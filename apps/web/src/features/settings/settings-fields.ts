@@ -26,6 +26,14 @@ const fields = (
   }));
 
 export const settingsFields: SettingsField[] = [
+  ...fields("finances", [
+    ["Transaction view", "financeTransactionView", "table cards saved default"],
+    [
+      "Group cards by",
+      "financeTransactionGroup",
+      "date category merchant direction posting grouping",
+    ],
+  ]),
   ...fields("tasks", [
     [
       "Sort by",

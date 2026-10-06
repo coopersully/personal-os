@@ -74,6 +74,12 @@ export function createWorkspaceSettingsService(db: Database) {
           input.preferences.mailListWidth !== undefined)
       )
         throw new AppError("invalid_request", "Mail layout preferences belong to Mail.");
+      if (
+        workspace !== "finances" &&
+        (input.preferences.financeTransactionView !== undefined ||
+          input.preferences.financeTransactionGroup !== undefined)
+      )
+        throw new AppError("invalid_request", "Finance display preferences belong to Finances.");
       return db.transaction(async (tx) => {
         const userId = context.principal.userId;
         await tx.execute(
@@ -146,10 +152,15 @@ export function createWorkspaceSettingsService(db: Database) {
             .values({ userId, ...values })
             .onConflictDoUpdate({ target: mailWorkspaceSettings.userId, set: values });
         } else {
+          const values = {
+            ...common,
+            financeTransactionView: preferences.financeTransactionView ?? "table",
+            financeTransactionGroup: preferences.financeTransactionGroup ?? "none",
+          };
           await tx
-            .insert(table)
-            .values({ userId, ...common })
-            .onConflictDoUpdate({ target: table.userId, set: common });
+            .insert(financesWorkspaceSettings)
+            .values({ userId, ...values })
+            .onConflictDoUpdate({ target: financesWorkspaceSettings.userId, set: values });
         }
         await tx.insert(auditEvents).values(
           auditValues({

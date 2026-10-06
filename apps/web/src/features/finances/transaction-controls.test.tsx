@@ -1,12 +1,35 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, render as testingRender, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { FinanceLinkedTransaction, FinanceTransactionControls } from "./transaction-controls.js";
 
-const api = vi.hoisted(() => ({ getFinanceTransaction: vi.fn() }));
+const api = vi.hoisted(() => ({
+  getFinanceTransaction: vi.fn(),
+  getWorkspaceSettings: vi
+    .fn()
+    .mockResolvedValue({ workspace: "finances", revision: 1, preferences: {} }),
+  updateWorkspaceSettings: vi.fn().mockImplementation(async (_workspace, input) => ({
+    workspace: "finances",
+    revision: input.expectedRevision + 1,
+    preferences: input.preferences,
+  })),
+}));
+function render(ui: React.ReactNode) {
+  return testingRender(
+    <QueryClientProvider
+      client={
+        new QueryClient({
+          defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+        })
+      }
+    >
+      {ui}
+    </QueryClientProvider>,
+  );
+}
 vi.mock("../../api.js", () => ({ api, errorMessage: (error: Error) => error.message }));
 function CurrentLocation() {
   return <output aria-label="Location">{useLocation().search}</output>;
@@ -155,6 +178,12 @@ it("switches views without clearing filters and groups transaction creation acti
   await user.click(screen.getByRole("button", { name: "Transaction view: Table" }));
   await user.click(screen.getByRole("menuitemradio", { name: "Cards" }));
   expect(screen.getByLabelText("Location")).toHaveTextContent("categoryId=travel&view=cards");
+  await waitFor(() =>
+    expect(api.updateWorkspaceSettings).toHaveBeenCalledWith("finances", {
+      expectedRevision: 1,
+      preferences: { financeTransactionView: "cards" },
+    }),
+  );
   await user.click(screen.getByRole("button", { name: "Add in Transactions" }));
   expect(screen.getByRole("menuitem", { name: "Add transaction" })).toHaveAttribute(
     "href",
@@ -183,5 +212,39 @@ it("groups transactions without clearing the selected view or filters", async ()
   await user.click(screen.getByRole("menuitemradio", { name: "Posting state" }));
   expect(screen.getByLabelText("Location")).toHaveTextContent(
     "view=cards&categoryId=travel&group=posting",
+  );
+  await waitFor(() =>
+    expect(api.updateWorkspaceSettings).toHaveBeenCalledWith("finances", {
+      expectedRevision: 1,
+      preferences: { financeTransactionGroup: "posting" },
+    }),
+  );
+});
+
+it("restores saved view and grouping and saves an explicit ungrouped choice", async () => {
+  api.getWorkspaceSettings.mockResolvedValue({
+    workspace: "finances",
+    revision: 7,
+    preferences: { financeTransactionView: "cards", financeTransactionGroup: "date" },
+  });
+  render(
+    <MemoryRouter initialEntries={["/finances/transactions"]}>
+      <FinanceTransactionControls accounts={[]} categories={[]} />
+      <CurrentLocation />
+    </MemoryRouter>,
+  );
+  expect(await screen.findByRole("button", { name: "Transaction view: Cards" })).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "Display transactions" }));
+  expect(screen.getByRole("menuitemradio", { name: "Date", exact: true })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await userEvent.click(screen.getByRole("menuitemradio", { name: "None", exact: true }));
+  expect(screen.getByLabelText("Location")).toHaveTextContent("group=none");
+  await waitFor(() =>
+    expect(api.updateWorkspaceSettings).toHaveBeenCalledWith("finances", {
+      expectedRevision: 7,
+      preferences: { financeTransactionGroup: "none" },
+    }),
   );
 });

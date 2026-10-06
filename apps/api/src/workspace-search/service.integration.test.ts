@@ -290,6 +290,46 @@ describe.sequential("workspace discovery and account preferences", () => {
       .where(eq(auditEvents.entityType, `${workspace}_workspace_settings`));
     expect(audits).toHaveLength(1);
   });
+  it("persists Finance view and grouping with partial updates and workspace isolation", async () => {
+    const context = { principal, requestId: "finance-display" };
+    const before = await settings.get(userId, "finances");
+    const saved = await settings.update(
+      "finances",
+      {
+        expectedRevision: before.revision,
+        preferences: { financeTransactionView: "cards", financeTransactionGroup: "merchant" },
+      },
+      context,
+    );
+    await settings.update(
+      "finances",
+      {
+        expectedRevision: saved.revision,
+        preferences: { financeTransactionGroup: "none" },
+      },
+      context,
+    );
+    expect((await settings.get(userId, "finances")).preferences).toMatchObject({
+      financeTransactionView: "cards",
+      financeTransactionGroup: "none",
+    });
+    expect((await settings.get(otherId, "finances")).preferences.financeTransactionView).not.toBe(
+      "cards",
+    );
+    await expect(
+      settings.update(
+        "tasks",
+        { expectedRevision: 0, preferences: { financeTransactionView: "cards" } },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    expect(
+      updateWorkspaceSettingsSchema.safeParse({
+        expectedRevision: 0,
+        preferences: { financeTransactionGroup: "invalid" },
+      }).success,
+    ).toBe(false);
+  });
   it("persists Tasks display defaults, preserves partial updates, and isolates workspaces", async () => {
     const context = { principal, requestId: "task-display" };
     const before = await settings.get(userId, "tasks");

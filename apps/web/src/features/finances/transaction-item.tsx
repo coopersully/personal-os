@@ -45,31 +45,29 @@ export function FinanceTransactionItem({
         className="group-has-data-[slot=item-description]/item:translate-y-0 group-has-data-[slot=item-description]/item:self-center"
       >
         {status === "expected" ? (
-          <ClockIcon className="size-10" />
+          <ClockIcon className="size-8" />
         ) : (
-          <MerchantIcon className="size-10" />
+          <MerchantIcon className="size-8" />
         )}
       </ItemMedia>
       <ItemContent className="min-w-0">
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
           <div className="flex min-w-0 flex-col gap-1">
             <ItemTitle className="min-w-0 max-w-full break-words">{title}</ItemTitle>
-            <ItemDescription className="text-xs">{description}</ItemDescription>
-            {status || category ? (
-              <div className="flex flex-wrap items-center gap-1.5">
-                {status ? (
-                  <Badge variant="secondary">
-                    <ClockIcon aria-hidden="true" />
-                    {status === "expected" ? "Expected" : "Pending"}
-                  </Badge>
-                ) : null}
-                {category ? (
-                  <Badge variant="secondary" className="h-auto max-w-full whitespace-normal">
-                    {category}
-                  </Badge>
-                ) : null}
-              </div>
-            ) : null}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <ItemDescription className="text-xs">{description}</ItemDescription>
+              {status ? (
+                <Badge variant="secondary">
+                  <ClockIcon aria-hidden="true" />
+                  {status === "expected" ? "Expected" : "Pending"}
+                </Badge>
+              ) : null}
+              {category ? (
+                <Badge variant="secondary" className="max-w-full">
+                  {category}
+                </Badge>
+              ) : null}
+            </div>
             {actions && actionsPlacement === "start" ? (
               <ItemActions className="mt-1 self-start">{actions}</ItemActions>
             ) : null}

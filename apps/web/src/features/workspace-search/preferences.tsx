@@ -192,6 +192,50 @@ export function WorkspacePreferencesSection({ workspace }: { workspace: Searchab
             </Field>
           </>
         ) : null}
+        {workspace === "finances"
+          ? (
+              [
+                [
+                  "financeTransactionView",
+                  "Transaction view",
+                  "table",
+                  [
+                    ["table", "Table"],
+                    ["cards", "Cards"],
+                  ],
+                ],
+                [
+                  "financeTransactionGroup",
+                  "Group cards by",
+                  "none",
+                  [
+                    ["none", "None"],
+                    ["date", "Date"],
+                    ["category", "Category"],
+                    ["merchant", "Merchant"],
+                    ["direction", "Direction"],
+                    ["posting", "Posting state"],
+                  ],
+                ],
+              ] as const
+            ).map(([key, label, fallback, options]) => (
+              <Field key={key}>
+                <FieldLabel htmlFor={key}>{label}</FieldLabel>
+                <NativeSelect
+                  id={key}
+                  value={values[key] ?? fallback}
+                  disabled={disabled}
+                  onChange={(event) => save.mutate({ [key]: event.target.value })}
+                >
+                  {options.map(([value, name]) => (
+                    <NativeSelectOption key={value} value={value}>
+                      {name}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </Field>
+            ))
+          : null}
         {workspace === "tasks" ? (
           <>
             {(

@@ -1,4 +1,9 @@
-import type { FinanceAccount, FinanceCategory, FinanceTransaction } from "@personal-os/domain";
+import type {
+  FinanceAccount,
+  FinanceCategory,
+  FinanceTransaction,
+  WorkspacePreferences,
+} from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -43,6 +48,10 @@ import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
 import { formatMoney } from "./format.js";
 import { requireFinanceResult } from "./position-material.js";
+import {
+  useFinancePresentationParams,
+  useSaveFinancePresentation,
+} from "./presentation-preferences";
 import { transactionGroupingOptions } from "./transaction-groups";
 
 export function FinanceTransactionControls({
@@ -72,7 +81,9 @@ export function FinanceTransactionControls({
   const activeFilters =
     ["search", "accountId", "categoryId", "from", "to", "pending"].filter((key) => params.get(key))
       .length + (reviewState && reviewState !== "all" ? 1 : 0);
-  const view = params.get("view") === "cards" ? "cards" : "table";
+  const presentation = useFinancePresentationParams();
+  const savePresentation = useSaveFinancePresentation();
+  const view = presentation.get("view") === "cards" ? "cards" : "table";
   const ViewIcon = view === "cards" ? GridIcon : ReceiptIcon;
   return (
     <>
@@ -92,13 +103,16 @@ export function FinanceTransactionControls({
           <DropdownMenuContent align="start">
             <DropdownMenuRadioGroup
               value={view}
-              onValueChange={(value) =>
+              onValueChange={(value) => {
+                savePresentation.mutate({
+                  financeTransactionView: value as WorkspacePreferences["financeTransactionView"],
+                });
                 setParams((current) => {
                   const next = new URLSearchParams(current);
                   next.set("view", value);
                   return next;
-                })
-              }
+                });
+              }}
             >
               <DropdownMenuRadioItem value="table">
                 <ReceiptIcon />
@@ -310,15 +324,18 @@ export function FinanceTransactionControls({
             <DropdownMenuContent align="end">
               <DropdownMenuLabel>Group by</DropdownMenuLabel>
               <DropdownMenuRadioGroup
-                value={params.get("group") ?? "none"}
-                onValueChange={(value) =>
+                value={presentation.get("group") ?? "none"}
+                onValueChange={(value) => {
+                  savePresentation.mutate({
+                    financeTransactionGroup:
+                      value as WorkspacePreferences["financeTransactionGroup"],
+                  });
                   setParams((current) => {
                     const next = new URLSearchParams(current);
-                    if (value === "none") next.delete("group");
-                    else next.set("group", value);
+                    next.set("group", value);
                     return next;
-                  })
-                }
+                  });
+                }}
               >
                 {transactionGroupingOptions.map(([value, label]) => (
                   <DropdownMenuRadioItem key={value} value={value}>

@@ -44,10 +44,21 @@ export const taskContainerSortPreferenceSchema = z.enum(["updated", "name", "new
 
 export const mailListDensityPreferenceSchema = z.enum(["compact", "comfortable", "expanded"]);
 export const mailListWidthPreferenceSchema = z.number().finite().min(5).max(95);
+export const financeTransactionViewPreferenceSchema = z.enum(["table", "cards"]);
+export const financeTransactionGroupPreferenceSchema = z.enum([
+  "none",
+  "date",
+  "category",
+  "merchant",
+  "direction",
+  "posting",
+]);
 export const workspacePreferencesSchema = z.object({
   mailConversationLayout: z.enum(["split", "single"]).optional(),
   mailListDensity: mailListDensityPreferenceSchema.optional(),
   mailListWidth: mailListWidthPreferenceSchema.optional(),
+  financeTransactionView: financeTransactionViewPreferenceSchema.optional(),
+  financeTransactionGroup: financeTransactionGroupPreferenceSchema.optional(),
   taskSort: taskSortPreferenceSchema.optional(),
   taskGroup: taskGroupPreferenceSchema.optional(),
   taskRowDetails: taskRowDetailsPreferenceSchema.optional(),
@@ -76,6 +87,8 @@ export const updateWorkspaceSettingsSchema = z
         mailConversationLayout: z.enum(["split", "single"]).optional(),
         mailListDensity: mailListDensityPreferenceSchema.optional(),
         mailListWidth: mailListWidthPreferenceSchema.optional(),
+        financeTransactionView: financeTransactionViewPreferenceSchema.optional(),
+        financeTransactionGroup: financeTransactionGroupPreferenceSchema.optional(),
         taskSort: taskSortPreferenceSchema.optional(),
         taskGroup: taskGroupPreferenceSchema.optional(),
         taskRowDetails: taskRowDetailsPreferenceSchema.optional(),

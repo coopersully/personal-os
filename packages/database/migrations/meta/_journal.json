@@ -750,6 +750,13 @@
       "when": 1791224000000,
       "tag": "0099_mail_conversation_layout",
       "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1791310000000,
+      "tag": "0100_finance_transaction_preferences",
+      "breakpoints": true
     }
   ]
 }

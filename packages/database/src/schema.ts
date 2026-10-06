@@ -4950,6 +4950,20 @@ export const mailWorkspaceSettings = pgTable(
 );
 export const financesWorkspaceSettings = pgTable(
   "finances_workspace_settings",
-  workspacePreferenceColumns(),
-  (table) => [check("finances_workspace_settings_revision_check", sql`${table.revision} > 0`)],
+  {
+    ...workspacePreferenceColumns(),
+    financeTransactionView: text("finance_transaction_view").notNull().default("table"),
+    financeTransactionGroup: text("finance_transaction_group").notNull().default("none"),
+  },
+  (table) => [
+    check("finances_workspace_settings_revision_check", sql`${table.revision} > 0`),
+    check(
+      "finances_transaction_view_check",
+      sql`${table.financeTransactionView} IN ('table', 'cards')`,
+    ),
+    check(
+      "finances_transaction_group_check",
+      sql`${table.financeTransactionGroup} IN ('none', 'date', 'category', 'merchant', 'direction', 'posting')`,
+    ),
+  ],
 );

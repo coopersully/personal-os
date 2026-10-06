@@ -117,6 +117,7 @@ import { FinanceBudgetBucketManager } from "./bucket-manager.js";
 import { FinanceCategoryDialog } from "./category-dialog";
 import { AddTransactionContext } from "./contextual-question.js";
 import { FinanceEntitySelector } from "./entity-selector";
+import { useFinancePresentationParams } from "./presentation-preferences";
 import { FinanceTransactionChecks } from "./transaction-checks";
 import { groupTransactions } from "./transaction-groups";
 import { TransactionContextEditor, TransactionContextMenu } from "./transaction-interactions";
@@ -2611,9 +2612,9 @@ function FinanceTransactionsTable({
   };
   transactions: FinanceTransaction[];
 }) {
-  const location = useLocation();
-  const view = new URLSearchParams(location.search).get("view") === "cards" ? "cards" : "table";
-  const group = view === "cards" ? new URLSearchParams(location.search).get("group") : null;
+  const presentation = useFinancePresentationParams();
+  const view = presentation.get("view") === "cards" ? "cards" : "table";
+  const group = view === "cards" ? presentation.get("group") : null;
   const groups = useMemo(() => groupTransactions(transactions, group), [transactions, group]);
   const groupedTransactions = useMemo(() => groups.flatMap((entry) => entry.items), [groups]);
   const groupHeadings = new Map(

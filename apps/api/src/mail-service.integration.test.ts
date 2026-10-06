@@ -448,7 +448,12 @@ describe.sequential("mail service", () => {
         cc: [],
         bodyText: "",
         attachments: [
-          { id: "download-attachment", filename: "../notes\n.txt", contentType: "text/plain", size: 4 },
+          {
+            id: "download-attachment",
+            filename: "../notes\n.txt",
+            contentType: "text/plain",
+            size: 4,
+          },
         ],
       })
       .returning();

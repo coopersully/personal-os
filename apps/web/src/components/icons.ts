@@ -76,6 +76,7 @@ import ScissorsSource from "reicon-react/icons/Scissors";
 import SearchSource from "reicon-react/icons/Search";
 import SettingsSource from "reicon-react/icons/Settings";
 import ShieldCheckSource from "reicon-react/icons/ShieldCheck";
+import MerchantSource from "reicon-react/icons/Shop2";
 import PanelLeftSource from "reicon-react/icons/Sidebar";
 import PanelTopSource from "reicon-react/icons/SidebarTop";
 import SideProfileSource from "reicon-react/icons/SideProfile";
@@ -88,6 +89,7 @@ import TagsSource from "reicon-react/icons/Tag";
 import TargetSource from "reicon-react/icons/Target";
 import ListTodoSource from "reicon-react/icons/Task";
 import TrashSource from "reicon-react/icons/Trash2";
+import UploadSource from "reicon-react/icons/Upload";
 import UserSource from "reicon-react/icons/User";
 import UserCircleSource from "reicon-react/icons/UserCircle";
 import UsersSource from "reicon-react/icons/Users";
@@ -222,3 +224,7 @@ export const PauseIcon: Icon = PauseSource;
 export const PlayIcon: Icon = PlaySource;
 
 export const ProjectIcon: Icon = ProjectSource;
+
+export const UploadIcon: Icon = UploadSource;
+
+export const MerchantIcon: Icon = MerchantSource;

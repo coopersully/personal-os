@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/api";
+import { ActionButton as Button } from "@/components/action-button";
 import { SearchIcon } from "@/components/icons";
 import {
   ResponsiveDialog,
@@ -12,7 +13,6 @@ import {
   ResponsiveDialogTitle,
 } from "@/components/responsive-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Combobox,
   ComboboxGroup,

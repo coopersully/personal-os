@@ -8,6 +8,7 @@ import {
 } from "@personal-os/domain";
 import { type ReactNode, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
+import { ActionButton as ShadcnButton } from "@/components/action-button";
 import {
   CalendarIcon,
   ChevronLeftIcon,
@@ -17,7 +18,6 @@ import {
   type Icon,
   LocationFixedIcon,
 } from "@/components/icons";
-import { Button as ShadcnButton } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,

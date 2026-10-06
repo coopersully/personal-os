@@ -1,3 +1,4 @@
+import { TooltipProvider } from "@/components/ui/tooltip";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -59,9 +60,11 @@ function renderPage(path: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[path]}>
-        <FinancesPage />
-      </MemoryRouter>
+      <TooltipProvider>
+        <MemoryRouter initialEntries={[path]}>
+          <FinancesPage />
+        </MemoryRouter>
+      </TooltipProvider>
     </QueryClientProvider>,
   );
 }
@@ -360,8 +363,9 @@ describe("Finance section states", () => {
   });
 
   it("shows health and review work empty states without hiding the controls", async () => {
-    const { unmount } = renderPage("/finances/health");
-    expect(await screen.findByText("Ledger health")).toBeVisible();
+    const { unmount } = renderPage("/finances/transactions?checks=1");
+    await screen.findByText("Transactions", { selector: "div[data-slot=card-title]" });
+    expect(screen.queryByRole("button", { name: "Transaction checks" })).not.toBeInTheDocument();
     unmount();
     renderPage("/finances/review");
     expect(await screen.findByText("Nothing needs review")).toBeVisible();
@@ -770,8 +774,8 @@ describe("Finance section states", () => {
     pending.unmount();
 
     api.getFinanceLedgerHealth.mockRejectedValue(new Error("Ledger unavailable"));
-    const failed = renderPage("/finances/health");
-    expect(await screen.findByText("Couldn’t load account health.")).toBeVisible();
+    const failed = renderPage("/finances/transactions?checks=1");
+    expect(await screen.findByText(/Transaction checks could not load/)).toBeVisible();
     failed.unmount();
 
     api.getFinanceCategories.mockResolvedValue([
@@ -992,7 +996,7 @@ describe("Finance section states", () => {
       ),
     );
     for (const item of ["Transactions", "Accounts", "Budget plan", "Categories"]) {
-      await browser.click(screen.getByRole("button", { name: "Export data" }));
+      await browser.click(screen.getByRole("button", { name: "Export" }));
       await browser.click(await screen.findByRole("menuitem", { name: item }));
     }
     await waitFor(() => expect(api.exportFinanceData).toHaveBeenCalledTimes(4));
@@ -1250,8 +1254,8 @@ describe("Finance section states", () => {
     });
     accounts.unmount();
 
-    const transactions = renderPage("/finances/transactions");
-    fireEvent.click(await screen.findByRole("button", { name: "New transaction" }));
+    const transactions = renderPage("/finances/transactions#finance-add-transaction");
+    await screen.findByRole("dialog", { name: "Add a transaction" });
     const transactionAccount = document.getElementById("finance-account-select");
     if (!(transactionAccount instanceof HTMLSelectElement))
       throw new Error("Expected the transaction account select.");

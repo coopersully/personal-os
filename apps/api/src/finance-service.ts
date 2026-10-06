@@ -126,6 +126,7 @@ import {
   serializeFinanceAccountRows,
 } from "./finance/account-service.js";
 import { createFinanceBudgetBucketService } from "./finance/budget-bucket-service.js";
+import { readFinanceConfiguration } from "./finance/configuration-service.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./finance/context.js";
 import { createInboxService } from "./finance/inbox-service.js";
 import { createFinanceLedgerService } from "./finance/ledger-service.js";
@@ -164,6 +165,7 @@ import { lockReimbursementTopology } from "./finance-reimbursement-locks.js";
 import { createFinanceReimbursementService } from "./finance-reimbursement-service.js";
 import { auditAttentionItemMetadata, serializeAttentionItem } from "./serialization.js";
 import type { Principal, RequestLog } from "./types.js";
+import { createWorkspaceSettingsService } from "./workspace-search/settings.js";
 
 type MaintenanceMutationAttribution = {
   idempotencyKey: string;
@@ -3948,6 +3950,26 @@ export function createFinanceService({
     ...inbox,
     ...planning,
     ...setup,
+    async getFinanceConfiguration(userId: string) {
+      return readFinanceConfiguration({
+        execution: async () => {
+          const run = await db.query.workspaceMaintenanceRuns.findFirst({
+            where: and(
+              eq(workspaceMaintenanceRuns.userId, userId),
+              eq(workspaceMaintenanceRuns.domain, "finances"),
+            ),
+            orderBy: [desc(workspaceMaintenanceRuns.createdAt)],
+          });
+          return run ? { id: run.id, status: run.status } : null;
+        },
+        profile: async () => (await planning.getFinancialProfile(userId)).data,
+        preferences: () => createWorkspaceSettingsService(db).get(userId, "finances"),
+        income: () => this.getProfile(userId),
+        budget: async () => (await planning.getFinanceBudget(userId)).data,
+        accounts: () => canonicalAccounts.list(userId, { includeExcluded: true }),
+        guidance: () => this.getGuidedSetupContext(userId),
+      });
+    },
     async listReimbursements(userId: string) {
       return reimbursements.list(userId);
     },
@@ -4337,7 +4359,19 @@ export function createFinanceService({
       if (executor === db) return db.transaction((tx) => this.updateProfile(input, context, tx));
       if (input.payAccountId)
         await ownedAccount(context.principal.userId, input.payAccountId, executor);
+      await executor.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`finance-income:${context.principal.userId}`}, 0))`,
+      );
       const before = await this.getProfile(context.principal.userId, undefined, executor);
+      if (
+        input.expectedUpdatedAt !== undefined &&
+        input.expectedUpdatedAt !== (before?.updatedAt ?? null)
+      ) {
+        throw new AppError(
+          "conflict",
+          "Your payroll details changed. Reload before saving your edit.",
+        );
+      }
       const [row] = await executor
         .insert(financeProfiles)
         .values({
@@ -4416,10 +4450,18 @@ export function createFinanceService({
                   ? 52
                   : null;
         const changes: UpdateFinancialProfileInput["changes"] = {};
-        if (input.householdSize !== undefined) changes.householdSize = input.householdSize;
-        if (input.dependents !== undefined) changes.dependents = input.dependents;
-        if (input.expectedNetPay === null) changes.expectedMonthlyTakeHome = null;
-        else if (input.expectedNetPay !== undefined && periods !== null)
+        if (input.householdSize !== undefined && input.householdSize !== before?.householdSize)
+          changes.householdSize = input.householdSize;
+        if (input.dependents !== undefined && input.dependents !== before?.dependents)
+          changes.dependents = input.dependents;
+        if (input.expectedNetPay === null && before?.expectedNetPay != null)
+          changes.expectedMonthlyTakeHome = null;
+        else if (
+          input.expectedNetPay != null &&
+          periods !== null &&
+          (input.expectedNetPay !== before?.expectedNetPay ||
+            input.payFrequency !== before?.payFrequency)
+        )
           changes.expectedMonthlyTakeHome =
             Math.round((input.expectedNetPay * 100 * periods) / 12) / 100;
         if (Object.keys(changes).length > 0) {

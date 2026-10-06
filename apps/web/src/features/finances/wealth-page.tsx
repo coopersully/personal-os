@@ -1,10 +1,26 @@
 import type { FinanceGoal, ManageFinanceGoalInput } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { ActionButton as Button } from "@/components/action-button";
+import { CurrencyInput } from "@/components/currency-input";
+import { BankIcon, DollarIcon, PlusIcon, TargetIcon, WalletIcon } from "@/components/icons";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPrevious,
+} from "@/components/ui/carousel";
 import {
   Dialog,
   DialogContent,
@@ -25,10 +41,6 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import {
-  WorkspaceSecondaryAppBar,
-  WorkspaceSecondaryAppBarActions,
-} from "@/components/workspace-secondary-app-bar";
 import { api } from "../../api.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
@@ -37,7 +49,6 @@ import {
   requireFinanceMutationResult,
 } from "./mutation-retry.js";
 import {
-  FinanceAccountRecord,
   FinancePositionMaterial,
   FinanceSourceState,
   financeAmount,
@@ -52,10 +63,6 @@ export function FinanceWealthPage() {
   const snapshot = useQuery({
     queryKey: ["finance-snapshot"],
     queryFn: async () => requireFinanceResult(await api.getFinanceSnapshot()),
-  });
-  const accounts = useQuery({
-    queryKey: ["finance-accounts"],
-    queryFn: () => api.listFinanceAccounts(),
   });
   const goals = useQuery({
     queryKey: ["finance-goals"],
@@ -90,143 +97,162 @@ export function FinanceWealthPage() {
   const visibleGoals = goals.data?.data.filter((goal) => goal.status !== "removed");
   return (
     <div className="flex flex-col gap-6">
-      <WorkspaceSecondaryAppBar aria-label="Wealth controls">
-        <WorkspaceSecondaryAppBarActions>
-          <Button onClick={() => setEditor("new")} size="sm">
-            Create goal
-          </Button>
-          <Button asChild size="sm" variant="outline">
-            <Link to="/finances/accounts">Manage accounts</Link>
-          </Button>
-        </WorkspaceSecondaryAppBarActions>
-      </WorkspaceSecondaryAppBar>
       <FinanceSourceState label="Wealth snapshot" query={snapshot} />
-      {snapshot.data ? <FinancePositionMaterial result={snapshot.data} wealth /> : null}
-      <section aria-label="Financial goals" className="flex flex-col gap-3">
-        <h2 className="text-base font-medium">Financial goals</h2>
-        <FinanceSourceState label="Financial goals" query={goals} />
-        {changeGoal.isError && !confirm ? (
-          <Alert variant="destructive">
-            <AlertTitle>Goal was not changed</AlertTitle>
-            <AlertDescription>{changeGoal.feedback?.message}</AlertDescription>
-          </Alert>
-        ) : null}
-        {visibleGoals?.length ? (
-          <ItemGroup>
-            {visibleGoals.map((goal) => (
-              <Item key={goal.id} id={`goal-${goal.id}`}>
-                <ItemContent className="min-w-0">
-                  <ItemTitle>
-                    {goal.name}
-                    <Badge variant="secondary">
-                      {goal.status === "active"
-                        ? "Active"
-                        : goal.status === "paused"
-                          ? "Paused"
-                          : "Completed"}
-                    </Badge>
-                  </ItemTitle>
-                  <ItemDescription>
-                    {financeAmount(goal.currentAmount)} recorded toward{" "}
-                    {financeAmount(goal.targetAmount)} ·{" "}
-                    {goal.priority === "high"
-                      ? "High"
-                      : goal.priority === "medium"
-                        ? "Medium"
-                        : "Low"}{" "}
-                    priority{goal.deadline ? ` · Due ${goal.deadline}` : " · No deadline"}
-                  </ItemDescription>
-                  <p className="text-muted-foreground text-xs">
-                    Recorded goal progress · Version {goal.version}
-                  </p>
-                </ItemContent>
-                <ItemActions className="flex-wrap">
-                  <Button
-                    aria-label={`Edit ${goal.name}`}
-                    disabled={changeGoal.isPending}
-                    onClick={() => setEditor(goal)}
-                    size="sm"
-                    variant="outline"
-                  >
-                    Edit
-                  </Button>
-                  {goal.status === "active" || goal.status === "paused" ? (
+      {snapshot.data ? (
+        <>
+          <Carousel
+            opts={{ align: "start", loop: true }}
+            aria-label="Wealth key metrics"
+            className="min-w-0"
+          >
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h2 className="text-base font-medium">Key metrics</h2>
+              <div className="flex gap-2">
+                <CarouselPrevious
+                  className="static translate-x-0 translate-y-0"
+                  title="Previous metrics"
+                />
+                <CarouselNext className="static translate-x-0 translate-y-0" title="Next metrics" />
+              </div>
+            </div>
+            <CarouselContent>
+              {[
+                { label: "Net worth", value: snapshot.data.data.netWorth, icon: WalletIcon },
+                { label: "Cash", value: snapshot.data.data.cash, icon: BankIcon },
+                { label: "Investments", value: snapshot.data.data.investments, icon: TargetIcon },
+                { label: "Debt", value: snapshot.data.data.debt, icon: DollarIcon },
+              ].map(({ label, value, icon: Icon }) => (
+                <CarouselItem key={label} className="basis-4/5 sm:basis-1/2 xl:basis-1/3">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Icon aria-hidden="true" />
+                        {label}
+                      </CardTitle>
+                      <CardDescription>Current balance</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-3xl font-semibold tabular-nums">{financeAmount(value)}</p>
+                    </CardContent>
+                  </Card>
+                </CarouselItem>
+              ))}
+            </CarouselContent>
+          </Carousel>
+          <FinancePositionMaterial result={snapshot.data} wealth hideMetrics />
+        </>
+      ) : null}
+      <Card aria-label="Financial goals">
+        <CardHeader>
+          <CardTitle>Financial goals</CardTitle>
+          <CardAction>
+            <Button size="icon" aria-label="Create goal" onClick={() => setEditor("new")}>
+              <PlusIcon />
+            </Button>
+          </CardAction>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <FinanceSourceState label="Financial goals" query={goals} />
+          {changeGoal.isError && !confirm ? (
+            <Alert variant="destructive">
+              <AlertTitle>Goal was not changed</AlertTitle>
+              <AlertDescription>{changeGoal.feedback?.message}</AlertDescription>
+            </Alert>
+          ) : null}
+          {visibleGoals?.length ? (
+            <ItemGroup className="finance-bento finance-goal-grid">
+              {visibleGoals.map((goal) => (
+                <Item key={goal.id} id={`goal-${goal.id}`}>
+                  <ItemContent className="min-w-0">
+                    <ItemTitle>
+                      {goal.name}
+                      <Badge variant="secondary">
+                        {goal.status === "active"
+                          ? "Active"
+                          : goal.status === "paused"
+                            ? "Paused"
+                            : "Completed"}
+                      </Badge>
+                    </ItemTitle>
+                    <ItemDescription>
+                      {financeAmount(goal.currentAmount)} recorded toward{" "}
+                      {financeAmount(goal.targetAmount)} ·{" "}
+                      {goal.priority === "high"
+                        ? "High"
+                        : goal.priority === "medium"
+                          ? "Medium"
+                          : "Low"}{" "}
+                      priority{goal.deadline ? ` · Due ${goal.deadline}` : " · No deadline"}
+                    </ItemDescription>
+                    <p className="text-muted-foreground text-xs">
+                      Recorded goal progress · Version {goal.version}
+                    </p>
+                  </ItemContent>
+                  <ItemActions className="flex-wrap">
                     <Button
-                      aria-label={`${goal.status === "paused" ? "Resume" : "Pause"} ${goal.name}`}
+                      aria-label={`Edit ${goal.name}`}
                       disabled={changeGoal.isPending}
-                      onClick={() =>
-                        changeGoal.mutate({
-                          goal,
-                          operation: goal.status === "paused" ? "resume" : "pause",
-                        })
-                      }
+                      onClick={() => setEditor(goal)}
+                      size="sm"
+                      variant="outline"
+                    >
+                      Edit
+                    </Button>
+                    {goal.status === "active" || goal.status === "paused" ? (
+                      <Button
+                        aria-label={`${goal.status === "paused" ? "Resume" : "Pause"} ${goal.name}`}
+                        disabled={changeGoal.isPending}
+                        onClick={() =>
+                          changeGoal.mutate({
+                            goal,
+                            operation: goal.status === "paused" ? "resume" : "pause",
+                          })
+                        }
+                        size="sm"
+                        variant="ghost"
+                      >
+                        {goal.status === "paused" ? "Resume" : "Pause"}
+                      </Button>
+                    ) : null}
+                    {goal.status !== "completed" ? (
+                      <Button
+                        aria-label={`Complete ${goal.name}`}
+                        disabled={changeGoal.isPending}
+                        onClick={() => setConfirm({ goal, operation: "complete" })}
+                        size="sm"
+                        variant="ghost"
+                      >
+                        Complete
+                      </Button>
+                    ) : null}
+                    <Button
+                      aria-label={`Remove ${goal.name}`}
+                      disabled={changeGoal.isPending}
+                      onClick={() => setConfirm({ goal, operation: "remove" })}
                       size="sm"
                       variant="ghost"
                     >
-                      {goal.status === "paused" ? "Resume" : "Pause"}
+                      Remove
                     </Button>
-                  ) : null}
-                  {goal.status !== "completed" ? (
-                    <Button
-                      aria-label={`Complete ${goal.name}`}
-                      disabled={changeGoal.isPending}
-                      onClick={() => setConfirm({ goal, operation: "complete" })}
-                      size="sm"
-                      variant="ghost"
-                    >
-                      Complete
-                    </Button>
-                  ) : null}
-                  <Button
-                    aria-label={`Remove ${goal.name}`}
-                    disabled={changeGoal.isPending}
-                    onClick={() => setConfirm({ goal, operation: "remove" })}
-                    size="sm"
-                    variant="ghost"
-                  >
-                    Remove
-                  </Button>
-                </ItemActions>
-              </Item>
-            ))}
-          </ItemGroup>
-        ) : goals.isSuccess ? (
-          <Empty>
-            <EmptyHeader>
-              <EmptyTitle>No financial goals yet</EmptyTitle>
-              <EmptyDescription>
-                Give a reserve, debt milestone, or future expense a target.
-              </EmptyDescription>
-            </EmptyHeader>
-            <Button onClick={() => setEditor("new")} size="sm">
-              Create your first goal
-            </Button>
-          </Empty>
-        ) : null}
-      </section>
-      <section aria-label="Accounts behind your position" className="flex flex-col gap-3">
-        <h2 className="text-base font-medium">Accounts behind your position</h2>
-        <FinanceSourceState label="Wealth accounts" query={accounts} />
-        {accounts.data?.accounts.length ? (
-          <ItemGroup>
-            {accounts.data.accounts.map((account) => (
-              <FinanceAccountRecord key={account.id} account={account} />
-            ))}
-          </ItemGroup>
-        ) : accounts.isSuccess ? (
-          <Empty>
-            <EmptyHeader>
-              <EmptyTitle>No account evidence yet</EmptyTitle>
-              <EmptyDescription>
-                Your position becomes available when account evidence is established.
-              </EmptyDescription>
-            </EmptyHeader>
-            <Button asChild size="sm" variant="outline">
-              <Link to="/finances/accounts">Add accounts</Link>
-            </Button>
-          </Empty>
-        ) : null}
-      </section>
+                  </ItemActions>
+                </Item>
+              ))}
+            </ItemGroup>
+          ) : goals.isSuccess ? (
+            <Empty>
+              <EmptyHeader>
+                <EmptyTitle>No financial goals yet</EmptyTitle>
+                <EmptyDescription>
+                  Give a reserve, debt milestone, or future expense a target.
+                </EmptyDescription>
+              </EmptyHeader>
+              <Button onClick={() => setEditor("new")} size="sm">
+                Create your first goal
+              </Button>
+            </Empty>
+          ) : null}
+        </CardContent>
+      </Card>
       {editor ? (
         <GoalEditor
           key={editor === "new" ? "new" : `${editor.id}:${editor.version}`}
@@ -375,16 +401,14 @@ function GoalEditor({ goal, onClose }: { goal: FinanceGoal | null; onClose: () =
               </Field>
               <Field>
                 <FieldLabel htmlFor="goal-target">Target amount (USD)</FieldLabel>
-                <Input
+                <CurrencyInput
                   name="target"
                   id="goal-target"
-                  type="number"
-                  min="0"
-                  max="100000000"
-                  step="0.01"
+                  min={0}
+                  max={100000000}
                   required
                   value={target}
-                  onChange={(event) => setTarget(event.target.value)}
+                  onValueChange={setTarget}
                 />
               </Field>
               <Field>

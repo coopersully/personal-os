@@ -168,6 +168,8 @@ describe("complete finance plan", () => {
     await screen.findByRole("button", { name: "Approve version 3" });
     for (const row of [...plan.resources, ...plan.allocations])
       expect(screen.getByText(row.key)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /assumptions · Show details/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Why this budget?" }));
     for (const assumption of plan.assumptions)
       expect(screen.getByText(assumption)).toBeInTheDocument();
     expect(screen.getByText(plan.rationale)).toBeInTheDocument();
@@ -290,28 +292,14 @@ describe("complete finance plan", () => {
     );
   });
 
-  it("creates a complete balanced proposal from an empty account", async () => {
+  it("routes a missing budget to its prerequisite section without creating a proposal", async () => {
     api.getFinanceBudget.mockResolvedValue(result(null));
     mount();
-    await userEvent.click(await screen.findByRole("button", { name: "Create plan" }));
-    fireEvent.change(screen.getByLabelText("Resource 1 amount"), { target: { value: "1234.56" } });
-    fireEvent.change(screen.getByLabelText("Allocation 1 amount"), {
-      target: { value: "1234.56" },
-    });
-    fireEvent.change(screen.getByLabelText("Rationale"), {
-      target: { value: "Start with monthly spending." },
-    });
-    await userEvent.click(screen.getByRole("button", { name: "Save proposal" }));
-    await waitFor(() =>
-      expect(api.createFinanceBudget).toHaveBeenCalledWith(
-        expect.objectContaining({
-          resources: [{ key: "Income", kind: "income", amount: 1234.56 }],
-          allocations: [{ key: "Spending", kind: "spending", amount: 1234.56 }],
-          assumptions: [],
-          idempotencyKey: expect.any(String),
-        }),
-      ),
+    expect(await screen.findByRole("link", { name: "Set up your budget" })).toHaveAttribute(
+      "href",
+      "/finances/setup?section=budget&returnTo=%2Ffinances%2Fplan",
     );
+    expect(api.createFinanceBudget).not.toHaveBeenCalled();
   });
 
   it("shows a distinct active plan only from the status response, with no synthesized actual spending", async () => {
@@ -327,6 +315,7 @@ describe("complete finance plan", () => {
     const button = await screen.findByRole("button", { name: "View active version 2 · 2026-09" });
     expect(screen.queryByText(active.rationale)).not.toBeInTheDocument();
     await userEvent.click(button);
+    await userEvent.click(screen.getAllByRole("button", { name: "Why this budget?" }).at(-1)!);
     expect(screen.getByText(active.rationale)).toBeInTheDocument();
     expect(screen.queryByText(/Spent.*\$0/)).not.toBeInTheDocument();
   });
@@ -443,6 +432,7 @@ describe("complete finance plan", () => {
 it("opens the specific plan requested by workspace search", async () => {
   mount(`/finances/plan?planId=${planId}`);
   await waitFor(() => expect(api.getFinanceBudget).toHaveBeenCalledWith(planId));
+  await userEvent.click(await screen.findByRole("button", { name: "Why this budget?" }));
   expect(
     await screen.findByText("Build a cushion while paying down the card."),
   ).toBeInTheDocument();

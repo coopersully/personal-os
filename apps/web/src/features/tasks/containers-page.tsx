@@ -1,10 +1,10 @@
 import type { TaskList, TaskProject } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
+import { ActionButton as Button } from "@/components/action-button";
 import { PageLoading, QueryFeedback } from "@/components/async-state";
 import { ListTodoIcon, ProjectIcon, SliderHorizontalIcon, SortIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -106,6 +106,15 @@ export function TaskContainerControls({ kind }: { kind: ContainerKind }) {
             variant="ghost"
             aria-label={`Filter ${kind}`}
             title={`Filter ${kind}`}
+            badgeCount={
+              Number(Boolean(params.get("q"))) +
+              Number(
+                Boolean(
+                  params.get("containerStatus") &&
+                    params.get("containerStatus") !== (kind === "archive" ? "all" : "active"),
+                ),
+              )
+            }
           >
             <SliderHorizontalIcon />
           </Button>

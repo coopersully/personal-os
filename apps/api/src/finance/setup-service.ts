@@ -15,11 +15,11 @@ import type {
   UpdateFinancialProfileInput,
 } from "@personal-os/domain";
 import {
+  availableFinancePlanningQuestions,
   financeSetupPlanningSchema,
   financeWorkflowUnavailableSchema,
   financialProfileChangesSchema,
   NOHMI_FINANCE_PLAYBOOK,
-  nextFinancePlanningQuestion,
 } from "@personal-os/domain";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
@@ -77,10 +77,10 @@ const questions = {
   },
 } satisfies Record<string, FinanceInteractionQuestion>;
 
-function nextQuestion(
+export function availableSetupQuestions(
   profile: FinanceProfileVersion | null,
   skipped: Array<{ questionId: string; profileVersion: number }> = [],
-): FinanceInteractionQuestion | null {
+): FinanceInteractionQuestion[] {
   const version = profile?.version ?? 0;
   const isSkipped = (id: string) =>
     skipped.some((entry) => entry.questionId === id && entry.profileVersion === version);
@@ -93,15 +93,27 @@ function nextQuestion(
     ["profile:debts", !profile?.provenance.debts],
     ["profile:buffer_target", profile?.preferences.bufferTarget == null],
   ] as const;
-  for (const [key, absent] of missing) if (absent && !isSkipped(key)) return questions[key];
-  const question = nextFinancePlanningQuestion(
+  const profileQuestions = missing
+    .filter(([key, absent]) => absent && !isSkipped(key))
+    .map(([key]) => questions[key]);
+  const planningQuestions = availableFinancePlanningQuestions(
     financeSetupPlanningSchema.parse(profile?.planning ?? {}),
     skipped.filter((entry) => entry.questionId.startsWith("planning:")) as Parameters<
-      typeof nextFinancePlanningQuestion
+      typeof availableFinancePlanningQuestions
     >[1],
     version,
   );
-  return question ? { ...question, answerType: question.id } : null;
+  return [
+    ...profileQuestions,
+    ...planningQuestions.map((question) => ({ ...question, answerType: question.id })),
+  ];
+}
+
+function nextQuestion(
+  profile: FinanceProfileVersion | null,
+  skipped: Array<{ questionId: string; profileVersion: number }> = [],
+) {
+  return availableSetupQuestions(profile, skipped)[0] ?? null;
 }
 
 export function parseSetupMoney(answer: string): number {
@@ -206,6 +218,7 @@ export function setupResult(input: {
   nextAction?: FinanceToolResult<unknown>["nextAction"];
   optionalDetails?: string[];
   question?: FinanceInteractionQuestion | null;
+  availableQuestions?: FinanceInteractionQuestion[];
   sessionId: string;
   stage: FinanceSetupPayload["stage"];
   version: number;
@@ -221,6 +234,7 @@ export function setupResult(input: {
     maintenanceRunId: input.maintenanceRunId ?? null,
     canonicalMaintenanceRunId: input.canonicalMaintenanceRunId ?? null,
     question: input.question ?? null,
+    availableQuestions: input.availableQuestions ?? [],
     sessionId: input.sessionId,
     stage: input.stage,
     version: input.version,
@@ -293,9 +307,11 @@ export function createSetupService({ db, now, planning, executor }: Options) {
     session: typeof financeSetupSessions.$inferSelect,
     currentProfile: FinanceProfileVersion | null,
     context: FinanceMutationContext,
+    prepareBudget = false,
   ) {
-    const question = nextQuestion(currentProfile, session.skippedQuestions);
-    if (question) {
+    const availableQuestions = availableSetupQuestions(currentProfile, session.skippedQuestions);
+    const question = availableQuestions[0] ?? null;
+    if (question && !prepareBudget) {
       const [updated] = await db
         .update(financeSetupSessions)
         .set({
@@ -314,8 +330,9 @@ export function createSetupService({ db, now, planning, executor }: Options) {
       if (!updated) throw new AppError("internal_error", "Finance setup did not advance.");
       return setupResult({
         budgetVersionId: updated.budgetVersionId,
-        headline: "I need one answer to continue your financial setup.",
+        headline: "Answer what you know in any order. You can leave unknown details for later.",
         question,
+        availableQuestions,
         sessionId: updated.id,
         stage: "collecting_profile",
         version: updated.version,
@@ -701,7 +718,7 @@ export function createSetupService({ db, now, planning, executor }: Options) {
             }),
           }).setupFinances(input, context);
         });
-      if (input.operation === "start") {
+      if (input.operation === "start" || input.operation === "prepare_budget") {
         let session = await activeSession(context.userId);
         session ??= await latestSettledSession(context.userId);
         if (!session) {
@@ -718,6 +735,8 @@ export function createSetupService({ db, now, planning, executor }: Options) {
           session = created ?? (await activeSession(context.userId));
           if (!session) throw new AppError("internal_error", "Finance setup did not start.");
         }
+        if (input.operation === "prepare_budget")
+          return advance(session, await profile(context.userId), context, true);
         return continueSession(session, context);
       }
       if (input.operation === "resume") {
@@ -753,12 +772,14 @@ export function createSetupService({ db, now, planning, executor }: Options) {
               `Finance setup is at version ${session.version}; resume it before continuing.`,
             );
           if (input.operation === "answer" || input.operation === "skip") {
+            const current = await profile(context.userId);
             if (
               session.status !== "collecting_profile" ||
-              session.currentQuestionKey !== input.questionId
+              !availableSetupQuestions(current, session.skippedQuestions).some(
+                (question) => question.id === input.questionId,
+              )
             )
-              throw new AppError("conflict", "That is not the current Finance setup question.");
-            const current = await profile(context.userId);
+              throw new AppError("conflict", "That Finance setup question is no longer available.");
             if (session.questionProfileVersionId !== (current?.id ?? null))
               throw new AppError(
                 "conflict",

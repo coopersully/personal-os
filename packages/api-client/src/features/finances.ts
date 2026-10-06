@@ -41,6 +41,7 @@ import type {
   FinanceCategorizationProposal,
   FinanceCategorizationProposalPage,
   FinanceCategory,
+  FinanceConfiguration,
   FinanceContextualQuestionResult,
   FinanceCsvImportInput,
   FinanceDomainOutcome,
@@ -306,6 +307,9 @@ export function createFinanceApi(request: FinanceRequest) {
       return response.review;
     },
     createFinanceBudget,
+    async getFinanceConfiguration(): Promise<FinanceConfiguration> {
+      return request("/v1/finances/configuration");
+    },
     async setupFinances(input: FinanceSetupInput): Promise<FinanceToolResult<FinanceSetupPayload>> {
       return request("/v1/finances/setup", {
         body: JSON.stringify(input),

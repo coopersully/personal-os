@@ -14,6 +14,37 @@ import { registerFinanceRoutes } from "./finances.js";
 const id = "11111111-1111-4111-8111-111111111111";
 
 describe("finance routes", () => {
+  it("reads configuration only for the authenticated owner without write scope", async () => {
+    const app = new Hono<AppEnv>();
+    let scopes = new Set<AccessScope>(["finances:read"]);
+    const getFinanceConfiguration = vi
+      .fn()
+      .mockResolvedValue({ profile: { state: "loaded", value: null } });
+    app.use("*", async (context, next) => {
+      context.set("principal", { actorId: id, actorType: "user", scopes, userId: id });
+      context.set("requestId", "configuration-read");
+      await next();
+    });
+    app.onError(errorResponse);
+    registerFinanceRoutes({
+      app,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financeStatus: {} as FinanceStatusService,
+      finances: { getFinanceConfiguration } as unknown as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+    const response = await app.request("/v1/finances/configuration?userId=foreign");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(getFinanceConfiguration).toHaveBeenCalledWith(id);
+    scopes = new Set();
+    expect((await app.request("/v1/finances/configuration")).status).toBe(403);
+    expect(getFinanceConfiguration).toHaveBeenCalledTimes(1);
+  });
+
   it("reads canonical position evidence for the authenticated tenant and validates scope", async () => {
     const app = new Hono<AppEnv>();
     let scopes = new Set<AccessScope>(["finances:read"]);

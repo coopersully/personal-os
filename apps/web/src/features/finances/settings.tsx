@@ -1,13 +1,6 @@
-import type {
-  FinanceAccount,
-  FinanceGuidedSetupContext,
-  FinanceProfile,
-} from "@personal-os/domain";
+import type { FinanceGuidedSetupContext } from "@personal-os/domain";
 import { Spinner } from "@personal-os/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { CurrencyInput } from "@/components/currency-input";
-import { DateInput } from "@/components/date-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,8 +11,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
 import {
   Item,
   ItemActions,
@@ -28,13 +19,11 @@ import {
   ItemGroup,
   ItemTitle,
 } from "@/components/ui/item";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { api } from "../../api.js";
 import { InlineError, QueryFeedback } from "../../components/async-state.js";
-import { FeedbackForm } from "../../components/feedback-form.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
-import { FinanceProfileEditor } from "./profile-editor.js";
+import { FinanceConfigurationEditor } from "./configuration-editor.js";
 
 const financeHumanOnlyActionLabels = {
   add_manual_transaction: "add manual transactions",
@@ -52,51 +41,8 @@ const financeHumanOnlyActionLabels = {
   review_recurring_obligation: "change recurring-obligation review state",
 } satisfies Record<FinanceGuidedSetupContext["humanOnlyActions"][number], string>;
 
-type FinanceProfileForm = {
-  effectiveDate: string;
-  employer: string;
-  employmentType: "" | "contract" | "full_time" | "part_time" | "self_employed" | "unemployed";
-  expectedNetPay: string;
-  grossAnnualIncome: string;
-  nextPayday: string;
-  payAccountId: string;
-  payFrequency: "" | "biweekly" | "irregular" | "monthly" | "semimonthly" | "weekly";
-  role: string;
-};
-
-function emptyProfileForm(): FinanceProfileForm {
-  return {
-    effectiveDate: `${new Date().toISOString().slice(0, 7)}-01`,
-    employer: "",
-    employmentType: "",
-    expectedNetPay: "",
-    grossAnnualIncome: "",
-    nextPayday: "",
-    payAccountId: "",
-    payFrequency: "",
-    role: "",
-  };
-}
-
-function financeProfileForm(profile: FinanceProfile): FinanceProfileForm {
-  return {
-    effectiveDate: profile.effectiveDate,
-    employer: profile.employer ?? "",
-    employmentType: profile.employmentType ?? "",
-    expectedNetPay: profile.expectedNetPay?.toString() ?? "",
-    grossAnnualIncome: profile.grossAnnualIncome?.toString() ?? "",
-    nextPayday: profile.nextPayday ?? "",
-    payAccountId: profile.payAccountId ?? "",
-    payFrequency: profile.payFrequency ?? "",
-    role: profile.role ?? "",
-  };
-}
-
 export function FinanceSettings() {
   const queryClient = useQueryClient();
-  const [form, setForm] = useState<FinanceProfileForm>(emptyProfileForm);
-  const [formDirty, setFormDirty] = useState(false);
-  const currentMonth = new Date().toISOString().slice(0, 7);
   const setup = useQuery({
     queryFn: api.getFinanceGuidedSetup,
     queryKey: ["finance-guided-setup"],
@@ -104,14 +50,6 @@ export function FinanceSettings() {
   const agentProfile = useQuery({
     queryFn: () => api.getDomainProfile("finances"),
     queryKey: ["domain-profile", "finances"],
-  });
-  const overview = useQuery({
-    queryFn: api.getFinanceOverview,
-    queryKey: ["finance-overview", currentMonth],
-  });
-  const financialProfile = useQuery({
-    queryFn: api.getFinanceProfile,
-    queryKey: ["finance-profile"],
   });
   const activate = useFeedbackMutation({
     feedback: { action: "activate financial planning", safeToRetry: false, form: false },
@@ -139,42 +77,9 @@ export function FinanceSettings() {
         queryClient.invalidateQueries({ queryKey: ["assistant-setup-status"] }),
       ]),
   });
-  const saveProfile = useFeedbackMutation({
-    feedback: { action: "save your financial profile", safeToRetry: false, form: true },
-    mutationFn: () =>
-      api.updateFinanceProfile({
-        effectiveDate: form.effectiveDate,
-        employer: form.employer.trim() || null,
-        employmentType: form.employmentType || null,
-        expectedNetPay: form.expectedNetPay ? Number(form.expectedNetPay) : null,
-        grossAnnualIncome: form.grossAnnualIncome ? Number(form.grossAnnualIncome) : null,
-        nextPayday: form.nextPayday || null,
-        payAccountId: form.payAccountId || null,
-        payFrequency: form.payFrequency || null,
-        role: form.role.trim() || null,
-      }),
-    onSuccess: (profile) => {
-      if ("status" in profile) {
-        return queryClient.invalidateQueries({ queryKey: ["finance-profile"] });
-      }
-      queryClient.setQueryData(["finance-profile"], profile);
-      setForm(financeProfileForm(profile));
-      setFormDirty(false);
-      return Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["finance-profile"] }),
-        queryClient.invalidateQueries({ queryKey: ["finance-guided-setup"] }),
-        queryClient.invalidateQueries({ queryKey: ["finances", "guided-setup"] }),
-      ]);
-    },
-  });
-  useEffect(() => {
-    if (!financialProfile.data || formDirty) return;
-    setForm(financeProfileForm(financialProfile.data));
-  }, [financialProfile.data, formDirty]);
-
   return (
     <div className="agent-access" id="guidance">
-      <FinanceProfileEditor />
+      <FinanceConfigurationEditor />
       <QueryFeedback query={setup} title="Couldn’t load finance setup." />
       <QueryFeedback query={agentProfile} title="Couldn’t load finance guidance." />
       <MutationFeedback feedback={activate.feedback} />
@@ -189,27 +94,6 @@ export function FinanceSettings() {
         profileStatus={agentProfile.data?.status ?? null}
         setup={setup.data}
       />
-      <QueryFeedback query={financialProfile} title="Couldn’t load financial profile." />
-      <QueryFeedback query={overview} title="Couldn’t load finance accounts." />
-      <FeedbackForm
-        feedback={saveProfile.feedback}
-        onSubmit={(event) => {
-          event.preventDefault();
-          saveProfile.mutate();
-        }}
-      >
-        <FinancialProfilePanel
-          accounts={overview.data?.accounts ?? []}
-          error={null}
-          form={form}
-          loading={financialProfile.isPending || overview.isPending}
-          onChange={(update) => {
-            setFormDirty(true);
-            setForm(update);
-          }}
-          saving={saveProfile.isPending}
-        />
-      </FeedbackForm>
     </div>
   );
 }
@@ -427,184 +311,5 @@ function FinanceGuidanceDetails({
         </p>
       </div>
     </fieldset>
-  );
-}
-
-function FinancialProfilePanel({
-  accounts,
-  error,
-  form,
-  loading,
-  onChange,
-  saving,
-}: {
-  accounts: FinanceAccount[];
-  error: Error | null;
-  form: FinanceProfileForm;
-  loading: boolean;
-  onChange: React.Dispatch<React.SetStateAction<FinanceProfileForm>>;
-  saving: boolean;
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Payroll details</CardTitle>
-        <CardDescription>
-          Your private baseline for paycheck and cash-flow checks. It is never inferred as a job
-          change without your confirmation.
-        </CardDescription>
-        <CardAction>
-          <Button disabled={loading || saving} type="submit">
-            {saving ? "Saving…" : "Save profile"}
-          </Button>
-        </CardAction>
-      </CardHeader>
-      <CardContent>
-        {loading ? <Spinner label="Loading financial profile" /> : null}
-        {error ? <InlineError error={error} /> : null}
-        <FieldGroup className="grid gap-4 md:grid-cols-2">
-          <ProfileTextField
-            id="finance-employer"
-            label="Employer"
-            onChange={(employer) => onChange((value) => ({ ...value, employer }))}
-            value={form.employer}
-          />
-          <ProfileTextField
-            id="finance-role"
-            label="Role"
-            onChange={(role) => onChange((value) => ({ ...value, role }))}
-            value={form.role}
-          />
-          <Field>
-            <FieldLabel htmlFor="finance-employment-type">Employment type</FieldLabel>
-            <NativeSelect
-              name="employmentType"
-              id="finance-employment-type"
-              onChange={(event) =>
-                onChange((value) => ({
-                  ...value,
-                  employmentType: event.target.value as FinanceProfileForm["employmentType"],
-                }))
-              }
-              value={form.employmentType}
-            >
-              <NativeSelectOption value="">Not set</NativeSelectOption>
-              <NativeSelectOption value="full_time">Full time</NativeSelectOption>
-              <NativeSelectOption value="part_time">Part time</NativeSelectOption>
-              <NativeSelectOption value="contract">Contract</NativeSelectOption>
-              <NativeSelectOption value="self_employed">Self-employed</NativeSelectOption>
-              <NativeSelectOption value="unemployed">Not employed</NativeSelectOption>
-            </NativeSelect>
-          </Field>
-          <ProfileTextField
-            id="finance-effective-date"
-            label="Effective date"
-            onChange={(effectiveDate) => onChange((value) => ({ ...value, effectiveDate }))}
-            type="date"
-            value={form.effectiveDate}
-          />
-          <ProfileTextField
-            type="currency"
-            id="finance-gross-income"
-            label="Gross annual income"
-            onChange={(grossAnnualIncome) => onChange((value) => ({ ...value, grossAnnualIncome }))}
-            value={form.grossAnnualIncome}
-          />
-          <ProfileTextField
-            type="currency"
-            id="finance-net-pay"
-            label="Expected net paycheck"
-            onChange={(expectedNetPay) => onChange((value) => ({ ...value, expectedNetPay }))}
-            value={form.expectedNetPay}
-          />
-          <Field>
-            <FieldLabel htmlFor="finance-pay-frequency">Pay frequency</FieldLabel>
-            <NativeSelect
-              name="payFrequency"
-              id="finance-pay-frequency"
-              onChange={(event) =>
-                onChange((value) => ({
-                  ...value,
-                  payFrequency: event.target.value as FinanceProfileForm["payFrequency"],
-                }))
-              }
-              value={form.payFrequency}
-            >
-              <NativeSelectOption value="">Not set</NativeSelectOption>
-              <NativeSelectOption value="weekly">Weekly</NativeSelectOption>
-              <NativeSelectOption value="biweekly">Every two weeks</NativeSelectOption>
-              <NativeSelectOption value="semimonthly">Twice monthly</NativeSelectOption>
-              <NativeSelectOption value="monthly">Monthly</NativeSelectOption>
-              <NativeSelectOption value="irregular">Irregular</NativeSelectOption>
-            </NativeSelect>
-          </Field>
-          <ProfileTextField
-            id="finance-next-payday"
-            label="Next payday"
-            onChange={(nextPayday) => onChange((value) => ({ ...value, nextPayday }))}
-            type="date"
-            value={form.nextPayday}
-          />
-          <Field>
-            <FieldLabel htmlFor="finance-pay-account">Pay account</FieldLabel>
-            <NativeSelect
-              name="payAccountId"
-              id="finance-pay-account"
-              onChange={(event) =>
-                onChange((value) => ({ ...value, payAccountId: event.target.value }))
-              }
-              value={form.payAccountId}
-            >
-              <NativeSelectOption value="">Not set</NativeSelectOption>
-              {accounts.map((account) => (
-                <NativeSelectOption key={account.id} value={account.id}>
-                  {account.institution} · {account.name}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </Field>
-        </FieldGroup>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ProfileTextField({
-  id,
-  label,
-  onChange,
-  type = "text",
-  value,
-}: {
-  id: string;
-  label: string;
-  onChange: (value: string) => void;
-  type?: "date" | "text" | "currency";
-  value: string;
-}) {
-  const Control = type === "currency" ? CurrencyInput : DateInput;
-  const name =
-    {
-      "finance-employer": "employer",
-      "finance-role": "role",
-      "finance-effective-date": "effectiveDate",
-      "finance-gross-income": "grossAnnualIncome",
-      "finance-net-pay": "expectedNetPay",
-      "finance-next-payday": "nextPayday",
-    }[id] ?? id;
-  return (
-    <Field>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      {type === "text" ? (
-        <Input
-          id={id}
-          name={name}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
-      ) : (
-        <Control id={id} name={name} value={value} onValueChange={onChange} />
-      )}
-    </Field>
   );
 }

@@ -1,6 +1,7 @@
 import type { TaskList, TaskProject, WorkspacePreferences } from "@personal-os/domain";
 import { type FormEvent, useId, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { ActionButton as Button } from "@/components/action-button";
 import {
   CalendarIcon,
   ChevronRightIcon,
@@ -24,7 +25,6 @@ import {
   ResponsiveDialogTitle,
   ResponsiveDialogTrigger,
 } from "@/components/responsive-dialog";
-import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   DropdownMenu,
@@ -301,6 +301,7 @@ export function WorkspaceFilters({
           variant={count ? "secondary" : "ghost"}
           aria-label={count ? `Filters (${count})` : "Filters"}
           title={count ? `Filters (${count})` : "Filters"}
+          badgeCount={count}
         >
           <SliderHorizontalIcon aria-hidden="true" />
         </Button>

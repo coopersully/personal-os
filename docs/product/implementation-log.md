@@ -1,5 +1,22 @@
 # nohmi — Implementation Log
 
+## 2026-10-06 — Finance configuration and prerequisites (branch implementation)
+
+- Financial setup loads a read-only, owner-scoped aggregate and shares autosaving fields with
+  Finance Settings. Profile, Accounts and records, and Budget can be visited independently.
+- Scalar/profile collection edits retain unknown versus explicit zero/None, serialize shared
+  revisions, preserve newer drafts, and expose retry/reload beside failed fields. Payroll updates
+  support optimistic conflict checks without a storage migration.
+- Preparing the first budget and checking records remain explicit operations. Preparation can
+  use partial information but retains incomplete/evidence and approval safeguards. Reopening a
+  page does not execute the setup protocol.
+- The Finance sidebar groups Money, Planning, and Manage. Budget links to a prerequisite screen
+  when absent; records and useful cash-flow/wealth surfaces remain available. Settings search
+  targets the shared fields directly.
+- Focused API/database/UI checks and desktop/mobile setup persistence acceptance passed.
+  The full verification command was stopped after 60 seconds in the deployment-drain scenario
+  stage; full coverage/build verification is not claimed. This is branch work, not deployment.
+
 ## 2026-10-05 — Calendar opening and Follow preferences (branch implementation)
 
 - Calendar remembers an explicitly selected view in account-owned Calendar settings. Normal entry

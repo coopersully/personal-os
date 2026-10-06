@@ -1,6 +1,7 @@
 import type { TaskList, TaskProject, TaskSystemView } from "@personal-os/domain";
 import { type ReactNode, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { ActionButton as Button } from "@/components/action-button";
 import {
   ArchiveIcon,
   CalendarIcon,
@@ -16,7 +17,6 @@ import {
   TrashIcon,
   XIcon,
 } from "@/components/icons";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,

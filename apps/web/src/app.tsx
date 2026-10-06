@@ -69,6 +69,7 @@ import {
   AccountSelectionTrigger,
   reconnectAccountsLabel,
 } from "@/components/account-selection-trigger";
+import { ActionButton } from "@/components/action-button";
 import {
   EmailField,
   InviteCodeField,
@@ -295,6 +296,7 @@ import { MobileWorkspaceDock } from "./components/mobile-workspace-dock.js";
 import { MutationFeedback } from "./components/mutation-feedback.js";
 import { SettingsRecord, SettingsRecordAction } from "./components/settings-record.js";
 import { WorkspaceAppBar } from "./components/workspace-app-bar.js";
+import { WorkspaceHeaderControlsSlot } from "./components/workspace-header-controls.js";
 import { WorkspaceIcon, workspaceIdForPath } from "./components/workspace-identity.js";
 import {
   WorkspaceSecondaryAppBar,
@@ -328,7 +330,6 @@ import {
   financeSectionFromPath,
 } from "./features/finances/navigation.js";
 import { FinanceSettings } from "./features/finances/settings.js";
-import { FinanceAddTransactionButton } from "./features/finances/workspace-header.js";
 import {
   MailPage as MailFeaturePage,
   MailSidebar as MailFeatureSidebar,
@@ -1828,7 +1829,8 @@ function WorkspaceAppBarForRoute({
     if (action === "new-reminder") setEditor({ kind: "reminder" });
     if (action === "new-event") setEditor({ kind: "event" });
     if (action === "new-message") navigateSearch("/mail?compose=new");
-    if (action === "new-transaction") window.location.hash = "finance-add-transaction";
+    if (action === "new-transaction")
+      navigateSearch("/finances/transactions#finance-add-transaction");
   };
   const workspace = workspaceForLocation(pathname)?.id ?? "account";
   const isSpatialCalendar = pathname === "/calendar";
@@ -1892,7 +1894,11 @@ function WorkspaceAppBarForRoute({
       search={<WorkspaceFinder workspace="mail" onAction={handleSearchAction} />}
     />
   ) : workspace === "finances" ? (
-    <WorkspaceFinder workspace="finances" onAction={handleSearchAction} />
+    <>
+      <WorkspaceHeaderControlsSlot placement="leading" />
+      <WorkspaceFinder workspace="finances" onAction={handleSearchAction} />
+      <WorkspaceHeaderControlsSlot />
+    </>
   ) : null;
 
   return (
@@ -1928,8 +1934,6 @@ function WorkspaceAppBarForRoute({
             }
             onCreateReminder={() => setEditor({ kind: "reminder" })}
           />
-        ) : workspace === "finances" ? (
-          <FinanceAddTransactionButton />
         ) : workspace === "today" ? (
           <CreateMenu setEditor={setEditor} />
         ) : null
@@ -2052,7 +2056,7 @@ function WorkspaceSwitcher({
       <ShadcnSidebarMenuItem>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <ShadcnButton
+            <ActionButton
               aria-label="Switch workspace"
               data-compact={compact || undefined}
               className={
@@ -2080,7 +2084,7 @@ function WorkspaceSwitcher({
               {!compact ? (
                 <ChevronDownIcon aria-hidden="true" className="ml-auto" data-icon="inline-end" />
               ) : null}
-            </ShadcnButton>
+            </ActionButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="start"
@@ -2909,9 +2913,9 @@ function workspaceTitleForLocation(pathname: string, search: string): string | n
   if (pathname === "/motives") return "Motives";
   if (pathname === "/finances") return "Finances";
   if (pathname === "/finances/accounts") return "Accounts";
-  if (pathname === "/finances/budgets" || pathname === "/finances/plan") return "Plan";
+  if (pathname === "/finances/budgets" || pathname === "/finances/plan") return "Budget";
   if (pathname === "/finances/wealth") return "Wealth";
-  if (pathname === "/finances/setup") return "Financial setup";
+  if (pathname === "/finances/setup") return "Financial profile";
   if (pathname.startsWith("/finances/reviews/")) return "Financial review";
   if (pathname === "/finances/cashflow") return "Cash flow";
   if (pathname === "/finances/health") return "Ledger health";
@@ -5813,9 +5817,9 @@ function MailSyncButton({
       {hasSyncDetails ? (
         <ShadcnPopover open={detailsOpen} onOpenChange={setDetailsOpen}>
           <ShadcnPopoverTrigger asChild>
-            <ShadcnButton aria-label="Mail sync details" size="icon-sm" variant="ghost">
+            <ActionButton aria-label="Mail sync details" size="icon-sm" variant="ghost">
               <AlertTriangleIcon aria-hidden="true" />
-            </ShadcnButton>
+            </ActionButton>
           </ShadcnPopoverTrigger>
           <ShadcnPopoverContent className="space-y-3" align="end">
             <ShadcnPopoverHeader>
@@ -6399,7 +6403,7 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
                     </ShadcnItemContent>
                     {calendar.provider === "local" ? (
                       <ShadcnItemActions>
-                        <ShadcnButton
+                        <ActionButton
                           aria-label={`Delete ${calendar.name}`}
                           disabled={remove.isPending}
                           onClick={() =>
@@ -6416,7 +6420,7 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
                           variant="ghost"
                         >
                           <TrashIcon />
-                        </ShadcnButton>
+                        </ActionButton>
                       </ShadcnItemActions>
                     ) : null}
                   </ShadcnItem>
@@ -6819,7 +6823,7 @@ function XBookmarksConnectorRow({
               ? "Syncing"
               : "Ready"}
         </ShadcnBadge>
-        <ShadcnButton
+        <ActionButton
           aria-label={`Sync X bookmarks for ${account.username}`}
           disabled={syncing || !account.selectedFolderId}
           onClick={sync}
@@ -6828,8 +6832,8 @@ function XBookmarksConnectorRow({
           variant="ghost"
         >
           <RefreshIcon className={syncing ? "spin" : ""} />
-        </ShadcnButton>
-        <ShadcnButton
+        </ActionButton>
+        <ActionButton
           aria-label={`Disconnect X bookmarks for ${account.username}`}
           onClick={disconnect}
           size="icon"
@@ -6837,7 +6841,7 @@ function XBookmarksConnectorRow({
           variant="ghost"
         >
           <TrashIcon />
-        </ShadcnButton>
+        </ActionButton>
       </ShadcnItemActions>
     </ShadcnItem>
   );
@@ -9500,14 +9504,14 @@ function EventVisibilityList({
       <li>
         <ShadcnPopover onOpenChange={setOpen} open={open}>
           <ShadcnPopoverTrigger asChild>
-            <ShadcnButton
+            <ActionButton
               aria-label={`Add calendar to ${status}`}
               disabled={disabled || availableCalendars.length === 0}
               size="icon-xs"
               variant="outline"
             >
               <PlusIcon aria-hidden="true" />
-            </ShadcnButton>
+            </ActionButton>
           </ShadcnPopoverTrigger>
           <ShadcnPopoverContent align="start" className="event-visibility-popover">
             <ShadcnPopoverHeader>

@@ -5255,9 +5255,11 @@ describe("ilo web app", () => {
     configureFinanceWorkspace();
     const browser = userEvent.setup();
     const view = setup("/finances/accounts");
-    expect(await screen.findByRole("list", { name: "Financial accounts" })).toHaveTextContent(
-      "Checking",
-    );
+    expect(
+      await screen.findByRole("list", { name: "Financial accounts" }, { timeout: 5_000 }),
+    ).toHaveTextContent("Checking");
+    await browser.click(screen.getByRole("button", { name: "Add in Finances" }));
+    await browser.click(screen.getByRole("button", { name: "Account" }));
     await browser.click(screen.getByRole("button", { name: "Connect bank" }));
     await waitFor(() => expect(mocks.plaidLink.open).toHaveBeenCalled());
     act(() => mocks.plaidLink.onSuccess?.("public-token"));
@@ -5268,7 +5270,7 @@ describe("ilo web app", () => {
       }),
     );
     await browser.click(screen.getByRole("link", { name: "Import records" }));
-    expect(await screen.findByRole("heading", { name: "Import history" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Import transactions" })).toBeInTheDocument();
     await browser.selectOptions(screen.getByLabelText("Export provider"), "paypal");
     await browser.selectOptions(screen.getByLabelText("Destination account"), secondId);
     const csvFile = new File(["Date,Amount\n2026-07-13,10"], "paypal-history.csv", {
@@ -5294,7 +5296,8 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     const view = setup("/finances/transactions");
     await screen.findByRole("table", { name: "Transactions" }, { timeout: 5_000 });
-    await browser.click(screen.getByRole("button", { name: "New transaction" }));
+    await browser.click(screen.getByRole("button", { name: "Add in Finances" }));
+    await browser.click(screen.getByRole("button", { name: "Transaction" }));
     await browser.selectOptions(
       screen.getByLabelText("Account", { selector: "#finance-account-select" }),
       id,
@@ -5303,7 +5306,9 @@ describe("ilo web app", () => {
     await browser.type(screen.getByLabelText("Amount"), "19.25");
     await browser.type(screen.getByLabelText("Category (optional)"), "Books");
     await browser.click(
-      within(screen.getByRole("main")).getByRole("button", { name: "Add transaction" }),
+      within(screen.getByRole("dialog", { name: "Add a transaction" })).getByRole("button", {
+        name: "Add transaction",
+      }),
     );
     await waitFor(() =>
       expect(mocks.createFinanceTransaction).toHaveBeenCalledWith(
@@ -5811,14 +5816,19 @@ describe("ilo web app", () => {
       ),
     );
     const financeControls = await screen.findByRole(
-      "navigation",
+      "group",
       { name: "Transaction controls" },
       { timeout: 5_000 },
     );
-    expect(
-      within(financeControls).getByRole("button", { name: "New transaction" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("form", { name: "Filter transactions" })).toBeInTheDocument();
+    const financeHeader = screen.getByRole("navigation", { name: "Top navigation" });
+    expect(financeHeader).toContainElement(financeControls);
+    expect(within(financeControls).getByRole("button", { name: "Import" })).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "Add in Finances" })).toHaveLength(1);
+    await userEvent.click(within(financeHeader).getByRole("button", { name: "Add in Finances" }));
+    await userEvent.click(screen.getByRole("button", { name: "Transaction" }));
+    expect(await screen.findByRole("dialog", { name: "Add a transaction" })).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();
     finances.unmount();
   });
 

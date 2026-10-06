@@ -94,7 +94,7 @@ Every product page has these layers, in order:
 | --- | --- | --- |
 | Orientation | Where am I and what time/context applies? | Keep the page title and current context visible in the app frame. |
 | Primary material | What deserves attention now? | Give one primary block the strongest visual weight. |
-| Working sequence | What comes before or after it? | Use a linear list, timeline, or queue—not a second dashboard. |
+| Working sequence | What comes before or after it? | Use a linear list, timeline, or queue for ordered work. Independent summaries may use a responsive bento grid while keeping the primary material prominent. |
 | Detail | What do I need to inspect or change? | Open an inspector, sheet, popover, or a labelled disclosure from the affected item. |
 | History | What happened before? | Collapse by default unless it changes the immediate decision. |
 
@@ -116,8 +116,21 @@ controls owned by the feature while placing them in the shared frame. Omit the
 bar or set `enabled={false}` to leave no empty row. Its default layout placement
 stays pinned below the primary bar and shares the body inset. Spatial Calendar
 headers may use `placement="inline"` to retain their own scroll/column alignment.
-Controls that govern multiple workspace panes, such as Mail count, density, and
-reader actions, use the default shared full-width slot.
+Compact page-wide actions and view selection should first use the route-owned
+primary-header controls slot below. A secondary row is reserved for controls or spatial
+headers that need their own width; record-specific actions stay with their records.
+
+### Route-owned primary-header controls
+
+`WorkspaceHeaderControls` lets a route supply a labelled group of contextual controls to
+`WorkspaceHeaderControlsSlot` inside its primary app bar. `WorkspaceLayout` owns the slot
+context; controls keep their page-owned state, mutations, and dialogs. Unmounting a route
+removes its controls. Standalone feature previews render the same group inline.
+
+Prefer this slot for compact page-wide actions and view selection before adding secondary
+navigation. Do not duplicate creation in the shell and page body. Keep spatial calendar axes,
+large filter forms, and record-specific actions in their appropriate existing surfaces.
+Use content-driven wrapping at narrow widths and zoom instead of clipping interactive controls.
 
 ### Blocks
 
@@ -739,3 +752,19 @@ Keep compact/comfortable/expanded density preferences and suppress empty metadat
 Collapsed sidebar review entries follow the shared icon-only menu-button geometry: hide
 both text and inline count, center the review icon, preserve its attention surface, and
 expose the complete review count/status through the shared tooltip and accessible label.
+
+### Icon action tooltips and workspace creation
+
+Every icon-only button must expose an action-oriented accessible name and a shadcn tooltip
+on hover and keyboard focus; a native `title` alone is insufficient. Use the shared
+`ActionButton` for icon-sized buttons, including buttons composed with menu/popover triggers
+or links. Existing explicit Tooltip compositions may remain; do not nest duplicate tooltips.
+Audit desktop and mobile top-navigation controls whenever adding a workspace action.
+
+The Finances plus action offers Transaction or Account. Account creation then offers bank
+connection or manual tracking, without duplicate creation buttons in the Accounts header.
+Transaction filters use the same responsive dialog/drawer pattern as Tasks, with compact
+header filter and sort buttons. Sort choices are radio menu items; clearing filters preserves
+unrelated URL state. Workspace-wide search remains the shared workspace finder.
+
+Top-navigation filter triggers show the number of active filters in a bottom-end badge. The shared ActionButton owns badge geometry; each domain counts applied filters, excluding sort/display preferences. Zero active filters render no badge. Keep the full accessible filter label and tooltip.

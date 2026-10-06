@@ -6,10 +6,18 @@ import type {
 import { formatDateOnly } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { ChevronDownIcon, DollarIcon } from "@/components/icons";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import {
   Item,
@@ -20,11 +28,7 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  WorkspaceSecondaryAppBar,
-  WorkspaceSecondaryAppBarContent,
-} from "@/components/workspace-secondary-app-bar";
+import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
@@ -34,6 +38,13 @@ import { FinanceSourceState, requireFinanceResult } from "./position-material.js
 import { FinanceReimbursementList } from "./reimbursement-list";
 import { FinanceScenarioComparison } from "./scenario-comparison.js";
 
+const cashflowViews = [
+  { value: "outlook", label: "Outlook" },
+  { value: "income", label: "Income" },
+  { value: "subscriptions", label: "Bills & subscriptions" },
+  { value: "reimbursements", label: "Reimbursements" },
+  { value: "scenarios", label: "Scenarios" },
+];
 const date = (value: string) =>
   formatDateOnly(value, { month: "short", day: "numeric", year: "numeric" });
 const cadence: Record<string, string> = {
@@ -171,18 +182,36 @@ export function FinanceCashflowPage() {
   );
   return (
     <div className="wide-page flex min-w-0 w-full max-w-6xl flex-col gap-6 pb-8">
-      <Tabs value={view} onValueChange={(value) => setParams({ view: value })}>
-        <WorkspaceSecondaryAppBar aria-label="Cash flow views">
-          <WorkspaceSecondaryAppBarContent>
-            <TabsList>
-              <TabsTrigger value="outlook">Outlook</TabsTrigger>
-              <TabsTrigger value="income">Income</TabsTrigger>
-              <TabsTrigger value="subscriptions">Bills & subscriptions</TabsTrigger>
-              <TabsTrigger value="reimbursements">Reimbursements</TabsTrigger>
-              <TabsTrigger value="scenarios">Scenarios</TabsTrigger>
-            </TabsList>
-          </WorkspaceSecondaryAppBarContent>
-        </WorkspaceSecondaryAppBar>
+      <div className="flex flex-col gap-4">
+        <WorkspaceHeaderControls label="Cash flow views" placement="leading">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" aria-label="Cash flow view" className="max-w-48">
+                <DollarIcon data-icon="inline-start" />
+                <span className="truncate">
+                  {cashflowViews.find((item) => item.value === view)?.label}
+                </span>
+                <ChevronDownIcon data-icon="inline-end" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuRadioGroup
+                value={view}
+                onValueChange={(value) => {
+                  const next = new URLSearchParams(params);
+                  next.set("view", value);
+                  setParams(next);
+                }}
+              >
+                {cashflowViews.map((item) => (
+                  <DropdownMenuRadioItem key={item.value} value={item.value}>
+                    {item.label}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </WorkspaceHeaderControls>
         {update.isError ? <MutationFeedback feedback={update.feedback} /> : null}
         {recurring.isError ? (
           <Alert variant="destructive">
@@ -199,191 +228,222 @@ export function FinanceCashflowPage() {
             </AlertDescription>
           </Alert>
         ) : null}
-        <TabsContent value="scenarios">
-          <FinanceScenarioComparison />
-        </TabsContent>
-        <TabsContent value="outlook" className="flex flex-col gap-6">
-          <section aria-label="Cash outlook">
-            <Card>
-              <CardHeader>
-                <CardTitle>Money coming in and going out</CardTitle>
-                <CardDescription>
-                  {forecast.data
-                    ? `Forecast as of ${date(forecast.data.asOf.slice(0, 10))}`
-                    : "Your next income and commitments"}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-5">
-                {snapshot.isPending ||
-                forecast.isPending ||
-                accounts.isPending ||
-                recurring.isPending ? (
-                  <Skeleton className="h-20 w-full" />
-                ) : (
-                  <dl className="grid gap-5 sm:grid-cols-3">
-                    <div>
-                      <dt className="text-sm text-muted-foreground">Projected low balance</dt>
-                      <dd className="text-2xl font-semibold tabular-nums">
-                        {usable ? formatMoney(forecast.data.lowestProjectedBalance) : "Unavailable"}
-                      </dd>
-                      {usable && forecast.data.lowestProjectedDate ? (
-                        <p className="text-sm text-muted-foreground">
-                          {date(forecast.data.lowestProjectedDate)}
+        {view === "scenarios" ? (
+          <Card aria-label="Scenarios">
+            <CardHeader>
+              <CardTitle>Scenarios</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <FinanceScenarioComparison />
+            </CardContent>
+          </Card>
+        ) : null}
+        {view === "outlook" ? (
+          <section aria-label="Outlook" className="finance-bento">
+            <section aria-label="Cash outlook" className="finance-bento__wide">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Money coming in and going out</CardTitle>
+                  <CardDescription>
+                    {forecast.data
+                      ? `Forecast as of ${date(forecast.data.asOf.slice(0, 10))}`
+                      : "Your next income and commitments"}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-5">
+                  {snapshot.isPending ||
+                  forecast.isPending ||
+                  accounts.isPending ||
+                  recurring.isPending ? (
+                    <Skeleton className="h-20 w-full" />
+                  ) : (
+                    <dl className="grid gap-5 sm:grid-cols-3">
+                      <div>
+                        <dt className="text-sm text-muted-foreground">Projected low balance</dt>
+                        <dd className="text-2xl font-semibold tabular-nums">
+                          {usable
+                            ? formatMoney(forecast.data.lowestProjectedBalance)
+                            : "Unavailable"}
+                        </dd>
+                        {usable && forecast.data.lowestProjectedDate ? (
+                          <p className="text-sm text-muted-foreground">
+                            {date(forecast.data.lowestProjectedDate)}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div>
+                        <dt className="text-sm text-muted-foreground">Expected income</dt>
+                        <dd className="text-2xl font-semibold tabular-nums">
+                          {usable ? formatMoney(forecast.data.upcomingIncome) : "Unavailable"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-sm text-muted-foreground">Upcoming obligations</dt>
+                        <dd className="text-2xl font-semibold tabular-nums">
+                          {usable ? formatMoney(forecast.data.upcomingObligations) : "Unavailable"}
+                        </dd>
+                      </div>
+                    </dl>
+                  )}
+                  {snapshot.isError ? (
+                    <InlineError
+                      error={snapshot.error}
+                      retry={() => snapshot.refetch()}
+                      stale={snapshot.data !== undefined}
+                    />
+                  ) : null}
+                  {forecast.isError ? (
+                    <InlineError
+                      error={forecast.error}
+                      retry={() => forecast.refetch()}
+                      stale={forecast.data !== undefined}
+                    />
+                  ) : null}
+                  {accounts.isError ? (
+                    <FinanceSourceState label="Forecast account scope" query={accounts} />
+                  ) : null}
+                  {unsupportedScope ? (
+                    <Alert>
+                      <AlertTitle>Forecast unavailable for this account scope</AlertTitle>
+                      <AlertDescription>
+                        <p>
+                          The available forecast uses full cash balances and recurring amounts. It
+                          cannot account for excluded or shared accounts, or a pattern whose source
+                          account is unavailable.
                         </p>
-                      ) : null}
-                    </div>
-                    <div>
-                      <dt className="text-sm text-muted-foreground">Expected income</dt>
-                      <dd className="text-2xl font-semibold tabular-nums">
-                        {usable ? formatMoney(forecast.data.upcomingIncome) : "Unavailable"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-sm text-muted-foreground">Upcoming obligations</dt>
-                      <dd className="text-2xl font-semibold tabular-nums">
-                        {usable ? formatMoney(forecast.data.upcomingObligations) : "Unavailable"}
-                      </dd>
-                    </div>
-                  </dl>
-                )}
-                {snapshot.isError ? (
-                  <InlineError
-                    error={snapshot.error}
-                    retry={() => snapshot.refetch()}
-                    stale={snapshot.data !== undefined}
-                  />
-                ) : null}
-                {forecast.isError ? (
-                  <InlineError
-                    error={forecast.error}
-                    retry={() => forecast.refetch()}
-                    stale={forecast.data !== undefined}
-                  />
-                ) : null}
-                {accounts.isError ? (
-                  <FinanceSourceState label="Forecast account scope" query={accounts} />
-                ) : null}
-                {unsupportedScope ? (
-                  <Alert>
-                    <AlertTitle>Forecast unavailable for this account scope</AlertTitle>
-                    <AlertDescription>
-                      <p>
-                        The available forecast uses full cash balances and recurring amounts. It
-                        cannot account for excluded or shared accounts, or a pattern whose source
-                        account is unavailable.
-                      </p>
-                      <Link className="underline" to="/finances/accounts">
-                        Inspect account scope
-                      </Link>
-                    </AlertDescription>
-                  </Alert>
-                ) : null}
-                {snapshot.isSuccess && !snapshot.data.data.ledger.trustworthy ? (
-                  <Alert>
-                    <AlertTitle>Complete the evidence before relying on a forecast</AlertTitle>
-                    <AlertDescription>
-                      <p>
-                        {snapshot.data.communication.requiredDisclosures[0]?.message ??
-                          "Account ownership and ledger activity need review."}
-                      </p>
-                      <Link className="underline" to="/finances/accounts">
-                        Review accounts
-                      </Link>
-                    </AlertDescription>
-                  </Alert>
-                ) : null}
-                <p className="text-sm text-muted-foreground">
-                  Projected balances use known income and obligations. Reserved money and
-                  unconfirmed payments may limit what is available to spend.
-                </p>
-              </CardContent>
-            </Card>
+                        <Link className="underline" to="/finances/accounts">
+                          Inspect account scope
+                        </Link>
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+                  {snapshot.isSuccess && !snapshot.data.data.ledger.trustworthy ? (
+                    <Alert>
+                      <AlertTitle>Complete the evidence before relying on a forecast</AlertTitle>
+                      <AlertDescription>
+                        <p>
+                          {snapshot.data.communication.requiredDisclosures[0]?.message ??
+                            "Account ownership and ledger activity need review."}
+                        </p>
+                        <Link className="underline" to="/finances/accounts">
+                          Review accounts
+                        </Link>
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+                  <p className="text-sm text-muted-foreground">
+                    Projected balances use known income and obligations. Reserved money and
+                    unconfirmed payments may limit what is available to spend.
+                  </p>
+                </CardContent>
+              </Card>
+            </section>
+            <section aria-labelledby="cashflow-upcoming" className="finance-bento__wide">
+              <Card>
+                <CardContent className="flex flex-col gap-3">
+                  <h2 id="cashflow-upcoming" className="text-lg font-semibold">
+                    Next expected activity
+                  </h2>
+                  {recurring.isPending ? (
+                    <Skeleton className="h-28 w-full" />
+                  ) : nextEvents.length ? (
+                    <ItemGroup>
+                      {nextEvents.map((item) => (
+                        <Item key={`${item.type}-${item.id}`}>
+                          <ItemContent>
+                            <ItemTitle>{item.displayName}</ItemTitle>
+                            <ItemDescription>
+                              {date(item.nextExpectedDate as string)} ·{" "}
+                              {item.type === "income" ? "Expected income" : "Expected payment"}
+                            </ItemDescription>
+                          </ItemContent>
+                          <ItemActions>
+                            <span className="tabular-nums">
+                              {item.type === "income" ? "+" : "−"}
+                              {formatMoney(item.expectedAmount)}
+                            </span>
+                          </ItemActions>
+                        </Item>
+                      ))}
+                    </ItemGroup>
+                  ) : recurring.isSuccess ? (
+                    <Empty>
+                      <EmptyHeader>
+                        <EmptyTitle>No confirmed upcoming activity</EmptyTitle>
+                        <EmptyDescription>
+                          Confirm your income and bills to build an outlook.
+                        </EmptyDescription>
+                      </EmptyHeader>
+                    </Empty>
+                  ) : null}
+                </CardContent>
+              </Card>
+            </section>
           </section>
-          <section aria-labelledby="cashflow-upcoming">
-            <h2 id="cashflow-upcoming" className="text-lg font-semibold">
-              Next expected activity
-            </h2>
-            {recurring.isPending ? (
-              <Skeleton className="h-28 w-full" />
-            ) : nextEvents.length ? (
-              <ItemGroup>
-                {nextEvents.map((item) => (
-                  <Item key={`${item.type}-${item.id}`}>
-                    <ItemContent>
-                      <ItemTitle>{item.displayName}</ItemTitle>
-                      <ItemDescription>
-                        {date(item.nextExpectedDate as string)} ·{" "}
-                        {item.type === "income" ? "Expected income" : "Expected payment"}
-                      </ItemDescription>
-                    </ItemContent>
-                    <ItemActions>
-                      <span className="tabular-nums">
-                        {item.type === "income" ? "+" : "−"}
-                        {formatMoney(item.expectedAmount)}
-                      </span>
-                    </ItemActions>
-                  </Item>
-                ))}
-              </ItemGroup>
-            ) : recurring.isSuccess ? (
-              <Empty>
-                <EmptyHeader>
-                  <EmptyTitle>No confirmed upcoming activity</EmptyTitle>
-                  <EmptyDescription>
-                    Confirm your income and bills to build an outlook.
-                  </EmptyDescription>
-                </EmptyHeader>
-              </Empty>
-            ) : null}
+        ) : null}
+        {view === "income" ? (
+          <Card aria-label="Income">
+            <CardHeader>
+              <CardTitle>Income</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <p className="text-sm text-muted-foreground">
+                Confirm the deposits that represent ongoing income. Transfers and reimbursements
+                belong to their original activity.
+              </p>
+              {recurring.isPending ? (
+                <Skeleton className="h-28 w-full" />
+              ) : income.length ? (
+                patternRows(income, "income")
+              ) : recurring.isSuccess ? (
+                <Empty>
+                  <EmptyHeader>
+                    <EmptyTitle>No income patterns yet</EmptyTitle>
+                    <EmptyDescription>
+                      Add account history or complete your financial profile.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                  <Button asChild>
+                    <Link to="/finances/setup">Update financial profile</Link>
+                  </Button>
+                </Empty>
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
+        {view === "subscriptions" ? (
+          <Card aria-label="Bills & subscriptions">
+            <CardHeader>
+              <CardTitle>Bills &amp; subscriptions</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <p className="text-sm text-muted-foreground">
+                Changing a pattern updates this forecast. It does not cancel a subscription or
+                change a payment with its provider.
+              </p>
+              {recurring.isPending ? (
+                <Skeleton className="h-28 w-full" />
+              ) : obligations.length ? (
+                patternRows(obligations, "obligation")
+              ) : recurring.isSuccess ? (
+                <Empty>
+                  <EmptyHeader>
+                    <EmptyTitle>No bills or subscriptions yet</EmptyTitle>
+                    <EmptyDescription>
+                      Recurring activity appears when there is enough account history.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
+        {view === "reimbursements" ? (
+          <section aria-label="Reimbursements">
+            <FinanceReimbursementList />
           </section>
-        </TabsContent>
-        <TabsContent value="income" className="flex flex-col gap-4">
-          <p className="text-sm text-muted-foreground">
-            Confirm the deposits that represent ongoing income. Transfers and reimbursements belong
-            to their original activity.
-          </p>
-          {recurring.isPending ? (
-            <Skeleton className="h-28 w-full" />
-          ) : income.length ? (
-            patternRows(income, "income")
-          ) : recurring.isSuccess ? (
-            <Empty>
-              <EmptyHeader>
-                <EmptyTitle>No income patterns yet</EmptyTitle>
-                <EmptyDescription>
-                  Add account history or complete your financial setup.
-                </EmptyDescription>
-              </EmptyHeader>
-              <Button asChild>
-                <Link to="/finances/setup">Continue setup</Link>
-              </Button>
-            </Empty>
-          ) : null}
-        </TabsContent>
-        <TabsContent value="subscriptions" className="flex flex-col gap-4">
-          <p className="text-sm text-muted-foreground">
-            Changing a pattern updates this forecast. It does not cancel a subscription or change a
-            payment with its provider.
-          </p>
-          {recurring.isPending ? (
-            <Skeleton className="h-28 w-full" />
-          ) : obligations.length ? (
-            patternRows(obligations, "obligation")
-          ) : recurring.isSuccess ? (
-            <Empty>
-              <EmptyHeader>
-                <EmptyTitle>No bills or subscriptions yet</EmptyTitle>
-                <EmptyDescription>
-                  Recurring activity appears when there is enough account history.
-                </EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : null}
-        </TabsContent>
-        <TabsContent value="reimbursements">
-          <FinanceReimbursementList />
-        </TabsContent>
-      </Tabs>
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -220,7 +220,7 @@ test("Tasks plus guides creation into the existing responsive editors", async ({
   ]) {
     await page.getByRole("button", { name: "Create in Tasks" }).click();
     await page.getByRole("button", { name: choice!, exact: true }).click();
-    if (choice!.startsWith("Project"))
+    if (choice?.startsWith("Project"))
       await page.getByRole("button", { name: "Continue", exact: true }).click();
     await expect(page.getByRole("dialog")).toContainText(heading!);
     await expect(page.getByRole("progressbar", { name: "Creation progress" })).toHaveAttribute(
@@ -670,4 +670,120 @@ test("Mail attachments download, retry failures, and preview safely", async ({ p
   await expect(page.getByRole("dialog")).toContainText("hello");
   await page.getByRole("button", { name: "Close", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+test("Finance consolidates contextual controls and preserves responsive creation", async ({
+  page,
+  isMobile,
+}) => {
+  test.setTimeout(90_000);
+  await page.goto("/");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  const header = page.getByRole("navigation", { name: "Top navigation", exact: true });
+  for (const [path, group] of [
+    ["/finances/transactions", "Transaction controls"],
+    ["/finances/imports", "Import controls"],
+    ["/finances/accounts", "Account controls"],
+    ["/finances/wealth", "Wealth controls"],
+    ["/finances/plan", "Plan controls"],
+    ["/finances/cashflow", "Cash flow views"],
+  ]) {
+    await page.goto(path!);
+    await expect(header.getByRole("group", { name: group!, exact: true })).toBeVisible();
+    await expect(page.locator('[data-slot="workspace-secondary-app-bar"]')).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "New transaction", exact: true })).toHaveCount(1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(
+      true,
+    );
+    const bounds = await header.boundingBox();
+    expect(bounds?.height).toBeLessThanOrEqual(isMobile ? 112 : 64);
+    const controls = header.getByRole("group", { name: group!, exact: true });
+    for (const control of await controls.locator("button, a").all()) {
+      const box = await control.boundingBox();
+      if (box) {
+        expect(box.x).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width).toBeLessThanOrEqual((page.viewportSize()?.width ?? 0) + 1);
+      }
+    }
+  }
+  await header.getByRole("button", { name: "Cash flow view" }).click();
+  await page.getByRole("menuitemradio", { name: "Income", exact: true }).click();
+  await expect(page).toHaveURL(/view=income/);
+  await expect(header.getByRole("button", { name: "Cash flow view" })).toHaveText("Income");
+  await page.reload();
+  await expect(header.getByRole("button", { name: "Cash flow view" })).toHaveText("Income");
+
+  await page.goto("/finances/plan");
+  await header.getByRole("button", { name: "Budget buckets" }).click();
+  await expect(page.getByRole("dialog", { name: "Organize budget categories" })).toBeVisible();
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await header.getByRole("button", { name: "New transaction", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "Add a transaction" });
+  await expect(editor).toBeVisible();
+  await expect(editor).toHaveAttribute("data-presentation", isMobile ? "drawer" : "dialog");
+  await editor.getByLabel("Merchant").fill("Draft transaction");
+  await editor.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(editor).not.toBeVisible();
+  await expect(page).not.toHaveURL(/finance-add-transaction/);
+  await header.getByRole("button", { name: "New transaction", exact: true }).click();
+  await expect(editor.getByLabel("Merchant")).toHaveValue("Draft transaction");
+  await editor.getByRole("button", { name: "Close", exact: true }).click();
+
+  await page.goto("/finances");
+  await expect(page.getByRole("region", { name: "Complete plan", exact: true })).toBeVisible();
+  await expect(header.getByRole("group")).toHaveCount(0);
+  await page.screenshot({
+    path: `/tmp/finance-overview-${isMobile ? "mobile" : "desktop"}.png`,
+    fullPage: true,
+  });
+});
+
+test("Financial setup opens shared fields and preserves edits across sections and reload", async ({
+  page,
+  isMobile,
+}) => {
+  let setupRequests = 0;
+  await page.route("**/v1/finances/setup", async (route) => {
+    setupRequests++;
+    await route.continue();
+  });
+  await page.goto("/");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await page.goto("/finances/setup");
+  const steps = page.getByRole("navigation", { name: "Financial setup sections" });
+  await expect(steps.getByRole("button")).toHaveCount(3);
+  await expect(page.getByLabel("Household size")).toBeVisible();
+  const original = await page.getByLabel("Household size").inputValue();
+  await page.getByLabel("Household size").fill("3");
+  const save =
+    original !== "3"
+      ? page.waitForResponse(
+          (r) => r.url().endsWith("/v1/finances/profile") && r.request().method() !== "GET",
+        )
+      : null;
+  await page.getByLabel("Household size").press("Tab");
+  if (save) expect((await save).ok()).toBe(true);
+  await steps.getByRole("button", { name: /Accounts and records/ }).click();
+  await expect(page.getByRole("link", { name: "Manage accounts" })).toBeVisible();
+  await steps.getByRole("button", { name: /Budget/ }).click();
+  expect(setupRequests).toBe(0);
+  await steps.getByRole("button", { name: /Profile/ }).click();
+  await page.reload();
+  await expect(page.getByLabel("Household size")).toHaveValue("3");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(
+    true,
+  );
+  await page.screenshot({
+    path: `/tmp/finance-configuration-${isMobile ? "mobile" : "desktop"}.png`,
+  });
+  await page.goto("/settings?section=finances&field=finances:household-size");
+  await expect(page.getByLabel("Household size")).toHaveValue("3");
+  await page.getByLabel("Household size").fill(original);
+  await page.getByLabel("Household size").press("Tab");
 });

@@ -109,17 +109,35 @@ If a Finance projection fails, available sibling work remains visible and affect
 
 ## Financial setup contract
 
-`/finances/setup` starts or resumes the server-owned setup protocol only after
-an explicit click. A remounted page discovers interrupted progress through
-`start`; the active session uses `resume`. Each answer sends the session ID,
-current question ID, exact session version, and an idempotency key. Conflicts
-preserve entered text and offer a resume action.
+`/finances/setup` opens directly into a read-only configuration aggregate. Navigation and reload
+never start the setup protocol, prepare a budget, approve anything, or run maintenance.
+The **Profile**, **Accounts and records**, and **Budget** sections can be visited independently.
+Unavailable reads remain distinguishable from missing information; successful sibling sections
+stay editable. The API retains its interview protocol for agent clients.
 
-Setup reuses current profile facts and asks about income reliability, obligations and timing,
-reserves, debt minimums, goals, protected priorities, and a chosen buffer. Structured answers use
-labelled fields. Blank amounts remain unknown; **Confirm none** records an empty list. **Skip for
-now** records progress against the current profile revision without confirming a fact. A concurrent
-profile change requires resume before an old answer or skip can apply.
+Setup and Finance Settings share one editor for persisted household, income, debts, obligations,
+goals, priorities, reserves, and payroll fields. Valid scalar edits save on blur or selection;
+complete collection rows save when leaving the row. Incomplete rows remain local. Blank is unknown,
+zero is explicit, and **None** confirms an empty collection. No routine saved message is shown.
+Version-checked writes sharing the canonical profile are serialized; later local drafts survive
+responses and section navigation. Failed fields preserve edits and offer retry or reload.
+
+The configuration endpoint composes existing authoritative stores rather than copying them into
+workspace preferences: versioned financial facts retain provenance and budget references;
+payroll retains its effective-dated records and conflict checks; workspace preferences retain their
+own revision. An unrelated payroll edit does not recalculate monthly income. Reliable budget
+resources remain separate from expected monthly income and per-paycheck amounts.
+
+Only an explicit **Prepare budget** action generates the conservative first proposal; it does not
+require answering every field. Record checks are also explicit and can run independently. Existing
+budgets remain inspectable. A missing budget opens a prerequisite screen with a setup destination
+and return link. Accounts, transactions, recorded goals, and cash-flow records stay accessible;
+derived forecasts retain their evidence checks rather than using a global setup-complete flag.
+
+Sidebar groups are **Money** (Overview, Transactions, Accounts), **Planning** (Budget, Cash flow,
+Wealth), and **Manage** (Financial setup). Budget retains `/finances/plan`. A prerequisite indicator
+routes to the explanatory page; it does not leave a dead disabled link. Finance Settings belongs
+in the shared Settings navigation, not as a separate sidebar shortcut.
 
 The first plan uses only stated recurring resources and chosen needs, preserves exact-cent deficits,
 and excludes uncertain income, exceptional resources, and reserves from recurring funding. Debt
@@ -149,8 +167,7 @@ available at their relevant steps.
 which decisions still require me.**
 
 Compatibility domain guidance belongs in Finance settings. The canonical
-financial profile and one-question interview are available through Financial
-setup. Shared Connected agents and Workspace access continue to own connection
+financial profile is editable through both Settings and Financial setup. Shared Connected agents and Workspace access continue to own connection
 and authorization; Finance routes there without duplicating those controls.
 
 Finance settings provides the canonical financial profile and planning preferences, plus
@@ -204,8 +221,11 @@ Review.
 
 ## Responsive and accessibility contract
 
-- Use at most one raised primary block per page; supporting material is an open
-  sequence, table, or labelled disclosure. The app frame owns the page title.
+- Use a responsive bento grid for independent overview summaries, financial accounts, and goals.
+  Compose existing Card/Item primitives and semantic surfaces; the position summary remains
+  the full-width anchor. Tables, ordered activity, and financial evidence stay full-width when
+  splitting them would impair comparison. Tiles collapse to one column based on available space.
+  The app frame owns the page title.
 - Financial context, agent guidance, and payroll details remain separately labelled;
   connection and access controls remain in shared Settings.
 - Status is text as well as color. Every route to agent controls is a labelled
@@ -223,7 +243,7 @@ The approved workspace journeys extend the compatibility checks below:
   unqualified net-worth total.
 - Answer one canonical Inbox question, fail and retry a request, and verify
   progression follows the response while older approvals remain accessible.
-- Start or resume setup, answer at the saved session version, inspect the full
+- Open setup directly, edit and reload independent fields, inspect the full
   proposal, and confirm reasoning or audit work remains visibly pending.
 - Open all seven destinations and legacy deep links at desktop and narrow
   widths; verify keyboard controls, wrapping, filters, and local read failures.
@@ -241,4 +261,60 @@ The approved workspace journeys extend the compatibility checks below:
    the financial profile remains usable.
 7. Verify keyboard operation and narrow/mobile wrapping.
 
-The overview has no secondary app bar: Financial setup is already available in the sidebar. Other Finance views retain their contextual controls.
+## Header and page composition
+
+Finance uses the shared primary header for workspace search, contextual controls, and one
+**New transaction** icon button. Pages publish stateful controls through
+`WorkspaceHeaderControls`; the app frame mounts its destination beside workspace search.
+No Finance page adds a secondary navigation row just for actions.
+
+- Transactions exposes Import history; Imports exposes Transactions.
+- Plan exposes Financial setup, Budget buckets, Refresh, and Revise plan when available.
+- Accounts exposes bank connection, manual account creation, imports, and evidence health.
+- Wealth exposes goal creation and account management.
+- Cash flow uses a compact view dropdown with trailing radio indicators for Outlook, Income,
+  Bills & subscriptions, Reimbursements, and Scenarios. The selected view remains URL-backed;
+  changing it preserves other query parameters.
+- Controls remain end-aligned with consistent spacing. Icon actions retain accessible names
+  and tooltips. Narrow/zoomed layouts may wrap within the header without horizontal overflow.
+  The shared mobile create placement remains in effect.
+- New transaction opens the existing transaction form in the shared responsive dialog/drawer,
+  using a navigable transaction route and hash. Closing removes that hash while preserving
+  transaction filters. Draft fields remain intact while closing/reopening the same mounted page;
+  a successful save clears the draft.
+- Transaction filtering remains a labelled form beside the ledger because its combined
+  account/category/date inputs need more room than the header. Record actions and financial
+  evidence stay with the records they affect.
+
+Validation covers header placement on six Finance routes, exclusive Cash flow selection and
+reload, single creation entry, dialog/drawer presentation, draft preservation, and viewport
+overflow on desktop/mobile. Provider behavior and financial calculation rules are unchanged.
+
+### Contextual information and progressive disclosure
+
+Budget renders totals once from structured budget data. Assumptions remain available as individual
+secondary rows under a disclosure; rationale is a separate disclosure. Incomplete budgets retain a
+visible next action and do not present absent resource evidence as a confirmed zero. Allocation
+progress is shown only when expected resources are positive.
+
+Transactions owns labeled Import and Export header actions. Import is a responsive dialog/drawer;
+legacy import links redirect into that flow. The standalone Ledger health page is retired. Only nonzero diagnostics not guaranteed to appear in Reviews belong on Transactions, while connection freshness, ownership,
+balances, and account coverage belong on Accounts. Pending activity and balance-only tracking are
+informational, not automatically warnings. Existing health links redirect to Transactions checks.
+
+Financial profile is the durable name for the planning-input surface. Sidebar attention derives
+from missing planning facts, proposed budgets awaiting approval, and disconnected or bank accounts
+not successfully refreshed for more than 24 hours. Accounts displays the total account count, including manual accounts. Missing balances, unresolved ownership, and possible duplicate accounts also set sidebar attention.
+Account warnings name the affected account and provide sync, reconnect, or edit actions.
+
+Accounts use full-width records with type icons, source/status badges beside the title, and tooltip-equipped edit/transaction actions at the top end. Wealth presents current metrics in a swipeable, looping KPI carousel and links to Accounts rather than repeating its records. Historical charts are deferred until reliable balance history is available.
+
+Finance creation belongs to the relevant collection card: Transactions, Accounts, Budget buckets,
+and Financial goals each expose a tooltip-equipped Add action at the header end. Finance has no
+workspace-wide Add menu. Cash flow view selection occupies the shared leading header slot; search
+and other utilities remain at the end. Account records are secondary Items within the Accounts
+card, with inline attention, source, kind, balance, and recovery actions rather than separate warning
+cards. Currency fields use CurrencyInput; absent account currency stays unspecified, with the
+source caveat available in a tooltip. Pending posting state has an explicit badge and subdued row;
+it is independent of review status. URL `reviewState` filters transactions, while `review` opens a
+review flow. Historical review-state links remain readable without opening a review dialog.

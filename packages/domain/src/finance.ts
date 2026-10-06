@@ -1,3 +1,5 @@
+export * from "./finance/configuration.js";
+
 import { z } from "zod";
 
 export * from "./finance/setup-planning.js";
@@ -446,6 +448,7 @@ export const financeProfileSchema = z.object({
 export type FinanceProfile = z.infer<typeof financeProfileSchema>;
 
 export const updateFinanceProfileInputSchema = z.object({
+  expectedUpdatedAt: isoDateTimeSchema.nullable().optional(),
   dependents: z.number().int().min(0).max(20).nullable().optional(),
   effectiveDate: z.iso.date().default(() => new Date().toISOString().slice(0, 10)),
   employer: z.string().trim().max(160).nullable().default(null),

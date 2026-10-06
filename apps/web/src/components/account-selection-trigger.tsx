@@ -1,7 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
+import { ActionButton as Button } from "@/components/action-button";
 import { CheckIcon, XIcon } from "@/components/icons";
 import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
 import {
   PopoverContent,
   PopoverDescription,
@@ -41,6 +41,7 @@ export function AccountSelectionTrigger({
 }: AccountSelectionTriggerProps) {
   return (
     <Button
+      tooltip={ariaLabel}
       {...buttonProps}
       aria-label={ariaLabel}
       title={`${ariaLabel}${allSynced && !needsAttention ? ", all accounts connected and syncing" : ""}`}

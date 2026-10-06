@@ -1,9 +1,18 @@
 import type { FinanceAccount, FinanceSnapshot, FinanceToolResult } from "@personal-os/domain";
 import type { QueryClient } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { ActionButton as Button } from "@/components/action-button";
+import {
+  BankIcon,
+  CircleAlertIcon,
+  EditIcon,
+  ReceiptIcon,
+  TargetIcon,
+  WalletIcon,
+} from "@/components/icons";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -14,6 +23,8 @@ import {
 } from "@/components/ui/card";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { financeAccountNeedsAttention } from "./attention";
 import { formatMoney } from "./format.js";
 
 export function refreshFinancePosition(client: QueryClient) {
@@ -77,9 +88,11 @@ export function FinanceSourceState({
 export function FinancePositionMaterial({
   result,
   wealth = false,
+  hideMetrics = false,
 }: {
   result: FinanceToolResult<FinanceSnapshot>;
   wealth?: boolean;
+  hideMetrics?: boolean;
 }) {
   const snapshot = result.data;
   const metrics = wealth
@@ -108,23 +121,27 @@ export function FinancePositionMaterial({
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          {metrics.map((metric) => (
-            <div className="flex flex-col gap-1" key={metric.label}>
-              <dt className="text-muted-foreground text-sm">
-                <Link
-                  className="underline underline-offset-4"
-                  to={
-                    "href" in metric ? (metric.href ?? "/finances/accounts") : "/finances/accounts"
-                  }
-                >
-                  {metric.label}
-                </Link>
-              </dt>
-              <dd className="text-xl tabular-nums">{financeAmount(metric.amount)}</dd>
-            </div>
-          ))}
-        </dl>
+        {!hideMetrics ? (
+          <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            {metrics.map((metric) => (
+              <div className="flex flex-col gap-1" key={metric.label}>
+                <dt className="text-muted-foreground text-sm">
+                  <Link
+                    className="underline underline-offset-4"
+                    to={
+                      "href" in metric
+                        ? (metric.href ?? "/finances/accounts")
+                        : "/finances/accounts"
+                    }
+                  >
+                    {metric.label}
+                  </Link>
+                </dt>
+                <dd className="text-xl tabular-nums">{financeAmount(metric.amount)}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
         <p className="text-muted-foreground text-sm">
           Balances reflect planning inclusion and your recorded ownership share. Unavailable amounts
           need more evidence in{" "}
@@ -143,7 +160,7 @@ export function FinancePositionMaterial({
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2">
         <Button asChild size="sm" variant="outline">
-          <Link to="/finances/health">Inspect evidence</Link>
+          <Link to="/finances/accounts">Review accounts</Link>
         </Button>
         <span className="text-muted-foreground text-xs">
           {snapshot.ledger.reconciledThrough
@@ -165,10 +182,12 @@ export function FinanceAccountRecord({
   account,
   duplicateNames = [],
   onEdit,
+  attentionAction,
 }: {
   account: FinanceAccount;
   duplicateNames?: string[];
   onEdit?: () => void;
+  attentionAction?: ReactNode;
 }) {
   const balance =
     account.balance === null
@@ -178,22 +197,73 @@ export function FinanceAccountRecord({
             style: "currency",
             currency: account.currencyCode,
           }).format(account.balance)
-        : `${account.balance.toLocaleString()} · currency unavailable`;
+        : account.balance.toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          });
   return (
-    <Item id={`account-${account.id}`} role="listitem">
+    <Item
+      id={`account-${account.id}`}
+      role="listitem"
+      variant="secondary"
+      className="finance-account-record"
+    >
       <ItemContent className="min-w-0">
-        <ItemTitle>{account.name}</ItemTitle>
-        <ItemDescription>
-          {account.institution} ·{" "}
-          {account.kind === "investment"
-            ? "Investments"
-            : account.kind === "cash"
-              ? "Cash"
-              : account.kind === "debt"
-                ? "Debt"
-                : "Other assets"}{" "}
-          · {balance}
-        </ItemDescription>
+        <div className="flex flex-wrap items-center gap-2">
+          {account.kind === "debt" ? (
+            <WalletIcon aria-hidden="true" />
+          ) : account.kind === "investment" ? (
+            <TargetIcon aria-hidden="true" />
+          ) : (
+            <BankIcon aria-hidden="true" />
+          )}
+          <ItemTitle>{account.name}</ItemTitle>
+          {financeAccountNeedsAttention(account, duplicateNames.length > 0) ? (
+            <Badge variant="destructive">
+              <CircleAlertIcon />
+              Needs attention
+            </Badge>
+          ) : null}
+          <Badge
+            variant={
+              account.status === "needs_reauth" || account.synchronization.state === "blocked"
+                ? "destructive"
+                : "secondary"
+            }
+          >
+            {account.provider === "manual"
+              ? "Manually tracked"
+              : account.status === "needs_reauth"
+                ? "Reconnect required"
+                : account.synchronization.state === "current"
+                  ? "Current"
+                  : account.synchronization.state === "stale"
+                    ? "Stale"
+                    : account.synchronization.state === "retrying"
+                      ? "Retrying"
+                      : "Blocked"}
+          </Badge>
+        </div>
+        <ItemDescription>{account.institution}</ItemDescription>
+        <div className="flex flex-wrap items-center gap-3">
+          <Badge variant="outline">
+            {account.kind === "investment"
+              ? "Investments"
+              : account.kind === "cash"
+                ? "Cash"
+                : account.kind === "debt"
+                  ? "Debt"
+                  : "Other assets"}
+          </Badge>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="text-xl font-semibold tabular-nums">{balance}</span>
+            </TooltipTrigger>
+            <TooltipContent>
+              {account.currencyCode ?? "The source has not provided a currency code."}
+            </TooltipContent>
+          </Tooltip>
+        </div>
         <p className="text-muted-foreground text-sm">
           {accountOwnership(account)} ·{" "}
           {account.includeInPlanning ? "Included in planning" : "Excluded from planning"}
@@ -218,37 +288,21 @@ export function FinanceAccountRecord({
             planning.
           </p>
         ) : null}
+        {attentionAction}
       </ItemContent>
       <ItemActions className="flex-wrap">
-        <Badge
-          variant={
-            account.status === "needs_reauth" || account.synchronization.state === "blocked"
-              ? "destructive"
-              : "secondary"
-          }
-        >
-          {account.status === "needs_reauth"
-            ? "Reconnect required"
-            : account.synchronization.state === "current"
-              ? "Current"
-              : account.synchronization.state === "stale"
-                ? "Stale"
-                : account.synchronization.state === "retrying"
-                  ? "Retrying"
-                  : "Blocked"}
-        </Badge>
         {onEdit ? (
-          <Button aria-label={`Edit ${account.name}`} onClick={onEdit} size="sm" variant="outline">
-            Edit
+          <Button aria-label={`Edit ${account.name}`} onClick={onEdit} size="icon" variant="ghost">
+            <EditIcon />
           </Button>
         ) : (
           <Button asChild size="sm" variant="outline">
             <Link to={`/finances/accounts#account-${account.id}`}>Inspect account</Link>
           </Button>
         )}
-        <Button asChild size="sm" variant="ghost">
+        <Button asChild size="icon" variant="ghost" aria-label={`Transactions for ${account.name}`}>
           <Link to={`/finances/transactions?accountId=${encodeURIComponent(account.id)}`}>
-            Transactions
+            <ReceiptIcon />
           </Link>
         </Button>
       </ItemActions>

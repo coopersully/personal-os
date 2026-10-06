@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { FinanceSettings } from "./settings.js";
@@ -100,6 +100,9 @@ const savedFinanceProfile = {
 };
 
 const mocks = vi.hoisted(() => ({
+  getFinanceConfiguration: vi.fn(),
+  listFinanceGoals: vi.fn(),
+  listFinanceAccounts: vi.fn(),
   getDomainProfile: vi.fn(),
   getFinanceGuidedSetup: vi.fn(),
   getFinanceOverview: vi.fn(),
@@ -131,6 +134,13 @@ function renderSettings() {
 describe("Finance settings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getFinanceConfiguration.mockResolvedValue({
+      profile: { state: "loaded", value: null },
+      income: { state: "loaded", value: null },
+      accounts: { state: "loaded", value: { accounts: [] } },
+    });
+    mocks.listFinanceGoals.mockResolvedValue({ outcome: "completed", data: [] });
+    mocks.listFinanceAccounts.mockResolvedValue({ accounts: [] });
     mocks.getDomainProfile.mockResolvedValue(draftProfile);
     mocks.getFinanceGuidedSetup.mockResolvedValue(guidedSetupFixture);
     mocks.getFinanceOverview.mockResolvedValue({
@@ -183,129 +193,6 @@ describe("Finance settings", () => {
     );
   });
 
-  it("shows active guidance and saves the signed-in person's financial profile", async () => {
-    const active = {
-      ...draftProfile,
-      categories: [],
-      instructions: [],
-      preferences: {},
-      sourceContexts: [],
-      status: "active" as const,
-      version: 2,
-    };
-    mocks.getDomainProfile.mockResolvedValue(active);
-    mocks.getFinanceGuidedSetup.mockResolvedValue({
-      ...guidedSetupFixture,
-      accountSources: [],
-      guidance: {
-        approvedProfile: active,
-        draftNotice: null,
-        draftProposal: null,
-      },
-      humanOnlyActions: [],
-    });
-    mocks.getFinanceOverview.mockResolvedValue({
-      accounts: [{ id, institution: "Credit Union", name: "Checking" }],
-      budgets: [],
-      reviewCount: 0,
-      spendingThisMonth: 0,
-      transactions: [],
-    });
-    mocks.getFinanceProfile.mockResolvedValue({
-      effectiveDate: "2026-08-01",
-      employer: null,
-      employmentType: null,
-      expectedNetPay: null,
-      grossAnnualIncome: null,
-      nextPayday: null,
-      payAccountId: null,
-      payFrequency: null,
-      role: null,
-    });
-
-    renderSettings();
-    const browser = userEvent.setup();
-    expect(await screen.findByText("Active approved guidance")).toBeVisible();
-    expect(
-      screen.getByText("Manage your financial records and decisions directly in Finance."),
-    ).toBeVisible();
-    expect(screen.queryByText("Monthly review guidance")).not.toBeInTheDocument();
-
-    await browser.type(screen.getByRole("textbox", { name: "Employer" }), "Harbor Arts Center");
-    await browser.type(screen.getByRole("textbox", { name: "Role" }), "Product lead");
-    await browser.selectOptions(
-      screen.getByRole("combobox", { name: "Employment type" }),
-      "full_time",
-    );
-    await browser.clear(screen.getByLabelText("Effective date"));
-    await browser.type(screen.getByLabelText("Effective date"), "2026-08-15");
-    await browser.type(screen.getByRole("textbox", { name: "Gross annual income" }), "145000");
-    await browser.type(screen.getByRole("textbox", { name: "Expected net paycheck" }), "4125");
-    await browser.selectOptions(
-      screen.getByRole("combobox", { name: "Pay frequency" }),
-      "biweekly",
-    );
-    await browser.type(screen.getByLabelText("Next payday"), "2026-08-28");
-    await browser.selectOptions(screen.getByRole("combobox", { name: "Pay account" }), id);
-    await browser.click(screen.getByRole("button", { name: "Save profile" }));
-
-    await waitFor(() =>
-      expect(mocks.updateFinanceProfile).toHaveBeenCalledWith({
-        effectiveDate: "2026-08-15",
-        employer: "Harbor Arts Center",
-        employmentType: "full_time",
-        expectedNetPay: 4125,
-        grossAnnualIncome: 145000,
-        nextPayday: "2026-08-28",
-        payAccountId: id,
-        payFrequency: "biweekly",
-        role: "Product lead",
-      }),
-    );
-  });
-
-  it("preserves unsaved profile edits when the profile refreshes in the background", async () => {
-    mocks.getFinanceProfile.mockResolvedValue({
-      effectiveDate: "2026-08-01",
-      employer: "Original employer",
-      employmentType: null,
-      expectedNetPay: null,
-      grossAnnualIncome: null,
-      nextPayday: null,
-      payAccountId: null,
-      payFrequency: null,
-      role: null,
-    });
-    const { queryClient } = renderSettings();
-    const browser = userEvent.setup();
-    const employer = await screen.findByRole("textbox", { name: "Employer" });
-    await waitFor(() => expect(employer).toHaveValue("Original employer"));
-
-    await browser.clear(employer);
-    await browser.type(employer, "Unsaved employer");
-    await act(() => {
-      queryClient.setQueryData(["finance-profile"], {
-        effectiveDate: "2026-08-01",
-        employer: "Refetched employer",
-        employmentType: null,
-        expectedNetPay: null,
-        grossAnnualIncome: null,
-        nextPayday: null,
-        payAccountId: null,
-        payFrequency: null,
-        role: null,
-      });
-    });
-    expect(queryClient.getQueryData(["finance-profile"])).toMatchObject({
-      employer: "Refetched employer",
-    });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    expect(employer).toHaveValue("Unsaved employer");
-  });
-
   it("keeps draft guidance visible and restores activation after a failed request", async () => {
     mocks.upsertDomainProfile.mockRejectedValueOnce(new Error("Guidance activation failed"));
     renderSettings();
@@ -318,22 +205,6 @@ describe("Finance settings", () => {
     ).toBeVisible();
     expect(screen.getByText("Keep financial review trustworthy.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Activate guidance" })).toBeEnabled();
-  });
-
-  it("keeps profile edits and restores saving after a failed request", async () => {
-    mocks.updateFinanceProfile.mockRejectedValueOnce(new Error("Profile save failed"));
-    renderSettings();
-    const browser = userEvent.setup();
-    const employer = await screen.findByRole("textbox", { name: "Employer" });
-
-    await browser.type(employer, "Unsaved employer");
-    await browser.click(screen.getByRole("button", { name: "Save profile" }));
-
-    expect(
-      await screen.findByText(/Couldn’t confirm whether we could save your financial profile/),
-    ).toBeVisible();
-    expect(employer).toHaveValue("Unsaved employer");
-    expect(screen.getByRole("button", { name: "Save profile" })).toBeEnabled();
   });
 
   it("renders an active draft's detailed guidance and pending actions", async () => {
@@ -365,13 +236,6 @@ describe("Finance settings", () => {
           finishActivation = () => resolve({ ...detailedDraft, status: "active", version: 2 });
         }),
     );
-    let finishSave: (() => void) | undefined;
-    mocks.updateFinanceProfile.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          finishSave = () => resolve({ status: "pending" });
-        }),
-    );
     renderSettings();
     const browser = userEvent.setup();
 
@@ -383,9 +247,6 @@ describe("Finance settings", () => {
     expect(screen.getByRole("button", { name: "Activating…" })).toBeDisabled();
     finishActivation?.();
 
-    await browser.click(screen.getByRole("button", { name: "Save profile" }));
-    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
-    finishSave?.();
-    await waitFor(() => expect(mocks.updateFinanceProfile).toHaveBeenCalled());
+    expect(screen.queryByRole("button", { name: "Save profile" })).not.toBeInTheDocument();
   });
 });

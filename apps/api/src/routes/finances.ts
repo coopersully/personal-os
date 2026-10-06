@@ -436,6 +436,10 @@ export function registerFinanceRoutes({
       ),
     });
   });
+  app.get("/v1/finances/configuration", async (context) => {
+    context.header("Cache-Control", "no-store");
+    return context.json(await finances.getFinanceConfiguration(context.get("principal").userId));
+  });
   app.post("/v1/finances/setup", async (context) =>
     context.json(
       await finances.setupFinances(

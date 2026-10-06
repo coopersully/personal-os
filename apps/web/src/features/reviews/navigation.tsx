@@ -1,9 +1,9 @@
 import type { AgentAccessDomain } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
+import { ActionButton as Button } from "@/components/action-button";
 import { ApprovalHandIcon } from "@/components/icons";
 import { formatSidebarCount } from "@/components/sidebar-item-meta";
-import { Button } from "@/components/ui/button";
 import {
   SidebarFooter,
   SidebarMenu,
@@ -69,6 +69,7 @@ export function ReviewNavigation({
     </SidebarFooter>
   ) : (
     <Button
+      tooltip={label}
       aria-label={label}
       className="review-navigation"
       data-attention={needsAttention || undefined}

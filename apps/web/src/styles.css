@@ -7630,3 +7630,32 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   .tasks-header-view { grid-area: 1 / 2; justify-self: start; max-width: 100%; }
   .tasks-header-tools { grid-column: 1 / -1; grid-row: 2; }
 }
+
+/* Route-owned utilities share the primary header; only genuine spatial axes use
+   secondary navigation. Flex wrapping is a fallback for zoom and narrow windows. */
+.workspace-header-controls-slot:empty { display: none; }
+.workspace-header-controls-slot { min-width: 0; }
+.workspace-header-controls { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: .375rem; min-width: 0; }
+.workspace-app-bar[data-workspace="finances"] .workspace-app-bar__context { overflow: visible; flex-wrap: wrap; padding-block: .375rem; }
+.finance-bento { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); align-items: stretch; gap: 1rem; min-width: 0; }
+.finance-bento__wide { grid-column: 1 / -1; }
+.finance-goal-grid > [data-slot="item"] { background: var(--card); color: var(--card-foreground); border-radius: var(--radius-xl); align-items: flex-start; flex-direction: column; }
+.finance-account-grid [data-slot="item-actions"],
+.finance-goal-grid [data-slot="item-actions"] { flex-wrap: wrap; }
+@media (max-width: 767px) {
+  .workspace-app-bar[data-workspace="finances"] { display: flex; flex-wrap: wrap; }
+  .workspace-app-bar[data-workspace="finances"] .workspace-app-bar__title { flex: 1 1 auto; }
+  .workspace-app-bar[data-workspace="finances"] .workspace-app-bar__context { margin-inline-start: auto; max-width: 100%; }
+  .workspace-app-bar[data-workspace="finances"] .workspace-header-controls [data-slot="button"] { min-height: 2.5rem; }
+  .workspace-app-bar[data-workspace="finances"] .review-navigation { margin-inline-start: .25rem; }
+}
+
+.action-count-badge { position: absolute; right: -0.2rem; bottom: -0.2rem; min-width: 1rem; height: 1rem; padding: 0 .2rem; font-size: .625rem; line-height: 1; pointer-events: none; }
+.finance-account-grid .finance-account-record { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; }
+.finance-account-record [data-slot="item-actions"] { align-self: start; }
+.finance-account-record [data-slot="item-description"] { -webkit-line-clamp: unset; }
+
+.workspace-app-bar .action-count-trigger, .workspace-secondary-app-bar .action-count-trigger { overflow: visible; }
+
+.finance-account-grid .finance-account-record { background: var(--secondary); border-radius: var(--radius-lg); }
+.workspace-header-controls-slot--leading { margin-inline-end: auto; }

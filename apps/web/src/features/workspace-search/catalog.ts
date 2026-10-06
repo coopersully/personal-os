@@ -47,7 +47,7 @@ const destinations: Record<SearchableWorkspace, Array<[string, string, string]>>
   finances: [
     ["Overview", "/finances", "overview financial position"],
     ["Transactions", "/finances/transactions", "transactions ledger"],
-    ["Plan", "/finances/plan", "budget plan"],
+    ["Budget", "/finances/plan", "budget plan"],
     ["Cash flow", "/finances/cashflow", "cash flow"],
     ["Wealth", "/finances/wealth", "wealth net worth"],
     ["Accounts", "/finances/accounts", "accounts banks"],

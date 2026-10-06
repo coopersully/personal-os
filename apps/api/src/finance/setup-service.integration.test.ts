@@ -66,6 +66,53 @@ describe.sequential("guided Finance setup", () => {
     await container.stop();
   });
 
+  it("prepares an incomplete budget explicitly without requiring sequential answers", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Independent setup",
+        email: "independent-setup@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("Fixture user missing");
+    const now = () => new Date("2026-10-06T12:00:00Z");
+    const planning = createProfileBudgetService({ db: database.db, now });
+    const service = createSetupService({ db: database.db, now, planning });
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: owner.id,
+        actorType: "user",
+        scopes: new Set(["finances:write"]),
+        userId: owner.id,
+      },
+      requestId: "independent-setup",
+    });
+    const first = await service.setupFinances({ operation: "prepare_budget" }, context);
+    expect(first.data.budgetVersionId).toBeTruthy();
+    expect(first.data.question).toBeNull();
+    const budgets = await database.db
+      .select()
+      .from(financeBudgetVersions)
+      .where(eq(financeBudgetVersions.userId, owner.id));
+    expect(budgets).toHaveLength(1);
+    expect(budgets[0]?.status).not.toBe("active");
+    await service.setupFinances({ operation: "prepare_budget" }, context);
+    expect(
+      await database.db
+        .select()
+        .from(financeBudgetVersions)
+        .where(eq(financeBudgetVersions.userId, owner.id)),
+    ).toHaveLength(1);
+    expect(
+      await database.db
+        .select()
+        .from(workspaceMaintenanceRuns)
+        .where(eq(workspaceMaintenanceRuns.userId, owner.id)),
+    ).toHaveLength(0);
+  });
+
   it("resumes a setup proposal revised and approved through another Finance surface", async () => {
     const [owner] = await database.db
       .insert(users)
@@ -665,6 +712,56 @@ describe.sequential("guided Finance setup", () => {
       service: createSetupService({ db: database.db, now, planning }),
     };
   }
+
+  it("accepts any available question while protecting ownership, revisions, and replay", async () => {
+    const { owner, planning, context, service } = await setupFixture("any-order-profile");
+    const first = await service.setupFinances({ operation: "start" }, context);
+    expect(first.data.availableQuestions).toHaveLength(13);
+    const input = {
+      operation: "answer" as const,
+      sessionId: first.data.sessionId,
+      expectedVersion: first.data.version,
+      questionId: "profile:household_size",
+      answer: "3",
+      idempotencyKey: "later-question",
+    };
+    const other = await setupFixture("other-profile-owner");
+    await expect(service.setupFinances(input, other.context)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    const saved = await service.setupFinances(input, context);
+    expect(await service.setupFinances(input, context)).toEqual(saved);
+    expect(saved.data.question?.id).toBe("profile:location");
+    expect(saved.data.availableQuestions?.map((question) => question.id)).not.toContain(
+      input.questionId,
+    );
+    expect((await planning.getFinancialProfile(owner.id)).data?.householdSize).toBe(3);
+    await expect(
+      service.setupFinances(
+        { ...input, questionId: "profile:location", idempotencyKey: "stale-later-question" },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    const skip = {
+      operation: "skip" as const,
+      sessionId: saved.data.sessionId,
+      expectedVersion: saved.data.version,
+      questionId: "planning:priorities",
+      idempotencyKey: "skip-later-question",
+    };
+    const skipped = await service.setupFinances(skip, context);
+    expect(skipped.data.question?.id).toBe("profile:location");
+    expect(skipped.data.version).toBeGreaterThan(saved.data.version);
+    expect(skipped.data.availableQuestions?.map((question) => question.id)).not.toContain(
+      skip.questionId,
+    );
+    await expect(
+      service.setupFinances(
+        { ...input, expectedVersion: skipped.data.version, idempotencyKey: "already-answered" },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
 
   it("keeps a completely unknown profile absent and invalidates old skips after a profile edit", async () => {
     const { owner, planning, context, service } = await setupFixture("unknown-profile");

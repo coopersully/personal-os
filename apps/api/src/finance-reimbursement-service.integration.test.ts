@@ -46,7 +46,7 @@ describe.sequential("reimbursement lifecycle", () => {
       .start();
     database = createDatabaseClient(container.getConnectionUri());
     await migrateDatabase(database.db, resolve(process.cwd(), "packages/database/migrations"));
-  });
+  }, 120_000);
 
   afterAll(async () => {
     await database.close();

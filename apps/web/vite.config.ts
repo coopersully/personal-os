@@ -8,7 +8,9 @@ import { VitePWA } from "vite-plugin-pwa";
 
 const agentSkillRelease = JSON.parse(
   await readFile(
-    fileURLToPath(new URL("../../packages/domain/src/ilo-setup-release.json", import.meta.url)),
+    fileURLToPath(
+      new URL("../../packages/domain/src/personal-os-setup-release.json", import.meta.url),
+    ),
     "utf8",
   ),
 ) as { sourcePath: string };

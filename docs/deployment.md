@@ -148,8 +148,8 @@ Apply the infrastructure only with a reviewed plan and set
 command requires this acknowledgement on every invocation:
 
 ```bash
-ILO_PRODUCTION_SOURCE_PROFILE=<named-ilo-operator-profile> \
-ILO_PRODUCTION_RUNTIME=I_UNDERSTAND_THIS_IS_PRODUCTION \
+PERSONAL_OS_PRODUCTION_SOURCE_PROFILE=<named-personal-os-operator-profile> \
+PERSONAL_OS_PRODUCTION_RUNTIME=I_UNDERSTAND_THIS_IS_PRODUCTION \
 pnpm env:prod:start
 ```
 
@@ -229,7 +229,7 @@ skill override aligned with the deployed environment so Settings never teaches
 a host to use a staging, local, or changing endpoint.
 
 The checked release identity lives in
-`packages/domain/src/ilo-setup-release.json`. Runtime defaults read that
+`packages/domain/src/personal-os-setup-release.json`. Runtime defaults read that
 manifest, and `pnpm lint` fails if `.env.example` or Compose advertises a
 different tuple. Change the manifest and both deployment projections together
 for every release.

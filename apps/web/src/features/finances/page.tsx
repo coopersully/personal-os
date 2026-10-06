@@ -106,7 +106,6 @@ import {
   TableHeader as ShadcnTableHeader,
   TableRow as ShadcnTableRow,
 } from "@/components/ui/table";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { TooltipContent, TooltipTrigger, Tooltip as UiTooltip } from "@/components/ui/tooltip";
 import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import { api } from "../../api.js";
@@ -116,11 +115,11 @@ import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { FinanceBudgetBucketManager } from "./bucket-manager.js";
+import { FinanceCategoryDialog } from "./category-dialog";
 import { AddTransactionContext } from "./contextual-question.js";
 import { FinanceEntitySelector } from "./entity-selector";
 import { FinanceTransactionChecks } from "./transaction-checks";
 import { FinanceTransactionItem } from "./transaction-item";
-import { FinanceCreateButton } from "./workspace-header";
 
 export { FinanceBudgetBucketManager } from "./bucket-manager.js";
 
@@ -141,6 +140,7 @@ export function FinancesPage() {
     location.pathname === "/finances/budgets"
       ? "budgets"
       : financeSectionFromPath(location.pathname);
+  const [categoryOpen, setCategoryOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(() =>
     new URLSearchParams(location.search).has("import"),
   );
@@ -623,6 +623,7 @@ export function FinancesPage() {
       {section === "transactions" ? (
         <FinanceTransactionControls
           onImport={() => setImportOpen(true)}
+          onAddCategory={() => setCategoryOpen(true)}
           exportAction={<FinanceExportMenu />}
           accounts={finance.accounts}
           sort={`${transactionSort.sortBy}:${transactionSort.sortDirection}`}
@@ -638,6 +639,7 @@ export function FinancesPage() {
           categories={categories.data ?? []}
         />
       ) : null}
+      {categoryOpen ? <FinanceCategoryDialog onClose={() => setCategoryOpen(false)} /> : null}
       {section === "transactions" && linkedTransactionId ? (
         <FinanceLinkedTransaction
           id={linkedTransactionId}
@@ -753,23 +755,14 @@ export function FinancesPage() {
         hidden={section === "overview" || section === "cashflow" || section === "subscriptions"}
       >
         <div className="flex min-w-0 flex-col gap-6">
-          <ShadcnCard
-            className="min-w-0"
-            hidden={section !== "review" && section !== "transactions"}
-          >
-            <ShadcnCardHeader>
-              <ShadcnCardTitle>
-                {section === "transactions" ? "Transactions" : "Review queue"}
-              </ShadcnCardTitle>
-              <ShadcnCardDescription>
-                {section === "transactions"
-                  ? "Your posted and pending transactions."
-                  : "Review only the categories the system cannot safely infer."}
-              </ShadcnCardDescription>
-              <ShadcnCardAction>
-                {section === "transactions" ? (
-                  <FinanceCreateButton kind="transaction" />
-                ) : (
+          <TransactionSurface section={section}>
+            {section === "review" ? (
+              <ShadcnCardHeader>
+                <ShadcnCardTitle>Review queue</ShadcnCardTitle>
+                <ShadcnCardDescription>
+                  Review only the categories the system cannot safely infer.
+                </ShadcnCardDescription>
+                <ShadcnCardAction>
                   <ShadcnButton
                     onClick={() => setReviewOnly((value) => !value)}
                     size="sm"
@@ -777,10 +770,10 @@ export function FinancesPage() {
                   >
                     {reviewOnly ? "View all" : "Review queue"}
                   </ShadcnButton>
-                )}
-              </ShadcnCardAction>
-            </ShadcnCardHeader>
-            <ShadcnCardContent className={section === "transactions" ? "min-w-0" : undefined}>
+                </ShadcnCardAction>
+              </ShadcnCardHeader>
+            ) : null}
+            <div className={section === "review" ? "px-4 pb-4" : "min-w-0"}>
               {section === "transactions" && transactionList.isError && !transactionList.data
                 ? null
                 : null}
@@ -888,8 +881,8 @@ export function FinancesPage() {
                   ))}
                 </ShadcnItemGroup>
               )}
-            </ShadcnCardContent>
-          </ShadcnCard>
+            </div>
+          </TransactionSurface>
           <section aria-label={`${formatMonth(budgetMonth)} budget`} hidden={section !== "budgets"}>
             <FinanceBudgetBucketManager categories={categories.data ?? []} month={budgetMonth} />
             <FinanceBudgetSummary
@@ -2626,7 +2619,8 @@ function FinanceTransactionsTable({
   };
   transactions: FinanceTransaction[];
 }) {
-  const [view, setView] = useState<"table" | "cards">("table");
+  const location = useLocation();
+  const view = new URLSearchParams(location.search).get("view") === "cards" ? "cards" : "table";
   const [expandedTransactionId, setExpandedTransactionId] = useState<string | null>(null);
   const columns = useMemo<Array<ColumnDef<FinanceTransaction>>>(
     () => [
@@ -2765,23 +2759,8 @@ function FinanceTransactionsTable({
 
   return (
     <div className="flex flex-col gap-3">
-      <ToggleGroup
-        type="single"
-        value={view}
-        onValueChange={(value) => {
-          if (value) setView(value as "table" | "cards");
-        }}
-        aria-label="Transaction view"
-      >
-        <ToggleGroupItem value="table" aria-label="Table view">
-          Table
-        </ToggleGroupItem>
-        <ToggleGroupItem value="cards" aria-label="Card view">
-          Cards
-        </ToggleGroupItem>
-      </ToggleGroup>
       {view === "cards" ? (
-        <ShadcnItemGroup className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <ShadcnItemGroup className="gap-3">
           {transactions.map((transaction) => (
             <FinanceTransactionItem
               key={transaction.id}
@@ -2960,7 +2939,7 @@ export function TransactionDetails({
   transaction: FinanceTransaction;
 }) {
   return (
-    <dl className="grid gap-x-6 gap-y-3 py-1 text-sm sm:grid-cols-2 lg:grid-cols-4">
+    <dl className="grid min-w-0 gap-x-6 gap-y-3 py-2 text-sm [grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr))]">
       <TransactionDetail label="Direction" value={directionLabel(transaction.direction)} />
       <TransactionDetail
         label="Confidence"
@@ -2972,7 +2951,7 @@ export function TransactionDetails({
         value={transaction.rawMerchant ?? transaction.merchant}
       />
       {transaction.notes ? <TransactionDetail label="Notes" value={transaction.notes} /> : null}
-      <div className="flex items-end gap-2">
+      <div className="col-span-full flex min-w-0 flex-wrap items-end gap-2">
         <ShadcnButton onClick={() => onBreakdown(transaction)} size="sm" variant="outline">
           Split purchase
         </ShadcnButton>
@@ -3229,4 +3208,13 @@ function transactionAmountTone(direction: FinanceTransaction["direction"]) {
 
 function FinancePageSkeleton() {
   return <WorkspaceSkeleton kind="finances" />;
+}
+
+function TransactionSurface({ section, children }: { section: string; children: ReactNode }) {
+  if (section === "transactions") return <div className="min-w-0">{children}</div>;
+  return (
+    <ShadcnCard hidden={section !== "review"} className="min-w-0">
+      {children}
+    </ShadcnCard>
+  );
 }

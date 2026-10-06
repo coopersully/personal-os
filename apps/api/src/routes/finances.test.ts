@@ -1069,3 +1069,45 @@ describe("finance routes", () => {
     expect(getOwned).toHaveBeenCalledTimes(2);
   });
 });
+
+it("creates categories only for the authenticated human with write access", async () => {
+  const app = new Hono<AppEnv>();
+  let actorType: "user" | "agent" = "user";
+  let scopes = new Set<AccessScope>(["finances:write"]);
+  const createCategory = vi.fn().mockResolvedValue({ id, name: "Hobbies" });
+  app.use("*", async (context, next) => {
+    context.set("principal", { actorId: id, actorType, scopes, userId: id });
+    context.set("requestId", "category-create");
+    await next();
+  });
+  app.onError(errorResponse);
+  registerFinanceRoutes({
+    app,
+    finances: { createCategory } as unknown as ReturnType<typeof createFinanceService>,
+    financeMaintenance: {} as FinanceMaintenanceService,
+    financeStatus: {} as FinanceStatusService,
+    mutationContext: (context) => ({
+      principal: context.get("principal"),
+      requestId: context.get("requestId"),
+    }),
+  });
+  const send = (body: unknown) =>
+    app.request("/v1/finances/categories", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  expect((await send({ name: "  Hobbies  " })).status).toBe(200);
+  expect(createCategory).toHaveBeenCalledWith(
+    { name: "Hobbies" },
+    expect.objectContaining({ principal: expect.objectContaining({ userId: id }) }),
+  );
+  expect((await send({ name: " " })).status).toBe(400);
+  expect((await send({ name: "Hobbies", userId: "foreign" })).status).toBe(400);
+  actorType = "agent";
+  expect((await send({ name: "Hobbies" })).status).toBe(403);
+  actorType = "user";
+  scopes = new Set(["finances:read"]);
+  expect((await send({ name: "Hobbies" })).status).toBe(403);
+  expect(createCategory).toHaveBeenCalledTimes(1);
+});

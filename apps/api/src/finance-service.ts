@@ -43,6 +43,7 @@ import type {
   AttentionItem,
   CreateFinanceAccountInput,
   CreateFinanceBudgetInput,
+  CreateFinanceCategoryInput,
   CreateFinanceTransactionInput,
   ExchangePlaidTokenInput,
   FinanceAccount,
@@ -5336,6 +5337,22 @@ export function createFinanceService({
           profilesDemoted,
           userRowsScanned: userRows.length,
         };
+      });
+    },
+    async createCategory(input: CreateFinanceCategoryInput, context: MutationContext) {
+      return db.transaction(async (tx) => {
+        const category = await categoryForName(context.principal.userId, input.name, tx);
+        await tx.insert(auditEvents).values(
+          auditValues({
+            action: "finance.category_saved",
+            after: categoryValue(category),
+            before: null,
+            entityId: category.id,
+            entityType: "finance_category",
+            ...context,
+          }),
+        );
+        return categoryValue(category);
       });
     },
     async listCategories(userId: string) {

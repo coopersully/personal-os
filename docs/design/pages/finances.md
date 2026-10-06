@@ -297,7 +297,7 @@ secondary rows under a disclosure; rationale is a separate disclosure. Incomplet
 visible next action and do not present absent resource evidence as a confirmed zero. Allocation
 progress is shown only when expected resources are positive.
 
-Transactions owns labeled Import and Export header actions. Import is a responsive dialog/drawer;
+Transactions owns a leading icon-and-label view menu and trailing Export and Add header actions. Add offers transaction, category, and transaction import commands. Import is a responsive dialog/drawer;
 legacy import links redirect into that flow. The standalone Ledger health page is retired. Only nonzero diagnostics not guaranteed to appear in Reviews belong on Transactions, while connection freshness, ownership,
 balances, and account coverage belong on Accounts. Pending activity and balance-only tracking are
 informational, not automatically warnings. Existing health links redirect to Transactions checks.
@@ -307,10 +307,9 @@ from missing planning facts, proposed budgets awaiting approval, and disconnecte
 not successfully refreshed for more than 24 hours. Accounts displays the total account count, including manual accounts. Missing balances, unresolved ownership, and possible duplicate accounts also set sidebar attention.
 Account warnings name the affected account and provide sync, reconnect, or edit actions.
 
-Accounts use full-width records with type icons, source/status badges beside the title, and tooltip-equipped edit/transaction actions at the top end. Wealth presents current metrics in a swipeable, looping KPI carousel and links to Accounts rather than repeating its records. Historical charts are deferred until reliable balance history is available.
+Accounts use full-width records with type icons, source/status badges beside the title, and tooltip-equipped edit/transaction actions at the top end. Wealth presents current metrics in responsive shared KPI cards and links to Accounts rather than repeating its records. Historical charts are deferred until reliable balance history is available.
 
-Finance creation belongs to the relevant collection card: Transactions, Accounts, Budget buckets,
-and Financial goals each expose a tooltip-equipped Add action at the header end. Finance has no
+Accounts, Budget buckets, and Financial goals each expose a tooltip-equipped Add action at the header end. The transaction-only Add menu lives at the end of the header; other Finance pages have no
 workspace-wide Add menu. Cash flow view selection occupies the shared leading header slot; search
 and other utilities remain at the end. Account records are secondary Items within the Accounts
 card, with inline attention, source, kind, balance, and recovery actions rather than separate warning
@@ -325,7 +324,7 @@ Overview and Wealth compose the shared `KeyMetrics` container and `KeyMetric` ca
 side by side when space permits and wrap on narrow screens; current data does not imply historical
 balances. The Overview does not duplicate the outstanding Reviews inbox.
 
-Transactions offer compact table and card views with the same details, categorization, split, and
+Transactions begin directly with their compact table or full-width card rows, without an enclosing card, title, description, or body toolbar. The header view menu retains active filters when switching. Income amounts use success, expenses destructive, and transfers neutral foregrounds. Expanded details wrap to available row width. Both views retain the same details, categorization, split, and
 pagination behavior. Cash flow reuses the Finance transaction Item with an explicit Expected state;
 forecast entries are not posted transactions. Recurring-item actions sit at the top right.
 
@@ -335,3 +334,5 @@ and setup answers. Scenario and split fields must wrap within the available cont
 persistent labels. Merchant and category entry search existing names and permit new names; new
 records are created by the transaction save. Budget navigation needs attention when prerequisites
 are incomplete or no active approved plan exists.
+
+Split allocations use the card surface inside the background-toned dialog so each allocation is distinct. The Transactions Add menu can save a reusable category without creating a transaction; the authenticated human-only endpoint validates the name, scopes storage to the owner, and records an audit event.

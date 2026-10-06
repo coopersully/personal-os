@@ -10,6 +10,7 @@ import type {
   CreateFinanceBudgetPolicyInput,
   CreateFinanceBudgetRevisionProposalInput,
   CreateFinanceBudgetVersionInput,
+  CreateFinanceCategoryInput,
   CreateFinanceContextualQuestionInput,
   CreateFinanceTransactionInput,
   DesignateFinanceBudgetBaselineInput,
@@ -646,6 +647,13 @@ export function createFinanceApi(request: FinanceRequest) {
     async exportFinanceData(): Promise<FinanceExport> {
       const response = await request<{ export: FinanceExport }>("/v1/finances/export");
       return response.export;
+    },
+    async createFinanceCategory(input: CreateFinanceCategoryInput): Promise<FinanceCategory> {
+      const response = await request<{ category: FinanceCategory }>("/v1/finances/categories", {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+      return response.category;
     },
     async getFinanceCategories(): Promise<FinanceCategory[]> {
       const response = await request<{ categories: FinanceCategory[] }>("/v1/finances/categories");

@@ -11,6 +11,7 @@ import {
   createFinanceBudgetPolicySchema,
   createFinanceBudgetRevisionProposalSchema,
   createFinanceBudgetVersionInputSchema,
+  createFinanceCategoryInputSchema,
   createFinanceContextualQuestionInputSchema,
   createFinanceTransactionInputSchema,
   designateFinanceBudgetBaselineSchema,
@@ -563,6 +564,14 @@ export function registerFinanceRoutes({
       pace: await finances.getBudgetPace(
         context.get("principal").userId,
         financeBudgetPaceQuerySchema.parse(context.req.query()).period,
+      ),
+    }),
+  );
+  app.post("/v1/finances/categories", requireHuman, async (context) =>
+    context.json({
+      category: await finances.createCategory(
+        await parseBody(context, createFinanceCategoryInputSchema),
+        financeMutationContext(context),
       ),
     }),
   );

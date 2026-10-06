@@ -136,3 +136,33 @@ it("retains a pending source and its original merchant through a failed backgrou
     expect(screen.queryByText(/Showing the last available update/)).not.toBeInTheDocument(),
   );
 });
+
+it("switches views without clearing filters and groups transaction creation actions", async () => {
+  const user = userEvent.setup();
+  const onImport = vi.fn();
+  const onAddCategory = vi.fn();
+  render(
+    <MemoryRouter initialEntries={["/finances/transactions?categoryId=travel"]}>
+      <FinanceTransactionControls
+        accounts={[]}
+        categories={[]}
+        onImport={onImport}
+        onAddCategory={onAddCategory}
+      />
+      <CurrentLocation />
+    </MemoryRouter>,
+  );
+  await user.click(screen.getByRole("button", { name: "Transaction view: Table" }));
+  await user.click(screen.getByRole("menuitemradio", { name: "Cards" }));
+  expect(screen.getByLabelText("Location")).toHaveTextContent("categoryId=travel&view=cards");
+  await user.click(screen.getByRole("button", { name: "Add in Transactions" }));
+  expect(screen.getByRole("menuitem", { name: "Add transaction" })).toHaveAttribute(
+    "href",
+    "/finances/transactions?categoryId=travel&view=cards#finance-add-transaction",
+  );
+  await user.click(screen.getByRole("menuitem", { name: "Add category" }));
+  expect(onAddCategory).toHaveBeenCalledOnce();
+  await user.click(screen.getByRole("button", { name: "Add in Transactions" }));
+  await user.click(screen.getByRole("menuitem", { name: "Import transactions" }));
+  expect(onImport).toHaveBeenCalledOnce();
+});

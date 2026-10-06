@@ -1,10 +1,19 @@
 import type { FinanceAccount, FinanceCategory, FinanceTransaction } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
 import { DateInput } from "@/components/date-input";
-import { SliderHorizontalIcon, SortIcon, UploadIcon } from "@/components/icons";
+import {
+  ChevronDownIcon,
+  GridIcon,
+  PlusIcon,
+  ReceiptIcon,
+  SliderHorizontalIcon,
+  SortIcon,
+  TagsIcon,
+  UploadIcon,
+} from "@/components/icons";
 import {
   ResponsiveDialog,
   ResponsiveDialogBody,
@@ -18,6 +27,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
@@ -34,6 +44,7 @@ import { requireFinanceResult } from "./position-material.js";
 export function FinanceTransactionControls({
   accounts,
   onImport,
+  onAddCategory,
   exportAction,
   categories,
   sort,
@@ -41,6 +52,7 @@ export function FinanceTransactionControls({
 }: {
   accounts: FinanceAccount[];
   onImport?: () => void;
+  onAddCategory?: () => void;
   exportAction?: ReactNode;
   categories: FinanceCategory[];
   sort?: string;
@@ -48,6 +60,7 @@ export function FinanceTransactionControls({
 }) {
   const [params, setParams] = useSearchParams();
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const openingDialog = useRef(false);
   const legacyReview = params.get("review");
   const reviewState =
     params.get("reviewState") ??
@@ -55,201 +68,287 @@ export function FinanceTransactionControls({
   const activeFilters =
     ["search", "accountId", "categoryId", "from", "to", "pending"].filter((key) => params.get(key))
       .length + (reviewState && reviewState !== "all" ? 1 : 0);
+  const view = params.get("view") === "cards" ? "cards" : "table";
+  const ViewIcon = view === "cards" ? GridIcon : ReceiptIcon;
   return (
-    <WorkspaceHeaderControls label="Transaction controls">
-      <ResponsiveDialog open={filtersOpen} onOpenChange={setFiltersOpen}>
-        <ResponsiveDialogTrigger asChild>
-          <Button
-            size="icon"
-            variant="ghost"
-            aria-label={activeFilters ? `Filters (${activeFilters} active)` : "Filters"}
-            badgeCount={activeFilters}
-          >
-            <SliderHorizontalIcon />
-            {activeFilters ? <span className="sr-only">{activeFilters} active</span> : null}
-          </Button>
-        </ResponsiveDialogTrigger>
-        <ResponsiveDialogContent>
-          <ResponsiveDialogHeader>
-            <ResponsiveDialogTitle>Filter transactions</ResponsiveDialogTitle>
-          </ResponsiveDialogHeader>
-          <form
-            className="flex min-h-0 flex-col overflow-hidden"
-            aria-label="Filter transactions"
-            key={params.toString()}
-            onSubmit={(event) => {
-              event.preventDefault();
-              const form = new FormData(event.currentTarget);
-              const next = new URLSearchParams(params);
-              for (const key of [
-                "search",
-                "accountId",
-                "categoryId",
-                "from",
-                "to",
-                "pending",
-                "reviewState",
-              ]) {
-                const value = String(form.get(key) ?? "").trim();
-                if (value) next.set(key, value);
-                else next.delete(key);
-              }
-              if (["all", "resolved", "needs_review"].includes(next.get("review") ?? ""))
-                next.delete("review");
-              next.delete("transactionId");
-              setParams(next);
-              setFiltersOpen(false);
-            }}
-          >
-            <ResponsiveDialogBody>
-              <FieldGroup className="mb-5">
-                <Field>
-                  <FieldLabel htmlFor="transaction-search">Search</FieldLabel>
-                  <Input
-                    id="transaction-search"
-                    name="search"
-                    maxLength={160}
-                    defaultValue={params.get("search") ?? ""}
-                    placeholder="Merchant or notes"
-                  />
-                </Field>
-              </FieldGroup>
-              <FieldGroup className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                <Field>
-                  <FieldLabel htmlFor="transaction-account">Account</FieldLabel>
-                  <NativeSelect
-                    id="transaction-account"
-                    name="accountId"
-                    defaultValue={params.get("accountId") ?? ""}
-                  >
-                    <NativeSelectOption value="">All accounts</NativeSelectOption>
-                    {accounts.map((account) => (
-                      <NativeSelectOption key={account.id} value={account.id}>
-                        {account.name}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="transaction-category">Category</FieldLabel>
-                  <NativeSelect
-                    id="transaction-category"
-                    name="categoryId"
-                    defaultValue={params.get("categoryId") ?? ""}
-                  >
-                    <NativeSelectOption value="">All categories</NativeSelectOption>
-                    {categories.map((category) => (
-                      <NativeSelectOption key={category.id} value={category.id}>
-                        {category.name}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="transaction-review">Review</FieldLabel>
-                  <NativeSelect
-                    id="transaction-review"
-                    name="reviewState"
-                    defaultValue={reviewState ?? "all"}
-                  >
-                    <NativeSelectOption value="all">All review states</NativeSelectOption>
-                    <NativeSelectOption value="needs_review">Needs review</NativeSelectOption>
-                    <NativeSelectOption value="resolved">Reviewed</NativeSelectOption>
-                  </NativeSelect>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="transaction-from">From</FieldLabel>
-                  <TransactionDate
-                    id="transaction-from"
-                    name="from"
-                    initialValue={params.get("from") ?? ""}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="transaction-to">Through</FieldLabel>
-                  <TransactionDate
-                    id="transaction-to"
-                    name="to"
-                    initialValue={params.get("to") ?? ""}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="transaction-posted">Posting state</FieldLabel>
-                  <NativeSelect
-                    id="transaction-posted"
-                    name="pending"
-                    defaultValue={params.get("pending") ?? ""}
-                  >
-                    <NativeSelectOption value="">Pending and posted</NativeSelectOption>
-                    <NativeSelectOption value="pending">Pending</NativeSelectOption>
-                    <NativeSelectOption value="posted">Posted</NativeSelectOption>
-                  </NativeSelect>
-                </Field>
-              </FieldGroup>
-            </ResponsiveDialogBody>
-            <ResponsiveDialogFooter className="flex-row justify-end">
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => {
-                  const next = new URLSearchParams(params);
-                  for (const key of [
-                    "search",
-                    "accountId",
-                    "categoryId",
-                    "from",
-                    "to",
-                    "pending",
-                    "reviewState",
-                    "transactionId",
-                  ])
-                    next.delete(key);
-                  if (["all", "resolved", "needs_review"].includes(next.get("review") ?? ""))
-                    next.delete("review");
-                  setParams(next);
-                  setFiltersOpen(false);
-                }}
-              >
-                Clear filters
-              </Button>
-              <Button type="submit">Apply filters</Button>
-            </ResponsiveDialogFooter>
-          </form>
-        </ResponsiveDialogContent>
-      </ResponsiveDialog>
-      {onSort ? (
+    <>
+      <WorkspaceHeaderControls label="Transaction view" placement="leading">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="icon" variant="ghost" aria-label="Sort transactions">
-              <SortIcon />
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={`Transaction view: ${view === "cards" ? "Cards" : "Table"}`}
+            >
+              <ViewIcon />
+              <span>{view === "cards" ? "Cards" : "Table"}</span>
+              <ChevronDownIcon />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuRadioGroup value={sort ?? "date:desc"} onValueChange={onSort}>
-              {(
-                [
-                  ["date:desc", "Newest first"],
-                  ["date:asc", "Oldest first"],
-                  ["amount:desc", "Highest amount"],
-                  ["amount:asc", "Lowest amount"],
-                  ["merchant:asc", "Merchant A–Z"],
-                  ["merchant:desc", "Merchant Z–A"],
-                ] as const
-              ).map(([value, label]) => (
-                <DropdownMenuRadioItem key={value} value={value}>
-                  {label}
-                </DropdownMenuRadioItem>
-              ))}
+          <DropdownMenuContent align="start">
+            <DropdownMenuRadioGroup
+              value={view}
+              onValueChange={(value) =>
+                setParams((current) => {
+                  const next = new URLSearchParams(current);
+                  next.set("view", value);
+                  return next;
+                })
+              }
+            >
+              <DropdownMenuRadioItem value="table">
+                <ReceiptIcon />
+                Table
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="cards">
+                <GridIcon />
+                Cards
+              </DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
-      ) : null}
-      <Button size="sm" variant="ghost" onClick={onImport}>
-        <UploadIcon />
-        Import
-      </Button>
-      {exportAction}
-    </WorkspaceHeaderControls>
+      </WorkspaceHeaderControls>
+      <WorkspaceHeaderControls label="Transaction controls">
+        <ResponsiveDialog open={filtersOpen} onOpenChange={setFiltersOpen}>
+          <ResponsiveDialogTrigger asChild>
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label={activeFilters ? `Filters (${activeFilters} active)` : "Filters"}
+              badgeCount={activeFilters}
+            >
+              <SliderHorizontalIcon />
+              {activeFilters ? <span className="sr-only">{activeFilters} active</span> : null}
+            </Button>
+          </ResponsiveDialogTrigger>
+          <ResponsiveDialogContent>
+            <ResponsiveDialogHeader>
+              <ResponsiveDialogTitle>Filter transactions</ResponsiveDialogTitle>
+            </ResponsiveDialogHeader>
+            <form
+              className="flex min-h-0 flex-col overflow-hidden"
+              aria-label="Filter transactions"
+              key={params.toString()}
+              onSubmit={(event) => {
+                event.preventDefault();
+                const form = new FormData(event.currentTarget);
+                const next = new URLSearchParams(params);
+                for (const key of [
+                  "search",
+                  "accountId",
+                  "categoryId",
+                  "from",
+                  "to",
+                  "pending",
+                  "reviewState",
+                ]) {
+                  const value = String(form.get(key) ?? "").trim();
+                  if (value) next.set(key, value);
+                  else next.delete(key);
+                }
+                if (["all", "resolved", "needs_review"].includes(next.get("review") ?? ""))
+                  next.delete("review");
+                next.delete("transactionId");
+                setParams(next);
+                setFiltersOpen(false);
+              }}
+            >
+              <ResponsiveDialogBody>
+                <FieldGroup className="mb-5">
+                  <Field>
+                    <FieldLabel htmlFor="transaction-search">Search</FieldLabel>
+                    <Input
+                      id="transaction-search"
+                      name="search"
+                      maxLength={160}
+                      defaultValue={params.get("search") ?? ""}
+                      placeholder="Merchant or notes"
+                    />
+                  </Field>
+                </FieldGroup>
+                <FieldGroup className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  <Field>
+                    <FieldLabel htmlFor="transaction-account">Account</FieldLabel>
+                    <NativeSelect
+                      id="transaction-account"
+                      name="accountId"
+                      defaultValue={params.get("accountId") ?? ""}
+                    >
+                      <NativeSelectOption value="">All accounts</NativeSelectOption>
+                      {accounts.map((account) => (
+                        <NativeSelectOption key={account.id} value={account.id}>
+                          {account.name}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="transaction-category">Category</FieldLabel>
+                    <NativeSelect
+                      id="transaction-category"
+                      name="categoryId"
+                      defaultValue={params.get("categoryId") ?? ""}
+                    >
+                      <NativeSelectOption value="">All categories</NativeSelectOption>
+                      {categories.map((category) => (
+                        <NativeSelectOption key={category.id} value={category.id}>
+                          {category.name}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="transaction-review">Review</FieldLabel>
+                    <NativeSelect
+                      id="transaction-review"
+                      name="reviewState"
+                      defaultValue={reviewState ?? "all"}
+                    >
+                      <NativeSelectOption value="all">All review states</NativeSelectOption>
+                      <NativeSelectOption value="needs_review">Needs review</NativeSelectOption>
+                      <NativeSelectOption value="resolved">Reviewed</NativeSelectOption>
+                    </NativeSelect>
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="transaction-from">From</FieldLabel>
+                    <TransactionDate
+                      id="transaction-from"
+                      name="from"
+                      initialValue={params.get("from") ?? ""}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="transaction-to">Through</FieldLabel>
+                    <TransactionDate
+                      id="transaction-to"
+                      name="to"
+                      initialValue={params.get("to") ?? ""}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="transaction-posted">Posting state</FieldLabel>
+                    <NativeSelect
+                      id="transaction-posted"
+                      name="pending"
+                      defaultValue={params.get("pending") ?? ""}
+                    >
+                      <NativeSelectOption value="">Pending and posted</NativeSelectOption>
+                      <NativeSelectOption value="pending">Pending</NativeSelectOption>
+                      <NativeSelectOption value="posted">Posted</NativeSelectOption>
+                    </NativeSelect>
+                  </Field>
+                </FieldGroup>
+              </ResponsiveDialogBody>
+              <ResponsiveDialogFooter className="flex-row justify-end">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => {
+                    const next = new URLSearchParams(params);
+                    for (const key of [
+                      "search",
+                      "accountId",
+                      "categoryId",
+                      "from",
+                      "to",
+                      "pending",
+                      "reviewState",
+                      "transactionId",
+                    ])
+                      next.delete(key);
+                    if (["all", "resolved", "needs_review"].includes(next.get("review") ?? ""))
+                      next.delete("review");
+                    setParams(next);
+                    setFiltersOpen(false);
+                  }}
+                >
+                  Clear filters
+                </Button>
+                <Button type="submit">Apply filters</Button>
+              </ResponsiveDialogFooter>
+            </form>
+          </ResponsiveDialogContent>
+        </ResponsiveDialog>
+        {onSort ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="icon" variant="ghost" aria-label="Sort transactions">
+                <SortIcon />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuRadioGroup value={sort ?? "date:desc"} onValueChange={onSort}>
+                {(
+                  [
+                    ["date:desc", "Newest first"],
+                    ["date:asc", "Oldest first"],
+                    ["amount:desc", "Highest amount"],
+                    ["amount:asc", "Lowest amount"],
+                    ["merchant:asc", "Merchant A–Z"],
+                    ["merchant:desc", "Merchant Z–A"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <DropdownMenuRadioItem key={value} value={value}>
+                    {label}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
+        {exportAction}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="icon" aria-label="Add in Transactions">
+              <PlusIcon />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            onCloseAutoFocus={(event) => {
+              if (openingDialog.current) event.preventDefault();
+              openingDialog.current = false;
+            }}
+          >
+            <DropdownMenuItem
+              asChild
+              onSelect={() => {
+                openingDialog.current = true;
+              }}
+            >
+              <Link
+                to={{
+                  pathname: "/finances/transactions",
+                  search: `?${params}`,
+                  hash: "finance-add-transaction",
+                }}
+              >
+                <PlusIcon />
+                Add transaction
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => {
+                openingDialog.current = true;
+                onAddCategory?.();
+              }}
+            >
+              <TagsIcon />
+              Add category
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => {
+                openingDialog.current = true;
+                onImport?.();
+              }}
+            >
+              <UploadIcon />
+              Import transactions
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </WorkspaceHeaderControls>
+    </>
   );
 }
 

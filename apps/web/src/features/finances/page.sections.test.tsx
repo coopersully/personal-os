@@ -366,7 +366,7 @@ describe("Finance section states", () => {
 
   it("shows health and review work empty states without hiding the controls", async () => {
     const { unmount } = renderPage("/finances/transactions?checks=1");
-    await screen.findByText("Transactions", { selector: "div[data-slot=card-title]" });
+    await screen.findByRole("button", { name: "Transaction view: Table" });
     expect(screen.queryByRole("button", { name: "Transaction checks" })).not.toBeInTheDocument();
     unmount();
     renderPage("/finances/review");
@@ -979,13 +979,15 @@ describe("Finance section states", () => {
 
     renderPage("/finances/transactions");
     await screen.findByRole("table", { name: "Transactions" });
-    await browser.click(screen.getByRole("radio", { name: "Card view" }));
+    await browser.click(screen.getByRole("button", { name: "Transaction view: Table" }));
+    await browser.click(screen.getByRole("menuitemradio", { name: "Cards" }));
     expect(screen.queryByRole("table", { name: "Transactions" })).not.toBeInTheDocument();
     expect(screen.getByRole("listitem")).toHaveTextContent("Cafe");
     await browser.click(screen.getByRole("button", { name: "Details" }));
     expect(screen.getByText("SQ CAFE")).toBeVisible();
     await browser.click(screen.getByRole("button", { name: "Details" }));
-    await browser.click(screen.getByRole("radio", { name: "Table view" }));
+    await browser.click(screen.getByRole("button", { name: "Transaction view: Cards" }));
+    await browser.click(screen.getByRole("menuitemradio", { name: "Table" }));
     for (const label of ["date", "merchant", "amount", "date"]) {
       fireEvent.click(await screen.findByRole("button", { name: `Sort by ${label}` }));
       await screen.findByRole("table", { name: "Transactions" });

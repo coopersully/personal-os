@@ -127,7 +127,7 @@ export function TransactionBreakdownDialog({
         </DialogHeader>
         <div className="grid min-w-0 gap-4">
           {rows.map((row, index) => (
-            <FieldSet className="min-w-0 rounded-lg bg-secondary p-4" key={row.id}>
+            <FieldSet className="min-w-0 rounded-lg bg-card p-4" key={row.id}>
               <div className="flex items-center justify-between gap-2">
                 <FieldLegend className="mb-0">Allocation {index + 1}</FieldLegend>
                 <Button

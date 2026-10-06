@@ -2125,6 +2125,18 @@ describe.sequential("finance service", () => {
     ).toEqual([]);
   });
 
+  it("creates reusable categories without transactions and isolates owners", async () => {
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(userId), requestId: "category-create" };
+    const first = await service.createCategory({ name: "Custom hobby supplies" }, context);
+    const repeated = await service.createCategory({ name: "custom hobby supplies" }, context);
+    expect(repeated.id).toBe(first.id);
+    expect(await service.listCategories(userId)).toContainEqual(first);
+    expect(await service.listCategories("00000000-0000-4000-8000-000000000000")).not.toContainEqual(
+      first,
+    );
+  });
+
   it("manages manual finances, review decisions, budgets, and safe unavailable Plaid state", async () => {
     const service = createFinanceService({ db: database.db, now: () => now });
     const context = { principal: financePrincipal(userId), requestId: "manual-finance" };

@@ -1342,3 +1342,8 @@ export * from "./finance/presentation.js";
 export * from "./finance/profile.js";
 export * from "./finance/reporting.js";
 export * from "./finance/workflow-contracts.js";
+
+export const createFinanceCategoryInputSchema = z.strictObject({
+  name: z.string().trim().min(1).max(120),
+});
+export type CreateFinanceCategoryInput = z.infer<typeof createFinanceCategoryInputSchema>;

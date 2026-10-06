@@ -5295,7 +5295,8 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     const view = setup("/finances/transactions");
     await screen.findByRole("table", { name: "Transactions" }, { timeout: 5_000 });
-    await browser.click(screen.getByRole("button", { name: "Add transaction" }));
+    await browser.click(screen.getByRole("button", { name: "Add in Transactions" }));
+    await browser.click(screen.getByRole("menuitem", { name: "Add transaction" }));
     await browser.selectOptions(
       screen.getByLabelText("Account", { selector: "#finance-account-select" }),
       id,
@@ -5799,11 +5800,17 @@ describe("ilo web app", () => {
     );
     const financeHeader = screen.getByRole("navigation", { name: "Top navigation" });
     expect(financeHeader).toContainElement(financeControls);
-    expect(within(financeControls).getByRole("button", { name: "Import" })).toBeVisible();
+    expect(
+      within(financeControls).getByRole("button", { name: "Add in Transactions" }),
+    ).toBeVisible();
+    expect(
+      within(financeHeader).getByRole("button", { name: "Transaction view: Table" }),
+    ).toBeVisible();
     expect(
       within(financeHeader).queryByRole("button", { name: "Add in Finances" }),
     ).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Add transaction" }));
+    await userEvent.click(screen.getByRole("button", { name: "Add in Transactions" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Add transaction" }));
     expect(await screen.findByRole("dialog", { name: "Add a transaction" })).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();

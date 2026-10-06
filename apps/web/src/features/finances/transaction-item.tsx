@@ -30,21 +30,23 @@ export function FinanceTransactionItem({
 }) {
   return (
     <Item
-      variant={status === "expected" ? "muted" : "secondary"}
+      variant={status === "expected" ? "muted" : "outline"}
       role="listitem"
       className="min-w-0 items-start"
     >
       <ItemMedia variant="icon">
         {status === "expected" ? <ClockIcon /> : <MerchantIcon />}
       </ItemMedia>
-      <ItemContent>
+      <ItemContent className="min-w-0">
         <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
           <ItemTitle className="min-w-0 break-words">{title}</ItemTitle>
           {actions ? <ItemActions className="ml-auto self-start">{actions}</ItemActions> : null}
         </div>
         <ItemDescription>{description}</ItemDescription>
         <div className="flex flex-wrap items-center gap-2">
-          <p className="text-lg font-semibold tabular-nums">
+          <p
+            className={`text-lg font-semibold tabular-nums ${direction === "income" ? "text-success" : direction === "expense" ? "text-destructive" : "text-muted-foreground"}`}
+          >
             {direction === "income" ? "+" : direction === "expense" ? "−" : "↔ "}
             {formatMoney(amount)}
           </p>

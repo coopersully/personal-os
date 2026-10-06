@@ -119,6 +119,7 @@ import { FinanceCategoryDialog } from "./category-dialog";
 import { AddTransactionContext } from "./contextual-question.js";
 import { FinanceEntitySelector } from "./entity-selector";
 import { FinanceTransactionChecks } from "./transaction-checks";
+import { groupTransactions } from "./transaction-groups";
 import { FinanceTransactionItem } from "./transaction-item";
 
 export { FinanceBudgetBucketManager } from "./bucket-manager.js";
@@ -2621,6 +2622,17 @@ function FinanceTransactionsTable({
 }) {
   const location = useLocation();
   const view = new URLSearchParams(location.search).get("view") === "cards" ? "cards" : "table";
+  const group = new URLSearchParams(location.search).get("group");
+  const groups = useMemo(() => groupTransactions(transactions, group), [transactions, group]);
+  const groupedTransactions = useMemo(() => groups.flatMap((entry) => entry.items), [groups]);
+  const groupHeadings = new Map(
+    groups
+      .filter((entry) => entry.label)
+      .map((entry) => [
+        entry.items[0]?.id,
+        `${group === "date" ? formatTransactionDate(entry.label) : entry.label} (${entry.items.length})`,
+      ]),
+  );
   const [expandedTransactionId, setExpandedTransactionId] = useState<string | null>(null);
   const columns = useMemo<Array<ColumnDef<FinanceTransaction>>>(
     () => [
@@ -2737,7 +2749,7 @@ function FinanceTransactionsTable({
   );
   const table = useReactTable({
     columns,
-    data: transactions,
+    data: groupedTransactions,
     getCoreRowModel: getCoreRowModel(),
     getRowId: (row) => row.id,
     manualSorting: true,
@@ -2759,41 +2771,51 @@ function FinanceTransactionsTable({
 
   return (
     <div className="flex flex-col gap-3">
+      {groupHeadings.size > 0 && (hasPreviousPage || nextCursor) ? (
+        <p className="text-xs text-muted-foreground">Grouped within this page</p>
+      ) : null}
       {view === "cards" ? (
         <ShadcnItemGroup className="gap-3">
-          {transactions.map((transaction) => (
-            <FinanceTransactionItem
-              key={transaction.id}
-              title={transaction.merchant}
-              amount={transaction.amount}
-              direction={transaction.direction}
-              description={`${formatTransactionDate(transaction.date)} · ${transactionCategoryLabel(transaction.category)}`}
-              status={transaction.pending ? "pending" : undefined}
-              actions={
-                <ShadcnButton
-                  size="sm"
-                  variant="ghost"
-                  aria-expanded={expandedTransactionId === transaction.id}
-                  onClick={() =>
-                    setExpandedTransactionId(
-                      expandedTransactionId === transaction.id ? null : transaction.id,
-                    )
-                  }
-                >
-                  Details
-                </ShadcnButton>
-              }
-            >
-              {expandedTransactionId === transaction.id ? (
-                <TransactionDetails
-                  canAddContext={manualAccountIds.includes(transaction.accountId)}
-                  isCategorizing={isCategorizing}
-                  onBreakdown={onBreakdown}
-                  onCategorize={onCategorize}
-                  transaction={transaction}
-                />
+          {groupedTransactions.map((transaction) => (
+            <Fragment key={transaction.id}>
+              {groupHeadings.has(transaction.id) ? (
+                <h2 className="mt-3 text-sm font-medium">{groupHeadings.get(transaction.id)}</h2>
               ) : null}
-            </FinanceTransactionItem>
+              <FinanceTransactionItem
+                key={transaction.id}
+                title={transaction.merchant}
+                amount={transaction.amount}
+                direction={transaction.direction}
+                description={formatTransactionDate(transaction.date)}
+                category={transactionCategoryLabel(transaction.category)}
+                actionsPlacement="start"
+                status={transaction.pending ? "pending" : undefined}
+                actions={
+                  <ShadcnButton
+                    size="sm"
+                    variant="ghost"
+                    aria-expanded={expandedTransactionId === transaction.id}
+                    onClick={() =>
+                      setExpandedTransactionId(
+                        expandedTransactionId === transaction.id ? null : transaction.id,
+                      )
+                    }
+                  >
+                    Details
+                  </ShadcnButton>
+                }
+              >
+                {expandedTransactionId === transaction.id ? (
+                  <TransactionDetails
+                    canAddContext={manualAccountIds.includes(transaction.accountId)}
+                    isCategorizing={isCategorizing}
+                    onBreakdown={onBreakdown}
+                    onCategorize={onCategorize}
+                    transaction={transaction}
+                  />
+                ) : null}
+              </FinanceTransactionItem>
+            </Fragment>
           ))}
         </ShadcnItemGroup>
       ) : (
@@ -2819,6 +2841,13 @@ function FinanceTransactionsTable({
               const isExpanded = expandedTransactionId === row.original.id;
               return (
                 <Fragment key={row.id}>
+                  {groupHeadings.has(row.id) ? (
+                    <ShadcnTableRow>
+                      <ShadcnTableHead colSpan={row.getVisibleCells().length} scope="rowgroup">
+                        {groupHeadings.get(row.id)}
+                      </ShadcnTableHead>
+                    </ShadcnTableRow>
+                  ) : null}
                   <ShadcnTableRow
                     className={
                       row.original.pending ? "bg-muted/50 text-muted-foreground" : undefined

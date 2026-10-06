@@ -336,3 +336,7 @@ records are created by the transaction save. Budget navigation needs attention w
 are incomplete or no active approved plan exists.
 
 Split allocations use the card surface inside the background-toned dialog so each allocation is distinct. The Transactions Add menu can save a reusable category without creating a transaction; the authenticated human-only endpoint validates the name, scopes storage to the owner, and records an audit event.
+
+KPI amounts use compact currency notation (for example, $23.6k), with exact values available on hover and to assistive technology. Overview labels monthly spending **Spent this month**. Four-metric sets use four columns when space permits and otherwise a balanced 2×2 grid, never three plus one.
+
+Transaction cards place the large signed amount at the inline end, with a clock-marked Pending status and category badge below it. The date sits in small text below the merchant. The Tasks-standard Display menu offers grouping by date, category, merchant, direction, or posting state in either view; group/view choices preserve filters in the URL. Grouping applies to the loaded page and is explicitly labelled when pagination is present.

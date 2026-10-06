@@ -775,3 +775,5 @@ Use the shared `KeyMetrics` layout with `KeyMetric` cards for a set of scalar su
 fitting or wrapping cards so all values remain visible over forcing a carousel. Compose the shared
 shadcn Card anatomy and retain honest unavailable states. Dollar amount entry uses `CurrencyInput`
 with a canonical decimal value; percentages, counts, and durations remain ordinary numeric inputs.
+
+Four-item KeyMetrics sets use a balanced two- or four-column grid based on container width; they must not leave one metric alone beneath a three-column row. Compact financial KPI values retain the full amount for hover and assistive technology.

@@ -166,3 +166,22 @@ it("switches views without clearing filters and groups transaction creation acti
   await user.click(screen.getByRole("menuitem", { name: "Import transactions" }));
   expect(onImport).toHaveBeenCalledOnce();
 });
+
+it("groups transactions without clearing the selected view or filters", async () => {
+  const user = userEvent.setup();
+  render(
+    <MemoryRouter initialEntries={["/finances/transactions?view=cards&categoryId=travel"]}>
+      <FinanceTransactionControls accounts={[]} categories={[]} />
+      <CurrentLocation />
+    </MemoryRouter>,
+  );
+  await user.click(screen.getByRole("button", { name: "Display transactions" }));
+  expect(screen.getByRole("menuitemradio", { name: "None" })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await user.click(screen.getByRole("menuitemradio", { name: "Posting state" }));
+  expect(screen.getByLabelText("Location")).toHaveTextContent(
+    "view=cards&categoryId=travel&group=posting",
+  );
+});

@@ -983,11 +983,15 @@ describe("Finance section states", () => {
     await browser.click(screen.getByRole("menuitemradio", { name: "Cards" }));
     expect(screen.queryByRole("table", { name: "Transactions" })).not.toBeInTheDocument();
     expect(screen.getByRole("listitem")).toHaveTextContent("Cafe");
+    await browser.click(screen.getByRole("button", { name: "Display transactions" }));
+    await browser.click(screen.getByRole("menuitemradio", { name: "Merchant" }));
+    expect(screen.getByRole("heading", { name: "Cafe (1)" })).toBeVisible();
     await browser.click(screen.getByRole("button", { name: "Details" }));
     expect(screen.getByText("SQ CAFE")).toBeVisible();
     await browser.click(screen.getByRole("button", { name: "Details" }));
     await browser.click(screen.getByRole("button", { name: "Transaction view: Cards" }));
     await browser.click(screen.getByRole("menuitemradio", { name: "Table" }));
+    expect(screen.getByRole("rowheader", { name: "Cafe (1)" })).toBeVisible();
     for (const label of ["date", "merchant", "amount", "date"]) {
       fireEvent.click(await screen.findByRole("button", { name: `Sort by ${label}` }));
       await screen.findByRole("table", { name: "Transactions" });

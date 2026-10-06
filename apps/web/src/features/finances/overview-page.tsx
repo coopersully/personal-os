@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/item";
 import { api } from "../../api.js";
 import { FinanceBentoSection } from "./bento-section.js";
+import { formatCompactMoney } from "./format";
 import {
   FinancePositionMaterial,
   FinanceSourceState,
@@ -68,18 +69,33 @@ export function FinanceOverviewPage() {
           <KeyMetrics label="Finance key metrics">
             <KeyMetric
               label="Cash"
-              value={financeAmount(snapshot.data.data.cash)}
+              value={
+                snapshot.data.data.cash === null
+                  ? "Unavailable"
+                  : formatCompactMoney(snapshot.data.data.cash)
+              }
+              exactValue={financeAmount(snapshot.data.data.cash)}
               icon={BankIcon}
               description="Current balance"
             />
             <KeyMetric
-              label="Posted spending this month"
-              value={financeAmount(snapshot.data.data.budget.spent)}
+              label="Spent this month"
+              value={
+                snapshot.data.data.budget.spent === null
+                  ? "Unavailable"
+                  : formatCompactMoney(snapshot.data.data.budget.spent)
+              }
+              exactValue={financeAmount(snapshot.data.data.budget.spent)}
               icon={ReceiptIcon}
             />
             <KeyMetric
               label="Net worth"
-              value={financeAmount(snapshot.data.data.netWorth)}
+              value={
+                snapshot.data.data.netWorth === null
+                  ? "Unavailable"
+                  : formatCompactMoney(snapshot.data.data.netWorth)
+              }
+              exactValue={financeAmount(snapshot.data.data.netWorth)}
               icon={WalletIcon}
               description="Current balance"
             />

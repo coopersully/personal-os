@@ -6,7 +6,9 @@ import { ActionButton as Button } from "@/components/action-button";
 import { DateInput } from "@/components/date-input";
 import {
   ChevronDownIcon,
+  EyeIcon,
   GridIcon,
+  LayersIcon,
   PlusIcon,
   ReceiptIcon,
   SliderHorizontalIcon,
@@ -28,6 +30,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
@@ -40,6 +43,7 @@ import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
 import { formatMoney } from "./format.js";
 import { requireFinanceResult } from "./position-material.js";
+import { transactionGroupingOptions } from "./transaction-groups";
 
 export function FinanceTransactionControls({
   accounts,
@@ -296,6 +300,34 @@ export function FinanceTransactionControls({
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="icon" variant="ghost" aria-label="Display transactions">
+              <EyeIcon />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>Group by</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={params.get("group") ?? "none"}
+              onValueChange={(value) =>
+                setParams((current) => {
+                  const next = new URLSearchParams(current);
+                  if (value === "none") next.delete("group");
+                  else next.set("group", value);
+                  return next;
+                })
+              }
+            >
+              {transactionGroupingOptions.map(([value, label]) => (
+                <DropdownMenuRadioItem key={value} value={value}>
+                  <LayersIcon />
+                  {label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
         {exportAction}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

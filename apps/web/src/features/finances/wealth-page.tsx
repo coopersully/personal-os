@@ -31,6 +31,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { api } from "../../api.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+import { formatCompactMoney } from "./format";
 import {
   isConfirmedFinanceMutationFailure,
   requireFinanceMutationResult,
@@ -97,7 +98,8 @@ export function FinanceWealthPage() {
               <KeyMetric
                 key={label}
                 label={label}
-                value={financeAmount(value)}
+                value={value === null ? "Unavailable" : formatCompactMoney(value)}
+                exactValue={financeAmount(value)}
                 icon={icon}
                 description="Current balance"
               />

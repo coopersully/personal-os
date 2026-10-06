@@ -16,16 +16,20 @@ export function FinanceTransactionItem({
   amount,
   direction,
   description,
+  category,
   status,
   actions,
+  actionsPlacement = "end",
   children,
 }: {
   title: string;
   amount: number;
   direction: "income" | "expense" | "transfer";
   description: ReactNode;
+  category?: string;
   status?: "pending" | "expected" | undefined;
   actions?: ReactNode;
+  actionsPlacement?: "start" | "end";
   children?: ReactNode;
 }) {
   return (
@@ -38,21 +42,34 @@ export function FinanceTransactionItem({
         {status === "expected" ? <ClockIcon /> : <MerchantIcon />}
       </ItemMedia>
       <ItemContent className="min-w-0">
-        <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
-          <ItemTitle className="min-w-0 break-words">{title}</ItemTitle>
-          {actions ? <ItemActions className="ml-auto self-start">{actions}</ItemActions> : null}
-        </div>
-        <ItemDescription>{description}</ItemDescription>
-        <div className="flex flex-wrap items-center gap-2">
-          <p
-            className={`text-lg font-semibold tabular-nums ${direction === "income" ? "text-success" : direction === "expense" ? "text-destructive" : "text-muted-foreground"}`}
-          >
-            {direction === "income" ? "+" : direction === "expense" ? "−" : "↔ "}
-            {formatMoney(amount)}
-          </p>
-          {status ? (
-            <Badge variant="secondary">{status === "expected" ? "Expected" : "Pending"}</Badge>
-          ) : null}
+        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+          <div className="flex min-w-0 flex-col gap-1">
+            <ItemTitle className="min-w-0 max-w-full break-words">{title}</ItemTitle>
+            <ItemDescription className="text-xs">{description}</ItemDescription>
+            {actions && actionsPlacement === "start" ? (
+              <ItemActions className="mt-1 self-start">{actions}</ItemActions>
+            ) : null}
+          </div>
+          <div className="flex min-w-0 max-w-48 flex-col items-end gap-1 text-right">
+            {actions && actionsPlacement === "end" ? <ItemActions>{actions}</ItemActions> : null}
+            <p
+              className={`break-words text-2xl font-semibold tabular-nums ${direction === "income" ? "text-success" : direction === "expense" ? "text-destructive" : "text-muted-foreground"}`}
+            >
+              {direction === "income" ? "+" : direction === "expense" ? "−" : "↔ "}
+              {formatMoney(amount)}
+            </p>
+            {status ? (
+              <Badge variant="secondary">
+                <ClockIcon aria-hidden="true" />
+                {status === "expected" ? "Expected" : "Pending"}
+              </Badge>
+            ) : null}
+            {category ? (
+              <Badge variant="secondary" className="h-auto max-w-full whitespace-normal text-right">
+                {category}
+              </Badge>
+            ) : null}
+          </div>
         </div>
         {children}
       </ItemContent>

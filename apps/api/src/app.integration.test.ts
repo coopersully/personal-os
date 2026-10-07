@@ -6694,6 +6694,10 @@ describe.sequential("ilo API", () => {
     const invalid = await request("/v1/desktop/activity?cursor=invalid");
     expect(invalid.status).toBe(400);
 
+    const privateCategory = await request("/v1/finances/categories", {
+      body: { name: "Private medical category" },
+    });
+    expect(privateCategory.status).toBe(200);
     const fullAgentToken = agentToken;
     const auditOnlyToken = await payload(
       await request("/v1/access-tokens", {
@@ -6708,6 +6712,13 @@ describe.sequential("ilo API", () => {
       await payload(await request("/v1/audit", { auth: "agent" }))
     ).events.filter((event: { action: string }) => event.action.startsWith("finance."));
     expect(auditOnlyFinanceEvents.length).toBeGreaterThan(0);
+    expect(auditOnlyFinanceEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "finance.category_saved", after: { saved: true } }),
+      ]),
+    );
+    expect(JSON.stringify(auditOnlyFinanceEvents)).not.toContain("Private medical category");
+
     expect(
       JSON.stringify(
         auditOnlyFinanceEvents.map((event: { after: unknown; before: unknown }) => ({

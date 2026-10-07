@@ -1,8 +1,9 @@
 # Workspace layout architecture
 
-Status: architecture audit and proposed migration, October 3, 2026. The hierarchy
-below is the intended direction; the migration is not implemented by this document.
-Existing visual placements remain authoritative until their replacement is verified.
+Status: shared frame migration implemented on the workspace-layout-architecture
+branch, October 3, 2026. Product content and current action placements are preserved.
+The original audit below records the starting point; the implementation contract
+describes the new boundaries.
 
 ## Purpose
 
@@ -16,7 +17,7 @@ responsive behavior. It does not require identical content grids or identical
 numbers of toolbars. Customization should expose useful choices (collapsed
 navigation, pane width, domain views), not an arbitrary dashboard builder.
 
-## Current implementation audit
+## Starting-point audit
 
 - `components/workspace-layout.tsx` provides banner, primary navigation, a
   secondary portal target, and children. It is a useful starting point, not yet
@@ -109,6 +110,60 @@ just because it is visually near the top of the screen.
   Persist only useful layout preferences; preserve desktop preferences while mobile.
 - Respect safe areas, keyboard occlusion, large text, reduced motion, and long
   account/list names. Floating controls must not cover the final actionable row.
+
+## Implemented frame contract
+
+- `WorkspaceLayout` owns an intrinsic `workspace-chrome` stack containing the
+  banner, primary navigation, and collection toolbar portal. There is one sticky
+  stack, with no guessed banner or toolbar offsets.
+- `contentMode="panes"` bounds Calendar and Mail to the viewport. Chrome consumes
+  its natural height; content receives the remainder and domain panes scroll.
+  `contentMode="page"` supports normal page material: desktop content scrolls in
+  the shell and mobile pages scroll as documents. Pane content never inherits
+  mobile document padding or the bottom navigation reservation.
+- `WorkspaceAppBar` accepts identity, context, utility actions, attention, and
+  primary actions. Primary actions have a named, permanently mounted responsive
+  region; changing placement does not mount a second copy of a control.
+- `FloatingActionRegion` owns the common safe-area anchor for Calendar and Mail.
+  Domains choose center or end and own their expanded workflows. Search may
+  deliberately move Calendar's expanded surface toward the viewport center.
+- Calendar orientation/period controls, Mail search composition, and Finance
+  creation live in feature `workspace-header.tsx` modules. Tasks already exports
+  its controls from its feature. Existing account visibility/sync adapters remain
+  in the integration root and are passed as slots; moving those queries is not
+  necessary to establish the layout contract.
+- The mobile navigation host accepts its title and navigation contents from its
+  owner. It no longer contains a second workspace switcher or a stale copy of
+  Tasks/Finance destinations. The same domain navigation renders in the sidebar
+  and mobile sheet.
+- Calendar axes continue to use inline secondary navigation. Collection toolbars
+  use the stable portal target. Do not move coordinate-aligned headers outside
+  their domain scrolling surface.
+
+Verification must include intrinsic multi-row headers and pane bottom edges,
+mobile attention visibility, navigation sheets, and preservation of floating
+workflow state/focus. The shared-frame tests exercise portal placement and action
+state across chrome updates; domain floating-action tests cover their workflows.
+
+## Mobile header density
+
+The compact workspace switcher is always a 32px square with a centered glyph,
+including Calendar and the desktop collapsed-rail entry. Its owner defines both
+dimensions; workspace-specific rules must not override either dimension.
+
+Workspace-owned controls use the shared top navigation slots described in the
+[design system](system.md), rather than a duplicate toolbar beside each collection.
+Route-specific creation actions appear only where that route supports them.
+
+Calendar keeps a collapsed Day/Week/Month selector at every width. At 600px or
+less, its view menu also contains a separate Today and Previous/Next command group;
+above that breakpoint those period actions remain visible in the app bar. Both
+presentations share URL update handlers, source visibility, and review entry points.
+The floating date control remains available for date navigation.
+
+Use the domain's control priorities and responsive menus to preserve accessible
+hit targets and useful context. Keep mobile review copy compact; do not reduce
+control sizes to force all content onto one row.
 
 ## Bounded migration
 

@@ -84,6 +84,8 @@ and verify matching computed backgrounds and column alignment in both themes.
 - The app-frame controls keep Day/Week/Month, Today, period back/forward, and
   the synced-calendar disclosure in that order. The disclosure shows account
   avatars with an `X of X calendars` label and uses switches for visibility.
+  At widths of 600 px or less, Today and Previous/Next period commands move
+  into the Calendar view menu after the view choices, keeping the app bar compact.
 - Timeline columns carry 15-minute rules with an hour/half-hour/quarter-hour
   weight hierarchy. Half-hour labels in the gutter make the hierarchy readable
   without counting subdivisions. At scroll-top, the midnight label remains

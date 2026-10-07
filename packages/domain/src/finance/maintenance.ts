@@ -48,6 +48,7 @@ export type FinanceMaintenancePayload = z.infer<typeof financeMaintenancePayload
 
 export const financeSetupInputSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("start") }),
+  z.object({ operation: z.literal("prepare_budget") }),
   z.object({
     answer: z.string().trim().min(1).max(10_000),
     expectedVersion: z.number().int().positive(),
@@ -83,6 +84,7 @@ export const financeSetupPayloadSchema = z.object({
   maintenanceRunId: idSchema.nullable(),
   canonicalMaintenanceRunId: idSchema.nullable(),
   question: financeInteractionQuestionSchema.nullable(),
+  availableQuestions: z.array(financeInteractionQuestionSchema).optional(),
   sessionId: idSchema,
   stage: z.enum([
     "collecting_profile",

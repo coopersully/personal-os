@@ -45,6 +45,9 @@ describe.sequential("mail service", () => {
   let temporaryMigrationsFolder: string | null = null;
   let setupMigrationsFolder: string | null = null;
   const gateway = {
+    downloadAttachment: vi.fn<NonNullable<ConnectedMailGateway["downloadAttachment"]>>(async () =>
+      Buffer.from("test"),
+    ),
     sendCapability: vi.fn<NonNullable<ConnectedMailGateway["sendCapability"]>>(
       async () => "available",
     ),
@@ -431,6 +434,68 @@ describe.sequential("mail service", () => {
       policy: "preview",
       version: 2,
     });
+  });
+
+  it("downloads only attachments owned by the caller and rejects oversized files", async () => {
+    const [message] = await database.db
+      .insert(mailMessages)
+      .values({
+        threadId,
+        remoteMessageId: "download-message",
+        receivedAt: new Date(),
+        from: { address: "sender@example.com", name: null },
+        to: [],
+        cc: [],
+        bodyText: "",
+        attachments: [
+          {
+            id: "download-attachment",
+            filename: "../notes\n.txt",
+            contentType: "text/plain",
+            size: 4,
+          },
+        ],
+      })
+      .returning();
+    if (!message) throw new Error("Missing test message");
+    const controller = new AbortController();
+    gateway.downloadAttachment.mockClear();
+    await expect(
+      service.downloadAttachment(userId, message.id, "download-attachment", controller.signal),
+    ).resolves.toMatchObject({ data: "dGVzdA==", filename: ".._notes_.txt", size: 4 });
+    expect(gateway.downloadAttachment).toHaveBeenCalledWith(
+      userId,
+      enabledAccountId,
+      "download-message",
+      expect.objectContaining({ id: "download-attachment" }),
+      controller.signal,
+    );
+    gateway.downloadAttachment.mockClear();
+    await expect(
+      service.downloadAttachment(crypto.randomUUID(), message.id, "download-attachment"),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(service.downloadAttachment(userId, message.id, "missing")).rejects.toMatchObject({
+      code: "not_found",
+    });
+    expect(gateway.downloadAttachment).not.toHaveBeenCalled();
+    await database.db
+      .update(mailMessages)
+      .set({
+        attachments: [
+          {
+            id: "big",
+            filename: "large.zip",
+            contentType: "application/zip",
+            size: 11 * 1024 * 1024,
+          },
+        ],
+      })
+      .where(eq(mailMessages.id, message.id));
+    await expect(service.downloadAttachment(userId, message.id, "big")).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+    expect(gateway.downloadAttachment).not.toHaveBeenCalled();
+    await database.db.delete(mailMessages).where(eq(mailMessages.id, message.id));
   });
 
   it("lists enabled mailboxes and serializes mailbox membership", async () => {

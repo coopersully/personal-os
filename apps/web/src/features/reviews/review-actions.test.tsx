@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   getMailSetupContext: vi.fn(),
   activateMailRule: vi.fn(),
   getMailStatus: vi.fn(),
+  maintainMail: vi.fn(),
+  getMailReview: vi.fn(),
   getMailQuestion: vi.fn(),
   answerMailQuestion: vi.fn(),
   listAttentionItems: vi.fn(),
@@ -132,10 +134,47 @@ it("blocks attention writes when its current revision cannot be loaded", async (
   expect(screen.getByRole("button", { name: "Dismiss" })).toBeDisabled();
   expect(mocks.updateAttentionItem).not.toHaveBeenCalled();
 });
-it("keeps an empty Mail run blocker honest without inventing a question", async () => {
-  mocks.getMailStatus.mockResolvedValue({ details: { openQuestions: [] } });
-  setup("mail-run:run");
-  expect(await screen.findByText(/No open question is available/)).toBeVisible();
+it("recovers a blocked Mail run without a question and refreshes the review queue once", async () => {
+  const status = {
+    state: "blocked",
+    activeRun: null,
+    freshness: { state: "current", observedAt: "2026-08-25T15:00:00.000Z", blockers: [] },
+    details: {
+      openQuestions: [],
+      openQuestionCount: 0,
+      latestReview: null,
+      objective: { summary: "Keep obligations current", profileVersion: null },
+      obligationCounts: { open: 0 },
+      effectCounts: { reconcile: 1 },
+      health: [],
+      authority: {
+        automatic: [],
+        approvedRule: [],
+        individualApproval: [],
+        unavailable: ["send_email"],
+      },
+    },
+  };
+  mocks.getMailStatus
+    .mockResolvedValueOnce(status)
+    .mockResolvedValue({ ...status, state: "clean" });
+  mocks.maintainMail.mockResolvedValue({
+    run: { id: "recovery", status: "completed" },
+    summary: "Evidence reconciled.",
+  });
+  const changed = setup("mail-run:run");
+  expect(await screen.findByRole("heading", { name: "Blocked" })).toBeVisible();
+  expect(screen.getByText("No unanswered questions.")).toBeVisible();
+  expect(screen.getByText("Reconcile effects")).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Back to inbox" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Workspace stewardship" })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Maintain Mail" }));
+  expect(await screen.findByRole("heading", { name: "Clean" })).toBeVisible();
+  await waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+  expect(mocks.getMailStatus).toHaveBeenCalledTimes(2);
+  expect(mocks.maintainMail).toHaveBeenCalledExactlyOnceWith({
+    scope: { type: "all_outstanding" },
+  });
   expect(mocks.getMailQuestion).not.toHaveBeenCalled();
   expect(mocks.answerMailQuestion).not.toHaveBeenCalled();
 });

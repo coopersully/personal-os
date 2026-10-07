@@ -121,6 +121,20 @@ it("does not count a submitted action when the source status is unavailable", as
   expect(screen.getByText("0 completed · 2 left · 2 total")).toBeVisible();
 });
 
+it.each([
+  "all",
+  "resolved",
+  "needs_review",
+])("does not open a review flow for the legacy Finance filter %s", (review) => {
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={[`/finances/transactions?pending=pending&review=${review}`]}>
+        <ReviewFlowHost workspace="finances" />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
 it("loads the selected attention item directly and refreshes its revision after a conflict", async () => {
   let revision = 4;
   mocks.listAttentionItems.mockImplementation(async (query) =>

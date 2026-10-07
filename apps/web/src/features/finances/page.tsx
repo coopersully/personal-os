@@ -16,23 +16,37 @@ import { addMonths, formatDateOnly, formatMonth } from "@personal-os/domain";
 import { EmptyState, Spinner } from "@personal-os/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
-import { Fragment, type ReactNode, useCallback, useMemo, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import { ActionButton as ShadcnButton } from "@/components/action-button";
+import { CurrencyInput } from "@/components/currency-input";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
-  ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  ChevronUpIcon,
   CircleCheckIcon,
   CircleHelpIcon,
+  ClockIcon,
   DownloadIcon,
+  MerchantIcon,
+  ReceiptIcon,
   SortIcon,
 } from "@/components/icons";
+import {
+  ResponsiveDialogBody as ImportBody,
+  ResponsiveDialogContent as ImportContent,
+  ResponsiveDialogDescription as ImportDescription,
+  ResponsiveDialog as ImportDialog,
+  ResponsiveDialogHeader as ImportHeader,
+  ResponsiveDialogTitle as ImportTitle,
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@/components/responsive-dialog";
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
-import { Button as ShadcnButton } from "@/components/ui/button";
 import {
   Card as ShadcnCard,
   CardAction as ShadcnCardAction,
@@ -91,6 +105,8 @@ import {
   TableHeader as ShadcnTableHeader,
   TableRow as ShadcnTableRow,
 } from "@/components/ui/table";
+import { TooltipContent, TooltipTrigger, Tooltip as UiTooltip } from "@/components/ui/tooltip";
+import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
@@ -98,7 +114,14 @@ import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { FinanceBudgetBucketManager } from "./bucket-manager.js";
+import { FinanceCategoryDialog } from "./category-dialog";
 import { AddTransactionContext } from "./contextual-question.js";
+import { FinanceEntitySelector } from "./entity-selector";
+import { useFinancePresentationParams } from "./presentation-preferences";
+import { FinanceTransactionChecks } from "./transaction-checks";
+import { groupTransactions } from "./transaction-groups";
+import { TransactionContextEditor, TransactionContextMenu } from "./transaction-interactions";
+import { FinanceTransactionItem } from "./transaction-item";
 
 export { FinanceBudgetBucketManager } from "./bucket-manager.js";
 
@@ -114,10 +137,15 @@ import { financeTransactionFilters } from "./transaction-query.js";
 
 export function FinancesPage() {
   const location = useLocation();
+  const navigate = useNavigate();
   const section =
     location.pathname === "/finances/budgets"
       ? "budgets"
       : financeSectionFromPath(location.pathname);
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(() =>
+    new URLSearchParams(location.search).has("import"),
+  );
   const transactionParams = new URLSearchParams(location.search);
   const transactionFilters = financeTransactionFilters(transactionParams);
   const linkedTransactionId = transactionParams.get("transactionId");
@@ -166,7 +194,7 @@ export function FinancesPage() {
     queryKey: ["finance-playbook"],
   });
   const ledgerHealth = useQuery({
-    enabled: section === "health" || section === "overview",
+    enabled: section === "transactions" || section === "overview",
     queryFn: api.getFinanceLedgerHealth,
     queryKey: ["finance-ledger-health"],
   });
@@ -199,6 +227,11 @@ export function FinancesPage() {
     enabled: section === "overview",
     queryFn: () => api.getFinanceBudgetPace(budgetPacePeriod),
     queryKey: ["finance-budget-pace", budgetPacePeriod],
+  });
+  const merchants = useQuery({
+    queryKey: ["finance-merchants"],
+    queryFn: () => api.listFinanceMerchants(200),
+    enabled: section === "transactions",
   });
   const categories = useQuery({
     queryFn: api.getFinanceCategories,
@@ -233,7 +266,10 @@ export function FinancesPage() {
     category?: string;
     kind: "category" | "overages" | "planned" | "spent";
   } | null>(null);
-  const [showTransactionForm, setShowTransactionForm] = useState(false);
+  const showTransactionForm =
+    section === "transactions" && location.hash === "#finance-add-transaction";
+  const closeTransactionForm = () =>
+    navigate({ pathname: location.pathname, search: location.search, hash: "" }, { replace: true });
   const [scopeDialog, setScopeDialog] = useState<"spend" | "cash" | "investments" | null>(null);
   const [learnMerchant, setLearnMerchant] = useState(false);
   const [categorizing, setCategorizing] = useState<{
@@ -251,6 +287,16 @@ export function FinancesPage() {
   const [transactionCursorHistory, setTransactionCursorHistory] = useState<Array<string | null>>(
     [],
   );
+  const transactionFilterKey = JSON.stringify(transactionFilters);
+  const [cursorFilterKey, setCursorFilterKey] = useState(transactionFilterKey);
+  const currentTransactionCursor =
+    cursorFilterKey === transactionFilterKey ? transactionCursor : null;
+  useEffect(() => {
+    if (cursorFilterKey === transactionFilterKey) return;
+    setTransactionCursor(null);
+    setTransactionCursorHistory([]);
+    setCursorFilterKey(transactionFilterKey);
+  }, [cursorFilterKey, transactionFilterKey]);
   const [transactionSort, setTransactionSort] = useState<{
     sortBy: FinanceTransactionQuery["sortBy"];
     sortDirection: FinanceTransactionQuery["sortDirection"];
@@ -266,12 +312,17 @@ export function FinancesPage() {
     queryFn: () =>
       api.listFinanceTransactions({
         ...transactionFilters,
-        cursor: transactionCursor ?? undefined,
+        cursor: currentTransactionCursor ?? undefined,
         limit: 50,
         sortBy: transactionSort.sortBy,
         sortDirection: transactionSort.sortDirection,
       }),
-    queryKey: ["finance-transactions", transactionCursor, transactionSort, transactionFilters],
+    queryKey: [
+      "finance-transactions",
+      currentTransactionCursor,
+      transactionSort,
+      transactionFilters,
+    ],
   });
   const syncAccount = useFeedbackMutation({
     feedback: { action: "sync this bank account", safeToRetry: true },
@@ -338,7 +389,7 @@ export function FinancesPage() {
       setMerchant("");
       setAmount("");
       setCategory("");
-      setShowTransactionForm(false);
+      closeTransactionForm();
       return refresh();
     },
   });
@@ -577,13 +628,35 @@ export function FinancesPage() {
       {section === "review" && !categorizing ? (
         <MutationFeedback feedback={resolveReview.feedback} />
       ) : null}
+      {section === "imports" ? (
+        <WorkspaceHeaderControls label="Import controls">
+          <ShadcnButton asChild size="icon" variant="ghost" title="Transactions">
+            <Link to="/finances/transactions" aria-label="Transactions">
+              <ReceiptIcon />
+            </Link>
+          </ShadcnButton>
+        </WorkspaceHeaderControls>
+      ) : null}
       {section === "transactions" ? (
         <FinanceTransactionControls
+          onImport={() => setImportOpen(true)}
+          onAddCategory={() => setCategoryOpen(true)}
+          exportAction={<FinanceExportMenu />}
           accounts={finance.accounts}
+          sort={`${transactionSort.sortBy}:${transactionSort.sortDirection}`}
+          onSort={(value) => {
+            const [sortBy, sortDirection] = value.split(":");
+            setTransactionSort({
+              sortBy: sortBy as FinanceTransactionQuery["sortBy"],
+              sortDirection: sortDirection as FinanceTransactionQuery["sortDirection"],
+            });
+            setTransactionCursor(null);
+            setTransactionCursorHistory([]);
+          }}
           categories={categories.data ?? []}
-          onAdd={() => setShowTransactionForm(true)}
         />
       ) : null}
+      {categoryOpen ? <FinanceCategoryDialog onClose={() => setCategoryOpen(false)} /> : null}
       {section === "transactions" && linkedTransactionId ? (
         <FinanceLinkedTransaction
           id={linkedTransactionId}
@@ -677,6 +750,13 @@ export function FinancesPage() {
       {section === "overview" && ledgerHealth.data ? (
         <FinanceLedgerHealthDisclosure health={ledgerHealth.data} />
       ) : null}
+      {section === "transactions" ? (
+        <FinanceTransactionChecks
+          health={ledgerHealth.data}
+          error={ledgerHealth.isError}
+          retry={() => void ledgerHealth.refetch()}
+        />
+      ) : null}
       {section === "review" && !location.pathname.endsWith("/legacy") ? (
         <FinanceAgentReviewQueue />
       ) : null}
@@ -692,44 +772,14 @@ export function FinancesPage() {
         hidden={section === "overview" || section === "cashflow" || section === "subscriptions"}
       >
         <div className="flex min-w-0 flex-col gap-6">
-          <ShadcnCard hidden={section !== "health"}>
-            <ShadcnCardHeader>
-              <ShadcnCardTitle>Ledger health</ShadcnCardTitle>
-              <ShadcnCardDescription>
-                Totals use posted, net activity. These checks make any uncertainty explicit before
-                it reaches your budget or cash-flow decisions.
-              </ShadcnCardDescription>
-            </ShadcnCardHeader>
-            <ShadcnCardContent>
-              {ledgerHealth.isPending ? <Spinner label="Loading ledger health" /> : null}
-              {ledgerHealth.isError ? (
-                <InlineError
-                  error={ledgerHealth.error}
-                  title="Couldn’t load account health."
-                  stale={Boolean(ledgerHealth.data)}
-                  retry={() => ledgerHealth.refetch()}
-                />
-              ) : null}
-              {ledgerHealth.data ? <FinanceLedgerHealthCard health={ledgerHealth.data} /> : null}
-            </ShadcnCardContent>
-          </ShadcnCard>
-          <ShadcnCard
-            className="min-w-0"
-            hidden={section !== "review" && section !== "transactions"}
-          >
-            <ShadcnCardHeader>
-              <ShadcnCardTitle>
-                {section === "transactions" ? "Transactions" : "Review queue"}
-              </ShadcnCardTitle>
-              <ShadcnCardDescription>
-                {section === "transactions"
-                  ? "One row per transaction, with normalized names and category evidence."
-                  : "Review only the categories the system cannot safely infer."}
-              </ShadcnCardDescription>
-              <ShadcnCardAction>
-                {section === "transactions" ? (
-                  <FinanceExportMenu />
-                ) : (
+          <TransactionSurface section={section}>
+            {section === "review" ? (
+              <ShadcnCardHeader>
+                <ShadcnCardTitle>Review queue</ShadcnCardTitle>
+                <ShadcnCardDescription>
+                  Review only the categories the system cannot safely infer.
+                </ShadcnCardDescription>
+                <ShadcnCardAction>
                   <ShadcnButton
                     onClick={() => setReviewOnly((value) => !value)}
                     size="sm"
@@ -737,22 +787,15 @@ export function FinancesPage() {
                   >
                     {reviewOnly ? "View all" : "Review queue"}
                   </ShadcnButton>
-                )}
-              </ShadcnCardAction>
-            </ShadcnCardHeader>
-            <ShadcnCardContent className={section === "transactions" ? "min-w-0" : undefined}>
+                </ShadcnCardAction>
+              </ShadcnCardHeader>
+            ) : null}
+            <div className={section === "review" ? "px-4 pb-4" : "min-w-0"}>
               {section === "transactions" && transactionList.isError && !transactionList.data
                 ? null
                 : null}
               {section === "transactions" ? (
                 <FinanceTransactionsTable
-                  manualAccountIds={
-                    overview.data?.accounts
-                      .filter(
-                        (account) => account.provider === "manual" && account.status === "manual",
-                      )
-                      .map((account) => account.id) ?? []
-                  }
                   hasPreviousPage={transactionCursorHistory.length > 0}
                   isCategorizing={categorize.isPending}
                   isLoading={transactionList.isPending}
@@ -848,8 +891,8 @@ export function FinancesPage() {
                   ))}
                 </ShadcnItemGroup>
               )}
-            </ShadcnCardContent>
-          </ShadcnCard>
+            </div>
+          </TransactionSurface>
           <section aria-label={`${formatMonth(budgetMonth)} budget`} hidden={section !== "budgets"}>
             <FinanceBudgetBucketManager categories={categories.data ?? []} month={budgetMonth} />
             <FinanceBudgetSummary
@@ -907,91 +950,107 @@ export function FinancesPage() {
               </ShadcnItemGroup>
             )}
           </section>
-          <ShadcnCard hidden={section !== "imports"}>
-            <ShadcnCardHeader>
-              <ShadcnCardTitle>Import account history</ShadcnCardTitle>
-              <ShadcnCardDescription>
-                Upload a CSV exported from PayPal, Venmo, or Zelle. Duplicate rows are skipped.
-              </ShadcnCardDescription>
-            </ShadcnCardHeader>
-            <ShadcnCardContent>
-              <ShadcnFieldGroup>
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="finance-import-account">
-                    Destination account
-                  </ShadcnFieldLabel>
-                  <ShadcnNativeSelect
-                    id="finance-import-account"
-                    onChange={(event) => setImportAccountId(event.target.value)}
-                    value={importAccountId}
+          <ImportDialog
+            open={importOpen}
+            onOpenChange={(open) => {
+              if (importHistory.isPending) return;
+              setImportOpen(open);
+              if (!open && transactionParams.has("import")) {
+                const next = new URLSearchParams(location.search);
+                next.delete("import");
+                navigate(
+                  { pathname: location.pathname, search: next.toString() },
+                  { replace: true },
+                );
+              }
+            }}
+          >
+            <ImportContent>
+              <ImportHeader>
+                <ImportTitle>Import transactions</ImportTitle>
+                <ImportDescription>
+                  Upload a CSV exported from PayPal, Venmo, or Zelle. Duplicate rows are skipped.
+                </ImportDescription>
+              </ImportHeader>
+              <ImportBody>
+                <ShadcnFieldGroup>
+                  <ShadcnField>
+                    <ShadcnFieldLabel htmlFor="finance-import-account">
+                      Destination account
+                    </ShadcnFieldLabel>
+                    <ShadcnNativeSelect
+                      id="finance-import-account"
+                      onChange={(event) => setImportAccountId(event.target.value)}
+                      value={importAccountId}
+                    >
+                      <NativeSelectOption value="">Select account</NativeSelectOption>
+                      {finance.accounts
+                        .filter((item) => item.provider === importProvider)
+                        .map((item) => (
+                          <NativeSelectOption key={item.id} value={item.id}>
+                            {item.name}
+                          </NativeSelectOption>
+                        ))}
+                    </ShadcnNativeSelect>
+                  </ShadcnField>
+                  <ShadcnField>
+                    <ShadcnFieldLabel htmlFor="finance-import-provider">
+                      Export provider
+                    </ShadcnFieldLabel>
+                    <ShadcnNativeSelect
+                      id="finance-import-provider"
+                      onChange={(event) => {
+                        setImportProvider(event.target.value as "paypal" | "venmo" | "zelle");
+                        setImportAccountId("");
+                      }}
+                      value={importProvider}
+                    >
+                      <NativeSelectOption value="paypal">PayPal</NativeSelectOption>
+                      <NativeSelectOption value="venmo">Venmo</NativeSelectOption>
+                      <NativeSelectOption value="zelle">Zelle</NativeSelectOption>
+                    </ShadcnNativeSelect>
+                  </ShadcnField>
+                  <ShadcnField>
+                    <ShadcnFieldLabel htmlFor="finance-import-file">CSV export</ShadcnFieldLabel>
+                    <ShadcnInput
+                      accept="text/csv,.csv"
+                      id="finance-import-file"
+                      onChange={async (event) => {
+                        const file = event.currentTarget.files?.[0];
+                        if (!file) return;
+                        setImportCsv(await file.text());
+                        setImportFileName(file.name);
+                      }}
+                      type="file"
+                    />
+                    {importFileName ? (
+                      <ShadcnFieldDescription>
+                        {importFileName} ready to import
+                      </ShadcnFieldDescription>
+                    ) : null}
+                  </ShadcnField>
+                  <ShadcnButton
+                    disabled={importHistory.isPending || !importAccountId || !importCsv}
+                    onClick={() => importHistory.mutate()}
                   >
-                    <NativeSelectOption value="">Select account</NativeSelectOption>
-                    {finance.accounts
-                      .filter((item) => item.provider === importProvider)
-                      .map((item) => (
-                        <NativeSelectOption key={item.id} value={item.id}>
-                          {item.name}
-                        </NativeSelectOption>
-                      ))}
-                  </ShadcnNativeSelect>
-                </ShadcnField>
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="finance-import-provider">
-                    Export provider
-                  </ShadcnFieldLabel>
-                  <ShadcnNativeSelect
-                    id="finance-import-provider"
-                    onChange={(event) => {
-                      setImportProvider(event.target.value as "paypal" | "venmo" | "zelle");
-                      setImportAccountId("");
-                    }}
-                    value={importProvider}
-                  >
-                    <NativeSelectOption value="paypal">PayPal</NativeSelectOption>
-                    <NativeSelectOption value="venmo">Venmo</NativeSelectOption>
-                    <NativeSelectOption value="zelle">Zelle</NativeSelectOption>
-                  </ShadcnNativeSelect>
-                </ShadcnField>
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="finance-import-file">CSV export</ShadcnFieldLabel>
-                  <ShadcnInput
-                    accept="text/csv,.csv"
-                    id="finance-import-file"
-                    onChange={async (event) => {
-                      const file = event.currentTarget.files?.[0];
-                      if (!file) return;
-                      setImportCsv(await file.text());
-                      setImportFileName(file.name);
-                    }}
-                    type="file"
-                  />
-                  {importFileName ? (
+                    {importHistory.isPending ? "Importing" : "Import CSV"}
+                  </ShadcnButton>
+                  <MutationFeedback feedback={importHistory.feedback} />
+                  {!importAccountId || !importCsv ? (
+                    <p className="text-sm text-muted-foreground">
+                      Choose an account and a CSV file to import.
+                    </p>
+                  ) : null}
+                  {importHistory.data ? (
                     <ShadcnFieldDescription>
-                      {importFileName} ready to import
+                      Imported {importHistory.data.imported}; skipped {importHistory.data.skipped}{" "}
+                      duplicates.
                     </ShadcnFieldDescription>
                   ) : null}
-                </ShadcnField>
-                <ShadcnButton
-                  disabled={importHistory.isPending || !importAccountId || !importCsv}
-                  onClick={() => importHistory.mutate()}
-                >
-                  {importHistory.isPending ? "Importing" : "Import CSV"}
-                </ShadcnButton>
-                <MutationFeedback feedback={importHistory.feedback} />
-                {!importAccountId || !importCsv ? (
-                  <p className="text-sm text-muted-foreground">
-                    Choose an account and a CSV file to import.
-                  </p>
-                ) : null}
-                {importHistory.data ? (
-                  <ShadcnFieldDescription>
-                    Imported {importHistory.data.imported}; skipped {importHistory.data.skipped}{" "}
-                    duplicates.
-                  </ShadcnFieldDescription>
-                ) : null}
-              </ShadcnFieldGroup>
-            </ShadcnCardContent>
-          </ShadcnCard>
+                </ShadcnFieldGroup>
+              </ImportBody>
+            </ImportContent>
+          </ImportDialog>
         </div>
         <div className="flex flex-col gap-6">
           <ShadcnCard hidden={section !== "accounts"}>
@@ -1127,62 +1186,80 @@ export function FinancesPage() {
               </FeedbackForm>
             </ShadcnCardContent>
           </ShadcnCard>
-          <ShadcnCard hidden={section !== "transactions" || !showTransactionForm}>
-            <ShadcnCardHeader>
-              <ShadcnCardTitle>Add a transaction</ShadcnCardTitle>
-            </ShadcnCardHeader>
-            <ShadcnCardContent>
-              <FeedbackForm
-                feedback={addTransaction.feedback}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  addTransaction.mutate();
-                }}
-              >
-                <ShadcnFieldGroup>
-                  <ShadcnField>
-                    <ShadcnFieldLabel htmlFor="finance-account-select">Account</ShadcnFieldLabel>
-                    <ShadcnNativeSelect
-                      id="finance-account-select"
-                      name="accountId"
-                      required
-                      onChange={(event) => setAccountId(event.target.value)}
-                      value={accountId}
-                    >
-                      <NativeSelectOption value="">Select account</NativeSelectOption>
-                      {finance.accounts.map((item) => (
-                        <NativeSelectOption key={item.id} value={item.id}>
-                          {item.name}
-                        </NativeSelectOption>
-                      ))}
-                    </ShadcnNativeSelect>
-                  </ShadcnField>
-                  <FinanceTextField
-                    id="finance-merchant"
-                    label="Merchant"
-                    onChange={setMerchant}
-                    value={merchant}
-                  />
-                  <FinanceTextField
-                    id="finance-amount"
-                    inputMode="decimal"
-                    label="Amount"
-                    onChange={setAmount}
-                    value={amount}
-                  />
-                  <FinanceTextField
-                    id="finance-category"
-                    label="Category (optional)"
-                    onChange={setCategory}
-                    value={category}
-                  />
-                  <ShadcnButton disabled={addTransaction.isPending} type="submit">
-                    Add transaction
-                  </ShadcnButton>
-                </ShadcnFieldGroup>
-              </FeedbackForm>
-            </ShadcnCardContent>
-          </ShadcnCard>
+          <ResponsiveDialog
+            open={showTransactionForm}
+            onOpenChange={(open) => {
+              if (!open) closeTransactionForm();
+            }}
+          >
+            <ResponsiveDialogContent aria-describedby={undefined} className="overflow-y-auto">
+              <ResponsiveDialogHeader>
+                <ResponsiveDialogTitle>Add a transaction</ResponsiveDialogTitle>
+              </ResponsiveDialogHeader>
+              <div className="px-4 pb-4 sm:px-0 sm:pb-0">
+                <FeedbackForm
+                  feedback={addTransaction.feedback}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    addTransaction.mutate();
+                  }}
+                >
+                  <ShadcnFieldGroup>
+                    <ShadcnField>
+                      <ShadcnFieldLabel htmlFor="finance-account-select">Account</ShadcnFieldLabel>
+                      <ShadcnNativeSelect
+                        id="finance-account-select"
+                        name="accountId"
+                        required
+                        onChange={(event) => setAccountId(event.target.value)}
+                        value={accountId}
+                      >
+                        <NativeSelectOption value="">Select account</NativeSelectOption>
+                        {finance.accounts.map((item) => (
+                          <NativeSelectOption key={item.id} value={item.id}>
+                            {item.name}
+                          </NativeSelectOption>
+                        ))}
+                      </ShadcnNativeSelect>
+                    </ShadcnField>
+                    <ShadcnField>
+                      <ShadcnFieldLabel htmlFor="finance-merchant">Merchant</ShadcnFieldLabel>
+                      <FinanceEntitySelector
+                        id="finance-merchant"
+                        label="Merchant"
+                        value={merchant}
+                        onValueChange={setMerchant}
+                        options={(merchants.data ?? []).map((item) => item.displayName)}
+                        required
+                      />
+                    </ShadcnField>
+                    <FinanceTextField
+                      id="finance-amount"
+                      inputMode="decimal"
+                      label="Amount"
+                      onChange={setAmount}
+                      value={amount}
+                    />
+                    <ShadcnField>
+                      <ShadcnFieldLabel htmlFor="finance-category">
+                        Category (optional)
+                      </ShadcnFieldLabel>
+                      <FinanceEntitySelector
+                        id="finance-category"
+                        label="Category (optional)"
+                        value={category}
+                        onValueChange={setCategory}
+                        options={(categories.data ?? []).map((item) => item.name)}
+                      />
+                    </ShadcnField>
+                    <ShadcnButton disabled={addTransaction.isPending} type="submit">
+                      Add transaction
+                    </ShadcnButton>
+                  </ShadcnFieldGroup>
+                </FeedbackForm>
+              </div>
+            </ResponsiveDialogContent>
+          </ResponsiveDialog>
           <ShadcnCard hidden={section !== "budgets" || !showBudgetForm}>
             <ShadcnCardHeader>
               <ShadcnCardTitle>Set a budget</ShadcnCardTitle>
@@ -1823,7 +1900,7 @@ function FinanceExportMenu() {
       <ShadcnDropdownMenuTrigger asChild>
         <ShadcnButton size="sm" variant="outline">
           <DownloadIcon data-icon="inline-start" />
-          Export data
+          Export
         </ShadcnButton>
       </ShadcnDropdownMenuTrigger>
       <ShadcnDropdownMenuContent align="end">
@@ -2523,7 +2600,6 @@ function FinanceLedgerHealthCard({ health }: { health: FinanceLedgerHealth }) {
 }
 
 function FinanceTransactionsTable({
-  manualAccountIds,
   hasPreviousPage,
   isCategorizing,
   isLoading,
@@ -2536,7 +2612,6 @@ function FinanceTransactionsTable({
   sort,
   transactions,
 }: {
-  manualAccountIds: string[];
   hasPreviousPage: boolean;
   isCategorizing: boolean;
   isLoading: boolean;
@@ -2552,7 +2627,21 @@ function FinanceTransactionsTable({
   };
   transactions: FinanceTransaction[];
 }) {
-  const [expandedTransactionId, setExpandedTransactionId] = useState<string | null>(null);
+  const presentation = useFinancePresentationParams();
+  const view = presentation.get("view") === "cards" ? "cards" : "table";
+  const group = view === "cards" ? presentation.get("group") : null;
+  const groups = useMemo(() => groupTransactions(transactions, group), [transactions, group]);
+  const groupedTransactions = useMemo(() => groups.flatMap((entry) => entry.items), [groups]);
+  const groupHeadings = new Map(
+    groups
+      .filter((entry) => entry.label)
+      .map((entry) => [
+        entry.items[0]?.id,
+        `${group === "date" ? formatTransactionDate(entry.label) : entry.label} (${entry.items.length})`,
+      ]),
+  );
+  const [selectedTransaction, setSelectedTransaction] = useState<FinanceTransaction | null>(null);
+  const [contextTransaction, setContextTransaction] = useState<FinanceTransaction | null>(null);
   const columns = useMemo<Array<ColumnDef<FinanceTransaction>>>(
     () => [
       {
@@ -2570,13 +2659,20 @@ function FinanceTransactionsTable({
           return (
             <div className="flex min-w-0 items-center gap-2">
               {isKnownMerchant ? (
-                <span aria-label="Merchant entity found" role="img" title="Merchant entity found">
-                  <CircleCheckIcon
-                    aria-hidden="true"
-                    className="shrink-0 text-muted-foreground"
-                    data-icon="inline-start"
-                  />
-                </span>
+                <UiTooltip>
+                  <TooltipTrigger asChild>
+                    <span aria-label="Merchant entity found" role="img">
+                      <MerchantIcon
+                        aria-hidden="true"
+                        className="shrink-0 text-muted-foreground"
+                        data-icon="inline-start"
+                      />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Matched to a merchant record. Categories can still need review.
+                  </TooltipContent>
+                </UiTooltip>
               ) : (
                 <span
                   aria-label="Merchant entity needs review"
@@ -2590,7 +2686,7 @@ function FinanceTransactionsTable({
                   />
                 </span>
               )}
-              <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-2">
                 <p className="truncate font-medium" title={item.merchant}>
                   {item.merchant}
                 </p>
@@ -2632,35 +2728,32 @@ function FinanceTransactionsTable({
         ),
       },
       {
-        cell: ({ row }) => {
-          const isExpanded = expandedTransactionId === row.original.id;
-          return (
-            <ShadcnButton
-              aria-controls={`transaction-details-${row.original.id}`}
-              aria-expanded={isExpanded}
-              onClick={() => setExpandedTransactionId(isExpanded ? null : row.original.id)}
-              size="sm"
-              variant="ghost"
-            >
-              {isExpanded ? "Hide" : "Details"}
-              {isExpanded ? (
-                <ChevronUpIcon data-icon="inline-end" />
-              ) : (
-                <ChevronDownIcon data-icon="inline-end" />
-              )}
-            </ShadcnButton>
-          );
-        },
+        id: "status",
+        header: "Status",
         enableSorting: false,
-        header: "",
-        id: "details",
+        cell: ({ row }) => (
+          <UiTooltip>
+            <TooltipTrigger asChild>
+              <button type="button" aria-label={row.original.pending ? "Pending" : "Posted"}>
+                {row.original.pending ? (
+                  <ClockIcon aria-hidden="true" />
+                ) : (
+                  <CircleCheckIcon aria-hidden="true" />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {row.original.pending ? "Pending — not yet posted" : "Posted"}
+            </TooltipContent>
+          </UiTooltip>
+        ),
       },
     ],
-    [expandedTransactionId, onSort, sort],
+    [onSort, sort],
   );
   const table = useReactTable({
     columns,
-    data: transactions,
+    data: groupedTransactions,
     getCoreRowModel: getCoreRowModel(),
     getRowId: (row) => row.id,
     manualSorting: true,
@@ -2682,29 +2775,86 @@ function FinanceTransactionsTable({
 
   return (
     <div className="flex flex-col gap-3">
-      <ShadcnTable aria-label="Transactions" className="min-w-[33rem] table-fixed">
-        <ShadcnTableHeader>
-          {table.getHeaderGroups().map((headerGroup) => (
-            <ShadcnTableRow key={headerGroup.id}>
-              {headerGroup.headers.map((header) => (
-                <ShadcnTableHead
-                  className={transactionTableColumnClass(header.column.id)}
-                  key={header.id}
-                >
-                  {header.isPlaceholder
-                    ? null
-                    : flexRender(header.column.columnDef.header, header.getContext())}
-                </ShadcnTableHead>
-              ))}
-            </ShadcnTableRow>
+      {groupHeadings.size > 0 && (hasPreviousPage || nextCursor) ? (
+        <p className="text-xs text-muted-foreground">Grouped within this page</p>
+      ) : null}
+      {view === "cards" ? (
+        <ShadcnItemGroup className="gap-3">
+          {groupedTransactions.map((transaction) => (
+            <Fragment key={transaction.id}>
+              {groupHeadings.has(transaction.id) ? (
+                <h2 className="mt-3 text-sm font-medium">{groupHeadings.get(transaction.id)}</h2>
+              ) : null}
+              <TransactionContextMenu
+                transaction={transaction}
+                onSplit={() => onBreakdown(transaction)}
+                onContext={() => setContextTransaction(transaction)}
+                onCategorize={() => onCategorize(transaction)}
+              >
+                <li className="min-w-0 list-none">
+                  <button
+                    type="button"
+                    className="w-full rounded-lg text-left outline-none focus-visible:[&_[data-slot=item]]:border-foreground/50"
+                    aria-label={`Open ${transaction.merchant} transaction`}
+                    onClick={() => setSelectedTransaction(transaction)}
+                  >
+                    <FinanceTransactionItem
+                      presentation
+                      title={transaction.merchant}
+                      amount={transaction.amount}
+                      direction={transaction.direction}
+                      description={formatTransactionDate(transaction.date)}
+                      category={transactionCategoryLabel(transaction.category)}
+                      status={transaction.pending ? "pending" : undefined}
+                    />
+                  </button>
+                </li>
+              </TransactionContextMenu>
+            </Fragment>
           ))}
-        </ShadcnTableHeader>
-        <ShadcnTableBody>
-          {table.getRowModel().rows.map((row) => {
-            const isExpanded = expandedTransactionId === row.original.id;
-            return (
-              <Fragment key={row.id}>
-                <ShadcnTableRow data-state={isExpanded ? "selected" : undefined}>
+        </ShadcnItemGroup>
+      ) : (
+        <ShadcnTable aria-label="Transactions" className="min-w-[33rem] table-fixed">
+          <ShadcnTableHeader>
+            {table.getHeaderGroups().map((headerGroup) => (
+              <ShadcnTableRow key={headerGroup.id}>
+                {headerGroup.headers.map((header) => (
+                  <ShadcnTableHead
+                    className={transactionTableColumnClass(header.column.id)}
+                    key={header.id}
+                  >
+                    {header.isPlaceholder
+                      ? null
+                      : flexRender(header.column.columnDef.header, header.getContext())}
+                  </ShadcnTableHead>
+                ))}
+              </ShadcnTableRow>
+            ))}
+          </ShadcnTableHeader>
+          <ShadcnTableBody>
+            {table.getRowModel().rows.map((row) => (
+              <TransactionContextMenu
+                key={row.id}
+                transaction={row.original}
+                onSplit={() => onBreakdown(row.original)}
+                onContext={() => setContextTransaction(row.original)}
+                onCategorize={() => onCategorize(row.original)}
+              >
+                <ShadcnTableRow
+                  tabIndex={0}
+                  aria-label={`Open ${row.original.merchant} transaction`}
+                  className="cursor-pointer focus-visible:bg-selection"
+                  onClick={() => setSelectedTransaction(row.original)}
+                  onKeyDown={(event) => {
+                    if (
+                      event.target === event.currentTarget &&
+                      (event.key === "Enter" || event.key === " ")
+                    ) {
+                      event.preventDefault();
+                      setSelectedTransaction(row.original);
+                    }
+                  }}
+                >
                   {row.getVisibleCells().map((cell) => (
                     <ShadcnTableCell
                       className={transactionTableColumnClass(cell.column.id)}
@@ -2714,27 +2864,76 @@ function FinanceTransactionsTable({
                     </ShadcnTableCell>
                   ))}
                 </ShadcnTableRow>
-                {isExpanded ? (
-                  <ShadcnTableRow id={`transaction-details-${row.original.id}`}>
-                    <ShadcnTableCell
-                      className="whitespace-normal"
-                      colSpan={row.getVisibleCells().length}
-                    >
-                      <TransactionDetails
-                        canAddContext={manualAccountIds.includes(row.original.accountId)}
-                        isCategorizing={isCategorizing}
-                        onBreakdown={onBreakdown}
-                        onCategorize={onCategorize}
-                        transaction={row.original}
-                      />
-                    </ShadcnTableCell>
-                  </ShadcnTableRow>
-                ) : null}
-              </Fragment>
-            );
-          })}
-        </ShadcnTableBody>
-      </ShadcnTable>
+              </TransactionContextMenu>
+            ))}
+          </ShadcnTableBody>
+        </ShadcnTable>
+      )}
+      {selectedTransaction ? (
+        <ResponsiveDialog open onOpenChange={(open) => !open && setSelectedTransaction(null)}>
+          <ResponsiveDialogContent>
+            <ResponsiveDialogHeader>
+              <ResponsiveDialogTitle>{selectedTransaction.merchant}</ResponsiveDialogTitle>
+            </ResponsiveDialogHeader>
+            <ImportBody>
+              <p
+                className={`text-2xl font-semibold tabular-nums ${transactionAmountTone(selectedTransaction.direction)}`}
+              >
+                {formatTransactionAmount(selectedTransaction.amount, selectedTransaction.direction)}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {formatTransactionDate(selectedTransaction.date)} ·{" "}
+                {transactionCategoryLabel(selectedTransaction.category)} ·{" "}
+                {selectedTransaction.pending ? "Pending" : "Posted"}
+              </p>
+              <TransactionDetails
+                transaction={selectedTransaction}
+                isCategorizing={isCategorizing}
+                onBreakdown={onBreakdown}
+                onCategorize={onCategorize}
+                hideActions
+              />
+              <div className="flex flex-wrap gap-2">
+                <ShadcnButton
+                  variant="outline"
+                  onClick={() => {
+                    onBreakdown(selectedTransaction);
+                    setSelectedTransaction(null);
+                  }}
+                >
+                  Split purchase
+                </ShadcnButton>
+                <ShadcnButton
+                  variant="outline"
+                  onClick={() => {
+                    setContextTransaction(selectedTransaction);
+                    setSelectedTransaction(null);
+                  }}
+                >
+                  {selectedTransaction.notes ? "Edit context" : "Add context"}
+                </ShadcnButton>
+                <ShadcnButton
+                  variant="outline"
+                  onClick={() => {
+                    onCategorize(selectedTransaction);
+                    setSelectedTransaction(null);
+                  }}
+                >
+                  {selectedTransaction.category || selectedTransaction.categoryId
+                    ? "Recategorize"
+                    : "Categorize"}
+                </ShadcnButton>
+              </div>
+            </ImportBody>
+          </ResponsiveDialogContent>
+        </ResponsiveDialog>
+      ) : null}
+      {contextTransaction ? (
+        <TransactionContextEditor
+          transaction={contextTransaction}
+          onClose={() => setContextTransaction(null)}
+        />
+      ) : null}
       <div className="flex items-center justify-between gap-3 border-t pt-3">
         <p className="font-mono text-xs text-muted-foreground">
           {transactions.length} {transactions.length === 1 ? "transaction" : "transactions"}
@@ -2799,26 +2998,28 @@ function transactionTableColumnClass(columnId: string) {
     amount: "w-24 text-right",
     category: "w-24",
     date: "w-20",
-    details: "w-20 text-right",
+    status: "w-16 text-center",
     merchant: "w-44",
   }[columnId];
 }
 
 export function TransactionDetails({
   canAddContext = false,
+  hideActions = false,
   isCategorizing,
   onBreakdown,
   onCategorize,
   transaction,
 }: {
   canAddContext?: boolean;
+  hideActions?: boolean;
   isCategorizing: boolean;
   onBreakdown: (transaction: FinanceTransaction) => void;
   onCategorize: (transaction: FinanceTransaction) => void;
   transaction: FinanceTransaction;
 }) {
   return (
-    <dl className="grid gap-x-6 gap-y-3 py-1 text-sm sm:grid-cols-2 lg:grid-cols-4">
+    <dl className="grid min-w-0 gap-x-6 gap-y-3 py-2 text-sm [grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr))]">
       <TransactionDetail label="Direction" value={directionLabel(transaction.direction)} />
       <TransactionDetail
         label="Confidence"
@@ -2830,28 +3031,30 @@ export function TransactionDetails({
         value={transaction.rawMerchant ?? transaction.merchant}
       />
       {transaction.notes ? <TransactionDetail label="Notes" value={transaction.notes} /> : null}
-      <div className="flex items-end gap-2">
-        <ShadcnButton onClick={() => onBreakdown(transaction)} size="sm" variant="outline">
-          Split purchase
-        </ShadcnButton>
-        {canAddContext &&
-        transaction.needsReview &&
-        !transaction.pending &&
-        !transaction.categoryId &&
-        !transaction.category &&
-        (transaction.direction === "expense" || transaction.direction === "income") ? (
-          <AddTransactionContext key={transaction.id} transactionId={transaction.id} />
-        ) : null}
-        {transaction.needsReview ? (
-          <ShadcnButton
-            disabled={isCategorizing}
-            onClick={() => onCategorize(transaction)}
-            size="sm"
-          >
-            Categorize
+      {!hideActions ? (
+        <div className="col-span-full flex min-w-0 flex-wrap items-end gap-2">
+          <ShadcnButton onClick={() => onBreakdown(transaction)} size="sm" variant="outline">
+            Split purchase
           </ShadcnButton>
-        ) : null}
-      </div>
+          {canAddContext &&
+          transaction.needsReview &&
+          !transaction.pending &&
+          !transaction.categoryId &&
+          !transaction.category &&
+          (transaction.direction === "expense" || transaction.direction === "income") ? (
+            <AddTransactionContext key={transaction.id} transactionId={transaction.id} />
+          ) : null}
+          {transaction.needsReview ? (
+            <ShadcnButton
+              disabled={isCategorizing}
+              onClick={() => onCategorize(transaction)}
+              size="sm"
+            >
+              Categorize
+            </ShadcnButton>
+          ) : null}
+        </div>
+      ) : null}
     </dl>
   );
 }
@@ -2960,38 +3163,48 @@ function FinanceTextField({
   onChange: (value: string) => void;
   value: string;
 }) {
+  const name =
+    (
+      {
+        "finance-institution": "institution",
+        "finance-account": "name",
+        "finance-balance": "balance",
+        "finance-merchant": "merchant",
+        "finance-amount": "amount",
+        "finance-category": "category",
+        "finance-budget-category": "category",
+        "finance-budget-limit": "limit",
+      } as Record<string, string>
+    )[id] ?? id;
+  const required = [
+    "finance-institution",
+    "finance-account",
+    "finance-merchant",
+    "finance-amount",
+    "finance-budget-category",
+    "finance-budget-limit",
+  ].includes(id);
   return (
     <ShadcnField>
       <ShadcnFieldLabel htmlFor={id}>{label}</ShadcnFieldLabel>
-      <ShadcnInput
-        id={id}
-        name={
-          {
-            "finance-institution": "institution",
-            "finance-account": "name",
-            "finance-balance": "balance",
-            "finance-merchant": "merchant",
-            "finance-amount": "amount",
-            "finance-category": "category",
-            "finance-budget-category": "category",
-            "finance-budget-limit": "limit",
-          }[id] ?? id
-        }
-        required={[
-          "finance-institution",
-          "finance-account",
-          "finance-merchant",
-          "finance-amount",
-          "finance-budget-category",
-          "finance-budget-limit",
-        ].includes(id)}
-        type={inputMode === "decimal" ? "number" : "text"}
-        step={inputMode === "decimal" ? "any" : undefined}
-        min={["finance-amount", "finance-budget-limit"].includes(id) ? "0.01" : undefined}
-        inputMode={inputMode}
-        onChange={(event) => onChange(event.target.value)}
-        value={value}
-      />
+      {inputMode === "decimal" ? (
+        <CurrencyInput
+          id={id}
+          name={name}
+          required={required}
+          value={value}
+          min={id === "finance-balance" ? Number.NEGATIVE_INFINITY : 0.01}
+          onValueChange={onChange}
+        />
+      ) : (
+        <ShadcnInput
+          id={id}
+          name={name}
+          required={required}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      )}
     </ShadcnField>
   );
 }
@@ -3077,4 +3290,13 @@ function transactionAmountTone(direction: FinanceTransaction["direction"]) {
 
 function FinancePageSkeleton() {
   return <WorkspaceSkeleton kind="finances" />;
+}
+
+function TransactionSurface({ section, children }: { section: string; children: ReactNode }) {
+  if (section === "transactions") return <div className="min-w-0">{children}</div>;
+  return (
+    <ShadcnCard hidden={section !== "review"} className="min-w-0">
+      {children}
+    </ShadcnCard>
+  );
 }

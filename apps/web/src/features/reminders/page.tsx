@@ -2,6 +2,7 @@ import type { Reminder } from "@personal-os/domain";
 import { EmptyState } from "@personal-os/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
+import { ActionButton as ShadcnButton } from "@/components/action-button";
 import {
   CircleCheckIcon,
   ClockIcon,
@@ -19,7 +20,6 @@ import {
   ReminderItemPrimaryAction,
   ReminderItemTitle,
 } from "@/components/reminder-item";
-import { Button as ShadcnButton } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ItemGroup } from "@/components/ui/item";
 import {

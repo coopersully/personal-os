@@ -208,6 +208,13 @@ export type ConnectedEventGateway = {
 };
 
 export type ConnectedMailGateway = {
+  downloadAttachment?: (
+    userId: string,
+    accountId: string,
+    messageId: string,
+    attachment: import("@personal-os/domain").MailAttachment,
+    signal?: AbortSignal,
+  ) => Promise<Uint8Array>;
   sendCapability?: (
     userId: string,
     accountId: string,
@@ -639,6 +646,92 @@ export function createConnectorService({
   };
 
   const mailGateway: ConnectedMailGateway = {
+    async downloadAttachment(userId, accountId, messageId, attachment, signal) {
+      signal?.throwIfAborted();
+      const account = await getAccount(userId, accountId);
+      if (!account.mailEnabled)
+        throw new AppError(
+          "forbidden",
+          "Mail is disabled for this account. Enable Mail in Connections.",
+        );
+      signal?.throwIfAborted();
+      const timeout = AbortSignal.timeout(20_000);
+      const operation = {
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        deadlineMs: Date.now() + 20_000,
+      };
+      try {
+        if (account.provider === "google" && google.downloadMailAttachment) {
+          const result = await google.downloadMailAttachment(
+            credentials<GoogleCredentials>(account),
+            messageId,
+            attachment,
+            operation,
+          );
+          await saveGoogleCredentials(account.id, result.credentials, true).catch(() => {
+            throw new AppError(
+              "service_unavailable",
+              "The attachment was retrieved, but refreshed connection credentials could not be saved. Try again shortly.",
+            );
+          });
+          return result.value;
+        }
+        if (account.provider === "icloud" && icloud.downloadMailAttachment)
+          return await icloud.downloadMailAttachment(
+            credentials<ICloudCredentials>(account),
+            messageId,
+            attachment,
+            operation,
+          );
+      } catch (error) {
+        if (error instanceof AppError) throw error;
+        const failure = classifyConnectorSyncFailure(
+          error,
+          account.provider === "icloud" ? "icloud" : "google",
+        );
+        const code =
+          failure.category === "not_found"
+            ? "not_found"
+            : failure.category === "rate_limited"
+              ? "rate_limited"
+              : failure.recovery === "reconnect"
+                ? "forbidden"
+                : "service_unavailable";
+        log?.({
+          event: "mail_attachment_download_failed",
+          accountId,
+          category: failure.category,
+          disposition: failure.recovery,
+          durationMs: 0,
+          method: "CONNECTOR",
+          path: "/internal/connectors/mail/attachment",
+          provider: account.provider === "icloud" ? "icloud" : "google",
+          requestId: randomUUID(),
+          status:
+            code === "not_found"
+              ? 404
+              : code === "rate_limited"
+                ? 429
+                : code === "forbidden"
+                  ? 403
+                  : 503,
+        });
+        throw new AppError(
+          code,
+          code === "not_found"
+            ? "This attachment is no longer available."
+            : code === "rate_limited"
+              ? "The mail provider is busy. Try again shortly."
+              : code === "forbidden"
+                ? "Reconnect this mail account in Connections to download attachments."
+                : "Couldn’t retrieve this attachment. Try again shortly.",
+        );
+      }
+      throw new AppError(
+        "service_unavailable",
+        "Attachment downloads are unavailable for this connection.",
+      );
+    },
     async sendCapability(userId, accountId) {
       try {
         const account = await getAccount(userId, accountId);

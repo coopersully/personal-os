@@ -1,9 +1,9 @@
 import type { AgentAccessDomain } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
+import { ActionButton as Button } from "@/components/action-button";
 import { ApprovalHandIcon } from "@/components/icons";
 import { formatSidebarCount } from "@/components/sidebar-item-meta";
-import { Button } from "@/components/ui/button";
 import {
   SidebarFooter,
   SidebarMenu,
@@ -27,13 +27,12 @@ export function ReviewNavigation({
   });
   const count = query.data?.summary.byDomain[workspace];
   const unavailable = query.isError || query.data?.unavailableDomains.includes(workspace);
+  if (!unavailable && count === 0) return null;
   const needsAttention = unavailable || (typeof count === "number" && count > 0);
   const label = unavailable
     ? "Check review status"
     : typeof count === "number"
-      ? count === 0
-        ? "No items need review"
-        : `${count.toLocaleString()} ${count === 1 ? "item needs" : "items need"} review`
+      ? `${count.toLocaleString()} ${count === 1 ? "item needs" : "items need"} review`
       : "Checking reviews…";
   const active = params.has("review");
   const open = () =>
@@ -52,12 +51,13 @@ export function ReviewNavigation({
     </>
   );
   return footer ? (
-    <SidebarFooter>
+    <SidebarFooter className="review-navigation__footer">
       <SidebarMenu>
         <SidebarMenuItem>
           <SidebarMenuButton
             aria-label={label}
             className="review-navigation"
+            tooltip={label}
             data-attention={needsAttention || undefined}
             onClick={open}
             isActive={active}
@@ -69,6 +69,7 @@ export function ReviewNavigation({
     </SidebarFooter>
   ) : (
     <Button
+      tooltip={label}
       aria-label={label}
       className="review-navigation"
       data-attention={needsAttention || undefined}

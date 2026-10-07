@@ -16,3 +16,13 @@ it("keeps filters bounded and does not convert an invalid URL into a failing API
     review: "all",
   });
 });
+
+it("keeps posting and review-state filters independent from review flow links", () => {
+  expect(
+    financeTransactionFilters(new URLSearchParams("pending=pending&reviewState=resolved")),
+  ).toEqual({ pending: true, review: "resolved" });
+  expect(financeTransactionFilters(new URLSearchParams("pending=pending&review=open"))).toEqual({
+    pending: true,
+    review: "all",
+  });
+});

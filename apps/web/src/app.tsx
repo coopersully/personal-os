@@ -43,7 +43,6 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
-  type UIEvent as ReactUIEvent,
   Suspense,
   useCallback,
   useContext,
@@ -70,6 +69,7 @@ import {
   AccountSelectionTrigger,
   reconnectAccountsLabel,
 } from "@/components/account-selection-trigger";
+import { ActionButton } from "@/components/action-button";
 import {
   EmailField,
   InviteCodeField,
@@ -102,12 +102,9 @@ import {
   CheckIcon,
   CheckSquareIcon,
   ChevronDownIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
   CircleCheckIcon,
   ClockIcon,
   CloudIcon,
-  ColumnsIcon,
   CompassIcon,
   CopyIcon,
   CopyPlusIcon,
@@ -124,7 +121,6 @@ import {
   LayersIcon,
   ListChecksIcon,
   ListTodoIcon,
-  LocationFixedIcon,
   LockIcon,
   LogOutIcon,
   MailIcon,
@@ -156,6 +152,14 @@ import { LogoMark } from "@/components/logo-mark";
 import { OccasionCard } from "@/components/occasion-card";
 import { OfflineState } from "@/components/offline-state";
 import { QuoteCard } from "@/components/quote-card";
+import {
+  ResponsiveDialog,
+  ResponsiveDialogBody,
+  ResponsiveDialogContent,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@/components/responsive-dialog";
 import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
 import { SidebarItemMeta } from "@/components/sidebar-item-meta";
 import { TodayWorkspaceIcon, todayWeatherIcon } from "@/components/today-workspace-icon";
@@ -282,6 +286,7 @@ import { Textarea as ShadcnTextarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceLayout } from "@/components/workspace-layout";
 import { ConnectionAuthorizationOutcome } from "@/features/connections/authorization-outcome";
+import { TaskCreationProgress } from "@/features/tasks/creation-progress";
 import { api, isUnauthorized } from "./api.js";
 import { scrollTimelineToMinute } from "./calendar-timeline.js";
 import { InlineError, PageLoading, QueryFeedback } from "./components/async-state.js";
@@ -291,6 +296,7 @@ import { MobileWorkspaceDock } from "./components/mobile-workspace-dock.js";
 import { MutationFeedback } from "./components/mutation-feedback.js";
 import { SettingsRecord, SettingsRecordAction } from "./components/settings-record.js";
 import { WorkspaceAppBar } from "./components/workspace-app-bar.js";
+import { WorkspaceHeaderControlsSlot } from "./components/workspace-header-controls.js";
 import { WorkspaceIcon, workspaceIdForPath } from "./components/workspace-identity.js";
 import {
   WorkspaceSecondaryAppBar,
@@ -304,6 +310,11 @@ import {
   calendarQueryKeys,
   calendarViewFromSearch,
 } from "./features/calendar/page.js";
+import { useFollowScroll } from "./features/calendar/use-follow-scroll";
+import {
+  CalendarAppBarControls,
+  CalendarAppBarIdentity,
+} from "./features/calendar/workspace-header.js";
 import {
   ConnectionHealthBadge,
   ConnectionHealthDescription,
@@ -322,16 +333,11 @@ import { FinanceSettings } from "./features/finances/settings.js";
 import {
   MailPage as MailFeaturePage,
   MailSidebar as MailFeatureSidebar,
-  MailTopbarSearch,
 } from "./features/mail/mail.js";
-import {
-  ReminderRow,
-  RemindersCreateButton,
-  RemindersTopbarControls,
-} from "./features/reminders/page.js";
+import { MailAppBarControls } from "./features/mail/workspace-header.js";
+import { ReminderRow, RemindersCreateButton } from "./features/reminders/page.js";
 import { ReviewFlowHost } from "./features/reviews/flow.js";
 import { ReviewNavigation } from "./features/reviews/navigation.js";
-
 import { AccountIdentity, AccountOverview } from "./features/settings/account-overview.js";
 import {
   ConnectedAgentsSettings,
@@ -349,18 +355,21 @@ import {
 import { SettingsSearch, settingsDescriptions } from "./features/settings/settings-search.js";
 import { SetupSettings } from "./features/settings/setup-settings.js";
 import { useSettingsSidebarCounts } from "./features/settings/sidebar-counts.js";
-import {
-  TaskRow,
-  TasksCreateButton,
-  TasksSidebar,
-  TasksTopbarControls,
-} from "./features/tasks/page.js";
+import { TaskRow, TasksCreateButton, TasksSidebar } from "./features/tasks/page.js";
 import { TaskDialog } from "./features/tasks/task-dialog.js";
+import { TasksAppBarControls } from "./features/tasks/workspace-header.js";
 import { TasksWorkspacePage } from "./features/tasks/workspace-page.js";
 import { textingSettingsNavigationItem } from "./features/texting/manifest.js";
 import { TextingSettings } from "./features/texting/page.js";
 import { RitualSettings } from "./features/tracking/ritual-settings.js";
 import { RitualSetupOffer } from "./features/tracking/ritual-setup-offer.js";
+import type { SearchAction } from "./features/workspace-search/catalog.js";
+import {
+  useWorkspacePreferences,
+  WorkspacePreferencesSection,
+} from "./features/workspace-search/preferences.js";
+import { WorkspaceFinder } from "./features/workspace-search/search.js";
+import { useMediaQuery } from "./hooks/use-media-query.js";
 import {
   formatCalendarDate,
   formatMaterialDateTime,
@@ -384,7 +393,7 @@ type Editor =
   | { kind: "calendar" }
   | { draft?: EventDraft; event?: CalendarEvent; kind: "event"; mode?: "details" | "edit" }
   | { kind: "reminder"; reminder?: Reminder }
-  | { kind: "task"; task?: Task }
+  | { kind: "task"; task?: Task; placement?: { listId: string; projectId: string | null } }
   | null;
 
 type CalendarEventMove = { day: LocalDate; event: CalendarEvent; minute: number };
@@ -411,12 +420,6 @@ type CalendarRangeSelection = {
 };
 type CalendarMap = Map<string, Calendar>;
 type ContextSidebarMode = "finances" | "mail" | "settings" | "tasks" | null;
-
-const calendarViews: Array<{ icon: Icon; label: string; value: CalendarView }> = [
-  { icon: CalendarIcon, label: "Day", value: "day" },
-  { icon: ColumnsIcon, label: "Week", value: "week" },
-  { icon: GridIcon, label: "Month", value: "month" },
-];
 
 const RichEventNotes = lazy(() => import("./rich-event-notes.js"));
 const FinanceWorkspacePage = lazy(() =>
@@ -625,21 +628,6 @@ function useDeviceWeatherLocation(enabled: boolean): DeviceWeatherLocation {
     };
   }, [enabled]);
   return location;
-}
-
-function useMediaQuery(query: string) {
-  const [matches, setMatches] = useState(() => window.matchMedia?.(query).matches ?? false);
-
-  useEffect(() => {
-    const media = window.matchMedia?.(query);
-    if (!media) return;
-    const update = () => setMatches(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, [query]);
-
-  return matches;
 }
 
 function AuthScreen() {
@@ -986,26 +974,24 @@ function PasswordResetScreen({ token }: { token: string }) {
 
 function AuthLayout({ children }: { children: ReactNode }) {
   return (
-    <>
-      <main className="auth-shell">
-        <div className="auth-entry">
-          <header className="auth-header">
-            <div className="auth-header__brand">
-              <span aria-hidden="true" className="auth-header__symbol">
-                <NohmiBrandMark symbol />
-              </span>
-              <NohmiBrandMark />
-            </div>
-          </header>
-          <section className="auth-form-wrap">{children}</section>
-        </div>
-        <ShadcnCard aria-hidden="true" className="auth-brand-panel">
-          <ShadcnCardContent>
-            <BrandPattern />
-          </ShadcnCardContent>
-        </ShadcnCard>
-      </main>
-    </>
+    <main className="auth-shell">
+      <div className="auth-entry">
+        <header className="auth-header">
+          <div className="auth-header__brand">
+            <span aria-hidden="true" className="auth-header__symbol">
+              <NohmiBrandMark symbol />
+            </span>
+            <NohmiBrandMark />
+          </div>
+        </header>
+        <section className="auth-form-wrap">{children}</section>
+      </div>
+      <ShadcnCard aria-hidden="true" className="auth-brand-panel">
+        <ShadcnCardContent>
+          <BrandPattern />
+        </ShadcnCardContent>
+      </ShadcnCard>
+    </main>
   );
 }
 
@@ -1419,13 +1405,18 @@ function AuthenticatedApp({ user }: { user: User }) {
         ) : null}
         {isMobileWorkspaceDock && !isCalendarWorkspace ? (
           <MobileWorkspaceDock
-            showWorkspaceSwitcher={false}
-            accountSections={settingsSectionPages(
-              user.canManageInvitations === true,
-              workspaceSettingsActions,
-              settingsCounts,
-            )}
-            pathname={shellPathname}
+            title={
+              activeWorkspace?.id === "today" ? "Today" : (activeWorkspace?.label ?? "Settings")
+            }
+            pages={
+              activeWorkspace
+                ? [{ icon: HouseIcon, label: "Today", path: "/today" }]
+                : settingsSectionPages(
+                    user.canManageInvitations === true,
+                    workspaceSettingsActions,
+                    settingsCounts,
+                  )
+            }
             {...(sidebarMode === "tasks"
               ? {
                   renderWorkspaceNavigation: (onNavigate: () => void) => (
@@ -1449,9 +1440,6 @@ function AuthenticatedApp({ user }: { user: User }) {
                       ),
                     }
                   : {})}
-            planningTimezone={user.planningTimezone}
-            workspaceDefinitions={workspaceDefinitions}
-            weather={weather.data}
           />
         ) : null}
         <ReviewFlowHost
@@ -1466,6 +1454,7 @@ function AuthenticatedApp({ user }: { user: User }) {
           }
         />
         <WorkspaceLayout
+          contentMode={isCalendarWorkspace || sidebarMode === "mail" ? "panes" : "page"}
           banner={
             !online && (
               <div className="offline-banner">
@@ -1550,7 +1539,12 @@ function AuthenticatedApp({ user }: { user: User }) {
           <ReminderDialog close={() => setEditor(null)} reminder={editor.reminder} user={user} />
         )}
         {editor?.kind === "task" && (
-          <TaskDialog close={() => setEditor(null)} task={editor.task} user={user} />
+          <TaskDialog
+            close={() => setEditor(null)}
+            task={editor.task}
+            user={user}
+            placement={editor.placement}
+          />
         )}
         {editor?.kind === "event" && editor.event && editor.mode !== "edit" && (
           <EventInspector
@@ -1815,12 +1809,21 @@ function WorkspaceAppBarForRoute({
   weather: WeatherSnapshot | undefined;
   workspaceSwitcher: ReactNode;
 }) {
+  const navigateSearch = useNavigate();
+  const handleSearchAction = (action: SearchAction) => {
+    if (action === "new-task") setEditor({ kind: "task" });
+    if (action === "new-reminder") setEditor({ kind: "reminder" });
+    if (action === "new-event") setEditor({ kind: "event" });
+    if (action === "new-message") navigateSearch("/mail?compose=new");
+    if (action === "new-transaction")
+      navigateSearch("/finances/transactions#finance-add-transaction");
+  };
   const workspace = workspaceForLocation(pathname)?.id ?? "account";
   const isSpatialCalendar = pathname === "/calendar";
   const isReviewQueue = pathname.endsWith("/decisions");
   const identity = isReviewQueue ? (
     <span className="workspace-app-bar__title">Needs review</span>
-  ) : sidebarOwnsTitle ? null : isSpatialCalendar ? (
+  ) : workspace === "tasks" ? null : sidebarOwnsTitle ? null : isSpatialCalendar ? (
     <CalendarAppBarIdentity user={user} workspaceSwitcher={workspaceSwitcher} />
   ) : pathname === "/today" ? (
     <div className="calendar-app-bar__identity-cluster">
@@ -1848,17 +1851,40 @@ function WorkspaceAppBarForRoute({
     </span>
   );
   const context = isReviewQueue ? null : isSpatialCalendar ? (
-    <CalendarAppBarControls onToday={onCalendarToday} user={user} />
+    <div className="calendar-header-context">
+      <WorkspaceFinder
+        workspace="calendar"
+        timeZone={user.planningTimezone}
+        onAction={handleSearchAction}
+      />
+      <CalendarAppBarControls
+        accounts={<CalendarAccountsControl />}
+        onToday={onCalendarToday}
+        user={user}
+      />
+    </div>
   ) : pathname === "/today" ? (
     <TodayWeatherTopbar generatedAt={todayBrief?.generatedAt} user={user} weather={weather} />
   ) : pathname === "/activity" ? (
     <ActivityTopbarControls />
   ) : pathname === "/reminders" ? (
-    <RemindersTopbarControls />
+    <WorkspaceFinder workspace="tasks" onAction={handleSearchAction} />
   ) : pathname === "/tasks" ? (
-    <TasksTopbarControls />
+    <TasksAppBarControls
+      timeZone={user.planningTimezone}
+      search={<WorkspaceFinder workspace="tasks" onAction={handleSearchAction} />}
+    />
   ) : workspace === "mail" ? (
-    <MailAppBarControls />
+    <MailAppBarControls
+      sync={<MailSyncButton />}
+      search={<WorkspaceFinder workspace="mail" onAction={handleSearchAction} />}
+    />
+  ) : workspace === "finances" ? (
+    <>
+      <WorkspaceHeaderControlsSlot placement="leading" />
+      <WorkspaceFinder workspace="finances" onAction={handleSearchAction} />
+      <WorkspaceHeaderControlsSlot />
+    </>
   ) : null;
 
   return (
@@ -1881,29 +1907,30 @@ function WorkspaceAppBarForRoute({
               <TooltipContent side="bottom">Keep window on top</TooltipContent>
             </Tooltip>
           )}
-          <div
-            className={
-              workspace !== "mail" && workspace !== "calendar" && workspace !== "account"
-                ? "workspace-create-actions"
-                : undefined
-            }
-          >
-            {isReviewQueue ? null : pathname === "/reminders" ? (
-              <RemindersCreateButton onCreate={() => setEditor({ kind: "reminder" })} />
-            ) : workspace === "tasks" ? (
-              <TasksCreateButton
-                onCreate={() => setEditor({ kind: "task" })}
-                onCreateReminder={() => setEditor({ kind: "reminder" })}
-              />
-            ) : workspace === "calendar" ? null : workspace === "mail" ? (
-              <MailAccountsControl />
-            ) : workspace === "finances" ? (
-              <FinanceAddTransactionButton />
-            ) : workspace === "account" ? null : (
-              <CreateMenu setEditor={setEditor} />
-            )}
-          </div>
+          {workspace === "mail" && !isReviewQueue ? <MailAccountsControl /> : null}
         </>
+      }
+      primaryActions={
+        isReviewQueue ? null : pathname === "/reminders" ? (
+          <RemindersCreateButton onCreate={() => setEditor({ kind: "reminder" })} />
+        ) : workspace === "tasks" ? (
+          <TasksCreateButton
+            onCreate={(placement) =>
+              setEditor({ kind: "task", ...(placement ? { placement } : {}) })
+            }
+            onCreateReminder={() => setEditor({ kind: "reminder" })}
+          />
+        ) : workspace === "today" ? (
+          <CreateMenu setEditor={setEditor} />
+        ) : null
+      }
+      attention={
+        isSpatialCalendar ? (
+          <ReviewNavigation workspace="calendar" />
+        ) : workspaceSwitcher &&
+          (workspace === "mail" || workspace === "tasks" || workspace === "finances") ? (
+          <ReviewNavigation workspace={workspace} />
+        ) : null
       }
       context={context}
       identity={
@@ -1912,10 +1939,6 @@ function WorkspaceAppBarForRoute({
             ? workspaceSwitcher
             : null}
           {identity}
-          {workspaceSwitcher &&
-          (workspace === "mail" || workspace === "tasks" || workspace === "finances") ? (
-            <ReviewNavigation workspace={workspace} />
-          ) : null}
         </>
       }
       workspace={workspace}
@@ -2019,8 +2042,9 @@ function WorkspaceSwitcher({
       <ShadcnSidebarMenuItem>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <ShadcnButton
+            <ActionButton
               aria-label="Switch workspace"
+              data-compact={compact || undefined}
               className={
                 compact
                   ? "sidebar__workspace-trigger workspace-navigation-item"
@@ -2046,7 +2070,7 @@ function WorkspaceSwitcher({
               {!compact ? (
                 <ChevronDownIcon aria-hidden="true" className="ml-auto" data-icon="inline-end" />
               ) : null}
-            </ShadcnButton>
+            </ActionButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="start"
@@ -2159,21 +2183,6 @@ function CreateMenu({ setEditor }: { setEditor: (editor: Editor) => void }) {
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-function FinanceAddTransactionButton({ onSelect }: { onSelect?: () => void }) {
-  return (
-    <ShadcnButton
-      aria-label="Add transaction"
-      onClick={() => {
-        onSelect?.();
-        window.location.hash = "finance-add-transaction";
-      }}
-      size="sm"
-    >
-      <PlusIcon aria-hidden="true" data-icon="inline-start" /> <span>Add transaction</span>
-    </ShadcnButton>
   );
 }
 
@@ -2890,9 +2899,9 @@ function workspaceTitleForLocation(pathname: string, search: string): string | n
   if (pathname === "/motives") return "Motives";
   if (pathname === "/finances") return "Finances";
   if (pathname === "/finances/accounts") return "Accounts";
-  if (pathname === "/finances/budgets" || pathname === "/finances/plan") return "Plan";
+  if (pathname === "/finances/budgets" || pathname === "/finances/plan") return "Budget";
   if (pathname === "/finances/wealth") return "Wealth";
-  if (pathname === "/finances/setup") return "Financial setup";
+  if (pathname === "/finances/setup") return "Financial profile";
   if (pathname.startsWith("/finances/reviews/")) return "Financial review";
   if (pathname === "/finances/cashflow") return "Cash flow";
   if (pathname === "/finances/health") return "Ledger health";
@@ -2972,12 +2981,16 @@ function CalendarPage({
   const [floatingDraft, setFloatingDraft] = useState<EventDraft | null>(null);
   const initializedFollow = useRef(false);
   const requestedView = searchParams.get("view");
-  const defaultView: CalendarView =
-    typeof window.matchMedia === "function" && window.matchMedia("(max-width: 560px)").matches
-      ? "day"
-      : "week";
+  const calendarPreferences = useWorkspacePreferences("calendar");
+
+  const compactCalendar = useMediaQuery("(max-width: 560px)");
+  const responsiveDefaultView: CalendarView = compactCalendar ? "day" : "week";
+  const storedView = calendarPreferences.data?.preferences.calendarView;
+  const defaultView = storedView && storedView !== "auto" ? storedView : responsiveDefaultView;
   const view = calendarViewFromSearch(requestedView, defaultView);
-  const includeWeekends = searchParams.get("weekends") !== "0";
+  const includeWeekends = searchParams.has("weekends")
+    ? searchParams.get("weekends") !== "0"
+    : (calendarPreferences.data?.preferences.showWeekends ?? true);
   const requestedAnchor = searchParams.get("date");
   const requestedEventId = searchParams.get("event");
   const anchor = /^\d{4}-\d{2}-\d{2}$/.test(requestedAnchor ?? "")
@@ -3007,6 +3020,12 @@ function CalendarPage({
   const events = useQuery({
     queryFn: () => api.listEvents(range),
     queryKey: calendarQueryKeys.events(view, range.from, range.to),
+  });
+  const visibleLinkedEvent = events.data?.find((event) => event.id === requestedEventId);
+  const linkedEvent = useQuery({
+    queryKey: ["calendar-search-event", requestedEventId],
+    queryFn: () => api.getEvent(requestedEventId as string),
+    enabled: !!requestedEventId && !events.isPending && !visibleLinkedEvent,
   });
   const calendars = useQuery({ queryFn: api.listCalendars, queryKey: calendarQueryKeys.calendars });
   const connectorAccounts = useQuery({
@@ -3048,7 +3067,12 @@ function CalendarPage({
     onSettled: () => invalidateMaterial(queryClient),
   });
   const today = localDateAt(currentTime, user.planningTimezone);
-  const followToday = sameLocalDate(anchor, today) && searchParams.get("follow") !== "0";
+  const followToday =
+    !calendarPreferences.isPending &&
+    sameLocalDate(anchor, today) &&
+    (searchParams.has("follow")
+      ? searchParams.get("follow") !== "0"
+      : (calendarPreferences.data?.preferences.autoFollowToday ?? true));
   const disableFollowToday = () => updateCalendarState({ follow: "0" });
   const eventsByDay = useMemo(() => {
     const records = events.data ?? [];
@@ -3066,9 +3090,9 @@ function CalendarPage({
   }, [days, events.data, user.planningTimezone]);
 
   useEffect(() => {
-    if (!requestedEventId || !events.data) return;
-    const requestedEvent = events.data.find((event) => event.id === requestedEventId);
-    if (requestedEvent) setInspectedEvent(requestedEvent);
+    const selected = visibleLinkedEvent ?? linkedEvent.data;
+    if (!requestedEventId || !selected) return;
+    setInspectedEvent(selected);
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
@@ -3077,7 +3101,7 @@ function CalendarPage({
       },
       { replace: true },
     );
-  }, [events.data, requestedEventId, setSearchParams]);
+  }, [visibleLinkedEvent, linkedEvent.data, requestedEventId, setSearchParams]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(new Date()), 60_000);
@@ -3101,18 +3125,28 @@ function CalendarPage({
   }, [navigate, reconnectingAccountKey, reconnectingAccountLabels, reconnectingAccounts.length]);
 
   useEffect(() => {
-    if (initializedFollow.current) return;
+    if (initializedFollow.current || calendarPreferences.isPending) return;
     initializedFollow.current = true;
-    if (!sameLocalDate(anchor, today)) return;
+    if (!sameLocalDate(anchor, today) || searchParams.has("follow")) return;
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
-        next.set("follow", "1");
+        next.set(
+          "follow",
+          calendarPreferences.data?.preferences.autoFollowToday === false ? "0" : "1",
+        );
         return next;
       },
       { replace: true },
     );
-  }, [anchor, setSearchParams, today]);
+  }, [
+    anchor,
+    setSearchParams,
+    today,
+    searchParams,
+    calendarPreferences.isPending,
+    calendarPreferences.data,
+  ]);
 
   const showDay = (day: LocalDate) => {
     updateCalendarState({ date: localDateToIso(day), view: "day" });
@@ -3148,6 +3182,7 @@ function CalendarPage({
     <CalendarFeedbackRegion value={feedbackRegion}>
       <div className="calendar-page">
         <div ref={setFeedbackRegion} data-calendar-feedback />
+        <QueryFeedback query={linkedEvent} title="Couldn’t open this event." />
         <QueryFeedback query={events} title="Couldn’t refresh calendar events." staleOnly />
         <QueryFeedback query={calendars} title="Couldn’t load calendars." />
         <QueryFeedback query={connectorAccounts} title="Couldn’t load calendar accounts." />
@@ -3176,6 +3211,7 @@ function CalendarPage({
             setDragPreview={setDragPreview}
             followToday={followToday}
             key={localDateKey(days[0] as LocalDate)}
+            onEnterFollow={() => updateCalendarState({ follow: "1" })}
             onExitFollow={disableFollowToday}
             timeZone={user.planningTimezone}
             today={today}
@@ -3199,6 +3235,7 @@ function CalendarPage({
             showDay={showDay}
             followToday={followToday}
             key={localDateKey(days[0] as LocalDate)}
+            onEnterFollow={() => updateCalendarState({ follow: "1" })}
             onExitFollow={disableFollowToday}
             timeZone={user.planningTimezone}
             today={today}
@@ -3253,183 +3290,6 @@ function CalendarPage({
   );
 }
 
-function CalendarAppBarIdentity({
-  user,
-  workspaceSwitcher,
-}: {
-  user: User;
-  workspaceSwitcher: ReactNode;
-}) {
-  const [searchParams] = useSearchParams();
-  const compactMedia =
-    typeof window.matchMedia === "function" ? window.matchMedia("(max-width: 560px)") : undefined;
-  const defaultView: CalendarView = compactMedia?.matches ? "day" : "week";
-  const view = calendarViewFromSearch(searchParams.get("view"), defaultView);
-  const includeWeekends = searchParams.get("weekends") !== "0";
-  const requestedAnchor = searchParams.get("date");
-  const anchor = /^\d{4}-\d{2}-\d{2}$/.test(requestedAnchor ?? "")
-    ? parseLocalDate(requestedAnchor as string)
-    : localDateAt(new Date(), user.planningTimezone);
-  const days = useMemo(
-    () => calendarPeriodDays(view, anchor, includeWeekends),
-    [anchor, includeWeekends, view],
-  );
-  const start = days[0] as LocalDate;
-  const end = days[days.length - 1] as LocalDate;
-  const title =
-    view === "day"
-      ? formatLocalDate(start, { day: "numeric", month: "long", weekday: "long", year: "numeric" })
-      : view === "week"
-        ? calendarOrientationWeekTitle(start, end)
-        : formatLocalDate(anchor, { month: "long", year: "numeric" });
-  const compactTitle =
-    view === "day"
-      ? formatLocalDate(start, { day: "numeric", month: "short" })
-      : view === "week"
-        ? `${formatLocalDate(start, { month: "short" })} ${start.day}–${end.day}`
-        : formatLocalDate(anchor, { month: "short", year: "numeric" });
-
-  return (
-    <div className="calendar-app-bar__identity-cluster">
-      {workspaceSwitcher ? (
-        <div className="calendar-workspace-switcher">{workspaceSwitcher}</div>
-      ) : null}
-      <div className="calendar-app-bar__orientation">
-        <h2>
-          <span className="calendar-app-bar__title-full">{title}</span>
-          <span aria-hidden="true" className="calendar-app-bar__title-compact">
-            {compactTitle}
-          </span>
-        </h2>
-      </div>
-      <ReviewNavigation workspace="calendar" />
-    </div>
-  );
-}
-
-function calendarOrientationWeekTitle(start: LocalDate, end: LocalDate) {
-  if (start.year === end.year && start.month === end.month) {
-    return `${formatLocalDate(start, { month: "long" })} ${start.day}–${end.day}, ${start.year}`;
-  }
-  if (start.year === end.year) {
-    return `${formatLocalDate(start, { day: "numeric", month: "short" })}–${formatLocalDate(end, { day: "numeric", month: "short" })}, ${start.year}`;
-  }
-  return `${formatLocalDate(start, { day: "numeric", month: "short", year: "numeric" })}–${formatLocalDate(end, { day: "numeric", month: "short", year: "numeric" })}`;
-}
-
-function CalendarAppBarControls({ onToday, user }: { onToday: () => void; user: User }) {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const compactMedia =
-    typeof window.matchMedia === "function" ? window.matchMedia("(max-width: 560px)") : undefined;
-  const defaultView: CalendarView = compactMedia?.matches ? "day" : "week";
-  const requestedView = searchParams.get("view");
-  const view = calendarViewFromSearch(requestedView, defaultView);
-  const requestedAnchor = searchParams.get("date");
-  const anchor = /^\d{4}-\d{2}-\d{2}$/.test(requestedAnchor ?? "")
-    ? parseLocalDate(requestedAnchor as string)
-    : localDateAt(new Date(), user.planningTimezone);
-  const updateCalendarState = (updates: Record<string, null | string>) =>
-    setSearchParams((current) => {
-      const next = new URLSearchParams(current);
-      for (const [key, value] of Object.entries(updates)) {
-        if (value) next.set(key, value);
-        else next.delete(key);
-      }
-      return next;
-    });
-  const movePeriod = (direction: -1 | 1) => {
-    const date =
-      view === "day"
-        ? addLocalDays(anchor, direction)
-        : view === "week"
-          ? addLocalDays(anchor, direction * 7)
-          : addCalendarMonths(anchor, direction);
-    updateCalendarState({ date: localDateToIso(date), follow: "0" });
-  };
-  return (
-    <fieldset className="calendar-app-bar__controls">
-      <legend className="sr-only">Calendar controls</legend>
-      <div className="calendar-app-bar__control-set">
-        <SegmentedControl
-          aria-label="Calendar view: choose day, week, or month"
-          className="calendar-app-bar__view-switch"
-          data-view={view}
-          onValueChange={(value) => {
-            if (value === "day" || value === "week" || value === "month") {
-              updateCalendarState({ view: value === defaultView ? null : value });
-            }
-          }}
-          value={view}
-        >
-          {calendarViews.map((option) => {
-            const Icon = option.icon;
-            return (
-              <Tooltip key={option.value}>
-                <TooltipTrigger asChild>
-                  <SegmentedControlItem
-                    aria-label={option.label}
-                    className="calendar-app-bar__view-option"
-                    value={option.value}
-                  >
-                    <Icon aria-hidden="true" data-icon="inline-start" />
-                    <span className="calendar-app-bar__view-label">{option.label}</span>
-                  </SegmentedControlItem>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  Show {option.label.toLowerCase()} view
-                </TooltipContent>
-              </Tooltip>
-            );
-          })}
-        </SegmentedControl>
-        <ShadcnButton
-          aria-label="Today"
-          className="calendar-app-bar__today"
-          onClick={() => {
-            updateCalendarState({
-              date: localDateToIso(localDateAt(new Date(), user.planningTimezone)),
-              follow: "1",
-            });
-            onToday();
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <LocationFixedIcon aria-hidden="true" data-icon="inline-start" />
-          <span>Today</span>
-        </ShadcnButton>
-        <div className="calendar-app-bar__period-navigation">
-          <ShadcnButton
-            aria-label={`Previous ${view}`}
-            onClick={() => movePeriod(-1)}
-            size="icon-sm"
-            variant="ghost"
-          >
-            <ChevronLeftIcon aria-hidden="true" />
-          </ShadcnButton>
-          <ShadcnButton
-            aria-label={`Next ${view}`}
-            onClick={() => movePeriod(1)}
-            size="icon-sm"
-            variant="ghost"
-          >
-            <ChevronRightIcon aria-hidden="true" />
-          </ShadcnButton>
-        </div>
-        <CalendarAccountsControl />
-      </div>
-    </fieldset>
-  );
-}
-
-function addCalendarMonths(date: LocalDate, amount: number): LocalDate {
-  const monthIndex = date.month - 1 + amount;
-  const year = date.year + Math.floor(monthIndex / 12);
-  const month = (((monthIndex % 12) + 12) % 12) + 1;
-  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  return { day: Math.min(date.day, daysInMonth), month, year };
-}
-
 function CalendarAccountsControl() {
   const calendars = useQuery({ queryFn: api.listCalendars, queryKey: calendarQueryKeys.calendars });
   const accounts = useQuery({
@@ -3444,7 +3304,7 @@ function CalendarAccountsControl() {
   const attentionCount = enabledAccounts.filter(
     (account) => !["ready", "syncing"].includes(connectionHealth(account).state),
   ).length;
-  const needsAttention = attentionCount > 0;
+  const needsAttention = attentionCount > 0 || accounts.isError || calendars.isError;
   const triggerLabel = `${label}${needsAttention ? ", attention required" : ""}`;
   return (
     <ShadcnPopover>
@@ -3452,13 +3312,19 @@ function CalendarAccountsControl() {
         <AccountSelectionTrigger
           ariaLabel={triggerLabel}
           className="calendar-accounts-trigger"
-          disabled={accounts.isPending || records.length === 0}
+          disabled={accounts.isPending || calendars.isPending}
           identities={enabledAccounts.map((account) => ({
             avatarUrl: account.avatarUrl,
             fallback: initials(account.label ?? account.email ?? account.provider),
             id: account.id,
           }))}
           needsAttention={needsAttention}
+          allSynced={
+            enabledAccounts.length > 0 &&
+            enabledAccounts.every((account) =>
+              ["ready", "syncing"].includes(connectionHealth(account).state),
+            )
+          }
           selectedCount={selectedCount}
           totalCount={records.length}
         />
@@ -3467,13 +3333,27 @@ function CalendarAccountsControl() {
         className="calendar-accounts-popover"
         description={label}
         primaryAction={
-          needsAttention ? (
-            <ShadcnButton asChild className="w-full">
-              <Link to="/settings?section=connections">
-                {reconnectAccountsLabel(attentionCount)}
-              </Link>
-            </ShadcnButton>
-          ) : null
+          <>
+            {accounts.isError || calendars.isError ? (
+              <ShadcnButton
+                className="w-full"
+                disabled={accounts.isFetching || calendars.isFetching}
+                onClick={() => {
+                  void accounts.refetch();
+                  void calendars.refetch();
+                }}
+              >
+                Retry loading calendars
+              </ShadcnButton>
+            ) : null}
+            {attentionCount > 0 ? (
+              <ShadcnButton asChild className="w-full">
+                <Link to="/settings?section=connections">
+                  {reconnectAccountsLabel(attentionCount)}
+                </Link>
+              </ShadcnButton>
+            ) : null}
+          </>
         }
         title="Calendars"
       >
@@ -3629,6 +3509,7 @@ function DayCalendarView({
   followToday,
   moveEvent,
   onCreateRange,
+  onEnterFollow,
   onExitFollow,
   setEditor,
   setDraggedEventId,
@@ -3647,6 +3528,7 @@ function DayCalendarView({
   followToday: boolean;
   moveEvent: (event: CalendarEvent, day: LocalDate, minute: number) => void;
   onCreateRange: (draft: EventDraft) => void;
+  onEnterFollow: () => void;
   onExitFollow: () => void;
   setEditor: (editor: Editor) => void;
   setDraggedEventId: (id: string | null) => void;
@@ -3678,16 +3560,18 @@ function DayCalendarView({
     scrollTimelineToMinute(scrollContainer.current, localDateTimeAt(currentTime, timeZone).minute);
     rememberProgrammaticCalendarScroll(programmaticScrollPosition, scrollContainer.current);
   }, [currentTime, followToday, isToday, timeZone, todaySnap]);
-  const handleScroll = (event: ReactUIEvent<HTMLDivElement>) => {
-    if (!followToday) return;
-    if (consumeProgrammaticCalendarScroll(programmaticScrollPosition, event.currentTarget)) return;
-    const target = Math.max(
-      0,
-      minuteToTimelinePixels(localDateTimeAt(currentTime, timeZone).minute) -
-        event.currentTarget.clientHeight / 2,
-    );
-    if (Math.abs(event.currentTarget.scrollTop - target) > 96) onExitFollow();
-  };
+  const followPreferences = useWorkspacePreferences("calendar");
+  const handleScroll = useFollowScroll({
+    eligible: isToday,
+    following: followToday,
+    minute: localDateTimeAt(currentTime, timeZone).minute,
+    week: false,
+    programmatic: programmaticScrollPosition,
+    snapEnabled: followPreferences.data?.preferences.snapToFollow ?? true,
+    sensitivity: followPreferences.data?.preferences.followSnapSensitivity ?? "balanced",
+    onEnter: onEnterFollow,
+    onExit: onExitFollow,
+  });
   return (
     <section className={`calendar-day-view${isToday ? " is-today" : ""}`}>
       <WorkspaceSecondaryAppBar
@@ -3794,6 +3678,7 @@ function WeekCalendarView({
   followToday,
   moveEvent,
   onCreateRange,
+  onEnterFollow,
   onExitFollow,
   setEditor,
   setDraggedEventId,
@@ -3814,6 +3699,7 @@ function WeekCalendarView({
   followToday: boolean;
   moveEvent: (event: CalendarEvent, day: LocalDate, minute: number) => void;
   onCreateRange: (draft: EventDraft) => void;
+  onEnterFollow: () => void;
   onExitFollow: () => void;
   setEditor: (editor: Editor) => void;
   setDraggedEventId: (id: string | null) => void;
@@ -3882,33 +3768,25 @@ function WeekCalendarView({
     );
     rememberProgrammaticCalendarScroll(programmaticScrollPosition, container);
   }, [followToday, includesToday, timeZone, todaySnap]);
-  const handleScroll = (event: ReactUIEvent<HTMLDivElement>) => {
-    if (!followToday) return;
-    const container = event.currentTarget;
-    if (consumeProgrammaticCalendarScroll(programmaticScrollPosition, container)) return;
-    const verticalTarget = Math.max(
-      0,
-      minuteToTimelinePixels(localDateTimeAt(currentTime, timeZone).minute) -
-        container.clientHeight / 2,
-    );
-    const todayButton = container.querySelector<HTMLElement>('button[aria-current="date"]');
-    if (!todayButton) return;
-    const containerBounds = container.getBoundingClientRect();
-    const todayBounds = todayButton.getBoundingClientRect();
-    const horizontalDistance = Math.abs(
-      todayBounds.left + todayBounds.width / 2 - (containerBounds.left + container.clientWidth / 2),
-    );
-    if (Math.max(Math.abs(container.scrollTop - verticalTarget), horizontalDistance) > 96) {
-      onExitFollow();
-    }
-  };
+  const followPreferences = useWorkspacePreferences("calendar");
+  const handleScroll = useFollowScroll({
+    eligible: includesToday,
+    following: followToday,
+    minute: localDateTimeAt(currentTime, timeZone).minute,
+    week: true,
+    programmatic: programmaticScrollPosition,
+    snapEnabled: followPreferences.data?.preferences.snapToFollow ?? true,
+    sensitivity: followPreferences.data?.preferences.followSnapSensitivity ?? "balanced",
+    onEnter: onEnterFollow,
+    onExit: onExitFollow,
+  });
   return (
     <div className="week-calendar" onScroll={handleScroll} ref={scrollContainer}>
       <div
         className="week-calendar-grid"
         style={{
-          gridTemplateColumns: `var(--calendar-time-gutter-width) repeat(${days.length}, minmax(140px, 1fr))`,
-          minWidth: 56 + days.length * 140,
+          gridTemplateColumns: `var(--calendar-time-gutter-width) repeat(${days.length}, minmax(80px, 1fr))`,
+          minWidth: `calc(var(--calendar-time-gutter-width) + ${days.length * 80}px)`,
         }}
       >
         <WorkspaceSecondaryAppBar
@@ -3919,7 +3797,7 @@ function WeekCalendarView({
           <WorkspaceSecondaryAppBarContent
             className="calendar-secondary-app-bar__week-grid"
             style={{
-              gridTemplateColumns: `var(--calendar-time-gutter-width) repeat(${days.length}, minmax(140px, 1fr))`,
+              gridTemplateColumns: `var(--calendar-time-gutter-width) repeat(${days.length}, minmax(80px, 1fr))`,
             }}
           >
             <div data-calendar-axis="corner" className="week-time-corner">
@@ -4098,19 +3976,6 @@ function rememberProgrammaticCalendarScroll(
 ) {
   if (!container) return;
   position.current = { left: container.scrollLeft, top: container.scrollTop };
-}
-
-function consumeProgrammaticCalendarScroll(
-  position: { current: { left: number; top: number } | null },
-  container: HTMLElement,
-) {
-  const expected = position.current;
-  if (!expected) return false;
-  const matches =
-    Math.abs(container.scrollLeft - expected.left) <= 1 &&
-    Math.abs(container.scrollTop - expected.top) <= 1;
-  if (matches) position.current = null;
-  return matches;
 }
 
 function TimelineNow({
@@ -5684,26 +5549,6 @@ function MotivesPage() {
   );
 }
 
-function MailAppBarControls() {
-  const [params, setParams] = useSearchParams();
-  return (
-    <div className="mail-app-bar__controls">
-      <MailTopbarSearch
-        onSearch={(query) =>
-          setParams((current) => {
-            const next = new URLSearchParams(current);
-            query ? next.set("q", query) : next.delete("q");
-            next.delete("thread");
-            return next;
-          })
-        }
-        search={params.get("q")?.trim() ?? ""}
-      />
-      <MailSyncButton />
-    </div>
-  );
-}
-
 function MailAccountsControl() {
   const [params, setParams] = useSearchParams();
   const accounts = useQuery({
@@ -5721,7 +5566,7 @@ function MailAccountsControl() {
   const attentionCount = enabledAccounts.filter(
     (account) => !["ready", "syncing"].includes(connectionHealth(account).state),
   ).length;
-  const needsAttention = attentionCount > 0;
+  const needsAttention = attentionCount > 0 || accounts.isError;
   const triggerLabel = accounts.isPending
     ? "Loading mail accounts"
     : `${label}${needsAttention ? ", attention required" : ""}`;
@@ -5749,13 +5594,19 @@ function MailAccountsControl() {
         <AccountSelectionTrigger
           ariaLabel={triggerLabel}
           className="mail-accounts-trigger"
-          disabled={accounts.isPending || enabledAccounts.length === 0}
+          disabled={accounts.isPending}
           identities={enabledAccounts.map((account) => ({
             avatarUrl: account.avatarUrl,
             fallback: initials(account.label || account.email || account.provider),
             id: account.id,
           }))}
           needsAttention={needsAttention}
+          allSynced={
+            enabledAccounts.length > 0 &&
+            enabledAccounts.every((account) =>
+              ["ready", "syncing"].includes(connectionHealth(account).state),
+            )
+          }
           selectedCount={selectedIds.size}
           totalCount={enabledAccounts.length}
         />
@@ -5764,13 +5615,24 @@ function MailAccountsControl() {
         className="mail-accounts-popover"
         description={label}
         primaryAction={
-          needsAttention ? (
-            <ShadcnButton asChild className="w-full">
-              <Link to="/settings?section=connections">
-                {reconnectAccountsLabel(attentionCount)}
-              </Link>
-            </ShadcnButton>
-          ) : null
+          <>
+            {accounts.isError ? (
+              <ShadcnButton
+                className="w-full"
+                disabled={accounts.isFetching}
+                onClick={() => void accounts.refetch()}
+              >
+                Retry loading mail accounts
+              </ShadcnButton>
+            ) : null}
+            {attentionCount > 0 ? (
+              <ShadcnButton asChild className="w-full">
+                <Link to="/settings?section=connections">
+                  {reconnectAccountsLabel(attentionCount)}
+                </Link>
+              </ShadcnButton>
+            ) : null}
+          </>
         }
         title="Mail accounts"
       >
@@ -5936,9 +5798,9 @@ function MailSyncButton({
       {hasSyncDetails ? (
         <ShadcnPopover open={detailsOpen} onOpenChange={setDetailsOpen}>
           <ShadcnPopoverTrigger asChild>
-            <ShadcnButton aria-label="Mail sync details" size="icon-sm" variant="ghost">
+            <ActionButton aria-label="Mail sync details" size="icon-sm" variant="ghost">
               <AlertTriangleIcon aria-hidden="true" />
-            </ShadcnButton>
+            </ActionButton>
           </ShadcnPopoverTrigger>
           <ShadcnPopoverContent className="space-y-3" align="end">
             <ShadcnPopoverHeader>
@@ -6262,20 +6124,32 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
           </Link>
         </ShadcnButton>
       ) : null}
-      {section === "mail" ? <WorkspaceSettings domain="mail" /> : null}
+      {section === "mail" ? (
+        <div className="settings-stack">
+          <WorkspacePreferencesSection workspace="mail" />
+          <WorkspaceSettings domain="mail" />
+        </div>
+      ) : null}
       {section === "finances" ? (
         <div className="settings-stack">
+          <WorkspacePreferencesSection workspace="finances" />
           <FinanceSettings />
           <WorkspaceSettings domain="finances" />
         </div>
       ) : null}
       {section === "calendar" ? (
         <div className="settings-stack">
+          <WorkspacePreferencesSection workspace="calendar" />
           <CalendarsSettings setEditor={setEditor} />
           <WorkspaceSettings domain="calendar" />
         </div>
       ) : null}
-      {section === "tasks" ? <WorkspaceSettings domain="tasks" /> : null}
+      {section === "tasks" ? (
+        <div className="settings-stack">
+          <WorkspacePreferencesSection workspace="tasks" />
+          <WorkspaceSettings domain="tasks" />
+        </div>
+      ) : null}
       {section === "connections" ? (
         <div className="settings-stack">
           <ConnectorsSettings />
@@ -6510,7 +6384,7 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
                     </ShadcnItemContent>
                     {calendar.provider === "local" ? (
                       <ShadcnItemActions>
-                        <ShadcnButton
+                        <ActionButton
                           aria-label={`Delete ${calendar.name}`}
                           disabled={remove.isPending}
                           onClick={() =>
@@ -6527,7 +6401,7 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
                           variant="ghost"
                         >
                           <TrashIcon />
-                        </ShadcnButton>
+                        </ActionButton>
                       </ShadcnItemActions>
                     ) : null}
                   </ShadcnItem>
@@ -6930,7 +6804,7 @@ function XBookmarksConnectorRow({
               ? "Syncing"
               : "Ready"}
         </ShadcnBadge>
-        <ShadcnButton
+        <ActionButton
           aria-label={`Sync X bookmarks for ${account.username}`}
           disabled={syncing || !account.selectedFolderId}
           onClick={sync}
@@ -6939,8 +6813,8 @@ function XBookmarksConnectorRow({
           variant="ghost"
         >
           <RefreshIcon className={syncing ? "spin" : ""} />
-        </ShadcnButton>
-        <ShadcnButton
+        </ActionButton>
+        <ActionButton
           aria-label={`Disconnect X bookmarks for ${account.username}`}
           onClick={disconnect}
           size="icon"
@@ -6948,7 +6822,7 @@ function XBookmarksConnectorRow({
           variant="ghost"
         >
           <TrashIcon />
-        </ShadcnButton>
+        </ActionButton>
       </ShadcnItemActions>
     </ShadcnItem>
   );
@@ -9155,46 +9029,69 @@ function ReminderDialog({
     });
   };
   return (
-    <Modal
-      close={close}
-      eyebrow="Reminder"
-      title={reminder ? "Refine reminder" : "Hold onto something"}
-    >
-      <FeedbackForm feedback={mutation.feedback} className="editor-form" onSubmit={submit}>
-        <Field
-          autoFocus
-          defaultValue={reminder?.title}
-          label="What needs attention?"
-          name="title"
-          required
-        />
-        <div className="form-grid">
-          <Field
-            defaultValue={toDateTimeLocal(reminder?.dueAt, user.planningTimezone)}
-            label="Deadline"
-            name="dueAt"
-            type="datetime-local"
-          />
-          <label className="field">
-            <span>Priority</span>
-            <select defaultValue={reminder?.priority ?? "medium"} name="priority">
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
-          </label>
-        </div>
-        <label className="field">
-          <span>Notes</span>
-          <textarea defaultValue={reminder?.notes ?? ""} name="notes" rows={4} />
-        </label>
-        <FormActions
-          close={close}
-          pending={mutation.isPending}
-          submitLabel={reminder ? "Save changes" : "Create reminder"}
-        />
-      </FeedbackForm>
-    </Modal>
+    <ResponsiveDialog open onOpenChange={(open) => !open && close()}>
+      <ResponsiveDialogContent>
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>
+            {reminder ? "Refine reminder" : "Create a reminder"}
+          </ResponsiveDialogTitle>
+          {!reminder ? <TaskCreationProgress step={2} total={2} /> : null}
+        </ResponsiveDialogHeader>
+        <ResponsiveDialogBody>
+          <FeedbackForm feedback={mutation.feedback} onSubmit={submit}>
+            <ShadcnFieldGroup>
+              <ShadcnField>
+                <ShadcnFieldLabel htmlFor="reminder-title">What needs attention?</ShadcnFieldLabel>
+                <ShadcnInput
+                  autoFocus
+                  id="reminder-title"
+                  defaultValue={reminder?.title}
+                  name="title"
+                  required
+                />
+              </ShadcnField>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <ShadcnField>
+                  <ShadcnFieldLabel htmlFor="reminder-deadline">Deadline</ShadcnFieldLabel>
+                  <ShadcnInput
+                    id="reminder-deadline"
+                    defaultValue={toDateTimeLocal(reminder?.dueAt, user.planningTimezone)}
+                    name="dueAt"
+                    type="datetime-local"
+                  />
+                </ShadcnField>
+                <ShadcnField>
+                  <ShadcnFieldLabel htmlFor="reminder-priority">Priority</ShadcnFieldLabel>
+                  <ShadcnNativeSelect
+                    id="reminder-priority"
+                    defaultValue={reminder?.priority ?? "medium"}
+                    name="priority"
+                  >
+                    <NativeSelectOption value="low">Low</NativeSelectOption>
+                    <NativeSelectOption value="medium">Medium</NativeSelectOption>
+                    <NativeSelectOption value="high">High</NativeSelectOption>
+                  </ShadcnNativeSelect>
+                </ShadcnField>
+              </div>
+              <ShadcnField>
+                <ShadcnFieldLabel htmlFor="reminder-notes">Notes</ShadcnFieldLabel>
+                <ShadcnTextarea
+                  id="reminder-notes"
+                  defaultValue={reminder?.notes ?? ""}
+                  name="notes"
+                  rows={4}
+                />
+              </ShadcnField>
+            </ShadcnFieldGroup>
+            <ResponsiveDialogFooter className="mt-5">
+              <Button disabled={mutation.isPending} type="submit">
+                {mutation.isPending ? "Saving…" : reminder ? "Save changes" : "Create reminder"}
+              </Button>
+            </ResponsiveDialogFooter>
+          </FeedbackForm>
+        </ResponsiveDialogBody>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   );
 }
 
@@ -9592,14 +9489,14 @@ function EventVisibilityList({
       <li>
         <ShadcnPopover onOpenChange={setOpen} open={open}>
           <ShadcnPopoverTrigger asChild>
-            <ShadcnButton
+            <ActionButton
               aria-label={`Add calendar to ${status}`}
               disabled={disabled || availableCalendars.length === 0}
               size="icon-xs"
               variant="outline"
             >
               <PlusIcon aria-hidden="true" />
-            </ShadcnButton>
+            </ActionButton>
           </ShadcnPopoverTrigger>
           <ShadcnPopoverContent align="start" className="event-visibility-popover">
             <ShadcnPopoverHeader>

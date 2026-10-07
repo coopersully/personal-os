@@ -22,7 +22,19 @@ import type {
   UpsertMailAttentionItemInput,
 } from "@personal-os/domain";
 
+export type MailAttachmentContent = {
+  filename: string;
+  contentType: string;
+  data: string;
+  size: number;
+};
+
 export type MailApiClient = {
+  downloadMailAttachment(
+    messageId: string,
+    attachmentId: string,
+    signal?: AbortSignal,
+  ): Promise<MailAttachmentContent>;
   activateMailRule(
     id: string,
     input: ActivateMailRuleInput,
@@ -60,6 +72,13 @@ export function createMailApiClient(
   toQuery: (query: object) => string,
 ): MailApiClient {
   return {
+    async downloadMailAttachment(messageId, attachmentId, signal) {
+      const result = await request<{ attachment: MailAttachmentContent }>(
+        `/v1/mail/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+        signal ? { signal } : {},
+      );
+      return result.attachment;
+    },
     async activateMailRule(id, input) {
       return request<{ preview: MailRulePreview; rule: MailRule }>(
         `/v1/mail/rules/${id}/activate`,

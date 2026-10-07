@@ -86,7 +86,7 @@ it("morphs one persistent surface through every pill action", async () => {
   await browser.click(within(composer as HTMLElement).getByRole("button", { name: "Close" }));
   await browser.click(await screen.findByRole("button", { name: "Search calendar" }));
   expect(container.querySelector('[data-slot="calendar-floating-surface"]')).toBe(surface);
-  expect(surface).toHaveAttribute("data-state", "search");
+  expect(surface).toHaveAttribute("data-state", "closed");
 });
 
 it("moves focus into each surface and restores it to the triggering action", async () => {

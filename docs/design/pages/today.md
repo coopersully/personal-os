@@ -96,8 +96,9 @@ History (collapsed)
 
 - Today has no desktop sidebar. Its app bar owns the workspace switcher and
   account menu; the narrow workspace dock owns the equivalent mobile access.
-  Goals, Motives, Reviews, and Activity live in Settings. Reminders remains a
-  Tasks destination rather than a separate workspace.
+  Goals, Motives, and Activity live in Settings. Reviews opens from a workspace attention alert
+  or that workspace’s Settings header action; Today has no separate review-queue link. Reminders
+  remains a Tasks destination rather than a separate workspace.
 - Today uses the current condition glyph inside the same framed identity shape
   as every workspace in desktop and mobile switchers. The frame remains neutral;
   clear day, clear night, rain, and cloud/unavailable states change only the

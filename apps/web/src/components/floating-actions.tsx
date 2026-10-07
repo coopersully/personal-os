@@ -8,6 +8,15 @@ export function FloatingActions({ className, ...props }: ComponentProps<"nav">) 
   return <nav className={cn("floating-actions", className)} {...props} />;
 }
 
+/** Stable anchor for domain-owned floating workflows; opening never changes their host. */
+export function FloatingActionRegion({
+  align,
+  className,
+  ...props
+}: ComponentProps<"div"> & { align: "center" | "end" }) {
+  return <div {...props} className={cn("floating-action-region", className)} data-align={align} />;
+}
+
 export function FloatingActionButton({
   label,
   className,

@@ -170,7 +170,9 @@ function IncomeField({
     },
   });
   const change = (next: string) => client.setQueryData(draftKey, { value: next });
-  const commit = (next = value) => {
+  const commit = (
+    next = client.getQueryData<{ value: string } | null>(draftKey)?.value ?? saved,
+  ) => {
     const latest = client.getMutationCache().findAll({ mutationKey, status: "pending" }).at(-1);
     if ((latest && latest.state.variables === next) || (!latest && next === saved)) return;
     save.mutate(next);

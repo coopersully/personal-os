@@ -151,18 +151,19 @@ The compact workspace switcher is always a 32px square with a centered glyph,
 including Calendar and the desktop collapsed-rail entry. Its owner defines both
 dimensions; workspace-specific rules must not override either dimension.
 
-Tasks places identity, search, and the compact review alert on one header row.
-The task view/filter toolbar stays next to the collection. Calendar likewise uses
-one header row, with a compact radio menu for Day/Week/Month and Go to today,
-previous/next period controls, source visibility, and reviews. Desktop retains
-the visible segmented view selector and Today action. Both presentations share
-the same URL update handlers.
+Workspace-owned controls use the shared top navigation slots described in the
+[design system](system.md), rather than a duplicate toolbar beside each collection.
+Route-specific creation actions appear only where that route supports them.
 
-Mail keeps its search/sync/source row separate from identity when narrow; its
-collection toolbar stays separate too. Finances retains its single identity and
-attention row with creation at the bottom. Do not force every workspace to one
-row by shrinking controls or removing useful context. Use available space and
-the domain's control priorities; keep mobile review copy compact.
+Calendar keeps a collapsed Day/Week/Month selector at every width. At 600px or
+less, its view menu also contains a separate Today and Previous/Next command group;
+above that breakpoint those period actions remain visible in the app bar. Both
+presentations share URL update handlers, source visibility, and review entry points.
+The floating date control remains available for date navigation.
+
+Use the domain's control priorities and responsive menus to preserve accessible
+hit targets and useful context. Keep mobile review copy compact; do not reduce
+control sizes to force all content onto one row.
 
 ## Bounded migration
 

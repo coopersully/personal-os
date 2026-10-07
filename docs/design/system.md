@@ -638,8 +638,9 @@ use an X when attention is needed or health is unknown. Counts use secondary tex
 
 Header utility actions align to the inline end with shared icon-button sizing. Calendar keeps Reviews
 with its title; view and accounts precede Today, Previous, and Next at the far end. The view menu
-contains only Day, Week, and Month. Below 600px the period buttons yield to the compact header;
-the existing floating date control provides date navigation.
+contains Day, Week, and Month. At 600px or less, a separate command group in that menu also
+provides Today, Previous, and Next while the period buttons yield to the compact header.
+The existing floating date control remains available for date navigation.
 
 Calendar week columns flex above an 80px readable minimum, with the time gutter accounted for;
 only narrower viewports scroll horizontally. Week tiles use a very subtle alternating tone; Day keeps the page background and Month

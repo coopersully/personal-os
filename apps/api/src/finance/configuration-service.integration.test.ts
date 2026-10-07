@@ -179,6 +179,7 @@ describe.sequential("Finance configuration ownership and read purity", () => {
     const first = await service.updateProfile(
       updateFinanceProfileInputSchema.parse({
         expectedUpdatedAt: null,
+        effectiveDate: "2026-10-06",
         expectedNetPay: 1000,
         payFrequency: "monthly",
       }),

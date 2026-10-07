@@ -46,7 +46,7 @@ describe.sequential("reimbursement lifecycle", () => {
       .start();
     database = createDatabaseClient(container.getConnectionUri());
     await migrateDatabase(database.db, resolve(process.cwd(), "packages/database/migrations"));
-  });
+  }, 120_000);
 
   afterAll(async () => {
     await database.close();
@@ -343,7 +343,7 @@ describe.sequential("reimbursement lifecycle", () => {
     await service.reconcile(
       {
         allocationId: allocation.id,
-        dueDate: null,
+        dueDate: "2026-08-20",
         evidence: evidence(),
         expectedAmount: 220,
         operation: "create",

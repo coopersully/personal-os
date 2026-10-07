@@ -8,6 +8,7 @@ import {
   ritualDefinitionInputSchema,
   ritualResponseInputSchema,
   taskWorkspacePageSchema,
+  updateWorkspaceSettingsSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
 
@@ -265,6 +266,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
     paths: {
       "/v1/workspaces/{workspace}/search": {
         get: {
+          security,
           summary: "Search all available synced workspace content, independent of view filters",
           parameters: [
             {
@@ -317,6 +319,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
           },
         ],
         get: {
+          security,
           summary: "Read account-owned workspace preferences",
           responses: {
             200: {
@@ -325,28 +328,13 @@ export function createOpenApiDocument(apiBaseUrl: string) {
           },
         },
         patch: {
+          security,
           summary: "Update preferences with optimistic concurrency; human session only",
           requestBody: {
             required: true,
             content: {
               "application/json": {
-                schema: {
-                  type: "object",
-                  required: ["expectedRevision", "preferences"],
-                  properties: {
-                    expectedRevision: { type: "integer", minimum: 0 },
-                    preferences: {
-                      type: "object",
-                      properties: {
-                        includeArchivedInSearch: { type: "boolean" },
-                        calendarView: { type: "string", enum: ["auto", "day", "week", "month"] },
-                        showWeekends: { type: "boolean" },
-                      },
-                      additionalProperties: false,
-                    },
-                  },
-                  additionalProperties: false,
-                },
+                schema: z.toJSONSchema(updateWorkspaceSettingsSchema, { io: "input" }),
               },
             },
           },

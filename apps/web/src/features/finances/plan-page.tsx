@@ -299,7 +299,7 @@ export function FinancePlanPage() {
       return requireFinancePlanResult(result);
     },
     onSuccess: async (result) => {
-      queryClient.setQueryData(["finance-plan"], result);
+      queryClient.setQueryData(["finance-plan", requestedPlanId], result);
       setEditing(null);
       await refresh();
     },
@@ -328,7 +328,7 @@ export function FinancePlanPage() {
         approvalKeys.current.delete(`${displayed.id}:${displayed.version}`);
     },
     onSuccess: async (result) => {
-      queryClient.setQueryData(["finance-plan"], result);
+      queryClient.setQueryData(["finance-plan", requestedPlanId], result);
       queryClient.setQueryData(["finance-canonical-budget-status"], result);
       await refresh();
     },

@@ -6,6 +6,7 @@ import {
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
 import type { createAgentAccessWorkItemService } from "../agent-access-work-items.js";
+import { workspaceSearchBudget } from "../read-budget.js";
 import type { AppEnv, Principal } from "../types.js";
 import { createWorkspaceSearchService } from "../workspace-search/service.js";
 import { createWorkspaceSettingsService } from "../workspace-search/settings.js";
@@ -33,15 +34,29 @@ export function registerWorkspaceSearchRoutes({
     const query = workspaceSearchQuerySchema.parse(context.req.query());
     const principal = context.get("principal");
     if (workspace === "tasks") await requireScope("reminders:read")(context, async () => {});
-    const reviews = await workItems.searchItems(principal, workspace).then(
-      (items) => ({ items, unavailable: false }),
-      () => ({ items: [], unavailable: true }),
+    context.header("Cache-Control", "no-store");
+    return workspaceSearchBudget(
+      principal.userId,
+      async () => {
+        const reviews =
+          query.kind === "content"
+            ? { items: [], unavailable: false }
+            : await workItems.searchItems(principal, workspace, context.get("requestId")).then(
+                ({ items, unavailableSources }) => ({
+                  items,
+                  unavailable: unavailableSources.length > 0,
+                }),
+                () => ({ items: [], unavailable: true }),
+              );
+        context.req.raw.signal.throwIfAborted();
+        const result = await search.search(principal.userId, workspace, query, reviews.items);
+        return context.json({
+          ...result,
+          ...(reviews.unavailable ? { unavailable: ["reviews"] } : {}),
+        });
+      },
+      context.req.raw.signal,
     );
-    const result = await search.search(principal.userId, workspace, query, reviews.items);
-    return context.json({
-      ...result,
-      ...(reviews.unavailable ? { unavailable: ["reviews"] } : {}),
-    });
   });
   app.get("/v1/workspaces/:workspace/settings", async (context) =>
     context.json(

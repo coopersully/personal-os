@@ -39,7 +39,7 @@ describe("finance routes", () => {
     const response = await app.request("/v1/finances/configuration?userId=foreign");
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(getFinanceConfiguration).toHaveBeenCalledWith(id);
+    expect(getFinanceConfiguration).toHaveBeenCalledWith(id, "configuration-read");
     scopes = new Set();
     expect((await app.request("/v1/finances/configuration")).status).toBe(403);
     expect(getFinanceConfiguration).toHaveBeenCalledTimes(1);

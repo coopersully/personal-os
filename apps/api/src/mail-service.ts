@@ -1743,7 +1743,13 @@ export function createMailService({
       return serializeMailThread(record, await mailboxMap(userId));
     },
 
-    async downloadAttachment(userId: string, messageId: string, attachmentId: string) {
+    async downloadAttachment(
+      userId: string,
+      messageId: string,
+      attachmentId: string,
+      signal?: AbortSignal,
+    ) {
+      signal?.throwIfAborted();
       const [record] = await db
         .select({ message: mailMessages, accountId: mailThreads.accountId })
         .from(mailMessages)
@@ -1768,11 +1774,13 @@ export function createMailService({
           "service_unavailable",
           "Attachment downloads are unavailable for this connection.",
         );
+      signal?.throwIfAborted();
       const bytes = await gateway.downloadAttachment(
         userId,
         record.accountId,
         record.message.remoteMessageId,
         attachment,
+        signal,
       );
       if (bytes.length > 10 * 1024 * 1024)
         throw new AppError("invalid_request", "This attachment exceeds the 10 MB download limit.");

@@ -161,6 +161,46 @@ describe.sequential("Finance profile and budget lifecycle", () => {
     }
   });
 
+  it("reads and bridges today's payroll east of the UTC date boundary", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Local payroll",
+        email: `local-payroll-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "Pacific/Kiritimati",
+      })
+      .returning();
+    if (!owner) throw new Error("Missing owner");
+    const instant = new Date("2026-08-01T12:00:00Z");
+    const legacy = createFinanceService({ db: database.db, now: () => instant });
+    await legacy.updateProfile(
+      updateFinanceProfileInputSchema.parse({
+        effectiveDate: "2026-08-02",
+        expectedUpdatedAt: null,
+        expectedNetPay: 3000,
+        payFrequency: "monthly",
+      }),
+      {
+        principal: {
+          actorId: owner.id,
+          actorType: "user",
+          userId: owner.id,
+          scopes: new Set(["finances:write"]),
+        },
+        requestId: "local-payroll",
+      },
+    );
+    await expect(legacy.getProfile(owner.id)).resolves.toMatchObject({
+      effectiveDate: "2026-08-02",
+      expectedNetPay: 3000,
+    });
+    const canonical = createProfileBudgetService({ db: database.db, now: () => instant });
+    await expect(canonical.getFinancialProfile(owner.id)).resolves.toMatchObject({
+      data: { expectedMonthlyTakeHome: 3000 },
+    });
+  });
+
   it("retains explicit-null clearing and determined household changes in the legacy profile bridge", async () => {
     const [owner] = await database.db
       .insert(users)
@@ -196,6 +236,17 @@ describe.sequential("Finance profile and budget lifecycle", () => {
       context,
     );
     const legacy = createFinanceService({ db: database.db, now: () => now });
+    await legacy.updateProfile(
+      updateFinanceProfileInputSchema.parse({
+        effectiveDate: "2026-08-01",
+        expectedUpdatedAt: null,
+        employer: "Updated employer",
+      }),
+      { principal, requestId: "guarded-unrelated-profile" },
+    );
+    await expect(canonical.getFinancialProfile(owner.id)).resolves.toMatchObject({
+      data: { version: 1, expectedMonthlyTakeHome: 4_000 },
+    });
     await legacy.updateProfile(
       updateFinanceProfileInputSchema.parse({
         effectiveDate: "2026-08-01",

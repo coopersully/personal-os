@@ -44,7 +44,13 @@ const stateCopy: Record<MailStatus["state"], { label: string; description: strin
   },
 };
 
-export function MailStewardshipPage() {
+export function MailStewardshipPage({
+  embedded = false,
+  onChanged,
+}: {
+  embedded?: boolean;
+  onChanged?: () => Promise<void>;
+}) {
   const queryClient = useQueryClient();
   const [params] = useSearchParams();
   const focusedQuestion = params.get("question");
@@ -60,6 +66,7 @@ export function MailStewardshipPage() {
         queryClient.invalidateQueries({ queryKey: mailStewardshipQueryKeys.status }),
         queryClient.invalidateQueries({ queryKey: ["mail-maintenance-run", result.run.id] }),
       ]);
+      await onChanged?.();
     },
   });
   const review = useQuery({
@@ -77,10 +84,11 @@ export function MailStewardshipPage() {
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: mailStewardshipQueryKeys.status });
+      await onChanged?.();
     },
   });
 
-  if (status.isPending) return <MailStewardshipSkeleton />;
+  if (status.isPending) return <MailStewardshipSkeleton embedded={embedded} />;
   if (status.isError && !status.data)
     return <QueryFeedback query={status} title="Couldn’t load mail stewardship." />;
 
@@ -90,26 +98,34 @@ export function MailStewardshipPage() {
     left.id === focusedQuestion ? -1 : right.id === focusedQuestion ? 1 : 0,
   );
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 md:px-6">
+    <div
+      className={
+        embedded
+          ? "flex min-w-0 flex-col gap-6"
+          : "mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 md:px-6"
+      }
+    >
       <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div className="flex min-w-0 flex-col items-start gap-2">
-          <Button asChild size="sm" variant="ghost">
-            <Link to="/mail">
-              <ArrowLeftIcon aria-hidden="true" data-icon="inline-start" />
-              Back to inbox
-            </Link>
-          </Button>
-          <div>
-            <p className="text-sm font-medium text-muted-foreground">Evidence and authority</p>
-            <h1 className="font-heading text-2xl font-medium tracking-tight">
-              Workspace stewardship
-            </h1>
-            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-              Evidence-bound maintenance of obligations, decisions, rules, questions, and reviews.
-              Agents and automation never send email.
-            </p>
+        {!embedded ? (
+          <div className="flex min-w-0 flex-col items-start gap-2">
+            <Button asChild size="sm" variant="ghost">
+              <Link to="/mail">
+                <ArrowLeftIcon aria-hidden="true" data-icon="inline-start" />
+                Back to inbox
+              </Link>
+            </Button>
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">Evidence and authority</p>
+              <h1 className="font-heading text-2xl font-medium tracking-tight">
+                Workspace stewardship
+              </h1>
+              <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+                Evidence-bound maintenance of obligations, decisions, rules, questions, and reviews.
+                Agents and automation never send email.
+              </p>
+            </div>
           </div>
-        </div>
+        ) : null}
         <Button disabled={maintain.isPending} onClick={() => maintain.mutate()}>
           <RefreshIcon aria-hidden="true" data-icon="inline-start" />
           {maintain.isPending ? "Maintaining…" : "Maintain Mail"}
@@ -377,12 +393,16 @@ function AuthorityPanel({ status }: { status: MailStatus }) {
   );
 }
 
-function MailStewardshipSkeleton() {
+function MailStewardshipSkeleton({ embedded }: { embedded: boolean }) {
   return (
     <div
       aria-busy="true"
       aria-label="Loading Mail stewardship"
-      className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 md:px-6"
+      className={
+        embedded
+          ? "flex min-w-0 flex-col gap-6"
+          : "mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 md:px-6"
+      }
       role="status"
     >
       <Skeleton className="h-16 w-full max-w-xl" />

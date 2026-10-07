@@ -24,9 +24,9 @@ Seven primary destinations serve distinct jobs:
 The default route uses one primary position block and an open sequence of
 supporting material. Unavailable amounts remain unavailable; partial ownership
 or stale sources remain visible. Financial setup and Finance settings are
-secondary destinations. Imports and Ledger health remain available from
-Accounts; subscriptions remain available from Cash flow. Existing budget and
-subscription deep links continue to resolve.
+secondary destinations. Accounts links to transaction import; subscriptions remain available
+from Cash flow. Legacy import links open the Transactions import flow, and Ledger health links
+redirect to Transactions checks. Existing budget and subscription deep links continue to resolve.
 
 Navigation uses the shared shadcn sidebar group, menu, button, and badge
 components. The workspace picker already names Finances, so the navigation
@@ -199,8 +199,9 @@ Review.
   labels; the UI does not synthesize wealth history or an unsupported forecast.
 - Summary metrics live within their owning position block instead of separate,
   equally weighted metric cards.
-- Detailed ledger checks use progressive disclosure on the overview and remain
-  fully visible on the dedicated Ledger health route.
+- Transactions exposes nonzero ledger checks not guaranteed to appear in Reviews; Accounts owns
+  connection freshness, ownership, balances, and account coverage. Legacy Ledger health links
+  redirect to Transactions checks rather than a dedicated health page.
 - Empty budget pace does not render an inactive time-range control or an empty
   visualization.
 - Compatibility domain-guidance state is explicit: not configured, draft, or active.
@@ -263,23 +264,27 @@ The approved workspace journeys extend the compatibility checks below:
 
 ## Header and page composition
 
-Finance uses the shared primary header for workspace search, contextual controls, and one
-**New transaction** icon button. Pages publish stateful controls through
-`WorkspaceHeaderControls`; the app frame mounts its destination beside workspace search.
-No Finance page adds a secondary navigation row just for actions.
+Finance uses the shared primary header for workspace search and contextual controls. Pages publish
+stateful controls through `WorkspaceHeaderControls`; the app frame mounts its destination beside
+workspace search. No Finance page adds a secondary navigation row just for actions.
 
-- Transactions exposes Import history; Imports exposes Transactions.
-- Plan exposes Financial setup, Budget buckets, Refresh, and Revise plan when available.
-- Accounts exposes bank connection, manual account creation, imports, and evidence health.
-- Wealth exposes goal creation and account management.
+- Transactions has one trailing Add menu for transaction, category, and transaction import actions;
+  it has no separate New transaction button. The import dialog links to import history.
+- Plan exposes Revise plan in the workspace header when a plan is available. The Budget buckets
+  card owns its Add action and category manager.
+- Accounts exposes Import records in the workspace header. The Accounts card owns Add account,
+  which offers bank connection or manual account creation.
+- Wealth owns Create goal in the Financial goals card header and links to account management.
+- Overview and Financial profile do not add a workspace-wide creation control. Profile section
+  editors retain their own record actions.
 - Cash flow uses a compact view dropdown with trailing radio indicators for Outlook, Income,
   Bills & subscriptions, Reimbursements, and Scenarios. The selected view remains URL-backed;
   changing it preserves other query parameters.
 - Controls remain end-aligned with consistent spacing. Icon actions retain accessible names
   and tooltips. Narrow/zoomed layouts may wrap within the header without horizontal overflow.
   The shared mobile create placement remains in effect.
-- New transaction opens the existing transaction form in the shared responsive dialog/drawer,
-  using a navigable transaction route and hash. Closing removes that hash while preserving
+- The Transactions Add menu’s transaction action opens the existing transaction form in the shared
+  responsive dialog/drawer, using a navigable transaction route and hash. Closing removes that hash while preserving
   transaction filters. Draft fields remain intact while closing/reopening the same mounted page;
   a successful save clears the draft.
 - Transaction filtering remains a labelled form beside the ledger because its combined
@@ -309,7 +314,7 @@ Account warnings name the affected account and provide sync, reconnect, or edit 
 
 Accounts use full-width records with type icons, source/status badges beside the title, and tooltip-equipped edit/transaction actions at the top end. Wealth presents current metrics in responsive shared KPI cards and links to Accounts rather than repeating its records. Historical charts are deferred until reliable balance history is available.
 
-Accounts, Budget buckets, and Financial goals each expose a tooltip-equipped Add action at the header end. The transaction-only Add menu lives at the end of the header; other Finance pages have no
+Accounts, Budget buckets, and Financial goals each expose a tooltip-equipped Add action at their card header end. The transaction-only Add menu lives at the end of the header; other Finance pages have no
 workspace-wide Add menu. Cash flow view selection occupies the shared leading header slot; search
 and other utilities remain at the end. Account records are secondary Items within the Accounts
 card, with inline attention, source, kind, balance, and recovery actions rather than separate warning

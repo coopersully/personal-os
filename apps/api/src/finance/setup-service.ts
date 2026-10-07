@@ -795,7 +795,13 @@ export function createSetupService({ db, now, planning, executor }: Options) {
               const [updated] = await db
                 .update(financeSetupSessions)
                 .set({ skippedQuestions, version: session.version + 1, updatedAt: now() })
-                .where(eq(financeSetupSessions.id, session.id))
+                .where(
+                  and(
+                    eq(financeSetupSessions.id, session.id),
+                    eq(financeSetupSessions.userId, context.userId),
+                    eq(financeSetupSessions.version, input.expectedVersion),
+                  ),
+                )
                 .returning();
               if (!updated) throw new AppError("conflict", "Setup changed.");
               return advance(updated, current, context);

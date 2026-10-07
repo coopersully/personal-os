@@ -400,3 +400,26 @@ describe("Mail OpenAPI surface", () => {
     }
   });
 });
+
+it("documents all workspace preference writes without supplying PATCH defaults", () => {
+  const operation = taskOperation("/v1/workspaces/{workspace}/settings", "patch");
+  const schema = operation.requestBody?.content?.["application/json"]?.schema as JsonSchema;
+  const preferences = schema.properties?.preferences;
+  expect(preferences?.properties).toMatchObject({
+    financeTransactionView: { enum: ["table", "cards"] },
+    financeTransactionGroup: {
+      enum: ["none", "date", "category", "merchant", "direction", "posting"],
+    },
+    mailConversationLayout: { enum: ["split", "single"] },
+    pinnedListIds: { type: "array" },
+    pinnedProjectIds: { type: "array" },
+    autoFollowToday: { type: "boolean" },
+    snapToFollow: { type: "boolean" },
+    taskRowDetails: { type: "array" },
+  });
+  expect(preferences?.required).toBeUndefined();
+  expect(preferences?.additionalProperties).toBe(false);
+  expect(
+    Object.values(preferences?.properties ?? {}).every((field) => field.default === undefined),
+  ).toBe(true);
+});

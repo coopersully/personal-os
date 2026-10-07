@@ -146,7 +146,10 @@ function CreationFlow({
                 ? "Where does this task belong?"
                 : "Where does this project belong?"}
           </ResponsiveDialogTitle>
-          <TaskCreationProgress step={step === "choose" ? 1 : 2} total={3} />
+          <TaskCreationProgress
+            step={step === "choose" ? 1 : 2}
+            total={step === "choose" ? undefined : 3}
+          />
         </ResponsiveDialogHeader>
         <ResponsiveDialogBody>
           {step === "choose" ? (

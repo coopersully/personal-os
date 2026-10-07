@@ -68,7 +68,13 @@ export const detailOptions = [
   ["notes", "Notes"],
 ] as const;
 
-export function WorkspaceSort({ params }: { params: URLSearchParams }) {
+export function WorkspaceSort({
+  params,
+  routeParams = params,
+}: {
+  params: URLSearchParams;
+  routeParams?: URLSearchParams;
+}) {
   const save = useSaveTaskPresentation();
   const navigate = useNavigate();
   const value = params.get("sort") ?? "default";
@@ -94,7 +100,7 @@ export function WorkspaceSort({ params }: { params: URLSearchParams }) {
           <DropdownMenuRadioGroup
             value={value}
             onValueChange={(next) => {
-              navigate(withWorkspaceOption(params, "sort", next));
+              navigate(withWorkspaceOption(routeParams, "sort", next));
               save.mutate({ taskSort: next as WorkspacePreferences["taskSort"] });
             }}
           >
@@ -110,7 +116,13 @@ export function WorkspaceSort({ params }: { params: URLSearchParams }) {
   );
 }
 
-export function WorkspaceDisplay({ params }: { params: URLSearchParams }) {
+export function WorkspaceDisplay({
+  params,
+  routeParams = params,
+}: {
+  params: URLSearchParams;
+  routeParams?: URLSearchParams;
+}) {
   const save = useSaveTaskPresentation();
   const navigate = useNavigate();
   const details = (params.get("details") ?? "estimate").split(",");
@@ -127,7 +139,7 @@ export function WorkspaceDisplay({ params }: { params: URLSearchParams }) {
           <DropdownMenuRadioGroup
             value={params.get("group") ?? "none"}
             onValueChange={(next) => {
-              navigate(withWorkspaceOption(params, "group", next));
+              navigate(withWorkspaceOption(routeParams, "group", next));
               save.mutate({ taskGroup: next as WorkspacePreferences["taskGroup"] });
             }}
           >
@@ -165,7 +177,11 @@ export function WorkspaceDisplay({ params }: { params: URLSearchParams }) {
                   >,
                 });
                 navigate(
-                  withWorkspaceOption(params, "details", next.length ? next.join(",") : "none"),
+                  withWorkspaceOption(
+                    routeParams,
+                    "details",
+                    next.length ? next.join(",") : "none",
+                  ),
                 );
               }}
             >
@@ -220,11 +236,13 @@ function FilterSelect({
 
 export function WorkspaceFilters({
   params,
+  routeParams = params,
   timeZone,
   lists,
   projects,
 }: {
   params: URLSearchParams;
+  routeParams?: URLSearchParams;
   timeZone: string;
   lists: TaskList[];
   projects: TaskProject[];
@@ -271,7 +289,7 @@ export function WorkspaceFilters({
         return;
       }
     }
-    const next = new URLSearchParams(params);
+    const next = new URLSearchParams(routeParams);
     for (const key of [...workspaceFilterKeys, ...(global ? ["list", "project"] : [])]) {
       const value = draft.get(key);
       if (value) next.set(key, value);
@@ -518,7 +536,7 @@ export function WorkspaceFilters({
             variant="outline"
             size="sm"
             onClick={() => {
-              const next = new URLSearchParams(params);
+              const next = new URLSearchParams(routeParams);
               for (const key of workspaceFilterKeys) next.delete(key);
               if (global) {
                 next.delete("list");
@@ -540,11 +558,13 @@ export function WorkspaceFilters({
 
 export function WorkspaceFilterChips({
   params,
+  routeParams = params,
   timeZone,
   lists,
   projects,
 }: {
   params: URLSearchParams;
+  routeParams?: URLSearchParams;
   timeZone: string;
   lists: TaskList[];
   projects: TaskProject[];
@@ -623,7 +643,7 @@ export function WorkspaceFilterChips({
           variant="secondary"
           aria-label={`Remove ${chip.label}`}
           onClick={() => {
-            const next = new URLSearchParams(params);
+            const next = new URLSearchParams(routeParams);
             for (const key of chip.keys) next.delete(key);
             navigate(workspacePath(next));
           }}

@@ -23,7 +23,7 @@ type FileMetadata = {
   size: number | null;
 };
 type FileContent = { filename: string; contentType: string; data: string; size: number };
-type LoadAttachment = (id: string) => Promise<FileContent>;
+type LoadAttachment = (id: string, signal?: AbortSignal) => Promise<FileContent>;
 
 function previewType(contentType: string) {
   const mime = contentType.split(";")[0]?.trim().toLowerCase();
@@ -39,11 +39,13 @@ function AttachmentTile({ file, load }: { file: FileMetadata; load?: LoadAttachm
     null,
   );
   const mounted = useRef(true);
+  const activeRequest = useRef<AbortController | null>(null);
   const lastAction = useRef<"preview" | "download">("download");
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
+      activeRequest.current?.abort();
     };
   }, []);
   useEffect(
@@ -55,15 +57,29 @@ function AttachmentTile({ file, load }: { file: FileMetadata; load?: LoadAttachm
   const name = file.filename || "Attachment";
   const canPreview = Boolean(previewType(file.contentType));
   async function open(action: "preview" | "download") {
-    if (!load || busy) return;
+    if (!load || activeRequest.current) return;
+    const controller = new AbortController();
+    activeRequest.current = controller;
     lastAction.current = action;
     setBusy(true);
     setError(null);
     try {
-      const content = await load(file.id);
-      if (!mounted.current) return;
+      const content = await load(file.id, controller.signal);
+      if (!mounted.current || controller.signal.aborted) return;
       const bytes = Uint8Array.from(atob(content.data), (character) => character.charCodeAt(0));
-      const kind = previewType(content.contentType);
+      let kind = previewType(content.contentType);
+      let text: string | undefined;
+      if (kind === "text") {
+        const charset = /(?:^|;)\s*charset\s*=\s*(?:"([^"]+)"|([^;\s]+))/i.exec(
+          content.contentType,
+        );
+        try {
+          text = new TextDecoder(charset?.[1] ?? charset?.[2] ?? "utf-8").decode(bytes);
+        } catch {
+          // An unsupported charset remains downloadable without showing corrupted text.
+          kind = null;
+        }
+      }
       const blob = new Blob([bytes], {
         type: kind === "image" ? content.contentType : "application/octet-stream",
       });
@@ -72,7 +88,7 @@ function AttachmentTile({ file, load }: { file: FileMetadata; load?: LoadAttachm
         setPreview({
           url,
           filename: content.filename,
-          ...(kind === "text" ? { text: new TextDecoder().decode(bytes) } : {}),
+          ...(text !== undefined ? { text } : {}),
         });
       } else {
         const link = document.createElement("a");
@@ -84,11 +100,12 @@ function AttachmentTile({ file, load }: { file: FileMetadata; load?: LoadAttachm
         setTimeout(() => URL.revokeObjectURL(url), 30_000);
       }
     } catch (failure) {
-      if (mounted.current)
+      if (mounted.current && !controller.signal.aborted)
         setError(
           failure instanceof Error ? failure.message : "Couldn’t load the attachment. Try again.",
         );
     } finally {
+      if (activeRequest.current === controller) activeRequest.current = null;
       if (mounted.current) setBusy(false);
     }
   }

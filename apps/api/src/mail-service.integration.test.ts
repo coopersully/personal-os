@@ -458,15 +458,17 @@ describe.sequential("mail service", () => {
       })
       .returning();
     if (!message) throw new Error("Missing test message");
+    const controller = new AbortController();
     gateway.downloadAttachment.mockClear();
     await expect(
-      service.downloadAttachment(userId, message.id, "download-attachment"),
+      service.downloadAttachment(userId, message.id, "download-attachment", controller.signal),
     ).resolves.toMatchObject({ data: "dGVzdA==", filename: ".._notes_.txt", size: 4 });
     expect(gateway.downloadAttachment).toHaveBeenCalledWith(
       userId,
       enabledAccountId,
       "download-message",
       expect.objectContaining({ id: "download-attachment" }),
+      controller.signal,
     );
     gateway.downloadAttachment.mockClear();
     await expect(

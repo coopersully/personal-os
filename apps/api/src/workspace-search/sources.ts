@@ -41,12 +41,12 @@ export const workspaceSearchSources: Record<SearchableWorkspace, SearchSource[]>
   ],
   tasks: [
     source({
-      from: "reminders t LEFT JOIN task_lists l ON l.id = t.task_list_id AND l.user_id = t.user_id",
+      from: "reminders t JOIN users u ON u.id = t.user_id LEFT JOIN task_lists l ON l.id = t.task_list_id AND l.user_id = t.user_id",
       kind: "Task",
       kindSql: "CASE WHEN t.kind = 'task' THEN 'Task' ELSE 'Reminder' END",
       title: "t.title",
       preview:
-        "concat(CASE WHEN t.kind = 'task' THEN 'Task' ELSE 'Reminder' END, ' · ', coalesce(l.name, ''), ' · ', coalesce(t.notes, ''), CASE WHEN t.due_at IS NOT NULL THEN ' · Due ' || to_char(t.due_at, 'Mon DD, YYYY') ELSE '' END)",
+        "concat(CASE WHEN t.kind = 'task' THEN 'Task' ELSE 'Reminder' END, ' · ', coalesce(l.name, ''), ' · ', coalesce(t.notes, ''), CASE WHEN t.due_at IS NOT NULL THEN ' · Due ' || to_char(t.due_at AT TIME ZONE u.planning_timezone, 'Mon DD, YYYY') ELSE '' END)",
       text: "concat(t.title, ' ', t.notes, ' ', t.tags::text, ' ', t.task_why)",
       href: "CASE WHEN t.kind = 'task' THEN '/tasks?task=' || t.id ELSE '/reminders?reminder=' || t.id END",
       state:

@@ -5,6 +5,9 @@
 See when commitments occur across the selected calendars, then open or place an
 event without losing the shape of the day.
 
+Calendar stays bounded to the viewport across all view modes. When narrow app chrome grows taller,
+the calendar takes the remaining height and scrolls its own timeline rather than extending the page.
+
 ## Axis layout contract
 
 Calendar has two wayfinding axes: the top date/all-day rail and the leading time rail.
@@ -81,6 +84,8 @@ and verify matching computed backgrounds and column alignment in both themes.
 - The app-frame controls keep Day/Week/Month, Today, period back/forward, and
   the synced-calendar disclosure in that order. The disclosure shows account
   avatars with an `X of X calendars` label and uses switches for visibility.
+  At widths of 600 px or less, Today and Previous/Next period commands move
+  into the Calendar view menu after the view choices, keeping the app bar compact.
 - Timeline columns carry 15-minute rules with an hour/half-hour/quarter-hour
   weight hierarchy. Half-hour labels in the gutter make the hierarchy readable
   without counting subdivisions. At scroll-top, the midnight label remains

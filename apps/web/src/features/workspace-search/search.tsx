@@ -198,7 +198,7 @@ function FinderInput({
             setOffset(0);
           }}
         >
-          {includeArchived ? "Including archive" : "Active only"}
+          {includeArchived ? "Including archive" : "Excluding archive"}
         </Button>
       </div>
       <NativeSelect

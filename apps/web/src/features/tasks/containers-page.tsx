@@ -39,6 +39,11 @@ const sorts = [
   ["target", "Target date"],
 ] as const;
 
+function containerSort(kind: ContainerKind, params: URLSearchParams) {
+  const requested = params.get("containerSort") ?? "updated";
+  return kind === "lists" && requested === "target" ? "updated" : requested;
+}
+
 export function selectTaskContainers(
   kind: ContainerKind,
   lists: TaskList[],
@@ -72,7 +77,7 @@ export function selectTaskContainers(
       return text.join(" ").toLocaleLowerCase().includes(query);
     })
     .sort((a, b) => {
-      const sort = params.get("containerSort") ?? "updated";
+      const sort = containerSort(kind, params);
       const order =
         sort === "updated"
           ? b.updatedAt.localeCompare(a.updatedAt)
@@ -156,7 +161,7 @@ export function TaskContainerControls({ kind }: { kind: ContainerKind }) {
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuRadioGroup
-            value={params.get("containerSort") ?? "updated"}
+            value={containerSort(kind, params)}
             onValueChange={(value) => {
               update("containerSort", value);
               save.mutate({ taskContainerSort: value as "updated" | "name" | "newest" | "target" });
@@ -268,13 +273,12 @@ export function TaskContainersPage({ kind }: { kind: ContainerKind }) {
                       </ItemMedia>
                       <ItemTitle className="break-words">{record.name}</ItemTitle>
                     </Link>
-                    {kind !== "archive" ? (
-                      <TaskContainerPin
-                        id={record.id}
-                        kind={project ? "project" : "list"}
-                        name={record.name}
-                      />
-                    ) : null}
+                    <TaskContainerPin
+                      unpinOnly={kind === "archive"}
+                      id={record.id}
+                      kind={project ? "project" : "list"}
+                      name={record.name}
+                    />
                     {list && !archived ? (
                       <TaskContainerActions
                         list={list}

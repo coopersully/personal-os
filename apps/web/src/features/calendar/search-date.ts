@@ -14,14 +14,14 @@ export function calendarSearchResults(
   timeZone: string,
   now = new Date(),
 ): SearchResult[] {
-  const normalized = query.trim().toLocaleLowerCase();
+  const normalized = query.trim().toLowerCase();
   if (!normalized) return [];
   const dateResult = parseCalendarDateQuery(normalized, timeZone, now);
   const matchingEvents = events
     .filter((event) =>
       [event.title, event.location, event.notes]
         .filter(Boolean)
-        .some((value) => value?.toLocaleLowerCase().includes(normalized)),
+        .some((value) => value?.toLowerCase().includes(normalized)),
     )
     .slice(0, 7)
     .map((event) => ({
@@ -45,10 +45,10 @@ export function parseCalendarDateQuery(
   timeZone: string,
   now = new Date(),
 ): SearchResult | undefined {
-  query = query.trim().toLocaleLowerCase();
+  query = query.trim().toLowerCase();
   const today = localDateAt(now, timeZone);
   const relativeDays: Record<string, number> = { today: 0, tomorrow: 1, yesterday: -1 };
-  if (query in relativeDays) {
+  if (Object.hasOwn(relativeDays, query)) {
     const date = addDays(today, relativeDays[query] as number);
     return dateSearchResult(query, date);
   }

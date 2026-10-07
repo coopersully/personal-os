@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -49,22 +49,19 @@ describe("Settings field destinations", () => {
     await waitFor(() => expect(screen.getByLabelText("Time zone")).toHaveFocus());
     expect(screen.getByLabelText("Time zone")).toHaveValue("UTC");
   });
-  it("opens a settings editor and waits for the target to mount", async () => {
+  it("waits for inline Finance settings to finish loading before focusing", async () => {
     function Editor() {
-      const [open, setOpen] = useState(false);
-      return (
-        <>
-          {open ? (
-            <input id="profile-buffer" aria-label="Buffer target" />
-          ) : (
-            <button type="button" onClick={() => setOpen(true)}>
-              Edit financial profile
-            </button>
-          )}
-        </>
+      const [loaded, setLoaded] = useState(false);
+      return loaded ? (
+        <input id="finance-config-bufferTarget" aria-label="Buffer target" />
+      ) : (
+        <button type="button" onClick={() => setLoaded(true)}>
+          Finish loading
+        </button>
       );
     }
     mount("finances:buffer-target-usd-", <Editor />, "finances");
+    await act(async () => screen.getByRole("button", { name: "Finish loading" }).click());
     await waitFor(() => expect(screen.getByLabelText("Buffer target")).toHaveFocus());
   });
   it("selects the right ritual before focusing an identically labelled field", async () => {
@@ -102,6 +99,63 @@ describe("Settings field destinations", () => {
     );
     await waitFor(() => expect(screen.getByLabelText("Mobile number")).toHaveFocus());
     expect(send).not.toHaveBeenCalled();
+  });
+  it("focuses a visible grouped control instead of a hidden duplicate", async () => {
+    mount(
+      "wallpaper:layout",
+      <>
+        <div hidden>
+          <input id="Layout" aria-label="Hidden layout" />
+        </div>
+        <fieldset>
+          <legend>Layout</legend>
+          <select aria-label="Wallpaper layout" defaultValue="mosaic">
+            <option value="mosaic">Mosaic</option>
+          </select>
+        </fieldset>
+      </>,
+      "wallpaper",
+    );
+    await waitFor(() => expect(screen.getByLabelText("Wallpaper layout")).toHaveFocus());
+    expect(screen.getByLabelText("Wallpaper layout")).toHaveValue("mosaic");
+    expect(screen.getByLabelText("Hidden layout")).not.toHaveFocus();
+  });
+  it("makes a read-only destination focusable without creating a control", async () => {
+    mount("wallpaper:layout", <h2>Layout</h2>, "wallpaper");
+    const heading = screen.getByRole("heading", { name: "Layout" });
+    await waitFor(() => expect(heading).toHaveFocus());
+    expect(heading).toHaveAttribute("tabindex", "-1");
+  });
+  it("waits for an unavailable editor and recognizes its count-labelled action", async () => {
+    const opened = vi.fn();
+    let finishLoading = () => {};
+    function Editor() {
+      const [loading, setLoading] = useState(true);
+      const [open, setOpen] = useState(false);
+      finishLoading = () => setLoading(false);
+      return (
+        <>
+          {loading ? <p>Loading goals…</p> : null}
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => {
+              opened();
+              setOpen(true);
+            }}
+          >
+            Add goal · 2
+          </button>
+          {open ? <input id="goal-target-date" aria-label="Target date" /> : null}
+        </>
+      );
+    }
+    mount("goals:target-date", <Editor />, "goals");
+    await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    expect(opened).not.toHaveBeenCalled();
+    act(() => finishLoading());
+    await waitFor(() => expect(screen.getByLabelText("Target date")).toHaveFocus());
+    expect(opened).toHaveBeenCalledOnce();
   });
   it("ignores arbitrary or cross-section field destinations", () => {
     mount("finances:buffer-target-usd-", <input id="profile-buffer" aria-label="Buffer" />);

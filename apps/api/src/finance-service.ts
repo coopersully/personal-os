@@ -100,6 +100,7 @@ import {
   financeReviewReasonSchema,
   idSchema,
   localDateAt,
+  localDateToIso,
   toCents,
 } from "@personal-os/domain";
 import {
@@ -1580,16 +1581,24 @@ export function createFinanceService({
     const categories = await ensureCategories(userId, executor);
     const existing = categories.find((item) => item.name.toLowerCase() === name.toLowerCase());
     if (existing) return existing;
-    const slug = categorySlug(name);
-    const [created] = await executor
-      .insert(financeCategories)
-      .values({ group: "Custom", isSystem: false, name, slug, userId })
-      .onConflictDoUpdate({
-        set: { name, updatedAt: now() },
-        target: [financeCategories.userId, financeCategories.slug],
-      })
-      .returning();
-    return requireDatabaseRecord(created, "The finance category could not be saved.");
+    // Custom names can share a readable slug (including entirely non-ASCII names).
+    // Keep their identity distinct and never rename an existing category on creation.
+    for (let retry = 0; retry < 32; retry += 1) {
+      const slug = legacyCategorySlug(userId, name, retry);
+      const [created] = await executor
+        .insert(financeCategories)
+        .values({ group: "Custom", isSystem: false, name, slug, userId })
+        .onConflictDoNothing({ target: [financeCategories.userId, financeCategories.slug] })
+        .returning();
+      if (created) return created;
+      const [concurrent] = await executor
+        .select()
+        .from(financeCategories)
+        .where(and(eq(financeCategories.userId, userId), eq(financeCategories.slug, slug)))
+        .limit(1);
+      if (concurrent?.name.toLowerCase() === name.toLowerCase()) return concurrent;
+    }
+    throw new AppError("conflict", "Category identifiers are occupied. Try a different name.");
   }
 
   async function categoryForProposalName(
@@ -3300,6 +3309,16 @@ export function createFinanceService({
     }
   }
 
+  async function planningDate(userId: string, executor: FinanceReadExecutor = db) {
+    const [user] = await executor
+      .select({ planningTimezone: users.planningTimezone })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!user) throw new AppError("not_found", "The user was not found.");
+    return localDateToIso(localDateAt(now(), user.planningTimezone));
+  }
+
   const profileValue = (row: typeof financeProfiles.$inferSelect): FinanceProfile => ({
     dependents: row.dependents,
     effectiveDate: row.effectiveDate,
@@ -3951,25 +3970,71 @@ export function createFinanceService({
     ...inbox,
     ...planning,
     ...setup,
-    async getFinanceConfiguration(userId: string) {
-      return readFinanceConfiguration({
-        execution: async () => {
-          const run = await db.query.workspaceMaintenanceRuns.findFirst({
-            where: and(
-              eq(workspaceMaintenanceRuns.userId, userId),
-              eq(workspaceMaintenanceRuns.domain, "finances"),
+    async getFinanceConfiguration(userId: string, requestId: string = randomUUID()) {
+      const boundedRead = <T>(read: (executor: Database) => Promise<T>) =>
+        db.transaction(async (tx) => {
+          // Cancel SQL on the server; a caller-side race would leave blocked work running.
+          // These deadlines begin after pool acquisition, whose policy belongs to the pool.
+          await tx.execute(sql`SET LOCAL statement_timeout = '2000ms'`);
+          await tx.execute(sql`SET LOCAL transaction_timeout = '2500ms'`);
+          return read(tx as unknown as Database);
+        });
+      return readFinanceConfiguration(
+        {
+          execution: () =>
+            boundedRead(async (executor) => {
+              const run = await executor.query.workspaceMaintenanceRuns.findFirst({
+                where: and(
+                  eq(workspaceMaintenanceRuns.userId, userId),
+                  eq(workspaceMaintenanceRuns.domain, "finances"),
+                ),
+                orderBy: [desc(workspaceMaintenanceRuns.createdAt)],
+              });
+              return run ? { id: run.id, status: run.status } : null;
+            }),
+          profile: () =>
+            boundedRead(
+              async (executor) =>
+                (
+                  await createProfileBudgetService({ db: executor, now }).getFinancialProfile(
+                    userId,
+                  )
+                ).data,
             ),
-            orderBy: [desc(workspaceMaintenanceRuns.createdAt)],
-          });
-          return run ? { id: run.id, status: run.status } : null;
+          preferences: () =>
+            boundedRead((executor) =>
+              createWorkspaceSettingsService(executor).get(userId, "finances"),
+            ),
+          income: () => boundedRead((executor) => this.getProfile(userId, undefined, executor)),
+          budget: () =>
+            boundedRead(
+              async (executor) =>
+                (await createProfileBudgetService({ db: executor, now }).getFinanceBudget(userId))
+                  .data,
+            ),
+          accounts: () =>
+            boundedRead((executor) =>
+              createFinanceAccountService({ db: executor, now }).list(userId, {
+                includeExcluded: true,
+              }),
+            ),
+          guidance: () =>
+            boundedRead((executor) =>
+              createFinanceService({ db: executor, now }).getGuidedSetupContext(userId),
+            ),
         },
-        profile: async () => (await planning.getFinancialProfile(userId)).data,
-        preferences: () => createWorkspaceSettingsService(db).get(userId, "finances"),
-        income: () => this.getProfile(userId),
-        budget: async () => (await planning.getFinanceBudget(userId)).data,
-        accounts: () => canonicalAccounts.list(userId, { includeExcluded: true }),
-        guidance: () => this.getGuidedSetupContext(userId),
-      });
+        (section, failure) =>
+          log?.({
+            event: "finance_configuration_section_failed",
+            section,
+            durationMs: failure.durationMs,
+            category: failure.category,
+            method: "GET",
+            path: "/v1/finances/configuration",
+            requestId,
+            status: 503,
+          }),
+      );
     },
     async listReimbursements(userId: string) {
       return reimbursements.list(userId);
@@ -4342,14 +4407,14 @@ export function createFinanceService({
     },
     async getProfile(
       userId: string,
-      asOf = now().toISOString().slice(0, 10),
+      asOf: string | undefined = undefined,
       executor: FinanceReadExecutor = db,
     ) {
       const rows = await executor
         .select()
         .from(financeProfiles)
         .where(eq(financeProfiles.userId, userId));
-      const row = selectEffectiveRecord(rows, asOf);
+      const row = selectEffectiveRecord(rows, asOf ?? (await planningDate(userId, executor)));
       return row ? profileValue(row) : null;
     },
     async updateProfile(
@@ -4439,7 +4504,7 @@ export function createFinanceService({
           ...context,
         }),
       );
-      if (input.effectiveDate <= now().toISOString().slice(0, 10)) {
+      if (input.effectiveDate <= (await planningDate(context.principal.userId, executor))) {
         const periods =
           input.payFrequency === "monthly"
             ? 12
@@ -4451,11 +4516,22 @@ export function createFinanceService({
                   ? 52
                   : null;
         const changes: UpdateFinancialProfileInput["changes"] = {};
-        if (input.householdSize !== undefined && input.householdSize !== before?.householdSize)
+        if (
+          input.householdSize !== undefined &&
+          (input.expectedUpdatedAt === undefined || input.householdSize !== before?.householdSize)
+        )
           changes.householdSize = input.householdSize;
-        if (input.dependents !== undefined && input.dependents !== before?.dependents)
+        if (
+          input.dependents !== undefined &&
+          (input.expectedUpdatedAt === undefined || input.dependents !== before?.dependents)
+        )
           changes.dependents = input.dependents;
-        if (input.expectedNetPay === null && before?.expectedNetPay != null)
+        // Guarded field edits must not clear unrelated canonical income. Legacy full
+        // profile submissions still retain their explicit-null clearing contract.
+        if (
+          input.expectedNetPay === null &&
+          (input.expectedUpdatedAt === undefined || before?.expectedNetPay != null)
+        )
           changes.expectedMonthlyTakeHome = null;
         else if (
           input.expectedNetPay != null &&
@@ -5345,7 +5421,7 @@ export function createFinanceService({
         await tx.insert(auditEvents).values(
           auditValues({
             action: "finance.category_saved",
-            after: categoryValue(category),
+            after: { saved: true },
             before: null,
             entityId: category.id,
             entityType: "finance_category",

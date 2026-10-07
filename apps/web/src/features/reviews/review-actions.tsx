@@ -15,19 +15,18 @@ import { ReviewQuestion } from "../finances/review-page.js";
 import { FinanceAgentReviewQueue } from "../finances/review-queue.js";
 import { TransactionSummary } from "../finances/transaction-summary.js";
 
+import { MailStewardshipPage } from "../mail/stewardship-page.js";
+
 type ActionsProps = { item: AgentAccessWorkItem; onChanged: () => Promise<void> };
 export function ReviewActions({ item, onChanged }: ActionsProps) {
   const id = item.id.split(":")[1] as string;
   if (item.id.startsWith("attention:"))
     return <AttentionActions item={item} onChanged={onChanged} />;
   if (item.id.startsWith("mail-rule:")) return <MailRuleActions id={id} onChanged={onChanged} />;
-  if (item.id.startsWith("mail-question:") || item.id.startsWith("mail-run:"))
-    return (
-      <MailQuestionActions
-        id={item.id.startsWith("mail-question:") ? id : undefined}
-        onChanged={onChanged}
-      />
-    );
+  if (item.id.startsWith("mail-run:"))
+    return <MailStewardshipPage embedded onChanged={onChanged} />;
+  if (item.id.startsWith("mail-question:"))
+    return <MailQuestionActions id={id} onChanged={onChanged} />;
   if (item.id.startsWith("finance-contextual:"))
     return <FinanceContextualQuestionPage id={id} onChanged={onChanged} />;
   if (item.id.startsWith("finance-action:"))
@@ -56,9 +55,14 @@ export function ReviewActions({ item, onChanged }: ActionsProps) {
 
 function AttentionActions({ item, onChanged }: ActionsProps) {
   const query = useQuery({
-    queryKey: ["review-attention", item.domain],
+    queryKey: ["review-attention", item.domain, item.id],
     queryFn: () =>
-      api.listAttentionItems({ domain: item.domain ?? "mail", status: "open", limit: 100 }),
+      api.listAttentionItems({
+        domain: item.domain ?? "mail",
+        id: item.id.slice("attention:".length),
+        status: "open",
+        limit: 1,
+      }),
   });
   const current = query.data?.find((entry) => `attention:${entry.id}` === item.id);
   const mutation = useFeedbackMutation({
@@ -150,6 +154,28 @@ function MailRuleActions({ id, onChanged }: { id: string; onChanged: ActionsProp
               ? ` Rule scope: ${rule.sourceIds.length ? rule.sourceIds.map((source) => accountNames.get(source) ?? "Unknown account").join(", ") : "no explicit account selected"}.`
               : ""}
           </p>
+          {rule ? (
+            <dl className="grid gap-2 text-sm">
+              <div>
+                <dt className="text-muted-foreground">When</dt>
+                <dd>
+                  {rule.condition.field} {rule.condition.operator.replaceAll("_", " ")} “
+                  {rule.condition.value}”
+                </dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Future actions</dt>
+                <dd>
+                  {rule.actions
+                    .map(
+                      (action) =>
+                        `${action.type === "trash" ? "recoverable Trash" : action.type.replaceAll("_", " ")}${action.afterDays ? ` after ${action.afterDays} days` : " immediately"}`,
+                    )
+                    .join("; ")}
+                </dd>
+              </div>
+            </dl>
+          ) : null}
           <ul className="grid gap-2 text-sm">
             {preview.data.candidates.map((candidate) => (
               <li key={candidate.id} className="rounded-lg bg-secondary p-3">
@@ -196,11 +222,14 @@ function MailQuestionActions({
   id,
   onChanged,
 }: {
-  id: string | undefined;
+  id: string;
   onChanged: ActionsProps["onChanged"];
 }) {
-  const query = useQuery({ queryKey: ["review-mail-status"], queryFn: api.getMailStatus });
-  const question = query.data?.details.openQuestions.find((question) => !id || question.id === id);
+  const query = useQuery({
+    queryKey: ["review-mail-question", id],
+    queryFn: () => api.getMailQuestion(id),
+  });
+  const question = query.data?.status === "open" ? query.data : undefined;
   const [answer, setAnswer] = useState("");
   const mutation = useFeedbackMutation({
     feedback: { action: "answer this Mail question", safeToRetry: false, form: false },

@@ -34,6 +34,7 @@ function testApp(
     answerQuestion: vi.fn(async () => ({ id, status: "answered", version: 2 })),
     createFeedback: vi.fn(),
     createObligation: vi.fn(),
+    getQuestion: vi.fn(async () => ({ id, status: "open", version: 3 })),
     getReview: vi.fn(),
     getStatus: vi.fn(async () => ({ domain: "mail", state: "needs_input" })),
     getThreadStewardship: vi.fn(),
@@ -55,6 +56,16 @@ function testApp(
 }
 
 describe("Mail stewardship routes", () => {
+  it("loads an exact question for a signed-in Mail reader and denies agents", async () => {
+    const { app, stewardship } = testApp(["mail:read"]);
+    const response = await app.request(`/v1/mail/questions/${id}`);
+    expect(response.status).toBe(200);
+    expect(stewardship.getQuestion).toHaveBeenCalledWith(id, id);
+    const denied = testApp(["mail:read"], "agent");
+    expect((await denied.app.request(`/v1/mail/questions/${id}`)).status).toBe(403);
+    expect(denied.stewardship.getQuestion).not.toHaveBeenCalled();
+  });
+
   it("dispatches one maintenance intent and returns the honest API result", async () => {
     const { app, maintenance } = testApp(["mail:read", "mail:write"]);
     const response = await app.request("/v1/mail/maintenance", {

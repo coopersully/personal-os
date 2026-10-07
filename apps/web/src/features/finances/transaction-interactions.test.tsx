@@ -61,3 +61,29 @@ it("preserves edited context after failure and saves with the observed version",
     expectedTransactionUpdatedAt: transaction.updatedAt,
   });
 });
+
+it.each([
+  "pending_review",
+  "needs_information",
+])("keeps context open for a %s response", async (status) => {
+  api.updateFinanceTransaction.mockResolvedValue({ status });
+  const onClose = vi.fn();
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}
+    >
+      <TransactionContextEditor transaction={{ ...transaction, notes: null }} onClose={onClose} />
+    </QueryClientProvider>,
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Save context" }));
+  await waitFor(() =>
+    expect(api.updateFinanceTransaction).toHaveBeenCalledWith(
+      "meal",
+      expect.objectContaining({ notes: null }),
+    ),
+  );
+  expect(onClose).not.toHaveBeenCalled();
+  await user.keyboard("{Escape}");
+  expect(onClose).toHaveBeenCalledOnce();
+});

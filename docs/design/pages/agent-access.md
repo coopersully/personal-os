@@ -27,7 +27,7 @@ rule activation opens Mail settings with the exact proposed rule selected.
 
 ## Connected agents in Settings
 
-Settings → Connected agents answers **Who can act in nohmi?**
+Settings → Connections → Connected agents answers **Who can act in nohmi?**
 
 - Show the current MCP URL once, with a copy action.
 - List OAuth hosts and local/manual credentials separately.
@@ -42,7 +42,7 @@ different host.
 
 ## Workspace access overview in Settings
 
-Settings → Workspace access answers **Where can agents act, and where does configuration need attention?**
+Settings → Security & access → Workspace access answers **Where can agents act, and where does configuration need attention?**
 
 The selected workspace is stored in the URL. Mail, Calendar, Tasks, and Finances each summarize:
 
@@ -56,7 +56,7 @@ The selected workspace is stored in the URL. Mail, Calendar, Tasks, and Finances
 This centralized surface is a read-only cross-workspace overview. Every workspace-owned access,
 source, maintenance, override, rule, learning, recovery, and data control is edited inside the
 owning workspace; centralized Settings must not render a duplicate form. Connected-agent
-credentials and scopes remain global and editable in Settings → Connected agents.
+credentials and scopes remain global and editable in Settings → Connections → Connected agents.
 
 Do not imply per-source credential scope when the credential model is workspace-wide. State that
 limitation explicitly. Readiness is evidence, not a progress percentage. Use the stable phases

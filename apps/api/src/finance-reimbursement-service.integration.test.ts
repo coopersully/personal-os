@@ -46,7 +46,7 @@ describe.sequential("reimbursement lifecycle", () => {
       .start();
     database = createDatabaseClient(container.getConnectionUri());
     await migrateDatabase(database.db, resolve(process.cwd(), "packages/database/migrations"));
-  });
+  }, 120_000);
 
   afterAll(async () => {
     await database.close();
@@ -378,6 +378,7 @@ describe.sequential("reimbursement lifecycle", () => {
     const listed = await service.list(principal.userId);
 
     expect(expense.transactionDate).toBe("2026-08-17");
+    expect(listed.reimbursements[0]?.createdAt).toBe(now.toISOString());
     expect(listed.unmatchedCredits).toEqual(
       expect.arrayContaining([expect.objectContaining({ transactionId: currentCredit.id })]),
     );

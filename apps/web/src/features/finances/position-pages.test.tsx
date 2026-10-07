@@ -1127,3 +1127,38 @@ it("keeps account evidence visible when its refresh fails and allows source-spec
     expect(screen.queryByText(/Showing the last available update/)).not.toBeInTheDocument(),
   );
 });
+
+it("retries account coverage and syncs an account with blocked evidence", async () => {
+  api.getFinanceLedgerHealth
+    .mockRejectedValueOnce(new Error("Offline"))
+    .mockResolvedValue({ balanceOnlyAccounts: 1 });
+  const response = await api.listFinanceAccounts();
+  api.listFinanceAccounts.mockResolvedValue({
+    ...response,
+    accounts: [{ ...account, synchronization: { ...account.synchronization, state: "blocked" } }],
+  });
+  api.syncFinanceAccount.mockResolvedValue({});
+  mount(<FinanceAccountsPage />);
+  fireEvent.click(await screen.findByRole("button", { name: "Retry account coverage" }));
+  expect(await screen.findByText(/1 balance-only account/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Sync account" }));
+  await waitFor(() => expect(api.syncFinanceAccount).toHaveBeenCalledWith(account.id));
+  await waitFor(() => expect(api.listFinanceAccounts.mock.calls.length).toBeGreaterThan(2));
+});
+it("reloads the latest account after a conflict before another edit", async () => {
+  api.updateFinanceAccount.mockRejectedValue(
+    new ApiClientError({ code: "conflict", message: "Changed", status: 409 }),
+  );
+  mount(<FinanceAccountsPage />);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
+  fireEvent.change(screen.getByLabelText("Account name"), { target: { value: "My draft" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save account" }));
+  await screen.findByText(/This item changed or is no longer available/);
+  const response = await api.listFinanceAccounts();
+  api.listFinanceAccounts.mockResolvedValue({
+    ...response,
+    accounts: [{ ...account, name: "New server name", updatedAt: "2026-10-06T12:00:00Z" }],
+  });
+  fireEvent.click(screen.getByRole("button", { name: /Reload/ }));
+  await waitFor(() => expect(screen.getByLabelText("Account name")).toHaveValue("New server name"));
+});

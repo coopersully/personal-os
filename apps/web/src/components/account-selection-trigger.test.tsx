@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 import { describe, expect, it } from "vitest";
 import { Popover } from "@/components/ui/popover";
@@ -11,7 +12,7 @@ import {
 } from "./account-selection-trigger";
 
 describe("AccountSelectionTrigger", () => {
-  it("renders selected identities with optional artwork and attention state", () => {
+  it("renders selected identities with optional artwork and attention state", async () => {
     const view = render(
       <AccountSelectionTrigger
         ariaLabel="2 of 2 accounts, attention required"
@@ -43,8 +44,8 @@ describe("AccountSelectionTrigger", () => {
     );
     expect(screen.getByRole("button", { name: "1 of 1 account" })).toHaveTextContent("1/1");
     expect(document.querySelector(".account-selection-trigger__warning")).toBeNull();
-    expect(screen.getByRole("button", { name: "1 of 1 account" })).toHaveAttribute(
-      "title",
+    await userEvent.hover(screen.getByRole("button", { name: "1 of 1 account" }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
       "1 of 1 account, all accounts connected and syncing",
     );
   });

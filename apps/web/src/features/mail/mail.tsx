@@ -1153,7 +1153,9 @@ export function Reader({
                 <pre>{message.bodyText || "This message has no plain-text body."}</pre>
                 <MessageAttachments
                   attachments={message.attachments}
-                  load={(attachmentId) => api.downloadMailAttachment(message.id, attachmentId)}
+                  load={(attachmentId, signal) =>
+                    api.downloadMailAttachment(message.id, attachmentId, signal)
+                  }
                 />
               </div>
             ) : null}

@@ -58,3 +58,14 @@ Finance transaction reviews omit generic visible titles and descriptions. The tr
 Review flows lead with progress and decision material, without a generic workspace-review heading or instructional introduction. Keep the accessible dialog name. Suppress wrapper titles/previews when a domain adapter already renders the question, rule, or transaction; retain meaningful attention-item questions and approval consequences. Finance uses `TransactionSummary` for merchant, date, direction, and amount, with an explicit category-labeling prompt. Do not infer currency when it is missing.
 
 On mobile the responsive drawer spans the viewport, including widths between 640px and the desktop breakpoint. Review footer actions remain side by side: Later is a quiet ghost action, Check status is secondary, and Review remaining is the primary continuation. The close icon is the only explicit dismissal control; do not duplicate it with Done or Close in the footer.
+
+## Review recovery and exact targets
+
+Attention action reads filter by the exact owned item ID before applying the result limit. Mail
+question cards use the signed-in, owner-scoped `GET /v1/mail/questions/:id` endpoint rather than
+searching the bounded status overview. Check status refreshes the selected action's revision as well
+as the session snapshot, so a version conflict can be recovered without reopening the flow.
+
+Mail rule approval always displays the match condition and future actions, including retention timing,
+even when the bounded preview has no candidates. Mail maintenance blockers retain their title,
+explanation, and preview evidence when no question is available to answer.

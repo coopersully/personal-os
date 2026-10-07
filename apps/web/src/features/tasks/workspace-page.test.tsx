@@ -801,3 +801,128 @@ it("separates the destructive row action from ordinary actions", async () => {
   expect(trash).toHaveAttribute("data-variant", "destructive");
   expect(trash.previousElementSibling).toHaveAttribute("role", "separator");
 });
+
+it.each([
+  ["task", task],
+  ["reminder", reminder],
+] as const)("opens a loaded %s deep link exactly once", async (kind, item) => {
+  const { onEdit, onEditReminder } = setup(`/tasks?view=all&${kind}=${item.record.id}`);
+  const callback = kind === "task" ? onEdit : onEditReminder;
+  await waitFor(() => expect(callback).toHaveBeenCalledExactlyOnceWith(item.record));
+});
+
+it("opens an off-page reminder after retrieving its record", async () => {
+  mocks.listTaskWorkspace.mockResolvedValue({ items: [], nextCursor: null, total: 0 });
+  mocks.getReminder.mockResolvedValue(reminder.record);
+  const { onEditReminder } = setup("/tasks?view=all&reminder=r");
+  await waitFor(() => expect(onEditReminder).toHaveBeenCalledExactlyOnceWith(reminder.record));
+});
+
+it.each([true, false])("previews a trashed task deep link when loaded=%s", async (loaded) => {
+  const deletedAt = "2026-10-01T12:00:00.000Z";
+  const trashed = { ...task, deletedAt, record: { ...task.record, deletedAt } };
+  mocks.listTaskWorkspace.mockResolvedValue({
+    items: loaded ? [trashed] : [],
+    nextCursor: null,
+    total: loaded ? 1 : 0,
+  });
+  mocks.getTask.mockResolvedValue(trashed.record);
+  const { onEdit } = setup("/tasks?view=trash&task=t");
+  expect(await screen.findByRole("dialog", { name: "Plan trip" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Restore" })).toBeVisible();
+  expect(onEdit).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["active", "completed"],
+  ["archived", "open"],
+] as const)("previews an off-page task in a %s, %s project", async (availability, lifecycle) => {
+  mocks.listTaskWorkspace.mockResolvedValue({ items: [], nextCursor: null, total: 0 });
+  mocks.getTask.mockResolvedValue({ ...task.record, projectId: "project" });
+  mocks.listTaskProjects.mockResolvedValue({
+    items: [{ id: "project", name: "Retained project", listId: "inbox", availability, lifecycle }],
+    nextCursor: null,
+  });
+  const { onEdit } = setup("/tasks?view=history&task=t");
+  expect(await screen.findByRole("dialog", { name: "Plan trip" })).toBeVisible();
+  expect(onEdit).not.toHaveBeenCalled();
+});
+
+it.each([
+  "why",
+  "targetDate",
+] as const)("shows scoped project %s without requiring the other metadata", async (field) => {
+  mocks.listTaskProjects.mockResolvedValue({
+    items: [
+      {
+        id: "launch",
+        name: "Launch",
+        listId: "inbox",
+        availability: "active",
+        lifecycle: "open",
+        [field]: field === "why" ? "Ship carefully" : "2026-10-10",
+      },
+    ],
+    nextCursor: null,
+  });
+  setup("/tasks?list=inbox&project=launch");
+  expect(
+    await screen.findByText(field === "why" ? "Ship carefully" : "Target Oct 10, 2026"),
+  ).toBeVisible();
+});
+
+it.each(["list", "project"] as const)("uses known %s names for grouped rows", async (group) => {
+  mocks.listTaskProjects.mockResolvedValue({
+    items: [
+      { id: "launch", name: "Launch", listId: "inbox", availability: "active", lifecycle: "open" },
+    ],
+    nextCursor: null,
+  });
+  mocks.listTaskWorkspace.mockResolvedValue({
+    items: [{ ...task, groupKey: group === "list" ? "inbox" : "launch" }],
+    nextCursor: null,
+  });
+  setup(`/tasks?view=all&group=${group}`);
+  expect(
+    await screen.findByRole("heading", { name: group === "list" ? "Inbox" : "Launch" }),
+  ).toBeVisible();
+  expect(screen.getByRole("button", { name: "Open Plan trip" })).toBeVisible();
+});
+
+it("opens a retained task deep link and retains list and project context in a system view", async () => {
+  const project = {
+    id: "launch",
+    name: "Launch",
+    listId: "inbox",
+    availability: "active",
+    lifecycle: "open",
+  };
+  mocks.listTaskProjects.mockResolvedValue({ items: [project], nextCursor: null });
+  const record = { ...task.record, projectId: "launch" };
+  mocks.listTasks.mockResolvedValue({ items: [record], nextCursor: "next" });
+  const { onEdit } = setupLegacy("/tasks?view=today&task=t");
+  await waitFor(() => expect(onEdit).toHaveBeenCalledExactlyOnceWith(record));
+  expect(screen.getByRole("button", { name: "Load more Tasks" })).toBeVisible();
+  expect(screen.getByText(/Inbox \/ Launch/)).toBeVisible();
+});
+
+it.each([
+  "archived",
+  "completed",
+] as const)("opens retained project scope for %s projects", async (state) => {
+  mocks.listTaskProjects.mockResolvedValue({
+    items: [
+      {
+        id: "launch",
+        name: "Launch",
+        listId: "inbox",
+        availability: state === "archived" ? "archived" : "active",
+        lifecycle: state === "completed" ? "completed" : "open",
+      },
+    ],
+    nextCursor: null,
+  });
+  setupLegacy("/tasks?archive=project&project=launch");
+  expect(await screen.findByText("Nothing here yet")).toBeVisible();
+  expect(mocks.listTasks).toHaveBeenCalledWith(expect.objectContaining({ projectId: "launch" }));
+});

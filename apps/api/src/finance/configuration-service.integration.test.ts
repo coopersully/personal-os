@@ -13,7 +13,7 @@ import {
 } from "@personal-os/database";
 import { updateFinanceProfileInputSchema } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { createFinanceService } from "../finance-service.js";
 
 describe.sequential("Finance configuration ownership and read purity", () => {
@@ -76,6 +76,89 @@ describe.sequential("Finance configuration ownership and read purity", () => {
       await database.db.select().from(auditEvents).where(eq(auditEvents.userId, other.id)),
     ).toHaveLength(0);
   });
+  it("logs measured and safely classified configuration failures with the request identity", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Diagnostic fixture",
+        email: "diagnostics@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("Missing fixture");
+    const log = vi.fn();
+    const service = createFinanceService({ db: database.db, now: () => new Date(), log });
+    vi.spyOn(service, "getProfile").mockRejectedValue({
+      cause: { code: "57014", message: "private query with account details" },
+    });
+    const result = await service.getFinanceConfiguration(owner.id, "configuration-diagnostic");
+    expect(result.income).toEqual({ state: "unavailable" });
+    expect(result.profile.state).toBe("loaded");
+    const entry = log.mock.calls
+      .map(([value]) => value)
+      .find((value) => value.section === "income");
+    expect(entry).toEqual({
+      event: "finance_configuration_section_failed",
+      section: "income",
+      category: "timeout",
+      durationMs: expect.any(Number),
+      method: "GET",
+      path: "/v1/finances/configuration",
+      requestId: "configuration-diagnostic",
+      status: 503,
+    });
+    expect(entry.durationMs).toBeGreaterThan(0);
+    expect(JSON.stringify(log.mock.calls)).not.toContain("private");
+  });
+  it("cancels a blocked configuration section and releases its database work", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Timeout fixture",
+        email: "timeout@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("Missing fixture");
+    const blocker = await database.pool.connect();
+    const log = vi.fn();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("LOCK TABLE finance_profile_versions IN ACCESS EXCLUSIVE MODE");
+      const service = createFinanceService({ db: database.db, now: () => new Date(), log });
+      const result = await service.getFinanceConfiguration(owner.id, "locked-configuration");
+      expect(result.profile).toEqual({ state: "unavailable" });
+      expect(result.income).toEqual({ state: "loaded", value: null });
+      expect(result.accounts.state).toBe("loaded");
+      expect(result.preferences.state).toBe("loaded");
+      expect(result.execution).toEqual({ state: "loaded", value: null });
+      expect(log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: "finance_configuration_section_failed",
+          section: "profile",
+          category: "timeout",
+          requestId: "locked-configuration",
+          durationMs: expect.any(Number),
+        }),
+      );
+      const pending = await database.db.execute(sql`
+        SELECT pid FROM pg_stat_activity
+        WHERE wait_event_type = 'Lock' AND query LIKE '%finance_profile_versions%'
+      `);
+      expect(pending.rows).toHaveLength(0);
+    } finally {
+      try {
+        await blocker.query("ROLLBACK");
+      } finally {
+        blocker.release();
+      }
+    }
+    const recovered = await createFinanceService({
+      db: database.db,
+      now: () => new Date(),
+    }).getFinanceConfiguration(owner.id);
+    expect(recovered.profile).toEqual({ state: "loaded", value: null });
+  }, 10_000);
   it("rejects stale payroll writes and does not replace monthly income on unrelated edits", async () => {
     const [owner] = await database.db
       .insert(users)

@@ -564,6 +564,187 @@ describe.sequential("connector service", () => {
     ).rejects.toMatchObject({ code: "invalid_request" });
   });
 
+  it("preserves safe attachment failure categories and records boundary diagnostics", async () => {
+    const [account] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.providerAccountId, "google-person"));
+    if (!account) throw new Error("Missing account");
+    const prior = google.downloadMailAttachment;
+    const logs: unknown[] = [];
+    const reader = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google,
+      icloud,
+      now: () => timestamp,
+      log: (entry) => logs.push(entry),
+    });
+    await database.db
+      .update(calendarAccounts)
+      .set({ mailEnabled: true })
+      .where(eq(calendarAccounts.id, account.id));
+    try {
+      for (const [category, disposition, code] of [
+        ["authorization", "reconnect", "forbidden"],
+        ["not_found", "operator", "not_found"],
+        ["rate_limited", "retry", "rate_limited"],
+        ["transport", "retry", "service_unavailable"],
+      ] as const) {
+        google.downloadMailAttachment = vi.fn().mockRejectedValue(
+          new ConnectorError({
+            category,
+            disposition,
+            code: "private-provider-code",
+            message: "private token data",
+          }),
+        );
+        await expect(
+          reader.mailGateway.downloadAttachment?.(userId, account.id, "message", {
+            id: "a",
+            filename: "a.txt",
+            contentType: "text/plain",
+            size: 1,
+          }),
+        ).rejects.toMatchObject({ code });
+        expect(logs.at(-1)).toMatchObject({
+          event: "mail_attachment_download_failed",
+          category,
+          accountId: account.id,
+        });
+        expect(JSON.stringify(logs)).not.toContain("private");
+      }
+    } finally {
+      if (prior) google.downloadMailAttachment = prior;
+      else delete google.downloadMailAttachment;
+      await database.db
+        .update(calendarAccounts)
+        .set({ mailEnabled: account.mailEnabled })
+        .where(eq(calendarAccounts.id, account.id));
+    }
+  });
+
+  it.each([
+    "caller",
+    "timeout",
+  ] as const)("cancels attachment provider work on %s abort", async (cause) => {
+    const [account] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.providerAccountId, "google-person"));
+    if (!account) throw new Error("Missing account");
+    const prior = google.downloadMailAttachment;
+    const caller = new AbortController();
+    const timeout = new AbortController();
+    const timeoutSignal = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeout.signal);
+    let started!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let providerSignal: AbortSignal | undefined;
+    const stopped = vi.fn();
+    google.downloadMailAttachment = vi.fn((_credentials, _messageId, _attachment, operation) => {
+      providerSignal = operation?.signal;
+      return new Promise<never>((_resolve, reject) => {
+        operation?.signal?.addEventListener(
+          "abort",
+          () => {
+            stopped();
+            reject(operation.signal?.reason);
+          },
+          { once: true },
+        );
+        started();
+      });
+    });
+    await database.db
+      .update(calendarAccounts)
+      .set({ mailEnabled: true })
+      .where(eq(calendarAccounts.id, account.id));
+    try {
+      const pending = service.mailGateway.downloadAttachment?.(
+        userId,
+        account.id,
+        "message",
+        { id: "a", filename: "a.txt", contentType: "text/plain", size: 1 },
+        caller.signal,
+      );
+      const rejected = expect(pending).rejects.toMatchObject({ code: "service_unavailable" });
+      await ready;
+      expect(timeoutSignal).toHaveBeenCalledWith(20_000);
+      expect(providerSignal?.aborted).toBe(false);
+      (cause === "caller" ? caller : timeout).abort();
+      await rejected;
+      expect(providerSignal?.aborted).toBe(true);
+      expect(stopped).toHaveBeenCalledOnce();
+    } finally {
+      timeoutSignal.mockRestore();
+      if (prior) google.downloadMailAttachment = prior;
+      else delete google.downloadMailAttachment;
+      await database.db
+        .update(calendarAccounts)
+        .set({ mailEnabled: account.mailEnabled })
+        .where(eq(calendarAccounts.id, account.id));
+    }
+  });
+
+  it("reports credential persistence failures separately from attachment provider failures", async () => {
+    const [account] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.providerAccountId, "google-person"));
+    if (!account) throw new Error("Missing account");
+    const prior = google.downloadMailAttachment;
+    google.downloadMailAttachment = vi.fn().mockResolvedValue({
+      credentials: {
+        ...rotatedCredentials,
+        accessToken: "attachment-rotation",
+        expiresAt: "2030-07-13T13:00:00.000Z",
+      },
+      value: { filename: "a.txt", contentType: "text/plain", size: 1, data: "YQ==" },
+    });
+    await database.db
+      .update(calendarAccounts)
+      .set({ mailEnabled: true })
+      .where(eq(calendarAccounts.id, account.id));
+    await database.db.execute(sql`
+      CREATE FUNCTION reject_attachment_credentials_for_test() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.encrypted_credentials IS DISTINCT FROM OLD.encrypted_credentials THEN
+          RAISE EXCEPTION 'private credential persistence error';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER reject_attachment_credentials_for_test BEFORE UPDATE OF encrypted_credentials ON calendar_accounts
+      FOR EACH ROW EXECUTE FUNCTION reject_attachment_credentials_for_test();
+    `);
+    try {
+      await expect(
+        service.mailGateway.downloadAttachment?.(userId, account.id, "message", {
+          id: "a",
+          filename: "a.txt",
+          contentType: "text/plain",
+          size: 1,
+        }),
+      ).rejects.toMatchObject({
+        code: "service_unavailable",
+        message:
+          "The attachment was retrieved, but refreshed connection credentials could not be saved. Try again shortly.",
+      });
+    } finally {
+      await database.db.execute(
+        sql`DROP TRIGGER reject_attachment_credentials_for_test ON calendar_accounts; DROP FUNCTION reject_attachment_credentials_for_test();`,
+      );
+      if (prior) google.downloadMailAttachment = prior;
+      else delete google.downloadMailAttachment;
+      await database.db
+        .update(calendarAccounts)
+        .set({ mailEnabled: account.mailEnabled })
+        .where(eq(calendarAccounts.id, account.id));
+    }
+  });
+
   it("projects provider send capability without widening account authority", async () => {
     const [account] = await database.db
       .select()

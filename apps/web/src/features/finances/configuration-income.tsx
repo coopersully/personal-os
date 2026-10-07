@@ -1,6 +1,8 @@
 import {
   type FinanceConfiguration,
   type FinanceProfile,
+  localDateAt,
+  localDateToIso,
   updateFinanceProfileInputSchema,
 } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -130,9 +132,18 @@ function IncomeField({
       const config = client.getQueryData<FinanceConfiguration>(financeConfigurationKey);
       if (config?.income.state !== "loaded") throw new Error("Reload your payroll details first.");
       const current = config.income.value;
+      const effectiveDate =
+        current?.effectiveDate ??
+        localDateToIso(
+          localDateAt(
+            new Date(),
+            (await client.ensureQueryData({ queryKey: ["me"], queryFn: api.getMe }))
+              .planningTimezone,
+          ),
+        );
       const input = updateFinanceProfileInputSchema.parse({
         ...current,
-        effectiveDate: current?.effectiveDate ?? new Date().toISOString().slice(0, 10),
+        effectiveDate,
         expectedUpdatedAt: current?.updatedAt ?? null,
         [field.key]: submitted.trim()
           ? field.kind === "currency"
@@ -205,11 +216,11 @@ function IncomeField({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() =>
-                void client
-                  .refetchQueries({ queryKey: financeConfigurationKey })
-                  .then(() => save.reset())
-              }
+              onClick={() => {
+                client.setQueryData(draftKey, null);
+                save.reset();
+                void client.refetchQueries({ queryKey: financeConfigurationKey });
+              }}
             >
               Reload saved information
             </Button>

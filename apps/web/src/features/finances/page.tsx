@@ -16,7 +16,7 @@ import { addMonths, formatDateOnly, formatMonth } from "@personal-os/domain";
 import { EmptyState, Spinner } from "@personal-os/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
-import { Fragment, type ReactNode, useCallback, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { ActionButton as ShadcnButton } from "@/components/action-button";
@@ -287,6 +287,16 @@ export function FinancesPage() {
   const [transactionCursorHistory, setTransactionCursorHistory] = useState<Array<string | null>>(
     [],
   );
+  const transactionFilterKey = JSON.stringify(transactionFilters);
+  const [cursorFilterKey, setCursorFilterKey] = useState(transactionFilterKey);
+  const currentTransactionCursor =
+    cursorFilterKey === transactionFilterKey ? transactionCursor : null;
+  useEffect(() => {
+    if (cursorFilterKey === transactionFilterKey) return;
+    setTransactionCursor(null);
+    setTransactionCursorHistory([]);
+    setCursorFilterKey(transactionFilterKey);
+  }, [cursorFilterKey, transactionFilterKey]);
   const [transactionSort, setTransactionSort] = useState<{
     sortBy: FinanceTransactionQuery["sortBy"];
     sortDirection: FinanceTransactionQuery["sortDirection"];
@@ -302,12 +312,17 @@ export function FinancesPage() {
     queryFn: () =>
       api.listFinanceTransactions({
         ...transactionFilters,
-        cursor: transactionCursor ?? undefined,
+        cursor: currentTransactionCursor ?? undefined,
         limit: 50,
         sortBy: transactionSort.sortBy,
         sortDirection: transactionSort.sortDirection,
       }),
-    queryKey: ["finance-transactions", transactionCursor, transactionSort, transactionFilters],
+    queryKey: [
+      "finance-transactions",
+      currentTransactionCursor,
+      transactionSort,
+      transactionFilters,
+    ],
   });
   const syncAccount = useFeedbackMutation({
     feedback: { action: "sync this bank account", safeToRetry: true },

@@ -21,6 +21,20 @@ The domain package owns the search contract. The API owns authorized record sear
 source projections and deterministic ordering. PostgreSQL remains authoritative; indexes are
 rebuildable. Web owns labels, command launchers, and presentation. Every result and destination is
 owner-authorized independently. Search requests and responses must not log private query/content.
+Responses use `no-store`. Record-search admission allows two requests per process and one per
+user concurrently, with 120 requests per user per minute. Matching deduplicates terms and rejects
+more than twelve distinct terms. SQL searches have a transaction-local two-second statement
+deadline, including lock waits; capacity is released on success or failure.
+Review projections use separate PostgreSQL 17 transactions per source with a two-second statement
+timeout and a 2.5-second transaction timeout. Each search-only source read admits at most 200 rows
+and fetches one extra row to detect overflow. Timeout or overflow marks that source unavailable;
+healthy sibling sources remain searchable. Finance evidence scans first select transactions with noncanonical maintenance effects and
+then inspect only their evidence and referenced runs. Unrelated transactions and runs do not consume
+the row budget. Relevant evidence overflow fails closed rather than deriving review truth from
+truncated history, and can report incomplete coverage while other Finance sources succeed. Ordinary Review-list
+pagination still uses the complete source data. Integration checks cover SQL lock cancellation,
+source overflow, preservation of full list counts, and current versus stale contextual evidence;
+production-scale latency remains unverified.
 
 Workspace preference tables are account-owned, one row per owner, with revisions and typed values.
 Calendar view preferences move out of implicit UI defaults into these preferences. URL selections

@@ -536,6 +536,17 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
 
   return {
     async downloadMailAttachment(credentials, messageId, attachment, operation) {
+      const attachmentError = (
+        message: string,
+        category: "not_found" | "invalid_response" = "invalid_response",
+      ) =>
+        new ConnectorError({
+          category,
+          code: `google_attachment_${category}`,
+          disposition: "operator",
+          message,
+          status: category === "not_found" ? 404 : 502,
+        });
       const attachmentId =
         attachment.providerAttachmentId === undefined && !attachment.id.startsWith("part:")
           ? attachment.id
@@ -543,6 +554,8 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       const partId =
         attachment.providerPartId ??
         (attachment.id.startsWith("part:") ? attachment.id.slice(5) : null);
+      if (!attachmentId && partId === null)
+        throw attachmentError("Attachment locator is unavailable.", "not_found");
       const root = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}`;
       const result = await authenticatedRequest(
         credentials,
@@ -554,7 +567,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       );
       if (!result.response.ok) throw await connectorHttpError(result.response, "google");
       const reader = result.response.body?.getReader();
-      if (!reader) throw new Error("Attachment response is empty.");
+      if (!reader) throw attachmentError("Attachment response is empty.");
       const chunks: Uint8Array[] = [];
       let size = 0;
       try {
@@ -562,31 +575,50 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
           const chunk = await reader.read();
           if (chunk.done) break;
           size += chunk.value.length;
-          if (size > 15 * 1024 * 1024) throw new Error("Attachment exceeds the download limit.");
+          if (size > 15 * 1024 * 1024)
+            throw attachmentError("Attachment exceeds the download limit.");
           chunks.push(chunk.value);
         }
       } finally {
         await reader.cancel().catch(() => undefined);
       }
-      const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-      let body = payload;
+      let payload: { payload?: unknown };
+      try {
+        payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      } catch {
+        throw attachmentError("Google returned malformed attachment data.");
+      }
+      if (!payload || typeof payload !== "object")
+        throw attachmentError("Google returned malformed attachment data.");
+      let body: unknown = payload;
       if (!attachmentId) {
         const pending = [payload.payload];
         body = undefined;
         for (let count = 0; pending.length && count < 256; count++) {
           const part = pending.pop();
-          if (!part) continue;
-          if (partId !== null && part.partId === partId) {
-            body = part.body;
+          if (!part || typeof part !== "object") continue;
+          if (
+            ("partId" in part && partId !== null && part.partId === partId) ||
+            (partId === "root" &&
+              part === payload.payload &&
+              (!("partId" in part) || part.partId === ""))
+          ) {
+            body = "body" in part ? part.body : undefined;
             break;
           }
-          if (Array.isArray(part.parts)) pending.push(...part.parts.slice(0, 256));
+          if ("parts" in part && Array.isArray(part.parts))
+            pending.push(...part.parts.slice(0, 256));
         }
       }
-      const data = z.object({ data: z.string().regex(/^[A-Za-z0-9_-]*={0,2}$/) }).parse(body).data;
+      if (!body && !attachmentId)
+        throw attachmentError("The attachment is no longer available.", "not_found");
+      const parsed = z.object({ data: z.string().regex(/^[A-Za-z0-9_-]*={0,2}$/) }).safeParse(body);
+      if (!parsed.success || parsed.data.data.replace(/=+$/, "").length % 4 === 1)
+        throw attachmentError("Google returned malformed attachment data.");
+      const data = parsed.data.data;
       const bytes = Buffer.from(data, "base64url");
       if (bytes.length > 10 * 1024 * 1024)
-        throw new Error("Attachment exceeds the download limit.");
+        throw attachmentError("Attachment exceeds the download limit.");
       return { credentials: result.credentials, value: bytes };
     },
     authorizationUrl(

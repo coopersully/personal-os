@@ -499,6 +499,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     cursorSigningKey: dependencies.config.encryptionKey,
     db: dependencies.db,
     now,
+    ...(dependencies.log ? { log: dependencies.log } : {}),
   });
   const agentSkillRevision = dependencies.config.agentSkillRevision ?? officialAgentSkill.revision;
   const agentSkillSourceUrl =
@@ -595,6 +596,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   });
   const financeMaintenance = createFinanceMaintenanceService({
     actions: financeActions,
+    budget: financeBudgetPolicies,
     challenge: financeChallenges,
     finances,
     maintenance,

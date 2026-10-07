@@ -368,7 +368,7 @@ function RitualForm({
               </>
             ) : null}
             {message ? <p role="status">{message}</p> : null}
-            {busy || dirty ? (
+            {busy || (dirty && !error) ? (
               <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Spinner className="size-3" />
                 {dirty && !input.success ? "Finish the fields to save" : "Saving"}

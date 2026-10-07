@@ -7,6 +7,7 @@ import type {
   WorkspaceSearchResult,
 } from "@personal-os/domain";
 import { sql } from "drizzle-orm";
+import { AppError } from "../errors.js";
 import { workspaceSearchSources } from "./sources.js";
 
 /** Scope in SQL before matching. Queries stay on the server; only bounded previews leave it. */
@@ -32,9 +33,11 @@ export function createWorkspaceSearchService(db: Database) {
           id: item.id,
           kind: "Review",
           title: item.title,
-          preview: (
-            item.preview?.map((part) => `${part.label}: ${part.value}`).join(" · ") || item.summary
-          ).slice(0, 240),
+          preview: Array.from(
+            item.preview?.map((part) => `${part.label}: ${part.value}`).join(" · ") || item.summary,
+          )
+            .slice(0, 240)
+            .join(""),
           document: `${item.title} ${item.summary} ${item.preview?.map((part) => part.value).join(" ") ?? ""}`,
           href: `/${workspace}?review=${encodeURIComponent(item.id)}`,
           state: null,
@@ -44,11 +47,14 @@ export function createWorkspaceSearchService(db: Database) {
         );
       }
       const literal = query.q.replace(/[\\%_]/g, "\\$&");
-      const terms = query.q.split(/\s+/).filter(Boolean);
+      const terms = [...new Set(query.q.toLocaleLowerCase("en-US").split(/\s+/).filter(Boolean))];
+      if (terms.length > 12) throw new AppError("invalid_request", "Use at most 12 search terms.");
       const matches = terms.map(
         (term) => sql`document ILIKE ${`%${term.replace(/[\\%_]/g, "\\$&")}%`}`,
       );
-      const result = await db.execute<WorkspaceSearchResult>(sql`
+      const result = await db.transaction(async (tx) => {
+        await tx.execute(sql`SET LOCAL statement_timeout = '2000ms'`);
+        return tx.execute<WorkspaceSearchResult>(sql`
         WITH candidates AS (${sql.join(projections, sql` UNION ALL `)})
         SELECT id, kind, title, preview, href, state FROM candidates
         WHERE (${sql.join(matches, sql` AND `)})
@@ -59,6 +65,7 @@ export function createWorkspaceSearchService(db: Database) {
           lower(title), kind, id
         LIMIT ${query.limit + 1} OFFSET ${query.offset}
       `);
+      });
       return {
         items: result.rows.slice(0, query.limit),
         nextOffset: result.rows.length > query.limit ? query.offset + query.limit : null,

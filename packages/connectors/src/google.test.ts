@@ -1248,11 +1248,72 @@ describe("Mail attachment retrieval", () => {
     });
     expect(Buffer.from(result!.value).toString()).toBe("hello");
   });
+  it.each([
+    "",
+    undefined,
+  ])("retrieves root inline attachment %s using its projected locator", async (partId) => {
+    const result = await connector(
+      queued(response({ payload: { partId, body: { data: "aGVsbG8" } } })),
+    ).downloadMailAttachment?.(fresh, "message", {
+      ...attachment,
+      id: "part:root",
+      providerAttachmentId: null,
+      providerPartId: "root",
+    });
+    expect(Buffer.from(result?.value ?? []).toString()).toBe("hello");
+  });
+  it("classifies missing inline locators and missing MIME parts", async () => {
+    for (const providerPartId of [null, "absent"]) {
+      await expect(
+        connector(queued(response({ payload: {} }))).downloadMailAttachment?.(fresh, "message", {
+          ...attachment,
+          providerAttachmentId: null,
+          providerPartId,
+        }),
+      ).rejects.toMatchObject({ category: "not_found", status: 404 });
+    }
+    await expect(
+      connector(queued(new Response("bad json"))).downloadMailAttachment?.(
+        fresh,
+        "message",
+        attachment,
+      ),
+    ).rejects.toMatchObject({ category: "invalid_response", status: 502 });
+  });
+  it("uses legacy inline part locators and skips malformed MIME children", async () => {
+    const result = await connector(
+      queued(
+        response({ payload: { parts: [null, 2, { partId: "1", body: { data: "aGVsbG8" } }] } }),
+      ),
+    ).downloadMailAttachment?.(fresh, "message", {
+      ...attachment,
+      id: "part:1",
+      providerAttachmentId: null,
+      providerPartId: null,
+    });
+    expect(Buffer.from(result?.value ?? []).toString()).toBe("hello");
+  });
+  it("rejects empty transport and decoded payloads beyond the byte limit", async () => {
+    for (const payload of [
+      new Response(null),
+      response({ data: Buffer.alloc(10 * 1024 * 1024 + 1).toString("base64url") }),
+    ]) {
+      await expect(
+        connector(queued(payload)).downloadMailAttachment?.(fresh, "message", attachment),
+      ).rejects.toMatchObject({ category: "invalid_response" });
+    }
+  });
   it("rejects missing, malformed, and oversized bodies", async () => {
-    for (const body of [{}, { data: "not base64!" }, { data: "a".repeat(15 * 1024 * 1024) }]) {
+    for (const body of [
+      null,
+      {},
+      { data: "a" },
+      { data: "not base64!" },
+      { data: "a".repeat(15 * 1024 * 1024) },
+    ]) {
       await expect(
         connector(queued(response(body))).downloadMailAttachment?.(fresh, "message", attachment),
-      ).rejects.toThrow();
+      ).rejects.toMatchObject({ category: "invalid_response", status: 502 });
     }
     await expect(
       connector(queued(response({}, 404))).downloadMailAttachment?.(fresh, "message", attachment),

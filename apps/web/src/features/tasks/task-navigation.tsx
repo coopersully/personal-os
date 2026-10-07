@@ -461,8 +461,10 @@ export function TaskNavigation({
               <p className="px-2 text-xs text-muted-foreground">Couldn’t load pins.</p>
             ) : pins.isSuccess &&
               !(
-                pins.data.preferences.pinnedListIds?.length ||
-                pins.data.preferences.pinnedProjectIds?.length
+                lists.some((list) => pins.data.preferences.pinnedListIds?.includes(list.id)) ||
+                projects.some((project) =>
+                  pins.data.preferences.pinnedProjectIds?.includes(project.id),
+                )
               ) ? (
               <p className="px-2 text-xs text-muted-foreground">
                 Pin items from Lists or Projects.

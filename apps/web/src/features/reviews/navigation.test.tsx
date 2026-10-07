@@ -2,7 +2,10 @@
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter, useLocation } from "react-router-dom";
+import { SidebarProvider } from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { ReviewNavigation } from "./navigation.js";
 
 const mocks = vi.hoisted(() => ({ listAgentAccessWorkItems: vi.fn() }));
@@ -58,4 +61,42 @@ it.each([
   });
   renderEntry(workspace);
   await waitFor(() => expect(screen.queryByRole("button")).not.toBeInTheDocument());
+});
+function LocationProbe() {
+  return <output aria-label="Review location">{useLocation().search}</output>;
+}
+it("opens footer reviews without losing the active calendar filters", async () => {
+  mocks.listAgentAccessWorkItems.mockResolvedValue({
+    summary: { byDomain: { calendar: 2 } },
+    unavailableDomains: [],
+  });
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <MemoryRouter initialEntries={["/calendar?view=week&calendar=chosen&review=attention:one"]}>
+        <TooltipProvider>
+          <SidebarProvider>
+            <ReviewNavigation workspace="calendar" footer />
+          </SidebarProvider>
+        </TooltipProvider>
+        <LocationProbe />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  await userEvent.click(await screen.findByRole("button", { name: "2 items need review" }));
+  expect(screen.getByLabelText("Review location")).toHaveTextContent(
+    "?view=week&calendar=chosen&review=open",
+  );
+});
+it("marks an unavailable domain honestly even when a stale count remains", async () => {
+  mocks.listAgentAccessWorkItems.mockResolvedValue({
+    summary: { byDomain: { calendar: 3 } },
+    unavailableDomains: ["calendar"],
+  });
+  renderEntry();
+  const button = await screen.findByRole("button", { name: "Check review status" });
+  expect(button).toHaveAttribute("data-attention", "true");
+  expect(button.querySelector(".review-navigation__count")).toHaveTextContent("!");
+  expect(screen.queryByRole("button", { name: "3 items need review" })).not.toBeInTheDocument();
 });

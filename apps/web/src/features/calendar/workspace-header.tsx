@@ -6,8 +6,10 @@ import {
   parseLocalDate,
   type User,
 } from "@personal-os/domain";
+import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
+import { api } from "@/api";
 import { ActionButton as ShadcnButton } from "@/components/action-button";
 import {
   CalendarIcon,
@@ -18,13 +20,19 @@ import {
   type Icon,
   LocationFixedIcon,
 } from "@/components/icons";
+import { MutationFeedback } from "@/components/mutation-feedback";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useMediaQuery } from "@/hooks/use-media-query";
+import { useFeedbackMutation } from "@/lib/use-feedback-mutation";
 import { useWorkspacePreferences } from "../workspace-search/preferences.js";
 import { type CalendarView, calendarPeriodDays, calendarViewFromSearch } from "./page.js";
 
@@ -42,12 +50,11 @@ export function CalendarAppBarIdentity({
   workspaceSwitcher: ReactNode;
 }) {
   const [searchParams] = useSearchParams();
-  const compactMedia =
-    typeof window.matchMedia === "function" ? window.matchMedia("(max-width: 560px)") : undefined;
+  const compactCalendar = useMediaQuery("(max-width: 560px)");
   const preferences = useWorkspacePreferences("calendar");
   const storedView = preferences.data?.preferences.calendarView;
   const defaultView: CalendarView =
-    storedView && storedView !== "auto" ? storedView : compactMedia?.matches ? "day" : "week";
+    storedView && storedView !== "auto" ? storedView : compactCalendar ? "day" : "week";
   const view = calendarViewFromSearch(searchParams.get("view"), defaultView);
   const includeWeekends = searchParams.has("weekends")
     ? searchParams.get("weekends") !== "0"
@@ -111,13 +118,26 @@ export function CalendarAppBarControls({
   user: User;
   accounts: ReactNode;
 }) {
+  const queryClient = useQueryClient();
+  const saveCalendarView = useFeedbackMutation({
+    scope: { id: "calendar-view-preference" },
+    feedback: { action: "save Calendar view", safeToRetry: true },
+    mutationFn: async (calendarView: "day" | "week" | "month") => {
+      const current = await api.getWorkspaceSettings("calendar");
+      return api.updateWorkspaceSettings("calendar", {
+        expectedRevision: current.revision,
+        preferences: { calendarView },
+      });
+    },
+    onSuccess: (data) => queryClient.setQueryData(["workspace-settings", "calendar"], data),
+  });
   const [searchParams, setSearchParams] = useSearchParams();
-  const compactMedia =
-    typeof window.matchMedia === "function" ? window.matchMedia("(max-width: 560px)") : undefined;
+  const compactCalendar = useMediaQuery("(max-width: 560px)");
+  const compactPeriodNavigation = useMediaQuery("(max-width: 600px)");
   const preferences = useWorkspacePreferences("calendar");
   const storedView = preferences.data?.preferences.calendarView;
   const defaultView: CalendarView =
-    storedView && storedView !== "auto" ? storedView : compactMedia?.matches ? "day" : "week";
+    storedView && storedView !== "auto" ? storedView : compactCalendar ? "day" : "week";
   const requestedView = searchParams.get("view");
   const view = calendarViewFromSearch(requestedView, defaultView);
   const requestedAnchor = searchParams.get("date");
@@ -145,6 +165,7 @@ export function CalendarAppBarControls({
   const selectView = (value: string) => {
     if (value === "day" || value === "week" || value === "month") {
       updateCalendarState({ view: value });
+      saveCalendarView.mutate(value);
     }
   };
   const goToToday = () => {
@@ -158,6 +179,7 @@ export function CalendarAppBarControls({
   return (
     <fieldset className="calendar-app-bar__controls">
       <legend className="sr-only">Calendar controls</legend>
+      <MutationFeedback feedback={saveCalendarView.feedback} />
       <div className="calendar-app-bar__control-set">
         <div className="calendar-app-bar__compact-view">
           <DropdownMenu>
@@ -175,6 +197,25 @@ export function CalendarAppBarControls({
                   </DropdownMenuRadioItem>
                 ))}
               </DropdownMenuRadioGroup>
+              {compactPeriodNavigation ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuGroup>
+                    <DropdownMenuItem onSelect={goToToday}>
+                      <LocationFixedIcon aria-hidden="true" />
+                      Today
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => movePeriod(-1)}>
+                      <ChevronLeftIcon aria-hidden="true" />
+                      Previous {view}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => movePeriod(1)}>
+                      <ChevronRightIcon aria-hidden="true" />
+                      Next {view}
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+                </>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

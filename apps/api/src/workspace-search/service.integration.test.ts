@@ -4,28 +4,33 @@ import {
   calendarAccounts,
   calendarEvents,
   calendars,
+  calendarWorkspaceSettings,
   createDatabaseClient,
   type DatabaseClient,
   financeAccounts,
+  financesWorkspaceSettings,
   financeTransactions,
   mailboxes,
   mailMessages,
   mailThreads,
+  mailWorkspaceSettings,
   migrateDatabase,
   reminders,
   taskLists,
   taskProjects,
+  tasksWorkspaceSettings,
   users,
 } from "@personal-os/database";
 import {
   type AccessScope,
+  agentAccessWorkItemSchema,
   featureAccessPolicies,
   type SearchableWorkspace,
   updateWorkspaceSettingsSchema,
   workspaceSearchQuerySchema,
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { createAgentAccessWorkItemService } from "../agent-access-work-items.js";
 import { errorResponse } from "../errors.js";
@@ -44,6 +49,54 @@ describe.sequential("workspace discovery and account preferences", () => {
   let app: Hono<AppEnv>;
   let search: ReturnType<typeof createWorkspaceSearchService>;
   let settings: ReturnType<typeof createWorkspaceSettingsService>;
+  it("deduplicates repeated search terms and rejects excessive unique terms", async () => {
+    const repeated = await search.search(
+      userId,
+      "tasks",
+      workspaceSearchQuerySchema.parse({ q: "needle ".repeat(20) }),
+    );
+    const single = await search.search(
+      userId,
+      "tasks",
+      workspaceSearchQuerySchema.parse({ q: "needle" }),
+    );
+    expect(repeated.items).toEqual(single.items);
+    await expect(
+      search.search(
+        userId,
+        "tasks",
+        workspaceSearchQuerySchema.parse({
+          q: "one two three four five six seven eight nine ten eleven twelve thirteen",
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+  });
+  it("bounds blocked database searches and leaves other queries usable", async () => {
+    let release!: () => void;
+    let acquired!: () => void;
+    const ready = new Promise<void>((resolve) => {
+      acquired = resolve;
+    });
+    const lock = database.db.transaction(async (tx) => {
+      await tx.execute(sql`LOCK TABLE reminders IN ACCESS EXCLUSIVE MODE`);
+      acquired();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    });
+    await ready;
+    try {
+      await expect(
+        search.search(userId, "tasks", workspaceSearchQuerySchema.parse({ q: "needle" })),
+      ).rejects.toThrow();
+    } finally {
+      release();
+      await lock;
+    }
+    await expect(
+      search.search(userId, "tasks", workspaceSearchQuerySchema.parse({ q: "needle" })),
+    ).resolves.toMatchObject({ coverage: "synced" });
+  });
   beforeAll(async () => {
     container = await new PostgreSqlContainer("postgres:17.5-alpine").start();
     database = createDatabaseClient(container.getConnectionUri());
@@ -211,6 +264,43 @@ describe.sequential("workspace discovery and account preferences", () => {
     expect(page.items[0]?.preview.length).toBeLessThanOrEqual(240);
     expect(page.items.map((item) => item.title).join()).not.toMatch(/deleted|private|trash/);
   });
+  it("formats deadlines in the owner's planning timezone", async () => {
+    await database.db
+      .update(users)
+      .set({ planningTimezone: "America/New_York" })
+      .where(eq(users.id, userId));
+    await database.db
+      .insert(reminders)
+      .values({ userId, title: "Midnight deadline", dueAt: new Date("2026-10-07T01:00:00Z") });
+    const result = await search.search(
+      userId,
+      "tasks",
+      workspaceSearchQuerySchema.parse({ q: "Midnight deadline" }),
+    );
+    expect(result.items[0]?.preview).toContain("Due Oct 06, 2026");
+  });
+  it("preserves Unicode at the review preview boundary", async () => {
+    const review = agentAccessWorkItemSchema.parse({
+      id: "attention:unicode",
+      domain: "tasks",
+      kind: "attention",
+      priority: "normal",
+      title: "Unicode review",
+      summary: "a".repeat(239) + "😀 remainder",
+      action: null,
+      actionAt: null,
+      source: null,
+      updatedAt: instant.toISOString(),
+    });
+    const result = await search.search(
+      userId,
+      "tasks",
+      workspaceSearchQuerySchema.parse({ q: "Unicode review" }),
+      [review],
+    );
+    expect(result.items[0]?.preview).toBe("a".repeat(239) + "😀");
+    expect(result.items[0]?.href).toBe("/tasks?review=attention%3Aunicode");
+  });
   it("labels archived conversations and honors active-only Mail search", async () => {
     const archived = await search.search(
       userId,
@@ -225,11 +315,14 @@ describe.sequential("workspace discovery and account preferences", () => {
     );
     expect(active.items).toEqual([]);
   });
-  it("finds hidden historical events and preserves their date", async () => {
+  it.each([
+    true,
+    false,
+  ])("finds hidden historical events independent of archive inclusion (%s)", async (includeArchived) => {
     const page = await search.search(
       userId,
       "calendar",
-      workspaceSearchQuerySchema.parse({ q: "needle" }),
+      workspaceSearchQuerySchema.parse({ q: "needle", includeArchived: String(includeArchived) }),
     );
     expect(page.items[0]).toMatchObject({ state: "Hidden calendar" });
     expect(page.items[0]?.href).toContain("date=2020-01-01");
@@ -289,6 +382,15 @@ describe.sequential("workspace discovery and account preferences", () => {
       .from(auditEvents)
       .where(eq(auditEvents.entityType, `${workspace}_workspace_settings`));
     expect(audits).toHaveLength(1);
+    const table = {
+      calendar: calendarWorkspaceSettings,
+      tasks: tasksWorkspaceSettings,
+      mail: mailWorkspaceSettings,
+      finances: financesWorkspaceSettings,
+    }[workspace];
+    const [persisted] = await database.db.select().from(table).where(eq(table.userId, userId));
+    expect(audits[0]?.before).toBeNull();
+    expect(audits[0]?.after).toEqual(JSON.parse(JSON.stringify(persisted)));
   });
   it("persists Finance view and grouping with partial updates and workspace isolation", async () => {
     const context = { principal, requestId: "finance-display" };

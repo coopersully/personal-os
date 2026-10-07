@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import {
   createDatabaseClient,
+  type Database,
   type DatabaseClient,
   executionPolicySettings,
   financeAccounts,
@@ -14,7 +15,7 @@ import {
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { loadFinanceAuthorization } from "./context.js";
 import { createProfileBudgetService } from "./profile-budget-service.js";
 import { createSetupService } from "./setup-service.js";
@@ -762,6 +763,83 @@ describe.sequential("guided Finance setup", () => {
       ),
     ).rejects.toMatchObject({ code: "conflict" });
   });
+
+  it("rejects one concurrent any-order skip at the same session version without losing the winner", async () => {
+    const { owner, context, service } = await setupFixture("concurrent-question-skips");
+    const first = await service.setupFinances({ operation: "start" }, context);
+    const questionIds = first.data.availableQuestions?.slice(1, 3).map((question) => question.id);
+    if (questionIds?.length !== 2) throw new Error("Missing independent questions");
+    let signalLocked!: () => void;
+    let releaseLock!: () => void;
+    const locked = new Promise<void>((resolve) => {
+      signalLocked = resolve;
+    });
+    const released = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+    const blocker = database.db.transaction(async (tx) => {
+      await tx
+        .select()
+        .from(financeSetupSessions)
+        .where(eq(financeSetupSessions.id, first.data.sessionId))
+        .for("update");
+      signalLocked();
+      await released;
+    });
+    await locked;
+    const now = () => new Date("2026-09-18T12:00:00Z");
+    // Exercise transaction-scoped callers, which already own their mutation context and
+    // intentionally do not enter the standalone service's advisory-lock wrapper.
+    const outcomes = Promise.allSettled(
+      questionIds.map((questionId, index) =>
+        database.db.transaction(async (tx) => {
+          const scopedDb = tx as unknown as Database;
+          return createSetupService({
+            db: scopedDb,
+            executor: tx,
+            now,
+            planning: createProfileBudgetService({ db: scopedDb, executor: tx, now }),
+          }).setupFinances(
+            {
+              operation: "skip",
+              sessionId: first.data.sessionId,
+              expectedVersion: first.data.version,
+              questionId,
+              idempotencyKey: `concurrent-skip-${index}`,
+            },
+            context,
+          );
+        }),
+      ),
+    );
+    try {
+      await vi.waitFor(
+        async () => {
+          const waiting = await database.db.execute(
+            sql`SELECT pid FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE 'update %finance_setup_sessions%'`,
+          );
+          expect(waiting.rows.length).toBe(2);
+        },
+        { timeout: 5000 },
+      );
+    } finally {
+      releaseLock();
+      await blocker;
+    }
+    const results = await outcomes;
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((result) => result.status === "rejected");
+    expect(rejected).toMatchObject({ status: "rejected", reason: { code: "conflict" } });
+    const winner = results.findIndex((result) => result.status === "fulfilled");
+    const session = await database.db.query.financeSetupSessions.findFirst({
+      where: eq(financeSetupSessions.id, first.data.sessionId),
+    });
+    expect(session?.userId).toBe(owner.id);
+    expect(session?.skippedQuestions).toEqual([
+      { questionId: questionIds[winner], profileVersion: 0 },
+    ]);
+    expect(session?.version).toBe(first.data.version + 1);
+  }, 10_000);
 
   it("keeps a completely unknown profile absent and invalidates old skips after a profile edit", async () => {
     const { owner, planning, context, service } = await setupFixture("unknown-profile");

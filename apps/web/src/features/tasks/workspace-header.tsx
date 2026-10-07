@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArchiveIcon,
   CalendarIcon,
@@ -42,6 +42,7 @@ const historyViews = [
 
 export function TasksAppBarControls({ search, timeZone }: { search: ReactNode; timeZone: string }) {
   const params = useTaskPresentationParams();
+  const [routeParams] = useSearchParams();
   const navigate = useNavigate();
   const lists = useQuery({ queryKey: ["task-lists"], queryFn: listAllTaskLists });
   const projects = useQuery({ queryKey: ["task-projects"], queryFn: listAllTaskProjects });
@@ -93,7 +94,7 @@ export function TasksAppBarControls({ search, timeZone }: { search: ReactNode; t
     else
       navigate(
         taskPath(
-          params,
+          routeParams,
           value === "inbox"
             ? {}
             : {
@@ -152,12 +153,13 @@ export function TasksAppBarControls({ search, timeZone }: { search: ReactNode; t
           <>
             <WorkspaceFilters
               params={params}
+              routeParams={routeParams}
               timeZone={timeZone}
               lists={activeLists}
               projects={activeProjects}
             />
-            <WorkspaceSort params={params} />
-            <WorkspaceDisplay params={params} />
+            <WorkspaceSort params={params} routeParams={routeParams} />
+            <WorkspaceDisplay params={params} routeParams={routeParams} />
             {!params.has("view") && list ? (
               <TaskContainerActions
                 list={list}

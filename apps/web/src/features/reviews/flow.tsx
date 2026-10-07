@@ -171,6 +171,9 @@ function ReviewSession({
             (key === "agent-access-work-items" ||
               key === "assistant-setup-status" ||
               key === "domain-profile" ||
+              key === "review-attention" ||
+              key === "review-mail-question" ||
+              key === "review-finance-legacy" ||
               key.startsWith(
                 workspace === "finances"
                   ? "finance-"
@@ -231,7 +234,7 @@ function ReviewSession({
             </CardHeader>
             <CardContent className="grid gap-4">
               {current.preview?.length &&
-              !/^(finance-|mail-question:|mail-run:|mail-rule:)/.test(current.id) ? (
+              !/^(finance-|mail-question:|mail-rule:)/.test(current.id) ? (
                 <dl className="grid gap-3 sm:grid-cols-2">
                   {current.preview.map((field) => (
                     <div key={field.label}>

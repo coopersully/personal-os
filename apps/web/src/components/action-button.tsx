@@ -35,7 +35,7 @@ export function ActionButton({
         <TooltipTrigger asChild>
           <Button {...props} aria-label={props["aria-label"] ?? label} title={undefined} />
         </TooltipTrigger>
-        <TooltipContent side="bottom" sideOffset={6}>
+        <TooltipContent side="bottom" sideOffset={6} className="action-tooltip pointer-events-none">
           {label}
         </TooltipContent>
       </Tooltip>

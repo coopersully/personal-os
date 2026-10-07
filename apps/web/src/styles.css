@@ -1515,6 +1515,17 @@ p {
   max-width: 1440px;
   padding: 0.5rem var(--workspace-inline-padding);
 }
+/* Calendar owns a bounded viewport even when narrow chrome grows taller. */
+.workspace:has(> .content--calendar) {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 0;
+}
+.content--calendar {
+  flex: 1;
+  min-height: 0;
+}
 .content--calendar,
 .content--mail {
   margin: 0;
@@ -7648,6 +7659,11 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   .workspace-app-bar[data-workspace="finances"] .workspace-app-bar__context { margin-inline-start: auto; max-width: 100%; }
   .workspace-app-bar[data-workspace="finances"] .workspace-header-controls [data-slot="button"] { min-height: 2.5rem; }
   .workspace-app-bar[data-workspace="finances"] .review-navigation { margin-inline-start: .25rem; }
+}
+
+/* Action labels must not cover adjacent hit targets, including the positioning wrapper. */
+[data-radix-popper-content-wrapper]:has(> .action-tooltip) {
+  pointer-events: none;
 }
 
 .action-count-badge { position: absolute; right: -0.2rem; bottom: -0.2rem; min-width: 1rem; height: 1rem; padding: 0 .2rem; font-size: .625rem; line-height: 1; pointer-events: none; }

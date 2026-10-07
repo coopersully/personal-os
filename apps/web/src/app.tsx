@@ -369,6 +369,7 @@ import {
   WorkspacePreferencesSection,
 } from "./features/workspace-search/preferences.js";
 import { WorkspaceFinder } from "./features/workspace-search/search.js";
+import { useMediaQuery } from "./hooks/use-media-query.js";
 import {
   formatCalendarDate,
   formatMaterialDateTime,
@@ -627,21 +628,6 @@ function useDeviceWeatherLocation(enabled: boolean): DeviceWeatherLocation {
     };
   }, [enabled]);
   return location;
-}
-
-function useMediaQuery(query: string) {
-  const [matches, setMatches] = useState(() => window.matchMedia?.(query).matches ?? false);
-
-  useEffect(() => {
-    const media = window.matchMedia?.(query);
-    if (!media) return;
-    const update = () => setMatches(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, [query]);
-
-  return matches;
 }
 
 function AuthScreen() {
@@ -2996,40 +2982,9 @@ function CalendarPage({
   const initializedFollow = useRef(false);
   const requestedView = searchParams.get("view");
   const calendarPreferences = useWorkspacePreferences("calendar");
-  const attemptedView = useRef<string | null>(null);
-  const saveCalendarView = useFeedbackMutation({
-    scope: { id: "calendar-view-preference" },
-    feedback: { action: "save Calendar view", safeToRetry: true },
-    mutationFn: async (calendarView: "day" | "week" | "month") => {
-      const current = await api.getWorkspaceSettings("calendar");
-      return api.updateWorkspaceSettings("calendar", {
-        expectedRevision: current.revision,
-        preferences: { calendarView },
-      });
-    },
-    onSuccess: (data) => queryClient.setQueryData(["workspace-settings", "calendar"], data),
-  });
-  useEffect(() => {
-    if (!calendarPreferences.isSuccess || !["day", "week", "month"].includes(requestedView ?? ""))
-      return;
-    if (requestedView === calendarPreferences.data.preferences.calendarView) {
-      attemptedView.current = null;
-      return;
-    }
-    if (requestedView === attemptedView.current) return;
-    attemptedView.current = requestedView;
-    saveCalendarView.mutate(requestedView as "day" | "week" | "month");
-  }, [
-    requestedView,
-    calendarPreferences.isSuccess,
-    calendarPreferences.data,
-    saveCalendarView.mutate,
-  ]);
 
-  const responsiveDefaultView: CalendarView =
-    typeof window.matchMedia === "function" && window.matchMedia("(max-width: 560px)").matches
-      ? "day"
-      : "week";
+  const compactCalendar = useMediaQuery("(max-width: 560px)");
+  const responsiveDefaultView: CalendarView = compactCalendar ? "day" : "week";
   const storedView = calendarPreferences.data?.preferences.calendarView;
   const defaultView = storedView && storedView !== "auto" ? storedView : responsiveDefaultView;
   const view = calendarViewFromSearch(requestedView, defaultView);
@@ -3227,7 +3182,6 @@ function CalendarPage({
     <CalendarFeedbackRegion value={feedbackRegion}>
       <div className="calendar-page">
         <div ref={setFeedbackRegion} data-calendar-feedback />
-        <MutationFeedback feedback={saveCalendarView.feedback} />
         <QueryFeedback query={linkedEvent} title="Couldn’t open this event." />
         <QueryFeedback query={events} title="Couldn’t refresh calendar events." staleOnly />
         <QueryFeedback query={calendars} title="Couldn’t load calendars." />
@@ -3379,13 +3333,27 @@ function CalendarAccountsControl() {
         className="calendar-accounts-popover"
         description={label}
         primaryAction={
-          needsAttention ? (
-            <ShadcnButton asChild className="w-full">
-              <Link to="/settings?section=connections">
-                {reconnectAccountsLabel(attentionCount)}
-              </Link>
-            </ShadcnButton>
-          ) : null
+          <>
+            {accounts.isError || calendars.isError ? (
+              <ShadcnButton
+                className="w-full"
+                disabled={accounts.isFetching || calendars.isFetching}
+                onClick={() => {
+                  void accounts.refetch();
+                  void calendars.refetch();
+                }}
+              >
+                Retry loading calendars
+              </ShadcnButton>
+            ) : null}
+            {attentionCount > 0 ? (
+              <ShadcnButton asChild className="w-full">
+                <Link to="/settings?section=connections">
+                  {reconnectAccountsLabel(attentionCount)}
+                </Link>
+              </ShadcnButton>
+            ) : null}
+          </>
         }
         title="Calendars"
       >
@@ -5381,13 +5349,15 @@ function GoalItem({
       description={goal.description ?? "No supporting context yet."}
       actions={
         <>
-          <SettingsRecordAction
-            label={goal.status === "paused" ? "Resume" : "Pause"}
-            disabled={pending}
-            onClick={() => onUpdate({ status: goal.status === "paused" ? "active" : "paused" })}
-          >
-            {goal.status === "paused" ? <PlayIcon /> : <PauseIcon />}
-          </SettingsRecordAction>
+          {goal.status === "active" || goal.status === "paused" ? (
+            <SettingsRecordAction
+              label={goal.status === "paused" ? "Resume" : "Pause"}
+              disabled={pending}
+              onClick={() => onUpdate({ status: goal.status === "paused" ? "active" : "paused" })}
+            >
+              {goal.status === "paused" ? <PlayIcon /> : <PauseIcon />}
+            </SettingsRecordAction>
+          ) : null}
           <SettingsRecordAction
             label={`Remove ${goal.title}`}
             disabled={pending}
@@ -5645,13 +5615,24 @@ function MailAccountsControl() {
         className="mail-accounts-popover"
         description={label}
         primaryAction={
-          needsAttention ? (
-            <ShadcnButton asChild className="w-full">
-              <Link to="/settings?section=connections">
-                {reconnectAccountsLabel(attentionCount)}
-              </Link>
-            </ShadcnButton>
-          ) : null
+          <>
+            {accounts.isError ? (
+              <ShadcnButton
+                className="w-full"
+                disabled={accounts.isFetching}
+                onClick={() => void accounts.refetch()}
+              >
+                Retry loading mail accounts
+              </ShadcnButton>
+            ) : null}
+            {attentionCount > 0 ? (
+              <ShadcnButton asChild className="w-full">
+                <Link to="/settings?section=connections">
+                  {reconnectAccountsLabel(attentionCount)}
+                </Link>
+              </ShadcnButton>
+            ) : null}
+          </>
         }
         title="Mail accounts"
       >
@@ -7834,7 +7815,7 @@ function ProfileSettings({ user }: { user: User }) {
     feedback: { action: "save your profile", form: true },
     mutationFn: (input: {
       displayName: string;
-      email: string;
+      email?: string;
       planningTimezone: string;
       homeLocation: HomeLocation | null;
       workdayEndMinute: number;
@@ -7874,7 +7855,8 @@ function ProfileSettings({ user }: { user: User }) {
     if (!editRevision || update.isPending || !homeLocationValid) return;
     const timer = window.setTimeout(() => {
       const form = formRef.current;
-      if (!form || saving.current) return;
+      if (!form || saving.current || document.activeElement === form.elements.namedItem("email"))
+        return;
       const values = new FormData(form);
       if (
         !form.checkValidity() ||
@@ -7935,7 +7917,9 @@ function ProfileSettings({ user }: { user: User }) {
                 .map((value) => String(value).trim())
                 .filter(Boolean)
                 .join(" "),
-              email: String(form.get("email")),
+              ...(String(form.get("email")) !== user.email
+                ? { email: String(form.get("email")) }
+                : {}),
               planningTimezone,
               homeLocation,
               workdayEndMinute: timeToMinute(String(form.get("workdayEnd"))),
@@ -7995,6 +7979,7 @@ function ProfileSettings({ user }: { user: User }) {
                     defaultValue={user.email}
                     id="profile-email"
                     name="email"
+                    onBlur={edited}
                     required
                     type="email"
                   />

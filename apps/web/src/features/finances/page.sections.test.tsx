@@ -676,6 +676,21 @@ describe("Finance section states", () => {
       ),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Previous" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    const filters = screen.getByRole("dialog", { name: "Filter transactions" });
+    fireEvent.change(within(filters).getByLabelText("Search"), {
+      target: { value: "Bistro" },
+    });
+    api.listFinanceTransactions.mockClear();
+    fireEvent.click(within(filters).getByRole("button", { name: "Apply filters" }));
+    await waitFor(() =>
+      expect(api.listFinanceTransactions).toHaveBeenCalledWith(
+        expect.objectContaining({ search: "Bistro", cursor: undefined }),
+      ),
+    );
+    expect(api.listFinanceTransactions.mock.calls.every(([query]) => !query.cursor)).toBe(true);
+    expect(await screen.findByRole("button", { name: "Previous" })).toBeDisabled();
   }, 10_000);
 
   it("recovers browser account scopes and navigates unplanned budget months", async () => {
@@ -1404,4 +1419,119 @@ it.each([
   );
   expect(save).toHaveBeenCalledTimes(2);
   expect(save.mock.calls[1]).toEqual(save.mock.calls[0]);
+});
+
+it.each([
+  "cards",
+  "table",
+])("opens context actions from the %s transaction and supports dismissing edits", async (view) => {
+  api.listFinanceTransactions.mockResolvedValue({
+    items: [
+      {
+        accountId: "checking",
+        amount: 18.5,
+        category: null,
+        categoryConfidence: null,
+        categoryId: null,
+        categorySource: null,
+        createdAt: "2026-08-23T12:00:00Z",
+        date: "2026-08-23",
+        direction: "expense",
+        id: "meal",
+        merchant: "Cafe",
+        merchantId: null,
+        needsReview: true,
+        notes: null,
+        pending: true,
+        rawMerchant: "SQ CAFE",
+        updatedAt: "2026-08-23T12:00:00Z",
+      },
+    ],
+    nextCursor: null,
+  });
+  renderPage(`/finances/transactions?view=${view}`);
+  const user = userEvent.setup();
+  const trigger = await screen.findByRole(view === "cards" ? "button" : "row", {
+    name: "Open Cafe transaction",
+  });
+  fireEvent.contextMenu(trigger);
+  await user.click(screen.getByRole("menuitem", { name: "Add context" }));
+  expect(await screen.findByRole("dialog", { name: "Add context" })).toBeVisible();
+  await user.keyboard("{Escape}");
+  fireEvent.contextMenu(trigger);
+  await user.click(screen.getByRole("menuitem", { name: "Categorize" }));
+  expect(await screen.findByRole("dialog", { name: "Categorize Cafe" })).toBeVisible();
+  await user.keyboard("{Escape}");
+  fireEvent.contextMenu(trigger);
+  await user.click(screen.getByRole("menuitem", { name: "Split purchase" }));
+  expect(await screen.findByRole("dialog", { name: "Split Cafe" })).toBeVisible();
+  await user.keyboard("{Escape}");
+  await user.click(trigger);
+  await user.click(screen.getByRole("button", { name: "Split purchase" }));
+  expect(await screen.findByRole("dialog", { name: "Split Cafe" })).toBeVisible();
+});
+it("opens transaction import and category creation from the header and changes sorting", async () => {
+  renderPage("/finances/transactions");
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Sort transactions" }));
+  await user.click(screen.getByRole("menuitemradio", { name: "Highest amount" }));
+  await waitFor(() =>
+    expect(api.listFinanceTransactions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sortBy: "amount", sortDirection: "desc" }),
+    ),
+  );
+  for (const name of ["Import transactions", "Add category"]) {
+    await user.click(screen.getByRole("button", { name: "Add in Transactions" }));
+    await user.click(screen.getByRole("menuitem", { name }));
+    expect(await screen.findByRole("dialog")).toBeVisible();
+    await user.keyboard("{Escape}");
+  }
+});
+
+it.each([
+  "spent",
+  "category",
+] as const)("shows purchases and refund credits in the %s budget detail", (kind) => {
+  const base = {
+    accountId: "checking",
+    amount: 50,
+    category: "Dining",
+    categoryConfidence: 1,
+    categorySource: "user",
+    createdAt: "2026-09-01T12:00:00Z",
+    date: "2026-09-01",
+    id: "meal",
+    merchant: "Dinner",
+    merchantId: null,
+    needsReview: false,
+    notes: null,
+    pending: false,
+    rawMerchant: null,
+    updatedAt: "2026-09-01T12:00:00Z",
+    direction: "expense",
+  };
+  render(
+    <FinanceBudgetDetailDialog
+      budgets={[{ category: "Dining", limit: 100, month: "2026-09" }]}
+      detail={kind === "category" ? { kind, category: "Dining" } : { kind }}
+      month="2026-09"
+      onOpenChange={vi.fn()}
+      transactions={
+        [
+          base,
+          { ...base, id: "refund", merchant: "Dinner refund", amount: 15, direction: "income" },
+        ] as never
+      }
+    />,
+  );
+  expect(screen.getByText("+$15.00")).toBeVisible();
+  expect(screen.getByText("−$50.00")).toBeVisible();
+  if (kind === "category") expect(screen.getByText("$35.00", { exact: false })).toBeVisible();
+});
+
+it("opens an interactive budget metric with its accessible label", () => {
+  const onClick = vi.fn();
+  render(<BudgetMetricCard label="Remaining" tone="success" value="$25.00" onClick={onClick} />);
+  fireEvent.click(screen.getByRole("button"));
+  expect(onClick).toHaveBeenCalledOnce();
 });

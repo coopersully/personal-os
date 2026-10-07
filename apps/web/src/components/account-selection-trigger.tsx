@@ -41,10 +41,9 @@ export function AccountSelectionTrigger({
 }: AccountSelectionTriggerProps) {
   return (
     <Button
-      tooltip={ariaLabel}
+      tooltip={`${ariaLabel}${allSynced && !needsAttention ? ", all accounts connected and syncing" : ""}`}
       {...buttonProps}
       aria-label={ariaLabel}
-      title={`${ariaLabel}${allSynced && !needsAttention ? ", all accounts connected and syncing" : ""}`}
       className={cn("account-selection-trigger", className)}
       disabled={disabled}
       size="sm"

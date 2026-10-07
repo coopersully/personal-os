@@ -38,7 +38,8 @@ Orientation (app frame)
 
 Tasks context (sidebar)
 ├── Inbox, Today, Upcoming, All
-├── Lists: active user Lists with their nested active, open Projects
+├── Lists and Projects: collection destinations
+├── Pinned: explicitly pinned active Lists and open Projects as independent entries
 └── History, Trash
 
 Tasks top navigation (shared app frame)

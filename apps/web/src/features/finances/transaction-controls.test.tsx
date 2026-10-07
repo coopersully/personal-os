@@ -235,11 +235,11 @@ it("restores saved view and grouping and saves an explicit ungrouped choice", as
   );
   expect(await screen.findByRole("button", { name: "Transaction view: Cards" })).toBeVisible();
   await userEvent.click(screen.getByRole("button", { name: "Display transactions" }));
-  expect(screen.getByRole("menuitemradio", { name: "Date", exact: true })).toHaveAttribute(
+  expect(screen.getByRole("menuitemradio", { name: "Date" })).toHaveAttribute(
     "aria-checked",
     "true",
   );
-  await userEvent.click(screen.getByRole("menuitemradio", { name: "None", exact: true }));
+  await userEvent.click(screen.getByRole("menuitemradio", { name: "None" }));
   expect(screen.getByLabelText("Location")).toHaveTextContent("group=none");
   await waitFor(() =>
     expect(api.updateWorkspaceSettings).toHaveBeenCalledWith("finances", {

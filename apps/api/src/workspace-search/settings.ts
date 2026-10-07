@@ -162,11 +162,12 @@ export function createWorkspaceSettingsService(db: Database) {
             .values({ userId, ...values })
             .onConflictDoUpdate({ target: financesWorkspaceSettings.userId, set: values });
         }
+        const [persisted] = await tx.select().from(table).where(eq(table.userId, userId));
         await tx.insert(auditEvents).values(
           auditValues({
             action: "workspace.preferences_updated",
             before: row ?? null,
-            after: preferences,
+            after: persisted ?? null,
             entityId: userId,
             entityType: `${workspace}_workspace_settings`,
             ...context,

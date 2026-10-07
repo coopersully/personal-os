@@ -486,6 +486,13 @@ describe("database schema contracts", () => {
       "0091_texting_provider_submission_evidence",
       "0092_finance_sms_answer_provenance",
       "0093_ritual_tracking",
+      "0094_workspace_preferences",
+      "0095_calendar_follow_preferences",
+      "0096_task_container_pins",
+      "0097_task_display_preferences",
+      "0098_mail_layout_preferences",
+      "0099_mail_conversation_layout",
+      "0100_finance_transaction_preferences",
     ]);
   });
 

@@ -439,7 +439,12 @@ export function registerFinanceRoutes({
   });
   app.get("/v1/finances/configuration", async (context) => {
     context.header("Cache-Control", "no-store");
-    return context.json(await finances.getFinanceConfiguration(context.get("principal").userId));
+    return context.json(
+      await finances.getFinanceConfiguration(
+        context.get("principal").userId,
+        context.get("requestId"),
+      ),
+    );
   });
   app.post("/v1/finances/setup", async (context) =>
     context.json(

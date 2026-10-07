@@ -86,7 +86,9 @@ export function useFinanceProfileField<T>(
   function setValue(next: T) {
     client.setQueryData(draftKey, { value: next });
   }
-  function commit(next = value) {
+  function commit(
+    next = (client.getQueryData<{ value: T } | null>(draftKey) ?? { value: saved }).value,
+  ) {
     const pending = client.getMutationCache().findAll({ mutationKey, status: "pending" });
     const latest = pending.at(-1);
     if (
@@ -97,9 +99,10 @@ export function useFinanceProfileField<T>(
     save.mutate(next);
   }
   async function reload() {
-    await client.refetchQueries({ queryKey: financeConfigurationKey });
+    client.setQueryData(draftKey, null);
     attempt.current = null;
     save.reset();
+    await client.refetchQueries({ queryKey: financeConfigurationKey });
   }
   return { value, setValue, commit, save, reload };
 }

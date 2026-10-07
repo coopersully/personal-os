@@ -30,7 +30,11 @@ export type MailAttachmentContent = {
 };
 
 export type MailApiClient = {
-  downloadMailAttachment(messageId: string, attachmentId: string): Promise<MailAttachmentContent>;
+  downloadMailAttachment(
+    messageId: string,
+    attachmentId: string,
+    signal?: AbortSignal,
+  ): Promise<MailAttachmentContent>;
   activateMailRule(
     id: string,
     input: ActivateMailRuleInput,
@@ -68,9 +72,10 @@ export function createMailApiClient(
   toQuery: (query: object) => string,
 ): MailApiClient {
   return {
-    async downloadMailAttachment(messageId, attachmentId) {
+    async downloadMailAttachment(messageId, attachmentId, signal) {
       const result = await request<{ attachment: MailAttachmentContent }>(
         `/v1/mail/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+        signal ? { signal } : {},
       );
       return result.attachment;
     },

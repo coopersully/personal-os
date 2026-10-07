@@ -286,6 +286,7 @@ function WorkspaceContent({ onEdit, onEditReminder, timeZone }: WorkspacePagePro
       <div className="narrow-page flex min-w-0 flex-col gap-3">
         <WorkspaceFilterChips
           params={params}
+          routeParams={routeParams}
           timeZone={timeZone}
           lists={lists.data?.items ?? []}
           projects={projects.data?.items ?? []}

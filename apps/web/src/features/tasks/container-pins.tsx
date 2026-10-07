@@ -9,10 +9,12 @@ export function TaskContainerPin({
   id,
   kind,
   name,
+  unpinOnly = false,
 }: {
   id: string;
   kind: "list" | "project";
   name: string;
+  unpinOnly?: boolean;
 }) {
   const query = useWorkspacePreferences("tasks");
   const cache = useQueryClient();
@@ -21,16 +23,25 @@ export function TaskContainerPin({
   const pinned = ids.includes(id);
   const save = useFeedbackMutation({
     feedback: { action: pinned ? "unpin this item" : "pin this item", safeToRetry: false },
-    mutationFn: () =>
-      api.updateWorkspaceSettings("tasks", {
-        expectedRevision: query.data?.revision ?? 0,
-        preferences: { [key]: pinned ? ids.filter((value) => value !== id) : [...ids, id] },
-      }),
+    scope: { id: "tasks-presentation-preferences" },
+    mutationFn: async (shouldPin: boolean) => {
+      const current = await api.getWorkspaceSettings("tasks");
+      const currentIds = current.preferences[key] ?? [];
+      return api.updateWorkspaceSettings("tasks", {
+        expectedRevision: current.revision,
+        preferences: {
+          [key]: shouldPin
+            ? [...new Set([...currentIds, id])]
+            : currentIds.filter((value) => value !== id),
+        },
+      });
+    },
     onSuccess: (data) => cache.setQueryData(["workspace-settings", "tasks"], data),
     onError: () => {
       void query.refetch();
     },
   });
+  if (unpinOnly && !pinned) return null;
   return (
     <Button
       size="icon-sm"
@@ -39,7 +50,7 @@ export function TaskContainerPin({
       aria-label={`${pinned ? "Unpin" : "Pin"} ${name}`}
       title={`${pinned ? "Unpin" : "Pin"} ${name}`}
       disabled={!query.isSuccess || save.isPending || (!pinned && ids.length >= 100)}
-      onClick={() => save.mutate()}
+      onClick={() => save.mutate(!pinned)}
     >
       <PinIcon aria-hidden="true" weight={pinned ? "Filled" : "Outline"} />
     </Button>

@@ -1,6 +1,9 @@
 # Finance Configuration and Readiness Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Historical implementation plan:** Retained as the original work breakdown, not a live task
+> checklist or shipping record. Current interaction contracts live in
+> [Finances](../../design/pages/finances.md); verified delivery is recorded in the
+> [implementation log](../../product/implementation-log.md).
 
 **Goal:** Open Finance setup directly into shared editable configuration and explain feature prerequisites without imposing a global setup lock.
 
@@ -72,7 +75,7 @@
 
 **Interfaces:** Sidebar and search use Task 1 readiness and the same existing Finance destinations. Entries remain links to their pages or prerequisite screens, not dead disabled controls.
 
-- [ ] Add tests for groups/order: Overview; Money (Accounts, Transactions); Planning (Budget, Cash flow, Wealth); Setup (Financial setup). Assert no Finance settings sidebar entry and no review footer for zero actionable items.
+- [ ] Add tests for groups/order: Money (Overview, Transactions, Accounts); Planning (Budget, Cash flow, Wealth); Manage (Financial profile). Assert no Finance settings sidebar entry and no review footer for zero actionable items.
 - [ ] Run tests to confirm the current menu fails the new expectations.
 - [ ] Implement labels/grouping and accessible unavailable-state metadata using shared sidebar components. Keep `/finances/plan` and historical redirects working while displaying Budget consistently in navigation and search.
 - [ ] Verify desktop, collapsed sidebar, mobile menu, search destinations, active states, and direct unavailable-page navigation. Keep the standard Settings entry and Finance settings page intact.

@@ -415,6 +415,85 @@ describe.sequential("real contextual question producer", () => {
     "finance_transactions",
     "finance_review_cases",
     "finance_contextual_questions",
+  ])("aborts a batch when %s disappears after the owned preview", async (table) => {
+    const f = await questionFixture();
+    const id =
+      table === "finance_accounts"
+        ? f.account.id
+        : table === "finance_transactions"
+          ? f.transaction.id
+          : table === "finance_review_cases"
+            ? f.question.reviewCaseId
+            : f.question.id;
+    const single = createDatabaseClient({ connectionString: container.getConnectionUri(), max: 1 });
+    const client = await single.pool.connect();
+    const original = client.query.bind(client);
+    let deleted = false;
+    const query = vi.spyOn(client, "query").mockImplementation((async (
+      input: { text: string },
+      values: unknown[],
+    ) => {
+      const result = await original(input, values);
+      if (!deleted && /from "finance_contextual_questions"/i.test(input.text)) {
+        deleted = true;
+        await database.pool.query(`DELETE FROM ${table} WHERE id=$1`, [id]);
+      }
+      return result;
+    }) as typeof client.query);
+    client.release();
+    try {
+      await expect(
+        single.db.transaction((tx) => resolveContextualWorks(f.userId, [f.question.work], tx)),
+      ).rejects.toMatchObject({ code: "conflict", details: { retryable: true } });
+      expect(deleted).toBe(true);
+    } finally {
+      query.mockRestore();
+      await single.close();
+    }
+  });
+  it.each([
+    ["40001", true],
+    ["23514", false],
+  ])("classifies PostgreSQL %s during a batch parent lock", async (code, retryable) => {
+    const f = await questionFixture();
+    const single = createDatabaseClient({ connectionString: container.getConnectionUri(), max: 1 });
+    const client = await single.pool.connect();
+    const original = client.query.bind(client);
+    let intercepted = false;
+    const query = vi.spyOn(client, "query").mockImplementation((async (
+      input: { text: string },
+      values: unknown[],
+    ) => {
+      if (/from "finance_accounts"/i.test(input.text) && /for share nowait/i.test(input.text)) {
+        intercepted = true;
+        throw Object.assign(new Error("simulated PostgreSQL failure"), { code });
+      }
+      return original(input, values);
+    }) as typeof client.query);
+    client.release();
+    try {
+      const resolving = single.db.transaction((tx) =>
+        resolveContextualWorks(f.userId, [f.question.work], tx),
+      );
+      if (retryable) {
+        await expect(resolving).rejects.toMatchObject({
+          code: "conflict",
+          details: { retryable: true },
+        });
+      } else {
+        await expect(resolving).rejects.toMatchObject({ cause: { code } });
+      }
+      expect(intercepted).toBe(true);
+    } finally {
+      query.mockRestore();
+      await single.close();
+    }
+  });
+  it.each([
+    "finance_accounts",
+    "finance_transactions",
+    "finance_review_cases",
+    "finance_contextual_questions",
   ])("aborts NOWAIT contention on %s before receipt insertion and retries the same command", async (table) => {
     const f = await questionFixture();
     const id =

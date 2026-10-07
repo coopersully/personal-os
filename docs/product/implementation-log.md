@@ -26,6 +26,9 @@
   back to setup. Pending login approval opens macOS Login Items directly.
 - Settings refresh OS evidence while visible and on return from System Settings, preserving
   unsaved edits. Setup saves launch-at-login independently of those drafts.
+- Local desktop verification after the main catch-up exposed a signed-out startup loop.
+  Native updater status now survives API session expiry, keeping login reachable while
+  authenticated query data is still cleared. Regression coverage exercises both paths.
 - The existing resident runtime remains responsible for close-window operation and wake
   recovery. Explicit Quit still exits; there is no new persistent helper. Already scheduled
   OS notifications may outlive Quit.

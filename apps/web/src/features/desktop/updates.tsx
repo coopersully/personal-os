@@ -32,6 +32,7 @@ const updateKey = ["desktop-update-status"];
 function useStatus() {
   return useQuery({
     queryKey: updateKey,
+    meta: { sessionIndependent: true },
     queryFn: getUpdateStatus,
     enabled: isDesktop(),
     refetchInterval: (query) =>

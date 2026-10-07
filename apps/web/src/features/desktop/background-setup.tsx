@@ -5,6 +5,11 @@ import { MonitorIcon } from "../../components/icons.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { ReadinessPanel, type ReadinessPanelCheck } from "../../components/readiness-panel.js";
 import { Button } from "../../components/ui/button.js";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "../../components/ui/collapsible.js";
 import { ItemGroup } from "../../components/ui/item.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import {
@@ -194,15 +199,23 @@ export function BackgroundSetup({
           {...(next ? { focus: { label: "Next step" as const, title: next.title } } : {})}
         />
       </ItemGroup>
-      <p className="text-sm text-muted-foreground">
-        Closing the window keeps nohmi in the menu bar, with your enabled pet and routines active.
-        Quit nohmi stops the pet, routines, and new notification checks until you reopen it. Alerts
-        already scheduled with macOS may still arrive.
-      </p>
-      <p className="text-sm text-muted-foreground">
-        Routines resume when your Mac wakes; nohmi does not wake it. A missed routine follows its
-        catch-up window rather than running while the Mac is asleep.
-      </p>
+      <Collapsible>
+        <CollapsibleTrigger asChild>
+          <Button type="button" size="sm" variant="ghost">
+            Background behavior
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="flex flex-col gap-2 pt-2 text-sm text-muted-foreground">
+          <p>
+            Closing the window keeps enabled features running in the menu bar. Quitting nohmi stops
+            the pet, routines, and new notification checks.
+          </p>
+          <p>
+            Routines resume when your Mac wakes. Alerts already scheduled with macOS may still
+            arrive after quitting.
+          </p>
+        </CollapsibleContent>
+      </Collapsible>
       <MutationFeedback feedback={startup.feedback} />
       <MutationFeedback feedback={action.feedback} />
     </div>

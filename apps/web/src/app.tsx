@@ -362,7 +362,6 @@ import { TasksWorkspacePage } from "./features/tasks/workspace-page.js";
 import { textingSettingsNavigationItem } from "./features/texting/manifest.js";
 import { TextingSettings } from "./features/texting/page.js";
 import { RitualSettings } from "./features/tracking/ritual-settings.js";
-import { RitualSetupOffer } from "./features/tracking/ritual-setup-offer.js";
 import type { SearchAction } from "./features/workspace-search/catalog.js";
 import {
   useWorkspacePreferences,
@@ -1521,7 +1520,6 @@ function AuthenticatedApp({ user }: { user: User }) {
                 {pageTitle && navigationOwner.kind !== "account-utility" ? (
                   <h1 className="sr-only">{pageTitle}</h1>
                 ) : null}
-                {isTauri() ? <RitualSetupOffer userId={user.id} /> : null}
                 <WorkspaceRoutes
                   calendarTodaySnap={calendarTodaySnap}
                   calendars={calendars.data ?? []}
@@ -5883,7 +5881,6 @@ const secondarySettings: Array<{
   { icon: LockIcon, id: "sessions", label: "Signed-in devices", parent: "security" },
   { icon: UserIcon, id: "invitations", label: "Invitations", parent: "security" },
   { icon: ImageIcon, id: "wallpaper", label: "Wallpaper", parent: "appearance" },
-  { icon: SparklesIcon, id: "pet", label: "Desktop pet", parent: "desktop" },
 ];
 const settingsNavigation: Array<{
   items: Array<{ icon: Icon; id: SettingsSectionId; label: string }>;
@@ -5922,6 +5919,7 @@ const settingsNavigation: Array<{
       { icon: PulseIcon, id: "notifications", label: "Notifications" },
       { ...textingSettingsNavigationItem, id: "texting", label: "Texting" },
       { icon: MonitorIcon, id: "desktop", label: "Desktop app" },
+      { icon: SparklesIcon, id: "pet", label: "Desktop pet" },
     ],
   },
 ];
@@ -6251,23 +6249,7 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
       {section === "invitations" ? <InvitationsSettings /> : null}
       {section === "sessions" ? <SessionsSettings /> : null}
       {section === "texting" ? <TextingSettings /> : null}
-      {section === "desktop" ? (
-        <div className="settings-stack">
-          <DesktopDownloads />
-          {isTauri() ? (
-            <RelatedSettings
-              title="Desktop companion"
-              items={[
-                {
-                  label: "Desktop pet",
-                  description: "Choose your companion and its shortcuts.",
-                  section: "pet",
-                },
-              ]}
-            />
-          ) : null}
-        </div>
-      ) : null}
+      {section === "desktop" && !isTauri() ? <DesktopDownloads /> : null}
       {section === "wallpaper" ? <PinterestWallpaperSettingsPanel /> : null}
       {isTauri() && (section === "desktop" || section === "pet" || section === "notifications") ? (
         <DesktopSettingsPanel section={section} />

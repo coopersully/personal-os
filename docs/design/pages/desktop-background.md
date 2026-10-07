@@ -45,3 +45,22 @@ sleep/wake catch-up without promising execution while asleep or powering on the 
   tests check bridge compatibility. A signed installed build still needs manual checks
   for OS approval, login relaunch, notification delivery, close-window pet/routine behavior,
   sleep/wake, and explicit Quit. Mocked readiness cannot establish those OS behaviors.
+
+## Desktop settings composition
+
+Desktop pet is a peer Settings destination, never hidden beneath Desktop app. Its primary
+controls come before background diagnostics. Desktop app separates Updates, Background activity (including startup),
+Widgets, and Server connection using the shared settings cards and content-width bento.
+The installed app does not repeat its download promotion above its preferences.
+
+Optional ritual setup never appears in the shared application layout. People find and configure
+rituals in Settings → Rituals. Its local delivery group uses the short **Background settings**
+action, with unsaved-change guidance in wrapping text rather than a long button label.
+
+Login presents a quiet **Server settings** trigger. Hosted/custom selection, testing, and saving
+live in its labelled, scrollable dialog; custom-server use does not automatically expose the
+editor on login. Keep the active server, drafts, failure recovery, and account-switch behavior
+intact. Native recovery evidence remains available inside this dialog.
+
+Buttons and form fields must fit their owning cards/dialogs at 390px and desktop widths. Use
+wrapping action groups and existing responsive settings containers, not overflow clipping.

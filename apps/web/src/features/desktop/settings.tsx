@@ -1,5 +1,5 @@
 import { useIsMutating, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useState } from "react";
+import { type ReactNode, useEffect, useId, useState } from "react";
 import { toast } from "sonner";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
@@ -14,6 +14,14 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "../../components/ui/collapsible.js";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "../../components/ui/dialog.js";
 import {
   Field,
   FieldDescription,
@@ -33,7 +41,7 @@ import {
 } from "../../components/ui/item.js";
 import { Switch } from "../../components/ui/switch.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
-import { SettingsSection } from "../settings/settings-layout.js";
+import { SettingsBento, SettingsSection } from "../settings/settings-layout.js";
 import { RitualLocal } from "../tracking/ritual-local.js";
 import { BackgroundSetup } from "./background-setup.js";
 import {
@@ -66,7 +74,37 @@ function Toggle({
     </Field>
   );
 }
-export function DesktopSettingsPanel({
+type DesktopSettingsPanelProps = {
+  section?: "desktop" | "pet" | "notifications";
+  connectionOnly?: boolean;
+};
+
+export function DesktopSettingsPanel(props: DesktopSettingsPanelProps) {
+  if (!isDesktop()) return null;
+  if (!props.connectionOnly) return <DesktopSettingsContent {...props} />;
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="sm" className="self-center" type="button">
+          Server settings
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Server connection</DialogTitle>
+          <DialogDescription>Use hosted nohmi or connect to your own server.</DialogDescription>
+        </DialogHeader>
+        <DesktopSettingsContent {...props} />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ConnectionFields({ children }: { children: ReactNode; title: string }) {
+  return <>{children}</>;
+}
+
+function DesktopSettingsContent({
   section = "desktop",
   connectionOnly = false,
 }: {
@@ -161,31 +199,19 @@ export function DesktopSettingsPanel({
   const notification = (value: Partial<DesktopSettings["notifications"]>) =>
     update({ notifications: { ...draft.notifications, ...value } });
 
+  const Group = connectionOnly ? ConnectionFields : SettingsSection;
+  const background = query.data?.native.loginStatus ? (
+    <BackgroundSetup
+      status={query.data}
+      stale={query.isError}
+      saving={save.isPending}
+      dirty={JSON.stringify(draft) !== JSON.stringify(query.data.settings)}
+      section={section}
+      onStartupEnabled={() => setDraft((current) => current && { ...current, launchAtLogin: true })}
+    />
+  ) : null;
   return (
-    <SettingsSection
-      title={
-        connectionOnly
-          ? "Server"
-          : section === "pet"
-            ? "Desktop pet"
-            : section === "notifications"
-              ? "Notifications"
-              : "Desktop preferences"
-      }
-    >
-      {!connectionOnly && section === "desktop" ? <DesktopUpdates /> : null}
-      {!connectionOnly && section !== "notifications" && query.data?.native.loginStatus ? (
-        <BackgroundSetup
-          status={query.data}
-          stale={query.isError}
-          saving={save.isPending}
-          dirty={JSON.stringify(draft) !== JSON.stringify(query.data.settings)}
-          section={section}
-          onStartupEnabled={() =>
-            setDraft((current) => current && { ...current, launchAtLogin: true })
-          }
-        />
-      ) : null}
+    <div className="settings-stack min-w-0">
       {connectionOnly ? <RitualLocal recoveryOnly /> : null}
       {query.data?.native.error ? (
         <Alert variant="destructive">
@@ -200,360 +226,379 @@ export function DesktopSettingsPanel({
       <QueryFeedback query={query} title="Couldn’t refresh desktop preferences." staleOnly />
       <FeedbackForm
         feedback={save.feedback}
-        className="flex flex-col gap-5"
+        className="settings-stack min-w-0"
         onSubmit={(event) => {
           event.preventDefault();
           if (!startupPending) save.mutate(draft);
         }}
       >
         {section === "desktop" ? (
-          <FieldGroup>
-            <ItemGroup>
-              <Item variant="secondary">
-                <ItemContent>
-                  <ItemTitle>
-                    Hosted nohmi <Badge variant="secondary">Recommended</Badge>
-                  </ItemTitle>
-                  <ItemDescription>nohmi-api.coopersully.me</ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  {usesHostedServer ? (
-                    <Badge variant="secondary">Selected</Badge>
-                  ) : (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => {
-                        update({ serverUrl: hostedServer });
-                        setTested(null);
-                      }}
-                    >
-                      Use hosted nohmi
-                    </Button>
-                  )}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    disabled={test.isPending}
-                    onClick={() => test.mutate(hostedServer)}
-                  >
-                    {test.isPending ? "Testing hosted…" : "Test hosted connection"}
-                  </Button>
-                </ItemActions>
-              </Item>
-            </ItemGroup>
-            {tested === hostedServer ? <p role="status">Hosted connection verified</p> : null}
-            <Collapsible open={advancedServerOpen} onOpenChange={setAdvancedServerOpen}>
-              <CollapsibleTrigger asChild>
-                <Button type="button" variant="ghost" aria-expanded={advancedServerOpen}>
-                  Advanced server settings
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="pt-3">
-                <FieldGroup>
-                  <Field>
-                    <FieldLabel htmlFor="desktop-server">Custom API server</FieldLabel>
-                    <Input
-                      id="desktop-server"
-                      value={usesHostedServer ? "" : draft.serverUrl}
-                      onChange={(event) => {
-                        update({ serverUrl: event.target.value });
-                        setTested(null);
-                      }}
-                      placeholder="https://nohmi-api.example.com"
-                      type="url"
-                      required={!usesHostedServer}
-                    />
-                    <FieldDescription>
-                      Use the HTTPS origin of a self-hosted nohmi API. Switching servers signs you
-                      out.
-                    </FieldDescription>
-                  </Field>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={test.isPending || usesHostedServer || !draft.serverUrl}
-                    onClick={() => test.mutate(draft.serverUrl)}
-                  >
-                    {test.isPending ? "Testing…" : "Test connection"}
-                  </Button>
-                  {tested === draft.serverUrl && !usesHostedServer ? (
-                    <p role="status">Connection verified</p>
-                  ) : null}
-                </FieldGroup>
-              </CollapsibleContent>
-            </Collapsible>
+          <>
             {!connectionOnly ? (
-              <>
-                <Toggle
-                  label="Open at login"
-                  value={draft.launchAtLogin}
-                  onChange={(launchAtLogin) => update({ launchAtLogin })}
-                />
-                {query.data?.wallpaperError ? (
-                  <p role="alert">
-                    Wallpaper could not refresh. nohmi will retry while it is running.
+              <SettingsBento primaryFirst>
+                <SettingsSection title="Background activity">
+                  <Toggle
+                    label="Open at login"
+                    value={draft.launchAtLogin}
+                    onChange={(launchAtLogin) => update({ launchAtLogin })}
+                  />
+                  {query.data?.wallpaperError ? (
+                    <p role="alert">
+                      Wallpaper could not refresh. nohmi will retry while it is running.
+                    </p>
+                  ) : null}
+                  {background}
+                </SettingsSection>
+                <SettingsSection title="Widgets">
+                  <FieldSet>
+                    <FieldLegend>Widget workspaces</FieldLegend>
+                    <FieldDescription>
+                      Choose what can appear in Today at a Glance, independently of the pet.
+                    </FieldDescription>
+                    {["tasks", "reminders", "calendar", "finances", "mail", "goals", "motives"].map(
+                      (workspace) => (
+                        <Field orientation="horizontal" key={workspace}>
+                          <Checkbox
+                            id={`widget-${workspace}`}
+                            checked={draft.widgetWorkspaces.includes(workspace)}
+                            onCheckedChange={(checked) =>
+                              update({
+                                widgetWorkspaces: checked
+                                  ? [...draft.widgetWorkspaces, workspace]
+                                  : draft.widgetWorkspaces.filter((value) => value !== workspace),
+                              })
+                            }
+                          />
+                          <FieldLabel htmlFor={`widget-${workspace}`}>
+                            {`${workspace[0]?.toUpperCase()}${workspace.slice(1)}`}
+                          </FieldLabel>
+                        </Field>
+                      ),
+                    )}
+                  </FieldSet>
+                  <p>
+                    {query.data?.native.widgetsAvailable
+                      ? "Native widgets are available through Edit Widgets on your desktop."
+                      : "Native widgets require an installed build with App Group access."}
                   </p>
-                ) : null}
-                <FieldSet>
-                  <FieldLegend>Widget workspaces</FieldLegend>
-                  <FieldDescription>
-                    Choose what can appear in Today at a Glance, independently of the pet.
-                  </FieldDescription>
-                  {["tasks", "reminders", "calendar", "finances", "mail", "goals", "motives"].map(
-                    (workspace) => (
-                      <Field orientation="horizontal" key={workspace}>
-                        <Checkbox
-                          id={`widget-${workspace}`}
-                          checked={draft.widgetWorkspaces.includes(workspace)}
-                          onCheckedChange={(checked) =>
-                            update({
-                              widgetWorkspaces: checked
-                                ? [...draft.widgetWorkspaces, workspace]
-                                : draft.widgetWorkspaces.filter((value) => value !== workspace),
-                            })
-                          }
-                        />
-                        <FieldLabel htmlFor={`widget-${workspace}`}>
-                          {`${workspace[0]?.toUpperCase()}${workspace.slice(1)}`}
-                        </FieldLabel>
-                      </Field>
-                    ),
-                  )}
-                </FieldSet>
-                <p>
-                  {query.data?.native.widgetsAvailable
-                    ? "Native widgets are available through Edit Widgets on your desktop."
-                    : "Native widgets require an installed build with App Group access."}
-                </p>
-              </>
+                </SettingsSection>
+              </SettingsBento>
             ) : null}
-          </FieldGroup>
+            <Group title="Server connection">
+              <FieldGroup>
+                <ItemGroup>
+                  <Item variant="secondary" className="flex-col items-stretch">
+                    <ItemContent>
+                      <ItemTitle>
+                        Hosted nohmi <Badge variant="secondary">Recommended</Badge>
+                      </ItemTitle>
+                      <ItemDescription>nohmi-api.coopersully.me</ItemDescription>
+                    </ItemContent>
+                    <ItemActions className="flex-wrap">
+                      {usesHostedServer ? (
+                        <Badge variant="secondary">Selected</Badge>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            update({ serverUrl: hostedServer });
+                            setTested(null);
+                          }}
+                        >
+                          Use hosted nohmi
+                        </Button>
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        disabled={test.isPending}
+                        onClick={() => test.mutate(hostedServer)}
+                      >
+                        {test.isPending ? "Testing hosted…" : "Test hosted connection"}
+                      </Button>
+                    </ItemActions>
+                  </Item>
+                </ItemGroup>
+                {tested === hostedServer ? <p role="status">Hosted connection verified</p> : null}
+                <Collapsible open={advancedServerOpen} onOpenChange={setAdvancedServerOpen}>
+                  <CollapsibleTrigger asChild>
+                    <Button type="button" variant="ghost" aria-expanded={advancedServerOpen}>
+                      Advanced server settings
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-3">
+                    <FieldGroup>
+                      <Field>
+                        <FieldLabel htmlFor="desktop-server">Custom API server</FieldLabel>
+                        <Input
+                          id="desktop-server"
+                          value={usesHostedServer ? "" : draft.serverUrl}
+                          onChange={(event) => {
+                            update({ serverUrl: event.target.value });
+                            setTested(null);
+                          }}
+                          placeholder="https://nohmi-api.example.com"
+                          type="url"
+                          required={!usesHostedServer}
+                        />
+                        <FieldDescription>
+                          Use the HTTPS origin of a self-hosted nohmi API. Switching servers signs
+                          you out.
+                        </FieldDescription>
+                      </Field>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={test.isPending || usesHostedServer || !draft.serverUrl}
+                        onClick={() => test.mutate(draft.serverUrl)}
+                      >
+                        {test.isPending ? "Testing…" : "Test connection"}
+                      </Button>
+                      {tested === draft.serverUrl && !usesHostedServer ? (
+                        <p role="status">Connection verified</p>
+                      ) : null}
+                    </FieldGroup>
+                  </CollapsibleContent>
+                </Collapsible>
+              </FieldGroup>
+            </Group>
+          </>
         ) : null}
         {section === "pet" ? (
-          <FieldGroup>
-            <Toggle
-              label="Show desktop pet"
-              value={draft.petEnabled}
-              onChange={(petEnabled) => update({ petEnabled })}
-            />
-            <Field>
-              <FieldLabel htmlFor="pet-color">Pet color</FieldLabel>
-              <Input
-                id="pet-color"
-                type="color"
-                value={draft.petColor}
-                onChange={(event) => update({ petColor: event.target.value })}
+          <SettingsSection title="Companion">
+            <FieldGroup>
+              <Toggle
+                label="Show desktop pet"
+                value={draft.petEnabled}
+                onChange={(petEnabled) => update({ petEnabled })}
               />
-            </Field>
-            <FieldSet>
-              <FieldLegend>Show in quick access</FieldLegend>
-              {["tasks", "reminders", "calendar", "mail", "finances", "goals", "motives"].map(
-                (workspace) => (
-                  <Field orientation="horizontal" key={workspace}>
-                    <Checkbox
-                      id={`pet-${workspace}`}
-                      checked={draft.petWorkspaces.includes(workspace)}
-                      onCheckedChange={(checked) =>
-                        update({
-                          petWorkspaces: checked
-                            ? [...draft.petWorkspaces, workspace]
-                            : draft.petWorkspaces.filter((value) => value !== workspace),
-                        })
-                      }
-                    />
-                    <FieldLabel htmlFor={`pet-${workspace}`}>
-                      {`${workspace[0]?.toUpperCase()}${workspace.slice(1)}`}
-                    </FieldLabel>
-                  </Field>
-                ),
-              )}
-            </FieldSet>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => action.mutate("reset_pet_position")}
-            >
-              Reset pet position
-            </Button>
-            <FieldDescription>
-              Animation follows your macOS Reduce Motion preference.
-            </FieldDescription>
-          </FieldGroup>
+              <Field>
+                <FieldLabel htmlFor="pet-color">Pet color</FieldLabel>
+                <Input
+                  id="pet-color"
+                  type="color"
+                  className="max-w-24"
+                  value={draft.petColor}
+                  onChange={(event) => update({ petColor: event.target.value })}
+                />
+              </Field>
+              <FieldSet>
+                <FieldLegend>Show in quick access</FieldLegend>
+                {["tasks", "reminders", "calendar", "mail", "finances", "goals", "motives"].map(
+                  (workspace) => (
+                    <Field orientation="horizontal" key={workspace}>
+                      <Checkbox
+                        id={`pet-${workspace}`}
+                        checked={draft.petWorkspaces.includes(workspace)}
+                        onCheckedChange={(checked) =>
+                          update({
+                            petWorkspaces: checked
+                              ? [...draft.petWorkspaces, workspace]
+                              : draft.petWorkspaces.filter((value) => value !== workspace),
+                          })
+                        }
+                      />
+                      <FieldLabel htmlFor={`pet-${workspace}`}>
+                        {`${workspace[0]?.toUpperCase()}${workspace.slice(1)}`}
+                      </FieldLabel>
+                    </Field>
+                  ),
+                )}
+              </FieldSet>
+              <Button
+                type="button"
+                variant="outline"
+                className="self-start"
+                onClick={() => action.mutate("reset_pet_position")}
+              >
+                Reset pet position
+              </Button>
+              <FieldDescription>
+                Animation follows your macOS Reduce Motion preference.
+              </FieldDescription>
+            </FieldGroup>
+          </SettingsSection>
         ) : null}
         {section === "notifications" ? (
-          <FieldGroup>
-            <p role="status">
-              macOS permission: {query.data?.native.notificationPermission ?? "unavailable"}
-            </p>
-            <FieldDescription>
-              {query.data?.native.notificationPermission === "denied"
-                ? "Notifications are blocked. Open macOS notification settings and allow nohmi, then return here."
-                : query.data?.native.notificationAlertsAvailable === false
-                  ? "macOS alerts are off. Enable banners or alerts in notification settings."
-                  : "Allow macOS notifications, then send a test. Focus and quiet hours may silence alerts."}
-            </FieldDescription>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => action.mutate("request_notification_permission")}
-              >
-                Allow notifications
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => action.mutate("open_notification_settings")}
-              >
-                macOS notification settings
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => action.mutate("test_notification")}
-              >
-                Test notification
-              </Button>
-            </div>
-            <Toggle
-              label="Enable notifications"
-              value={draft.notifications.enabled}
-              onChange={(enabled) => notification({ enabled })}
-            />
-            <Toggle
-              label="Tasks due"
-              value={draft.notifications.tasks}
-              onChange={(tasks) => notification({ tasks })}
-            />
-            <Toggle
-              label="Reminders due"
-              value={draft.notifications.reminders}
-              onChange={(reminders) => notification({ reminders })}
-            />
-            <Toggle
-              label="Upcoming events"
-              value={draft.notifications.calendar}
-              onChange={(calendar) => notification({ calendar })}
-            />
-            <Field>
-              <FieldLabel htmlFor="event-notice">Minutes before an event</FieldLabel>
-              <Input
-                id="event-notice"
-                type="number"
-                min={0}
-                max={1440}
-                value={draft.notifications.advanceMinutes}
-                onChange={(event) => notification({ advanceMinutes: Number(event.target.value) })}
+          <SettingsSection title="Desktop notifications">
+            <FieldGroup>
+              <p role="status">
+                macOS permission: {query.data?.native.notificationPermission ?? "unavailable"}
+              </p>
+              <FieldDescription>
+                {query.data?.native.notificationPermission === "denied"
+                  ? "Notifications are blocked. Open macOS notification settings and allow nohmi, then return here."
+                  : query.data?.native.notificationAlertsAvailable === false
+                    ? "macOS alerts are off. Enable banners or alerts in notification settings."
+                    : "Allow macOS notifications, then send a test. Focus and quiet hours may silence alerts."}
+              </FieldDescription>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => action.mutate("request_notification_permission")}
+                >
+                  Allow notifications
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => action.mutate("open_notification_settings")}
+                >
+                  macOS notification settings
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => action.mutate("test_notification")}
+                >
+                  Test notification
+                </Button>
+              </div>
+              <Toggle
+                label="Enable notifications"
+                value={draft.notifications.enabled}
+                onChange={(enabled) => notification({ enabled })}
               />
-            </Field>
-            <FieldSet>
-              <FieldLegend>Calendar selection</FieldLegend>
-              <FieldDescription>No selection uses all selected calendars.</FieldDescription>
-              {calendars.data?.map((calendar) => (
-                <Field orientation="horizontal" key={calendar.id}>
-                  <Checkbox
-                    id={`notify-calendar-${calendar.id}`}
-                    checked={draft.notifications.calendarIds.includes(calendar.id)}
-                    onCheckedChange={(checked) =>
-                      notification({
-                        calendarIds: checked
-                          ? [...draft.notifications.calendarIds, calendar.id]
-                          : draft.notifications.calendarIds.filter((id) => id !== calendar.id),
-                      })
-                    }
-                  />
-                  <FieldLabel htmlFor={`notify-calendar-${calendar.id}`}>
-                    {calendar.name}
-                  </FieldLabel>
-                </Field>
-              ))}
-            </FieldSet>
-            <Toggle
-              label="New mail"
-              value={draft.notifications.mail}
-              onChange={(mail) => notification({ mail })}
-            />
-            <FieldSet>
-              <FieldLegend>Mail accounts</FieldLegend>
-              {[...new Set(mailboxes.data?.map((mailbox) => mailbox.accountId) ?? [])].map(
-                (accountId, index) => (
-                  <Field orientation="horizontal" key={accountId}>
+              <Toggle
+                label="Tasks due"
+                value={draft.notifications.tasks}
+                onChange={(tasks) => notification({ tasks })}
+              />
+              <Toggle
+                label="Reminders due"
+                value={draft.notifications.reminders}
+                onChange={(reminders) => notification({ reminders })}
+              />
+              <Toggle
+                label="Upcoming events"
+                value={draft.notifications.calendar}
+                onChange={(calendar) => notification({ calendar })}
+              />
+              <Field>
+                <FieldLabel htmlFor="event-notice">Minutes before an event</FieldLabel>
+                <Input
+                  id="event-notice"
+                  type="number"
+                  min={0}
+                  max={1440}
+                  value={draft.notifications.advanceMinutes}
+                  onChange={(event) => notification({ advanceMinutes: Number(event.target.value) })}
+                />
+              </Field>
+              <FieldSet>
+                <FieldLegend>Calendar selection</FieldLegend>
+                <FieldDescription>No selection uses all selected calendars.</FieldDescription>
+                {calendars.data?.map((calendar) => (
+                  <Field orientation="horizontal" key={calendar.id}>
                     <Checkbox
-                      id={`notify-mail-${accountId}`}
-                      checked={draft.notifications.mailAccountIds.includes(accountId)}
+                      id={`notify-calendar-${calendar.id}`}
+                      checked={draft.notifications.calendarIds.includes(calendar.id)}
                       onCheckedChange={(checked) =>
                         notification({
-                          mailAccountIds: checked
-                            ? [...draft.notifications.mailAccountIds, accountId]
-                            : draft.notifications.mailAccountIds.filter((id) => id !== accountId),
+                          calendarIds: checked
+                            ? [...draft.notifications.calendarIds, calendar.id]
+                            : draft.notifications.calendarIds.filter((id) => id !== calendar.id),
                         })
                       }
                     />
-                    <FieldLabel htmlFor={`notify-mail-${accountId}`}>
-                      {accounts.data?.find((account) => account.id === accountId)?.email ??
-                        `Mail account ${index + 1}`}
+                    <FieldLabel htmlFor={`notify-calendar-${calendar.id}`}>
+                      {calendar.name}
                     </FieldLabel>
                   </Field>
-                ),
-              )}
-              <QueryFeedback query={mailboxes} title="Couldn’t load mail accounts." />
-              <QueryFeedback query={accounts} title="Couldn’t load connected accounts." />
-              <QueryFeedback query={calendars} title="Couldn’t load calendars." />
-              {query.data?.mailError ? (
-                <p role="alert">
-                  Mail notifications could not refresh. nohmi will retry while running.
-                </p>
-              ) : null}
-              {accounts.data
-                ?.filter((account) => account.syncError)
-                .map((account) => (
-                  <p role="status" key={account.id}>
-                    {account.email}: Sync needs attention. Check Connections to reconnect.
-                  </p>
                 ))}
-            </FieldSet>
-            <Toggle
-              label="Play notification sounds"
-              value={draft.notifications.sound}
-              onChange={(sound) => notification({ sound })}
-            />
-            <Toggle
-              label="Show message previews"
-              value={draft.notifications.preview}
-              onChange={(preview) => notification({ preview })}
-            />
-            <FieldSet>
-              <FieldLegend>Quiet hours</FieldLegend>
-              <Field>
-                <FieldLabel htmlFor="quiet-start">From</FieldLabel>
-                <Input
-                  id="quiet-start"
-                  type="time"
-                  value={draft.notifications.quietStart ?? ""}
-                  onChange={(event) => notification({ quietStart: event.target.value || null })}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="quiet-end">Until</FieldLabel>
-                <Input
-                  id="quiet-end"
-                  type="time"
-                  value={draft.notifications.quietEnd ?? ""}
-                  onChange={(event) => notification({ quietEnd: event.target.value || null })}
-                />
-              </Field>
-            </FieldSet>
-            <FieldDescription>
-              Notifications work with the window closed and the pet disabled. macOS Focus and
-              notification settings control presentation.
-            </FieldDescription>
-          </FieldGroup>
+              </FieldSet>
+              <Toggle
+                label="New mail"
+                value={draft.notifications.mail}
+                onChange={(mail) => notification({ mail })}
+              />
+              <FieldSet>
+                <FieldLegend>Mail accounts</FieldLegend>
+                {[...new Set(mailboxes.data?.map((mailbox) => mailbox.accountId) ?? [])].map(
+                  (accountId, index) => (
+                    <Field orientation="horizontal" key={accountId}>
+                      <Checkbox
+                        id={`notify-mail-${accountId}`}
+                        checked={draft.notifications.mailAccountIds.includes(accountId)}
+                        onCheckedChange={(checked) =>
+                          notification({
+                            mailAccountIds: checked
+                              ? [...draft.notifications.mailAccountIds, accountId]
+                              : draft.notifications.mailAccountIds.filter((id) => id !== accountId),
+                          })
+                        }
+                      />
+                      <FieldLabel htmlFor={`notify-mail-${accountId}`}>
+                        {accounts.data?.find((account) => account.id === accountId)?.email ??
+                          `Mail account ${index + 1}`}
+                      </FieldLabel>
+                    </Field>
+                  ),
+                )}
+                <QueryFeedback query={mailboxes} title="Couldn’t load mail accounts." />
+                <QueryFeedback query={accounts} title="Couldn’t load connected accounts." />
+                <QueryFeedback query={calendars} title="Couldn’t load calendars." />
+                {query.data?.mailError ? (
+                  <p role="alert">
+                    Mail notifications could not refresh. nohmi will retry while running.
+                  </p>
+                ) : null}
+                {accounts.data
+                  ?.filter((account) => account.syncError)
+                  .map((account) => (
+                    <p role="status" key={account.id}>
+                      {account.email}: Sync needs attention. Check Connections to reconnect.
+                    </p>
+                  ))}
+              </FieldSet>
+              <Toggle
+                label="Play notification sounds"
+                value={draft.notifications.sound}
+                onChange={(sound) => notification({ sound })}
+              />
+              <Toggle
+                label="Show message previews"
+                value={draft.notifications.preview}
+                onChange={(preview) => notification({ preview })}
+              />
+              <FieldSet>
+                <FieldLegend>Quiet hours</FieldLegend>
+                <Field>
+                  <FieldLabel htmlFor="quiet-start">From</FieldLabel>
+                  <Input
+                    id="quiet-start"
+                    type="time"
+                    value={draft.notifications.quietStart ?? ""}
+                    onChange={(event) => notification({ quietStart: event.target.value || null })}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="quiet-end">Until</FieldLabel>
+                  <Input
+                    id="quiet-end"
+                    type="time"
+                    value={draft.notifications.quietEnd ?? ""}
+                    onChange={(event) => notification({ quietEnd: event.target.value || null })}
+                  />
+                </Field>
+              </FieldSet>
+              <FieldDescription>
+                Notifications work with the window closed and the pet disabled. macOS Focus and
+                notification settings control presentation.
+              </FieldDescription>
+            </FieldGroup>
+          </SettingsSection>
         ) : null}
-        <Button type="submit" disabled={save.isPending || startupPending}>
+        <Button className="self-start" type="submit" disabled={save.isPending || startupPending}>
           {save.isPending ? "Saving…" : "Save preferences"}
         </Button>
       </FeedbackForm>
-    </SettingsSection>
+      {section === "pet" && background ? (
+        <SettingsSection title="Background activity">{background}</SettingsSection>
+      ) : null}
+      {!connectionOnly && section === "desktop" ? <DesktopUpdates /> : null}
+    </div>
   );
 }

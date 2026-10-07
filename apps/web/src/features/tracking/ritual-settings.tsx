@@ -357,18 +357,26 @@ function RitualForm({
             {isDesktop() ? (
               <>
                 <RitualLocal />
-                {dirty || busy ? (
-                  <Button disabled variant="ghost">
-                    Save routine changes before opening background setup
+                <div className="flex min-w-0 flex-col items-start gap-2">
+                  <Button
+                    asChild={!dirty && !busy}
+                    disabled={dirty || busy}
+                    variant="ghost"
+                    size="sm"
+                  >
+                    {dirty || busy ? (
+                      "Background settings"
+                    ) : (
+                      <a href="/settings?section=desktop">Background settings</a>
+                    )}
                   </Button>
-                ) : (
-                  <Button asChild variant="ghost">
-                    <a href="/settings?section=desktop">
-                      Set up launch at login and background activity
-                    </a>
-                  </Button>
-                )}
-                <div className="flex gap-2">
+                  {dirty || busy ? (
+                    <p className="text-sm text-muted-foreground">
+                      Save routine changes before leaving this page.
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap gap-2">
                   <Button variant="outline" onClick={() => void automatic(true)}>
                     Enable
                   </Button>

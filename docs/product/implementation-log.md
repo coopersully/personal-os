@@ -21,6 +21,9 @@
 
 - Tracked by [COO-77 — Guide desktop background setup and macOS permissions](https://linear.app/coopersully/issue/COO-77/guide-desktop-background-setup-and-macos-permissions)
   and [PR #218 — Guide desktop background setup](https://github.com/coopersully/personal-os/pull/218).
+- UI refinement removes the application-wide ritual setup offer, promotes Desktop pet to a
+  primary Settings destination, groups desktop preferences by decision, and hides login server
+  configuration behind a dialog. Ritual background navigation uses a compact, bounded action.
 - Desktop and Pet settings now guide login startup, OS notification alerts, pet enablement,
   and morning routine readiness through the shared readiness dialog. Routine settings link
   back to setup. Pending login approval opens macOS Login Items directly.

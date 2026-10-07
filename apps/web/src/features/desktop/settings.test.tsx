@@ -43,14 +43,14 @@ function deferred<T>() {
 }
 function mount(props: Parameters<typeof DesktopSettingsPanel>[0] = {}) {
   const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return {
-    ...render(
-      <QueryClientProvider client={cache}>
-        <DesktopSettingsPanel {...props} />
-      </QueryClientProvider>,
-    ),
-    cache,
-  };
+  const rendered = render(
+    <QueryClientProvider client={cache}>
+      <DesktopSettingsPanel {...props} />
+    </QueryClientProvider>,
+  );
+  if (props.connectionOnly)
+    fireEvent.click(screen.getByRole("button", { name: "Server settings" }));
+  return { ...rendered, cache };
 }
 async function save() {
   await userEvent.click(screen.getByRole("button", { name: "Save preferences" }));
@@ -136,6 +136,22 @@ describe("desktop preferences", () => {
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
+  it("keeps server choices off the login page until explicitly opened", async () => {
+    const cache = new QueryClient();
+    render(
+      <QueryClientProvider client={cache}>
+        <DesktopSettingsPanel connectionOnly />
+      </QueryClientProvider>,
+    );
+    expect(screen.queryByText("Recommended")).not.toBeInTheDocument();
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Server settings" }));
+    expect(await screen.findByRole("dialog", { name: "Server connection" })).toBeInTheDocument();
+    expect(await screen.findByText("Recommended")).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Server settings" })).toHaveFocus();
+  });
+
   it("promotes hosted nohmi and keeps custom server controls in an advanced disclosure", async () => {
     mount({ connectionOnly: true });
     expect(await screen.findByText("Recommended")).toBeInTheDocument();
@@ -156,12 +172,14 @@ describe("desktop preferences", () => {
       </QueryClientProvider>
     );
     const first = render(panel);
+    fireEvent.click(screen.getByRole("button", { name: "Server settings" }));
     expect(await screen.findByText("Recommended")).toBeInTheDocument();
     first.unmount();
 
     const refresh = deferred<DesktopStatus>();
     mocks.invoke.mockReturnValueOnce(refresh.promise);
     const remounted = render(panel);
+    fireEvent.click(screen.getByRole("button", { name: "Server settings" }));
     await waitFor(() =>
       expect(
         mocks.invoke.mock.calls.filter(([command]) => command === "desktop_settings"),

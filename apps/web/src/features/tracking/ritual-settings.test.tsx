@@ -373,16 +373,10 @@ it("blocks background setup navigation until ritual edits are saved", async () =
       <RitualSettings timeZone="UTC" />
     </QueryClientProvider>,
   );
-  await screen.findByRole("link", { name: "Set up launch at login and background activity" });
+  await screen.findByRole("link", { name: "Background settings" });
   fireEvent.change(screen.getAllByLabelText("Available from")[0]!, { target: { value: "07:15" } });
-  expect(
-    screen.getByRole("button", { name: "Save routine changes before opening background setup" }),
-  ).toBeDisabled();
-  expect(
-    screen.queryByRole("link", { name: "Set up launch at login and background activity" }),
-  ).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Background settings" })).toBeDisabled();
+  expect(screen.queryByRole("link", { name: "Background settings" })).not.toBeInTheDocument();
   await screen.findByRole("alert");
-  expect(
-    screen.getByRole("button", { name: "Save routine changes before opening background setup" }),
-  ).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Background settings" })).toBeDisabled();
 });

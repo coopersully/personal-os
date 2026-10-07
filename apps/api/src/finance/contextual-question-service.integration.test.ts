@@ -340,6 +340,15 @@ describe.sequential("real contextual question producer", () => {
       ),
     ).rejects.toMatchObject({ code: "invalid_request" });
     await expect(
+      database.db.transaction((tx) =>
+        resolveContextualWorks(
+          f.userId,
+          [f.question.work, { ...f.question.work, id: f.question.id.toUpperCase() }],
+          tx,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
       database.db.transaction((tx) => resolveContextualWorks(f.userId, [], tx)),
     ).rejects.toThrow();
     const hundred = Array.from({ length: 100 }, () => ({

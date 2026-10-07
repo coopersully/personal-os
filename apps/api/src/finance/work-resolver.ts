@@ -64,7 +64,7 @@ export async function resolveContextualWorks(
   tx: FinanceTransaction,
 ): Promise<NotificationResolution[]> {
   const refs = batchSchema.parse(raw);
-  if (new Set(refs.map((ref) => ref.id)).size !== refs.length) {
+  if (new Set(refs.map((ref) => ref.id.toLowerCase())).size !== refs.length) {
     throw new AppError("invalid_request", "Each Finance work item may appear once.");
   }
   const supported = refs.filter((ref) => ref.kind === "question");

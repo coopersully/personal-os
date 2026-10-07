@@ -1,3 +1,4 @@
+import { TooltipProvider } from "@/components/ui/tooltip";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -41,6 +42,7 @@ const api = vi.hoisted(() => ({
   listFinanceRecurringObligations: vi.fn(),
   listFinanceReimbursements: vi.fn(),
   listFinanceTransactions: vi.fn(),
+  listFinanceMerchants: vi.fn(),
   resolveFinanceReview: vi.fn(),
   resolveFinanceAlert: vi.fn(),
   refreshFinanceInsights: vi.fn(),
@@ -59,9 +61,11 @@ function renderPage(path: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[path]}>
-        <FinancesPage />
-      </MemoryRouter>
+      <TooltipProvider>
+        <MemoryRouter initialEntries={[path]}>
+          <FinancesPage />
+        </MemoryRouter>
+      </TooltipProvider>
     </QueryClientProvider>,
   );
 }
@@ -78,6 +82,7 @@ beforeEach(() => {
     spendingThisMonth: 0,
     transactions: [],
   };
+  api.listFinanceMerchants.mockResolvedValue([]);
   api.getFinanceOverview.mockResolvedValue(overview);
   api.getFinanceOverviewForMonth.mockResolvedValue(overview);
   api.getFinanceOverviewForAccounts.mockResolvedValue(overview);
@@ -360,8 +365,9 @@ describe("Finance section states", () => {
   });
 
   it("shows health and review work empty states without hiding the controls", async () => {
-    const { unmount } = renderPage("/finances/health");
-    expect(await screen.findByText("Ledger health")).toBeVisible();
+    const { unmount } = renderPage("/finances/transactions?checks=1");
+    await screen.findByRole("button", { name: "Transaction view: Table" });
+    expect(screen.queryByRole("button", { name: "Transaction checks" })).not.toBeInTheDocument();
     unmount();
     renderPage("/finances/review");
     expect(await screen.findByText("Nothing needs review")).toBeVisible();
@@ -645,11 +651,11 @@ describe("Finance section states", () => {
     renderPage("/finances/transactions");
     expect(await screen.findByText("Corner Bistro")).toBeVisible();
     expect(screen.getByLabelText("Merchant entity needs review")).toBeVisible();
-    const [detailsButton] = screen.getAllByRole("button", { name: "Details" });
+    const [detailsButton] = screen.getAllByRole("row", { name: /Open .* transaction/ });
     if (!detailsButton) throw new Error("Transaction details button was not rendered.");
     fireEvent.click(detailsButton);
     expect(await screen.findByText("Team dinner")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Categorize" }));
+    fireEvent.click(screen.getByRole("button", { name: "Recategorize" }));
     const categorySelect = screen.getAllByLabelText("Category").at(-1);
     if (!categorySelect) throw new Error("Category selector was not rendered.");
     fireEvent.change(categorySelect, {
@@ -661,7 +667,6 @@ describe("Finance section states", () => {
         category: "Dining",
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
     fireEvent.click(screen.getByRole("button", { name: "Sort by amount" }));
     fireEvent.click(await screen.findByRole("button", { name: "Sort by amount" }));
     fireEvent.click(await screen.findByRole("button", { name: "Next" }));
@@ -671,6 +676,21 @@ describe("Finance section states", () => {
       ),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Previous" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    const filters = screen.getByRole("dialog", { name: "Filter transactions" });
+    fireEvent.change(within(filters).getByLabelText("Search"), {
+      target: { value: "Bistro" },
+    });
+    api.listFinanceTransactions.mockClear();
+    fireEvent.click(within(filters).getByRole("button", { name: "Apply filters" }));
+    await waitFor(() =>
+      expect(api.listFinanceTransactions).toHaveBeenCalledWith(
+        expect.objectContaining({ search: "Bistro", cursor: undefined }),
+      ),
+    );
+    expect(api.listFinanceTransactions.mock.calls.every(([query]) => !query.cursor)).toBe(true);
+    expect(await screen.findByRole("button", { name: "Previous" })).toBeDisabled();
   }, 10_000);
 
   it("recovers browser account scopes and navigates unplanned budget months", async () => {
@@ -770,8 +790,8 @@ describe("Finance section states", () => {
     pending.unmount();
 
     api.getFinanceLedgerHealth.mockRejectedValue(new Error("Ledger unavailable"));
-    const failed = renderPage("/finances/health");
-    expect(await screen.findByText("Couldn’t load account health.")).toBeVisible();
+    const failed = renderPage("/finances/transactions?checks=1");
+    expect(await screen.findByText(/Transaction checks could not load/)).toBeVisible();
     failed.unmount();
 
     api.getFinanceCategories.mockResolvedValue([
@@ -973,15 +993,33 @@ describe("Finance section states", () => {
 
     renderPage("/finances/transactions");
     await screen.findByRole("table", { name: "Transactions" });
+    await browser.click(screen.getByRole("button", { name: "Transaction view: Table" }));
+    await browser.click(screen.getByRole("menuitemradio", { name: "Cards" }));
+    expect(screen.queryByRole("table", { name: "Transactions" })).not.toBeInTheDocument();
+    expect(screen.getByRole("listitem")).toHaveTextContent("Cafe");
+    await browser.click(screen.getByRole("button", { name: "Display transactions" }));
+    await browser.click(screen.getByRole("menuitemradio", { name: "Merchant" }));
+    expect(screen.getByRole("heading", { name: "Cafe (1)" })).toBeVisible();
+    await browser.click(screen.getByRole("button", { name: "Open Cafe transaction" }));
+    expect(screen.getByText("SQ CAFE")).toBeVisible();
+    await browser.click(screen.getByRole("button", { name: "Close" }));
+    await browser.click(screen.getByRole("button", { name: "Transaction view: Cards" }));
+    await browser.click(screen.getByRole("menuitemradio", { name: "Table" }));
+    expect(screen.queryByRole("rowheader", { name: "Cafe (1)" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Display transactions" })).not.toBeInTheDocument();
     for (const label of ["date", "merchant", "amount", "date"]) {
       fireEvent.click(await screen.findByRole("button", { name: `Sort by ${label}` }));
       await screen.findByRole("table", { name: "Transactions" });
     }
-    fireEvent.click(screen.getByRole("button", { name: "Details" }));
+    expect(screen.getByRole("columnheader", { name: "Status" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Posted" })).toBeVisible();
+    fireEvent.keyDown(screen.getByRole("row", { name: "Open Cafe transaction" }), { key: "Enter" });
     expect(screen.getByText("SQ CAFE")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Categorize" }));
     expect(await screen.findByRole("dialog", { name: /Categorize Cafe/ })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Split purchase" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.contextMenu(screen.getByRole("row", { name: "Open Cafe transaction" }));
+    await browser.click(screen.getByRole("menuitem", { name: "Split purchase" }));
     expect(await screen.findByRole("dialog", { name: /Split Cafe/ })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
@@ -992,7 +1030,7 @@ describe("Finance section states", () => {
       ),
     );
     for (const item of ["Transactions", "Accounts", "Budget plan", "Categories"]) {
-      await browser.click(screen.getByRole("button", { name: "Export data" }));
+      await browser.click(screen.getByRole("button", { name: "Export" }));
       await browser.click(await screen.findByRole("menuitem", { name: item }));
     }
     await waitFor(() => expect(api.exportFinanceData).toHaveBeenCalledTimes(4));
@@ -1250,17 +1288,19 @@ describe("Finance section states", () => {
     });
     accounts.unmount();
 
-    const transactions = renderPage("/finances/transactions");
-    fireEvent.click(await screen.findByRole("button", { name: "New transaction" }));
+    const transactions = renderPage("/finances/transactions#finance-add-transaction");
+    await screen.findByRole("dialog", { name: "Add a transaction" });
     const transactionAccount = document.getElementById("finance-account-select");
     if (!(transactionAccount instanceof HTMLSelectElement))
       throw new Error("Expected the transaction account select.");
     fireEvent.change(transactionAccount, { target: { value: "checking" } });
     fireEvent.change(screen.getByLabelText("Merchant"), { target: { value: "Cafe" } });
+    fireEvent.click(await screen.findByRole("option", { name: "Add “Cafe”" }));
     fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "8.5" } });
     fireEvent.change(screen.getByLabelText("Category (optional)"), {
       target: { value: "Dining" },
     });
+    fireEvent.click(await screen.findByRole("option", { name: /Dining/ }));
     fireEvent.click(screen.getByRole("button", { name: "Add transaction" }));
     await waitFor(() =>
       expect(api.createFinanceTransaction).toHaveBeenCalledWith(
@@ -1356,7 +1396,7 @@ it.each([
   save.mockRejectedValueOnce(new Error("private database details")).mockResolvedValue({});
   renderPage(`/finances/${section}`);
   if (section === "transactions")
-    fireEvent.click(await screen.findByRole("button", { name: "Details" }));
+    fireEvent.click(await screen.findByRole("row", { name: "Open Cafe transaction" }));
   fireEvent.click(
     await screen.findByRole("button", {
       name: section === "transactions" ? "Categorize" : "Change",
@@ -1379,4 +1419,119 @@ it.each([
   );
   expect(save).toHaveBeenCalledTimes(2);
   expect(save.mock.calls[1]).toEqual(save.mock.calls[0]);
+});
+
+it.each([
+  "cards",
+  "table",
+])("opens context actions from the %s transaction and supports dismissing edits", async (view) => {
+  api.listFinanceTransactions.mockResolvedValue({
+    items: [
+      {
+        accountId: "checking",
+        amount: 18.5,
+        category: null,
+        categoryConfidence: null,
+        categoryId: null,
+        categorySource: null,
+        createdAt: "2026-08-23T12:00:00Z",
+        date: "2026-08-23",
+        direction: "expense",
+        id: "meal",
+        merchant: "Cafe",
+        merchantId: null,
+        needsReview: true,
+        notes: null,
+        pending: true,
+        rawMerchant: "SQ CAFE",
+        updatedAt: "2026-08-23T12:00:00Z",
+      },
+    ],
+    nextCursor: null,
+  });
+  renderPage(`/finances/transactions?view=${view}`);
+  const user = userEvent.setup();
+  const trigger = await screen.findByRole(view === "cards" ? "button" : "row", {
+    name: "Open Cafe transaction",
+  });
+  fireEvent.contextMenu(trigger);
+  await user.click(screen.getByRole("menuitem", { name: "Add context" }));
+  expect(await screen.findByRole("dialog", { name: "Add context" })).toBeVisible();
+  await user.keyboard("{Escape}");
+  fireEvent.contextMenu(trigger);
+  await user.click(screen.getByRole("menuitem", { name: "Categorize" }));
+  expect(await screen.findByRole("dialog", { name: "Categorize Cafe" })).toBeVisible();
+  await user.keyboard("{Escape}");
+  fireEvent.contextMenu(trigger);
+  await user.click(screen.getByRole("menuitem", { name: "Split purchase" }));
+  expect(await screen.findByRole("dialog", { name: "Split Cafe" })).toBeVisible();
+  await user.keyboard("{Escape}");
+  await user.click(trigger);
+  await user.click(screen.getByRole("button", { name: "Split purchase" }));
+  expect(await screen.findByRole("dialog", { name: "Split Cafe" })).toBeVisible();
+});
+it("opens transaction import and category creation from the header and changes sorting", async () => {
+  renderPage("/finances/transactions");
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Sort transactions" }));
+  await user.click(screen.getByRole("menuitemradio", { name: "Highest amount" }));
+  await waitFor(() =>
+    expect(api.listFinanceTransactions).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sortBy: "amount", sortDirection: "desc" }),
+    ),
+  );
+  for (const name of ["Import transactions", "Add category"]) {
+    await user.click(screen.getByRole("button", { name: "Add in Transactions" }));
+    await user.click(screen.getByRole("menuitem", { name }));
+    expect(await screen.findByRole("dialog")).toBeVisible();
+    await user.keyboard("{Escape}");
+  }
+});
+
+it.each([
+  "spent",
+  "category",
+] as const)("shows purchases and refund credits in the %s budget detail", (kind) => {
+  const base = {
+    accountId: "checking",
+    amount: 50,
+    category: "Dining",
+    categoryConfidence: 1,
+    categorySource: "user",
+    createdAt: "2026-09-01T12:00:00Z",
+    date: "2026-09-01",
+    id: "meal",
+    merchant: "Dinner",
+    merchantId: null,
+    needsReview: false,
+    notes: null,
+    pending: false,
+    rawMerchant: null,
+    updatedAt: "2026-09-01T12:00:00Z",
+    direction: "expense",
+  };
+  render(
+    <FinanceBudgetDetailDialog
+      budgets={[{ category: "Dining", limit: 100, month: "2026-09" }]}
+      detail={kind === "category" ? { kind, category: "Dining" } : { kind }}
+      month="2026-09"
+      onOpenChange={vi.fn()}
+      transactions={
+        [
+          base,
+          { ...base, id: "refund", merchant: "Dinner refund", amount: 15, direction: "income" },
+        ] as never
+      }
+    />,
+  );
+  expect(screen.getByText("+$15.00")).toBeVisible();
+  expect(screen.getByText("−$50.00")).toBeVisible();
+  if (kind === "category") expect(screen.getByText("$35.00", { exact: false })).toBeVisible();
+});
+
+it("opens an interactive budget metric with its accessible label", () => {
+  const onClick = vi.fn();
+  render(<BudgetMetricCard label="Remaining" tone="success" value="$25.00" onClick={onClick} />);
+  fireEvent.click(screen.getByRole("button"));
+  expect(onClick).toHaveBeenCalledOnce();
 });

@@ -6,6 +6,7 @@ import {
 } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { CurrencyInput } from "@/components/currency-input";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -122,10 +123,10 @@ function ScenarioFields({
   const [validated, setValidated] = useState<Set<string>>(() => new Set());
   const prefix = index === 0 ? "Baseline" : `Alternative ${index}`;
   return (
-    <FieldSet className="rounded-lg bg-muted/40 p-4">
+    <FieldSet className="min-w-0 rounded-lg bg-secondary p-4">
       <FieldLegend>{prefix}</FieldLegend>
       <FieldGroup>
-        <Field>
+        <Field className="min-w-0">
           <FieldLabel htmlFor={`${draft.id}-label`}>{prefix} name</FieldLabel>
           <Input
             id={`${draft.id}-label`}
@@ -135,7 +136,7 @@ function ScenarioFields({
             onChange={(event) => onChange({ ...draft, label: event.target.value })}
           />
         </Field>
-        <FieldGroup className="sm:grid sm:grid-cols-2 lg:grid-cols-4">
+        <FieldGroup className="grid grid-cols-1 md:grid-cols-2">
           {moneyFields.map((field) => (
             <Field
               key={field.key}
@@ -149,9 +150,10 @@ function ScenarioFields({
                 {prefix} {field.label.toLowerCase()}
                 {field.required ? "" : " (optional)"}
               </FieldLabel>
-              <Input
+              <CurrencyInput
                 id={`${draft.id}-${field.key}`}
                 name={`${draft.id}-${field.key}`}
+                min={field.key === "startingCash" ? Number.NEGATIVE_INFINITY : 0}
                 onBlur={() => setValidated((current) => new Set([...current, field.key]))}
                 inputMode="decimal"
                 required={field.required}
@@ -161,8 +163,8 @@ function ScenarioFields({
                     amount(draft.money[field.key], field.key === "startingCash") === undefined,
                 )}
                 value={draft.money[field.key]}
-                onChange={(event) =>
-                  onChange({ ...draft, money: { ...draft.money, [field.key]: event.target.value } })
+                onValueChange={(value) =>
+                  onChange({ ...draft, money: { ...draft.money, [field.key]: value } })
                 }
               />
             </Field>
@@ -174,8 +176,8 @@ function ScenarioFields({
             Category amounts are in addition to housing, debt payments, and reserve contributions.
           </FieldDescription>
           {draft.allocations.map((row, rowIndex) => (
-            <FieldGroup className="sm:grid sm:grid-cols-[1fr_1fr_auto]" key={row.id}>
-              <Field>
+            <FieldGroup className="grid grid-cols-1 md:grid-cols-2" key={row.id}>
+              <Field className="min-w-0">
                 <FieldLabel htmlFor={`${row.id}-category`}>
                   {prefix} spending {rowIndex + 1} category
                 </FieldLabel>
@@ -201,20 +203,20 @@ function ScenarioFields({
                   ))}
                 </NativeSelect>
               </Field>
-              <Field>
+              <Field className="min-w-0">
                 <FieldLabel htmlFor={`${row.id}-limit`}>
                   {prefix} spending {rowIndex + 1} amount
                 </FieldLabel>
-                <Input
+                <CurrencyInput
                   id={`${row.id}-limit`}
                   required
                   inputMode="decimal"
                   value={row.limit}
-                  onChange={(event) =>
+                  onValueChange={(value) =>
                     onChange({
                       ...draft,
                       allocations: draft.allocations.map((item) =>
-                        item.id === row.id ? { ...item, limit: event.target.value } : item,
+                        item.id === row.id ? { ...item, limit: value } : item,
                       ),
                     })
                   }
@@ -268,7 +270,7 @@ function ScenarioFields({
             Add {prefix.toLowerCase()} spending
           </Button>
         </FieldSet>
-        <Field>
+        <Field className="min-w-0">
           <FieldLabel htmlFor={`${draft.id}-assumptions`}>{prefix} assumptions</FieldLabel>
           <Textarea
             id={`${draft.id}-assumptions`}
@@ -442,7 +444,7 @@ export function FinanceScenarioComparison() {
       <FeedbackForm feedback={mutation.feedback} className="grid gap-5" onSubmit={compare}>
         <FieldSet disabled={mutation.isPending}>
           <FieldGroup className="sm:grid sm:grid-cols-2">
-            <Field>
+            <Field className="min-w-0">
               <FieldLabel htmlFor="scenario-date">As of</FieldLabel>
               <Input
                 name="scenarioDate"
@@ -453,7 +455,7 @@ export function FinanceScenarioComparison() {
                 onChange={(event) => setAsOf(event.target.value)}
               />
             </Field>
-            <Field>
+            <Field className="min-w-0">
               <FieldLabel htmlFor="scenario-horizon">Horizon in months</FieldLabel>
               <Input
                 name="scenarioHorizon"

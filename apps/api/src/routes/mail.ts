@@ -15,6 +15,7 @@ import {
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
 import type { createMailService } from "../mail-service.js";
+import { attachmentReadBudget } from "../read-budget.js";
 import type { AppEnv, Principal } from "../types.js";
 import { parseBody, requireFeatureAccess, requireHuman, requireScope } from "./support.js";
 
@@ -153,6 +154,23 @@ export function registerMailRoutes({ app, mail, mutationContext }: MailRouteOpti
         mailListQuerySchema.parse(context.req.query()),
       ),
     }),
+  );
+  app.get(
+    "/v1/mail/messages/:id/attachments/:attachmentId",
+    requireScope("mail:read"),
+    async (context) => {
+      context.header("Cache-Control", "no-store");
+      return attachmentReadBudget(context.get("principal").userId, async () =>
+        context.json({
+          attachment: await mail.downloadAttachment(
+            context.get("principal").userId,
+            context.req.param("id"),
+            context.req.param("attachmentId"),
+            context.req.raw.signal,
+          ),
+        }),
+      );
+    },
   );
   app.get("/v1/mail/threads/:id/messages", async (context) =>
     context.json({

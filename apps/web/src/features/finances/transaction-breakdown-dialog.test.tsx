@@ -126,3 +126,21 @@ it("saves a single-category future rule and keeps a failed save recoverable", as
     await screen.findByText(/Couldn’t confirm whether we could save this transaction breakdown/),
   ).toBeVisible();
 });
+
+it("does not round sub-cent amounts into a saveable split", async () => {
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <TransactionBreakdownDialog
+        categories={categories}
+        onOpenChange={vi.fn()}
+        open
+        transaction={transaction}
+      />
+    </QueryClientProvider>,
+  );
+  const user = userEvent.setup();
+  const amounts = await screen.findAllByLabelText("Amount");
+  await user.clear(amounts[0] as HTMLInputElement);
+  await user.type(amounts[0] as HTMLInputElement, "310.001");
+  expect(screen.getByRole("button", { name: "Save breakdown" })).toBeDisabled();
+});

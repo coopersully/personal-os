@@ -1,3 +1,5 @@
+export { calendarSearchResults, parseCalendarDateQuery } from "./search-date";
+
 import type {
   Calendar,
   CalendarEvent,
@@ -5,12 +7,7 @@ import type {
   User,
   WeatherLocationOption,
 } from "@personal-os/domain";
-import {
-  localDateAt,
-  localDateRange,
-  localDateTimeToUtc,
-  parseLocalDate,
-} from "@personal-os/domain";
+import { localDateAt, localDateTimeToUtc, parseLocalDate } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, useIsPresent, usePresenceData } from "motion/react";
 import * as m from "motion/react-m";
@@ -28,7 +25,11 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
-import { FloatingActionButton, FloatingActions } from "@/components/floating-actions";
+import {
+  FloatingActionButton,
+  FloatingActionRegion,
+  FloatingActions,
+} from "@/components/floating-actions";
 import {
   CalendarIcon,
   CheckIcon,
@@ -70,12 +71,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "../../api.js";
-import { QueryFeedback } from "../../components/async-state.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 
-type FloatingMode = "closed" | "create" | "date" | "search";
+type FloatingMode = "closed" | "create" | "date";
 type FloatingSurfaceState = FloatingMode | "details";
 type ConferenceChoice = "google_meet" | "link" | "none";
 
@@ -96,7 +96,6 @@ export function CalendarFloatingNav({
   calendars,
   draft,
   eventDetails,
-  events = [],
   onDraftDismiss,
   onNavigate,
   timeZone,
@@ -128,7 +127,6 @@ export function CalendarFloatingNav({
     const trigger = {
       create: createTrigger,
       date: dateTrigger,
-      search: searchTrigger,
     }[restoreFocusMode.current];
     restoreFocusMode.current = null;
     window.requestAnimationFrame(() => trigger.current?.focus());
@@ -146,7 +144,7 @@ export function CalendarFloatingNav({
       </FloatingActionButton>
       <FloatingActionButton
         label="Search calendar"
-        onClick={() => open("search")}
+        onClick={() => window.dispatchEvent(new Event("nohmi:workspace-search"))}
         ref={searchTrigger}
       >
         <SearchIcon aria-hidden="true" />
@@ -154,13 +152,6 @@ export function CalendarFloatingNav({
     </FloatingActions>
   ) : mode === "date" ? (
     <DateJumpCard anchor={anchor} close={close} onNavigate={onNavigate} timeZone={timeZone} />
-  ) : mode === "search" ? (
-    <CalendarSearchCard
-      close={close}
-      onNavigate={onNavigate}
-      timeZone={timeZone}
-      visibleEvents={events}
-    />
   ) : (
     <InlineEventComposer
       calendars={calendars}
@@ -173,7 +164,7 @@ export function CalendarFloatingNav({
   );
 
   return (
-    <div className="calendar-floating-nav" data-mode={surfaceState}>
+    <FloatingActionRegion align="center" className="calendar-floating-nav" data-mode={surfaceState}>
       <m.div
         className="calendar-floating-nav__surface"
         data-slot="calendar-floating-surface"
@@ -201,7 +192,7 @@ export function CalendarFloatingNav({
           </FloatingNavTransitionContent>
         </AnimatePresence>
       </m.div>
-    </div>
+    </FloatingActionRegion>
   );
 }
 
@@ -279,206 +270,6 @@ function DateJumpCard({
       </CardContent>
     </Card>
   );
-}
-
-function CalendarSearchCard({
-  close,
-  onNavigate,
-  timeZone,
-  visibleEvents,
-}: {
-  close: () => void;
-  onNavigate: (date: LocalDate) => void;
-  timeZone: string;
-  visibleEvents: CalendarEvent[];
-}) {
-  const [query, setQuery] = useState("");
-  const deferredQuery = useDeferredValue(query);
-  const input = useRef<HTMLInputElement>(null);
-  const searchYear = localDateAt(new Date(), timeZone).year;
-  const searchRange = useMemo(
-    () =>
-      localDateRange(
-        { day: 1, month: 1, year: searchYear - 1 },
-        { day: 1, month: 1, year: searchYear + 2 },
-        timeZone,
-      ),
-    [searchYear, timeZone],
-  );
-  const events = useQuery({
-    queryFn: () => api.listEvents(searchRange),
-    queryKey: ["events", "calendar-search", searchRange.from, searchRange.to],
-    staleTime: 60_000,
-  });
-  const searchableEvents = useMemo(
-    () =>
-      Array.from(
-        new Map(
-          [...visibleEvents, ...(events.data ?? [])].map((event) => [event.id, event] as const),
-        ).values(),
-      ),
-    [events.data, visibleEvents],
-  );
-  const results = useMemo(
-    () => calendarSearchResults(deferredQuery, searchableEvents, timeZone),
-    [deferredQuery, searchableEvents, timeZone],
-  );
-
-  useEffect(() => input.current?.focus(), []);
-
-  const selectDate = (date: LocalDate) => {
-    onNavigate(date);
-    close();
-  };
-
-  return (
-    <Card aria-label="Search calendar" className="calendar-floating-nav__search" size="sm">
-      <CardContent>
-        <InputGroup>
-          <InputGroupAddon>
-            <SearchIcon aria-hidden="true" />
-          </InputGroupAddon>
-          <InputGroupInput
-            aria-label="Search events and dates"
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search events or try “last Christmas”"
-            ref={input}
-            value={query}
-          />
-          <InputGroupAddon align="inline-end">
-            <Button aria-label="Close search" onClick={close} size="icon-xs" variant="ghost">
-              <XIcon aria-hidden="true" />
-            </Button>
-          </InputGroupAddon>
-        </InputGroup>
-        <QueryFeedback query={events} title="Couldn’t search the full calendar." />
-        {query.trim() ? (
-          <ul aria-label="Calendar search results" className="calendar-search-results">
-            {results.length === 0 ? (
-              <li>
-                {events.isPending
-                  ? "Searching…"
-                  : events.isError
-                    ? "Search is incomplete. Try again above."
-                    : "No matching events or dates."}
-              </li>
-            ) : (
-              results.map((result) => (
-                <li key={result.key}>
-                  <button onClick={() => selectDate(result.date)} type="button">
-                    <span>{result.label}</span>
-                    <small>{result.detail}</small>
-                  </button>
-                </li>
-              ))
-            )}
-          </ul>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
-
-type SearchResult = { date: LocalDate; detail: string; key: string; label: string };
-
-export function calendarSearchResults(
-  query: string,
-  events: CalendarEvent[],
-  timeZone: string,
-  now = new Date(),
-): SearchResult[] {
-  const normalized = query.trim().toLocaleLowerCase();
-  if (!normalized) return [];
-  const dateResult = parseCalendarDateQuery(normalized, timeZone, now);
-  const matchingEvents = events
-    .filter((event) =>
-      [event.title, event.location, event.notes]
-        .filter(Boolean)
-        .some((value) => value?.toLocaleLowerCase().includes(normalized)),
-    )
-    .slice(0, 7)
-    .map((event) => ({
-      date: localDateAt(new Date(event.startsAt), timeZone),
-      detail: new Intl.DateTimeFormat("en", {
-        day: "numeric",
-        hour: event.allDay ? undefined : "numeric",
-        minute: event.allDay ? undefined : "2-digit",
-        month: "short",
-        timeZone,
-        year: "numeric",
-      }).format(new Date(event.startsAt)),
-      key: `event:${event.id}`,
-      label: event.title,
-    }));
-  return dateResult ? [dateResult, ...matchingEvents] : matchingEvents;
-}
-
-export function parseCalendarDateQuery(
-  query: string,
-  timeZone: string,
-  now = new Date(),
-): SearchResult | undefined {
-  query = query.trim().toLocaleLowerCase();
-  const today = localDateAt(now, timeZone);
-  const relativeDays: Record<string, number> = { today: 0, tomorrow: 1, yesterday: -1 };
-  if (query in relativeDays) {
-    const date = addDays(today, relativeDays[query] as number);
-    return dateSearchResult(query, date);
-  }
-  const christmas = /^(last|next) christmas$/.exec(query);
-  if (christmas) {
-    const candidate = { day: 25, month: 12, year: today.year };
-    const direction = christmas[1];
-    const date =
-      direction === "last"
-        ? {
-            ...candidate,
-            year: compareLocalDates(candidate, today) < 0 ? today.year : today.year - 1,
-          }
-        : {
-            ...candidate,
-            year: compareLocalDates(candidate, today) > 0 ? today.year : today.year + 1,
-          };
-    return dateSearchResult(`${direction} Christmas`, date);
-  }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(query)) {
-    const date = parseLocalDate(query);
-    if (
-      date.month >= 1 &&
-      date.month <= 12 &&
-      date.day >= 1 &&
-      date.day <= daysInCalendarMonth(date.month, date.year)
-    ) {
-      return dateSearchResult(query, date);
-    }
-    return undefined;
-  }
-  const namedDate =
-    /^(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:,?\s+(\d{4}))?$/.exec(
-      query,
-    );
-  const numericDate = /^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{4}))?$/.exec(query);
-  const month = namedDate
-    ? calendarMonthNumber(namedDate[1] as string)
-    : Number(numericDate?.[1] ?? 0);
-  const day = Number(namedDate?.[2] ?? numericDate?.[2] ?? 0);
-  const year = Number(namedDate?.[3] ?? numericDate?.[3] ?? today.year);
-  if (month >= 1 && month <= 12 && day >= 1 && day <= daysInCalendarMonth(month, year)) {
-    return dateSearchResult(query, { day, month, year });
-  }
-  return undefined;
-}
-
-function calendarMonthNumber(value: string) {
-  return (
-    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"].indexOf(
-      value.slice(0, 3),
-    ) + 1
-  );
-}
-
-function daysInCalendarMonth(month: number, year: number) {
-  return new Date(Date.UTC(year, month, 0, 12)).getUTCDate();
 }
 
 function EventLocationPicker({ onDismiss }: { onDismiss: () => void }) {
@@ -1236,17 +1027,6 @@ function CloseButton({ close }: { close: () => void }) {
 
 function calendarDate(date: LocalDate) {
   return new Date(Date.UTC(date.year, date.month - 1, date.day, 12));
-}
-
-function dateSearchResult(label: string, date: LocalDate): SearchResult {
-  return {
-    date,
-    detail: new Intl.DateTimeFormat("en", { dateStyle: "full", timeZone: "UTC" }).format(
-      calendarDate(date),
-    ),
-    key: `date:${date.year}-${date.month}-${date.day}`,
-    label,
-  };
 }
 
 function addDays(date: LocalDate, amount: number): LocalDate {

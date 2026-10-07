@@ -49,22 +49,19 @@ describe("Settings field destinations", () => {
     await waitFor(() => expect(screen.getByLabelText("Time zone")).toHaveFocus());
     expect(screen.getByLabelText("Time zone")).toHaveValue("UTC");
   });
-  it("opens a settings editor and waits for the target to mount", async () => {
+  it("waits for inline Finance settings to finish loading before focusing", async () => {
     function Editor() {
-      const [open, setOpen] = useState(false);
-      return (
-        <>
-          {open ? (
-            <input id="profile-buffer" aria-label="Buffer target" />
-          ) : (
-            <button type="button" onClick={() => setOpen(true)}>
-              Edit financial profile
-            </button>
-          )}
-        </>
+      const [loaded, setLoaded] = useState(false);
+      return loaded ? (
+        <input id="finance-config-bufferTarget" aria-label="Buffer target" />
+      ) : (
+        <button type="button" onClick={() => setLoaded(true)}>
+          Finish loading
+        </button>
       );
     }
     mount("finances:buffer-target-usd-", <Editor />, "finances");
+    await act(async () => screen.getByRole("button", { name: "Finish loading" }).click());
     await waitFor(() => expect(screen.getByLabelText("Buffer target")).toHaveFocus());
   });
   it("selects the right ritual before focusing an identically labelled field", async () => {

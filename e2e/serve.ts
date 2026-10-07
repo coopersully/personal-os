@@ -68,6 +68,9 @@ try {
     API_BASE_URL: apiUrl,
     APP_BASE_URL: webUrl,
     APP_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
+    // Browser cases use fresh sessions but share one loopback client address.
+    // Rate-limit enforcement is covered independently by API tests.
+    AUTH_RATE_LIMIT_MAX_REQUESTS: "1000",
     DATABASE_URL: postgres.getConnectionUri(),
     GOOGLE_REDIRECT_URI: `${apiUrl}/v1/connectors/google/callback`,
     X_REDIRECT_URI: `${apiUrl}/v1/x-bookmarks/callback`,

@@ -236,7 +236,8 @@ it("falls back to outlook and exposes each recurring pattern state and direction
   api.manageFinanceRecurringItem.mockResolvedValue({ data: {} });
   renderPage("/finances/cashflow?view=unknown");
   expect(await screen.findByText("Expected income")).toBeVisible();
-  await user.click(screen.getByRole("tab", { name: "Income" }));
+  await user.click(screen.getByRole("button", { name: "Cash flow view" }));
+  await user.click(screen.getByRole("menuitemradio", { name: "Income" }));
   expect(await screen.findByText("Needs confirmation")).toBeVisible();
   expect(screen.getByText("Inactive")).toBeVisible();
   expect(screen.getByText(/fortnightly/)).toBeVisible();

@@ -20,7 +20,7 @@ import {
 } from "@personal-os/database";
 import type { AccessScope, AgentConnectionGuide } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, inArray, sql } from "drizzle-orm";
 import { createAgentAccessWorkItemService } from "./agent-access-work-items.js";
 import { AppError } from "./errors.js";
 import { createFinanceContextualQuestionService } from "./finance/contextual-question-service.js";
@@ -404,6 +404,156 @@ describe.sequential("Agent Access work-item projection", () => {
     expect(page.summary.byDomain.tasks).toBeGreaterThan(0);
   });
 
+  it("keeps searchable review sources available when a sibling source fails", async () => {
+    const log = vi.fn();
+    const service = createAgentAccessWorkItemService({
+      log,
+      cursorSigningKey: "agent-access-test-signing-key",
+      db: database.db,
+      now: () => snapshot,
+      sourceReaders: {
+        mailRules: async () => {
+          throw new Error("Private query merchant-secret, token-secret and SQL params");
+        },
+      },
+    });
+    const result = await service.searchItems(principal, "mail", "search-unexpected");
+    expect(result.unavailableSources).toEqual(["mailRules"]);
+    expect(log).toHaveBeenCalledExactlyOnceWith({
+      event: "workspace_review_search_source_failed",
+      requestId: "search-unexpected",
+      workspace: "mail",
+      source: "mailRules",
+      category: "unexpected",
+      durationMs: expect.any(Number),
+      method: "GET",
+      path: "/v1/workspaces/mail/search",
+      status: 503,
+    });
+    expect(log.mock.calls[0]?.[0].durationMs).toBeGreaterThanOrEqual(0);
+    expect(JSON.stringify(log.mock.calls)).not.toContain("merchant-secret");
+    expect(JSON.stringify(log.mock.calls)).not.toContain("token-secret");
+
+    expect(result.items.length).toBeGreaterThan(0);
+    expect(result.items.every((item) => item.domain === "mail")).toBe(true);
+    expect(result.items.some((item) => item.id.startsWith("mail-rule:"))).toBe(false);
+  });
+
+  it("marks overflowing search sources unavailable while preserving the full review list", async () => {
+    const log = vi.fn();
+    const inserted = await database.db
+      .insert(mailRules)
+      .values(
+        Array.from({ length: 201 }, (_, index) => ({
+          userId: otherPrincipal.userId,
+          name: `Bounded source ${index}`,
+          enabled: false,
+          policy: "preview" as const,
+          condition: {
+            field: "sender" as const,
+            operator: "equals" as const,
+            value: "example@test.invalid",
+          },
+          actions: [{ afterDays: 0, mailboxId: null, type: "mark_read" as const }],
+          updatedAt: snapshot,
+        })),
+      )
+      .returning({ id: mailRules.id });
+    try {
+      const service = createAgentAccessWorkItemService({
+        log,
+        db: database.db,
+        cursorSigningKey: "test",
+        now: () => snapshot,
+      });
+      const search = await service.searchItems(otherPrincipal, "mail", "search-overflow");
+      expect(search.unavailableSources).toEqual(["mailRules"]);
+      expect(log).toHaveBeenCalledExactlyOnceWith({
+        event: "workspace_review_search_source_failed",
+        requestId: "search-overflow",
+        workspace: "mail",
+        source: "mailRules",
+        category: "overflow",
+        durationMs: expect.any(Number),
+        method: "GET",
+        path: "/v1/workspaces/mail/search",
+        status: 503,
+      });
+      expect(log.mock.calls[0]?.[0].durationMs).toBeGreaterThanOrEqual(0);
+      expect(JSON.stringify(log.mock.calls)).not.toContain("merchant-secret");
+      expect(JSON.stringify(log.mock.calls)).not.toContain("token-secret");
+
+      expect(search.items.some((item) => item.kind === "attention")).toBe(true);
+      expect(search.items.some((item) => item.id.startsWith("mail-rule:"))).toBe(false);
+      const listed = await service.list(
+        otherPrincipal,
+        { limit: 100, domain: "mail", kind: "review" },
+        publishedDomains,
+      );
+      expect(listed.filteredTotal).toBe(201);
+      expect(listed.unavailableDomains).toEqual([]);
+      expect(listed.nextCursor).not.toBeNull();
+    } finally {
+      await database.db.delete(mailRules).where(
+        inArray(
+          mailRules.id,
+          inserted.map(({ id }) => id),
+        ),
+      );
+    }
+  });
+
+  it("cancels blocked review SQL and returns healthy sibling sources", async () => {
+    const log = vi.fn();
+    let signalLocked!: () => void;
+    let signalRelease!: () => void;
+    const locked = new Promise<void>((resolve) => {
+      signalLocked = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      signalRelease = resolve;
+    });
+    const blocker = database.db.transaction(async (tx) => {
+      await tx.execute(sql`LOCK TABLE mail_rules IN ACCESS EXCLUSIVE MODE`);
+      signalLocked();
+      await release;
+    });
+    try {
+      await locked;
+      const service = createAgentAccessWorkItemService({
+        log,
+        db: database.db,
+        cursorSigningKey: "test",
+        now: () => snapshot,
+      });
+      const result = await service.searchItems(principal, "mail", "search-timeout");
+      expect(result.unavailableSources).toEqual(["mailRules"]);
+      expect(log).toHaveBeenCalledExactlyOnceWith({
+        event: "workspace_review_search_source_failed",
+        requestId: "search-timeout",
+        workspace: "mail",
+        source: "mailRules",
+        category: "timeout",
+        durationMs: expect.any(Number),
+        method: "GET",
+        path: "/v1/workspaces/mail/search",
+        status: 503,
+      });
+      expect(log.mock.calls[0]?.[0].durationMs).toBeGreaterThanOrEqual(0);
+      expect(JSON.stringify(log.mock.calls)).not.toContain("merchant-secret");
+      expect(JSON.stringify(log.mock.calls)).not.toContain("token-secret");
+
+      expect(result.items.length).toBeGreaterThan(0);
+      const pending = await database.db.execute(
+        sql`SELECT pid FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '%mail_rules%'`,
+      );
+      expect(pending.rows).toHaveLength(0);
+    } finally {
+      signalRelease();
+      await blocker;
+    }
+  }, 10_000);
+
   it("projects mixed authority and source edge cases without inventing work", async () => {
     const [attention] = await database.db
       .select()
@@ -521,7 +671,7 @@ describe.sequential("Agent Access work-item projection", () => {
     expect(page.summary.byKind.review).toBe(0);
   });
 
-  it("projects redacted Mail questions and deduplicates a represented maintenance block", async () => {
+  it("projects redacted Mail questions alongside maintenance blocks", async () => {
     const [account] = await database.db
       .select()
       .from(calendarAccounts)
@@ -619,9 +769,7 @@ describe.sequential("Agent Access work-item projection", () => {
         priority: "blocked",
       }),
     );
-    expect(blockedPage.items.some((item) => item.id === `mail-question:${question.id}`)).toBe(
-      false,
-    );
+    expect(blockedPage.items.some((item) => item.id === `mail-question:${question.id}`)).toBe(true);
 
     await database.db
       .update(mailStewardshipQuestions)
@@ -692,6 +840,81 @@ describe.sequential("Agent Access work-item projection", () => {
       publishedDomains,
     );
     expect(cleanPage.items.some((item) => item.id.startsWith("mail-run:"))).toBe(false);
+  });
+  it("keeps an older open Mail question in reviews and search after a clean run for another thread", async () => {
+    const [account] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.userId, principal.userId))
+      .limit(1);
+    if (!account) throw new Error("Mail account fixture was not found.");
+    const threads = await database.db
+      .insert(mailThreads)
+      .values(
+        ["question-a", "clean-b"].map((name) => ({
+          accountId: account.id,
+          userId: principal.userId,
+          provider: "google" as const,
+          remoteThreadId: name,
+          subject: name,
+          snippet: "Fixture thread",
+          bodyText: "Fixture thread",
+          from: { address: "sender@example.com", name: null },
+          to: [],
+          receivedAt: new Date("2026-08-11T15:00:00.000Z"),
+        })),
+      )
+      .returning();
+    const [threadA, threadB] = threads;
+    if (!threadA || !threadB) throw new Error("Mail thread fixtures were not created.");
+    const [question] = await database.db
+      .insert(mailStewardshipQuestions)
+      .values({
+        accountId: account.id,
+        userId: principal.userId,
+        threadId: threadA.id,
+        fingerprint: "c".repeat(64),
+        kind: "needs_disposition",
+        evidence: [],
+        options: [],
+        reason: "Thread A still needs a disposition.",
+        createdAt: new Date("2026-08-11T15:05:00.000Z"),
+        updatedAt: new Date("2026-08-11T15:05:00.000Z"),
+      })
+      .returning();
+    if (!question) throw new Error("Mail question fixture was not created.");
+    const [run] = await database.db
+      .insert(workspaceMaintenanceRuns)
+      .values({
+        domain: "mail",
+        userId: principal.userId,
+        rulebookVersion: "mail-v1",
+        scope: { type: "target", entityType: "mail_thread", id: threadB.id },
+        status: "completed",
+        settledResult: {},
+        updatedAt: new Date("2026-08-11T15:10:00.000Z"),
+      })
+      .returning();
+    if (!run) throw new Error("Mail run fixture was not created.");
+    const service = createAgentAccessWorkItemService({
+      cursorSigningKey: "agent-access-test-signing-key",
+      db: database.db,
+      now: () => snapshot,
+    });
+    const page = await service.list(
+      principal,
+      { domain: "mail", kind: "review", limit: 100 },
+      publishedDomains,
+    );
+    const expectedQuestion = expect.objectContaining({
+      id: `mail-question:${question.id}`,
+      action: { label: "Answer in Mail", to: `/mail/review?question=${question.id}` },
+    });
+    expect(page.items).toContainEqual(expectedQuestion);
+    expect(page.items.some((item) => item.id === `mail-run:${run.id}`)).toBe(false);
+    const search = await service.searchItems(principal, "mail", "targeted-run-question");
+    expect(search.items).toContainEqual(expectedQuestion);
+    expect(search.unavailableSources).toEqual([]);
   });
   it("projects exact Finance work once, preserves notes, and retires resolved work", async () => {
     const [owner] = await database.db
@@ -1084,6 +1307,18 @@ describe.sequential("Agent Access work-item projection", () => {
       { domain: "finances", kind: "review", limit: 10 },
       publishedDomains,
     );
+    const searchable = await service.searchItems(actor, "finances");
+    expect(searchable.unavailableSources).toEqual([]);
+    expect(searchable.items).toEqual(page.items);
+    await database.db
+      .update(financeTransactions)
+      .set({ merchant: "Changed transaction context" })
+      .where(eq(financeTransactions.id, transaction.id));
+    const stale = await service.searchItems(actor, "finances");
+    expect(stale.unavailableSources).toEqual([]);
+    expect(
+      stale.items.some((item) => item.id === `finance-contextual:${created.question.id}`),
+    ).toBe(false);
     expect(page.items).toContainEqual(
       expect.objectContaining({
         action: {

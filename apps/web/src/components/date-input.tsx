@@ -17,12 +17,15 @@ type DateInputProps = Omit<
 > & {
   value: string;
   onValueChange: (value: string) => void;
+  /** A calendar selection is complete without a subsequent native-input blur. */
+  onValueCommit?: (value: string) => void;
 };
 
 /** Date-only ISO values; no UTC conversion or accidental day shift on selection. */
 export function DateInput({
   value,
   onValueChange,
+  onValueCommit,
   disabled,
   readOnly,
   min,
@@ -81,6 +84,7 @@ export function DateInput({
               onSelect={(date) => {
                 if (date) {
                   onValueChange(format(date, "yyyy-MM-dd"));
+                  onValueCommit?.(format(date, "yyyy-MM-dd"));
                   setOpen(false);
                 }
               }}

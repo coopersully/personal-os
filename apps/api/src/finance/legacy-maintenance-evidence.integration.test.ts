@@ -102,6 +102,50 @@ describe.sequential("Legacy Finance maintenance evidence", () => {
     return { userId: owner.id, account, first, second, third, revision, legacyRunId };
   }
 
+  it("searches mature Finance history without treating unrelated transactions or runs as overflow", async () => {
+    const setup = await fixture();
+    await database.db
+      .delete(financeTransactionRevisions)
+      .where(eq(financeTransactionRevisions.id, setup.revision.id));
+    await database.db.insert(financeTransactions).values(
+      Array.from({ length: 205 }, (_, index) => ({
+        userId: setup.userId,
+        accountId: setup.account.id,
+        amount: 1000,
+        transactionDate: "2026-07-01",
+        merchant: `Ordinary history ${index}`,
+        direction: "expense" as const,
+        needsReview: false,
+      })),
+    );
+    await database.db.insert(financeMaintenanceRuns).values(
+      Array.from({ length: 205 }, () => ({
+        userId: setup.userId,
+        scope: { type: "all" as const },
+      })),
+    );
+    const service = createAgentAccessWorkItemService({
+      db: database.db,
+      now: () => laterAt,
+      cursorSigningKey: "search-bound-test",
+    });
+    const principal = {
+      actorId: setup.userId,
+      actorType: "user" as const,
+      userId: setup.userId,
+      scopes: new Set(["finances:read" as const]),
+    };
+    const empty = await service.searchItems(principal, "finances");
+    expect(empty.unavailableSources).toEqual([]);
+    expect(empty.items).toEqual([]);
+    await database.db.insert(financeTransactionRevisions).values(setup.revision);
+    const work = await service.searchItems(principal, "finances");
+    expect(work.unavailableSources).toEqual([]);
+    expect(work.items.map((item) => item.id)).toEqual([
+      `finance-effect:classification:${setup.revision.id}`,
+    ]);
+  });
+
   it("blocks historical effects even when needsReview is false and exposes exact repair in status", async () => {
     const setup = await fixture();
     const effects = await findUnverifiedLegacyFinanceEffects(database.db, setup.userId, {
@@ -634,6 +678,26 @@ describe.sequential("Legacy Finance maintenance evidence", () => {
       userId: setup.userId,
       snapshotAt: laterAt,
     });
+    const searched = await createAgentAccessWorkItemService({
+      db: database.db,
+      now: () => laterAt,
+      cursorSigningKey: "search-effect-test",
+    }).searchItems(
+      {
+        actorId: setup.userId,
+        actorType: "user",
+        userId: setup.userId,
+        scopes: new Set(["finances:read"]),
+      },
+      "finances",
+    );
+    expect(searched.unavailableSources).toEqual([]);
+    expect(
+      searched.items
+        .filter((item) => item.id.startsWith("finance-effect:"))
+        .map((item) => item.id)
+        .sort(),
+    ).toEqual(work.map((item) => item.id).sort());
     expect(work.map((item) => item.id).sort()).toEqual(
       [
         `finance-effect:classification:${setup.revision.id}`,

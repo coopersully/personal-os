@@ -444,3 +444,60 @@ it("shows an unavailable exact approval without offering another pending approva
   expect(api.listFinanceQuestions).not.toHaveBeenCalled();
   expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
 });
+
+it("requires shortening a long clarification when switching to a category resolution", async () => {
+  const user = userEvent.setup();
+  mount();
+  const answer = await screen.findByLabelText("Your answer");
+  await user.click(answer);
+  await user.paste("A".repeat(600));
+  expect(screen.getByRole("button", { name: "Save answer" })).toBeEnabled();
+  await user.selectOptions(screen.getByLabelText("Resolution"), "classify_transaction");
+  expect(screen.getByText("Use 500 characters or fewer for this resolution.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Save answer" })).toBeDisabled();
+  await user.clear(answer);
+  await user.type(screen.getByRole("combobox", { name: "Category" }), "Dining");
+  await user.keyboard("{Enter}");
+  api.answerFinanceReview.mockResolvedValue(response([]));
+  await user.click(screen.getByRole("button", { name: "Save answer" }));
+  expect(api.answerFinanceReview).toHaveBeenCalledWith(
+    reviewId,
+    expect.objectContaining({
+      answer: "Categorized as Dining.",
+      resolution: { type: "classify_transaction", categoryId, meaning: "Categorized as Dining." },
+    }),
+  );
+  expect(await screen.findByText("No open Inbox questions")).toBeVisible();
+});
+
+it("shows a selected transaction's evidence even when it is absent from the related page", async () => {
+  const item = {
+    ...review(),
+    proposedResolution: {
+      type: "link_transactions",
+      relationship: "refund",
+      relatedTransactionId: nextId,
+    },
+  };
+  api.getFinanceInbox.mockResolvedValue(response([item]));
+  api.getFinanceTransaction.mockImplementation(async (id: string) => ({
+    data: {
+      id,
+      merchant: id === nextId ? "Prior refund" : "Original debit",
+      amount: 42,
+      currencyCode: "USD",
+      date: "2026-09-02",
+      direction: id === nextId ? "income" : "expense",
+      pending: false,
+      category: null,
+    },
+  }));
+  mount();
+  await userEvent.selectOptions(await screen.findByLabelText("Resolution"), "link_transactions");
+  expect(await screen.findByRole("link", { name: "Prior refund" })).toHaveAttribute(
+    "href",
+    `/finances/transactions?transactionId=${nextId}`,
+  );
+  expect(screen.getByRole("option", { name: "Selected transaction (see evidence)" })).toBeVisible();
+  expect(screen.getByLabelText("Related transaction")).toHaveValue(nextId);
+});

@@ -37,7 +37,12 @@ export async function loadReviewSession(workspace: AgentAccessDomain, signal?: A
 export function ReviewFlowHost({ workspace }: { workspace: AgentAccessDomain | undefined }) {
   const [params, setParams] = useSearchParams();
   const requested = params.get("review");
-  if (!workspace || !requested) return null;
+  if (
+    !workspace ||
+    !requested ||
+    (workspace === "finances" && ["all", "needs_review", "resolved"].includes(requested))
+  )
+    return null;
   return (
     <ReviewFlow
       key={`${workspace}:${requested}`}
@@ -215,7 +220,9 @@ function ReviewSession({
           >
             <CardHeader
               className={
-                /^(finance-|mail-question:|mail-rule:)/.test(current.id) ? "sr-only" : undefined
+                /^(finance-|mail-question:|mail-run:|mail-rule:)/.test(current.id)
+                  ? "sr-only"
+                  : undefined
               }
             >
               <CardTitle>

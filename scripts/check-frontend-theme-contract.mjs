@@ -44,6 +44,12 @@ const stylesheetForDecorativeChecks = stylesheet
     /\/\* theme-contract-allow-start: functional-calendar-grid \*\/[\s\S]*?\/\* theme-contract-allow-end: functional-calendar-grid \*\//g,
     "",
   )
+  // Approved Mail history navigation fade preserves legibility over scrolling messages.
+  // Limit the exception to this selector and the page-background gradient.
+  .replace(
+    /(\.mail-reader__history-nav\s*\{[^}]*?)background: linear-gradient\(\s*to bottom,\s*var\(--background\) 0%,\s*color-mix\(in srgb, var\(--background\) 90%, transparent\) 55%,\s*transparent 100%\s*\);/g,
+    "$1",
+  )
   // The approved Setup edge fade keeps floating controls legible over content.
   // Exempt only this selector and canvas-colored declaration, not other effects.
   .replace(

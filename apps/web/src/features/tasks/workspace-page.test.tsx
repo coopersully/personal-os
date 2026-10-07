@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import type { TaskWorkspaceItem } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -15,9 +15,14 @@ import {
   taskDescription,
   taskTiming,
 } from "./page";
+import { TasksAppBarControls } from "./workspace-header";
 import { TasksWorkspacePage } from "./workspace-page";
 
 const mocks = vi.hoisted(() => ({
+  getWorkspaceSettings: vi.fn().mockResolvedValue({
+    revision: 0,
+    preferences: { pinnedListIds: [], pinnedProjectIds: ["open", "closed", "orphan"] },
+  }),
   listTaskWorkspace: vi.fn(),
   listTaskLists: vi.fn(),
   listTaskProjects: vi.fn(),
@@ -89,6 +94,7 @@ function setup(path = "/tasks?view=all") {
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
       <MemoryRouter initialEntries={[path]}>
+        <TasksAppBarControls search={null} timeZone="America/New_York" />
         <TasksWorkspacePage
           onEdit={onEdit}
           onEditReminder={onEditReminder}
@@ -140,19 +146,26 @@ it("mixes concise rows with distinct inspectors and progressive row details", as
   await browser.click(screen.getByRole("menuitemcheckbox", { name: "Notes" }));
   expect(await screen.findByText("Compare options")).toBeInTheDocument();
 });
-it("keeps create choices compact and exposes the optional reminder action", async () => {
+it("creates tasks with placement and opens reminders from the shared plus", async () => {
   const user = userEvent.setup();
   const onCreate = vi.fn();
   const onCreateReminder = vi.fn();
-  render(<TasksCreateButton onCreate={onCreate} onCreateReminder={onCreateReminder} />);
-  await user.click(screen.getByRole("button", { name: "New task" }));
-  await user.click(screen.getByRole("button", { name: "More create options" }));
-  await user.click(screen.getByRole("menuitem", { name: "New reminder" }));
-  expect(onCreate).toHaveBeenCalledOnce();
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <MemoryRouter>
+        <TasksCreateButton onCreate={onCreate} onCreateReminder={onCreateReminder} />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  await user.click(screen.getByRole("button", { name: "Create in Tasks" }));
+  await user.click(screen.getByRole("button", { name: "Task Something to do" }));
+  await user.click(await screen.findByRole("button", { name: "Continue" }));
+  expect(onCreate).toHaveBeenCalledWith({ listId: "inbox", projectId: null });
+  await user.click(screen.getByRole("button", { name: "Create in Tasks" }));
+  await user.click(screen.getByRole("button", { name: "Reminder Something to remember" }));
   expect(onCreateReminder).toHaveBeenCalledOnce();
-  cleanup();
-  render(<TasksCreateButton onCreate={onCreate} />);
-  expect(screen.queryByRole("button", { name: "More create options" })).not.toBeInTheDocument();
 });
 
 it("filters inactive sidebar containers and recovers each navigation dependency", async () => {
@@ -367,7 +380,16 @@ it("keeps archived lists inspectable and their retained tasks actionable", async
 
 it("lists every archived container from the retained-work overview", async () => {
   mocks.listTaskLists.mockResolvedValue({
-    items: [{ id: "archived", name: "Someday", kind: "standard", availability: "archived" }],
+    items: [
+      {
+        id: "archived",
+        name: "Someday",
+        kind: "standard",
+        availability: "archived",
+        updatedAt: "2026-10-01",
+        createdAt: "2026-10-01",
+      },
+    ],
     nextCursor: null,
   });
   mocks.listTaskProjects.mockResolvedValue({
@@ -375,6 +397,8 @@ it("lists every archived container from the retained-work overview", async () =>
       {
         id: "finished",
         name: "Kitchen refresh",
+        updatedAt: "2026-10-01",
+        createdAt: "2026-10-01",
         listId: "archived",
         availability: "active",
         lifecycle: "completed",
@@ -626,7 +650,7 @@ it("renders grouped workspace fallbacks and every contextual empty message", asy
   mocks.listTaskWorkspace.mockResolvedValue({ items: [groupedTask], nextCursor: null, total: 3 });
   setup("/tasks?view=all&group=date");
   expect(await screen.findByText(/Tue, Sep 8/)).toBeVisible();
-  expect(screen.getByText("1 of 3 shown")).toBeVisible();
+  expect(screen.getByText("3 items • 1 shown")).toBeVisible();
   cleanup();
 
   for (const [path, copy] of [
@@ -702,10 +726,10 @@ it("toggles visible selection and confirms destructive workspace actions", async
   await screen.findByRole("button", { name: "Open Plan trip" });
   await browser.click(screen.getByRole("button", { name: "Select items" }));
   await browser.click(screen.getByRole("checkbox", { name: "Select Plan trip" }));
-  expect(screen.getAllByText("1 selected")).toHaveLength(2);
+  expect(screen.getByText("2 items • 1 selected")).toBeVisible();
   await browser.click(screen.getByRole("checkbox", { name: "Select Plan trip" }));
   await browser.click(screen.getByRole("checkbox", { name: "Select visible items" }));
-  expect(screen.getAllByText("2 selected")).toHaveLength(2);
+  expect(screen.getByText("2 items • 2 selected")).toBeVisible();
   await browser.click(screen.getByRole("checkbox", { name: "Select visible items" }));
   await browser.click(screen.getByRole("checkbox", { name: "Select Plan trip" }));
   await browser.click(
@@ -724,4 +748,181 @@ it("toggles visible selection and confirms destructive workspace actions", async
   await vi.waitFor(() =>
     expect(mocks.trashTask).toHaveBeenCalledWith("t", { expectedRevision: 2 }),
   );
+});
+
+it("switches the header between Inbox, Today, Upcoming, and All", async () => {
+  const { browser } = setup();
+  for (const label of [
+    "Inbox",
+    "Today",
+    "Upcoming",
+    "All Lists",
+    "Projects",
+    "History",
+    "Trash",
+    "Archive",
+  ]) {
+    await browser.click(screen.getByRole("button", { name: /^Tasks view:/ }));
+    await browser.click(screen.getByRole("menuitemradio", { name: label }));
+    expect(await screen.findByRole("button", { name: `Tasks view: ${label}` })).toBeVisible();
+  }
+});
+
+it("names the selected list in the header and clears its scope when switching views", async () => {
+  mocks.listTaskLists.mockResolvedValue({
+    items: [
+      { id: "inbox", name: "Inbox", kind: "inbox", availability: "active" },
+      { id: "work", name: "Work projects", kind: "custom", availability: "active" },
+    ],
+    nextCursor: null,
+  });
+  const { browser } = setup("/tasks?list=work");
+  await waitFor(() =>
+    expect(mocks.listTaskWorkspace).toHaveBeenLastCalledWith(
+      expect.objectContaining({ listId: "work" }),
+    ),
+  );
+  await browser.click(await screen.findByRole("button", { name: "Tasks view: Work projects" }));
+  expect(screen.queryByRole("menuitemradio", { name: "Work projects" })).not.toBeInTheDocument();
+  await browser.click(screen.getByRole("menuitemradio", { name: "Today" }));
+  expect(await screen.findByRole("button", { name: "Tasks view: Today" })).toBeVisible();
+  await waitFor(() =>
+    expect(mocks.listTaskWorkspace).toHaveBeenLastCalledWith(
+      expect.objectContaining({ view: "today" }),
+    ),
+  );
+  expect(mocks.listTaskWorkspace.mock.lastCall?.[0].listId).toBeUndefined();
+});
+
+it("separates the destructive row action from ordinary actions", async () => {
+  const { browser } = setup();
+  await browser.click(await screen.findByRole("button", { name: "Plan trip options" }));
+  const trash = screen.getByRole("menuitem", { name: "Move to Trash" });
+  expect(trash).toHaveAttribute("data-variant", "destructive");
+  expect(trash.previousElementSibling).toHaveAttribute("role", "separator");
+});
+
+it.each([
+  ["task", task],
+  ["reminder", reminder],
+] as const)("opens a loaded %s deep link exactly once", async (kind, item) => {
+  const { onEdit, onEditReminder } = setup(`/tasks?view=all&${kind}=${item.record.id}`);
+  const callback = kind === "task" ? onEdit : onEditReminder;
+  await waitFor(() => expect(callback).toHaveBeenCalledExactlyOnceWith(item.record));
+});
+
+it("opens an off-page reminder after retrieving its record", async () => {
+  mocks.listTaskWorkspace.mockResolvedValue({ items: [], nextCursor: null, total: 0 });
+  mocks.getReminder.mockResolvedValue(reminder.record);
+  const { onEditReminder } = setup("/tasks?view=all&reminder=r");
+  await waitFor(() => expect(onEditReminder).toHaveBeenCalledExactlyOnceWith(reminder.record));
+});
+
+it.each([true, false])("previews a trashed task deep link when loaded=%s", async (loaded) => {
+  const deletedAt = "2026-10-01T12:00:00.000Z";
+  const trashed = { ...task, deletedAt, record: { ...task.record, deletedAt } };
+  mocks.listTaskWorkspace.mockResolvedValue({
+    items: loaded ? [trashed] : [],
+    nextCursor: null,
+    total: loaded ? 1 : 0,
+  });
+  mocks.getTask.mockResolvedValue(trashed.record);
+  const { onEdit } = setup("/tasks?view=trash&task=t");
+  expect(await screen.findByRole("dialog", { name: "Plan trip" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Restore" })).toBeVisible();
+  expect(onEdit).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["active", "completed"],
+  ["archived", "open"],
+] as const)("previews an off-page task in a %s, %s project", async (availability, lifecycle) => {
+  mocks.listTaskWorkspace.mockResolvedValue({ items: [], nextCursor: null, total: 0 });
+  mocks.getTask.mockResolvedValue({ ...task.record, projectId: "project" });
+  mocks.listTaskProjects.mockResolvedValue({
+    items: [{ id: "project", name: "Retained project", listId: "inbox", availability, lifecycle }],
+    nextCursor: null,
+  });
+  const { onEdit } = setup("/tasks?view=history&task=t");
+  expect(await screen.findByRole("dialog", { name: "Plan trip" })).toBeVisible();
+  expect(onEdit).not.toHaveBeenCalled();
+});
+
+it.each([
+  "why",
+  "targetDate",
+] as const)("shows scoped project %s without requiring the other metadata", async (field) => {
+  mocks.listTaskProjects.mockResolvedValue({
+    items: [
+      {
+        id: "launch",
+        name: "Launch",
+        listId: "inbox",
+        availability: "active",
+        lifecycle: "open",
+        [field]: field === "why" ? "Ship carefully" : "2026-10-10",
+      },
+    ],
+    nextCursor: null,
+  });
+  setup("/tasks?list=inbox&project=launch");
+  expect(
+    await screen.findByText(field === "why" ? "Ship carefully" : "Target Oct 10, 2026"),
+  ).toBeVisible();
+});
+
+it.each(["list", "project"] as const)("uses known %s names for grouped rows", async (group) => {
+  mocks.listTaskProjects.mockResolvedValue({
+    items: [
+      { id: "launch", name: "Launch", listId: "inbox", availability: "active", lifecycle: "open" },
+    ],
+    nextCursor: null,
+  });
+  mocks.listTaskWorkspace.mockResolvedValue({
+    items: [{ ...task, groupKey: group === "list" ? "inbox" : "launch" }],
+    nextCursor: null,
+  });
+  setup(`/tasks?view=all&group=${group}`);
+  expect(
+    await screen.findByRole("heading", { name: group === "list" ? "Inbox" : "Launch" }),
+  ).toBeVisible();
+  expect(screen.getByRole("button", { name: "Open Plan trip" })).toBeVisible();
+});
+
+it("opens a retained task deep link and retains list and project context in a system view", async () => {
+  const project = {
+    id: "launch",
+    name: "Launch",
+    listId: "inbox",
+    availability: "active",
+    lifecycle: "open",
+  };
+  mocks.listTaskProjects.mockResolvedValue({ items: [project], nextCursor: null });
+  const record = { ...task.record, projectId: "launch" };
+  mocks.listTasks.mockResolvedValue({ items: [record], nextCursor: "next" });
+  const { onEdit } = setupLegacy("/tasks?view=today&task=t");
+  await waitFor(() => expect(onEdit).toHaveBeenCalledExactlyOnceWith(record));
+  expect(screen.getByRole("button", { name: "Load more Tasks" })).toBeVisible();
+  expect(screen.getByText(/Inbox \/ Launch/)).toBeVisible();
+});
+
+it.each([
+  "archived",
+  "completed",
+] as const)("opens retained project scope for %s projects", async (state) => {
+  mocks.listTaskProjects.mockResolvedValue({
+    items: [
+      {
+        id: "launch",
+        name: "Launch",
+        listId: "inbox",
+        availability: state === "archived" ? "archived" : "active",
+        lifecycle: state === "completed" ? "completed" : "open",
+      },
+    ],
+    nextCursor: null,
+  });
+  setupLegacy("/tasks?archive=project&project=launch");
+  expect(await screen.findByText("Nothing here yet")).toBeVisible();
+  expect(mocks.listTasks).toHaveBeenCalledWith(expect.objectContaining({ projectId: "launch" }));
 });

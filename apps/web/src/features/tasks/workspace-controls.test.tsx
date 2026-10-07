@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { TaskList, TaskProject } from "@personal-os/domain";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -26,10 +27,14 @@ function LocationProbe() {
 
 function mount(content: React.ReactNode, entry = "/tasks") {
   render(
-    <MemoryRouter initialEntries={[entry]}>
-      {content}
-      <LocationProbe />
-    </MemoryRouter>,
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <MemoryRouter initialEntries={[entry]}>
+        {content}
+        <LocationProbe />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -52,7 +57,7 @@ it("changes every workspace sort and display option without closing detail selec
   expect(screen.getByLabelText("location")).toHaveTextContent("group=project");
   await user.click(screen.getByRole("button", { name: "Display" }));
   await user.click(screen.getByRole("menuitemcheckbox", { name: "Notes" }));
-  expect(screen.getByLabelText("location")).toHaveTextContent("details=none%2Cnotes");
+  expect(screen.getByLabelText("location")).toHaveTextContent("details=notes");
 });
 
 it("validates advanced ranges and applies the global history controls", async () => {

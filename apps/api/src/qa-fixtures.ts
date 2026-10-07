@@ -1229,7 +1229,7 @@ function addLoadedWorkspace(
     ],
     [
       "Protect time around the dentist appointment",
-      "The dentist appointment is scheduled for Thursday. Decide whether travel time should be reserved before or after it.",
+      "The dentist appointment is scheduled for tomorrow. Decide whether travel time should be reserved before or after it.",
     ],
     [
       "Revisit the monthly finance task",

@@ -1,520 +1,229 @@
-import type {
-  FinanceBudgetVersion,
-  FinanceMaintenancePayload,
-  FinanceSetupInput,
-  FinanceSetupPayload,
-  FinanceToolResult,
-} from "@personal-os/domain";
-import { financeMaintenanceInputSchema } from "@personal-os/domain";
-import { Spinner } from "@personal-os/ui";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useMutationState, useQueryClient } from "@tanstack/react-query";
+import { Link, useSearchParams } from "react-router-dom";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Field, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
-import { api, errorMessage } from "../../api.js";
-import { InlineError } from "../../components/async-state.js";
+import { api } from "../../api.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
-import { formatMoney } from "./format.js";
+import { SettingsSection } from "../settings/settings-layout.js";
+import { FinanceConfigurationEditor } from "./configuration-editor.js";
 import { requireFinanceResult } from "./position-material.js";
-import { SetupAnswerFields } from "./setup-answer-fields.js";
-
-const setupStages: Record<FinanceSetupPayload["stage"], string> = {
-  collecting_profile: "Building your financial profile",
-  budget_proposal: "Preparing your budget",
-  budget_approval: "Budget approval",
-  initial_maintenance: "Initial maintenance remains",
-  settled: "Setup complete",
-};
-const maintenanceStages: Record<NonNullable<FinanceMaintenancePayload["run"]>["status"], string> = {
-  queued: "Maintenance queued",
-  running: "Processing transaction evidence",
-  completed: "Maintenance complete",
-  completed_with_questions: "Maintenance complete with questions",
-  awaiting_agent_challenge: "Ledger challenge required",
-  awaiting_approval: "Action approval required",
-  blocked: "Maintenance blocked",
-  failed_recoverable: "Maintenance needs recovery",
-  failed_terminal: "Maintenance failed",
-};
+import { SetupMaintenance } from "./setup-maintenance.js";
+import { financeConfigurationKey, useFinanceConfiguration } from "./use-finance-configuration.js";
 
 export function FinanceSetupPage() {
-  const queryClient = useQueryClient();
-  const [result, setResult] = useState<FinanceToolResult<FinanceSetupPayload> | null>(null);
-  const [maintenanceInstructionVersion, setMaintenanceInstructionVersion] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const requestKey = useRef({ signature: "", key: "" });
-  const session = result?.data;
-  const question = session?.question;
-  const answerKey = session && question ? `${session.sessionId}:${question.id}` : "";
-  const answer = answers[answerKey] ?? "";
-  const setup = useFeedbackMutation({
-    feedback: { action: "update financial setup", safeToRetry: false, form: true },
-    mutationFn: (input: FinanceSetupInput) => api.setupFinances(input),
-    onError: (error) => {
-      if (errorMessage(error).includes("previously failed; use a new idempotency key")) {
-        requestKey.current = { signature: "", key: "" };
-      }
-    },
-    onSuccess: (response, input) => {
-      if (response.outcome === "failed") {
-        requestKey.current = { signature: "", key: "" };
-        return;
-      }
-      setResult(response);
-      setMaintenanceInstructionVersion((version) => version + 1);
-      if (input.operation === "answer")
-        setAnswers((current) => ({ ...current, [`${input.sessionId}:${input.questionId}`]: "" }));
-      requestKey.current = { signature: "", key: "" };
-      void queryClient.invalidateQueries({
-        predicate: (query) =>
-          typeof query.queryKey[0] === "string" && query.queryKey[0].startsWith("finance-"),
-      });
-    },
+  const query = useFinanceConfiguration();
+  const client = useQueryClient();
+  const [params, setParams] = useSearchParams();
+  const selected = params.get("section") ?? "profile";
+  const section = ["profile", "accounts", "budget"].includes(selected) ? selected : "profile";
+  const returnTo = params.get("returnTo");
+  const safeReturn = returnTo && /^\/finances(?:[/?#]|$)/.test(returnTo) ? returnTo : null;
+  const pendingSaves = useMutationState({
+    filters: { status: "pending" },
+    select: (mutation) => mutation.options.scope?.id === "finance-profile-configuration",
+  }).some(Boolean);
+  const generate = useFeedbackMutation({
+    feedback: { action: "prepare your budget", safeToRetry: false, form: true },
+    mutationFn: async () =>
+      requireFinanceResult(await api.setupFinances({ operation: "prepare_budget" })),
+    onSuccess: () => client.invalidateQueries({ queryKey: financeConfigurationKey }),
   });
-  const budget = useQuery({
-    queryKey: ["finance-setup-budget", session?.budgetVersionId],
-    queryFn: () => api.getFinanceBudget(),
-    enabled: Boolean(session?.budgetVersionId),
-  });
-  const categories = useQuery({
-    queryKey: ["finance-categories"],
-    queryFn: () => api.getFinanceCategories(),
-    enabled: Boolean(session?.budgetVersionId),
-  });
-  const plan = budget.data?.data;
-  const exactPlan = plan && plan.id === session?.budgetVersionId ? plan : null;
-  function mutationKey(input: object) {
-    const signature = JSON.stringify(input);
-    if (signature !== requestKey.current.signature)
-      requestKey.current = { signature, key: crypto.randomUUID() };
-    return requestKey.current.key;
-  }
-  function resume() {
-    setup.mutate(
-      session ? { operation: "resume", sessionId: session.sessionId } : { operation: "start" },
+  const profile = query.data?.profile;
+  const accounts = query.data?.accounts;
+  const budget = query.data?.budget;
+  const execution = query.data?.execution;
+  const run = execution?.state === "loaded" ? execution.value : null;
+  const status = {
+    profile:
+      profile?.state === "loaded"
+        ? profile.value
+          ? "Editable"
+          : "Not recorded"
+        : query.isPending
+          ? "Loading"
+          : "Unavailable",
+    accounts:
+      accounts?.state === "loaded"
+        ? `${accounts.value.accounts.length} accounts`
+        : query.isPending
+          ? "Loading"
+          : "Unavailable",
+    budget:
+      budget?.state === "loaded"
+        ? budget.value
+          ? "Draft or saved budget"
+          : "Not created"
+        : query.isPending
+          ? "Loading"
+          : "Unavailable",
+  };
+  if (query.isError)
+    return (
+      <Alert>
+        <AlertDescription>
+          Financial profile could not load.{" "}
+          <Button variant="secondary" onClick={() => void query.refetch()}>
+            Retry
+          </Button>
+        </AlertDescription>
+      </Alert>
     );
-  }
-  function submitAnswer(value = answer) {
-    if (!session || !question || setup.isPending || !value.trim()) return;
-    const input = {
-      answer: value.trim(),
-      expectedVersion: session.version,
-      operation: "answer" as const,
-      questionId: question.id,
-      sessionId: session.sessionId,
-    };
-    setup.mutate({ ...input, idempotencyKey: mutationKey(input) });
-  }
-  function skip() {
-    if (!session || !question || setup.isPending) return;
-    const input = {
-      operation: "skip" as const,
-      sessionId: session.sessionId,
-      expectedVersion: session.version,
-      questionId: question.id,
-    };
-    setup.mutate({ ...input, idempotencyKey: mutationKey(input) });
-  }
-  function approve() {
-    if (
-      !session ||
-      !exactPlan ||
-      exactPlan.status !== "proposed" ||
-      exactPlan.balanceDelta !== 0 ||
-      setup.isPending ||
-      budget.isFetching ||
-      budget.isError
-    )
-      return;
-    const input = {
-      approvalSource: "user_instruction" as const,
-      budgetVersionId: exactPlan.id,
-      expectedProfileVersionId: exactPlan.profileVersionId ?? null,
-      expectedVersion: session.version,
-      operation: "approve_budget" as const,
-      sessionId: session.sessionId,
-    };
-    setup.mutate({ ...input, idempotencyKey: mutationKey(input) });
-  }
   return (
-    <section className="grid gap-4" aria-label="Financial setup">
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            <h2>
-              {session
-                ? session.stage === "settled" &&
-                  (result?.outcome !== "completed" || result.remainingWork.count > 0)
-                  ? "Setup progress"
-                  : setupStages[session.stage]
-                : "A plan grounded in your finances"}
-            </h2>
-          </CardTitle>
-          <CardDescription>
-            {result?.communication.headline ??
-              "Build your first plan one question at a time. Unknown details can wait, and existing progress will resume."}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4">
-          {setup.error ? (
-            <Alert variant="destructive">
-              <AlertTitle>Setup change not saved</AlertTitle>
-              <AlertDescription>
-                {setup.feedback?.message} Your input is preserved. Resume saved progress if the
-                session has changed.
-              </AlertDescription>
-            </Alert>
-          ) : null}
-          {setup.data?.outcome === "failed" ? (
-            <Alert variant="destructive">
-              <AlertTitle>Setup could not continue</AlertTitle>
-              <AlertDescription>{setup.data.communication.headline}</AlertDescription>
-            </Alert>
-          ) : null}
-          {result?.communication.requiredDisclosures.map((disclosure) => (
-            <Alert key={disclosure.message}>
-              <AlertDescription>{disclosure.message}</AlertDescription>
-            </Alert>
-          ))}
-          {!session ? (
-            <Button className="justify-self-start" disabled={setup.isPending} onClick={resume}>
-              {setup.isPending ? "Loading saved progress…" : "Start or resume setup"}
-            </Button>
-          ) : null}
-          {session?.stage === "collecting_profile" &&
-          question &&
-          (question.id.startsWith("planning:") || question.id === "profile:debts") ? (
-            <section aria-label={question.prompt}>
-              <p>{question.prompt}</p>
-              <SetupAnswerFields
-                key={`${session.sessionId}:${question.id}`}
-                questionId={question.id}
-                pending={setup.isPending}
-                onSubmit={submitAnswer}
-              />
-            </section>
-          ) : session?.stage === "collecting_profile" && question ? (
-            <form
-              key={question.id}
-              className="grid gap-4"
-              onSubmit={(event) => {
-                event.preventDefault();
-                submitAnswer();
-              }}
-            >
-              <Field>
-                <FieldLabel htmlFor="finance-setup-answer">{question.prompt}</FieldLabel>
-                <Input
-                  id="finance-setup-answer"
-                  autoComplete="off"
-                  disabled={setup.isPending}
-                  inputMode={
-                    question.answerType === "currency"
-                      ? "decimal"
-                      : question.answerType === "integer"
-                        ? "numeric"
-                        : "text"
-                  }
-                  maxLength={10000}
-                  value={answer}
-                  onChange={(event) =>
-                    setAnswers((current) => ({ ...current, [answerKey]: event.target.value }))
-                  }
-                  required
-                />
-              </Field>
-              <Button
-                className="justify-self-start"
-                type="submit"
-                disabled={setup.isPending || !answer.trim()}
-              >
-                {setup.isPending ? "Saving answer…" : "Save answer"}
-              </Button>
-            </form>
-          ) : null}
-          {session?.stage === "collecting_profile" && question ? (
-            <Button variant="ghost" disabled={setup.isPending} onClick={skip}>
-              Skip for now — keep unknown
-            </Button>
-          ) : null}
-          {session?.stage === "budget_proposal" ? (
-            <Alert>
-              <AlertTitle>First plan saved; evidence remains incomplete</AlertTitle>
-              <AlertDescription>
-                Unknown amounts stay unknown. Planned contributions do not mean money moved. You can
-                keep bookkeeping while qualified position evidence is unavailable.
-              </AlertDescription>
-            </Alert>
-          ) : null}
-          {session?.budgetVersionId ? (
+    <section className="grid gap-4" aria-label="Financial profile">
+      <nav aria-label="Financial profile sections" className="grid gap-2 sm:grid-cols-3">
+        {(
+          [
+            ["profile", "Profile"],
+            ["accounts", "Accounts and records"],
+            ["budget", "Budget"],
+          ] as const
+        ).map(([id, title]) => (
+          <Button
+            key={id}
+            variant={section === id ? "secondary" : "ghost"}
+            className={`h-auto justify-between gap-2 whitespace-normal p-3 ${section === id ? "bg-card" : ""}`}
+            aria-current={section === id ? "page" : undefined}
+            onClick={() =>
+              setParams((current) => {
+                const next = new URLSearchParams(current);
+                next.set("section", id);
+                return next;
+              })
+            }
+          >
+            {title}
+            <span className="text-xs font-normal text-muted-foreground">{status[id]}</span>
+          </Button>
+        ))}
+      </nav>
+      {query.isPending ? (
+        <p role="status">Loading financial setup…</p>
+      ) : (
+        <>
+          {section === "profile" ? <FinanceConfigurationEditor /> : null}
+          {section === "accounts" ? (
             <>
-              {budget.isPending ? <Spinner label="Loading proposed budget" /> : null}
-              {budget.error ? (
-                <InlineError
-                  error={budget.error}
-                  retry={() => budget.refetch()}
-                  stale={budget.data !== undefined}
-                />
-              ) : null}
-              {categories.error ? (
-                <InlineError
-                  error={categories.error}
-                  retry={() => categories.refetch()}
-                  stale={categories.data !== undefined}
-                />
-              ) : null}
-              {exactPlan ? (
-                <SetupBudget
-                  plan={exactPlan}
-                  categoryNames={
-                    new Map(categories.data?.map((category) => [category.id, category.name]))
-                  }
-                />
-              ) : null}
-              {!budget.isPending && !budget.isError && !exactPlan ? (
-                <Alert>
-                  <AlertTitle>Budget version changed</AlertTitle>
-                  <AlertDescription>
-                    The current plan does not match this setup proposal. Open Plan to inspect the
-                    current version before continuing.
-                  </AlertDescription>
-                </Alert>
-              ) : null}
+              <SettingsSection
+                title="Accounts"
+                action={
+                  <Button asChild variant="secondary">
+                    <Link to="/finances/accounts">Manage accounts</Link>
+                  </Button>
+                }
+              >
+                {accounts?.state === "loaded" ? (
+                  accounts.value.accounts.length ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {accounts.value.accounts.map((account) => (
+                        <div className="rounded-lg bg-secondary p-4" key={account.id}>
+                          <p className="font-medium">{account.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {account.status === "needs_reauth"
+                              ? "Reconnect required"
+                              : account.status === "manual"
+                                ? "Manual account"
+                                : "Connected"}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Connect an account or add one manually. You can also import transactions.
+                    </p>
+                  )
+                ) : (
+                  <p role="alert">
+                    Accounts could not load.{" "}
+                    <Button variant="ghost" onClick={() => void query.refetch()}>
+                      Retry
+                    </Button>
+                  </p>
+                )}
+                <Button asChild variant="ghost">
+                  <Link to="/finances/imports">Import history</Link>
+                </Button>
+              </SettingsSection>
+              <SettingsSection title="Check records">
+                {execution?.state === "unavailable" ? (
+                  <p role="alert">
+                    Record-check progress could not load.{" "}
+                    <Button onClick={() => void query.refetch()}>Retry</Button>
+                  </p>
+                ) : (
+                  <>
+                    {run ? (
+                      <Badge variant="secondary">{run.status.replaceAll("_", " ")}</Badge>
+                    ) : null}
+                    <SetupMaintenance
+                      nextAction={{
+                        tool: "maintain_finances",
+                        arguments:
+                          run &&
+                          !["completed", "completed_with_questions", "failed_terminal"].includes(
+                            run.status,
+                          )
+                            ? { operation: "resume", runId: run.id }
+                            : { operation: "start" },
+                        reason: "Check your transaction evidence",
+                      }}
+                    />
+                  </>
+                )}
+              </SettingsSection>
             </>
           ) : null}
-          {session?.stage === "budget_approval" ? (
-            <div className="grid gap-3">
-              {question ? <p className="font-medium">{question.prompt}</p> : null}
-              <Button
-                className="justify-self-start"
-                disabled={
-                  setup.isPending ||
-                  budget.isFetching ||
-                  budget.isError ||
-                  !exactPlan ||
-                  exactPlan.status !== "proposed" ||
-                  exactPlan.balanceDelta !== 0
-                }
-                onClick={approve}
-              >
-                {setup.isPending ? "Approving budget…" : "Approve displayed budget"}
-              </Button>
-            </div>
-          ) : null}
-          {session?.stage === "initial_maintenance" ? (
-            <SetupMaintenance key={maintenanceInstructionVersion} nextAction={result?.nextAction} />
-          ) : null}
-          {session?.stage === "settled" &&
-          (result?.outcome !== "completed" || (result?.remainingWork.count ?? 0) > 0) ? (
-            <Alert>
-              <AlertTitle>Work remains</AlertTitle>
-              <AlertDescription>
-                {result?.nextAction?.reason ??
-                  "The server reports remaining work. Check saved progress before considering setup complete."}
-              </AlertDescription>
-            </Alert>
-          ) : null}
-          {result?.communication.optionalDetails.length ? (
-            <Collapsible>
-              <CollapsibleTrigger asChild>
-                <Button variant="ghost" size="sm">
-                  Setup details
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent className="grid gap-2 pt-2">
-                {result.communication.optionalDetails.map((detail) => (
-                  <p className="text-sm text-muted-foreground" key={detail}>
-                    {detail}
+          {section === "budget" ? (
+            <SettingsSection title="Budget">
+              {budget?.state === "unavailable" ? (
+                <p role="alert">
+                  Your budget could not load.{" "}
+                  <Button variant="secondary" onClick={() => void query.refetch()}>
+                    Retry
+                  </Button>
+                </p>
+              ) : budget?.state === "loaded" && budget.value ? (
+                <>
+                  <p>
+                    Your saved budget is available to inspect. Changes to your profile do not
+                    approve or activate a revised budget.
                   </p>
-                ))}
-              </CollapsibleContent>
-            </Collapsible>
+                  <Button asChild className="self-start">
+                    <Link to="/finances/plan">Open budget</Link>
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Prepare a draft from the information you have recorded. Unknown amounts remain
+                    unknown. Approval and financial evidence are checked separately.
+                  </p>
+                  <Button
+                    className="self-start"
+                    disabled={generate.isPending || pendingSaves || profile?.state !== "loaded"}
+                    onClick={() => generate.mutate()}
+                  >
+                    {generate.isPending ? "Preparing budget…" : "Prepare budget"}
+                  </Button>
+                </>
+              )}
+              <MutationFeedback feedback={generate.feedback} />
+              {generate.data?.communication.requiredDisclosures.map((item) => (
+                <Alert key={item.message}>
+                  <AlertDescription>{item.message}</AlertDescription>
+                </Alert>
+              ))}
+            </SettingsSection>
           ) : null}
-          {session ? (
-            <Button
-              className="justify-self-start"
-              variant="outline"
-              disabled={setup.isPending}
-              onClick={resume}
-            >
-              {setup.isPending ? "Loading saved progress…" : "Resume saved progress"}
-            </Button>
-          ) : null}
-        </CardContent>
-      </Card>
-      <nav aria-label="Financial setup resources" className="flex flex-wrap gap-2">
-        <Button asChild variant="ghost">
-          <Link to="/finances/plan">Open Plan</Link>
-        </Button>
-        <Button asChild variant="ghost">
-          <Link to="/finances/accounts">Manage accounts</Link>
-        </Button>
-        <Button asChild variant="ghost">
-          <Link to="/finances/transactions">Continue bookkeeping</Link>
-        </Button>
-      </nav>
-    </section>
-  );
-}
-
-function SetupBudget({
-  plan,
-  categoryNames,
-}: {
-  plan: FinanceBudgetVersion;
-  categoryNames: Map<string, string>;
-}) {
-  return (
-    <section className="grid gap-3" aria-label="Setup budget">
-      <div className="flex flex-wrap gap-2 items-center">
-        <h3 className="font-medium">Budget for {plan.effectiveFrom}</h3>
-        <Badge variant="secondary">
-          {plan.status} · Version {plan.version}
-        </Badge>
-      </div>
-      <p className="text-sm">{plan.rationale}</p>
-      <h4 className="font-medium">
-        Known planned resources · {formatMoney(plan.expectedResources)}
-      </h4>
-      <ItemGroup>
-        {plan.resources.map((resource) => (
-          <Item key={resource.key}>
-            <ItemContent>
-              <ItemTitle>{resource.description ?? resource.key}</ItemTitle>
-              <ItemDescription>{resource.kind.replaceAll("_", " ")}</ItemDescription>
-            </ItemContent>
-            <span className="tabular-nums">{formatMoney(resource.amount)}</span>
-          </Item>
-        ))}
-      </ItemGroup>
-      <h4 className="font-medium">Allocations · {formatMoney(plan.allocatedTotal)}</h4>
-      <ItemGroup>
-        {plan.allocations.map((allocation) => (
-          <Item key={allocation.key}>
-            <ItemContent>
-              <ItemTitle>
-                {allocation.description ??
-                  (allocation.kind === "spending" && allocation.categoryId
-                    ? categoryNames.get(allocation.categoryId)
-                    : undefined) ??
-                  allocation.key}
-              </ItemTitle>
-              <ItemDescription>
-                {allocation.kind}
-                {allocation.kind === "spending" && allocation.legacyCategory
-                  ? ` · ${allocation.legacyCategory}`
-                  : ""}
-              </ItemDescription>
-            </ItemContent>
-            <span className="tabular-nums">{formatMoney(allocation.amount)}</span>
-          </Item>
-        ))}
-      </ItemGroup>
-      <p className="text-sm">
-        {plan.balanceDelta < 0 ? "Unfunded known needs" : "Unallocated known resources"}:{" "}
-        {formatMoney(Math.abs(plan.balanceDelta))}
-      </p>
-      <h4 className="font-medium">Assumptions</h4>
-      {plan.assumptions.length ? (
-        <ul className="list-disc pl-5 text-sm grid gap-2">
-          {plan.assumptions.map((assumption) => (
-            <li key={assumption}>{assumption}</li>
-          ))}
-        </ul>
-      ) : (
-        <p className="text-sm text-muted-foreground">No assumptions recorded.</p>
+        </>
       )}
-    </section>
-  );
-}
-
-function SetupMaintenance({
-  nextAction,
-}: {
-  nextAction: FinanceToolResult<FinanceSetupPayload>["nextAction"];
-}) {
-  const queryClient = useQueryClient();
-  const [run, setRun] = useState<FinanceMaintenancePayload | null>(null);
-  const [communication, setCommunication] = useState<
-    FinanceToolResult<FinanceMaintenancePayload>["communication"] | null
-  >(null);
-  const instructedInput =
-    nextAction?.tool === "maintain_finances"
-      ? financeMaintenanceInputSchema.safeParse(nextAction.arguments)
-      : null;
-  const input = run?.run
-    ? { operation: "resume" as const, runId: run.run.id }
-    : instructedInput?.success
-      ? instructedInput.data
-      : null;
-  const maintenance = useFeedbackMutation({
-    feedback: { action: "run financial maintenance", safeToRetry: false, form: false },
-    mutationFn: async () => {
-      if (!input) throw new Error("Refresh setup progress to load the next maintenance action.");
-      return requireFinanceResult(await api.maintainFinances(input));
-    },
-    onSuccess: (response) => {
-      setRun(response.data);
-      setCommunication(response.communication);
-      void queryClient.invalidateQueries({
-        predicate: (query) =>
-          typeof query.queryKey[0] === "string" && query.queryKey[0].startsWith("finance-"),
-      });
-    },
-  });
-  return (
-    <section className="grid gap-3" aria-label="Initial maintenance">
-      <h3 className="font-medium">
-        {run?.run
-          ? maintenanceStages[run.run.status]
-          : run?.recovery
-            ? "Maintenance recovery"
-            : "Maintain transaction evidence"}
-      </h3>
-      <p className="text-sm text-muted-foreground">
-        {communication?.headline ??
-          "Your profile and budget are saved. Categorization, reconciliation, and audit still need to run."}
-      </p>
-      {run?.recovery ? <p className="text-sm">{run.recovery.reason}</p> : null}
-      {run?.nextAction ? <p className="text-sm">{run.nextAction.reason}</p> : null}
-      {run?.run?.status === "awaiting_approval" ||
-      run?.run?.status === "completed_with_questions" ? (
-        <Button asChild variant="outline">
-          <Link to="/finances/review">Answer in Review</Link>
+      {safeReturn ? (
+        <Button asChild variant="ghost" className="justify-self-start">
+          <Link to={safeReturn}>Return to previous page</Link>
         </Button>
       ) : null}
-      {communication?.requiredDisclosures.map((disclosure) => (
-        <Alert key={disclosure.message}>
-          <AlertDescription>{disclosure.message}</AlertDescription>
-        </Alert>
-      ))}
-      {maintenance.error ? <MutationFeedback feedback={maintenance.feedback} /> : null}
-      <div className="flex flex-wrap gap-2">
-        <Button
-          disabled={maintenance.isPending || !input}
-          onClick={() => maintenance.mutate()}
-          variant="outline"
-        >
-          {maintenance.isPending
-            ? "Checking maintenance…"
-            : input?.operation === "resume"
-              ? "Check maintenance progress"
-              : "Start initial maintenance"}
-        </Button>
-        {run?.nextAction?.tool === "get_finance_ledger_challenge" ? (
-          <Button asChild variant="ghost">
-            <Link to="/settings?section=agent-connections">Connected agents</Link>
-          </Button>
-        ) : null}
-      </div>
     </section>
   );
 }

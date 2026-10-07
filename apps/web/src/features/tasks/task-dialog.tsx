@@ -5,6 +5,14 @@ import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import {
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@/components/responsive-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -32,6 +40,7 @@ import { FeedbackForm } from "../../components/feedback-form.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+import { TaskCreationProgress } from "./creation-progress";
 import { listAllTaskLists, listAllTaskProjects } from "./page.js";
 
 type TaskFields = {
@@ -52,12 +61,14 @@ type PendingMove = {
 };
 
 export function TaskDialog({
+  placement,
   close,
   task,
   user,
 }: {
   close: () => void;
   task: Task | undefined;
+  placement?: { listId: string; projectId: string | null } | undefined;
   user: User;
 }) {
   const [searchParams] = useSearchParams();
@@ -67,10 +78,12 @@ export function TaskDialog({
     queryFn: listAllTaskProjects,
     queryKey: ["task-projects"],
   });
-  const requestedProjectId = searchParams.get("project") ?? "";
+  const requestedProjectId = placement
+    ? (placement.projectId ?? "")
+    : (searchParams.get("project") ?? "");
   const [currentTask, setCurrentTask] = useState(task);
-  const [listId, setListId] = useState(task?.listId ?? "");
-  const [projectId, setProjectId] = useState(task?.projectId ?? "");
+  const [listId, setListId] = useState(task?.listId ?? placement?.listId ?? "");
+  const [projectId, setProjectId] = useState(task?.projectId ?? placement?.projectId ?? "");
   const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
   const inbox = lists.data?.items.find((list) => list.kind === "inbox");
   const activeLists = lists.data?.items.filter((list) => list.availability === "active") ?? [];
@@ -218,12 +231,12 @@ export function TaskDialog({
   };
 
   const pending = save.isPending || confirmMove.isPending || transition.isPending;
-  const EditorRoot = task ? Sheet : Dialog;
-  const EditorContent = task ? SheetContent : DialogContent;
-  const EditorHeader = task ? SheetHeader : DialogHeader;
-  const EditorTitle = task ? SheetTitle : DialogTitle;
-  const EditorDescription = task ? SheetDescription : DialogDescription;
-  const EditorFooter = task ? SheetFooter : DialogFooter;
+  const EditorRoot = task ? Sheet : ResponsiveDialog;
+  const EditorContent = task ? SheetContent : ResponsiveDialogContent;
+  const EditorHeader = task ? SheetHeader : ResponsiveDialogHeader;
+  const EditorTitle = task ? SheetTitle : ResponsiveDialogTitle;
+  const EditorDescription = task ? SheetDescription : ResponsiveDialogDescription;
+  const EditorFooter = task ? SheetFooter : ResponsiveDialogFooter;
   return (
     <>
       <EditorRoot open={!pendingMove} onOpenChange={(open) => !open && !pendingMove && close()}>
@@ -231,7 +244,7 @@ export function TaskDialog({
           className={
             task
               ? "w-full overflow-y-auto sm:max-w-lg"
-              : "max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"
+              : "max-sm:px-4 max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"
           }
         >
           <EditorHeader>
@@ -239,6 +252,7 @@ export function TaskDialog({
             <EditorDescription>
               Keep the commitment separate from its deadline and reserved time.
             </EditorDescription>
+            {!task ? <TaskCreationProgress step={3} total={3} /> : null}
           </EditorHeader>
           <MutationFeedback feedback={transition.feedback} />
           {lists.isError ? (

@@ -5,15 +5,20 @@ export type WorkspaceAppBarWorkspace = WorkspaceId | "account";
 
 /**
  * The stable, page-wide frame for every workspace. Consumers supply semantic
- * content for the three slots; this component owns their order and geometry.
+ * identity, context, attention, utilities, and creation; this component owns
+ * their order and responsive geometry. Primary actions remain mounted on resize.
  */
 export function WorkspaceAppBar({
   actions,
+  attention,
+  primaryActions,
   context,
   identity,
   workspace,
 }: {
   actions?: ReactNode;
+  attention?: ReactNode;
+  primaryActions?: ReactNode;
   context?: ReactNode;
   identity?: ReactNode;
   workspace: WorkspaceAppBarWorkspace;
@@ -27,12 +32,18 @@ export function WorkspaceAppBar({
     >
       <div className="workspace-app-bar__identity" data-slot="workspace-app-bar-identity">
         {identity}
+        {attention}
       </div>
       <div className="workspace-app-bar__context" data-slot="workspace-app-bar-context">
         {context}
       </div>
       <div className="workspace-app-bar__actions" data-slot="workspace-app-bar-actions">
         {actions}
+        {primaryActions ? (
+          <div className="workspace-primary-actions" data-slot="workspace-primary-actions">
+            {primaryActions}
+          </div>
+        ) : null}
       </div>
     </nav>
   );

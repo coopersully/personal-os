@@ -140,6 +140,19 @@ or chat surface.
 - Update the page specification when a change establishes or revises a reusable
   interaction rule. UI and its specification must land together.
 
+## Menus and selection semantics
+
+Apply the app-wide [menu standards](../../../docs/design/system.md#menus-and-selection-controls-all-workspaces).
+Use `DropdownMenuItem` for commands/navigation, `DropdownMenuRadioGroup` and
+`DropdownMenuRadioItem` for mutually exclusive values, and `DropdownMenuCheckboxItem`
+for independent toggles. Shared trailing radio/checkbox indicators must remain visible
+when unchecked; do not append ad hoc checkmarks or nest interactive inputs in menu rows.
+Keep multi-select menus open while adjusting options. Reserve indicator space, constrain
+menus to the viewport, and separate destructive actions with a separator and destructive
+variant. Replace one-action overflow menus with accessible direct icon buttons.
+Verify keyboard navigation, selected/unselected/mixed/disabled states, and narrow layouts.
+These rules apply to every workspace and Settings, not only Tasks.
+
 ## Make user state honest
 
 Represent loading, empty, error, stale, reconnect, and capability states.

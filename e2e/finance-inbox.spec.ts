@@ -6,6 +6,7 @@ if (!demoAccount) throw new Error("The demo-full QA fixture is required.");
 
 test("Finance outstanding items open with context and retain notes for maintenance", async ({
   page,
+  isMobile,
 }, testInfo) => {
   await page.goto("/");
   await page.getByLabel("Email").fill(demoAccount.email);
@@ -16,6 +17,15 @@ test("Finance outstanding items open with context and retain notes for maintenan
   const transactionId = "33333333-3333-4333-8333-333333333333";
   const caseId = "44444444-4444-4444-8444-444444444444";
   let resolution: Record<string, string> | null = null;
+  let answersSaved = 0;
+  let maintenanceStarts = 0;
+  page.on("request", (request) => {
+    if (
+      new URL(request.url()).pathname === "/v1/finances/maintenance" &&
+      request.method() === "POST"
+    )
+      maintenanceStarts++;
+  });
   const transaction = {
     id: transactionId,
     accountId: transactionId,
@@ -60,6 +70,41 @@ test("Finance outstanding items open with context and retain notes for maintenan
         context: { ...transaction, accountName: "Savings", institution: "Example Bank" },
       },
     ]);
+  await page.route("**/v1/assistant/work-items?*", async (route) => {
+    if (new URL(route.request().url()).searchParams.get("domain") !== "finances") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      json: {
+        filteredTotal: 1,
+        items: [
+          {
+            id: `finance-review:${caseId}`,
+            domain: "finances",
+            kind: "review",
+            priority: "normal",
+            title: "Review Example transfer",
+            summary: resolution
+              ? "Context supplied; financial classification still requires review."
+              : "Where did this money go?",
+            action: { label: "Review transaction", to: `/finances/review?item=${caseId}` },
+            actionAt: null,
+            source: null,
+            updatedAt: "2026-09-09T12:00:00Z",
+          },
+        ],
+        nextCursor: null,
+        snapshotAt: "2026-09-09T12:00:00Z",
+        summary: {
+          byDomain: { calendar: 0, finances: 1, mail: 0, tasks: 0 },
+          byKind: { attention: 0, review: 1 },
+          total: 1,
+        },
+        unavailableDomains: [],
+      },
+    });
+  });
   await page.route("**/v1/finances/inbox", (route) => route.fulfill({ json: inbox() }));
   await page.route(`**/v1/finances/transactions/${transactionId}`, (route) =>
     route.fulfill({ json: envelope(transaction) }),
@@ -70,25 +115,57 @@ test("Finance outstanding items open with context and retain notes for maintenan
     expect(input.answer).toBe("Weekly transfer to my investment account");
     expect(input.idempotencyKey).toBeTruthy();
     resolution = input.resolution;
+    answersSaved++;
     await route.fulfill({ json: inbox() });
   });
 
   await page.goto("/finances");
-  const outstanding = page.getByRole("region", { name: "Outstanding finance items" });
-  await expect(outstanding.getByRole("heading", { name: "Outstanding (1)" })).toBeVisible();
-  await outstanding.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: testInfo.outputPath("finance-outstanding.png") });
-  await outstanding.getByRole("button", { name: "Review Example transfer" }).click();
-  const dialog = page.getByRole("dialog", { name: "Review financial activity" });
+  await expect(page.getByRole("region", { name: "Outstanding finance items" })).toHaveCount(0);
+  const openReview = page.getByRole("button", { name: "1 item needs review", exact: true });
+  await expect(openReview).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("finance-review-entry.png") });
+  await openReview.click();
+  const dialog = page.getByRole("dialog", { name: "Finances reviews", exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute("data-presentation", isMobile ? "drawer" : "dialog");
   await expect(dialog.getByText(/Sep 8, 2026 · Money out · Posted/)).toBeVisible();
+  await expect(dialog.getByText("Example Bank · Savings", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("link", { name: "Example transfer", exact: true })).toHaveAttribute(
+    "href",
+    `/finances/transactions?transactionId=${transactionId}`,
+  );
   await dialog.getByLabel("Your answer").fill("Weekly transfer to my investment account");
   await page.screenshot({ path: testInfo.outputPath("finance-note-editor.png") });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
   await dialog.getByRole("button", { name: "Save answer" }).click();
+  await expect(
+    dialog.getByText("Note saved · awaiting maintenance", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByText("Your update was checked. This item still needs review."),
+  ).toBeVisible();
+  await expect(dialog.getByText("0 completed · 1 left · 1 total")).toBeVisible();
+  await expect(dialog.getByRole("progressbar", { name: "Review progress" })).toHaveAttribute(
+    "aria-valuenow",
+    "0",
+  );
+  expect(answersSaved).toBe(1);
+  expect(maintenanceStarts).toBe(0);
+  await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await expect(dialog).not.toBeVisible();
-  await expect(outstanding.getByText("Note saved · awaiting maintenance")).toBeVisible();
+  await expect(openReview).toBeVisible();
+  await expect(page).not.toHaveURL(/review=/);
   await page.reload();
-  await expect(outstanding.getByText("Note saved · awaiting maintenance")).toBeVisible();
+  await openReview.click();
+  await expect(
+    dialog.getByText("Note saved · awaiting maintenance", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    dialog.getByText("Weekly transfer to my investment account", { exact: true }),
+  ).toBeVisible();
+  await expect(dialog.getByText("0 completed · 1 left · 1 total")).toBeVisible();
+  expect(answersSaved).toBe(1);
+  expect(maintenanceStarts).toBe(0);
 });

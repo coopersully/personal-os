@@ -1,4 +1,23 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
+
+async function selectCalendarView(page: Page, view: string) {
+  const picker = page.getByRole("button", { name: /^Calendar view:/ });
+  const changed =
+    (await picker.getAttribute("aria-label")) !== `Calendar view: ${view.toLowerCase()}`;
+  await picker.click();
+  const saved = changed
+    ? page.waitForResponse(
+        (response) =>
+          response.url().includes("/workspaces/calendar/settings") &&
+          response.request().method() === "PATCH",
+      )
+    : null;
+  await page.getByRole("menuitemradio", { name: view, exact: true }).click();
+  if (saved) expect((await saved).ok()).toBeTruthy();
+  await expect(
+    page.getByRole("button", { name: `Calendar view: ${view.toLowerCase()}`, exact: true }),
+  ).toBeVisible();
+}
 
 test("the repository QA fixture login exposes representative workspace data", async ({ page }) => {
   await page.goto("/");
@@ -71,18 +90,23 @@ test("the repository QA fixture login exposes representative workspace data", as
   }
 
   await page.goto("/tasks");
-  if (test.info().project.name === "mobile-chromium") {
-    await page.getByRole("button", { name: "Workspace actions" }).click();
-  }
+  await page.getByRole("button", { name: /^Tasks view:/ }).click();
+  await page.getByRole("menuitemradio", { name: "All Lists", exact: true }).click();
   await page
-    .getByRole("navigation", { name: "Task Lists" })
-    .getByRole("link", { name: "Work", exact: true })
+    .getByRole("list", { name: "Lists", exact: true })
+    .getByText("Work", { exact: true })
     .click();
+  await expect(page.getByRole("button", { name: "Tasks view: Work", exact: true })).toBeVisible();
   await expect(page.getByText("Draft weekly program update", { exact: true })).toBeVisible();
   await page.goto("/mail");
   await expect(page.getByText("Board packet for Friday", { exact: true })).toBeVisible();
-  await page.goto("/finances/transactions");
-  await expect(page.getByRole("row", { name: /Sq Unknown Popup Uncategorized/ })).toBeVisible();
+  await page.goto("/finances/transactions?view=table");
+  const unknownTransaction = page.getByRole("row", {
+    name: "Open Sq Unknown Popup transaction",
+    exact: true,
+  });
+  await expect(unknownTransaction).toBeVisible();
+  await expect(unknownTransaction.getByText("Uncategorized", { exact: true })).toBeVisible();
 });
 
 test("desktop navigation fills the viewport while long content scrolls independently", async ({
@@ -95,195 +119,216 @@ test("desktop navigation fills the viewport while long content scrolls independe
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
-  await page.emulateMedia({ reducedMotion: "no-preference" });
-  await expect(page.locator(".app-shell")).toHaveCSS("transition-duration", "0.14s");
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  expect(
-    await page
-      .locator(".app-shell")
-      .evaluate((element) => Number.parseFloat(getComputedStyle(element).transitionDuration)),
-  ).toBeLessThanOrEqual(0.00001);
-  await page.emulateMedia({ reducedMotion: "no-preference" });
+  const settingsPath = "/v1/workspaces/calendar/settings";
+  const originalResponse = await page.request.get(settingsPath);
+  expect(originalResponse.ok()).toBeTruthy();
+  const original = await originalResponse.json();
+  try {
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await expect(page.locator(".app-shell")).toHaveCSS("transition-duration", "0.14s");
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    expect(
+      await page
+        .locator(".app-shell")
+        .evaluate((element) => Number.parseFloat(getComputedStyle(element).transitionDuration)),
+    ).toBeLessThanOrEqual(0.00001);
+    await page.emulateMedia({ reducedMotion: "no-preference" });
 
-  for (const workspace of ["Tasks", "Mail", "Finances"]) {
-    await page
-      .getByRole("navigation", { name: "Workspace navigation" })
-      .getByRole("link", { name: workspace, exact: true })
-      .click();
-    const sidebar = page.getByRole("complementary", { name: `${workspace} Sidebar` });
-    await expect(sidebar).toHaveAttribute("data-slot", "sidebar");
-    await expect(sidebar.locator('[data-slot="sidebar-header"]')).toHaveText(workspace);
+    for (const workspace of ["Tasks", "Mail", "Finances"]) {
+      await page
+        .getByRole("navigation", { name: "Workspace navigation" })
+        .getByRole("link", { name: workspace, exact: true })
+        .click();
+      const sidebar = page.getByRole("complementary", { name: `${workspace} Sidebar` });
+      await expect(sidebar).toHaveAttribute("data-slot", "sidebar");
+      await expect(sidebar.locator('[data-slot="sidebar-header"]')).toHaveText(workspace);
+      await expect(
+        page
+          .getByRole("navigation", { name: "Top navigation" })
+          .getByText(workspace, { exact: true }),
+      ).toHaveCount(0);
+      await expect(page.locator(".workspace-rail .workspace-icon")).toHaveCount(0);
+      const handle = page.getByRole("separator", { name: "Collapse or show sidebar" });
+      const edge = await handle.boundingBox();
+      if (!edge) throw new Error("Missing sidebar drag handle");
+      await page.mouse.move(edge.x, edge.y + 100);
+      await page.mouse.down();
+      await page.mouse.move(edge.x - 220, edge.y + 100);
+      await page.mouse.up();
+      await expect(sidebar).toHaveAttribute("data-state", "collapsed");
+      const iconLabel =
+        workspace === "Mail" ? "Starred" : workspace === "Tasks" ? "All" : "Overview";
+      await sidebar.getByRole("link", { name: iconLabel, exact: true }).hover();
+      await expect(page.getByRole("tooltip", { name: iconLabel, exact: true })).toBeVisible();
+      await page.keyboard.press("Control+b");
+      await expect(sidebar).toHaveAttribute("data-state", "expanded");
+      await page.keyboard.press("Control+b");
+      await expect(sidebar).toHaveAttribute("data-state", "collapsed");
+      await handle.press("ArrowRight");
+      await expect(sidebar).toHaveAttribute("data-state", "expanded");
+      if (workspace === "Tasks") {
+        await sidebar.getByRole("link", { name: "All Lists", exact: true }).focus();
+        await page.keyboard.press("Control+b");
+        await expect(handle).toBeFocused();
+      }
+      await handle.press("End");
+      await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(256);
+      const colors = await page
+        .locator("body, .workspace-app-bar, .workspace-secondary-app-bar")
+        .evaluateAll((elements) =>
+          elements.map((element) => getComputedStyle(element).backgroundColor),
+        );
+      expect(new Set(colors).size).toBe(1);
+    }
+    const railHandle = page.getByRole("separator", { name: "Minimize workspace rail" });
+    await railHandle.press("Enter");
+    const compactPicker = page.getByRole("button", { name: "Switch workspace", exact: true });
+    await expect(compactPicker).toBeFocused();
+    await compactPicker.press("Enter");
+    await page.getByRole("menuitem", { name: "Show workspace rail" }).press("Enter");
     await expect(
       page
-        .getByRole("navigation", { name: "Top navigation" })
-        .getByText(workspace, { exact: true }),
-    ).toHaveCount(0);
-    await expect(page.locator(".workspace-rail .workspace-icon")).toHaveCount(0);
-    const handle = page.getByRole("separator", { name: "Collapse or show sidebar" });
-    const edge = await handle.boundingBox();
-    if (!edge) throw new Error("Missing sidebar drag handle");
-    await page.mouse.move(edge.x, edge.y + 100);
+        .getByRole("navigation", { name: "Workspace navigation" })
+        .getByRole("link", { name: "Finances", exact: true }),
+    ).toBeFocused();
+    const railEdge = await page
+      .getByRole("separator", { name: "Minimize workspace rail" })
+      .boundingBox();
+    if (!railEdge) throw new Error("Missing rail drag handle");
+    await page.mouse.move(railEdge.x, railEdge.y + 100);
     await page.mouse.down();
-    await page.mouse.move(edge.x - 220, edge.y + 100);
+    await page.mouse.move(railEdge.x - 60, railEdge.y + 100);
     await page.mouse.up();
-    await expect(sidebar).toHaveAttribute("data-state", "collapsed");
-    const iconLabel = workspace === "Mail" ? "Starred" : workspace === "Tasks" ? "All" : "Overview";
-    await sidebar.getByRole("link", { name: iconLabel, exact: true }).hover();
-    await expect(page.getByRole("tooltip", { name: iconLabel, exact: true })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Workspace navigation" })).toHaveCount(0);
+    const switcher = page.getByRole("button", { name: "Switch workspace", exact: true });
+    await expect(switcher).toBeVisible();
+    await switcher.click();
+    await page.getByRole("menuitem", { name: "Calendar", exact: true }).click();
+    await expect(page.locator(".workspace-app-bar")).toHaveCSS("padding-left", "48px");
+    const storedSidebar = await page.evaluate(() => localStorage.getItem("nohmi.sidebar-width.v1"));
     await page.keyboard.press("Control+b");
-    await expect(sidebar).toHaveAttribute("data-state", "expanded");
-    await page.keyboard.press("Control+b");
-    await expect(sidebar).toHaveAttribute("data-state", "collapsed");
-    await handle.press("ArrowRight");
-    await expect(sidebar).toHaveAttribute("data-state", "expanded");
-    if (workspace === "Tasks") {
-      await sidebar.getByRole("button", { name: "New List", exact: true }).focus();
-      await page.keyboard.press("Control+b");
-      await expect(handle).toBeFocused();
-    }
-    await handle.press("End");
-    await expect.poll(async () => (await sidebar.boundingBox())?.width).toBe(256);
-    const colors = await page
-      .locator("body, .workspace-app-bar, .workspace-secondary-app-bar")
-      .evaluateAll((elements) =>
-        elements.map((element) => getComputedStyle(element).backgroundColor),
-      );
-    expect(new Set(colors).size).toBe(1);
-  }
-  const railHandle = page.getByRole("separator", { name: "Minimize workspace rail" });
-  await railHandle.press("Enter");
-  const compactPicker = page.getByRole("button", { name: "Switch workspace", exact: true });
-  await expect(compactPicker).toBeFocused();
-  await compactPicker.press("Enter");
-  await page.getByRole("menuitem", { name: "Show workspace rail" }).press("Enter");
-  await expect(
-    page
-      .getByRole("navigation", { name: "Workspace navigation" })
-      .getByRole("link", { name: "Finances", exact: true }),
-  ).toBeFocused();
-  const railEdge = await page
-    .getByRole("separator", { name: "Minimize workspace rail" })
-    .boundingBox();
-  if (!railEdge) throw new Error("Missing rail drag handle");
-  await page.mouse.move(railEdge.x, railEdge.y + 100);
-  await page.mouse.down();
-  await page.mouse.move(railEdge.x - 60, railEdge.y + 100);
-  await page.mouse.up();
-  await expect(page.getByRole("navigation", { name: "Workspace navigation" })).toHaveCount(0);
-  const switcher = page.getByRole("button", { name: "Switch workspace", exact: true });
-  await expect(switcher).toBeVisible();
-  await switcher.click();
-  await page.getByRole("menuitem", { name: "Calendar", exact: true }).click();
-  await expect(page.locator(".workspace-app-bar")).toHaveCSS("padding-left", "48px");
-  const storedSidebar = await page.evaluate(() => localStorage.getItem("nohmi.sidebar-width.v1"));
-  await page.keyboard.press("Control+b");
-  expect(await page.evaluate(() => localStorage.getItem("nohmi.sidebar-width.v1"))).toBe(
-    storedSidebar,
-  );
-  for (const view of ["Day", "Week", "Month"]) {
-    await page.getByRole("radio", { name: view, exact: true }).click();
-    const axes = page.locator("[data-calendar-axis]:not(.is-today)");
-    await expect(axes.first()).toBeVisible();
-    const canvasColor = await page
-      .locator("body")
-      .evaluate((element) => getComputedStyle(element).backgroundColor);
-    await expect(axes.first()).toHaveCSS("background-color", canvasColor);
-    const baseCell = page
-      .locator(
-        view === "Month"
-          ? ".month-day:not(.is-today):not(.is-outside)"
-          : view === "Week"
-            ? ".week-day-timeline:nth-of-type(odd):not(.is-today)"
-            : ".calendar-timeline",
-      )
-      .first();
-    await expect(baseCell).toHaveCSS("background-color", canvasColor);
-    await expect
-      .poll(
-        async () =>
-          new Set(
-            await axes.evaluateAll((elements) =>
-              elements.map((element) => getComputedStyle(element).backgroundColor),
-            ),
-          ).size,
-      )
-      .toBe(1);
-    await expect(page.locator('[data-calendar-axis="left"]')).toHaveCount(view === "Month" ? 0 : 1);
-    if (view === "Day") {
-      await expect(page.locator(".calendar-day-view .week-all-day-day.is-today")).toHaveCount(0);
-    }
-    if (view === "Month") {
-      const todayColor = await page
-        .locator(".month-day.is-today")
-        .evaluate((element) => getComputedStyle(element).backgroundColor);
-      const otherColor = await page
-        .locator(".month-day:not(.is-today):not(.is-outside)")
-        .first()
-        .evaluate((element) => getComputedStyle(element).backgroundColor);
-      expect(todayColor).not.toBe(otherColor);
-    }
-    if (view === "Week") {
-      const columnColor = await page
-        .locator(".week-day-timeline.is-today")
-        .evaluate((element) => getComputedStyle(element).backgroundColor);
-      await expect(page.locator(".week-day-header.is-today")).toHaveCSS(
-        "background-color",
-        columnColor,
-      );
-
-      await expect(page.locator(".week-all-day-corner")).toHaveCSS("background-image", "none");
-    }
-  }
-
-  for (const size of [
-    { width: 1280, height: 1100 },
-    { width: 900, height: 700 },
-    { width: 390, height: 844 },
-  ]) {
-    await page.setViewportSize(size);
+    expect(await page.evaluate(() => localStorage.getItem("nohmi.sidebar-width.v1"))).toBe(
+      storedSidebar,
+    );
     for (const view of ["Day", "Week", "Month"]) {
-      await page.getByRole("radio", { name: view, exact: true }).click();
-      await expect(
-        page.getByRole("navigation", {
-          name: `Calendar ${view.toLowerCase()} navigation`,
-          exact: true,
-        }),
-      ).toBeVisible();
-      const bounds = await page.locator(".calendar-page").boundingBox();
-      expect(Math.abs((bounds?.y ?? 0) + (bounds?.height ?? 0) - size.height)).toBeLessThanOrEqual(
-        1,
+      await selectCalendarView(page, view);
+      const axes = page.locator("[data-calendar-axis]:not(.is-today)");
+      await expect(axes.first()).toBeVisible();
+      const canvasColor = await page
+        .locator("body")
+        .evaluate((element) => getComputedStyle(element).backgroundColor);
+      await expect(axes.first()).toHaveCSS("background-color", canvasColor);
+      const baseCell = page
+        .locator(
+          view === "Month"
+            ? ".month-day:not(.is-today):not(.is-outside)"
+            : view === "Week"
+              ? ".week-day-timeline:nth-of-type(odd):not(.is-today)"
+              : ".calendar-timeline",
+        )
+        .first();
+      await expect(baseCell).toHaveCSS("background-color", canvasColor);
+      await expect
+        .poll(
+          async () =>
+            new Set(
+              await axes.evaluateAll((elements) =>
+                elements.map((element) => getComputedStyle(element).backgroundColor),
+              ),
+            ).size,
+        )
+        .toBe(1);
+      await expect(page.locator('[data-calendar-axis="left"]')).toHaveCount(
+        view === "Month" ? 0 : 1,
       );
+      if (view === "Day") {
+        await expect(page.locator(".calendar-day-view .week-all-day-day.is-today")).toHaveCount(0);
+      }
       if (view === "Month") {
-        const grid = await page.locator(".month-grid").boundingBox();
-        expect((grid?.y ?? 0) + (grid?.height ?? 0)).toBeGreaterThanOrEqual(size.height - 1);
+        const todayColor = await page
+          .locator(".month-day.is-today")
+          .evaluate((element) => getComputedStyle(element).backgroundColor);
+        const otherColor = await page
+          .locator(".month-day:not(.is-today):not(.is-outside)")
+          .first()
+          .evaluate((element) => getComputedStyle(element).backgroundColor);
+        expect(todayColor).not.toBe(otherColor);
+      }
+      if (view === "Week") {
+        const columnColor = await page
+          .locator(".week-day-timeline.is-today")
+          .evaluate((element) => getComputedStyle(element).backgroundColor);
+        await expect(page.locator(".week-day-header.is-today")).toHaveCSS(
+          "background-color",
+          columnColor,
+        );
+
+        await expect(page.locator(".week-all-day-corner")).toHaveCSS("background-image", "none");
       }
     }
+
+    for (const size of [
+      { width: 1280, height: 1100 },
+      { width: 900, height: 700 },
+      { width: 390, height: 844 },
+    ]) {
+      await page.setViewportSize(size);
+      for (const view of ["Day", "Week", "Month"]) {
+        await selectCalendarView(page, view);
+        await expect(
+          page.getByRole("navigation", {
+            name: `Calendar ${view.toLowerCase()} navigation`,
+            exact: true,
+          }),
+        ).toBeVisible();
+        const bounds = await page.locator(".calendar-page").boundingBox();
+        expect(
+          Math.abs((bounds?.y ?? 0) + (bounds?.height ?? 0) - size.height),
+        ).toBeLessThanOrEqual(1);
+        if (view === "Month") {
+          const grid = await page.locator(".month-grid").boundingBox();
+          expect((grid?.y ?? 0) + (grid?.height ?? 0)).toBeGreaterThanOrEqual(size.height - 1);
+        }
+      }
+    }
+    await page.setViewportSize({ width: 1280, height: 480 });
+    await page.reload();
+    await expect(switcher).toBeVisible();
+    await switcher.click();
+    await page.getByRole("menuitem", { name: "Show workspace rail", exact: true }).click();
+    await expect(page.getByRole("navigation", { name: "Workspace navigation" })).toBeVisible();
+    await page
+      .getByRole("navigation", { name: "Workspace navigation" })
+      .getByRole("link", { name: "Settings" })
+      .click();
+    await expect(page.getByRole("heading", { name: "Profile", exact: true })).toBeVisible();
+    for (const selector of [".workspace-rail", ".sidebar"]) {
+      const bounds = await page.locator(selector).boundingBox();
+      expect(bounds?.y).toBe(0);
+      expect(bounds?.height).toBe(480);
+    }
+    const layout = await page.locator("main").evaluate((main) => ({
+      documentHeight: document.documentElement.scrollHeight,
+      viewport: innerHeight,
+      overflow: getComputedStyle(main).overflowY,
+      scrolls: main.scrollHeight > main.clientHeight,
+    }));
+    expect(layout.documentHeight).toBe(layout.viewport);
+    expect(layout.overflow).toBe("auto");
+    expect(layout.scrolls).toBe(true);
+  } finally {
+    const latestResponse = await page.request.get(settingsPath);
+    expect(latestResponse.ok()).toBeTruthy();
+    const latest = await latestResponse.json();
+    const restored = await page.request.patch(settingsPath, {
+      headers: { origin: new URL(page.url()).origin },
+      data: {
+        expectedRevision: latest.revision,
+        preferences: { calendarView: original.preferences.calendarView },
+      },
+    });
+    expect(restored.ok()).toBeTruthy();
   }
-  await page.setViewportSize({ width: 1280, height: 480 });
-  await page.reload();
-  await expect(switcher).toBeVisible();
-  await switcher.click();
-  await page.getByRole("menuitem", { name: "Show workspace rail", exact: true }).click();
-  await expect(page.getByRole("navigation", { name: "Workspace navigation" })).toBeVisible();
-  await page
-    .getByRole("navigation", { name: "Workspace navigation" })
-    .getByRole("link", { name: "Settings" })
-    .click();
-  await expect(page.getByRole("heading", { name: "Profile", exact: true })).toBeVisible();
-  for (const selector of [".workspace-rail", ".sidebar"]) {
-    const bounds = await page.locator(selector).boundingBox();
-    expect(bounds?.y).toBe(0);
-    expect(bounds?.height).toBe(480);
-  }
-  const layout = await page.locator("main").evaluate((main) => ({
-    documentHeight: document.documentElement.scrollHeight,
-    viewport: innerHeight,
-    overflow: getComputedStyle(main).overflowY,
-    scrolls: main.scrollHeight > main.clientHeight,
-  }));
-  expect(layout.documentHeight).toBe(layout.viewport);
-  expect(layout.overflow).toBe("auto");
-  expect(layout.scrolls).toBe(true);
 });
 
 test("Reviews and agent controls separate decisions from configuration", async ({ page }) => {
@@ -516,12 +561,28 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await openWorkspace("Calendar");
   if (mobile) {
     await expect(
-      page.getByRole("radio", { name: "Day", exact: true, checked: true }),
+      page.getByRole("button", { name: "Calendar view: day", exact: true }),
     ).toBeVisible();
-    await page.getByRole("radio", { name: "Week", exact: true }).click();
+    await selectCalendarView(page, "Week");
   }
-  await expect(page.getByRole("radio", { name: "Week", exact: true, checked: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Today", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Calendar view: week", exact: true }),
+  ).toBeVisible();
+  if (mobile) {
+    await page.getByRole("button", { name: "Calendar view: week", exact: true }).click();
+    await expect(page.getByRole("menuitem", { name: "Today", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+  } else {
+    await expect(page.getByRole("button", { name: "Today", exact: true })).toBeVisible();
+  }
+  const navigateCalendarPeriod = async (name: string) => {
+    if (mobile) {
+      await page.getByRole("button", { name: /^Calendar view:/ }).click();
+      await page.getByRole("menuitem", { name, exact: true }).click();
+    } else {
+      await page.getByRole("button", { name, exact: true }).click();
+    }
+  };
   await expect(page.getByText("12 AM", { exact: true })).toBeVisible();
   const floatingPillColors = await page.locator(".calendar-floating-nav__pill").evaluate((pill) => {
     const primarySwatch = document.createElement("span");
@@ -645,7 +706,8 @@ test("a person and an agent share one reminder and calendar surface", async ({
   expect(weekGridLayout.midnightLabelTop + 0.01).toBeGreaterThanOrEqual(
     weekGridLayout.navigationBottom,
   );
-  expect(weekGridLayout.timelineBorderLeft).toBe("0px");
+  // Functional day-grid separators stay visible independently of the tinted surfaces.
+  expect(weekGridLayout.timelineBorderLeft).toBe("1px");
   expect(new Set(weekGridLayout.otherHeaderBackgrounds).size).toBe(1);
   expect(new Set(weekGridLayout.otherTimelineBackgrounds).size).toBeGreaterThan(1);
   expect(weekGridLayout.todayHeaderBackground).not.toBe(weekGridLayout.otherHeaderBackgrounds[0]);
@@ -655,12 +717,11 @@ test("a person and an agent share one reminder and calendar surface", async ({
   expect(weekGridLayout.todayHeaderBackground).toBe(weekGridLayout.todayTimelineBackground);
   const calendarHeading = page.locator('[data-slot="workspace-app-bar-identity"] h2');
   const initialCalendarHeading = await calendarHeading.innerText();
-  await page.getByRole("button", { name: "Next week" }).click();
+  await navigateCalendarPeriod("Next week");
   await expect.poll(() => calendarHeading.innerText()).not.toBe(initialCalendarHeading);
-  await page.getByRole("button", { name: "Previous week" }).click();
+  await navigateCalendarPeriod("Previous week");
   await expect.poll(() => calendarHeading.innerText()).toBe(initialCalendarHeading);
-  await page.getByRole("radio", { name: "Month" }).click();
-  await expect(page.getByRole("radio", { name: "Month", checked: true })).toBeVisible();
+  await selectCalendarView(page, "Month");
   const monthDayBackgrounds = await page.locator(".month-grid").evaluate((grid) => {
     const today = grid.querySelector<HTMLElement>(".month-day.is-today");
     const other = grid.querySelector<HTMLElement>(".month-day:not(.is-today):not(.is-outside)");
@@ -676,12 +737,11 @@ test("a person and an agent share one reminder and calendar surface", async ({
     viewportWidth: window.innerWidth,
   }));
   expect(calendarLayout.documentWidth).toBeLessThanOrEqual(calendarLayout.viewportWidth + 1);
-  await page.getByRole("radio", { name: "Day", exact: true }).click();
-  await expect(page.getByRole("radio", { name: "Day", checked: true })).toBeVisible();
+  await selectCalendarView(page, "Day");
   await expect(
     page.getByRole("region", { name: "24-hour schedule with 15-minute marks" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Today", exact: true }).click();
+  await navigateCalendarPeriod("Today");
 
   await returnToApp();
   await openWorkspace("Settings");

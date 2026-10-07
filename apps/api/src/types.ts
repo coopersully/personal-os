@@ -9,6 +9,7 @@ import type { Database } from "@personal-os/database";
 import type {
   AccessScope,
   ActorType,
+  AgentAccessDomain,
   CalendarProvider,
   ConnectorFailureCategory,
   ConnectorSubscriptionKind,
@@ -52,7 +53,9 @@ export type RequestLog = {
   accountId?: string;
   ageMs?: number | undefined;
   calendarProviderReconciliation?: CalendarProviderReconciliationLog;
-  category?: ConnectorFailureCategory;
+  category?: ConnectorFailureCategory | "timeout" | "overflow" | "unexpected";
+  workspace?: AgentAccessDomain;
+  source?: string;
   code?: string | undefined;
   disposition?: ConnectorSyncRecovery;
   durationMs: number;
@@ -74,7 +77,11 @@ export type RequestLog = {
     | "finance_sync_health_initialized"
     | "finance_receipt_mail_search_failed"
     | "mail_rule_work_dispatch_failed"
+    | "finance_configuration_section_failed"
+    | "workspace_review_search_source_failed"
+    | "mail_attachment_download_failed"
     | "request";
+  section?: "profile" | "preferences" | "income" | "budget" | "accounts" | "guidance" | "execution";
   failureCount?: number;
   freshnessAgeMs?: number;
   initializationComplete?: boolean;

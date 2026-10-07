@@ -26,6 +26,55 @@ const fields = (
   }));
 
 export const settingsFields: SettingsField[] = [
+  ...fields("finances", [
+    ["Transaction view", "financeTransactionView", "table cards saved default"],
+    [
+      "Group cards by",
+      "financeTransactionGroup",
+      "date category merchant direction posting grouping",
+    ],
+  ]),
+  ...fields("tasks", [
+    [
+      "Sort by",
+      "taskSort",
+      "recommended relevant date reserved priority newest oldest title estimate",
+    ],
+    ["Group by", "taskGroup", "date list project grouping"],
+    ["List and project sorting", "taskContainerSort", "recent updated name target date"],
+    ["Estimates", "task-details-estimate", "row details"],
+    ["Tags", "task-details-tags", "row details"],
+    ["Notes", "task-details-notes", "row details"],
+  ]),
+  ...fields("mail", [
+    ["Conversation layout", "mail-conversation-layout", "split full width reading pane mobile"],
+    [
+      "Conversation density",
+      "mail-list-density",
+      "message list layout compact comfortable expanded",
+    ],
+    ["Conversation list width", "mail-list-width", "reader split layout percent"],
+  ]),
+  ...["calendar", "tasks", "mail", "finances"].flatMap((workspace) =>
+    fields(workspace, [
+      [
+        "Include completed and archived items in search",
+        `${workspace}-search-archived`,
+        "search scope history",
+      ],
+    ]),
+  ),
+  ...fields("calendar", [
+    ["Preferred view", "calendar-default-view", "default day week month automatic saved"],
+    ["Automatically follow today", "calendar-auto-follow", "target current time midnight opening"],
+    ["Snap back to Follow", "calendar-snap-follow", "target scroll snap enable disable"],
+    [
+      "Follow snap sensitivity",
+      "calendar-snap-sensitivity",
+      "precise balanced generous target scroll",
+    ],
+    ["Show weekends", "calendar-show-weekends", "saturday sunday work week"],
+  ]),
   ...["mail", "tasks"].flatMap((domain) =>
     fields(domain, [
       ["Objective", `${domain}-objective`, "preferences guidance"],
@@ -229,30 +278,33 @@ export const settingsFields: SettingsField[] = [
   ...fields("finances", [
     ["Employer", "Employer"],
     ["Role", "Role", "job"],
-    ["Employment type", "finance-employment-type"],
-    ["Effective date", "Effective date"],
+    ["Employment type", "finance-employmentType"],
     ["Gross annual income", "Gross annual income", "salary earnings"],
     ["Expected net paycheck", "Expected net paycheck", "take home pay"],
-    ["Pay frequency", "finance-pay-frequency"],
+    ["Pay frequency", "finance-payFrequency"],
     ["Next payday", "Next payday"],
-    ["Pay account", "finance-pay-account", "deposit bank"],
+    ["Pay account", "finance-payAccountId", "deposit bank"],
   ]),
-  ...fields(
-    "finances",
-    [
-      ["Jurisdiction", "profile-jurisdiction", "country state region"],
-      ["Income stability", "profile-income-stability"],
-      ["Household size", "profile-householdSize"],
-      ["Dependents", "profile-dependents"],
-      ["Expected monthly take-home", "profile-expectedMonthlyTakeHome", "net income earnings"],
-      ["Liquid reserves", "profile-liquidReserves", "savings emergency fund"],
-      ["Reserve target (months)", "profile-reserve-months", "emergency savings"],
-      ["Buffer target (USD)", "profile-buffer", "cash cushion"],
-      ["Debt priority", "profile-debt-priority", "repayment"],
-      ["Planning notes", "profile-notes"],
-    ],
-    { reveal: ["Edit financial profile", "Create financial profile"] },
-  ),
+  ...fields("finances", [
+    ["Jurisdiction", "finance-config-jurisdiction", "country state region"],
+    ["Income stability", "finance-config-incomeStability"],
+    ["Household size", "finance-config-householdSize"],
+    ["Dependents", "finance-config-dependents"],
+    ["Expected monthly take-home", "finance-config-expectedMonthlyTakeHome", "net income earnings"],
+    ["Liquid reserves", "finance-config-liquidReserves", "savings emergency fund"],
+    ["Reserve target (months)", "finance-config-reserveMonths", "emergency savings"],
+    ["Buffer target (USD)", "finance-config-bufferTarget", "cash cushion"],
+    ["Debt priority", "finance-config-debtPriority", "repayment"],
+    ["Planning notes", "finance-config-notes"],
+    ["Reliable monthly income", "finance-config-reliable-income", "budget resources"],
+    ["Next reliable payment", "finance-config-next-payment"],
+    ["Bills and minimum payments", "Bills and minimum payments", "expenses obligations"],
+    ["Other possible income", "Other possible income"],
+    ["One-time resources", "One-time resources"],
+    ["Goal contributions", "Goal contributions"],
+    ["Spending priorities", "Spending priorities"],
+    ["Debts", "Debts"],
+  ]),
   ...fields(
     "connections",
     [

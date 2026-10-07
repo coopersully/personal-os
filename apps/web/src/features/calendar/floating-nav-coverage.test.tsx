@@ -78,7 +78,7 @@ describe("Calendar floating navigation edge states", () => {
     mocks.searchWeatherLocations.mockReset();
   });
 
-  it("validates the title on submission and recovers a failed calendar search", async () => {
+  it("validates the title on submission and launches shared workspace search", async () => {
     const browser = userEvent.setup();
     mocks.listEvents.mockRejectedValueOnce(new Error("Unavailable")).mockResolvedValue([]);
     renderCalendar();
@@ -89,28 +89,17 @@ describe("Calendar floating navigation edge states", () => {
     expect(mocks.createEvent).not.toHaveBeenCalled();
     await browser.click(screen.getByRole("button", { name: "Close" }));
     await browser.click(await screen.findByRole("button", { name: "Search calendar" }));
-    expect(await screen.findByText("Couldn’t search the full calendar.")).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Try again" }));
-    await waitFor(() =>
-      expect(screen.queryByText("Couldn’t search the full calendar.")).not.toBeInTheDocument(),
-    );
+    expect(mocks.listEvents).not.toHaveBeenCalled();
   });
 
-  it("shows honest pending and empty search states", async () => {
+  it("delegates search to the shared workspace control", async () => {
+    const listener = vi.fn();
+    window.addEventListener("nohmi:workspace-search", listener);
     const browser = userEvent.setup();
-    let resolveEvents: (events: never[]) => void = () => undefined;
-    mocks.listEvents.mockReturnValue(
-      new Promise<never[]>((resolve) => {
-        resolveEvents = resolve;
-      }),
-    );
     renderCalendar();
-
     await browser.click(screen.getByRole("button", { name: "Search calendar" }));
-    await browser.type(screen.getByRole("textbox", { name: "Search events and dates" }), "zzz");
-    expect(await screen.findByText("Searching…")).toBeInTheDocument();
-    resolveEvents([]);
-    expect(await screen.findByText("No matching events or dates.")).toBeInTheDocument();
+    expect(listener).toHaveBeenCalledOnce();
+    window.removeEventListener("nohmi:workspace-search", listener);
   });
 
   it("submits optional links and keeps provider failures visible", async () => {

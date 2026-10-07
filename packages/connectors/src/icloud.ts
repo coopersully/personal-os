@@ -143,6 +143,104 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
   }
 
   return {
+    async downloadMailAttachment(credentials, messageId, attachment, operation) {
+      const attachmentError = (
+        message: string,
+        category: "not_found" | "invalid_response" = "not_found",
+      ) =>
+        new ConnectorError({
+          category,
+          code: `icloud_mail_attachment_${category}`,
+          disposition: "operator",
+          message,
+          status: category === "not_found" ? 404 : 502,
+        });
+      const match = /^(.*):([0-9]+):([0-9]+)$/.exec(messageId);
+      const part = attachment.providerPartId ?? attachment.id;
+      const suffix = part.startsWith(`${messageId}:`) ? part.slice(messageId.length + 1) : "";
+      const index = /^[0-9]+$/.test(suffix) ? Number(suffix) : -1;
+      if (!match || !Number.isSafeInteger(index) || index < 0)
+        throw attachmentError("Attachment locator is unavailable.");
+      const client = imapFactory(credentials);
+      let closed = false;
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        try {
+          client.close();
+        } catch {
+          /* Socket already closed. */
+        }
+      };
+      let rejectProvider!: (error: unknown) => void;
+      const providerFailure = new Promise<never>((_resolve, reject) => {
+        rejectProvider = reject;
+      });
+      void providerFailure.catch(() => undefined);
+      // Keep the listener through socket shutdown, which can emit a late error.
+      client.on("error", (error: Error) => {
+        rejectProvider(error);
+        close();
+      });
+      const read = <T>(pending: Promise<T>) => Promise.race([pending, providerFailure]);
+      const abort = () => {
+        rejectProvider(operation?.signal?.reason ?? new Error("Attachment download cancelled."));
+        close();
+      };
+      const timeout = setTimeout(() => {
+        rejectProvider(
+          new ConnectorError({
+            category: "transport",
+            code: "icloud_mail_attachment_timeout",
+            disposition: "retry",
+            message: "Attachment download timed out.",
+            status: 504,
+          }),
+        );
+        close();
+      }, 15_000);
+      operation?.signal?.addEventListener("abort", abort, { once: true });
+      try {
+        throwIfProviderOperationCancelled(operation);
+        await read(client.connect());
+        const lock = await read(client.getMailboxLock(match[1] ?? ""));
+        try {
+          if (!client.mailbox || String(client.mailbox.uidValidity) !== match[2])
+            throw attachmentError("The mailbox changed. Sync Mail and try again.");
+          let message: { source?: Buffer; size?: number } | undefined;
+          await read(
+            (async () => {
+              for await (const fetched of client.fetch(
+                match[3] ?? "",
+                { source: { maxLength: MAX_MAIL_SOURCE_BYTES + 1 }, size: true },
+                { uid: true },
+              )) {
+                message = fetched;
+              }
+            })(),
+          );
+          if (!message?.source) throw attachmentError("The message is no longer available.");
+          if (
+            (message.size ?? message.source.length) > MAX_MAIL_SOURCE_BYTES ||
+            message.source.length > MAX_MAIL_SOURCE_BYTES
+          )
+            throw attachmentError("The message exceeds the download limit.", "invalid_response");
+          const parsed = await read(simpleParser(message.source));
+          const file = parsed.attachments[index];
+          if (!file) throw attachmentError("The attachment is no longer available.");
+          return file.content;
+        } finally {
+          lock.release();
+        }
+      } catch (error) {
+        if (operation?.signal?.aborted) throw operation.signal.reason;
+        throw providerError("mail", error);
+      } finally {
+        clearTimeout(timeout);
+        operation?.signal?.removeEventListener("abort", abort);
+        close();
+      }
+    },
     async listenForMailChanges(credentials, onChange, operation) {
       throwIfProviderOperationCancelled(operation);
       const client = imapFactory(credentials);

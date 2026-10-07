@@ -76,13 +76,13 @@ function result<T>(data: T): FinanceToolResult<T> {
     schemaVersion: 1,
   };
 }
-function mount() {
+function mount(route = "/finances/plan") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[route]}>
         <FinancePlanPage />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -168,6 +168,8 @@ describe("complete finance plan", () => {
     await screen.findByRole("button", { name: "Approve version 3" });
     for (const row of [...plan.resources, ...plan.allocations])
       expect(screen.getByText(row.key)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /assumptions · Show details/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Why this budget?" }));
     for (const assumption of plan.assumptions)
       expect(screen.getByText(assumption)).toBeInTheDocument();
     expect(screen.getByText(plan.rationale)).toBeInTheDocument();
@@ -290,28 +292,14 @@ describe("complete finance plan", () => {
     );
   });
 
-  it("creates a complete balanced proposal from an empty account", async () => {
+  it("routes a missing budget to its prerequisite section without creating a proposal", async () => {
     api.getFinanceBudget.mockResolvedValue(result(null));
     mount();
-    await userEvent.click(await screen.findByRole("button", { name: "Create plan" }));
-    fireEvent.change(screen.getByLabelText("Resource 1 amount"), { target: { value: "1234.56" } });
-    fireEvent.change(screen.getByLabelText("Allocation 1 amount"), {
-      target: { value: "1234.56" },
-    });
-    fireEvent.change(screen.getByLabelText("Rationale"), {
-      target: { value: "Start with monthly spending." },
-    });
-    await userEvent.click(screen.getByRole("button", { name: "Save proposal" }));
-    await waitFor(() =>
-      expect(api.createFinanceBudget).toHaveBeenCalledWith(
-        expect.objectContaining({
-          resources: [{ key: "Income", kind: "income", amount: 1234.56 }],
-          allocations: [{ key: "Spending", kind: "spending", amount: 1234.56 }],
-          assumptions: [],
-          idempotencyKey: expect.any(String),
-        }),
-      ),
+    expect(await screen.findByRole("link", { name: "Set up your budget" })).toHaveAttribute(
+      "href",
+      "/finances/setup?section=budget&returnTo=%2Ffinances%2Fplan",
     );
+    expect(api.createFinanceBudget).not.toHaveBeenCalled();
   });
 
   it("shows a distinct active plan only from the status response, with no synthesized actual spending", async () => {
@@ -327,6 +315,7 @@ describe("complete finance plan", () => {
     const button = await screen.findByRole("button", { name: "View active version 2 · 2026-09" });
     expect(screen.queryByText(active.rationale)).not.toBeInTheDocument();
     await userEvent.click(button);
+    await userEvent.click(screen.getAllByRole("button", { name: "Why this budget?" }).at(-1)!);
     expect(screen.getByText(active.rationale)).toBeInTheDocument();
     expect(screen.queryByText(/Spent.*\$0/)).not.toBeInTheDocument();
   });
@@ -438,4 +427,163 @@ describe("complete finance plan", () => {
     expect(screen.getByRole("dialog", { name: "Organize budget categories" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Needs" })).toBeInTheDocument();
   });
+});
+
+it("opens the specific plan requested by workspace search", async () => {
+  mount(`/finances/plan?planId=${planId}`);
+  await waitFor(() => expect(api.getFinanceBudget).toHaveBeenCalledWith(planId));
+  await userEvent.click(await screen.findByRole("button", { name: "Why this budget?" }));
+  expect(
+    await screen.findByText("Build a cushion while paying down the card."),
+  ).toBeInTheDocument();
+});
+
+it("edits linked proposal records and removes optional rows without losing descriptions", async () => {
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Revise plan" }));
+  fireEvent.change(screen.getByLabelText("Effective month"), { target: { value: "2026-10" } });
+  fireEvent.change(screen.getByLabelText("Resource 1 description"), {
+    target: { value: "Updated pay" },
+  });
+  fireEvent.blur(screen.getByLabelText("Resource 1 amount"));
+  fireEvent.change(screen.getByLabelText("Allocation 1 category"), { target: { value: "" } });
+  fireEvent.change(screen.getByLabelText("Allocation 1 category label"), {
+    target: { value: "Household basics" },
+  });
+  fireEvent.change(screen.getByLabelText("Allocation 1 description"), {
+    target: { value: "Revised food and housing" },
+  });
+  fireEvent.change(screen.getByLabelText("Allocation 3 account"), { target: { value: accountId } });
+  fireEvent.click(screen.getByRole("button", { name: "Remove resource 4" }));
+  fireEvent.click(screen.getByRole("button", { name: "Remove allocation 5" }));
+  fireEvent.change(screen.getByLabelText("Allocation 1 amount"), { target: { value: "3400" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save proposal" }));
+  await waitFor(() => expect(api.reviseFinanceBudget).toHaveBeenCalled());
+  expect(api.reviseFinanceBudget).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      effectiveFrom: "2026-10",
+      resources: expect.arrayContaining([expect.objectContaining({ description: "Updated pay" })]),
+      allocations: expect.arrayContaining([
+        expect.objectContaining({
+          key: "Household",
+          legacyCategory: "Household basics",
+          description: "Revised food and housing",
+          amount: 3400,
+        }),
+      ]),
+    }),
+  );
+});
+it("closes an unsaved proposal with Escape", async () => {
+  mount();
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Revise plan" }));
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(api.reviseFinanceBudget).not.toHaveBeenCalled();
+});
+
+it.each([
+  "draft",
+  "retired",
+  "active",
+] as const)("explains a %s plan with no recorded amounts or assumptions", async (status) => {
+  api.getFinanceBudget.mockResolvedValue(
+    result({
+      ...plan,
+      status,
+      resources: [],
+      allocations: [],
+      assumptions: [],
+      expectedResources: 0,
+      allocatedTotal: 0,
+      balanceDelta: 0,
+      approvedAt: status === "active" ? now : null,
+    }),
+  );
+  api.listFinanceBudgetBuckets.mockResolvedValue({ taxonomy: { buckets: [] } });
+  mount();
+  expect(await screen.findByText(/No resources recorded/)).toBeVisible();
+  expect(screen.getByText(/Nothing allocated yet/)).toBeVisible();
+  expect(screen.getByText("No budget buckets yet.")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "0 assumptions · Show details" }));
+  expect(screen.getByText("No assumptions recorded.")).toBeVisible();
+  expect(screen.queryByRole("button", { name: /Approve version/ })).not.toBeInTheDocument();
+  if (status === "draft") expect(screen.getByText("Complete your financial profile")).toBeVisible();
+  if (status !== "active") expect(screen.getAllByText("Not provided")).toHaveLength(2);
+  else expect(screen.queryByText("Not provided")).not.toBeInTheDocument();
+});
+
+it("keeps missing category and goal identities distinguishable from unlinked allocations", async () => {
+  api.getFinanceCategories.mockResolvedValue([]);
+  api.listFinanceGoals.mockResolvedValue(result([]));
+  api.getFinanceBudget.mockResolvedValue(
+    result({
+      ...plan,
+      allocations: [
+        { key: "Unknown category", kind: "spending", categoryId, amount: 100 },
+        { key: "Unlinked category", kind: "spending", amount: 100 },
+        { key: "Legacy category", kind: "spending", legacyCategory: "Old essentials", amount: 100 },
+        { key: "Unknown goal", kind: "goal", goalId, amount: 100 },
+        { key: "Unlinked savings", kind: "savings", amount: 100 },
+      ],
+    }),
+  );
+  mount();
+  expect(await screen.findByText("Category unavailable")).toBeVisible();
+  expect(screen.getByText("No category linked")).toBeVisible();
+  expect(screen.getByText("Old essentials")).toBeVisible();
+  expect(screen.getByRole("link", { name: "Goal unavailable" })).toHaveAttribute(
+    "href",
+    "/finances/wealth",
+  );
+  expect(screen.getByText("No linked record")).toBeVisible();
+});
+
+it.each([
+  "Resource 2 name",
+  "Allocation 2 name",
+])("rejects duplicate %s until the name is corrected", async (label) => {
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Revise plan" }));
+  fireEvent.change(screen.getByLabelText(label), {
+    target: { value: label.startsWith("Resource") ? "Salary" : "Household" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save proposal" }));
+  expect(
+    await screen.findByText("Give each resource a unique name and each allocation a unique name."),
+  ).toBeVisible();
+  expect(api.reviseFinanceBudget).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText(label), { target: { value: "Distinct purpose" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save proposal" }));
+  await waitFor(() => expect(api.reviseFinanceBudget).toHaveBeenCalledOnce());
+});
+
+it("requires a linked debt account after a kind change and removes cleared optional details", async () => {
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Revise plan" }));
+  fireEvent.change(screen.getByLabelText("Allocation 1 kind"), { target: { value: "debt" } });
+  expect(screen.getByLabelText("Allocation 1 account")).toBeRequired();
+  expect(screen.getByLabelText("Allocation 1 account")).toHaveValue("");
+  fireEvent.change(screen.getByLabelText("Allocation 1 account"), { target: { value: accountId } });
+  fireEvent.change(screen.getByLabelText("Allocation 1 description"), { target: { value: "" } });
+  fireEvent.change(screen.getByLabelText("Resource 1 description"), { target: { value: "" } });
+  fireEvent.change(screen.getByLabelText("Allocation 2 goal"), { target: { value: "" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save proposal" }));
+  await waitFor(() => expect(api.reviseFinanceBudget).toHaveBeenCalledOnce());
+  const saved = api.reviseFinanceBudget.mock.calls[0]?.[0];
+  expect(saved.allocations[0]).toEqual({ key: "Household", kind: "debt", amount: 3000, accountId });
+  expect(saved.allocations[1].goalId).toBeUndefined();
+  expect(saved.resources[0].description).toBeUndefined();
+});
+it("keeps approval visible when the following budget refresh fails", async () => {
+  const client = mount(`/finances/plan?planId=${plan.planId}`);
+  await screen.findByRole("button", { name: "Approve version 3" });
+  api.getFinanceBudget.mockRejectedValue(new Error("Refresh unavailable"));
+  await userEvent.click(screen.getByRole("button", { name: "Approve version 3" }));
+  await waitFor(() =>
+    expect(client.getQueryData(["finance-plan", plan.planId])).toMatchObject({
+      data: { status: "active" },
+    }),
+  );
 });

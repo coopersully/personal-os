@@ -1,22 +1,22 @@
 import type { TaskList, TaskProject, TaskSystemView } from "@personal-os/domain";
 import { type ReactNode, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { ActionButton as Button } from "@/components/action-button";
 import {
   ArchiveIcon,
   CalendarIcon,
   CircleCheckIcon,
   ClockIcon,
   EditIcon,
+  HistoryIcon,
   type Icon,
   InboxIcon,
-  ListChecksIcon,
   ListTodoIcon,
   MoreHorizontalIcon,
-  PlusIcon,
+  ProjectIcon,
   TrashIcon,
   XIcon,
 } from "@/components/icons";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,7 +27,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   SidebarGroup,
-  SidebarGroupAction,
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarMenu,
@@ -38,6 +37,7 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
+import { useWorkspacePreferences } from "../workspace-search/preferences";
 import { TaskListDialog } from "./task-list-dialog";
 import { getTaskListIcon } from "./task-list-icons";
 import { TaskProjectDialog } from "./task-project-dialog";
@@ -66,7 +66,7 @@ export function taskPath(
   selection: {
     list?: string | null;
     project?: string | null;
-    view?: TaskSystemView | "all" | "history";
+    view?: TaskSystemView | "all" | "history" | "lists" | "projects";
   },
   preserveTask = false,
 ) {
@@ -88,6 +88,14 @@ export function taskPath(
     "group",
     "details",
   ]) {
+    if (
+      (current.get("view") === "lists" ||
+        current.get("view") === "projects" ||
+        selection.view === "lists" ||
+        selection.view === "projects") &&
+      key !== "q"
+    )
+      continue;
     const value = current.get(key);
     if (value) params.set(key, value);
   }
@@ -111,62 +119,81 @@ export function TaskContainerActions({
   projects: TaskProject[];
   sidebar?: boolean;
 }) {
-  const [dialog, setDialog] = useState<"edit" | "archive" | "create-project" | null>(null);
+  const [dialog, setDialog] = useState<"edit" | "archive" | null>(null);
   const label = `${project?.name ?? list.name} options`;
   const close = () => setDialog(null);
+  if (!project && list.kind === "inbox") return null;
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          {sidebar ? (
-            <SidebarMenuAction
-              aria-label={label}
-              title={label}
-              className="[@media(hover:none)]:opacity-100"
-              showOnHover
-            >
-              <MoreHorizontalIcon aria-hidden="true" />
-            </SidebarMenuAction>
-          ) : (
-            <Button aria-label={label} title={label} size="icon-sm" variant="ghost">
-              <MoreHorizontalIcon aria-hidden="true" />
-            </Button>
-          )}
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuGroup>
-            {!project ? (
-              <DropdownMenuItem onSelect={() => setDialog("create-project")}>
-                <PlusIcon aria-hidden="true" />
-                New project
-              </DropdownMenuItem>
-            ) : null}
-            {project || list.kind !== "inbox" ? (
-              <DropdownMenuItem onSelect={() => setDialog("edit")}>
-                <EditIcon aria-hidden="true" />
-                {project ? "Manage project" : "Edit list"}
-              </DropdownMenuItem>
-            ) : null}
-          </DropdownMenuGroup>
-          {!project && list.kind !== "inbox" ? (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuGroup>
-                <DropdownMenuItem onSelect={() => setDialog("archive")}>
-                  <ArchiveIcon aria-hidden="true" />
-                  Archive list…
+      {project ? (
+        sidebar ? (
+          <SidebarMenuAction
+            aria-label={`Edit ${project.name}`}
+            title={`Edit ${project.name}`}
+            onClick={() => setDialog("edit")}
+            showOnHover
+            className="[@media(hover:none)]:opacity-100"
+          >
+            <EditIcon aria-hidden="true" />
+          </SidebarMenuAction>
+        ) : (
+          <Button
+            aria-label={`Edit ${project.name}`}
+            title={`Edit ${project.name}`}
+            size="icon-sm"
+            variant="ghost"
+            onClick={() => setDialog("edit")}
+          >
+            <EditIcon aria-hidden="true" />
+          </Button>
+        )
+      ) : (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            {sidebar ? (
+              <SidebarMenuAction
+                aria-label={label}
+                title={label}
+                className="[@media(hover:none)]:opacity-100"
+                showOnHover
+              >
+                <MoreHorizontalIcon aria-hidden="true" />
+              </SidebarMenuAction>
+            ) : (
+              <Button aria-label={label} title={label} size="icon-sm" variant="ghost">
+                <MoreHorizontalIcon aria-hidden="true" />
+              </Button>
+            )}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuGroup>
+              {project || list.kind !== "inbox" ? (
+                <DropdownMenuItem onSelect={() => setDialog("edit")}>
+                  <EditIcon aria-hidden="true" />
+                  {project ? "Manage project" : "Edit list"}
                 </DropdownMenuItem>
-              </DropdownMenuGroup>
-            </>
-          ) : null}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {dialog === "create-project" || (dialog === "edit" && project) ? (
+              ) : null}
+            </DropdownMenuGroup>
+            {!project && list.kind !== "inbox" ? (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onSelect={() => setDialog("archive")}>
+                    <ArchiveIcon aria-hidden="true" />
+                    Archive list
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+              </>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+      {dialog === "edit" && project ? (
         <TaskProjectDialog
           close={close}
           listId={list.id}
           lists={lists}
-          project={dialog === "edit" ? project : undefined}
+          project={project}
           projects={projects}
         />
       ) : null}
@@ -241,7 +268,7 @@ function TaskListBranch({
                   onClick={onNavigate}
                   to={taskPath(params, { list: list.id, project: project.id })}
                 >
-                  <ListChecksIcon
+                  <ProjectIcon
                     aria-hidden="true"
                     weight={selectedProjectId === project.id ? "Filled" : "Outline"}
                   />
@@ -283,7 +310,7 @@ export function TaskNavigation({
     ? rawView === "completed"
       ? "history"
       : "all"
-    : rawView === "all" || rawView === "history"
+    : rawView === "all" || rawView === "history" || rawView === "lists" || rawView === "projects"
       ? rawView
       : rawView === "scheduled"
         ? "all"
@@ -302,36 +329,44 @@ export function TaskNavigation({
         params.get("list") ??
         lists.find((list) => list.kind === "inbox")?.id ??
         null);
-  const [createList, setCreateList] = useState(false);
+  const pins = useWorkspacePreferences("tasks");
   // A destination changes scope, not the user's presentation preferences.
   const taskParams = new URLSearchParams();
   for (const key of ["q", "sort", "group", "details"]) {
     const value = params.get(key);
     if (value) taskParams.set(key, value);
   }
-  const renderView = (value: TaskSystemView | "all" | "history") => {
+  const renderView = (
+    value: TaskSystemView | "all" | "history" | "lists" | "projects" | "archive",
+  ) => {
     const view =
-      value === "all"
-        ? { icon: ListTodoIcon, label: "All" }
-        : value === "history"
-          ? { icon: ArchiveIcon, label: "History" }
-          : taskViews.find((candidate) => candidate.value === value);
+      value === "archive"
+        ? { icon: ArchiveIcon, label: "Archive" }
+        : value === "lists"
+          ? { icon: ListTodoIcon, label: "All Lists" }
+          : value === "projects"
+            ? { icon: ProjectIcon, label: "Projects" }
+            : value === "all"
+              ? { icon: ListTodoIcon, label: "All" }
+              : value === "history"
+                ? { icon: HistoryIcon, label: "History" }
+                : taskViews.find((candidate) => candidate.value === value);
     if (!view) return null;
     const ViewIcon = view.icon;
     return (
       <SidebarMenuItem key={value}>
         <SidebarMenuButton
           asChild
-          isActive={selectedView === value || (archive && value === "history")}
+          isActive={selectedView === value || (archive && value === "archive")}
           className="max-md:h-10"
           tooltip={view.label}
         >
           <Link
             aria-current={
-              selectedView === value || (archive && value === "history") ? "page" : undefined
+              selectedView === value || (archive && value === "archive") ? "page" : undefined
             }
             onClick={onNavigate}
-            to={taskPath(taskParams, { view: value })}
+            to={value === "archive" ? "/tasks?archive=all" : taskPath(taskParams, { view: value })}
           >
             <ViewIcon aria-hidden="true" weight={selectedView === value ? "Filled" : "Outline"} />
             <span>{view.label}</span>
@@ -345,7 +380,7 @@ export function TaskNavigation({
       key={list.id}
       list={list}
       lists={lists}
-      projects={projects}
+      projects={[]}
       params={taskParams}
       selectedListId={selectedListId}
       selectedProjectId={selectedProject?.id ?? null}
@@ -363,25 +398,78 @@ export function TaskNavigation({
               {renderView("today")}
               {renderView("upcoming")}
               {renderView("all")}
+              {renderView("lists")}
+              {renderView("projects")}
             </SidebarMenu>
           </nav>
         </SidebarGroupContent>
       </SidebarGroup>
       <SidebarGroup>
-        <SidebarGroupLabel>My lists</SidebarGroupLabel>
-        <SidebarGroupAction
-          aria-label="New List"
-          title="New list"
-          onClick={() => setCreateList(true)}
-        >
-          <PlusIcon aria-hidden="true" />
-        </SidebarGroupAction>
+        <SidebarGroupLabel>Pinned</SidebarGroupLabel>
         <SidebarGroupContent>
           {status}
-          <nav aria-label="Task Lists">
+          <nav aria-label="Pinned lists and projects">
             <SidebarMenu>
-              {lists.filter((list) => list.kind !== "inbox").map(renderList)}
+              {lists
+                .filter((list) => pins.data?.preferences.pinnedListIds?.includes(list.id))
+                .map((list) => (
+                  <TaskListBranch
+                    key={list.id}
+                    list={list}
+                    lists={lists}
+                    projects={[]}
+                    params={taskParams}
+                    selectedListId={selectedListId}
+                    selectedProjectId={selectedProject?.id ?? null}
+                    onNavigate={onNavigate}
+                  />
+                ))}
+              {projects
+                .filter((project) => pins.data?.preferences.pinnedProjectIds?.includes(project.id))
+                .map((project) => (
+                  <SidebarMenuItem key={project.id}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={selectedProject?.id === project.id}
+                      tooltip={project.name}
+                    >
+                      <Link
+                        to={taskPath(taskParams, { list: project.listId, project: project.id })}
+                        onClick={onNavigate}
+                        aria-current={selectedProject?.id === project.id ? "page" : undefined}
+                      >
+                        <ProjectIcon aria-hidden="true" />
+                        <span>{project.name}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                    {lists
+                      .filter((list) => list.id === project.listId)
+                      .map((list) => (
+                        <TaskContainerActions
+                          key={list.id}
+                          list={list}
+                          project={project}
+                          lists={lists}
+                          projects={projects}
+                          sidebar
+                        />
+                      ))}
+                  </SidebarMenuItem>
+                ))}
             </SidebarMenu>
+            {pins.isError ? (
+              <p className="px-2 text-xs text-muted-foreground">Couldn’t load pins.</p>
+            ) : pins.isSuccess &&
+              !(
+                lists.some((list) => pins.data.preferences.pinnedListIds?.includes(list.id)) ||
+                projects.some((project) =>
+                  pins.data.preferences.pinnedProjectIds?.includes(project.id),
+                )
+              ) ? (
+              <p className="px-2 text-xs text-muted-foreground">
+                Pin items from Lists or Projects.
+              </p>
+            ) : null}
           </nav>
         </SidebarGroupContent>
       </SidebarGroup>
@@ -392,13 +480,11 @@ export function TaskNavigation({
             <SidebarMenu>
               {renderView("history")}
               {renderView("trash")}
+              {renderView("archive")}
             </SidebarMenu>
           </nav>
         </SidebarGroupContent>
       </SidebarGroup>
-      {createList ? (
-        <TaskListDialog close={() => setCreateList(false)} list={undefined} lists={lists} />
-      ) : null}
     </>
   );
 }

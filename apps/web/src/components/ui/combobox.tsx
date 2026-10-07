@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils"
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group"
 
 const Combobox = ComboboxPrimitive.Root
+const ComboboxGroup = ComboboxPrimitive.Group
+const ComboboxGroupLabel = ComboboxPrimitive.GroupLabel
 
 function ComboboxTrigger({ className, children, ...props }: ComboboxPrimitive.Trigger.Props) {
   return (
@@ -150,6 +152,8 @@ function ComboboxEmpty({ className, ...props }: ComboboxPrimitive.Empty.Props) {
 
 export {
   Combobox,
+  ComboboxGroup,
+  ComboboxGroupLabel,
   ComboboxClear,
   ComboboxContent,
   ComboboxEmpty,

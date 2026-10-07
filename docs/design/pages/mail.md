@@ -65,9 +65,11 @@ The API owns the four display states:
 - **Needs your input:** material ambiguity is preserved as an open bounded question.
 - **Blocked:** stale, partial, unavailable, failed, or indeterminate evidence prevents settlement.
 
-`/mail/review` renders that state verbatim with freshness cutoff, objective/profile version,
+`/mail/review` redirects to the unified Mail review dialog. Mail run blockers embed the
+workspace stewardship controls, including recovery when there is no open question, with freshness cutoff, objective/profile version,
 ledger counts, health dimensions, questions, effects, active maintenance, and the latest immutable
-review. “Maintain Mail” makes one request and invalidates first-party queries; the browser does not
+review. “Maintain Mail” makes one request and refreshes status and the shared review queue after
+a confirmed mutation; the browser does not
 poll, sequence steps, retry effects, or decide completion.
 
 ## Authority and learning
@@ -121,15 +123,20 @@ initiate delivery.
   Search remains available while reading and changing it returns to the conversation list. The
   account filter occupies the far edge of the same bar.
 - On desktop, the Mail sidebar and the conversation-list/reader boundary are independently
-  resizable by pointer or keyboard. Both choices persist on the current device. The navigation rail
+  resizable by pointer or keyboard. Reader width persists in account-owned Mail settings; sidebar
+  width remains device-local. The navigation rail
   also collapses into a standard icon-only rail with accessible tooltips; double-clicking its
   boundary restores the default width.
+- Mail layout preferences are now account-owned workspace settings. Earlier browser-only density
+  and pane-width values are not imported automatically because they contain no account identity
+  and survive logout. Untouched account settings start from defaults; subsequent edits persist
+  across devices without assigning unowned browser values to the current account.
 - Conversation count, list density, and reader actions share one full-workspace
   `WorkspaceSecondaryAppBar`: Archive retains its label; Snooze, Star, and read state are icon
   controls; Delete stays in the More menu. List density is a stable icon action with a standard
   radio menu rather than a labelled control that competes with message actions. The bar uses the
   shared neutral surface rather than a Mail-specific color.
-- The conversation list defaults to Comfortable and offers Compact and Expanded device-local
+- The conversation list defaults to Comfortable and offers Compact and Expanded account-owned
   layouts. Comfortable and Expanded show a sender avatar before the sender name; Compact minimizes
   vertical detail without removing the sender, subject, or received time.
 - At narrow widths, Mail presents one focused surface at a time. Selecting a
@@ -158,3 +165,36 @@ initiate delivery.
 Floating action sizing, colors, and labels use the shared
 [floating workspace actions contract](../system.md#floating-workspace-actions).
 Workspace placement and opened-workflow behavior remain owned by this page.
+
+
+## Received attachments
+
+Message attachment tiles expose filename, MIME type, size, and a labelled Download action.
+Raster images (PNG, JPEG, GIF, WebP) and plain text, CSV, and calendar files also expose
+Preview using the shared responsive dialog/drawer. Text is rendered literally using its declared
+charset (UTF-8 when omitted); unsupported charset labels fall back to download. HTML, SVG,
+PDFs, documents, archives, and other file types are download-only. Show loading per file,
+disable duplicate requests, and keep an inline error with Retry when retrieval fails.
+Release preview object URLs when closed and never persist attachment bodies in browser storage.
+Downloads are user-initiated; never auto-fetch every attachment while reading a thread.
+
+The Mail API verifies message ownership and attachment membership before asking the connected
+account's provider for bytes. Gmail uses the attachment endpoint or inline MIME-part data;
+iCloud verifies mailbox UIDVALIDITY, retrieves a bounded source message by UID, and selects the
+stored attachment index. This read uses existing Gmail/IMAP authority and network paths, with
+no background handoff or provider mutation. The interactive gateway deadline is 20 seconds;
+iCloud rejects the request and closes its socket after 15 seconds or caller cancellation. Downloads cap decoded files at 10 MiB; Gmail JSON is
+bounded to 15 MiB and iCloud raw source to 10 MiB before MIME parsing. Responses are private
+`no-store` JSON; file bytes are not logged. Provider failures expose retry/connection recovery,
+not credentials or raw provider errors. Missing files return 404, provider throttling returns 429,
+and reconnection requirements return 403 with a Connections recovery message. Redacted boundary
+events identify the account and failure category. Admission allows two active downloads per
+process, one per user, and 30 per user per minute before provider I/O. No download success is
+claimed before retrieval succeeds.
+
+Local adapter, authorization, and UI tests do not prove live-provider access. Revoked scopes,
+moved/deleted messages, expired credentials, provider throttling, and disconnected accounts can
+still prevent retrieval. Demo fixtures contain attachment metadata, not live provider bytes;
+exercise downloads with a connected account or explicit mocked file bytes in browser tests.
+
+Provider reference: [Gmail attachment retrieval](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages.attachments/get).

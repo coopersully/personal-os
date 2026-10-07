@@ -116,7 +116,10 @@
   --success: var(--status-success);
   --radius: 0.75rem;
   --calendar-axis-background: var(--background);
-  --calendar-tile-background: color-mix(in srgb, var(--surface-strong) 14%, var(--background));
+  --calendar-tile-background: color-mix(in srgb, var(--foreground) 3%, var(--background));
+  --calendar-grid-rule: color-mix(in srgb, var(--foreground) 10%, var(--background));
+  --scrollbar-thumb: color-mix(in srgb, var(--foreground) 24%, var(--background));
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--foreground) 38%, var(--background));
   --calendar-today-background: color-mix(in srgb, var(--timeline-now) 14%, var(--background));
   --calendar-time-gutter-width: 56px;
   --motion-duration-fast: 140ms;
@@ -717,7 +720,6 @@ p {
   width: auto;
 }
 .calendar-workspace-switcher .sidebar__workspace-trigger {
-  height: 1.75rem;
   width: auto;
 }
 .desktop,
@@ -1052,8 +1054,34 @@ p {
   justify-content: center;
   width: 32px;
 }
+/* The frame owns viewport geometry; domains own scrolling inside panes. */
 .workspace {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 100dvh;
+}
+.workspace[data-content-mode="panes"] {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+.workspace-chrome {
+  flex: 0 0 auto;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--background);
+}
+.workspace > .content {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+}
+.workspace[data-content-mode="panes"] > .content {
+  flex-basis: 0;
+  overflow: hidden;
 }
 .workspace-app-bar {
   align-items: center;
@@ -1061,10 +1089,8 @@ p {
   display: grid;
   gap: 0.5rem;
   grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
-  height: var(--chrome-height);
+  min-height: var(--chrome-height);
   padding: 0 var(--workspace-inline-padding);
-  position: sticky;
-  top: 0;
   z-index: 20;
 }
 .workspace-app-bar:has(> .workspace-app-bar__identity:empty) {
@@ -1074,6 +1100,7 @@ p {
   display: none;
 }
 .workspace-app-bar__identity {
+  gap: 0.5rem;
   align-items: center;
   display: flex;
   height: 100%;
@@ -1137,6 +1164,7 @@ p {
   min-width: 0;
   overflow: hidden;
 }
+.workspace-primary-actions { display: flex; align-items: center; gap: 0.5rem; }
 .workspace-app-bar__actions {
   align-items: center;
   align-self: stretch;
@@ -1155,9 +1183,7 @@ p {
   width: 100%;
 }
 .workspace-secondary-slot {
-  position: sticky;
-  top: var(--chrome-height);
-  z-index: 19;
+  min-width: 0;
 }
 .workspace-secondary-slot:empty {
   display: none;
@@ -1174,21 +1200,6 @@ p {
 .workspace-secondary-slot .workspace-secondary-app-bar__actions {
   flex: 0 0 auto;
   padding: 0;
-}
-.workspace:has(> .workspace-secondary-slot:not(:empty)) {
-  display: flex;
-  flex-direction: column;
-  min-height: 100dvh;
-}
-.workspace:has(> .workspace-secondary-slot:not(:empty)) > .content {
-  flex: 1;
-  width: 100%;
-}
-.workspace:has(> .workspace-secondary-slot:not(:empty)) :is(.workspace-stage, .workspace-route) {
-  min-height: 0;
-}
-.offline-banner ~ .workspace-secondary-slot {
-  top: calc(var(--chrome-height) + 29px);
 }
 .workspace-secondary-app-bar__leading,
 .workspace-secondary-app-bar__content,
@@ -1499,9 +1510,6 @@ p {
   top: 0;
   z-index: 30;
 }
-.offline-banner + .workspace-app-bar {
-  top: 29px;
-}
 .content {
   margin: 0 auto;
   max-width: 1440px;
@@ -1520,14 +1528,13 @@ p {
 }
 .content--calendar,
 .content--mail {
-  height: calc(100dvh - var(--chrome-height));
   margin: 0;
   max-width: none;
   padding: 0;
 }
 .workspace-stage,
 .workspace-route {
-  min-height: calc(100dvh - var(--chrome-height) - 1rem);
+  min-height: 0;
 }
 .workspace-stage {
   position: relative;
@@ -1619,7 +1626,7 @@ p {
 .workspace-skeleton__calendar {
   background: var(--surface-raised);
   height: 100%;
-  min-height: calc(100dvh - var(--chrome-height));
+  min-height: 0;
   padding-top: 3rem;
 }
 .workspace-skeleton__calendar-days {
@@ -1647,7 +1654,7 @@ p {
 .workspace-skeleton__mail {
   display: grid;
   grid-template-columns: minmax(18rem, 0.78fr) minmax(24rem, 1.22fr);
-  min-height: calc(100dvh - var(--chrome-height) - 1rem);
+  min-height: 0;
 }
 .workspace-skeleton__mail-list,
 .workspace-skeleton__mail-reader {
@@ -1690,29 +1697,23 @@ p {
 .wide-page--compact {
   padding-inline: clamp(16px, 2.5vw, 32px);
 }
-.app-scrollbar {
-  scrollbar-color: color-mix(in oklab, var(--foreground) 22%, transparent) transparent;
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-}
-.app-scrollbar::-webkit-scrollbar {
-  width: 8px;
-}
-.app-scrollbar::-webkit-scrollbar-thumb {
-  background: color-mix(in oklab, var(--foreground) 22%, transparent);
-  border: 2px solid transparent;
-  border-radius: 999px;
-  background-clip: padding-box;
-}
-.app-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
+/* Native scroll owners (including Calendar follow/drag regions) share ScrollArea's
+   quiet track and rounded thumb without changing their scrolling element. */
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+.app-scrollbar { scrollbar-gutter: stable; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border: 2px solid transparent; border-radius: 999px; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background-color: var(--scrollbar-thumb-hover); }
+*::-webkit-scrollbar-track, *::-webkit-scrollbar-corner { background: transparent; }
+*::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+[data-slot="scroll-area-thumb"] { background: var(--scrollbar-thumb); }
+[data-slot="scroll-area-thumb"]:hover { background: var(--scrollbar-thumb-hover); }
 .today-layout {
   align-items: stretch;
   display: grid;
   gap: clamp(28px, 3.25vw, 52px);
   grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.9fr);
-  min-height: calc(100dvh - var(--chrome-height) - 1rem);
+  min-height: 0;
 }
 .day-column {
   display: flex;
@@ -2052,7 +2053,7 @@ p {
   align-self: stretch;
   display: flex;
   flex-direction: column;
-  min-height: calc(100dvh - var(--chrome-height) - 1rem);
+  min-height: 0;
   padding: 0 0 0 24px;
 }
 .today-commitments {
@@ -2591,19 +2592,27 @@ p {
   height: 100%;
   min-height: 0;
 }
-.calendar-floating-nav {
+.floating-action-region {
   bottom: max(1rem, env(safe-area-inset-bottom));
   display: flex;
-  justify-content: center;
-  left: 50%;
   pointer-events: none;
   position: fixed;
+  width: min(38rem, calc(100vw - 2rem));
+  z-index: 16;
+}
+.floating-action-region[data-align="center"] {
+  justify-content: center;
+  left: 50%;
   transform: translateX(-50%);
+}
+.floating-action-region[data-align="end"] {
+  justify-content: flex-end;
+  right: max(1rem, env(safe-area-inset-right));
+}
+.calendar-floating-nav {
   transition:
     bottom var(--motion-duration-spatial) var(--motion-ease-spatial),
     transform var(--motion-duration-spatial) var(--motion-ease-spatial);
-  width: min(38rem, calc(100vw - 2rem));
-  z-index: 16;
 }
 .calendar-floating-nav[data-mode="search"] {
   bottom: 50%;
@@ -3112,9 +3121,9 @@ p {
   font-weight: 650;
 }
 .calendar-timeline {
-  --calendar-hour-rule: color-mix(in srgb, var(--line) 38%, transparent);
-  --calendar-half-hour-rule: color-mix(in srgb, var(--line) 20%, transparent);
-  --calendar-quarter-hour-rule: color-mix(in srgb, var(--line) 10%, transparent);
+  --calendar-hour-rule: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --calendar-half-hour-rule: color-mix(in srgb, var(--foreground) 6%, transparent);
+  --calendar-quarter-hour-rule: color-mix(in srgb, var(--foreground) 3%, transparent);
 
   background-color: var(--background);
   /* theme-contract-allow-start: functional-calendar-grid */
@@ -3125,11 +3134,11 @@ p {
   background-position: 0 0, 0 24px, 0 12px;
   background-size: 100% 48px, 5px 48px, 9px 24px;
   /* theme-contract-allow-end: functional-calendar-grid */
-  border-left: 1px solid var(--line);
+  border-left: 1px solid var(--calendar-grid-rule);
   position: relative;
 }
 .week-day-timeline {
-  border-left: 0;
+  border-left: 1px solid var(--calendar-grid-rule);
 }
 .calendar-create-selection {
   background: color-mix(in srgb, var(--primary) 24%, var(--surface-raised));
@@ -3659,7 +3668,7 @@ p {
   text-transform: uppercase;
 }
 .month-grid {
-  background: var(--line);
+  background: var(--calendar-grid-rule);
   border: 0;
   border-radius: 0;
   display: grid;
@@ -3879,10 +3888,11 @@ p {
   min-width: 0;
 }
 .workspace-app-bar[data-workspace="mail"] .workspace-app-bar__context {
-  justify-content: flex-start;
+  justify-content: flex-end;
 }
 .mail-app-bar__controls {
-  width: min(34rem, 100%);
+  justify-content: flex-end;
+  width: auto;
 }
 .mail-app-bar__controls .mail-topbar__search {
   flex: 1;
@@ -3977,14 +3987,15 @@ p {
   overflow-y: auto;
 }
 .mail-thread-list {
-  background: var(--paper);
+  container: mail-inbox / inline-size;
+  background: var(--background);
   height: 100%;
 }
 .mail-thread-list > [data-slot="alert"] {
   border-radius: 0;
 }
 .mail-thread-list__toolbar {
-  background: var(--paper);
+  background: var(--background);
   display: grid;
   gap: 8px;
   padding: 10px 12px 0;
@@ -4015,9 +4026,11 @@ p {
   text-align: left;
   width: 100%;
 }
-.mail-thread-row:hover,
+.mail-thread-row:hover {
+  background: var(--card);
+}
 .mail-thread-row.is-active {
-  background: var(--selection);
+  background: var(--card);
 }
 .mail-thread-row__sender,
 .mail-thread-row time {
@@ -4091,6 +4104,68 @@ p {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
+.mail-thread-row__summary {
+  display: contents;
+}
+.mail-thread-row__meta:empty {
+  display: none;
+}
+@container mail-inbox (min-width: 42rem) {
+  .mail-thread-row {
+    align-items: center;
+    grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr) auto auto;
+    column-gap: 1rem;
+    min-height: 3rem;
+    contain-intrinsic-size: 48px;
+    padding-block: 12px;
+  }
+  .mail-thread-row__sender {
+    grid-column: 1;
+    grid-row: 1;
+    font-size: 13px;
+  }
+  .mail-thread-row__summary {
+    display: flex;
+    align-items: baseline;
+    gap: 0.625rem;
+    min-width: 0;
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .mail-thread-row__summary strong {
+    flex: 0 1 auto;
+    max-width: 60%;
+  }
+  .mail-thread-row__summary .mail-thread-row__snippet {
+    flex: 1 1 0;
+    min-width: 0;
+    font-size: 13px;
+  }
+  .mail-thread-row__meta {
+    grid-column: 3;
+    grid-row: 1;
+    white-space: nowrap;
+  }
+  .mail-thread-row time {
+    grid-column: 4;
+    grid-row: 1;
+    white-space: nowrap;
+    text-align: end;
+  }
+  .mail-thread-row[data-density="compact"] {
+    min-height: 2.75rem;
+    padding-block: 8px;
+    contain-intrinsic-size: 44px;
+  }
+  .mail-thread-row[data-density="compact"] .mail-thread-row__summary strong {
+    max-width: 100%;
+  }
+  .mail-thread-row[data-density="expanded"] {
+    min-height: 4rem;
+    padding-block: 16px;
+    contain-intrinsic-size: 64px;
+  }
+}
 .mail-draft-row {
   border-bottom: 1px solid var(--line);
 }
@@ -4112,6 +4187,8 @@ p {
   height: 100%;
   min-width: 0;
   overflow-y: auto;
+  scroll-snap-type: y proximity;
+  scroll-padding-top: 4rem;
 }
 .mail-reader > [data-slot="empty"].mail-reader__empty {
   border: 0;
@@ -4119,23 +4196,70 @@ p {
   height: 100%;
   min-height: 100%;
 }
+.mail-workspace--single { display: block; }
+.mail-workspace--single [data-slot="resizable-panel"] { flex: none !important; height: 100% !important; width: 100% !important; }
+.mail-workspace--single [data-slot="resizable-handle"],
+.mail-workspace--single:not(.mail-workspace--reader) #mail-reader,
+.mail-workspace--single.mail-workspace--reader #mail-list { display: none !important; }
 .mail-reader__article {
   margin: 0;
   max-width: none;
-  padding: 1.5rem;
+  --reader-gutter: 1.5rem;
+  padding: 0 var(--reader-gutter) var(--reader-gutter);
 }
-.mail-reader__subject {
-  padding-bottom: 1.5rem;
+.mail-reader__history-nav {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  height: 4rem;
+  background: linear-gradient(
+    to bottom,
+    var(--background) 0%,
+    color-mix(in srgb, var(--background) 90%, transparent) 55%,
+    transparent 100%
+  );
 }
-.mail-reader__article h2 {
-  font-size: clamp(22px, 2.5vw, 34px);
-  font-weight: 550;
-  letter-spacing: -0.045em;
-  line-height: 1.15;
+.mail-reader__history-nav h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.5;
 }
 .mail-reader__message {
-  border-top: 1px solid var(--border-subtle);
-  padding-block: 1.5rem;
+  position: relative;
+  scroll-snap-align: start;
+  background: var(--card);
+  border-radius: var(--radius-xl);
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+}
+.mail-reader__message::after {
+  content: "";
+  position: absolute;
+  top: 2.25rem;
+  border-radius: var(--radius-sm);
+  width: 0.75rem;
+  height: 0.75rem;
+  background: var(--card);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+.mail-reader__message[data-direction="outgoing"]::after {
+  inset-inline-end: -0.375rem;
+}
+.mail-reader__message[data-direction="incoming"]::after {
+  inset-inline-start: -0.375rem;
+}
+.mail-reader__message:last-child {
+  margin-bottom: 0;
+}
+.mail-reader__article::after {
+  content: "";
+  display: block;
+  height: max(0px, calc(var(--reader-height, 0px) - var(--last-message-height, 0px) - 4rem - var(--reader-gutter)));
 }
 .mail-reader__message-header {
   align-items: flex-start;
@@ -4173,6 +4297,7 @@ p {
   min-width: 0;
 }
 .mail-reader__sender-line {
+  flex-wrap: wrap;
   align-items: baseline;
   display: flex;
   gap: 1rem;
@@ -4236,66 +4361,15 @@ p {
   font-size: 0.75rem;
 }
 .mail-reader__message-content {
-  margin-left: 2.75rem;
+  min-width: 0;
 }
 .mail-reader__message-content pre {
   font-family: var(--app-font-sans);
   font-size: 14px;
   line-height: 1.65;
   margin: 1.25rem 0 0;
-  max-width: 68ch;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
-}
-.mail-reader__attachments {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 1rem;
-}
-.mail-reader__attachments li {
-  align-items: center;
-  background: var(--ui-muted);
-  border-radius: var(--radius-lg);
-  display: flex;
-  gap: 0.625rem;
-  max-width: 20rem;
-  min-width: 12rem;
-  padding: 0.625rem 0.75rem;
-}
-.mail-reader__attachments li > svg {
-  color: var(--content-secondary);
-  flex: 0 0 1rem;
-  height: 1rem;
-  width: 1rem;
-}
-.mail-reader__attachments li > span {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.mail-reader__attachments strong,
-.mail-reader__attachments small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.mail-reader__attachments strong {
-  font-size: 0.75rem;
-}
-.mail-reader__attachments small {
-  color: var(--content-secondary);
-  font-size: 0.625rem;
-}
-.mail-floating-compose {
-  bottom: max(1rem, env(safe-area-inset-bottom));
-  display: flex;
-  justify-content: flex-end;
-  pointer-events: none;
-  position: fixed;
-  right: max(1rem, env(safe-area-inset-right));
-  width: min(38rem, calc(100vw - 2rem));
-  z-index: 16;
 }
 .mail-compose-dialog {
   pointer-events: auto;
@@ -5582,10 +5656,6 @@ p {
   .calendar-app-bar__title-compact {
     display: inline;
   }
-  .calendar-workspace-switcher .sidebar__workspace-trigger {
-    padding-inline: 0;
-    width: 1.75rem;
-  }
   .calendar-workspace-switcher .sidebar__workspace-trigger > span:not(.workspace-icon),
   .calendar-workspace-switcher .sidebar__workspace-trigger > [data-icon="inline-end"] {
     display: none;
@@ -5666,83 +5736,6 @@ p {
   .mail-floating-compose {
     bottom: calc(5.25rem + env(safe-area-inset-bottom));
   }
-  .workspace-dock__pill {
-    background: var(--surface-raised);
-    border: 1px solid transparent;
-    border-radius: 999px;
-    padding: 5px;
-    width: 100%;
-  }
-  .workspace-dock__workspace-trigger {
-    border-radius: 999px;
-    gap: 8px;
-    height: 42px;
-    justify-content: flex-start;
-    padding: 5px 10px 5px 5px;
-    width: 100%;
-  }
-  .workspace-dock__workspace-trigger > span:not(.workspace-dock__identity-frame) {
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .workspace-dock__workspace-trigger .workspace-icon {
-    height: 28px;
-    width: 28px;
-  }
-  .workspace-dock__workspace-trigger .workspace-icon > svg,
-  .workspace-dock__identity-frame > svg {
-    height: 16px;
-    width: 16px;
-  }
-  .workspace-dock__identity-frame {
-    align-items: center;
-    background: var(--secondary);
-    border: 1px solid transparent;
-    border-radius: var(--radius-lg);
-    color: var(--foreground);
-    display: inline-flex;
-    height: 28px;
-    justify-content: center;
-    width: 28px;
-  }
-  .workspace-dock__workspace-menu {
-    max-width: calc(100vw - 24px);
-    min-width: min(19rem, calc(100vw - 24px));
-  }
-  .workspace-dock__workspace-menu [data-slot="dropdown-menu-item"] > a {
-    align-items: center;
-    display: flex;
-    gap: 10px;
-    min-height: 42px;
-    padding: 4px 6px;
-    text-decoration: none;
-  }
-  .workspace-dock__workspace-copy {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    gap: 1px;
-    line-height: 1.15;
-    min-width: 0;
-  }
-  .workspace-dock__workspace-copy > span,
-  .workspace-dock__workspace-copy > small {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .workspace-dock__workspace-copy > small {
-    color: var(--muted);
-    font-family: var(--app-font-mono);
-    font-size: 0.625rem;
-    font-weight: 400;
-    letter-spacing: -0.01em;
-  }
-  .workspace-dock__actions--bubble {
-    border-radius: 50%;
-    height: 48px;
-    width: 48px;
-  }
   .workspace-dock-sheet {
     border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     max-height: min(76dvh, 680px);
@@ -5782,10 +5775,10 @@ p {
   .mail-workspace {
     display: block;
   }
-  .mail-workspace [data-panel] {
+  .mail-workspace [data-slot="resizable-panel"] {
     flex: none !important;
-    height: 100%;
-    width: 100%;
+    height: 100% !important;
+    width: 100% !important;
   }
   .mail-workspace [data-slot="resizable-handle"],
   .mail-workspace:not(.mail-workspace--reader) #mail-reader,
@@ -5803,13 +5796,12 @@ p {
     width: 1.75rem;
   }
   .mail-app-bar__controls .mail-sync-control__action > span,
-  .mail-accounts-trigger .account-selection-trigger__count,
   .mail-sync-control__timing {
     display: none;
   }
   .mail-accounts-trigger {
-    padding-inline: 0;
-    width: 1.75rem;
+    padding-inline: 0.125rem;
+    width: auto;
   }
   .mail-accounts-trigger .account-selection-trigger__avatars > :not(:first-child) {
     display: none;
@@ -5872,7 +5864,7 @@ p {
     display: block;
   }
   .mail-reader__article {
-    padding: 20px;
+    --reader-gutter: 20px;
   }
   .mail-thread-stewardship { padding: 0 20px 20px; }
   .mail-reader__message-content {
@@ -5894,13 +5886,12 @@ p {
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .calendar-accounts-trigger .account-selection-trigger__count,
   .calendar-accounts-trigger .account-selection-trigger__avatars > :not(:first-child) {
     display: none;
   }
   .calendar-accounts-trigger {
     padding-inline: 0.125rem;
-    width: 1.75rem;
+    width: auto;
   }
   .calendar-event-composer__time {
     align-items: stretch;
@@ -6478,8 +6469,7 @@ p {
 }
 
 /* nohmi brand entry and flat product-chrome refinements. */
-.sidebar__workspace-trigger > .workspace-icon,
-.workspace-dock__workspace-trigger > .workspace-icon {
+.sidebar__workspace-trigger > .workspace-icon {
   background: transparent;
   border: 0;
   border-radius: 0;
@@ -7490,6 +7480,17 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 }
 
 .review-navigation__count { display: none; font-variant-numeric: tabular-nums; }
+.app-shell[data-sidebar-state="collapsed"] .review-navigation__footer {
+  padding-inline: 0;
+}
+.app-shell[data-sidebar-state="collapsed"] .review-navigation[data-sidebar="menu-button"] {
+  justify-content: center;
+  gap: 0;
+}
+.app-shell[data-sidebar-state="collapsed"] .review-navigation :is(.review-navigation__label, .review-navigation__count) {
+  display: none;
+}
+
 
 /* Mobile workspace chrome shares desktop switcher identity and one bottom-end action baseline. */
 @media (max-width: 900px) {
@@ -7512,18 +7513,165 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   }
   .workspace-app-bar__identity { grid-column: 1 / -1; min-height: 2rem; display: flex; align-items: center; gap: .5rem; }
   .workspace-app-bar__context:empty,
-  .workspace-app-bar__actions:has(> div:empty) { display: none; }
-  .workspace-app-bar__actions:has(.workspace-create-actions) { display: contents; }
-  .workspace-app-bar__context { justify-content: flex-start; }
+  .workspace-app-bar__actions:empty { display: none; }
+  .workspace-app-bar__context { justify-content: flex-end; }
   .workspace-app-bar__context:has(.calendar-app-bar__controls) { grid-column: 1 / -1; }
   .workspace-app-bar__identity > [data-slot="sidebar-menu"] { width: auto; flex: none; }
-  .calendar-workspace-switcher .sidebar__workspace-trigger { width: 2rem; }
   .workspace-app-bar__identity .review-navigation { margin-inline-start: auto; }
-  .calendar-app-bar__identity-cluster { width: 100%; }
+  .calendar-app-bar__identity-cluster { flex: 1 1 auto; min-width: 0; }
   .workspace-dock { display: flex; left: auto; right: max(1rem, env(safe-area-inset-right)); bottom: max(1rem, env(safe-area-inset-bottom)); width: auto; transform: none; }
 
-  .workspace-create-actions { position: fixed; right: calc(4.75rem + env(safe-area-inset-right)); bottom: max(1rem, env(safe-area-inset-bottom)); z-index: 35; display: flex; align-items: flex-end; gap: .125rem; padding: .25rem; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); }
-  .workspace-app-bar__actions .workspace-create-actions [data-slot="button"] { height: 2.75rem; min-width: 2.75rem; padding-inline: .75rem; border-radius: 999px; background: transparent; color: inherit; }
+  .workspace-primary-actions { position: fixed; right: calc(4.75rem + env(safe-area-inset-right)); bottom: max(1rem, env(safe-area-inset-bottom)); z-index: 35; display: flex; align-items: flex-end; gap: .125rem; padding: .25rem; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); }
+  .workspace-app-bar__actions .workspace-primary-actions [data-slot="button"] { height: 2.75rem; min-width: 2.75rem; padding-inline: .75rem; border-radius: 999px; background: transparent; color: inherit; }
   .mail-floating-compose[data-state="closed"] { right: calc(4.75rem + env(safe-area-inset-right)); bottom: max(1rem, env(safe-area-inset-bottom)); width: min(38rem, calc(100vw - 5.75rem)); }
   .calendar-floating-nav[data-mode="closed"] { left: 50%; right: auto; bottom: max(1rem, env(safe-area-inset-bottom)); width: max-content; max-width: calc(100vw - 2rem); transform: translateX(-50%); justify-content: center; }
 }
+
+.workspace[data-content-mode="panes"] > .content { padding: 0; }
+
+
+/* Compact workspace identity is a square in headers and in the collapsed rail. */
+.sidebar__workspace-trigger[data-compact="true"] {
+  display: grid;
+  place-items: center;
+  flex: 0 0 2rem;
+  width: 2rem;
+  min-width: 2rem;
+  height: 2rem;
+  padding: 0;
+  aspect-ratio: 1;
+}
+.calendar-app-bar__compact-view { display: block; }
+
+/* Compact headers keep orientation, the live control, and attention on one row.
+   Controls stay mounted when crossing the breakpoint so search drafts retain focus. */
+@media (max-width: 900px) {
+  .workspace-app-bar:is([data-workspace="tasks"], [data-workspace="calendar"]) {
+    gap: .5rem;
+    grid-template-columns: auto auto minmax(0, 1fr) auto;
+  }
+  .workspace-app-bar:is([data-workspace="tasks"], [data-workspace="calendar"]) .workspace-app-bar__identity,
+  .workspace-app-bar:is([data-workspace="tasks"], [data-workspace="calendar"]) .workspace-app-bar__actions {
+    display: contents;
+  }
+  .workspace-app-bar[data-workspace="tasks"] .workspace-app-bar__identity > [data-slot="sidebar-menu"] { grid-area: 1 / 1; }
+  .workspace-app-bar[data-workspace="tasks"] .workspace-app-bar__title { grid-area: 1 / 2; }
+  .workspace-app-bar[data-workspace="tasks"] .workspace-app-bar__context { grid-area: 1 / 3; width: 100%; }
+  .workspace-app-bar[data-workspace="tasks"] .review-navigation { grid-area: 1 / 4; margin: 0; }
+  .workspace-app-bar[data-workspace="calendar"] { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .workspace-app-bar[data-workspace="calendar"] .calendar-app-bar__identity-cluster { grid-area: 1 / 1; }
+  .workspace-app-bar[data-workspace="calendar"] .workspace-app-bar__context { grid-area: 1 / 2; overflow: visible; }
+  .workspace-app-bar[data-workspace="calendar"] .review-navigation { grid-area: 1 / 3; margin: 0; }
+  .calendar-app-bar__compact-view { display: block; }
+  .calendar-app-bar__view-switch { display: none; }
+  .calendar-app-bar__orientation { display: flex; flex: 1 1 auto; min-width: 0; overflow: hidden; }
+  .calendar-app-bar__orientation h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .calendar-app-bar__title-full { display: none; }
+  .calendar-app-bar__title-compact { display: inline; }
+  .calendar-app-bar__control-set { gap: .125rem; }
+}
+
+/* Workspace search shares the header slot; its popup never changes page geometry. */
+.workspace-finder { flex: 0 0 auto; min-width: 0; width: auto; }
+.calendar-header-context { display: flex; justify-content: flex-end; align-items: center; gap: .75rem; width: 100%; min-width: 0; }
+.calendar-header-context > .calendar-app-bar__controls { flex: 0 0 auto; }
+.workspace-finder-results { width: 28rem; max-width: min(40rem, calc(100vw - 2rem)); }
+.workspace-finder-dialog { height: min(40rem, 85dvh); }
+@media (max-width: 900px) {
+  .workspace-finder { flex: 0 0 auto; width: auto; }
+  .calendar-header-context { gap: .125rem; }
+
+  .workspace-finder-results { max-width: calc(100vw - 2rem); }
+}
+
+/* Phone discovery is one compact utility, so Mail and Finance need no search-only row. */
+@media (max-width: 767px) {
+  .workspace-app-bar:is([data-workspace="mail"], [data-workspace="finances"]) {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    gap: .375rem;
+  }
+  .workspace-app-bar:is([data-workspace="mail"], [data-workspace="finances"]) .workspace-app-bar__identity,
+  .workspace-app-bar:is([data-workspace="mail"], [data-workspace="finances"]) .workspace-app-bar__actions { display: contents; }
+  .workspace-app-bar:is([data-workspace="mail"], [data-workspace="finances"]) .workspace-app-bar__identity > [data-slot="sidebar-menu"] { grid-area: 1 / 1; }
+  .workspace-app-bar:is([data-workspace="mail"], [data-workspace="finances"]) .workspace-app-bar__title { grid-area: 1 / 2; }
+  .workspace-app-bar:is([data-workspace="mail"], [data-workspace="finances"]) .workspace-app-bar__context { grid-area: 1 / 3; }
+  .workspace-app-bar:is([data-workspace="mail"], [data-workspace="finances"]) .review-navigation { grid-area: 1 / 4; margin: 0; }
+  .workspace-app-bar[data-workspace="mail"] { grid-template-columns: auto minmax(0, 1fr) auto auto auto; }
+  .workspace-app-bar[data-workspace="mail"] .mail-accounts-trigger { grid-area: 1 / 4; }
+  .workspace-app-bar[data-workspace="mail"] .review-navigation { grid-area: 1 / 5; }
+  .mail-app-bar__controls { gap: .125rem; }
+}
+
+.account-selection-trigger__identity { position: relative; display: flex; flex-shrink: 0; padding-inline-end: .25rem; padding-block-end: .125rem; }
+.account-selection-trigger__status { position: absolute; right: 0; bottom: 0; display: flex; border-radius: var(--radius-sm); background: var(--background); }
+.account-selection-trigger__status svg { width: .5rem; height: .5rem; }
+
+/* Header utilities align to the end; Calendar attention remains with its title. */
+.workspace-app-bar__actions { justify-content: flex-end; }
+.account-selection-trigger__count { color: var(--muted-foreground); font-weight: 400; }
+.account-selection-trigger__status { width: .75rem; height: .75rem; align-items: center; justify-content: center; border-radius: 50%; background: var(--status-danger-surface); color: var(--status-danger-foreground); }
+.account-selection-trigger__status[data-healthy="true"] { background: var(--status-success-foreground); color: var(--status-success-surface); }
+.calendar-app-bar__period-navigation { gap: .125rem; }
+@media (max-width: 600px) {
+  .workspace-app-bar[data-workspace="calendar"] .calendar-app-bar__period-navigation { display: none; }
+}
+
+/* Grid rules carry spatial boundaries; fills remain secondary to events and Today. */
+.week-day-header, .week-all-day-day { border: 0; }
+
+.calendar-app-bar__today[aria-pressed="true"] { background: var(--calendar-today-background); color: var(--timeline-now); }
+.calendar-secondary-app-bar, .workspace-app-bar { border: 0; }
+
+/* Tasks keeps scope and utilities in one intrinsic header; active chips belong to results. */
+.tasks-header-context { display: flex; align-items: center; gap: .75rem; width: 100%; min-width: 0; }
+.tasks-header-view { flex: 0 1 auto; min-width: 0; max-width: 18rem; }
+.tasks-header-tools { display: flex; align-items: center; gap: .125rem; margin-inline-start: auto; flex: 0 0 auto; }
+@media (max-width: 900px) {
+  .workspace-app-bar[data-workspace="tasks"] { grid-template-columns: auto minmax(0, 1fr) auto; gap: .25rem; }
+  .workspace-app-bar[data-workspace="tasks"] .workspace-app-bar__context { grid-area: 1 / 2; overflow: visible; }
+  .workspace-app-bar[data-workspace="tasks"] .review-navigation { grid-area: 1 / 3; }
+  .tasks-header-context { gap: .25rem; }
+  .tasks-header-tools [data-slot="button"] { width: 2rem; height: 2rem; padding: 0; }
+}
+@media (max-width: 360px) {
+  /* Preserve a readable scope on very narrow screens instead of reducing it to a chevron. */
+  .workspace-app-bar[data-workspace="tasks"] { padding-block: .25rem; }
+  .workspace-app-bar[data-workspace="tasks"] .workspace-app-bar__context,
+  .tasks-header-context { display: contents; }
+  .tasks-header-view { grid-area: 1 / 2; justify-self: start; max-width: 100%; }
+  .tasks-header-tools { grid-column: 1 / -1; grid-row: 2; }
+}
+
+/* Route-owned utilities share the primary header; only genuine spatial axes use
+   secondary navigation. Flex wrapping is a fallback for zoom and narrow windows. */
+.workspace-header-controls-slot:empty { display: none; }
+.workspace-header-controls-slot { min-width: 0; }
+.workspace-header-controls { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: .375rem; min-width: 0; }
+.workspace-app-bar[data-workspace="finances"] .workspace-app-bar__context { overflow: visible; flex-wrap: wrap; padding-block: .375rem; }
+.finance-bento { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); align-items: stretch; gap: 1rem; min-width: 0; }
+.finance-bento__wide { grid-column: 1 / -1; }
+.finance-goal-grid > [data-slot="item"] { background: var(--card); color: var(--card-foreground); border-radius: var(--radius-xl); align-items: flex-start; flex-direction: column; }
+.finance-account-grid [data-slot="item-actions"],
+.finance-goal-grid [data-slot="item-actions"] { flex-wrap: wrap; }
+@media (max-width: 767px) {
+  .workspace-app-bar[data-workspace="finances"] { display: flex; flex-wrap: wrap; }
+  .workspace-app-bar[data-workspace="finances"] .workspace-app-bar__title { flex: 1 1 auto; }
+  .workspace-app-bar[data-workspace="finances"] .workspace-app-bar__context { margin-inline-start: auto; max-width: 100%; }
+  .workspace-app-bar[data-workspace="finances"] .workspace-header-controls [data-slot="button"] { min-height: 2.5rem; }
+  .workspace-app-bar[data-workspace="finances"] .review-navigation { margin-inline-start: .25rem; }
+}
+
+/* Action labels must not cover adjacent hit targets, including the positioning wrapper. */
+[data-radix-popper-content-wrapper]:has(> .action-tooltip) {
+  pointer-events: none;
+}
+
+.action-count-badge { position: absolute; right: -0.2rem; bottom: -0.2rem; min-width: 1rem; height: 1rem; padding: 0 .2rem; font-size: .625rem; line-height: 1; pointer-events: none; }
+.finance-account-grid .finance-account-record { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; }
+.finance-account-record [data-slot="item-actions"] { align-self: start; }
+.finance-account-record [data-slot="item-description"] { -webkit-line-clamp: unset; }
+
+.workspace-app-bar .action-count-trigger, .workspace-secondary-app-bar .action-count-trigger { overflow: visible; }
+
+.finance-account-grid .finance-account-record { background: var(--secondary); border-radius: var(--radius-lg); }
+.workspace-header-controls-slot--leading { margin-inline-end: auto; }

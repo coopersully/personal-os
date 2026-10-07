@@ -1,4 +1,5 @@
 import {
+  availableSetupQuestions,
   parseSetupJurisdiction,
   parseSetupMoney,
   setupProfileChange,
@@ -141,4 +142,20 @@ describe("Finance setup answer parsing", () => {
       remainingWork: { categories: ["collecting_profile"], count: 1 },
     });
   });
+});
+
+it("exposes all unknown profile and planning questions together, respecting revision-specific skips", () => {
+  const questions = availableSetupQuestions(null);
+  expect(questions).toHaveLength(13);
+  expect(new Set(questions.map((question) => question.id)).size).toBe(13);
+  expect(questions[0]?.id).toBe("profile:location");
+  expect(questions.at(-1)?.id).toBe("planning:priorities");
+  const skipped = availableSetupQuestions(null, [
+    { questionId: "profile:household_size", profileVersion: 0 },
+    { questionId: "planning:priorities", profileVersion: 0 },
+    { questionId: "profile:location", profileVersion: 1 },
+  ]);
+  expect(skipped.map((question) => question.id)).not.toContain("profile:household_size");
+  expect(skipped.map((question) => question.id)).not.toContain("planning:priorities");
+  expect(skipped.map((question) => question.id)).toContain("profile:location");
 });

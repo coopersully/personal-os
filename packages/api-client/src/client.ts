@@ -14,15 +14,19 @@ import type {
   RegisterInput,
   RequestPasswordResetInput,
   ResetPasswordInput,
+  SearchableWorkspace,
   StartGoogleAuthorizationInput,
   UpdateAccountSetupInput,
   UpdatePinterestWallpaperSettingsInput,
   UpdateUserInput,
+  UpdateWorkspaceSettings,
   User,
   ValidateInvitationInput,
   WeatherCoordinates,
   WeatherLocationOption,
   WeatherSnapshot,
+  WorkspaceSearchPage,
+  WorkspaceSettings,
 } from "@personal-os/domain";
 import {
   type ConnectedAccountHealth,
@@ -396,6 +400,34 @@ export function createApiClient(options: ClientOptions) {
 
     async recordPinterestWallpaperApplied(): Promise<void> {
       await request<void>("/v1/pinterest/applied", { method: "POST" });
+    },
+
+    async searchWorkspace(
+      workspace: SearchableWorkspace,
+      query: {
+        q: string;
+        offset?: number;
+        limit?: number;
+        includeArchived?: boolean;
+        kind?: "all" | "content" | "reviews";
+      },
+      signal?: AbortSignal,
+    ): Promise<WorkspaceSearchPage> {
+      return request(`/v1/workspaces/${workspace}/search?${toQuery(query)}`, {
+        ...(signal ? { signal } : {}),
+      });
+    },
+    async getWorkspaceSettings(workspace: SearchableWorkspace): Promise<WorkspaceSettings> {
+      return request(`/v1/workspaces/${workspace}/settings`);
+    },
+    async updateWorkspaceSettings(
+      workspace: SearchableWorkspace,
+      input: UpdateWorkspaceSettings,
+    ): Promise<WorkspaceSettings> {
+      return request(`/v1/workspaces/${workspace}/settings`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      });
     },
 
     async listSessions(): Promise<Session[]> {

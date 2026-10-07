@@ -24,12 +24,16 @@ import {
   agentAccessDomains,
   featureAccessPolicies,
 } from "@personal-os/domain";
-import { and, eq, gt, isNull, lte, or } from "drizzle-orm";
+import { and, eq, gt, isNull, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { AppError } from "./errors.js";
 import { readFinanceContextualWork } from "./finance/contextual-question-projection.js";
 import { readFinanceEffectWork } from "./finance/review-effect-projection.js";
-import type { Principal } from "./types.js";
+import {
+  ReviewSearchOverflowError,
+  readProjectionRows,
+} from "./finance/search-projection-bounds.js";
+import type { Principal, RequestLog } from "./types.js";
 
 type SourceInput = { snapshotAt: Date; userId: string };
 type SourceReaders = {
@@ -127,130 +131,224 @@ export function createAgentAccessWorkItemService({
   db,
   now,
   sourceReaders: sourceReaderOverrides,
+  log,
 }: {
   cursorSigningKey: string;
   db: Database;
   now: () => Date;
   sourceReaders?: Partial<SourceReaders>;
+  log?: (entry: RequestLog) => void;
 }) {
-  const sourceReaders: SourceReaders = {
+  const buildSourceReaders = (db: Database, limit?: number): SourceReaders => ({
     accounts: async ({ snapshotAt, userId }) =>
-      db
-        .select()
-        .from(calendarAccounts)
-        .where(
-          and(
-            eq(calendarAccounts.userId, userId),
-            eq(calendarAccounts.syncRecovery, "reconnect"),
-            lte(calendarAccounts.updatedAt, snapshotAt),
-          ),
-        ),
-    attention: async ({ snapshotAt, userId }) =>
-      db
-        .select()
-        .from(attentionItems)
-        .where(
-          and(
-            eq(attentionItems.userId, userId),
-            eq(attentionItems.status, "open"),
-            lte(attentionItems.updatedAt, snapshotAt),
-          ),
-        ),
-    financeEffects: (input) => readFinanceEffectWork(db, input),
-    financeAccounts: async ({ snapshotAt, userId }) =>
-      db
-        .select()
-        .from(financeAccounts)
-        .where(
-          and(
-            eq(financeAccounts.userId, userId),
-            or(
-              eq(financeAccounts.syncRecovery, "reconnect"),
-              and(eq(financeAccounts.status, "needs_reauth"), isNull(financeAccounts.syncRecovery)),
+      readProjectionRows(
+        db
+          .select()
+          .from(calendarAccounts)
+          .where(
+            and(
+              eq(calendarAccounts.userId, userId),
+              eq(calendarAccounts.syncRecovery, "reconnect"),
+              lte(calendarAccounts.updatedAt, snapshotAt),
             ),
-            lte(financeAccounts.updatedAt, snapshotAt),
           ),
-        ),
+        limit,
+      ),
+    attention: async ({ snapshotAt, userId }) =>
+      readProjectionRows(
+        db
+          .select()
+          .from(attentionItems)
+          .where(
+            and(
+              eq(attentionItems.userId, userId),
+              eq(attentionItems.status, "open"),
+              lte(attentionItems.updatedAt, snapshotAt),
+            ),
+          ),
+        limit,
+      ),
+    financeEffects: (input) => readFinanceEffectWork(db, input, limit),
+    financeAccounts: async ({ snapshotAt, userId }) =>
+      readProjectionRows(
+        db
+          .select()
+          .from(financeAccounts)
+          .where(
+            and(
+              eq(financeAccounts.userId, userId),
+              or(
+                eq(financeAccounts.syncRecovery, "reconnect"),
+                and(
+                  eq(financeAccounts.status, "needs_reauth"),
+                  isNull(financeAccounts.syncRecovery),
+                ),
+              ),
+              lte(financeAccounts.updatedAt, snapshotAt),
+            ),
+          ),
+        limit,
+      ),
     financeActions: async ({ snapshotAt, userId }) =>
-      db
-        .select()
-        .from(financeAgentActionReviews)
-        .where(
-          and(
-            eq(financeAgentActionReviews.userId, userId),
-            eq(financeAgentActionReviews.status, "pending"),
-            lte(financeAgentActionReviews.updatedAt, snapshotAt),
+      readProjectionRows(
+        db
+          .select()
+          .from(financeAgentActionReviews)
+          .where(
+            and(
+              eq(financeAgentActionReviews.userId, userId),
+              eq(financeAgentActionReviews.status, "pending"),
+              lte(financeAgentActionReviews.updatedAt, snapshotAt),
+            ),
           ),
-        ),
-    financeContextual: (input) => readFinanceContextualWork(db, input),
+        limit,
+      ),
+    financeContextual: (input) => readFinanceContextualWork(db, input, limit),
     financeReviews: async ({ snapshotAt, userId }) => {
-      const rows = await db
-        .select({ review: financeReviewCases, transaction: financeTransactions })
-        .from(financeReviewCases)
-        .leftJoin(
-          financeTransactions,
-          and(
-            eq(financeTransactions.id, financeReviewCases.transactionId),
-            eq(financeTransactions.userId, userId),
+      const rows = await readProjectionRows(
+        db
+          .select({ review: financeReviewCases, transaction: financeTransactions })
+          .from(financeReviewCases)
+          .leftJoin(
+            financeTransactions,
+            and(
+              eq(financeTransactions.id, financeReviewCases.transactionId),
+              eq(financeTransactions.userId, userId),
+            ),
+          )
+          .where(
+            and(
+              eq(financeReviewCases.userId, userId),
+              or(eq(financeReviewCases.status, "open"), eq(financeReviewCases.status, "deferred")),
+              lte(financeReviewCases.updatedAt, snapshotAt),
+            ),
           ),
-        )
-        .where(
-          and(
-            eq(financeReviewCases.userId, userId),
-            or(eq(financeReviewCases.status, "open"), eq(financeReviewCases.status, "deferred")),
-            lte(financeReviewCases.updatedAt, snapshotAt),
-          ),
-        );
+        limit,
+      );
       return rows.map(({ review, transaction }) => ({ ...review, transaction }));
     },
     mailRules: async ({ snapshotAt, userId }) =>
-      db
-        .select()
-        .from(mailRules)
-        .where(
-          and(
-            eq(mailRules.userId, userId),
-            eq(mailRules.enabled, false),
-            lte(mailRules.updatedAt, snapshotAt),
+      readProjectionRows(
+        db
+          .select()
+          .from(mailRules)
+          .where(
+            and(
+              eq(mailRules.userId, userId),
+              eq(mailRules.enabled, false),
+              lte(mailRules.updatedAt, snapshotAt),
+            ),
           ),
-        ),
+        limit,
+      ),
     mailQuestions: async ({ snapshotAt, userId }) =>
-      db
-        .select()
-        .from(mailStewardshipQuestions)
-        .where(
-          and(
-            eq(mailStewardshipQuestions.userId, userId),
-            eq(mailStewardshipQuestions.status, "open"),
-            lte(mailStewardshipQuestions.updatedAt, snapshotAt),
+      readProjectionRows(
+        db
+          .select()
+          .from(mailStewardshipQuestions)
+          .where(
+            and(
+              eq(mailStewardshipQuestions.userId, userId),
+              eq(mailStewardshipQuestions.status, "open"),
+              lte(mailStewardshipQuestions.updatedAt, snapshotAt),
+            ),
           ),
-        ),
+        limit,
+      ),
     mailRuns: async ({ snapshotAt, userId }) =>
-      db
-        .select()
-        .from(workspaceMaintenanceRuns)
-        .where(
-          and(
-            eq(workspaceMaintenanceRuns.userId, userId),
-            eq(workspaceMaintenanceRuns.domain, "mail"),
-            lte(workspaceMaintenanceRuns.updatedAt, snapshotAt),
+      readProjectionRows(
+        db
+          .select()
+          .from(workspaceMaintenanceRuns)
+          .where(
+            and(
+              eq(workspaceMaintenanceRuns.userId, userId),
+              eq(workspaceMaintenanceRuns.domain, "mail"),
+              lte(workspaceMaintenanceRuns.updatedAt, snapshotAt),
+            ),
           ),
-        ),
+        limit,
+      ),
     profiles: async ({ snapshotAt, userId }) =>
-      db
-        .select()
-        .from(domainProfiles)
-        .where(
-          and(
-            eq(domainProfiles.userId, userId),
-            eq(domainProfiles.status, "draft"),
-            lte(domainProfiles.updatedAt, snapshotAt),
+      readProjectionRows(
+        db
+          .select()
+          .from(domainProfiles)
+          .where(
+            and(
+              eq(domainProfiles.userId, userId),
+              eq(domainProfiles.status, "draft"),
+              lte(domainProfiles.updatedAt, snapshotAt),
+            ),
           ),
-        ),
-    ...sourceReaderOverrides,
-  };
+        limit,
+      ),
+  });
+  const sourceReaders = { ...buildSourceReaders(db), ...sourceReaderOverrides };
 
   return {
+    /** Reuse the review projection for workspace search without creating pagination snapshots. */
+    async searchItems(
+      principal: Principal,
+      workspace: AgentAccessDomain,
+      requestId = "unattributed",
+    ): Promise<{ items: AgentAccessWorkItem[]; unavailableSources: SourceKey[] }> {
+      if (!principal.scopes.has(featureAccessPolicies[workspace].readScope)) {
+        throw new AppError("forbidden", "This workspace requires read access.");
+      }
+      const input = { snapshotAt: now(), userId: principal.userId };
+      const entries = (
+        Object.entries(sourceReaders) as Array<[SourceKey, SourceReaders[SourceKey]]>
+      ).filter(([key]) => sourceImpact[key].domains.includes(workspace));
+      const settled = await Promise.allSettled(
+        entries.map(async ([key]) => {
+          const started = Date.now();
+          try {
+            return await db.transaction(async (tx) => {
+              // PostgreSQL cancels blocked/slow SQL and terminates over-budget transactions;
+              // a Promise.race alone would leave database work running after the response.
+              await tx.execute(sql`SET LOCAL statement_timeout = '2000ms'`);
+              await tx.execute(sql`SET LOCAL transaction_timeout = '2500ms'`);
+              await tx.execute(sql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`);
+              const reader =
+                sourceReaderOverrides?.[key] ??
+                buildSourceReaders(tx as unknown as Database, 200)[key];
+              return reader(input);
+            });
+          } catch (error) {
+            log?.({
+              event: "workspace_review_search_source_failed",
+              requestId,
+              workspace,
+              source: key,
+              category: reviewSearchFailureCategory(error),
+              durationMs: Date.now() - started,
+              method: "GET",
+              path: `/v1/workspaces/${workspace}/search`,
+              status: 503,
+            });
+            throw error;
+          }
+        }),
+      );
+      const results = {} as Partial<SourceResult>;
+      const unavailableSources: SourceKey[] = [];
+      for (const [index, result] of settled.entries()) {
+        const key = entries[index]?.[0];
+        if (!key) continue;
+        if (result.status === "fulfilled") Object.assign(results, { [key]: result.value });
+        else unavailableSources.push(key);
+      }
+      return {
+        items: projectItems({
+          accessibleDomains: new Set([workspace]),
+          results,
+          includePreview: principal.actorType === "user",
+        }).filter((item) => item.domain === workspace),
+        unavailableSources,
+      };
+    },
+
     async list(
       principal: Principal,
       query: AgentAccessWorkItemQuery,
@@ -483,29 +581,29 @@ function projectItems({
         updatedAt: representedRun.updatedAt.toISOString(),
       });
     }
+    // A later run can cover another thread or a bounded window. Its timestamp
+    // cannot prove that an unresolved question was included or answered.
     for (const question of results.mailQuestions ?? []) {
-      if (!representedRun || question.updatedAt.getTime() > representedRun.updatedAt.getTime()) {
-        items.push({
-          action: { label: "Answer in Mail", to: `/mail/review?question=${question.id}` },
-          actionAt: null,
-          domain: "mail",
-          id: `mail-question:${question.id}`,
-          kind: "review",
-          priority: "person_review",
-          source: null,
-          summary: `${question.reason} Question type: ${question.kind}. Account ${question.accountId}; thread ${question.threadId}. Open since ${question.createdAt.toISOString()}.`,
-          ...(includePreview
-            ? {
-                preview: workPreview([
-                  ["Question", question.reason],
-                  ["Choices", question.options.map((option) => option.label).join(" · ")],
-                ]),
-              }
-            : {}),
-          title: "Answer a Mail stewardship question",
-          updatedAt: question.updatedAt.toISOString(),
-        });
-      }
+      items.push({
+        action: { label: "Answer in Mail", to: `/mail/review?question=${question.id}` },
+        actionAt: null,
+        domain: "mail",
+        id: `mail-question:${question.id}`,
+        kind: "review",
+        priority: "person_review",
+        source: null,
+        summary: `${question.reason} Question type: ${question.kind}. Account ${question.accountId}; thread ${question.threadId}. Open since ${question.createdAt.toISOString()}.`,
+        ...(includePreview
+          ? {
+              preview: workPreview([
+                ["Question", question.reason],
+                ["Choices", question.options.map((option) => option.label).join(" · ")],
+              ]),
+            }
+          : {}),
+        title: "Answer a Mail stewardship question",
+        updatedAt: question.updatedAt.toISOString(),
+      });
     }
     for (const rule of results.mailRules ?? []) {
       items.push({
@@ -833,4 +931,17 @@ function workPreview(
         : [],
     )
     .slice(0, 4);
+}
+
+/** Classify known boundary failures without ever serializing driver errors or query parameters. */
+function reviewSearchFailureCategory(error: unknown): "timeout" | "overflow" | "unexpected" {
+  const seen = new Set<unknown>();
+  let cause = error;
+  while (typeof cause === "object" && cause !== null && !seen.has(cause)) {
+    seen.add(cause);
+    if (cause instanceof ReviewSearchOverflowError) return "overflow";
+    if ("code" in cause && (cause.code === "57014" || cause.code === "25P04")) return "timeout";
+    cause = "cause" in cause ? cause.cause : null;
+  }
+  return "unexpected";
 }

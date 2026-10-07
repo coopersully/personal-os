@@ -144,7 +144,7 @@ function unknownFields(planning: FinanceSetupPlanning): PlanningField[] {
 }
 
 /** A skip is progress for one displayed revision; it never supplies a missing fact. */
-export function nextFinancePlanningQuestion(
+export function availableFinancePlanningQuestions(
   input: FinanceSetupPlanning,
   skipped: z.infer<typeof financeSetupSkippedQuestionSchema>[],
   profileVersion: number,
@@ -152,13 +152,22 @@ export function nextFinancePlanningQuestion(
   const planning = financeSetupPlanningSchema.parse(input);
   z.number().int().nonnegative().parse(profileVersion);
   const validSkips = z.array(financeSetupSkippedQuestionSchema).max(100).parse(skipped);
-  const key = unknownFields(planning).find(
+  const keys = unknownFields(planning).filter(
     (field) =>
       !validSkips.some(
         (skip) => skip.questionId === `planning:${field}` && skip.profileVersion === profileVersion,
       ),
   );
-  return key ? { id: `planning:${key}` as const, prompt: prompts[key] } : null;
+  return keys.map((key) => ({ id: `planning:${key}` as const, prompt: prompts[key] }));
+}
+
+/** Sequential callers can still request the first unanswered question. */
+export function nextFinancePlanningQuestion(
+  input: FinanceSetupPlanning,
+  skipped: z.infer<typeof financeSetupSkippedQuestionSchema>[],
+  profileVersion: number,
+) {
+  return availableFinancePlanningQuestions(input, skipped, profileVersion)[0] ?? null;
 }
 
 /** Arithmetic over stated needs only. Qualified position remains a separate dependency. */

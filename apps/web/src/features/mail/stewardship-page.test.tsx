@@ -125,7 +125,10 @@ const review: MailReview = {
   state: "maintained_with_questions",
 };
 
-function renderPage(route = `/mail/review?question=${question.id}`) {
+function renderPage(
+  route = `/mail/review?question=${question.id}`,
+  props: Parameters<typeof MailStewardshipPage>[0] = {},
+) {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { gcTime: 0, retry: false } },
   });
@@ -133,7 +136,7 @@ function renderPage(route = `/mail/review?question=${question.id}`) {
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[route]}>
         <main>
-          <MailStewardshipPage />
+          <MailStewardshipPage {...props} />
         </main>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -186,6 +189,20 @@ describe("Mail workspace stewardship", () => {
     expect(
       screen.queryByRole("button", { name: /compose|reply|forward|send/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("refreshes embedded reviews after an answer but not after unconfirmed maintenance", async () => {
+    const onChanged = vi.fn(async () => {});
+    renderPage("/mail", { embedded: true, onChanged });
+    await userEvent.click(await screen.findByRole("button", { name: "Reference only" }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    mocks.maintainMail.mockRejectedValueOnce(new Error("Maintenance unavailable"));
+    await userEvent.click(screen.getByRole("button", { name: "Maintain Mail" }));
+    expect(
+      await screen.findByText(/Couldn’t confirm whether we could maintain the mail workspace/),
+    ).toBeVisible();
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(mocks.maintainMail).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the maintenance action honest while the turn is pending", async () => {

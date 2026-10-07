@@ -1,5 +1,22 @@
 # nohmi — Implementation Log
 
+## 2026-10-06 — Finance configuration and prerequisites (branch implementation)
+
+- Financial setup loads a read-only, owner-scoped aggregate and shares autosaving fields with
+  Finance Settings. Profile, Accounts and records, and Budget can be visited independently.
+- Scalar/profile collection edits retain unknown versus explicit zero/None, serialize shared
+  revisions, preserve newer drafts, and expose retry/reload beside failed fields. Payroll updates
+  support optimistic conflict checks without a storage migration.
+- Preparing the first budget and checking records remain explicit operations. Preparation can
+  use partial information but retains incomplete/evidence and approval safeguards. Reopening a
+  page does not execute the setup protocol.
+- The Finance sidebar groups Money, Planning, and Manage. Budget links to a prerequisite screen
+  when absent; records and useful cash-flow/wealth surfaces remain available. Settings search
+  targets the shared fields directly.
+- Focused API/database/UI checks and desktop/mobile setup persistence acceptance passed.
+  The full verification command was stopped after 60 seconds in the deployment-drain scenario
+  stage; full coverage/build verification is not claimed. This is branch work, not deployment.
+
 ## 2026-10-05 — Desktop background setup (source)
 
 - Tracked by [COO-77 — Guide desktop background setup and macOS permissions](https://linear.app/coopersully/issue/COO-77/guide-desktop-background-setup-and-macos-permissions)
@@ -15,6 +32,31 @@
 - Signed-installation approval, login relaunch, and actual OS delivery still require native
   smoke verification; source checks do not establish those runtime capabilities. See
   [desktop background setup](../design/pages/desktop-background.md).
+
+## 2026-10-05 — Calendar opening and Follow preferences (branch implementation)
+
+- Calendar remembers an explicitly selected view in account-owned Calendar settings. Normal entry
+  opens today in that view, following the current time by default; disabling automatic Follow
+  opens the day at midnight. Explicit date/view/Follow links retain their navigation intent.
+- Snap back to Follow can be disabled independently, with Precise, Balanced, and Generous capture
+  ranges. Capture waits for scrolling to settle and uses a wider release range to prevent jitter.
+- Migration 0095 adds the Follow preferences. Partial preference updates preserve omitted values;
+  read defaults are not applied to PATCH payloads. This is branch implementation, not deployment evidence.
+
+## 2026-10-03 — Workspace discovery (branch implementation)
+
+- Added a shared Calendar, Tasks, Mail, and Finances header finder for domain records, settings
+  fields, navigation, creation forms, and the existing review flow. Calendar accepts dates and
+  weekdays. Mobile renders inline results inside the shared drawer.
+- Server search scopes every source to its owner, searches beyond the current view, excludes
+  deleted/trash records, and returns bounded previews with pagination. Mail includes older replies;
+  hidden calendars and completed tasks remain discoverable. Review-source outages are disclosed.
+- Added four revisioned workspace preference tables with an additive migration. Existing account
+  timezone/day hours and domain-owned settings remain authoritative. No provider search or new
+  external permissions are introduced.
+- Search currently matches owner-scoped PostgreSQL projections using literal terms and full-text
+  relevance ranking; it does not create a separate persistent search index. Production-scale
+  latency has not been benchmarked. This is branch implementation, not deployment evidence.
 
 ## 2026-10-01 — Settings information architecture (branch implementation)
 

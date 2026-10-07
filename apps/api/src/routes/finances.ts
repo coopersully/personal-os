@@ -11,6 +11,7 @@ import {
   createFinanceBudgetPolicySchema,
   createFinanceBudgetRevisionProposalSchema,
   createFinanceBudgetVersionInputSchema,
+  createFinanceCategoryInputSchema,
   createFinanceContextualQuestionInputSchema,
   createFinanceTransactionInputSchema,
   designateFinanceBudgetBaselineSchema,
@@ -436,6 +437,15 @@ export function registerFinanceRoutes({
       ),
     });
   });
+  app.get("/v1/finances/configuration", async (context) => {
+    context.header("Cache-Control", "no-store");
+    return context.json(
+      await finances.getFinanceConfiguration(
+        context.get("principal").userId,
+        context.get("requestId"),
+      ),
+    );
+  });
   app.post("/v1/finances/setup", async (context) =>
     context.json(
       await finances.setupFinances(
@@ -559,6 +569,14 @@ export function registerFinanceRoutes({
       pace: await finances.getBudgetPace(
         context.get("principal").userId,
         financeBudgetPaceQuerySchema.parse(context.req.query()).period,
+      ),
+    }),
+  );
+  app.post("/v1/finances/categories", requireHuman, async (context) =>
+    context.json({
+      category: await finances.createCategory(
+        await parseBody(context, createFinanceCategoryInputSchema),
+        financeMutationContext(context),
       ),
     }),
   );

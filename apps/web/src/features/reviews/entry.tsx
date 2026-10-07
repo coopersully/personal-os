@@ -13,6 +13,7 @@ export function ReviewsEntry() {
     queryFn: () => api.listAgentAccessWorkItems({ limit: 10 }),
   });
   const count = query.data?.summary.total;
+  if (!query.isError && !query.data?.unavailableDomains.length && count === 0) return null;
   return (
     <ItemGroup>
       <SettingsRecord

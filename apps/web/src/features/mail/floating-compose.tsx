@@ -2,9 +2,13 @@ import { ApiClientError } from "@personal-os/api-client";
 import type { MailDraft, MailRecipientInput, MailSetupAccount } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { FloatingActionButton, FloatingActions } from "@/components/floating-actions";
+import {
+  FloatingActionButton,
+  FloatingActionRegion,
+  FloatingActions,
+} from "@/components/floating-actions";
 import { MailIcon, PlugIcon, PlusIcon } from "@/components/icons";
 import {
   ResponsiveDialog,
@@ -92,6 +96,19 @@ export function FloatingMailComposer({
   );
   const { confirm: confirmDiscard, confirmation: discardConfirmation } = useConfirmAction();
   const [open, setOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get("compose") !== "new") return;
+    setOpen(true);
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("compose");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [searchParams, setSearchParams]);
   const [accountId, setAccountId] = useState(available[0]?.accountId ?? "");
   const [to, setTo] = useState("");
   const [cc, setCc] = useState("");
@@ -347,7 +364,11 @@ export function FloatingMailComposer({
 
   return (
     <>
-      <div className="mail-floating-compose" data-state={open ? "open" : "closed"}>
+      <FloatingActionRegion
+        align="end"
+        className="mail-floating-compose"
+        data-state={open ? "open" : "closed"}
+      >
         {!open ? (
           <FloatingActions aria-label="Mail actions">
             <FloatingActionButton
@@ -359,7 +380,7 @@ export function FloatingMailComposer({
             </FloatingActionButton>
           </FloatingActions>
         ) : null}
-      </div>
+      </FloatingActionRegion>
       <ResponsiveDialog
         onOpenChange={(nextOpen) => {
           if (!nextOpen && !confirmation) void close();

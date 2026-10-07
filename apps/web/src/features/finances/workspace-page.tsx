@@ -34,9 +34,11 @@ export function FinanceWorkspacePage() {
       return <FinanceSetupPage />;
     case "wealth":
       return <FinanceWealthPage />;
-    case "transactions":
     case "imports":
+      return <Navigate replace to="/finances/transactions?import=1" />;
     case "health":
+      return <Navigate replace to="/finances/transactions?checks=1" />;
+    case "transactions":
       return <FinancesPage key={`${section}:${location.search}`} />;
     case "":
     case undefined:

@@ -17,11 +17,6 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ItemGroup } from "@/components/ui/item";
-import {
-  WorkspaceSecondaryAppBar,
-  WorkspaceSecondaryAppBarActions,
-  WorkspaceSecondaryAppBarContent,
-} from "@/components/workspace-secondary-app-bar";
 import { WorkspaceSkeleton } from "@/components/workspace-skeleton";
 import { api } from "../../api";
 import { InlineError } from "../../components/async-state";
@@ -29,8 +24,9 @@ import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { formatMaterialDateTime } from "../../lib/date-format";
 import { invalidateMaterial } from "../../lib/material-queries";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+import { TaskContainersPage } from "./containers-page";
 import { TasksPage as LegacyTasksPage, listAllTaskLists, listAllTaskProjects } from "./page";
-import { TaskContainerActions } from "./task-navigation";
+import { useTaskPresentationParams } from "./presentation-preferences";
 import {
   availableActions,
   itemKey,
@@ -38,12 +34,7 @@ import {
   type WorkspaceAction,
   workspaceActionLabels,
 } from "./workspace-actions";
-import {
-  WorkspaceDisplay,
-  WorkspaceFilterChips,
-  WorkspaceFilters,
-  WorkspaceSort,
-} from "./workspace-controls";
+import { WorkspaceFilterChips } from "./workspace-controls";
 import {
   canonicalWorkspaceParams,
   workspaceFilterKeys,
@@ -62,6 +53,12 @@ type WorkspacePageProps = {
 export function TasksWorkspacePage(props: WorkspacePageProps) {
   const [params] = useSearchParams();
   const location = useLocation();
+  if (
+    location.pathname === "/tasks" &&
+    (params.get("view") === "lists" || params.get("view") === "projects")
+  )
+    return <TaskContainersPage kind={params.get("view") === "lists" ? "lists" : "projects"} />;
+  if (params.get("archive") === "all") return <TaskContainersPage kind="archive" />;
   if (params.has("archive"))
     return <LegacyTasksPage onEdit={props.onEdit} timeZone={props.timeZone} />;
   const canonical = canonicalWorkspaceParams(params, location.pathname === "/reminders");
@@ -71,7 +68,8 @@ export function TasksWorkspacePage(props: WorkspacePageProps) {
 }
 
 function WorkspaceContent({ onEdit, onEditReminder, timeZone }: WorkspacePageProps) {
-  const [params] = useSearchParams();
+  const params = useTaskPresentationParams();
+  const [routeParams] = useSearchParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const lists = useQuery({ queryKey: ["task-lists"], queryFn: listAllTaskLists });
@@ -99,12 +97,13 @@ function WorkspaceContent({ onEdit, onEditReminder, timeZone }: WorkspacePagePro
   if (project) query.listId = project.listId;
   useEffect(() => {
     if (!lists.isSuccess || !projects.isSuccess || global) return;
-    const next = new URLSearchParams(params);
+    const next = new URLSearchParams(routeParams);
     if (project) next.set("list", project.listId);
-    else if (params.has("project")) next.delete("project");
+    else if (routeParams.has("project")) next.delete("project");
     if (!project && (!list || list.kind === "inbox")) next.delete("list");
-    if (next.toString() !== params.toString()) navigate(workspacePath(next), { replace: true });
-  }, [global, list, lists.isSuccess, navigate, params, project, projects.isSuccess]);
+    if (next.toString() !== routeParams.toString())
+      navigate(workspacePath(next), { replace: true });
+  }, [global, list, lists.isSuccess, navigate, routeParams, project, projects.isSuccess]);
   const queryIdentity = JSON.stringify(query);
   // Container metadata enriches rows; it must not block independently readable scopes.
   // Only Inbox needs a list lookup to avoid accidentally requesting the global queue.
@@ -258,14 +257,6 @@ function WorkspaceContent({ onEdit, onEditReminder, timeZone }: WorkspacePagePro
     next.set(item.kind, item.record.id);
     navigate(workspacePath(next));
   };
-  const activeLists = lists.data?.items.filter((entry) => entry.availability === "active") ?? [];
-  const activeProjects =
-    projects.data?.items.filter(
-      (entry) =>
-        entry.availability === "active" &&
-        entry.lifecycle === "open" &&
-        activeLists.some((candidate) => candidate.id === entry.listId),
-    ) ?? [];
   const scopeName = global
     ? ({ all: "All", today: "Today", upcoming: "Upcoming", history: "History", trash: "Trash" }[
         params.get("view") as "all"
@@ -292,41 +283,14 @@ function WorkspaceContent({ onEdit, onEditReminder, timeZone }: WorkspacePagePro
   return (
     <>
       <MutationFeedback feedback={batch.feedback} />
-      <WorkspaceSecondaryAppBar aria-label="Tasks page controls">
-        <WorkspaceSecondaryAppBarContent className="flex-wrap gap-2">
-          <h1 className="font-heading text-sm font-medium">{scopeName}</h1>
-          {total !== undefined ? (
-            <span className="text-xs text-muted-foreground">
-              {total} {total === 1 ? "item" : "items"}
-            </span>
-          ) : null}
-          <WorkspaceFilterChips
-            params={params}
-            timeZone={timeZone}
-            lists={lists.data?.items ?? []}
-            projects={projects.data?.items ?? []}
-          />
-        </WorkspaceSecondaryAppBarContent>
-        <WorkspaceSecondaryAppBarActions>
-          <WorkspaceFilters
-            params={params}
-            timeZone={timeZone}
-            lists={activeLists}
-            projects={activeProjects}
-          />
-          <WorkspaceSort params={params} />
-          <WorkspaceDisplay params={params} />
-          {!global && list ? (
-            <TaskContainerActions
-              list={list}
-              {...(project ? { project } : {})}
-              lists={activeLists}
-              projects={projects.data?.items ?? []}
-            />
-          ) : null}
-        </WorkspaceSecondaryAppBarActions>
-      </WorkspaceSecondaryAppBar>
       <div className="narrow-page flex min-w-0 flex-col gap-3">
+        <WorkspaceFilterChips
+          params={params}
+          routeParams={routeParams}
+          timeZone={timeZone}
+          lists={lists.data?.items ?? []}
+          projects={projects.data?.items ?? []}
+        />
         {!global && project && (project.why || project.targetDate) ? (
           <div className="flex flex-col gap-1 text-xs text-muted-foreground">
             {project.why ? <p className="line-clamp-2">{project.why}</p> : null}
@@ -418,8 +382,8 @@ function WorkspaceContent({ onEdit, onEditReminder, timeZone }: WorkspacePagePro
         {items.length ? (
           <>
             <div className="flex min-h-8 flex-wrap items-center justify-between gap-2">
-              {selecting ? (
-                <div className="flex items-center gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                {selecting ? (
                   <Checkbox
                     id="workspace-select-visible"
                     aria-label="Select visible items"
@@ -439,20 +403,15 @@ function WorkspaceContent({ onEdit, onEditReminder, timeZone }: WorkspacePagePro
                       })
                     }
                   />
-                  <label
-                    className="text-xs text-muted-foreground"
-                    htmlFor="workspace-select-visible"
-                  >
-                    {selectedKeys.length
-                      ? `${selectedKeys.length} selected`
-                      : `Select visible${items.length > 100 ? " (first 100)" : ""}`}
-                  </label>
-                </div>
-              ) : (
-                <span className="text-xs text-muted-foreground">
-                  {items.length < (total ?? 0) ? `${items.length} of ${total} shown` : ""}
+                ) : null}
+                <span className="text-xs text-muted-foreground" aria-live="polite">
+                  {total !== undefined
+                    ? `${total.toLocaleString()} ${total === 1 ? "item" : "items"}`
+                    : `${items.length.toLocaleString()} shown`}
+                  {selectedKeys.length ? ` • ${selectedKeys.length.toLocaleString()} selected` : ""}
+                  {items.length < (total ?? 0) ? ` • ${items.length.toLocaleString()} shown` : ""}
                 </span>
-              )}
+              </div>
               <Button
                 size="sm"
                 variant="ghost"

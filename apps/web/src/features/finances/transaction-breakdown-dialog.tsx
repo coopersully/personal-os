@@ -1,6 +1,8 @@
 import type { FinanceCategory, FinanceTransaction } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
+import { CurrencyInput } from "@/components/currency-input";
+import { TrashIcon } from "@/components/icons";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,8 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { api } from "../../api.js";
@@ -71,6 +72,12 @@ export function TransactionBreakdownDialog({
     new Set(activeRows.map((row) => `${row.categoryId}:${row.treatment}`)).size !==
     activeRows.length;
   const valid =
+    rows.every(
+      (row) =>
+        row.amount === "" ||
+        (/^(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(row.amount) &&
+          Number.isFinite(Number(row.amount))),
+    ) &&
     Boolean(transaction) &&
     remainingCents === 0 &&
     activeRows.length > 0 &&
@@ -111,86 +118,88 @@ export function TransactionBreakdownDialog({
   const remaining = useMemo(() => formatMoney(Math.abs(remainingCents) / 100), [remainingCents]);
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent>
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Split {transaction?.merchant ?? "transaction"}</DialogTitle>
           <DialogDescription>
             Assign every cent once. Mark only the portion someone should repay as reimbursable.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4">
+        <div className="grid min-w-0 gap-4">
           {rows.map((row, index) => (
-            <div
-              className="grid gap-3 rounded-md border p-3 sm:grid-cols-[1fr_8rem_9rem_auto]"
-              key={row.id}
-            >
-              <Field>
-                <FieldLabel htmlFor={`breakdown-category-${index}`}>Category</FieldLabel>
-                <NativeSelect
-                  id={`breakdown-category-${index}`}
-                  onChange={(event) =>
-                    setRows((current) =>
-                      current.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, categoryId: event.target.value } : item,
-                      ),
-                    )
+            <FieldSet className="min-w-0 rounded-lg bg-card p-4" key={row.id}>
+              <div className="flex items-center justify-between gap-2">
+                <FieldLegend className="mb-0">Allocation {index + 1}</FieldLegend>
+                <Button
+                  aria-label={`Remove allocation ${index + 1}`}
+                  disabled={rows.length === 1}
+                  onClick={() =>
+                    setRows((current) => current.filter((_, itemIndex) => itemIndex !== index))
                   }
-                  value={row.categoryId}
+                  size="icon-sm"
+                  type="button"
+                  variant="ghost"
                 >
-                  {categories.map((category) => (
-                    <NativeSelectOption key={category.id} value={category.id}>
-                      {category.name}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`breakdown-amount-${index}`}>Amount</FieldLabel>
-                <Input
-                  id={`breakdown-amount-${index}`}
-                  inputMode="decimal"
-                  onChange={(event) =>
-                    setRows((current) =>
-                      current.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, amount: event.target.value } : item,
-                      ),
-                    )
-                  }
-                  value={row.amount}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`breakdown-treatment-${index}`}>Treatment</FieldLabel>
-                <NativeSelect
-                  id={`breakdown-treatment-${index}`}
-                  onChange={(event) =>
-                    setRows((current) =>
-                      current.map((item, itemIndex) =>
-                        itemIndex === index
-                          ? { ...item, treatment: event.target.value as Row["treatment"] }
-                          : item,
-                      ),
-                    )
-                  }
-                  value={row.treatment}
-                >
-                  <NativeSelectOption value="personal">Mine</NativeSelectOption>
-                  <NativeSelectOption value="reimbursable">Reimbursable</NativeSelectOption>
-                </NativeSelect>
-              </Field>
-              <Button
-                aria-label={`Remove allocation ${index + 1}`}
-                disabled={rows.length === 1}
-                onClick={() =>
-                  setRows((current) => current.filter((_, itemIndex) => itemIndex !== index))
-                }
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                Remove
-              </Button>
-            </div>
+                  <TrashIcon />
+                </Button>
+              </div>
+              <FieldGroup className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <Field className="min-w-0">
+                  <FieldLabel htmlFor={`breakdown-category-${index}`}>Category</FieldLabel>
+                  <NativeSelect
+                    id={`breakdown-category-${index}`}
+                    onChange={(event) =>
+                      setRows((current) =>
+                        current.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, categoryId: event.target.value } : item,
+                        ),
+                      )
+                    }
+                    value={row.categoryId}
+                  >
+                    {categories.map((category) => (
+                      <NativeSelectOption key={category.id} value={category.id}>
+                        {category.name}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </Field>
+                <Field className="min-w-0">
+                  <FieldLabel htmlFor={`breakdown-amount-${index}`}>Amount</FieldLabel>
+                  <CurrencyInput
+                    id={`breakdown-amount-${index}`}
+                    inputMode="decimal"
+                    onValueChange={(value) =>
+                      setRows((current) =>
+                        current.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, amount: value } : item,
+                        ),
+                      )
+                    }
+                    value={row.amount}
+                  />
+                </Field>
+                <Field className="min-w-0">
+                  <FieldLabel htmlFor={`breakdown-treatment-${index}`}>Treatment</FieldLabel>
+                  <NativeSelect
+                    id={`breakdown-treatment-${index}`}
+                    onChange={(event) =>
+                      setRows((current) =>
+                        current.map((item, itemIndex) =>
+                          itemIndex === index
+                            ? { ...item, treatment: event.target.value as Row["treatment"] }
+                            : item,
+                        ),
+                      )
+                    }
+                    value={row.treatment}
+                  >
+                    <NativeSelectOption value="personal">Mine</NativeSelectOption>
+                    <NativeSelectOption value="reimbursable">Reimbursable</NativeSelectOption>
+                  </NativeSelect>
+                </Field>
+              </FieldGroup>
+            </FieldSet>
           ))}
           <Button
             onClick={() =>

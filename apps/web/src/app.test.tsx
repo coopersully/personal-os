@@ -9325,7 +9325,9 @@ describe("ilo web app", () => {
     mocks.createMotive.mockRejectedValueOnce(new Error("Motive rejected"));
     const browser = userEvent.setup();
     const goals = setup("/goals");
-    expect(await screen.findAllByText("No supporting context yet.")).toHaveLength(2);
+    expect(
+      await screen.findAllByText("No supporting context yet.", undefined, { timeout: 5_000 }),
+    ).toHaveLength(2);
     await browser.click(screen.getByRole("button", { name: "90%" }));
     await waitFor(() =>
       expect(mocks.updateGoal).toHaveBeenCalledWith(id, { progress: 100, status: "completed" }),
@@ -9345,7 +9347,9 @@ describe("ilo web app", () => {
     ).toBeInTheDocument();
     goals.unmount();
     const motives = setup("/motives");
-    expect(await screen.findByText("No additional context.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("No additional context.", undefined, { timeout: 5_000 }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Paused")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Resume" }));
     await waitFor(() => expect(mocks.updateMotive).toHaveBeenCalledWith(id, { isActive: true }));

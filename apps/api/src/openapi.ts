@@ -807,7 +807,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
             }),
             queryParameter("status", {
               type: "string",
-              enum: ["all", "open", "completed", "cancelled", "archived"],
+              enum: ["all", "open", "open_and_completed", "completed", "cancelled", "archived"],
             }),
             queryParameter("listId", { format: "uuid", type: "string" }),
             queryParameter("projectId", { format: "uuid", type: "string" }),

@@ -441,6 +441,16 @@ it("opens the specific plan requested by workspace search", async () => {
 it("edits linked proposal records and removes optional rows without losing descriptions", async () => {
   mount();
   fireEvent.click(await screen.findByRole("button", { name: "Revise plan" }));
+  const editor = within(screen.getByRole("dialog", { name: "Revise version 3" }));
+  // Avoid scanning every control's accessible name for each action in this large form.
+  const clickEditorButton = (name: string) => {
+    const button = editor.getByText(name, { exact: true });
+    expect(button).toHaveRole("button");
+    expect(button).toHaveAccessibleName(name);
+    expect(button).toBeVisible();
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+  };
   fireEvent.change(screen.getByLabelText("Effective month"), { target: { value: "2026-10" } });
   fireEvent.change(screen.getByLabelText("Resource 1 description"), {
     target: { value: "Updated pay" },
@@ -454,10 +464,10 @@ it("edits linked proposal records and removes optional rows without losing descr
     target: { value: "Revised food and housing" },
   });
   fireEvent.change(screen.getByLabelText("Allocation 3 account"), { target: { value: accountId } });
-  fireEvent.click(screen.getByRole("button", { name: "Remove resource 4" }));
-  fireEvent.click(screen.getByRole("button", { name: "Remove allocation 5" }));
+  clickEditorButton("Remove resource 4");
+  clickEditorButton("Remove allocation 5");
   fireEvent.change(screen.getByLabelText("Allocation 1 amount"), { target: { value: "3400" } });
-  fireEvent.click(screen.getByRole("button", { name: "Save proposal" }));
+  clickEditorButton("Save proposal");
   await waitFor(() => expect(api.reviseFinanceBudget).toHaveBeenCalled());
   expect(api.reviseFinanceBudget).toHaveBeenLastCalledWith(
     expect.objectContaining({

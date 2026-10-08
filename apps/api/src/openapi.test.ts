@@ -404,22 +404,18 @@ describe("Mail OpenAPI surface", () => {
 it("documents all workspace preference writes without supplying PATCH defaults", () => {
   const operation = taskOperation("/v1/workspaces/{workspace}/settings", "patch");
   const schema = operation.requestBody?.content?.["application/json"]?.schema as JsonSchema;
-  const preferences = schema.properties?.preferences;
-  expect(preferences?.properties).toMatchObject({
-    financeTransactionView: { enum: ["table", "cards"] },
-    financeTransactionGroup: {
-      enum: ["none", "date", "category", "merchant", "direction", "posting"],
-    },
-    mailConversationLayout: { enum: ["split", "single"] },
-    pinnedListIds: { type: "array" },
-    pinnedProjectIds: { type: "array" },
-    autoFollowToday: { type: "boolean" },
-    snapToFollow: { type: "boolean" },
-    taskRowDetails: { type: "array" },
-  });
-  expect(preferences?.required).toBeUndefined();
-  expect(preferences?.additionalProperties).toBe(false);
-  expect(
-    Object.values(preferences?.properties ?? {}).every((field) => field.default === undefined),
-  ).toBe(true);
+  const variants = (schema as JsonSchema & { anyOf: JsonSchema[] }).anyOf;
+  expect(variants).toHaveLength(4);
+  for (const variant of variants) {
+    const preferences = variant.properties?.preferences;
+    expect(preferences?.required).toBeUndefined();
+    expect(preferences?.additionalProperties).toBe(false);
+    expect(
+      Object.values(preferences?.properties ?? {}).every((field) => field.default === undefined),
+    ).toBe(true);
+  }
+  expect(variants[0]?.properties?.preferences?.properties).toHaveProperty("weekStartsOn");
+  expect(variants[1]?.properties?.preferences?.properties).toHaveProperty("defaultCaptureListId");
+  expect(variants[2]?.properties?.preferences?.properties).not.toHaveProperty("calendarView");
+  expect(variants[3]?.properties?.preferences?.properties).toHaveProperty("spendAccountIds");
 });

@@ -4,11 +4,13 @@ import {
   financeToolResultSchema,
   idSchema,
   maintenanceRunStatusSchema,
+  resetFinanceNotificationPreferencesSchema,
   ritualActionInputSchema,
   ritualDefinitionInputSchema,
   ritualResponseInputSchema,
   taskWorkspacePageSchema,
   updateWorkspaceSettingsSchema,
+  workspaceSettingsSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
 
@@ -309,6 +311,36 @@ export function createOpenApiDocument(apiBaseUrl: string) {
           },
         },
       },
+      "/v1/texting/notifications/preferences/finances": {
+        delete: {
+          security,
+          summary: "Reset Finance notification overrides to global preferences; human session only",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: z.toJSONSchema(resetFinanceNotificationPreferencesSchema),
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Finance now inherits global notification preferences",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: { scope: { const: "finances" }, inherited: { const: true } },
+                    required: ["scope", "inherited"],
+                  },
+                },
+              },
+            },
+            403: { description: "Interactive Texting write and Finance read access required" },
+            409: { description: "Override missing or revision changed" },
+          },
+        },
+      },
       "/v1/workspaces/{workspace}/settings": {
         parameters: [
           {
@@ -323,7 +355,9 @@ export function createOpenApiDocument(apiBaseUrl: string) {
           summary: "Read account-owned workspace preferences",
           responses: {
             200: {
-              description: "Preferences and revision; revision zero denotes untouched defaults",
+              description:
+                "Resolved workspace-specific preferences and revision; revision zero denotes untouched defaults",
+              content: { "application/json": { schema: z.toJSONSchema(workspaceSettingsSchema) } },
             },
           },
         },
@@ -339,7 +373,10 @@ export function createOpenApiDocument(apiBaseUrl: string) {
             },
           },
           responses: {
-            200: { description: "Saved preferences and incremented revision" },
+            200: {
+              description: "Saved preferences and incremented revision",
+              content: { "application/json": { schema: z.toJSONSchema(workspaceSettingsSchema) } },
+            },
             403: { description: "Interactive workspace write access required" },
             409: { description: "Preferences changed; reload before retrying" },
           },

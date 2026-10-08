@@ -1,3 +1,4 @@
+import { resolveWorkspaceSettings } from "@personal-os/domain";
 import { TooltipProvider } from "@/components/ui/tooltip";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
@@ -17,6 +18,8 @@ import {
 } from "./page.js";
 
 const api = vi.hoisted(() => ({
+  getWorkspaceSettings: vi.fn(),
+  updateWorkspaceSettings: vi.fn(),
   createFinanceAccount: vi.fn(),
   createFinanceBudget: vi.fn(),
   createFinanceTransaction: vi.fn(),
@@ -72,7 +75,16 @@ function renderPage(path: string) {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  sessionStorage.clear();
+  let savedPreferences = resolveWorkspaceSettings("finances");
+  api.getWorkspaceSettings.mockImplementation(async () => savedPreferences);
+  api.updateWorkspaceSettings.mockImplementation(async (_workspace, input) => {
+    savedPreferences = resolveWorkspaceSettings("finances", {
+      ...savedPreferences.preferences,
+      ...input.preferences,
+      revision: savedPreferences.revision + 1,
+    });
+    return savedPreferences;
+  });
   const overview = {
     accounts: [],
     budgets: [],
@@ -693,23 +705,13 @@ describe("Finance section states", () => {
     expect(await screen.findByRole("button", { name: "Previous" })).toBeDisabled();
   }, 10_000);
 
-  it("recovers browser account scopes and navigates unplanned budget months", async () => {
-    sessionStorage.setItem("finance-account-scope:spend", "not-json");
-    const malformed = renderPage("/finances");
-    expect(await screen.findByText("Financial position")).toBeVisible();
-    malformed.unmount();
-
-    sessionStorage.setItem("finance-account-scope:spend", JSON.stringify("not-an-array"));
-    const wrongShape = renderPage("/finances");
-    expect(await screen.findByText("Financial position")).toBeVisible();
-    wrongShape.unmount();
-
+  it("persists account scopes across page loads and navigates unplanned budget months", async () => {
     const overview = {
       accounts: [
         {
           balance: 2500,
           createdAt: "2026-08-01T12:00:00.000Z",
-          id: "investment",
+          id: "00000000-0000-4000-8000-000000000123",
           institution: "Broker",
           kind: "investment",
           lastSyncedAt: null,
@@ -726,7 +728,16 @@ describe("Finance section states", () => {
       spendingThisMonth: 100,
       transactions: [],
     };
-    sessionStorage.setItem("finance-account-scope:spend", JSON.stringify([]));
+    let selection = resolveWorkspaceSettings("finances", { spendAccountIds: [], revision: 1 });
+    api.getWorkspaceSettings.mockImplementation(async () => selection);
+    api.updateWorkspaceSettings.mockImplementation(async (_workspace, input) => {
+      selection = resolveWorkspaceSettings("finances", {
+        ...selection.preferences,
+        ...input.preferences,
+        revision: selection.revision + 1,
+      });
+      return selection;
+    });
     api.getFinanceOverview.mockResolvedValue(overview);
     api.getFinanceOverviewForMonth.mockResolvedValue(overview);
     api.getFinanceOverviewForAccounts.mockResolvedValue({ ...overview, spendingThisMonth: 0 });
@@ -766,11 +777,31 @@ describe("Finance section states", () => {
       await screen.findByRole("dialog", { name: "Accounts included in spending" }),
     ).toBeVisible();
     fireEvent.click(screen.getByLabelText(/Brokerage/));
-    expect(sessionStorage.getItem("finance-account-scope:spend")).toBe(
-      JSON.stringify(["investment"]),
+    await waitFor(() =>
+      expect(api.updateWorkspaceSettings).toHaveBeenCalledWith("finances", {
+        expectedRevision: 1,
+        preferences: { spendAccountIds: ["00000000-0000-4000-8000-000000000123"] },
+      }),
     );
+    await waitFor(() => expect(screen.getByLabelText(/Brokerage/)).toBeChecked());
     scoped.unmount();
 
+    const restored = renderPage("/finances");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Spent this month: configure included accounts" }),
+    );
+    await waitFor(() => expect(screen.getByLabelText(/Brokerage/)).toBeChecked());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Use all eligible accounts" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Use all eligible accounts" }));
+    await waitFor(() =>
+      expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith("finances", {
+        expectedRevision: 2,
+        preferences: { spendAccountIds: null },
+      }),
+    );
+    restored.unmount();
     const budgets = renderPage("/finances/budgets");
     expect(await screen.findByRole("button", { name: "Next month" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Next month" }));
@@ -1142,6 +1173,22 @@ describe("Finance section states", () => {
     fireEvent.click(screen.getByLabelText(/Unreported cash/));
     overviewView.unmount();
 
+    const restored = renderPage("/finances");
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Spent this month: configure included accounts" }),
+    );
+    await waitFor(() => expect(screen.getByLabelText(/Brokerage/)).toBeChecked());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Use all eligible accounts" })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Use all eligible accounts" }));
+    await waitFor(() =>
+      expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith("finances", {
+        expectedRevision: 2,
+        preferences: { spendAccountIds: null },
+      }),
+    );
+    restored.unmount();
     const budgets = renderPage("/finances/budgets");
     expect(await screen.findByText("Dining")).toBeVisible();
     fireEvent.click(

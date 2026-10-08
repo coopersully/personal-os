@@ -417,13 +417,15 @@ export function createApiClient(options: ClientOptions) {
         ...(signal ? { signal } : {}),
       });
     },
-    async getWorkspaceSettings(workspace: SearchableWorkspace): Promise<WorkspaceSettings> {
+    async getWorkspaceSettings<W extends SearchableWorkspace>(
+      workspace: W,
+    ): Promise<WorkspaceSettings<W>> {
       return request(`/v1/workspaces/${workspace}/settings`);
     },
-    async updateWorkspaceSettings(
-      workspace: SearchableWorkspace,
-      input: UpdateWorkspaceSettings,
-    ): Promise<WorkspaceSettings> {
+    async updateWorkspaceSettings<W extends SearchableWorkspace>(
+      workspace: W,
+      input: UpdateWorkspaceSettings<NoInfer<W>>,
+    ): Promise<WorkspaceSettings<W>> {
       return request(`/v1/workspaces/${workspace}/settings`, {
         method: "PATCH",
         body: JSON.stringify(input),

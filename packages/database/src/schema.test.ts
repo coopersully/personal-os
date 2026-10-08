@@ -493,6 +493,9 @@ describe("database schema contracts", () => {
       "0098_mail_layout_preferences",
       "0099_mail_conversation_layout",
       "0100_finance_transaction_preferences",
+      "0101_calendar_creation_preferences",
+      "0102_task_capture_preferences",
+      "0103_finance_display_account_preferences",
     ]);
   });
 

@@ -167,7 +167,7 @@ import { lockReimbursementTopology } from "./finance-reimbursement-locks.js";
 import { createFinanceReimbursementService } from "./finance-reimbursement-service.js";
 import { auditAttentionItemMetadata, serializeAttentionItem } from "./serialization.js";
 import type { Principal, RequestLog } from "./types.js";
-import { createWorkspaceSettingsService } from "./workspace-search/settings.js";
+import { createWorkspaceSettingsService } from "./workspace-settings/service.js";
 
 type MaintenanceMutationAttribution = {
   idempotencyKey: string;

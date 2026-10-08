@@ -64,6 +64,12 @@ export const saveNotificationPreferencesSchema = z
   })
   .strict();
 
+export const resetFinanceNotificationPreferencesSchema = z
+  .object({
+    expectedRevision: z.int().positive(),
+  })
+  .strict();
+
 export type NotificationAttemptHistory = {
   actionRevision: string;
   state: "accepted" | "submitting" | "uncertain" | "failed";

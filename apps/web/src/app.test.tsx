@@ -3,7 +3,12 @@ import { toast } from "sonner";
 import "@testing-library/jest-dom/vitest";
 import { readFileSync } from "node:fs";
 import { ApiClientError } from "@personal-os/api-client";
-import type { CalendarStatus, UpdateAccountSetupInput, User } from "@personal-os/domain";
+import {
+  type CalendarStatus,
+  getDefaultWorkspacePreferences,
+  type UpdateAccountSetupInput,
+  type User,
+} from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
@@ -709,14 +714,8 @@ function defaults() {
     workspace,
     revision: 0,
     preferences: {
-      pinnedListIds: [secondId],
-      pinnedProjectIds: [thirdId],
-      calendarView: "auto",
-      showWeekends: true,
-      autoFollowToday: true,
-      snapToFollow: true,
-      followSnapSensitivity: "balanced",
-      includeArchivedInSearch: true,
+      ...getDefaultWorkspacePreferences(workspace),
+      ...(workspace === "tasks" ? { pinnedListIds: [secondId], pinnedProjectIds: [thirdId] } : {}),
     },
   }));
   mocks.updateWorkspaceSettings.mockImplementation(async (workspace, input) => ({
@@ -7251,6 +7250,29 @@ describe("ilo web app", () => {
     expect(screen.getByRole("textbox", { name: "Ends minute" })).toHaveValue("15");
   });
 
+  it("honors a full-day default duration for keyboard event creation", async () => {
+    mocks.listEvents.mockResolvedValue([]);
+    mocks.getWorkspaceSettings.mockResolvedValue({
+      workspace: "calendar",
+      revision: 1,
+      preferences: {
+        ...getDefaultWorkspacePreferences("calendar"),
+        defaultEventDurationMinutes: 1440,
+      },
+    });
+    setup("/calendar?date=2026-07-13&view=week");
+    const tuesday = await screen.findByRole("region", { name: "Tuesday timeline" });
+    const target = within(tuesday).getByRole("button", {
+      name: "Create an event range on Tuesday with the keyboard",
+    });
+    fireEvent.keyDown(target, { key: "Enter" });
+    fireEvent.keyDown(target, { key: "Enter" });
+    expect(await screen.findByRole("button", { name: "Starts date, Jul 14" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ends date, Jul 15" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Starts hour" })).toHaveValue("9");
+    expect(screen.getByRole("textbox", { name: "Ends hour" })).toHaveValue("9");
+  });
+
   it("cancels pointer range creation with Escape and creates a keyboard-selected range", async () => {
     mocks.listEvents.mockResolvedValue([]);
     setup("/calendar?date=2026-07-13&view=week");
@@ -7310,7 +7332,11 @@ describe("ilo web app", () => {
   it("labels a range ending at midnight as 12 AM", async () => {
     mocks.listEvents.mockResolvedValue([]);
     setup("/calendar?date=2026-07-13&view=week");
-    const tuesday = await screen.findByRole("region", { name: "Tuesday timeline" });
+    const tuesday = await screen.findByRole(
+      "region",
+      { name: "Tuesday timeline" },
+      { timeout: 5000 },
+    );
     Object.defineProperty(tuesday, "getBoundingClientRect", {
       configurable: true,
       value: () => ({ bottom: 1152, height: 1152, left: 0, right: 200, top: 0, width: 200 }),
@@ -7463,8 +7489,14 @@ describe("ilo web app", () => {
     fireEvent.dragStart(readonly, { dataTransfer: readonlyTransfer });
     dropCalendarEvent(monday, readonlyTransfer, 675);
     expect(mocks.updateEvent).toHaveBeenCalledTimes(callsBeforeReadonlyDrop);
+    // Keep the read-only hold independent of Radix's touch context-menu timer.
+    const mousePointerDown = () => {
+      const pointer = createEvent.pointerDown(readonly);
+      Object.defineProperty(pointer, "pointerType", { value: "mouse" });
+      fireEvent(readonly, pointer);
+    };
     fireEvent.pointerCancel(readonly);
-    fireEvent.pointerDown(readonly);
+    mousePointerDown();
     expect(
       await screen.findByRole("tooltip", {
         name: "Readonly Google is read-only, so this event can’t be moved.",
@@ -7473,11 +7505,11 @@ describe("ilo web app", () => {
     expect(readonly).toHaveClass("is-move-blocked");
     fireEvent.click(readonly);
     expect(screen.queryByText(/write through to Google Calendar/)).not.toBeInTheDocument();
-    fireEvent.pointerDown(readonly);
+    mousePointerDown();
     await new Promise((resolve) => window.setTimeout(resolve, 400));
     fireEvent.click(readonly);
     expect(screen.queryByText(/write through to Google Calendar/)).not.toBeInTheDocument();
-    fireEvent.pointerDown(readonly);
+    mousePointerDown();
     fireEvent.click(readonly);
     expect(await screen.findByText(/write through to Google Calendar/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit Event" })).toBeDisabled();

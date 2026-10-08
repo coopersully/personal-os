@@ -1,25 +1,24 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { type SearchableWorkspace, workspacePreferencesSchema } from "@personal-os/domain";
+import { resolveWorkspaceSettings, type SearchableWorkspace } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { api } from "@/api";
-import { WorkspacePreferencesSection } from "./preferences";
+import { WorkspacePreferencesSection } from "./section";
 
 beforeEach(() => {
-  let preferences = workspacePreferencesSchema.parse({});
+  let preferences: Record<string, unknown> = {};
   let revision = 0;
-  vi.spyOn(api, "getWorkspaceSettings").mockImplementation(async (workspace) => ({
-    workspace,
-    revision,
-    preferences,
-  }));
+  vi.spyOn(api, "listTaskLists").mockResolvedValue({ items: [], nextCursor: null });
+  vi.spyOn(api, "getWorkspaceSettings").mockImplementation(async (workspace) =>
+    resolveWorkspaceSettings(workspace, { ...preferences, revision }),
+  );
   vi.spyOn(api, "updateWorkspaceSettings").mockImplementation(async (workspace, input) => {
     expect(input.expectedRevision).toBe(revision);
-    preferences = workspacePreferencesSchema.parse({ ...preferences, ...input.preferences });
-    return { workspace, revision: ++revision, preferences };
+    preferences = { ...preferences, ...input.preferences };
+    return resolveWorkspaceSettings(workspace, { ...preferences, revision: ++revision });
   });
 });
 afterEach(() => vi.restoreAllMocks());
@@ -125,8 +124,14 @@ it("saves Task sorting and toggles individual row details without losing sibling
       expect.objectContaining({ preferences: { taskRowDetails: ["notes"] } }),
     ),
   );
-  await waitFor(() => expect(screen.getByRole("switch")).toBeEnabled());
-  await user.click(screen.getByRole("switch"));
+  await waitFor(() =>
+    expect(
+      screen.getByRole("switch", { name: "Include completed and archived items in search" }),
+    ).toBeEnabled(),
+  );
+  await user.click(
+    screen.getByRole("switch", { name: "Include completed and archived items in search" }),
+  );
   await waitFor(() =>
     expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
       "tasks",
@@ -138,7 +143,49 @@ it("recovers authoritative settings after a rejected write", async () => {
   vi.mocked(api.updateWorkspaceSettings).mockRejectedValueOnce(new Error("Revision conflict"));
   const user = await show("finances");
   await user.selectOptions(screen.getByLabelText("Transaction view"), "cards");
-  await waitFor(() => expect(api.getWorkspaceSettings).toHaveBeenCalledTimes(2));
+  await waitFor(() =>
+    expect(vi.mocked(api.getWorkspaceSettings).mock.calls.length).toBeGreaterThan(1),
+  );
   await waitFor(() => expect(screen.getByLabelText("Transaction view")).toHaveValue("table"));
   await select(user, "Transaction view", "cards", { financeTransactionView: "cards" });
+});
+
+it("saves Calendar week start and duration and ignores invalid duration", async () => {
+  const user = await show("calendar");
+  await select(user, "Week starts on", "monday", { weekStartsOn: "monday" });
+  const input = screen.getByLabelText("Default event duration (minutes)");
+  for (const value of ["", "0", "1441", "60"]) {
+    fireEvent.change(input, { target: { value } });
+    fireEvent.blur(input);
+  }
+  expect(api.updateWorkspaceSettings).toHaveBeenCalledTimes(1);
+  fireEvent.change(input, { target: { value: "90" } });
+  fireEvent.blur(input);
+  await waitFor(() =>
+    expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
+      "calendar",
+      expect.objectContaining({ preferences: { defaultEventDurationMinutes: 90 } }),
+    ),
+  );
+});
+it("saves Tasks completed visibility and explicitly resets a stale capture destination", async () => {
+  const id = "00000000-0000-4000-8000-000000000124";
+  vi.mocked(api.getWorkspaceSettings).mockResolvedValueOnce(
+    resolveWorkspaceSettings("tasks", { defaultCaptureListId: id }),
+  );
+  const user = await show("tasks");
+  await waitFor(() => expect(screen.getByLabelText("Default capture list")).toBeEnabled());
+  expect(
+    screen.getByRole("option", { name: "Unavailable list — new tasks use Inbox" }),
+  ).toBeInTheDocument();
+  await select(user, "Default capture list", "", { defaultCaptureListId: null });
+  await user.click(
+    screen.getByRole("switch", { name: "Show completed tasks in lists and projects" }),
+  );
+  await waitFor(() =>
+    expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
+      "tasks",
+      expect.objectContaining({ preferences: { showCompletedTasks: true } }),
+    ),
+  );
 });

@@ -7740,7 +7740,7 @@ describe("ilo web app", () => {
     view.unmount();
   });
 
-  it("navigates calendar, reminders, activity, and settings workflows", async () => {
+  it("navigates calendar views, follow state, event controls, and dates", async () => {
     const view = setup("/calendar");
     const browser = userEvent.setup();
     expect(await screen.findByRole("button", { name: "Calendar view: week" })).toBeInTheDocument();
@@ -7862,7 +7862,12 @@ describe("ilo web app", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     await browser.click(screen.getByRole("button", { name: "View Monday, July 13, 2026" }));
     expect(await screen.findByRole("button", { name: "Calendar view: day" })).toBeInTheDocument();
+  }, 30_000);
 
+  it("navigates Calendar through Tasks and Today to Settings activity", async () => {
+    const view = setup("/calendar");
+    const browser = userEvent.setup();
+    expect(await screen.findByRole("button", { name: "Calendar view: week" })).toBeInTheDocument();
     await browser.click(
       within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
         name: "Tasks",
@@ -7928,7 +7933,14 @@ describe("ilo web app", () => {
     await browser.type(activitySearch, "no matching audit material");
     expect(await screen.findByText("No matching activity")).toBeInTheDocument();
     await browser.clear(activitySearch);
+  });
 
+  it("manages calendars and connector accounts from Settings", async () => {
+    setup("/settings?section=activity");
+    const browser = userEvent.setup();
+    const accountSidebar = await screen.findByRole("complementary", {
+      name: "Account utility navigation",
+    });
     await browser.click(within(accountSidebar).getByRole("link", { name: "Profile" }));
     expect(await screen.findByRole("heading", { name: "Profile" })).toBeInTheDocument();
     const settingsSidebar = screen.getByRole("complementary", {
@@ -7965,8 +7977,12 @@ describe("ilo web app", () => {
     await waitFor(() =>
       expect(mocks.deleteConnector).toHaveBeenCalledWith(secondId, expect.anything()),
     );
+  });
 
-    await browser.click(screen.getByRole("link", { name: "Open Connected agents" }));
+  it("creates and revokes a connected-agent token", async () => {
+    setup("/settings?section=connections");
+    const browser = userEvent.setup();
+    await browser.click(await screen.findByRole("link", { name: "Open Connected agents" }));
     expect(await screen.findByDisplayValue("https://mcp.example.com/mcp")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Set up a local token" }));
     await browser.clear(screen.getByLabelText("Token name"));
@@ -7994,6 +8010,16 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: "Revoke access" }));
     await waitFor(() =>
       expect(mocks.deleteAccessToken).toHaveBeenCalledWith(id, expect.anything()),
+    );
+  });
+
+  it("updates profile, appearance, security, authorization, and logout", async () => {
+    setup("/settings?section=agent-connections");
+    const browser = userEvent.setup();
+    const settingsNavigation = within(
+      await screen.findByRole("complementary", {
+        name: "Account utility navigation",
+      }),
     );
     await browser.click(settingsNavigation.getByRole("link", { name: "Profile" }));
     await browser.clear(screen.getByLabelText("First name"));
@@ -8046,7 +8072,7 @@ describe("ilo web app", () => {
     expect(screen.getByRole("button", { name: "Logging out…" })).toBeDisabled();
     resolveLogout?.();
     await waitFor(() => expect(screen.getByRole("button", { name: "Log out" })).toBeEnabled());
-  }, 30_000);
+  });
 
   it("defaults to a compact calendar view on small screens and preserves view navigation", async () => {
     const originalMatchMedia = window.matchMedia;
@@ -8920,13 +8946,16 @@ describe("ilo web app", () => {
 
     Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
     const desktopView = setup("/unknown");
-    expect(await screen.findByRole("heading", { name: "To take care of" })).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Keep window on top" }));
-    await waitFor(() => expect(mocks.setAlwaysOnTop).toHaveBeenCalledWith(true));
-    await browser.click(screen.getByRole("button", { name: "Keep window on top" }));
-    await waitFor(() => expect(mocks.setAlwaysOnTop).toHaveBeenCalledWith(false));
-    desktopView.unmount();
-    Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+    try {
+      expect(await screen.findByRole("heading", { name: "To take care of" })).toBeInTheDocument();
+      await browser.click(screen.getByRole("button", { name: "Keep window on top" }));
+      await waitFor(() => expect(mocks.setAlwaysOnTop).toHaveBeenCalledWith(true));
+      await browser.click(screen.getByRole("button", { name: "Keep window on top" }));
+      await waitFor(() => expect(mocks.setAlwaysOnTop).toHaveBeenCalledWith(false));
+    } finally {
+      desktopView.unmount();
+      Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+    }
 
     mocks.listEvents.mockRejectedValueOnce(new Error("week unavailable"));
     const calendarView = setup("/calendar");

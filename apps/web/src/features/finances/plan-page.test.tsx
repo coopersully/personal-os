@@ -442,6 +442,22 @@ it("edits linked proposal records and removes optional rows without losing descr
   mount();
   fireEvent.click(await screen.findByRole("button", { name: "Revise plan" }));
   const editor = within(screen.getByRole("dialog", { name: "Revise version 3" }));
+  // Resolve the editor's native label association without scanning every DOM node.
+  const editorField = (name: string) => {
+    const label = editor.getByText(name, { exact: true, selector: "label" });
+    expect(label).toBeVisible();
+    if (!(label instanceof HTMLLabelElement) || !label.control)
+      throw new Error(`Expected a native control associated with ${name}.`);
+    const control = label.control;
+    expect(control).toHaveAccessibleName(name);
+    expect(control).toBeVisible();
+    expect(control).toBeEnabled();
+    if (control instanceof HTMLSelectElement) expect(control).toHaveRole("combobox");
+    else if (control instanceof HTMLInputElement && control.type === "month")
+      expect(control).toHaveAttribute("type", "month");
+    else expect(control).toHaveRole("textbox");
+    return control;
+  };
   // Avoid scanning every control's accessible name for each action in this large form.
   const clickEditorButton = (name: string) => {
     const button = editor.getByText(name, { exact: true });
@@ -451,22 +467,22 @@ it("edits linked proposal records and removes optional rows without losing descr
     expect(button).toBeEnabled();
     fireEvent.click(button);
   };
-  fireEvent.change(screen.getByLabelText("Effective month"), { target: { value: "2026-10" } });
-  fireEvent.change(screen.getByLabelText("Resource 1 description"), {
+  fireEvent.change(editorField("Effective month"), { target: { value: "2026-10" } });
+  fireEvent.change(editorField("Resource 1 description"), {
     target: { value: "Updated pay" },
   });
-  fireEvent.blur(screen.getByLabelText("Resource 1 amount"));
-  fireEvent.change(screen.getByLabelText("Allocation 1 category"), { target: { value: "" } });
-  fireEvent.change(screen.getByLabelText("Allocation 1 category label"), {
+  fireEvent.blur(editorField("Resource 1 amount"));
+  fireEvent.change(editorField("Allocation 1 category"), { target: { value: "" } });
+  fireEvent.change(editorField("Allocation 1 category label"), {
     target: { value: "Household basics" },
   });
-  fireEvent.change(screen.getByLabelText("Allocation 1 description"), {
+  fireEvent.change(editorField("Allocation 1 description"), {
     target: { value: "Revised food and housing" },
   });
-  fireEvent.change(screen.getByLabelText("Allocation 3 account"), { target: { value: accountId } });
+  fireEvent.change(editorField("Allocation 3 account"), { target: { value: accountId } });
   clickEditorButton("Remove resource 4");
   clickEditorButton("Remove allocation 5");
-  fireEvent.change(screen.getByLabelText("Allocation 1 amount"), { target: { value: "3400" } });
+  fireEvent.change(editorField("Allocation 1 amount"), { target: { value: "3400" } });
   clickEditorButton("Save proposal");
   await waitFor(() => expect(api.reviseFinanceBudget).toHaveBeenCalled());
   expect(api.reviseFinanceBudget).toHaveBeenLastCalledWith(

@@ -1452,8 +1452,15 @@ export function FinancesPage() {
         onReset={(scope) =>
           saveAccountPreferences.mutate({ [financeAccountPreferenceKeys[scope]]: null })
         }
-        onChange={(scope, ids) => {
-          saveAccountPreferences.mutate({ [financeAccountPreferenceKeys[scope]]: ids });
+        onChange={(scope, id, checked) => {
+          saveAccountPreferences.mutate((current) => {
+            const selected = selectedFinanceAccounts(finance.accounts, scope, current);
+            return {
+              [financeAccountPreferenceKeys[scope]]: checked
+                ? [...new Set([...selected, id])]
+                : selected.filter((selectedId) => selectedId !== id),
+            };
+          });
         }}
         onOpenChange={(open) => !open && setScopeDialog(null)}
         scope={scopeDialog}
@@ -1663,7 +1670,7 @@ function AccountScopeDialog({
   feedback: ReactNode;
   onReset: (scope: "spend" | "cash" | "investments") => void;
   accounts: FinanceAccount[];
-  onChange: (scope: "spend" | "cash" | "investments", ids: string[]) => void;
+  onChange: (scope: "spend" | "cash" | "investments", id: string, checked: boolean) => void;
   onOpenChange: (open: boolean) => void;
   scope: "spend" | "cash" | "investments" | null;
   selectedIds: string[];
@@ -1708,14 +1715,7 @@ function AccountScopeDialog({
                   disabled={disabled}
                   checked={selectedIds.includes(account.id)}
                   id={`scope-${scope}-${account.id}`}
-                  onCheckedChange={(checked) =>
-                    onChange(
-                      scope,
-                      checked
-                        ? [...selectedIds, account.id]
-                        : selectedIds.filter((id) => id !== account.id),
-                    )
-                  }
+                  onCheckedChange={(checked) => onChange(scope, account.id, checked === true)}
                 />
                 <ShadcnFieldLabel htmlFor={`scope-${scope}-${account.id}`}>
                   {account.name} · {formatMoney(value)}

@@ -3,7 +3,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -1097,6 +1097,83 @@ describe("Finance section states", () => {
     expect(createObjectUrl).toHaveBeenCalledTimes(4);
     expect(revokeObjectUrl).toHaveBeenCalledTimes(4);
     expect(linkClick).toHaveBeenCalledTimes(4);
+  });
+
+  it.each([
+    ["spend", "spendAccountIds", "Spent this month"],
+    ["cash", "cashAccountIds", "Cash tracked"],
+  ] as const)("preserves rapid %s account toggles before the pending render", async (_scope, key, trigger) => {
+    const ids = ["00000000-0000-4000-8000-000000000131", "00000000-0000-4000-8000-000000000132"];
+    const accounts = ids.map((id, index) => ({
+      id,
+      name: `Selected account ${index + 1}`,
+      kind: "cash",
+      balance: 100,
+      institution: "Fixture bank",
+      provider: "manual",
+      status: "manual",
+      lastSyncedAt: null,
+      createdAt: "2026-08-01T12:00:00.000Z",
+      updatedAt: "2026-08-01T12:00:00.000Z",
+    }));
+    const overview = {
+      accounts,
+      budgets: [],
+      pendingSpendThisMonth: 0,
+      refundCreditsThisMonth: 0,
+      reviewCount: 0,
+      spendingThisMonth: 0,
+      transactions: [],
+    };
+    api.getFinanceOverview.mockResolvedValue(overview);
+    api.getFinanceOverviewForMonth.mockResolvedValue(overview);
+    api.getFinanceOverviewForAccounts.mockResolvedValue(overview);
+    renderPage("/finances");
+    fireEvent.click(
+      await screen.findByRole("button", { name: `${trigger}: configure included accounts` }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    const first = within(dialog).getByRole("checkbox", { name: /Selected account 1/ });
+    const second = within(dialog).getByRole("checkbox", { name: /Selected account 2/ });
+    await waitFor(() => expect(first).toBeEnabled());
+    expect(first).toBeChecked();
+    expect(second).toBeChecked();
+    // Both DOM events use one observed render, before pending disables the controls.
+    act(() => {
+      fireEvent.click(first);
+      fireEvent.click(second);
+    });
+    await waitFor(() => expect(api.updateWorkspaceSettings).toHaveBeenCalledTimes(2));
+    expect(api.updateWorkspaceSettings).toHaveBeenNthCalledWith(1, "finances", {
+      expectedRevision: 0,
+      preferences: { [key]: [ids[1]] },
+    });
+    expect(api.updateWorkspaceSettings).toHaveBeenNthCalledWith(2, "finances", {
+      expectedRevision: 1,
+      preferences: { [key]: [] },
+    });
+    await waitFor(() => {
+      expect(first).not.toBeChecked();
+      expect(second).not.toBeChecked();
+    });
+    await waitFor(() => expect(first).toBeEnabled());
+    act(() => {
+      fireEvent.click(first);
+      fireEvent.click(second);
+    });
+    await waitFor(() => expect(api.updateWorkspaceSettings).toHaveBeenCalledTimes(4));
+    expect(api.updateWorkspaceSettings).toHaveBeenNthCalledWith(3, "finances", {
+      expectedRevision: 2,
+      preferences: { [key]: [ids[0]] },
+    });
+    expect(api.updateWorkspaceSettings).toHaveBeenNthCalledWith(4, "finances", {
+      expectedRevision: 3,
+      preferences: { [key]: ids },
+    });
+    await waitFor(() => {
+      expect(first).toBeChecked();
+      expect(second).toBeChecked();
+    });
   });
 
   it("renders null evidence, cash scoping, and empty budget drill-downs conservatively", async () => {

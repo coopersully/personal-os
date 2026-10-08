@@ -1,5 +1,16 @@
 # nohmi — Implementation Log
 
+## 2026-10-08 — Finance review history read (branch implementation)
+
+- Added owner-scoped, bounded keyset history reads for open, deferred, and resolved Finance Inbox
+  cases, plus an exact evidence read. A foreign or invalid cursor fails without exposing another
+  user's case; missing and foreign exact IDs share the same unavailable result. The existing
+  review-case tables and answer semantics are unchanged.
+- The Finance review page discloses older case status and exact recorded evidence on demand, with
+  bounded continuation and local retry states. Focused PostgreSQL and UI tests cover status,
+  timestamp ordering, ownership, pagination, and exact evidence. Full verification and review
+  remain pending; this branch does not activate SMS, matching, or reusable User Knowledge.
+
 ## 2026-10-06 — Finance configuration and prerequisites (branch implementation)
 
 - Financial setup loads a read-only, owner-scoped aggregate and shares autosaving fields with

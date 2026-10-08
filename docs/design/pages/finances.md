@@ -220,6 +220,15 @@ Review.
   signed-in activation control appears only for a draft and stays disabled until the draft contains at
   least one owned account source; activation submits the exact profile version.
 
+## Finance review history
+
+Finance review history is a read-only disclosure beside current Inbox work. It loads owned
+open, deferred, and resolved cases in bounded pages ordered by first-seen time and stable ID.
+Opening one row retrieves that exact case and shows its recorded answer, source evidence,
+status, and transaction destination when available. An unavailable exact case stays unavailable;
+the UI does not substitute another review or imply that a saved note completed bookkeeping.
+History loading and exact-read failures retain a retry action beside the affected material.
+
 ## Responsive and accessibility contract
 
 - Use a responsive bento grid for independent overview summaries, financial accounts, and goals.

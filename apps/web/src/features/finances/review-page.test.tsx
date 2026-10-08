@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import type { FinanceInboxCase, FinanceToolResult } from "@personal-os/domain";
+import type {
+  FinanceInboxCase,
+  FinanceReviewHistoryItem,
+  FinanceReviewHistorySummary,
+  FinanceToolResult,
+} from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -10,6 +15,8 @@ import { FinanceReviewPage } from "./review-page.js";
 
 const api = vi.hoisted(() => ({
   getFinanceInbox: vi.fn(),
+  listFinanceReviewHistory: vi.fn(),
+  getFinanceReviewHistoryItem: vi.fn(),
   answerFinanceReview: vi.fn(),
   getFinanceCategories: vi.fn(),
   getFinanceTransaction: vi.fn(),
@@ -80,6 +87,8 @@ function mount(path = "/finances/review") {
 beforeEach(() => {
   vi.resetAllMocks();
   api.getFinanceInbox.mockResolvedValue(response([review(), review(nextId)]));
+  api.listFinanceReviewHistory.mockResolvedValue({ items: [], nextCursor: null });
+  api.getFinanceReviewHistoryItem.mockResolvedValue(null);
   api.getFinanceCategories.mockResolvedValue([{ id: categoryId, name: "Dining" }]);
   api.getFinanceTransaction.mockResolvedValue({
     data: {
@@ -96,6 +105,71 @@ beforeEach(() => {
   api.listFinanceTransactions.mockResolvedValue({ items: [], nextCursor: null });
   api.listFinanceQuestions.mockResolvedValue([]);
   api.listFinanceActionReviews.mockResolvedValue([]);
+});
+
+it("loads bounded review history and exact evidence without changing the active question", async () => {
+  const user = userEvent.setup();
+  const first: FinanceReviewHistorySummary = {
+    id: reviewId,
+    transactionId,
+    firstSeenAt: now,
+    reason: "category_ambiguity",
+    resolvedAt: null,
+    status: "open",
+    context: {
+      accountId: categoryId,
+      accountName: "Checking",
+      institution: "Bank",
+      merchant: "Cafe Example",
+      date: "2026-09-02",
+      amount: 42,
+      currencyCode: "USD",
+      direction: "expense",
+      pending: false,
+    },
+  };
+  const resolved: FinanceReviewHistorySummary = {
+    ...first,
+    id: nextId,
+    status: "resolved",
+    resolvedAt: now,
+  };
+  const detail: FinanceReviewHistoryItem = {
+    ...review(nextId),
+    ...resolved,
+    resolution: { answer: "Dinner with a friend", type: "dismiss" },
+    resolutionProvenance: { actorType: "user" },
+    evidence: { note: "Receipt checked", source: "manual" },
+  };
+  api.listFinanceReviewHistory.mockImplementation(async ({ cursor }: { cursor?: string }) =>
+    cursor ? { items: [resolved], nextCursor: null } : { items: [first], nextCursor: reviewId },
+  );
+  api.getFinanceReviewHistoryItem.mockResolvedValue(detail);
+  mount();
+  expect(
+    await screen.findByRole("heading", { name: "Was this groceries or a meal?" }),
+  ).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Older questions and approvals" }));
+  expect(await screen.findByRole("heading", { name: "Review history" })).toBeVisible();
+  expect(api.listFinanceReviewHistory).toHaveBeenCalledWith({ limit: 20 });
+  await user.click(await screen.findByRole("button", { name: "Load more history" }));
+  await waitFor(() =>
+    expect(api.listFinanceReviewHistory).toHaveBeenCalledWith({ limit: 20, cursor: reviewId }),
+  );
+  expect(screen.getByText("resolved")).toBeVisible();
+  const evidenceButtons = screen.getAllByRole("button", { name: /View evidence for Cafe Example/ });
+  const secondButton = evidenceButtons[1];
+  if (!secondButton) throw new Error("The second history item was not rendered.");
+  await user.click(secondButton);
+  expect(api.getFinanceReviewHistoryItem).toHaveBeenCalledWith(nextId);
+  expect(await screen.findByText("Recorded answer: Dinner with a friend")).toBeVisible();
+  expect(screen.getByText(/Receipt checked/)).toBeVisible();
+  expect(screen.getByRole("link", { name: "Open transaction" })).toHaveAttribute(
+    "href",
+    `/finances/transactions?transactionId=${transactionId}`,
+  );
+  await user.click(screen.getByRole("button", { name: "Close" }));
+  expect(screen.getByRole("heading", { name: "Was this groceries or a meal?" })).toBeVisible();
 });
 it("shows the requested question and exact transaction evidence, then advances only after a typed answer returns", async () => {
   const user = userEvent.setup();

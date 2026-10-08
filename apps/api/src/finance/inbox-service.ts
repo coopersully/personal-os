@@ -13,11 +13,14 @@ import {
   type AnswerFinanceReviewInput,
   type FinanceChange,
   type FinanceInboxCase,
+  type FinanceReviewHistoryItem,
+  type FinanceReviewHistorySummary,
   type FinanceReviewReason,
   type FinanceToolResult,
+  financeReviewHistoryQuerySchema,
   financialProfileChangesSchema,
 } from "@personal-os/domain";
-import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
 import {
@@ -68,6 +71,49 @@ function caseValue(row: typeof financeReviewCases.$inferSelect): FinanceInboxCas
     resolvedAt: row.resolvedAt?.toISOString() ?? null,
     stableKey: row.stableKey,
     status: row.status,
+  };
+}
+
+function historyValue(
+  row: typeof financeReviewCases.$inferSelect,
+  context?: NonNullable<FinanceInboxCase["context"]>,
+): FinanceReviewHistoryItem {
+  return {
+    ...(context ? { context } : {}),
+    economicEventId: row.economicEventId,
+    evidence: row.evidence,
+    firstSeenAt: row.firstSeenAt.toISOString(),
+    id: row.id,
+    impactAmount: fromCents(row.impactAmount),
+    lastSeenAt: row.lastSeenAt.toISOString(),
+    prompt: prompt(row),
+    proposedResolution: row.proposedResolution,
+    reason: row.reasonCode,
+    reopenedFromId: row.reopenedFromId,
+    resolution: row.resolution,
+    resolutionProvenance: row.resolutionProvenance,
+    resolvedAt: row.resolvedAt?.toISOString() ?? null,
+    stableKey: row.stableKey,
+    status: row.status,
+    transactionId: row.transactionId,
+  };
+}
+
+function historySummary(
+  row: Pick<
+    typeof financeReviewCases.$inferSelect,
+    "firstSeenAt" | "id" | "reasonCode" | "resolvedAt" | "status" | "transactionId"
+  >,
+  context?: NonNullable<FinanceInboxCase["context"]>,
+): FinanceReviewHistorySummary {
+  return {
+    ...(context ? { context } : {}),
+    firstSeenAt: row.firstSeenAt.toISOString(),
+    id: row.id,
+    reason: row.reasonCode,
+    resolvedAt: row.resolvedAt?.toISOString() ?? null,
+    status: row.status,
+    transactionId: row.transactionId,
   };
 }
 
@@ -143,7 +189,7 @@ export function createInboxService({ db, now }: Options) {
 
   async function transactionContexts(
     userId: string,
-    rows: Array<typeof financeReviewCases.$inferSelect>,
+    rows: Array<{ transactionId: string }>,
     executor: FinanceExecutor,
   ) {
     if (!rows.length) return new Map<string, NonNullable<FinanceInboxCase["context"]>>();
@@ -265,6 +311,57 @@ export function createInboxService({ db, now }: Options) {
         [],
         await transactionContexts(userId, rows, executor),
       );
+    },
+
+    async listFinanceReviewHistory(userId: string, rawQuery: unknown) {
+      const query = financeReviewHistoryQuerySchema.parse(rawQuery);
+      if (query.cursor) {
+        const [anchor] = await db
+          .select({ id: financeReviewCases.id })
+          .from(financeReviewCases)
+          .where(
+            and(eq(financeReviewCases.userId, userId), eq(financeReviewCases.id, query.cursor)),
+          )
+          .limit(1);
+        if (!anchor) throw new AppError("invalid_request", "Review history cursor is unavailable.");
+      }
+      // Compare against the stored anchor timestamp inside PostgreSQL. A JS Date would
+      // truncate microseconds and could skip rows created within the same millisecond.
+      const afterCursor = query.cursor
+        ? sql`(${financeReviewCases.firstSeenAt}, ${financeReviewCases.id}) <
+            (SELECT first_seen_at, id FROM finance_review_cases
+             WHERE user_id = ${userId}::uuid AND id = ${query.cursor}::uuid)`
+        : undefined;
+      const rows = await db
+        .select({
+          firstSeenAt: financeReviewCases.firstSeenAt,
+          id: financeReviewCases.id,
+          reasonCode: financeReviewCases.reasonCode,
+          resolvedAt: financeReviewCases.resolvedAt,
+          status: financeReviewCases.status,
+          transactionId: financeReviewCases.transactionId,
+        })
+        .from(financeReviewCases)
+        .where(and(eq(financeReviewCases.userId, userId), afterCursor))
+        .orderBy(desc(financeReviewCases.firstSeenAt), desc(financeReviewCases.id))
+        .limit(query.limit + 1);
+      const page = rows.slice(0, query.limit);
+      const contexts = await transactionContexts(userId, page, db);
+      return {
+        items: page.map((row) => historySummary(row, contexts.get(row.transactionId))),
+        nextCursor: rows.length > query.limit ? (page.at(-1)?.id ?? null) : null,
+      };
+    },
+
+    async getFinanceReviewHistoryItem(userId: string, id: string) {
+      const [row] = await db
+        .select()
+        .from(financeReviewCases)
+        .where(and(eq(financeReviewCases.userId, userId), eq(financeReviewCases.id, id)))
+        .limit(1);
+      if (!row) throw new AppError("not_found", "Finance review not found.");
+      const contexts = await transactionContexts(userId, [row], db);
+      return historyValue(row, contexts.get(row.transactionId));
     },
 
     async answerFinanceReview(

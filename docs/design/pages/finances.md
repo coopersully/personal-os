@@ -233,6 +233,7 @@ rationale without a human answer; their reason remains visible. An unavailable e
 unavailable; the UI does not substitute another review or imply that a saved note completed
 bookkeeping.
 History loading and exact-read failures retain a retry action beside the affected material.
+Failure to load current review work does not hide independently available history.
 
 ## Responsive and accessibility contract
 

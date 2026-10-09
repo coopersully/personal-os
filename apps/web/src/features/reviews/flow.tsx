@@ -114,6 +114,11 @@ function ReviewFlow({
         </ResponsiveDialogHeader>
         {query.isPending ? <p role="status">Loading your decisions…</p> : null}
         <QueryFeedback query={query} title="Couldn’t load your review session." />
+        {workspace === "finances" && !query.data ? (
+          <ResponsiveDialogBody>
+            <FinanceHistoryDisclosure />
+          </ResponsiveDialogBody>
+        ) : null}
         {query.data &&
         initialId !== "open" &&
         !query.data.items.some((item) => item.id === initialId) ? (

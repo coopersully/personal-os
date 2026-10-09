@@ -5271,6 +5271,30 @@ describe("ilo web app", () => {
     view.unmount();
   });
 
+  it("keeps Finance review history available when current work cannot load", async () => {
+    mocks.listAgentAccessWorkItems.mockRejectedValue(new Error("Current reviews unavailable"));
+    mocks.listFinanceReviewHistory.mockResolvedValue({
+      items: [
+        {
+          id: secondId,
+          firstSeenAt: now,
+          reason: "category_ambiguity",
+          resolvedAt: now,
+          status: "resolved",
+          context: { merchant: "Cafe Example" },
+        },
+      ],
+      nextCursor: null,
+    });
+    const browser = userEvent.setup();
+    const view = setup("/finances/review");
+    expect(await screen.findByText("Couldn’t load your review session.")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Finance review history" }));
+    expect(await screen.findByText("Cafe Example")).toBeInTheDocument();
+    expect(mocks.listFinanceReviewHistory).toHaveBeenCalledWith({ limit: 20 });
+    view.unmount();
+  });
+
   it("answers the canonical Finance question and opens its exact transaction evidence", async () => {
     configureFinanceWorkspace();
     mocks.answerFinanceReview.mockResolvedValue(

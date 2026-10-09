@@ -3,7 +3,7 @@ import type {
   TaskList,
   TaskProject,
   WorkspaceSettings,
-} from "@personal-os/domain";
+} from "../packages/domain/src/index.js";
 import { expect, type Page, test } from "@playwright/test";
 
 test("two editors retain attempted workspace values and explicitly recover repeated conflicts", async ({

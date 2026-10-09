@@ -185,7 +185,7 @@ item or workspace. Multi-item messages number each item and bind those reference
 message and proposal revisions; replies identify every answered number. This is the accepted
 Texting target. Its unified cross-workspace destination is not implemented by the current scoped
 Reviews flow, and emitted legacy links fall back to Account; see the
-[Texting implementation gap](texting-operations.md#delivery-content-and-links) and
+[Texting implementation gap](texting-operations.md#workspace-maintenance-notifications) and
 [Reviews contract](../design/pages/reviews.md).
 
 A self-contained single question omits the link unless the person needs more context or the

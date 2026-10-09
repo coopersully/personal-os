@@ -40,8 +40,11 @@ Known producers and contracts that must be reconciled together include:
 - `apps/api/src/assistant-service.ts`: assistant context approval links.
 - `apps/api/src/routes/texting-recovery.ts` and the literal `reviewHref` schema in
   `packages/domain/src/texting.ts`: Finance reply recovery links.
-- `apps/mcp/src/app-links.ts`, attached by `apps/mcp/src/tool-surface.ts`: assistant and default
-  MCP approval links.
+- `apps/mcp/src/app-links.ts`, attached by `apps/mcp/src/tool-surface.ts`: every MCP `approvals`
+  mapping, including assistant/default legacy links and domain-specific destinations. Mail,
+  Calendar, Tasks, and Reminders currently link to bare workspace routes without opening the
+  review flow. Cover all mappings in `apps/mcp/src/app-links.test.ts` and navigation tests;
+  arriving in a workspace alone does not prove that the requested review opens.
 - `apps/web/src/app.tsx`: legacy redirects and the single-workspace flow host.
 
 Migration evidence must cover notification composition/delivery, assistant context, Texting schema

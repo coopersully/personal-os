@@ -43,6 +43,7 @@ const scheduler = setInterval(() => {
   runtimeLifecycle.startBackgroundTask("scheduled-finance-sync", dispatchFinanceSync);
   runtimeLifecycle.startBackgroundTask("scheduled-finance-maintenance", dispatchFinanceMaintenance);
   runtimeLifecycle.startBackgroundTask("scheduled-finance-backfill", dispatchFinanceBackfill);
+  runtimeLifecycle.startBackgroundTask("scheduled-texting-recovery", dispatchTextingRecovery);
   runtimeLifecycle.startBackgroundTask(
     "scheduled-finance-setup-integrity",
     dispatchFinanceSetupIntegrity,
@@ -67,6 +68,7 @@ runtimeLifecycle.startBackgroundTask("startup-mail-maintenance", dispatchMailMai
 runtimeLifecycle.startBackgroundTask("startup-finance-sync", dispatchFinanceSync);
 runtimeLifecycle.startBackgroundTask("startup-finance-maintenance", dispatchFinanceMaintenance);
 runtimeLifecycle.startBackgroundTask("startup-finance-backfill", dispatchFinanceBackfill);
+runtimeLifecycle.startBackgroundTask("startup-texting-recovery", dispatchTextingRecovery);
 runtimeLifecycle.startBackgroundTask(
   "startup-finance-setup-integrity",
   dispatchFinanceSetupIntegrity,
@@ -111,6 +113,15 @@ async function dispatchFinanceBackfill(): Promise<void> {
     process.stderr.write(`[personal-os] finance learning backfill failed: ${String(error)}\n`);
     throw error;
   }
+}
+
+async function dispatchTextingRecovery(): Promise<void> {
+  const pass = app.runTextingRecovery();
+  if (pass)
+    await pass.catch((error: unknown) => {
+      process.stderr.write(`[personal-os] Texting recovery failed: ${String(error)}\n`);
+      throw error;
+    });
 }
 
 async function dispatchFinanceSetupIntegrity(): Promise<void> {
@@ -170,7 +181,10 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
       closeDatabase: database.close,
       closeHttpServer: () => closeNodeHttpServer(server),
       lifecycle: runtimeLifecycle,
-      stopScheduling: () => clearInterval(scheduler),
+      stopScheduling: () => {
+        clearInterval(scheduler);
+        app.quiesceTextingRecovery();
+      },
       timeoutMs: config.apiShutdownTimeoutMs,
     });
     process.stdout.write("[personal-os] API drain completed successfully.\n");

@@ -368,7 +368,7 @@ receipt reconciliation rather than silently retrying that binding forever.
 An idempotent sweep can change only an expired, unattached open binding to terminal `expired` under
 its row lock. Attached pending, waiting, and uncertain children are never swept without first
 checking the exact Finance receipt. T1 adds no host schedule for the sweep, so bounded retention is
-not claimed until T2 wires invocation and reconciliation.
+not claimed for owners with no inbound claim; T3 below does not add a global expiry sweep.
 
 Texting history cleanup must retain any inbound claim or outbound binding while its child is open,
 pending, waiting, or uncertain. Database foreign keys reject deletion of their source message or
@@ -399,10 +399,33 @@ An internal, owner-scoped `runPage` reconciles bounded unfinished claims. For at
 it inspects the exact Finance receipt before same-key execution or result projection; unattached
 claims may first be bound. It preserves accepted siblings independently,
 does not re-execute incomplete Finance receipts, and can invoke the unattached-open-binding expiry
-sweep. Composition does not schedule or call that pass: there is no public recovery POST, agent
+sweep. This T2 foundation did not schedule or call that pass; T3 below adds API invocation. There is
+no public recovery POST, agent
 write trigger or trigger audit, host continuation, provider activation, or general Texting inbox.
 This foundation adds no 0093 recovery marker and does not settle the clarification/resend design
 for permanently missing provider creation time. It is not the complete Finance SMS conversation.
+
+## T3 durable Finance reply recovery invocation
+
+API startup and the existing 60-second API tick now invoke one local Texting recovery pass. A pass
+selects signed inbound claims from the database across owners only when no child is attached or at
+least one child remains pending, waiting, or uncertain. It rechecks the exact owner and claim before
+processing. Accepted-only claims leave the queue. The scan rotates by the composite owner/claim UUID
+after each settled attempt, including an unbound reply that remains eligible and an attempt that
+failed. A later pass wraps to the beginning. Startup and tick calls share one in-process flight;
+other replicas may overlap safely through the existing exact Finance receipt replay and row locks.
+
+Each pass attempts at most 25 claims. This is a work-count bound, not a bound on database rows scanned,
+query time, or wall-clock duration: eligibility uses attached/unfinished child checks, and a stalled
+database call can outlive the normal shutdown grace period. Quiesce stops new passes and the active
+pass remains tracked while shutdown drains; if the process is terminated after its grace period,
+persisted unfinished claims are eligible again on restart. An accepted Finance receipt is reconciled
+before any same-key execution, including when Texting is disabled. When no completed receipt exists,
+disabled Texting, STOP, consent, delivery, unbound, and stale-evidence gates still apply.
+
+This invocation does not create a host continuation, send a provider message, or activate general
+Texting routing. Expired open bindings with no inbound claim are outside the T3 scan; the existing
+owner-scoped expiry sweep remains available to its caller, without a new global schedule here.
 
 ## T0 notification implementation boundary
 

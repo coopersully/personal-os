@@ -108,6 +108,8 @@ import { createTaskListService } from "./task-list-service.js";
 import { createTaskProjectService } from "./task-project-service.js";
 import { createTaskService } from "./task-service.js";
 import { createTaskWorkspaceService } from "./task-workspace-service.js";
+import { createTextingRecoveryDispatcher } from "./texting-recovery-dispatcher.js";
+import { createTextingRecoveryRuntime } from "./texting-recovery-runtime.js";
 import { createTextingRecoveryService } from "./texting-recovery-service.js";
 import { createTextingService } from "./texting-service.js";
 import { createSmsAdmission } from "./texting-sms-admission.js";
@@ -144,6 +146,8 @@ export type PersonalOsApp = Hono<AppEnv> & {
   dispatchDueMailRuleWork: () => Promise<void>;
   dispatchDueMailMaintenance: () => Promise<void>;
   dispatchDueFinanceMaintenance: () => Promise<void>;
+  runTextingRecovery: () => Promise<void> | null;
+  quiesceTextingRecovery: () => void;
   superviseICloudMail: () => Promise<void>;
   syncDueConnectors: () => Promise<{
     attempted: number;
@@ -653,6 +657,16 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       },
     },
     now,
+  });
+  const textingRecoveryDispatcher = createTextingRecoveryDispatcher({
+    db: dependencies.db,
+    recovery: textingRecovery,
+  });
+  const textingRecoveryRuntime = createTextingRecoveryRuntime(async () => {
+    const result = await textingRecoveryDispatcher.runPass();
+    if (result.failed) {
+      throw new Error(`Texting recovery failed for ${result.failed} claims.`);
+    }
   });
   const notifications = createNotificationService({
     db: dependencies.db,
@@ -1405,6 +1419,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   }
 
   return Object.assign(app, {
+    runTextingRecovery() {
+      return textingRecoveryRuntime.run();
+    },
+    quiesceTextingRecovery() {
+      textingRecoveryRuntime.quiesce();
+    },
     async backfillFinanceProviderItems() {
       return financeProviderItems.backfillLegacyItems();
     },

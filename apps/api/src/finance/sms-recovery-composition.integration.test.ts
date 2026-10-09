@@ -381,12 +381,19 @@ describe.sequential("Finance SMS recovery composition", () => {
       await held;
       return result;
     });
-    await locked;
     const service = recovery();
-    const recovering = service.runPage(f.userId, { limit: 10 });
-    let firstPage: Awaited<typeof recovering>;
+    let recovering: ReturnType<typeof service.runPage> | undefined;
+    let firstPage: Awaited<ReturnType<typeof service.runPage>> | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let cleanupRejection: PromiseRejectedResult | undefined;
     try {
+      await Promise.race([
+        locked,
+        answering.then(() => {
+          throw new Error("App answer finished before the lock signal.");
+        }),
+      ]);
+      recovering = service.runPage(f.userId, { limit: 10 });
       firstPage = await Promise.race([
         recovering,
         new Promise<never>((_resolve, reject) => {
@@ -399,9 +406,15 @@ describe.sequential("Finance SMS recovery composition", () => {
     } finally {
       if (timer) clearTimeout(timer);
       releaseManual();
-      await answering;
-      await recovering;
+      const results = await Promise.allSettled([
+        answering,
+        recovering ?? Promise.resolve(undefined),
+      ]);
+      cleanupRejection = results.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
     }
+    if (cleanupRejection) throw cleanupRejection.reason;
     expect(firstPage).toMatchObject({
       claims: [
         {

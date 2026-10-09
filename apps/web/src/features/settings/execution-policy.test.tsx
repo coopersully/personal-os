@@ -181,3 +181,56 @@ it("does not optimistically update or submit policy after the account changes du
   expect(screen.getByRole("switch")).not.toBeChecked();
   expect(screen.queryByText("Your change: Enabled")).not.toBeInTheDocument();
 });
+
+it.each([
+  "uncertain",
+  "rejected",
+] as const)("keeps a %s attempt to disable policy distinct from the latest enabled policy", async (kind) => {
+  const get = vi
+    .spyOn(api, "getExecutionPolicySettings")
+    .mockResolvedValue({ reviewBypassEnabled: true, version: 2 });
+  const update = vi
+    .spyOn(api, "updateExecutionPolicySettings")
+    .mockRejectedValueOnce(
+      kind === "uncertain"
+        ? new Error("Response lost")
+        : new ApiClientError({ status: 403, code: "forbidden", message: "No access" }),
+    );
+  render(
+    <QueryClientProvider client={accountClient({ defaultOptions: { queries: { retry: false } } })}>
+      <ExecutionPolicySettingsCard />
+    </QueryClientProvider>,
+  );
+  const toggle = await screen.findByRole("switch");
+  await waitFor(() => expect(toggle).toBeEnabled());
+  await userEvent.click(toggle);
+  expect(await screen.findByText("Your change: Disabled")).toBeVisible();
+  expect(
+    await screen.findByText(
+      kind === "uncertain"
+        ? "The change may have been saved. Refresh checks the current values without writing."
+        : "The change could not be applied. Refresh the current values before trying again.",
+    ),
+  ).toBeVisible();
+  expect(update).toHaveBeenLastCalledWith({ expectedVersion: 2, reviewBypassEnabled: false });
+  get.mockResolvedValue({ reviewBypassEnabled: true, version: 7 });
+  await userEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Use latest settings" })).toBeEnabled(),
+  );
+  expect(screen.getByText("Latest: Enabled")).toBeVisible();
+  expect(update).toHaveBeenCalledTimes(1);
+  if (kind === "rejected") {
+    await userEvent.click(screen.getByRole("button", { name: "Use latest settings" }));
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(toggle).toBeChecked();
+  } else {
+    update.mockResolvedValue({ reviewBypassEnabled: false, version: 8 });
+    get.mockResolvedValue({ reviewBypassEnabled: false, version: 8 });
+    await userEvent.click(screen.getByRole("button", { name: "Reapply reviewed change" }));
+    await waitFor(() =>
+      expect(update).toHaveBeenLastCalledWith({ expectedVersion: 7, reviewBypassEnabled: false }),
+    );
+  }
+  await waitFor(() => expect(screen.queryByText("Your change: Disabled")).not.toBeInTheDocument());
+});

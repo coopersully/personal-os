@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { ApiClientError } from "@personal-os/api-client";
 import { defaultNotificationPreferences, type NotificationStatus } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
@@ -268,4 +269,98 @@ it.each([
   expect(screen.queryByRole("button", { name: "Reapply reviewed change" })).not.toBeInTheDocument();
   expect(cache.getQueryData(["notification-status"])).toEqual(ownedStatus);
   expect(mocks.resetFinanceNotificationPreferences).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  "uncertain",
+  "conflict",
+] as const)("reviews a remotely removed override after %s reset without resetting it twice", async (kind) => {
+  mocks.getNotificationStatus.mockReset();
+  mocks.resetFinanceNotificationPreferences.mockReset();
+  mocks.getNotificationStatus.mockResolvedValue({
+    ...status,
+    preferences: [{ scope: "finances", revision: 4, preferences: defaultNotificationPreferences }],
+  });
+  mocks.resetFinanceNotificationPreferences.mockRejectedValueOnce(
+    kind === "uncertain"
+      ? new Error("Response lost after reset")
+      : new ApiClientError({ status: 409, code: "conflict", message: "Changed elsewhere" }),
+  );
+  render(
+    <QueryClientProvider client={accountClient({ defaultOptions: { queries: { retry: false } } })}>
+      <FinanceNotificationPreferences />
+    </QueryClientProvider>,
+  );
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Use global notification preferences" }),
+  );
+  expect(
+    await screen.findByText(
+      kind === "uncertain"
+        ? "The change may have been saved. Refresh checks the current values without writing."
+        : "Another editor changed these settings. Your attempted change was rejected.",
+    ),
+  ).toBeVisible();
+  expect(mocks.resetFinanceNotificationPreferences).toHaveBeenLastCalledWith({
+    expectedRevision: 4,
+  });
+  expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
+  mocks.getNotificationStatus.mockResolvedValue(status);
+  await userEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeEnabled(),
+  );
+  expect(screen.getByText("Latest: Already using global preferences")).toBeVisible();
+  expect(mocks.resetFinanceNotificationPreferences).toHaveBeenCalledTimes(1);
+  await userEvent.click(
+    screen.getByRole("button", {
+      name: kind === "uncertain" ? "Reapply reviewed change" : "Use latest settings",
+    }),
+  );
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("button", { name: "Refresh latest settings" }),
+    ).not.toBeInTheDocument(),
+  );
+  expect(mocks.resetFinanceNotificationPreferences).toHaveBeenCalledTimes(1);
+  expect(screen.getByText("Inherited from global preferences")).toBeVisible();
+});
+
+it("removes only the override and inherits persisted global preferences after a confirmed reset", async () => {
+  mocks.getNotificationStatus.mockReset();
+  mocks.resetFinanceNotificationPreferences.mockReset();
+  const global = { ...defaultNotificationPreferences, detail: "minimal" as const };
+  const globalRow = { scope: "global" as const, revision: 8, preferences: global };
+  const inherited = { ...status, preferences: [globalRow], effective: global };
+  mocks.getNotificationStatus
+    .mockResolvedValueOnce({
+      ...inherited,
+      preferences: [
+        globalRow,
+        { scope: "finances", revision: 4, preferences: defaultNotificationPreferences },
+      ],
+    })
+    .mockResolvedValue(inherited);
+  mocks.resetFinanceNotificationPreferences.mockResolvedValue({
+    scope: "finances",
+    inherited: true,
+  });
+  const cache = accountClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={cache}>
+      <FinanceNotificationPreferences />
+    </QueryClientProvider>,
+  );
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Use global notification preferences" }),
+  );
+  expect(await screen.findByText("Inherited from global preferences")).toBeVisible();
+  expect(screen.getByText("Minimal")).toBeVisible();
+  expect(cache.getQueryData<NotificationStatus>(["notification-status"])?.preferences).toEqual([
+    globalRow,
+  ]);
+  expect(mocks.resetFinanceNotificationPreferences).toHaveBeenCalledTimes(1);
+  expect(mocks.resetFinanceNotificationPreferences).toHaveBeenLastCalledWith({
+    expectedRevision: 4,
+  });
 });

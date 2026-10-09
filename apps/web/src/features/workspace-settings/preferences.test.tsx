@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { api } from "@/api";
-import { useSaveWorkspacePreferences } from "./preferences";
+import { useSaveWorkspacePreferences, useWorkspacePreferences } from "./preferences";
 import { WorkspacePreferenceRecovery } from "./save-recovery";
 
 afterEach(() => vi.restoreAllMocks());
@@ -545,4 +545,107 @@ it("keeps an explicit replay at its reviewed revision when another hook's same-f
   await waitFor(() => expect(hooks.result.current.recovery.isWorkspacePending).toBe(false));
   expect(hooks.result.current.recovery.recovery?.attempted).toEqual({ taskSort: "priority" });
   expect(hooks.result.current.recovery.recovery?.reviewed).toBeUndefined();
+});
+
+it.each([
+  "rejected",
+  "uncertain",
+] as const)("settles an awaited %s save with originating callbacks and retains its intent until confirmed", async (outcome) => {
+  const original = resolveWorkspaceSettings("tasks", { revision: 2 });
+  let latest = original;
+  const failure =
+    outcome === "rejected"
+      ? new ApiClientError({ status: 403, code: "forbidden", message: "No access" })
+      : new Error("Response lost after submitting");
+  vi.spyOn(api, "getWorkspaceSettings").mockImplementation(async () => latest);
+  const update = vi
+    .spyOn(api, "updateWorkspaceSettings")
+    .mockRejectedValueOnce(failure)
+    .mockImplementation(async (_workspace, input) => {
+      latest = resolveWorkspaceSettings("tasks", {
+        ...latest.preferences,
+        ...input.preferences,
+        revision: input.expectedRevision + 1,
+      });
+      return latest;
+    });
+  const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  cache.setQueryData(["me"], { id: "owner" });
+  cache.setQueryData(["workspace-settings", "tasks"], original);
+  const hook = renderHook(() => useSaveWorkspacePreferences("tasks"), {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={cache}>{children}</QueryClientProvider>
+    ),
+  });
+  const callbacks = { onSuccess: vi.fn(), onError: vi.fn(), onSettled: vi.fn() };
+  const intent = { taskSort: "title" as const };
+  await act(async () => {
+    await expect(hook.result.current.mutateAsync(intent, callbacks)).rejects.toBe(failure);
+  });
+  await waitFor(() => expect(callbacks.onSettled).toHaveBeenCalledTimes(1));
+  expect(callbacks.onError.mock.calls[0]?.slice(0, 2)).toEqual([failure, intent]);
+  expect(callbacks.onSuccess).not.toHaveBeenCalled();
+  expect(update).toHaveBeenCalledTimes(1);
+  expect(update).toHaveBeenLastCalledWith("tasks", { expectedRevision: 2, preferences: intent });
+  expect(hook.result.current.recovery?.attempted).toEqual(intent);
+  expect(hook.result.current.recovery?.outcome).toBe(outcome);
+  latest = resolveWorkspaceSettings("tasks", { revision: 5, taskGroup: "list" });
+  await act(async () => {
+    await hook.result.current.refreshRecovery();
+  });
+  await waitFor(() => expect(hook.result.current.recovery?.reviewed?.revision).toBe(5));
+  expect(update).toHaveBeenCalledTimes(1);
+  const confirmed = { onSuccess: vi.fn(), onSettled: vi.fn() };
+  // A new explicit save uses the newly displayed snapshot, including its unrelated grouping.
+  await act(async () => {
+    await hook.result.current.mutateAsync(intent, confirmed);
+  });
+  await waitFor(() => expect(confirmed.onSettled).toHaveBeenCalledTimes(1));
+  expect(confirmed.onSuccess.mock.calls[0]?.slice(0, 2)).toEqual([latest, intent]);
+  expect(update).toHaveBeenLastCalledWith("tasks", { expectedRevision: 5, preferences: intent });
+  expect(latest.preferences.taskGroup).toBe("list");
+  expect(hook.result.current.recovery).toBeUndefined();
+});
+
+it("rejects an awaited edit without a loaded snapshot and permits a new explicit edit after loading", async () => {
+  const original = resolveWorkspaceSettings("tasks");
+  let load!: (value: typeof original) => void;
+  vi.spyOn(api, "getWorkspaceSettings").mockReturnValue(
+    new Promise((resolve) => {
+      load = resolve;
+    }),
+  );
+  const saved = resolveWorkspaceSettings("tasks", { revision: 1, taskSort: "title" });
+  const update = vi.spyOn(api, "updateWorkspaceSettings").mockResolvedValue(saved);
+  const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  cache.setQueryData(["me"], { id: "owner" });
+  const hook = renderHook(
+    () => ({ query: useWorkspacePreferences("tasks"), save: useSaveWorkspacePreferences("tasks") }),
+    {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={cache}>{children}</QueryClientProvider>
+      ),
+    },
+  );
+  expect(hook.result.current.query.isPending).toBe(true);
+  await act(async () => {
+    await expect(hook.result.current.save.mutateAsync({ taskSort: "title" })).rejects.toThrow(
+      "Load workspace preferences before saving.",
+    );
+  });
+  expect(update).not.toHaveBeenCalled();
+  expect(hook.result.current.save.isWorkspacePending).toBe(false);
+  await act(async () => {
+    load(original);
+  });
+  await waitFor(() => expect(hook.result.current.query.isSuccess).toBe(true));
+  await act(async () => {
+    await hook.result.current.save.mutateAsync({ taskSort: "title" });
+  });
+  expect(update).toHaveBeenCalledTimes(1);
+  expect(update).toHaveBeenLastCalledWith("tasks", {
+    expectedRevision: 0,
+    preferences: { taskSort: "title" },
+  });
+  expect(cache.getQueryData(["workspace-settings", "tasks"])).toEqual(saved);
 });

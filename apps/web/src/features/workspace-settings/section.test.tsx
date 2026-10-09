@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import { ApiClientError } from "@personal-os/api-client";
 import {
   type FinanceConfiguration,
   resolveWorkspaceSettings,
@@ -11,6 +12,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { api } from "@/api";
 import { useSaveWorkspacePreferences, useWorkspacePreferences } from "./preferences";
+import { WorkspacePreferenceRecovery } from "./save-recovery";
 import { WorkspacePreferencesSection } from "./section";
 
 beforeEach(() => {
@@ -283,4 +285,72 @@ it("fences account names and retained recovery across mounted Settings A to B to
   await screen.findByText("Latest: New A checking");
   expect(screen.queryByText(/Old A checking|B checking/)).not.toBeInTheDocument();
   expect(api.updateWorkspaceSettings).toHaveBeenCalledTimes(3);
+});
+
+it.each([
+  "uncertain",
+  "rejected",
+] as const)("keeps %s default-reset intent readable and refreshes it without another write", async (kind) => {
+  const initial = resolveWorkspaceSettings("tasks", { revision: 3, showCompletedTasks: true });
+  vi.mocked(api.getWorkspaceSettings).mockResolvedValue(initial);
+  vi.mocked(api.updateWorkspaceSettings).mockRejectedValueOnce(
+    kind === "uncertain"
+      ? new Error("Response lost after sending defaults")
+      : new ApiClientError({ status: 403, code: "forbidden", message: "No access" }),
+  );
+  const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  cache.setQueryData(["me"], { id: "owner" });
+  cache.setQueryData(["workspace-settings", "tasks"], initial);
+  const defaults = { defaultCaptureListId: null, taskRowDetails: [], showCompletedTasks: false };
+  function ResetDefaults() {
+    const query = useWorkspacePreferences("tasks");
+    const save = useSaveWorkspacePreferences("tasks");
+    return (
+      <>
+        <button
+          type="button"
+          disabled={!query.isSuccess || save.isWorkspacePending}
+          onClick={() => save.mutate(defaults)}
+        >
+          Reset displayed task defaults
+        </button>
+        <WorkspacePreferenceRecovery workspace="tasks" />
+      </>
+    );
+  }
+  render(
+    <QueryClientProvider client={cache}>
+      <ResetDefaults />
+    </QueryClientProvider>,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Reset displayed task defaults" }));
+  expect(
+    await screen.findByText(
+      kind === "uncertain"
+        ? "The change may have been saved. Refresh checks the current values without writing."
+        : "The change could not be applied. Refresh the current values before trying again.",
+    ),
+  ).toBeVisible();
+  for (const label of [
+    "Your change: Inbox (product default)",
+    "Your change: None selected",
+    "Your change: Disabled",
+  ])
+    expect(screen.getByText(label)).toBeVisible();
+  expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith("tasks", {
+    expectedRevision: 3,
+    preferences: defaults,
+  });
+  expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
+  const latest = resolveWorkspaceSettings("tasks", { revision: 6, showCompletedTasks: true });
+  vi.mocked(api.getWorkspaceSettings).mockResolvedValue(latest);
+  await userEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Use latest settings" })).toBeEnabled(),
+  );
+  expect(screen.getByText("Latest: Enabled")).toBeVisible();
+  expect(api.updateWorkspaceSettings).toHaveBeenCalledTimes(1);
+  await userEvent.click(screen.getByRole("button", { name: "Use latest settings" }));
+  expect(api.updateWorkspaceSettings).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole("button", { name: "Refresh latest settings" })).not.toBeInTheDocument();
 });

@@ -189,19 +189,23 @@ async function openSettingsSection(page: Page, mobile: boolean, label: string) {
       .getByRole("menuitem", { name: "Settings", exact: true })
       .click();
     await page.getByRole("button", { name: "Workspace actions" }).click();
-    await page
+    const link = page
       .getByRole("dialog", { name: "Settings" })
-      .locator(`a[href="/settings?section=${label.toLowerCase()}"]`)
-      .click();
+      .locator(`a[href="/settings?section=${label.toLowerCase()}"]`);
+    await expect(link).toHaveAccessibleName(new RegExp(`^${label}(?:: Action required)?$`));
+    await expect(link).toHaveAttribute("href", `/settings?section=${label.toLowerCase()}`);
+    await link.click();
   } else {
     await page
       .getByRole("navigation", { name: "Workspace navigation" })
       .getByRole("link", { name: "Settings", exact: true })
       .click();
-    await page
+    const link = page
       .getByRole("complementary", { name: "Account utility navigation" })
-      .locator(`a[href="/settings?section=${label.toLowerCase()}"]`)
-      .click();
+      .locator(`a[href="/settings?section=${label.toLowerCase()}"]`);
+    await expect(link).toHaveAccessibleName(new RegExp(`^${label}(?:: Action required)?$`));
+    await expect(link).toHaveAttribute("href", `/settings?section=${label.toLowerCase()}`);
+    await link.click();
   }
 }
 

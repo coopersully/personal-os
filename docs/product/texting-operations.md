@@ -296,8 +296,9 @@ explicit local offset.
 
 The shipped implementation provides verification, consent, conversation history, guarded manual
 reads and sends, delivery lifecycle, webhook handling, and MCP tools for reading and sending. It
-also has the authenticated Settings-owned Reviews destination, which aggregates available Review
-and Attention work across the four workspaces with filters and domain-owned action links. Current
+has a shared authenticated Reviews flow scoped to one workspace, with domain-owned actions.
+The older cross-workspace queue component remains unrouted; generated legacy links fall back to
+Account. The accepted unified multi-workspace destination is therefore still a gap. Current
 sources include reconnect-required Mail and Calendar accounts, but complete connector-failure and
 recovery coverage remains target work. Texting does not yet provide general-inbox intent
 classification, work-node answers, cross-workspace child
@@ -399,8 +400,9 @@ per-child `accepted`, `waiting`, `uncertain`, `blocked`, and `unavailable` state
 verified success from unresolved siblings. Public reasons are redacted: a terminal non-accepted
 answer with an unrecognized private reason is `answer_not_applied`, while an unknown nonterminal
 reason remains `processing_uncertain`. The response omits answer text, operation and binding UUIDs,
-provider IDs, phone data, and raw Finance outcomes; its only destination is the ordinary
-`/settings?section=reviews` page.
+provider IDs, phone data, and raw Finance outcomes. Its `reviewHref` is still the literal legacy
+`/settings?section=reviews` URL; that URL currently falls back to Account rather than opening
+the requested recovery work. The status read is available, but review navigation remains a gap.
 
 An internal, owner-scoped `runPage` reconciles bounded unfinished claims. For attached children,
 it inspects the exact Finance receipt before same-key execution or result projection; unattached
@@ -466,9 +468,10 @@ local wall time at each invocation: both occurrences of a repeated DST hour rema
 hour has no invented offset. The next bounded invocation rechecks eligibility against the current
 zone, preferences, expiry and domain state. No nohmi recurring notification schedule is introduced.
 
-T0 messages summarize up to three safe contextual labels, with an overflow count and an ordinary
-authenticated link to `/settings?section=reviews`. This is a general Reviews destination, not an
-exact-item or approval link. Messages do not advertise reply choices or numeric answer references.
+T0 messages summarize up to three safe contextual labels, with an overflow count and the legacy
+`/settings?section=reviews` link. It currently falls back to Account and does not open the
+requested review work; it carries no exact-item binding or approval authority. Messages do not
+advertise reply choices or numeric answer references.
 A domain disclosure ceiling and the global privacy ceiling constrain workspace preferences; a user
 preference cannot expand the permitted context. Sensitive or oversized content falls back to a
 short review summary. Notification rows contain references and delivery state, not copies of SMS

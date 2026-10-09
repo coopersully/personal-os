@@ -229,7 +229,7 @@ async function resolution(
   if (
     state.state !== "open" ||
     review.status !== "open" ||
-    work.revision !== review.contextualRevision.toString() ||
+    work.revision !== state.request.work.revision ||
     work.actionRevision !== review.actionRevision.toString() ||
     transaction.pending ||
     !transaction.needsReview ||

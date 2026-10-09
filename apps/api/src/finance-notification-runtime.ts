@@ -57,7 +57,7 @@ export function createFinanceNotificationDispatcher(options: {
       kind: "question" | "approval";
     }>(sql`
      WITH work AS (
-       SELECT user_id,id,contextual_revision::text AS revision,action_revision::text AS action_revision,'question'::text AS kind,0 AS source FROM finance_review_cases WHERE status='open' AND human_action->>'state'='open'
+       SELECT user_id,id,human_action->'request'->'work'->>'revision' AS revision,human_action->'request'->'work'->>'actionRevision' AS action_revision,'question'::text AS kind,0 AS source FROM finance_review_cases WHERE status='open' AND human_action->>'state'='open'
        UNION ALL
        SELECT user_id,id,work_revision::text AS revision,action_revision::text AS action_revision,'question'::text AS kind,1 AS source FROM finance_contextual_questions WHERE state='open'
        UNION ALL

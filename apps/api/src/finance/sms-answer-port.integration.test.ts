@@ -27,6 +27,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { eq, sql } from "drizzle-orm";
 import { createApp } from "../app.js";
 import { loadConfig } from "../config.js";
+import { createFinanceNotificationDispatcher } from "../finance-notification-runtime.js";
 import { encryptJson } from "../security.js";
 import { bindInboundReply, createTextReplyBindings } from "../texting-reply-binding.js";
 import { createTextingService } from "../texting-service.js";
@@ -344,6 +345,70 @@ describe.sequential("Finance SMS atomic answer port", () => {
       },
     });
   }
+  it("keeps immutable question generation through evidence drift, rediscovery, answer and receipt replay", async () => {
+    const f = await fixture("valid", true);
+    const [original] = await database.db
+      .select()
+      .from(financeReviewCases)
+      .where(eq(financeReviewCases.id, f.command.work.id));
+    if (!original) throw new Error("review");
+    await database.db
+      .update(financeReviewCases)
+      .set({ evidence: { ...original.evidence, incidental: "New source observation" } })
+      .where(eq(financeReviewCases.id, original.id));
+    await database.db.transaction((tx) =>
+      issueMaintenanceReviewQuestion(tx, f.userId, original.id),
+    );
+    const [refreshed] = await database.db
+      .select()
+      .from(financeReviewCases)
+      .where(eq(financeReviewCases.id, original.id));
+    expect(refreshed?.contextualRevision).toBeGreaterThan(original.contextualRevision);
+    expect(refreshed?.humanAction).toEqual(original.humanAction);
+    const publish = vi.fn(async () => ({}) as never);
+    const run = createFinanceNotificationDispatcher({
+      db: database.db,
+      enabled: () => true,
+      notifications: { publish, drain: vi.fn(async () => ({}) as never) },
+    });
+    await run();
+    expect(
+      publish.mock.calls.some((call) =>
+        (call as unknown as [Principal, { work: FinanceHumanWorkRef[] }])[1].work.some(
+          (work) => JSON.stringify(work) === JSON.stringify(f.command.work),
+        ),
+      ),
+    ).toBe(true);
+    const accepted = await answer(f);
+    expect(accepted.state).toBe("accepted");
+    expect(await answer(f)).toEqual(accepted);
+    expect(await port().inspectSmsReceipt(f.userId, f.command)).toEqual({
+      state: "completed",
+      outcome: accepted,
+    });
+    const rows = await database.db
+      .select()
+      .from(financeReviewAnswers)
+      .where(eq(financeReviewAnswers.userId, f.userId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.answeredWorkRevision).toBe(refreshed?.contextualRevision);
+    expect(rows[0]?.requestId).toBe(
+      original.humanAction.state === "open" ? original.humanAction.request.requestId : null,
+    );
+    expect(
+      await database.db
+        .select()
+        .from(financeAnswerContinuations)
+        .where(eq(financeAnswerContinuations.userId, f.userId)),
+    ).toHaveLength(1);
+    await database.db
+      .update(financeMutationRecords)
+      .set({ response: { ...accepted, resultRevision: "999" } })
+      .where(eq(financeMutationRecords.idempotencyKey, f.command.operationId));
+    await expect(port().inspectSmsReceipt(f.userId, f.command)).rejects.toMatchObject({
+      code: "internal_error",
+    });
+  });
   it("answers canonical maintenance questions atomically and rediscovery cannot reissue consumed authority", async () => {
     const f = await fixture("valid", true);
     const accepted = await answer(f);

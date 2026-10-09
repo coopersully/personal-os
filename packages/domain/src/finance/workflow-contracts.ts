@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "../common.js";
-import { financeContextTextSchema } from "./context.js";
 import { financeReviewReasonSchema } from "./inbox.js";
 
 const revisionSchema = z.string().trim().min(1).max(200);
@@ -815,7 +814,8 @@ export const financeContextSchema = z
   .object({
     id: idSchema,
     revision: revisionSchema,
-    text: financeContextTextSchema,
+    // Existing snapshots remain readable and revisable; new capture uses the stricter write schema.
+    text: z.string().trim().min(1).max(10_000),
     validFrom: isoDateTimeSchema.nullable(),
     validThrough: isoDateTimeSchema.nullable(),
     participants: z.array(z.string().trim().min(1).max(200)).max(50),

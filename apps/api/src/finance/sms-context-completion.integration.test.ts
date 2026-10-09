@@ -159,7 +159,9 @@ describe.sequential("signed Finance context SMS and durable completion", () => {
     await ack.run();
     await ack.run();
     expect(ack.send).toHaveBeenCalledTimes(1);
-    expect(ack.send.mock.calls[0]?.[0].body).toContain("could not safely attach");
+    expect(ack.send).toHaveBeenCalledWith(
+      expect.objectContaining({ body: expect.stringContaining("could not safely attach") }),
+    );
     expect(await database.db.select().from(financeMutationRecords)).toEqual([]);
   });
   it("captures verbatim prospective context once with SMS provenance and no inferred financial fields", async () => {

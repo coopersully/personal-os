@@ -120,8 +120,8 @@ import {
   preferenceValueLabel,
   WorkspacePreferenceRecovery,
 } from "../workspace-settings/save-recovery";
-import { AccountScopeDialog } from "./account-scope-dialog";
 import { financeAccountPreferenceKeys, selectedFinanceAccounts } from "./account-preferences";
+import { AccountScopeDialog } from "./account-scope-dialog";
 import { FinanceBudgetBucketManager } from "./bucket-manager.js";
 import { FinanceCategoryDialog } from "./category-dialog";
 import { AddTransactionContext } from "./contextual-question.js";

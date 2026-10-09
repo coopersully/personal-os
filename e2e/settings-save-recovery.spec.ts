@@ -1,9 +1,3 @@
-import type {
-  FinanceConfiguration,
-  TaskList,
-  TaskProject,
-  WorkspaceSettings,
-} from "../packages/domain/src/index.js";
 import {
   type APIRequestContext,
   type BrowserContext,
@@ -12,6 +6,12 @@ import {
   request,
   test,
 } from "@playwright/test";
+import type {
+  FinanceConfiguration,
+  TaskList,
+  TaskProject,
+  WorkspaceSettings,
+} from "../packages/domain/src/index.js";
 
 test("two editors retain attempted workspace values and explicitly recover repeated conflicts", async ({
   page,

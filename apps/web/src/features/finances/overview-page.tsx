@@ -15,9 +15,9 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { api } from "../../api.js";
-import { FinanceOverviewSettings } from "./overview-settings";
 import { FinanceBentoSection } from "./bento-section.js";
 import { formatCompactMoney } from "./format";
+import { FinanceOverviewSettings } from "./overview-settings";
 import {
   FinancePositionMaterial,
   FinanceSourceState,

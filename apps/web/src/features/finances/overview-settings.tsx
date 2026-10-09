@@ -14,8 +14,8 @@ import {
   WorkspacePreferenceRecovery,
 } from "../workspace-settings/save-recovery";
 import {
-  financeAccountPreferenceKeys,
   type FinanceAccountScope,
+  financeAccountPreferenceKeys,
   selectedFinanceAccounts,
 } from "./account-preferences";
 import { AccountScopeDialog } from "./account-scope-dialog";

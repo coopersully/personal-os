@@ -185,6 +185,76 @@ describe.sequential("durable notifications", () => {
     expect(audits).toHaveLength(3);
     expect((await service.status({ ...principal, userId: other })).preferences).toEqual([]);
   });
+  it("resets only the owned Finance override with revision fencing and audit, without reusing deleted revisions", async () => {
+    const global = { ...defaultNotificationPreferences, enabled: false };
+    await service.savePreferences(principal, "global", {
+      expectedRevision: null,
+      preferences: global,
+    });
+    await service.savePreferences(principal, "finances", {
+      expectedRevision: null,
+      preferences: defaultNotificationPreferences,
+    });
+    await expect(
+      service.resetFinancePreferences(
+        { ...principal, actorType: "agent" },
+        { expectedRevision: 1 },
+      ),
+    ).rejects.toThrow("Only the person");
+    await expect(
+      service.resetFinancePreferences(
+        { ...principal, scopes: new Set(["texting:read", "finances:read"]) },
+        { expectedRevision: 1 },
+      ),
+    ).rejects.toThrow("requires");
+    await expect(
+      service.resetFinancePreferences({ ...principal, userId: other }, { expectedRevision: 1 }),
+    ).rejects.toThrow("changed");
+    await expect(
+      service.resetFinancePreferences(principal, { expectedRevision: 2 }),
+    ).rejects.toThrow("changed");
+    expect(await service.resetFinancePreferences(principal, { expectedRevision: 1 })).toEqual({
+      scope: "finances",
+      inherited: true,
+    });
+    const inherited = await service.status(principal);
+    expect(inherited.preferences).toEqual([{ scope: "global", revision: 1, preferences: global }]);
+    expect(inherited.effective).toEqual(global);
+    const audits = await database.db.query.auditEvents.findMany();
+    expect(audits.filter((event) => event.action === "notifications.preferences.reset")).toEqual([
+      expect.objectContaining({
+        before: { scope: "finances", revision: 1, preferences: defaultNotificationPreferences },
+        after: { scope: "finances", inherited: true },
+      }),
+    ]);
+    expect(
+      (
+        await service.savePreferences(principal, "finances", {
+          expectedRevision: null,
+          preferences: defaultNotificationPreferences,
+        })
+      ).revision,
+    ).toBe(2);
+    await expect(
+      service.resetFinancePreferences(principal, { expectedRevision: 1 }),
+    ).rejects.toThrow("changed");
+    await expect(
+      service.savePreferences(principal, "finances", {
+        expectedRevision: 1,
+        preferences: global,
+      }),
+    ).rejects.toThrow("changed");
+    expect((await service.status(principal)).preferences).toEqual([
+      expect.objectContaining({ scope: "global", revision: 1, preferences: global }),
+      expect.objectContaining({
+        scope: "finances",
+        revision: 2,
+        preferences: defaultNotificationPreferences,
+      }),
+    ]);
+    expect(await database.db.query.auditEvents.findMany()).toHaveLength(audits.length + 1);
+    expect(send).not.toHaveBeenCalled();
+  });
   it("deduplicates wording and evidence refreshes while keeping semantic attempt history", async () => {
     await service.publish(principal, { work: [ref] });
     await service.drain(principal);

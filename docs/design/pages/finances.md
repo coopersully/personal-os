@@ -356,3 +356,12 @@ KPI amounts use compact currency notation (for example, $23.6k), with exact valu
 Transaction cards place the large signed amount at the inline end, with matching status and category badges inline beside the small date below the merchant. A compact merchant icon spans the title and metadata rows. The Tasks-standard Display menu offers grouping by date, category, merchant, direction, or posting state in card view only; group/view choices preserve filters in the URL and save to Finance workspace settings using revision-checked writes, as in Tasks. Opening Transactions without explicit URL choices restores these defaults; explicit links override them without resaving. Table view retains the saved card grouping without applying it. Grouping applies to the loaded page and is explicitly labelled when pagination is present.
 
 Transaction cards and table rows open details in the shared responsive dialog/drawer on activation; they never expand inline or include a Details button. Right-click/long-press exposes Split purchase, Add/Edit context, and Categorize/Recategorize. The same commands remain in details for touch and keyboard access. Context notes preserve the observed transaction version when saved and retain drafts after failures. Table view ignores retained card-group parameters and uses a dedicated posted/pending icon column with accessible labels and explanatory tooltips.
+
+### Saved account selections
+
+Spending, cash, and investment account selections persist as account-owned workspace preferences.
+The account selector distinguishes selecting no accounts from following all eligible accounts;
+“Use all eligible accounts” restores the latter. Save errors remain visible and do not claim a
+persisted change. These view preferences never modify planning inclusion or account meanings.
+Finance notification settings show inherited/effective policy and support resetting an existing
+workspace override to global preferences using its current revision.

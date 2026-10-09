@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { workspacePreferencesSchema } from "@personal-os/domain";
+import { tasksWorkspacePreferencesSchema } from "@personal-os/domain";
 import { describe, expect, it } from "vitest";
 import { taskPresentationParams } from "./presentation-preferences";
 
 describe("Tasks display defaults", () => {
-  const saved = workspacePreferencesSchema.parse({
+  const saved = tasksWorkspacePreferencesSchema.parse({
     taskSort: "title",
     taskGroup: "project",
     taskRowDetails: [],
@@ -37,4 +37,36 @@ describe("Tasks display defaults", () => {
       containerSort: "updated",
     });
   });
+});
+
+it.each([
+  "",
+  "list=work",
+  "project=launch",
+  "view=all&list=work",
+])("shows completed tasks by default in container %s", (scope) => {
+  const saved = tasksWorkspacePreferencesSchema.parse({ showCompletedTasks: true });
+  expect(taskPresentationParams(new URLSearchParams(scope), saved).get("status")).toBe(
+    "open_and_completed",
+  );
+});
+it.each([
+  "view=history",
+  "view=trash",
+  "view=today",
+  "view=upcoming",
+  "view=all",
+  "view=history&list=work",
+])("keeps lifecycle/global view semantics for %s", (scope) => {
+  const saved = tasksWorkspacePreferencesSchema.parse({ showCompletedTasks: true });
+  expect(taskPresentationParams(new URLSearchParams(scope), saved).has("status")).toBe(false);
+});
+it.each([
+  "open",
+  "all",
+  "completed",
+  "cancelled",
+])("preserves explicit status %s over saved visibility", (status) => {
+  const saved = tasksWorkspacePreferencesSchema.parse({ showCompletedTasks: true });
+  expect(taskPresentationParams(new URLSearchParams({ status }), saved).get("status")).toBe(status);
 });

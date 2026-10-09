@@ -40,6 +40,8 @@ import { FeedbackForm } from "../../components/feedback-form.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+import { useWorkspacePreferences } from "../workspace-settings/preferences";
+import { taskCaptureList } from "./capture-default";
 import { TaskCreationProgress } from "./creation-progress";
 import { listAllTaskLists, listAllTaskProjects } from "./page.js";
 
@@ -73,6 +75,7 @@ export function TaskDialog({
 }) {
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
+  const preferences = useWorkspacePreferences("tasks");
   const lists = useQuery({ queryFn: listAllTaskLists, queryKey: ["task-lists"] });
   const projects = useQuery({
     queryFn: listAllTaskProjects,
@@ -85,7 +88,11 @@ export function TaskDialog({
   const [listId, setListId] = useState(task?.listId ?? placement?.listId ?? "");
   const [projectId, setProjectId] = useState(task?.projectId ?? placement?.projectId ?? "");
   const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
-  const inbox = lists.data?.items.find((list) => list.kind === "inbox");
+  const unscoped = !task && !placement && !searchParams.has("list") && !searchParams.has("project");
+  const captureList = taskCaptureList(
+    lists.data?.items ?? [],
+    unscoped ? preferences.data?.preferences.defaultCaptureListId : null,
+  );
   const activeLists = lists.data?.items.filter((list) => list.availability === "active") ?? [];
   const requestedProject = projects.data?.items.find(
     (project) =>
@@ -99,9 +106,19 @@ export function TaskDialog({
   );
 
   useEffect(() => {
-    if (listId) return;
-    setListId(requestedProject?.listId ?? requestedList?.id ?? inbox?.id ?? "");
-  }, [inbox?.id, listId, requestedList?.id, requestedProject?.listId]);
+    if (listId || (unscoped && preferences.isPending) || (requestedProjectId && projects.isPending))
+      return;
+    setListId(requestedProject?.listId ?? requestedList?.id ?? captureList?.id ?? "");
+  }, [
+    captureList?.id,
+    listId,
+    preferences.isPending,
+    projects.isPending,
+    requestedList?.id,
+    requestedProject?.listId,
+    requestedProjectId,
+    unscoped,
+  ]);
   useEffect(() => {
     if (!task && requestedProject && !projectId) setProjectId(requestedProject.id);
   }, [projectId, requestedProject, task]);
@@ -310,6 +327,16 @@ export function TaskDialog({
                       </NativeSelectOption>
                     ))}
                   </NativeSelect>
+                  {unscoped &&
+                  lists.isSuccess &&
+                  preferences.data?.preferences.defaultCaptureListId &&
+                  captureList?.kind === "inbox" &&
+                  captureList.id === listId &&
+                  captureList.id !== preferences.data.preferences.defaultCaptureListId ? (
+                    <FieldDescription>
+                      Your default list is unavailable. This task will go to Inbox.
+                    </FieldDescription>
+                  ) : null}
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="task-project">Project</FieldLabel>

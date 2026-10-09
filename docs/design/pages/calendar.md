@@ -152,8 +152,8 @@ and verify matching computed backgrounds and column alignment in both themes.
 - Optional location, conferencing, and related-link fields expand in place and
   dismiss back to their compact add actions. Time inputs expose editable hour
   and minute segments with an explicit meridiem. An untouched end follows start
-  changes at a one-hour duration; a manually chosen valid end is preserved, and
-  any end invalidated by a later start is repaired to one hour after that start.
+  changes at a saved default duration; a manually chosen valid end is preserved, and
+  any end invalidated by a later start is repaired using that saved duration.
 - Conferencing follows the selected calendar's real capabilities. Writable Google calendars can
   request a unique Google Meet conference from Google; every calendar can attach an existing Zoom,
   Teams, Webex, or other meeting URL. Provider-generated options are never shown as available when
@@ -170,7 +170,7 @@ and verify matching computed backgrounds and column alignment in both themes.
 - Current-time, selection, event, and drag states remain visually dominant over
   the quarter-hour grid. Dragging a writable event visibly lifts it and the
   drop preview advances only in 15-minute increments. Pointer range creation
-  cancels with Escape. A keyboard user can start a one-hour range, adjust its
+  cancels with Escape. A keyboard user can start a range using the saved default duration, adjust its
   end in 15-minute increments, and commit it into the same inline composer.
 - Day, week, and month views retain an explicit app-frame date-range heading
   at every scroll position. The Today control remains a standard action, not a
@@ -272,3 +272,11 @@ the page background in Week and Month.
 Floating action sizing, colors, and labels use the shared
 [floating workspace actions contract](../system.md#floating-workspace-actions).
 Workspace placement and opened-workflow behavior remain owned by this page.
+
+## Saved workspace defaults
+
+Week, month, and the date-jump picker use the saved Sunday/Monday week start. Hiding weekends still
+shows Monday through Friday. New timed events, keyboard creation, and repair of an invalid end time
+use the saved event duration (initially 60 minutes). Explicit selected intervals and existing event
+durations retain their meaning. Default destination, buffers, and busy-block privacy are
+edited through the existing versioned Calendar profile; action rules retain their approval gates.

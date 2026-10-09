@@ -35,6 +35,8 @@ export const settingsFields: SettingsField[] = [
     ],
   ]),
   ...fields("tasks", [
+    ["Default capture list", "tasks-default-capture-list", "inbox new task"],
+    ["Show completed tasks in lists and projects", "tasks-show-completed", "visibility done"],
     [
       "Sort by",
       "taskSort",
@@ -47,6 +49,14 @@ export const settingsFields: SettingsField[] = [
     ["Notes", "task-details-notes", "row details"],
   ]),
   ...fields("mail", [
+    ["Inbox style", "mail-inbox-style", "signal balanced conservative custom"],
+    ["Important email handling", "mail-important-email-handling", "inbox attention"],
+    [
+      "Low-priority email handling",
+      "mail-noise-disposition",
+      "noise review archive trash retention",
+    ],
+    ["Low-priority email waiting period", "mail-noise-disposition", "retention days"],
     ["Conversation layout", "mail-conversation-layout", "split full width reading pane mobile"],
     [
       "Conversation density",
@@ -65,6 +75,12 @@ export const settingsFields: SettingsField[] = [
     ]),
   ),
   ...fields("calendar", [
+    ["Default calendar", "calendar-default-destination", "event destination source"],
+    ["Buffer before events", "calendar-beforeBufferMinutes", "minutes preparation"],
+    ["Buffer after events", "calendar-afterBufferMinutes", "minutes travel"],
+    ["Busy block privacy", "calendar-busy-block-privacy", "details visibility"],
+    ["Week starts on", "calendar-week-start", "sunday monday"],
+    ["Default event duration", "calendar-default-duration", "minutes new meeting"],
     ["Preferred view", "calendar-default-view", "default day week month automatic saved"],
     ["Automatically follow today", "calendar-auto-follow", "target current time midnight opening"],
     ["Snap back to Follow", "calendar-snap-follow", "target scroll snap enable disable"],
@@ -75,7 +91,7 @@ export const settingsFields: SettingsField[] = [
     ],
     ["Show weekends", "calendar-show-weekends", "saturday sunday work week"],
   ]),
-  ...["mail", "tasks"].flatMap((domain) =>
+  ...["mail", "tasks", "calendar"].flatMap((domain) =>
     fields(domain, [
       ["Objective", `${domain}-objective`, "preferences guidance"],
       ["Guidance", `${domain}-instructions`, "instructions preferences"],

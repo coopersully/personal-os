@@ -1,4 +1,8 @@
-import { notificationScopeSchema, saveNotificationPreferencesSchema } from "@personal-os/domain";
+import {
+  notificationScopeSchema,
+  resetFinanceNotificationPreferencesSchema,
+  saveNotificationPreferencesSchema,
+} from "@personal-os/domain";
 import type { Hono } from "hono";
 import type { createNotificationService } from "../notification-service.js";
 import type { AppEnv } from "../types.js";
@@ -24,6 +28,18 @@ export function registerNotificationRoutes(options: {
   );
   app.get("/v1/texting/notifications", async (context) =>
     context.json(await notifications.status(context.get("principal"))),
+  );
+  app.delete(
+    "/v1/texting/notifications/preferences/finances",
+    requireHuman,
+    requireScope("texting:write"),
+    async (context) =>
+      context.json(
+        await notifications.resetFinancePreferences(
+          context.get("principal"),
+          await parseBody(context, resetFinanceNotificationPreferencesSchema),
+        ),
+      ),
   );
   app.patch("/v1/texting/notifications/preferences/:scope", requireHuman, async (context) =>
     context.json(

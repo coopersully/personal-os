@@ -198,3 +198,8 @@ still prevent retrieval. Demo fixtures contain attachment metadata, not live pro
 exercise downloads with a connected account or explicit mocked file bytes in browser tests.
 
 Provider reference: [Gmail attachment retrieval](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages.attachments/get).
+
+Mail guidance exposes the typed inbox style, important-email handling, low-priority disposition,
+and retention period beside the existing objective and instructions. Saving preserves the profile
+version guard and unrelated preference keys. Changing these preferences does not activate rules;
+existing previews and approval remain required. Review-only disposition clears the retention period.

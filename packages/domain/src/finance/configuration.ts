@@ -1,5 +1,5 @@
 import type { FinanceAccountList, FinanceGuidedSetupContext, FinanceProfile } from "../finance.js";
-import type { WorkspaceSettings } from "../workspace-search.js";
+import type { WorkspaceSettings } from "../workspace-settings.js";
 import type { FinanceBudgetVersion } from "./budget.js";
 import type { FinanceProfileVersion } from "./profile.js";
 
@@ -18,7 +18,7 @@ export type FinanceConfiguration = {
     status: import("../maintenance.js").MaintenanceRun["status"];
   } | null>;
   profile: FinanceConfigurationSection<FinanceProfileVersion | null>;
-  preferences: FinanceConfigurationSection<WorkspaceSettings>;
+  preferences: FinanceConfigurationSection<WorkspaceSettings<"finances">>;
   income: FinanceConfigurationSection<FinanceProfile | null>;
   budget: FinanceConfigurationSection<FinanceBudgetVersion | null>;
   accounts: FinanceConfigurationSection<FinanceAccountList>;

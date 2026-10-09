@@ -1,5 +1,18 @@
 # nohmi — Implementation Log
 
+## 2026-10-08 — Finance review history read (branch implementation)
+
+- Added owner-scoped, bounded keyset history reads for open, deferred, and resolved Finance Inbox
+  cases, plus an exact evidence read. A foreign or invalid cursor fails without exposing another
+  user's case; missing and foreign exact IDs share the same unavailable result. A new
+  owner/time/ID index supports ordered pages; review-case records and answer semantics are unchanged.
+- The shared Finance Reviews dialog discloses older case status and exact recorded evidence on demand, with
+  bounded continuation and local retry states. Focused PostgreSQL and UI tests cover status,
+  timestamp ordering, ownership, pagination, and exact evidence. Source transaction and account
+  deletion retain immutable owner-scoped review evidence; the first published archive migration is
+  upgraded additively. Full verification on the current base remains pending; this branch does not
+  activate SMS, matching, or reusable User Knowledge.
+
 ## 2026-10-07 — Workspace layout, Finance configuration, and Mail recovery merge
 
 - [PR #223 — Standardize workspace layouts and Finance configuration](https://github.com/coopersully/personal-os/pull/223)

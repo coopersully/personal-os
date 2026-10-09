@@ -778,6 +778,27 @@
       "when": 1791313000000,
       "tag": "0103_finance_display_account_preferences",
       "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "7",
+      "when": 1791314000000,
+      "tag": "0104_finance_review_history_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "7",
+      "when": 1791315000000,
+      "tag": "0105_finance_review_history_archive",
+      "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1791319000000,
+      "tag": "0109_finance_review_history_archive_upgrade",
+      "breakpoints": true
     }
   ]
 }

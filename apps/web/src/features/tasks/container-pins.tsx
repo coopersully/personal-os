@@ -22,7 +22,10 @@ export function TaskContainerPin({
   const ids = query.data?.preferences[key] ?? [];
   const pinned = ids.includes(id);
   const save = useSaveWorkspacePreferences("tasks");
-  if (unpinOnly && !pinned && !save.recovery) return null;
+  const pinRecovery =
+    !!save.recovery &&
+    ("pinnedListIds" in save.recovery.attempted || "pinnedProjectIds" in save.recovery.attempted);
+  if (unpinOnly && !pinned && !pinRecovery) return null;
   return (
     <>
       <Button
@@ -46,7 +49,7 @@ export function TaskContainerPin({
       >
         <PinIcon aria-hidden="true" weight={pinned ? "Filled" : "Outline"} />
       </Button>
-      {save.recovery ? (
+      {pinRecovery ? (
         <Button asChild variant="secondary">
           <Link to="/settings?section=tasks">Review unsaved pin preferences</Link>
         </Button>

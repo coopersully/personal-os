@@ -117,6 +117,10 @@ import {
   useSaveWorkspacePreferences,
   useWorkspacePreferences,
 } from "../workspace-settings/preferences";
+import {
+  preferenceValueLabel,
+  WorkspacePreferenceRecovery,
+} from "../workspace-settings/save-recovery";
 import { financeAccountPreferenceKeys, selectedFinanceAccounts } from "./account-preferences";
 import { FinanceBudgetBucketManager } from "./bucket-manager.js";
 import { FinanceCategoryDialog } from "./category-dialog";
@@ -1437,16 +1441,57 @@ export function FinancesPage() {
         open={breakdownTransaction !== null}
         transaction={breakdownTransaction}
       />
+      {saveAccountPreferences.recovery && !scopeDialog ? (
+        <ShadcnButton
+          type="button"
+          variant="secondary"
+          onClick={() =>
+            setScopeDialog(
+              saveAccountPreferences.recovery &&
+                "spendAccountIds" in saveAccountPreferences.recovery.attempted
+                ? "spend"
+                : saveAccountPreferences.recovery &&
+                    "cashAccountIds" in saveAccountPreferences.recovery.attempted
+                  ? "cash"
+                  : "investments",
+            )
+          }
+        >
+          Review unsaved account selections
+        </ShadcnButton>
+      ) : null}
       <AccountScopeDialog
         accounts={finance.accounts}
-        disabled={!accountPreferences.isSuccess || saveAccountPreferences.isPending}
+        disabled={
+          !accountPreferences.isSuccess ||
+          saveAccountPreferences.isPending ||
+          !!saveAccountPreferences.recovery
+        }
         feedback={
           <>
             <QueryFeedback
               query={accountPreferences}
               title="Couldn’t load saved account selections."
             />
-            <MutationFeedback feedback={saveAccountPreferences.feedback} />
+            {!saveAccountPreferences.recovery ? (
+              <MutationFeedback feedback={saveAccountPreferences.feedback} />
+            ) : null}
+            <WorkspacePreferenceRecovery
+              workspace="finances"
+              formatValue={(value, key) => {
+                if (Array.isArray(value) && key.endsWith("AccountIds"))
+                  return value.length
+                    ? value
+                        .map(
+                          (id) =>
+                            finance.accounts.find((account) => account.id === id)?.name ??
+                            "Unavailable account",
+                        )
+                        .join(", ")
+                    : "None selected";
+                return preferenceValueLabel(value, key);
+              }}
+            />
           </>
         }
         onReset={(scope) =>
@@ -1689,11 +1734,17 @@ function AccountScopeDialog({
         <ShadcnDialogHeader>
           <ShadcnDialogTitle>{title}</ShadcnDialogTitle>
           <ShadcnDialogDescription>
-            Selections are saved to your Finance workspace across devices.
+            Selections are saved to your Finance workspace across devices. Use all eligible accounts
+            includes newly added accounts; unchecking every account selects none.
           </ShadcnDialogDescription>
         </ShadcnDialogHeader>
         {feedback}
-        <ShadcnButton variant="secondary" disabled={disabled} onClick={() => onReset(scope)}>
+        <ShadcnButton
+          type="button"
+          variant="secondary"
+          disabled={disabled}
+          onClick={() => onReset(scope)}
+        >
           Use all eligible accounts
         </ShadcnButton>
         <ShadcnFieldGroup>

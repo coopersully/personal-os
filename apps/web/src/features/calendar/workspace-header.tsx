@@ -35,6 +35,7 @@ import {
   useSaveWorkspacePreferences,
   useWorkspacePreferences,
 } from "../workspace-settings/preferences.js";
+import { WorkspacePreferenceRecovery } from "../workspace-settings/save-recovery";
 import { type CalendarView, calendarPeriodDays, calendarViewFromSearch } from "./page.js";
 
 const calendarViews: Array<{ icon: Icon; label: string; value: CalendarView }> = [
@@ -172,7 +173,10 @@ export function CalendarAppBarControls({
   return (
     <fieldset className="calendar-app-bar__controls">
       <legend className="sr-only">Calendar controls</legend>
-      <MutationFeedback feedback={saveCalendarView.feedback} />
+      {!saveCalendarView.recovery ? (
+        <MutationFeedback feedback={saveCalendarView.feedback} />
+      ) : null}
+      <WorkspacePreferenceRecovery workspace="calendar" />
       <div className="calendar-app-bar__control-set">
         <div className="calendar-app-bar__compact-view">
           <DropdownMenu>
@@ -184,7 +188,11 @@ export function CalendarAppBarControls({
             <DropdownMenuContent align="end">
               <DropdownMenuRadioGroup value={view} onValueChange={selectView}>
                 {calendarViews.map((option) => (
-                  <DropdownMenuRadioItem key={option.value} value={option.value}>
+                  <DropdownMenuRadioItem
+                    key={option.value}
+                    value={option.value}
+                    disabled={saveCalendarView.isPending || !!saveCalendarView.recovery}
+                  >
                     <option.icon aria-hidden="true" />
                     {option.label}
                   </DropdownMenuRadioItem>

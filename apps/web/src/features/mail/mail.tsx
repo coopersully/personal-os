@@ -1,5 +1,6 @@
 import { getDefaultWorkspacePreferences } from "@personal-os/domain";
 import { MessageAttachments } from "@/components/message-attachments";
+import { WorkspacePreferenceRecovery } from "../workspace-settings/save-recovery";
 
 export { formatAttachmentSize } from "@/components/message-attachments";
 
@@ -422,6 +423,7 @@ export function MailPage({ user }: { user: User }) {
             ? `${(drafts.data ?? []).filter((draft) => draft.sendStatus !== "sent").length} drafts`
             : `${threads.data?.length ?? 0} conversations`
         }
+        layoutDisabled={!layoutSettings.isSuccess || saveLayout.isPending || !!saveLayout.recovery}
         conversationLayout={conversationLayout}
         setConversationLayout={(mailConversationLayout) =>
           saveLayout.mutate({ mailConversationLayout })
@@ -481,7 +483,8 @@ export function MailPage({ user }: { user: User }) {
         {confirmation}
         <MutationFeedback feedback={deleteDraft.feedback} />
         <MutationFeedback feedback={reconcileDraft.feedback} />
-        <MutationFeedback feedback={saveLayout.feedback} />
+        {!saveLayout.recovery ? <MutationFeedback feedback={saveLayout.feedback} /> : null}
+        <WorkspacePreferenceRecovery workspace="mail" />
         <QueryFeedback query={layoutSettings} title="Couldn’t load Mail layout preferences." />
         <MutationFeedback feedback={updateThread.feedback} />
         <MutationFeedback feedback={snoozeThread.feedback} />
@@ -498,6 +501,9 @@ export function MailPage({ user }: { user: User }) {
           onLayoutChanged={(layout, metadata) => {
             const width = layout["mail-list"];
             if (
+              !saveLayout.recovery &&
+              !saveLayout.isPending &&
+              layoutSettings.isSuccess &&
               conversationLayout === "split" &&
               metadata.isUserInteraction &&
               width !== undefined &&
@@ -556,7 +562,11 @@ export function MailPage({ user }: { user: User }) {
               )}
             </section>
           </ResizablePanel>
-          <ResizableHandle aria-label="Resize conversation list" withHandle />
+          <ResizableHandle
+            disabled={!layoutSettings.isSuccess || saveLayout.isPending || !!saveLayout.recovery}
+            aria-label="Resize conversation list"
+            withHandle
+          />
           <ResizablePanel defaultSize="66%" id="mail-reader" minSize="360px">
             <section aria-label="Message reader" className="mail-reader">
               <QueryFeedback query={loaded} title="Couldn’t load the conversation." />
@@ -666,6 +676,7 @@ function MailSecondaryNavigation({
   countLabel,
   conversationLayout,
   setConversationLayout,
+  layoutDisabled,
   density,
   pending,
   forward,
@@ -682,6 +693,7 @@ function MailSecondaryNavigation({
   back: () => void;
   countLabel: string;
   conversationLayout: "split" | "single";
+  layoutDisabled: boolean;
   setConversationLayout: (layout: "split" | "single") => void;
   density: MailListDensity;
   pending: boolean;
@@ -824,6 +836,7 @@ function MailSecondaryNavigation({
             <TooltipTrigger asChild>
               <DropdownMenuTrigger asChild>
                 <Button
+                  disabled={layoutDisabled}
                   aria-label="Message list layout"
                   className="mail-secondary-nav__density"
                   size="icon"

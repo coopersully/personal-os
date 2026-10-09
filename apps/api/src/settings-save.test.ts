@@ -8,7 +8,7 @@ it("accepts exact missing and persisted domain revisions without treating defaul
     [0, null],
     [2, 1],
     [1, 2],
-  ]) {
+  ] as const) {
     expect(() => assertSettingsRevision(current, expected, "Changed")).toThrow("Changed");
   }
 });

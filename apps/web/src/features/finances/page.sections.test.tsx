@@ -62,6 +62,7 @@ vi.mock("../../api.js", () => ({
 
 function renderPage(path: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["me"], { id: "owner" });
   return render(
     <QueryClientProvider client={client}>
       <TooltipProvider>
@@ -1702,4 +1703,51 @@ it("opens an interactive budget metric with its accessible label", () => {
   render(<BudgetMetricCard label="Remaining" tone="success" value="$25.00" onClick={onClick} />);
   fireEvent.click(screen.getByRole("button"));
   expect(onClick).toHaveBeenCalledOnce();
+});
+
+it("keeps readable Finance account-selection recovery reachable after closing its dialog", async () => {
+  const accountId = "00000000-0000-4000-8000-000000000123";
+  api.getFinanceOverview.mockResolvedValue({
+    accounts: [
+      {
+        id: accountId,
+        name: "Recovery checking",
+        kind: "cash",
+        balance: 100,
+        institution: "Manual",
+        status: "manual",
+        provider: "manual",
+        createdAt: "2026-10-08T00:00:00Z",
+        updatedAt: "2026-10-08T00:00:00Z",
+        lastSyncedAt: null,
+      },
+    ],
+    budgets: [],
+    transactions: [],
+    spendingThisMonth: 0,
+    pendingSpendThisMonth: 0,
+    refundCreditsThisMonth: 0,
+    reviewCount: 0,
+  });
+  api.updateWorkspaceSettings.mockRejectedValue(new Error("Offline"));
+  const user = userEvent.setup();
+  renderPage("/finances");
+  await user.click(
+    await screen.findByRole("button", { name: "Spent this month: configure included accounts" }),
+  );
+  const choice = await screen.findByLabelText(/Recovery checking/);
+  await waitFor(() => expect(choice).toBeEnabled());
+  await user.click(choice);
+  expect(await screen.findByText("Your change: None selected")).toBeVisible();
+  api.getWorkspaceSettings.mockResolvedValue(
+    resolveWorkspaceSettings("finances", { spendAccountIds: [accountId], revision: 3 }),
+  );
+  await user.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  expect(await screen.findByText("Latest: Recovery checking")).toBeVisible();
+  await user.keyboard("{Escape}");
+  await user.click(
+    await screen.findByRole("button", { name: "Review unsaved account selections" }),
+  );
+  expect(await screen.findByText("Your change: None selected")).toBeVisible();
+  expect(api.updateWorkspaceSettings).toHaveBeenCalledTimes(1);
 });

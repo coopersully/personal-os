@@ -98,7 +98,7 @@ export function createNotificationService(options: Options) {
       expectedRevision: number | null;
       preferences: NotificationPreferences;
     },
-    requestId = crypto.randomUUID(),
+    requestId: string = crypto.randomUUID(),
   ) {
     authorize(principal);
     if (principal.actorType !== "user")
@@ -162,7 +162,7 @@ export function createNotificationService(options: Options) {
   async function resetFinancePreferences(
     principal: Principal,
     input: { expectedRevision: number },
-    requestId = crypto.randomUUID(),
+    requestId: string = crypto.randomUUID(),
   ) {
     authorize(principal);
     if (principal.actorType !== "user")

@@ -95,3 +95,105 @@ test("two editors retain attempted workspace values and explicitly recover repea
     expect(restored.ok()).toBeTruthy();
   }
 });
+
+for (const workspace of ["calendar", "mail"] as const) {
+  test(`${workspace} contextual failure remains reviewable after SPA navigation to Settings`, async ({
+    page,
+  }, info) => {
+    const mobile = !!info.project.use.isMobile;
+    await page.goto("/");
+    await page.getByLabel("Email").fill("demo+full@nohmi.test");
+    await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+    await page.getByRole("button", { name: "Log in" }).click();
+    await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+    const path = `/v1/workspaces/${workspace}/settings`;
+    const origin = new URL(page.url()).origin;
+    const original = await (await page.request.get(path)).json();
+    const preferences =
+      workspace === "calendar" ? { calendarView: "week" } : { mailConversationLayout: "split" };
+    expect(
+      (
+        await page.request.patch(path, {
+          headers: { origin },
+          data: { expectedRevision: original.revision, preferences },
+        })
+      ).ok(),
+    ).toBeTruthy();
+    let writes = 0;
+    page.on("request", (request) => {
+      if (request.method() === "PATCH" && request.url().endsWith(path)) writes++;
+    });
+    try {
+      await page.goto(`/${workspace}`);
+      await page.route(`**${path}`, async (route) => {
+        if (route.request().method() === "PATCH")
+          await route.fulfill({
+            status: 409,
+            contentType: "application/json",
+            body: JSON.stringify({
+              error: {
+                code: "conflict",
+                message: "These preferences changed. Reload and try again.",
+                requestId: "e2e-contextual-save",
+              },
+            }),
+          });
+        else await route.continue();
+      });
+      if (workspace === "calendar") {
+        await page.getByRole("button", { name: /^Calendar view:/ }).click();
+        await page.getByRole("menuitemradio", { name: "Month", exact: true }).click();
+      } else {
+        await page.getByRole("button", { name: "Message list layout" }).click();
+        await page.getByRole("menuitemradio", { name: "Full-width view", exact: true }).click();
+      }
+      const attempted =
+        workspace === "calendar" ? "Your change: month" : "Your change: Full-width view";
+      await expect(page.getByText(attempted)).toBeVisible();
+      await expect(page.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
+      if (mobile) {
+        await page.getByRole("button", { name: "Switch workspace" }).click();
+        await page
+          .getByRole("menu", { name: "Switch workspace" })
+          .getByRole("menuitem", { name: "Settings", exact: true })
+          .click();
+        await page.getByRole("button", { name: "Workspace actions" }).click();
+        await page
+          .getByRole("dialog", { name: "Settings" })
+          .getByRole("link", { name: workspace === "calendar" ? "Calendar" : "Mail", exact: true })
+          .click();
+      } else {
+        await page
+          .getByRole("navigation", { name: "Workspace navigation" })
+          .getByRole("link", { name: "Settings", exact: true })
+          .click();
+        await page
+          .getByRole("complementary", { name: "Account utility navigation" })
+          .getByRole("link", { name: workspace === "calendar" ? "Calendar" : "Mail", exact: true })
+          .click();
+      }
+      await expect(page.getByText(attempted)).toBeVisible();
+      await page.getByRole("button", { name: "Refresh latest settings" }).click();
+      await expect(page.getByRole("button", { name: "Use latest settings" })).toBeEnabled();
+      expect(writes).toBe(1);
+      await page.screenshot({
+        path: info.outputPath(`${workspace}-contextual-recovery-in-settings.png`),
+        fullPage: true,
+      });
+      await page.getByRole("button", { name: "Use latest settings" }).click();
+      await expect(page.getByText(attempted)).toHaveCount(0);
+      expect(writes).toBe(1);
+    } finally {
+      await page.unroute(`**${path}`);
+      const latest = await (await page.request.get(path)).json();
+      expect(
+        (
+          await page.request.patch(path, {
+            headers: { origin },
+            data: { expectedRevision: latest.revision, preferences: original.preferences },
+          })
+        ).ok(),
+      ).toBeTruthy();
+    }
+  });
+}

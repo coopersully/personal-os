@@ -23,14 +23,12 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 async function show(workspace: SearchableWorkspace) {
+  const cache = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  cache.setQueryData(["me"], { id: "owner" });
   render(
-    <QueryClientProvider
-      client={
-        new QueryClient({
-          defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-        })
-      }
-    >
+    <QueryClientProvider client={cache}>
       <MemoryRouter>
         <WorkspacePreferencesSection workspace={workspace} />
       </MemoryRouter>

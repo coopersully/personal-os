@@ -3023,7 +3023,11 @@ export const financeReviewArchives = pgTable(
     archivedAt: timestamp("archived_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    index("finance_review_archives_owner_cursor_idx").on(table.userId, table.firstSeenAt, table.id),
+    index("finance_review_archives_owner_cursor_idx").on(
+      table.userId,
+      table.firstSeenAt.desc(),
+      table.id.desc(),
+    ),
   ],
 );
 

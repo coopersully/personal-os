@@ -382,6 +382,46 @@ describe.sequential("transaction-backed Finance Inbox", () => {
         })
       ).items.map((item) => item.id),
     ).toEqual([ids[2]]);
+    const [liveTransaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: accounts[0].id,
+        amount: 900,
+        direction: "expense",
+        merchant: "Live review merchant",
+        transactionDate: "2026-10-07",
+        userId: historyUserId,
+      })
+      .returning();
+    if (!liveTransaction) throw new Error("Live history transaction was not created.");
+    const liveId = randomUUID();
+    await database.db.insert(financeReviewCases).values({
+      id: liveId,
+      userId: historyUserId,
+      transactionId: liveTransaction.id,
+      stableKey: `history:${liveId}`,
+      status: "open",
+      reasonCode: "unusual_amount",
+      evidence: { source: "live" },
+      impactAmount: 900,
+    });
+    await database.pool.query(
+      "UPDATE finance_review_cases SET first_seen_at = $1::timestamptz WHERE id = $2",
+      ["2026-10-08T12:00:00.000002Z", liveId],
+    );
+    const mixedFirst = await service.listFinanceReviewHistory(historyUserId, { limit: 2 });
+    const mixedSecond = await service.listFinanceReviewHistory(historyUserId, {
+      cursor: mixedFirst.nextCursor,
+      limit: 2,
+    });
+    expect(mixedFirst.items.map((item) => [item.id, item.archived])).toEqual(
+      tiedIds.map((id) => [id, true]),
+    );
+    expect(mixedSecond.items.map((item) => [item.id, item.archived])).toEqual([
+      [liveId, false],
+      [ids[2], true],
+    ]);
+    expect(mixedSecond.nextCursor).toBeNull();
     await expect(service.getFinanceReviewHistoryItem(otherUser.id, ids[0])).rejects.toMatchObject({
       code: "not_found",
     });

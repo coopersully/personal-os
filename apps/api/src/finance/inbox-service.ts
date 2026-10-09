@@ -334,29 +334,45 @@ export function createInboxService({ db, now }: Options) {
 
     async listFinanceReviewHistory(userId: string, rawQuery: unknown) {
       const query = financeReviewHistoryQuerySchema.parse(rawQuery);
-      // Both sides preserve PostgreSQL microseconds and the original case identity.
+      // Resolve the owned anchor before scanning either history source. Text preserves
+      // PostgreSQL microseconds that a JavaScript Date would truncate.
+      const anchor = query.cursor
+        ? await db.execute<{ first_seen_at: string }>(sql`
+            SELECT first_seen_at::text FROM finance_review_cases
+            WHERE user_id=${userId}::uuid AND id=${query.cursor}::uuid
+            UNION ALL
+            SELECT first_seen_at::text FROM finance_review_archives
+            WHERE user_id=${userId}::uuid AND id=${query.cursor}::uuid
+            LIMIT 1
+          `)
+        : null;
+      const anchorTimestamp = anchor?.rows[0]?.first_seen_at;
+      if (query.cursor && !anchorTimestamp)
+        throw new AppError("invalid_request", "Review history cursor is unavailable.");
+      const cursorBound = query.cursor
+        ? sql`(first_seen_at,id) < (${anchorTimestamp}::timestamptz,${query.cursor}::uuid)`
+        : sql`true`;
+      // Bound each indexed source before merging; neither branch needs to read
+      // the owner's entire history to fill a page.
       const rows = await db.execute<{
         id: string;
         snapshot: Record<string, unknown>;
         context: FinanceInboxCase["context"] | null;
         archived: boolean;
       }>(sql`
-        WITH history AS (
-          SELECT id,user_id,first_seen_at,to_jsonb(r) AS snapshot,NULL::jsonb AS context,false AS archived FROM finance_review_cases r WHERE user_id=${userId}::uuid
+        SELECT id,snapshot,context,archived FROM (
+          (SELECT id,first_seen_at,to_jsonb(r) AS snapshot,NULL::jsonb AS context,false AS archived
+           FROM finance_review_cases r
+           WHERE user_id=${userId}::uuid AND ${cursorBound}
+           ORDER BY first_seen_at DESC,id DESC LIMIT ${query.limit + 1})
           UNION ALL
-          SELECT id,user_id,first_seen_at,snapshot,context,true FROM finance_review_archives WHERE user_id=${userId}::uuid
-        )
-        SELECT id,snapshot,context,archived FROM history
-        WHERE ${query.cursor ? sql`(first_seen_at,id) < (SELECT first_seen_at,id FROM history WHERE id=${query.cursor}::uuid)` : sql`true`}
+          (SELECT id,first_seen_at,snapshot,context,true AS archived
+           FROM finance_review_archives
+           WHERE user_id=${userId}::uuid AND ${cursorBound}
+           ORDER BY first_seen_at DESC,id DESC LIMIT ${query.limit + 1})
+        ) history
         ORDER BY first_seen_at DESC,id DESC LIMIT ${query.limit + 1}
       `);
-      if (query.cursor) {
-        const anchor = await db.execute(
-          sql`SELECT id FROM finance_review_cases WHERE user_id=${userId}::uuid AND id=${query.cursor}::uuid UNION ALL SELECT id FROM finance_review_archives WHERE user_id=${userId}::uuid AND id=${query.cursor}::uuid`,
-        );
-        if (!anchor.rows.length)
-          throw new AppError("invalid_request", "Review history cursor is unavailable.");
-      }
       const page = rows.rows.slice(0, query.limit);
       const hydrated = page.map((entry) => ({ ...entry, row: archivedReviewRow(entry.snapshot) }));
       const contexts = await transactionContexts(

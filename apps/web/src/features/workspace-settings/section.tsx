@@ -423,7 +423,7 @@ function FinancesPreferences() {
   });
   const accounts =
     configuration.data?.accounts.state === "loaded"
-      ? configuration.data.accounts.value.items
+      ? configuration.data.accounts.value.accounts
       : undefined;
   return (
     <PreferenceSection

@@ -3,7 +3,7 @@ import {
   type Workspace,
   type WorkspacePreferences,
 } from "@personal-os/domain";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { api } from "@/api";
 import { QueryFeedback } from "@/components/async-state";
@@ -16,6 +16,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Switch } from "@/components/ui/switch";
 import { SettingsSection } from "../settings/settings-layout";
 import { listAllTaskLists, listAllTaskProjects } from "../tasks/page";
+import { sameSession, usePreferenceSession } from "./account-save-session";
 import { useSaveWorkspacePreferences, useWorkspacePreferences } from "./preferences";
 import { preferenceValueLabel, WorkspacePreferenceRecovery } from "./save-recovery";
 
@@ -413,13 +414,24 @@ function TasksPreferences() {
   );
 }
 function FinancesPreferences() {
+  const cache = useQueryClient();
+  const session = usePreferenceSession(cache);
+  return <FinancesPreferencesForSession key={`${session.owner}:${session.epoch}`} />;
+}
+function FinancesPreferencesForSession() {
+  const cache = useQueryClient();
+  const session = usePreferenceSession(cache);
   const recovery = useSaveWorkspacePreferences("finances").recovery;
   const needsAccountNames =
     !!recovery && Object.keys(recovery.attempted).some((key) => key.endsWith("AccountIds"));
   const configuration = useQuery({
-    queryKey: ["finance-configuration"],
-    queryFn: () => api.getFinanceConfiguration(),
-    enabled: needsAccountNames,
+    queryKey: ["finance-settings-account-names", session.owner, session.epoch],
+    queryFn: async () => {
+      const result = await api.getFinanceConfiguration();
+      if (!sameSession(cache, session)) throw new Error("Account session changed.");
+      return result;
+    },
+    enabled: !!session.owner && needsAccountNames,
   });
   const accounts =
     configuration.data?.accounts.state === "loaded"

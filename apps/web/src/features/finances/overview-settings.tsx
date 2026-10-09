@@ -86,7 +86,20 @@ function OverviewSettings() {
           />
           <QueryFeedback query={preferences} title="Couldn’t load saved account selections." />
           {configuration.isSuccess && !accounts ? (
-            <p>Account names are unavailable. Refresh account data before editing selections.</p>
+            <>
+              <p>
+                Account names are unavailable. Reload them before editing or reapplying account
+                selections.
+              </p>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={configuration.isFetching}
+                onClick={() => void configuration.refetch()}
+              >
+                Reload account names
+              </Button>
+            </>
           ) : null}
           <div className="flex flex-wrap gap-2">
             {(["spend", "cash", "investments"] as const).map((value) => (

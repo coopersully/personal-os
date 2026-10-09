@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { resolveWorkspaceSettings, type SearchableWorkspace } from "@personal-os/domain";
+import {
+  type FinanceConfiguration,
+  resolveWorkspaceSettings,
+  type SearchableWorkspace,
+} from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { api } from "@/api";
+import { useSaveWorkspacePreferences } from "./preferences";
 import { WorkspacePreferencesSection } from "./section";
 
 beforeEach(() => {
@@ -194,4 +199,68 @@ it("saves Tasks completed visibility and explicitly resets a stale capture desti
       expect.objectContaining({ preferences: { showCompletedTasks: true } }),
     ),
   );
+});
+
+it("fences account names and retained recovery across mounted Settings A to B to A with a late read", async () => {
+  function Writer() {
+    const save = useSaveWorkspacePreferences("finances");
+    return (
+      <button type="button" onClick={() => save.mutate({ cashAccountIds: [] })}>
+        Attempt cash selection
+      </button>
+    );
+  }
+  const configuration = (name: string) =>
+    ({
+      accounts: { state: "loaded", value: { accounts: [{ id: "checking", name }] } },
+    }) as unknown as FinanceConfiguration;
+  let release!: (value: FinanceConfiguration) => void;
+  const load = vi
+    .spyOn(api, "getFinanceConfiguration")
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    )
+    .mockResolvedValueOnce(configuration("B checking"))
+    .mockResolvedValue(configuration("New A checking"));
+  vi.mocked(api.getWorkspaceSettings).mockResolvedValue(
+    resolveWorkspaceSettings("finances", { cashAccountIds: ["checking"], revision: 3 }),
+  );
+  vi.mocked(api.updateWorkspaceSettings).mockRejectedValue(new Error("Save uncertain"));
+  const cache = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  cache.setQueryData(["me"], { id: "A" });
+  render(
+    <QueryClientProvider client={cache}>
+      <MemoryRouter>
+        <Writer />
+        <WorkspacePreferencesSection workspace="finances" />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Attempt cash selection" }));
+  await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+  act(() => cache.setQueryData(["me"], { id: "B" }));
+  await waitFor(() =>
+    expect(screen.queryByText("Your change: None selected")).not.toBeInTheDocument(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Attempt cash selection" }));
+  await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  await screen.findByText("Latest: B checking");
+  act(() => cache.setQueryData(["me"], { id: "A" }));
+  await waitFor(() =>
+    expect(screen.queryByText("Your change: None selected")).not.toBeInTheDocument(),
+  );
+  await act(async () => release(configuration("Old A checking")));
+  expect(screen.queryByText(/Old A checking|B checking/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Attempt cash selection" }));
+  await waitFor(() => expect(load).toHaveBeenCalledTimes(3));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  await screen.findByText("Latest: New A checking");
+  expect(screen.queryByText(/Old A checking|B checking/)).not.toBeInTheDocument();
+  expect(api.updateWorkspaceSettings).toHaveBeenCalledTimes(3);
 });

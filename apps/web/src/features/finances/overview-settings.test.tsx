@@ -133,3 +133,39 @@ it("discovers another hook's retained attempt without opening view settings firs
     expect(screen.queryByText("Your change: None selected")).not.toBeInTheDocument(),
   );
 });
+
+it("reloads unavailable account names in retained recovery without saving until explicit replay", async () => {
+  const load = vi
+    .spyOn(api, "getFinanceConfiguration")
+    .mockResolvedValueOnce({
+      accounts: { state: "unavailable" },
+    } as unknown as FinanceConfiguration)
+    .mockResolvedValue(configuration());
+  vi.spyOn(api, "getWorkspaceSettings").mockResolvedValue(
+    resolveWorkspaceSettings("finances", { cashAccountIds: ["checking"], revision: 6 }),
+  );
+  const update = vi
+    .spyOn(api, "updateWorkspaceSettings")
+    .mockRejectedValue(new ApiClientError({ status: 409, code: "conflict", message: "Changed" }));
+  mount(true);
+  fireEvent.click(screen.getByRole("button", { name: "Other writer" }));
+  await screen.findByText("Your change: None selected");
+  await screen.findByRole("button", { name: "Reload account names" });
+  fireEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Reload account names" }));
+  await screen.findByText("Latest: Everyday checking");
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeEnabled(),
+  );
+  expect(load).toHaveBeenCalledTimes(2);
+  expect(update).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("button", { name: "Reapply reviewed change" }));
+  await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+  expect(update).toHaveBeenLastCalledWith(
+    "finances",
+    expect.objectContaining({ expectedRevision: 6, preferences: { cashAccountIds: [] } }),
+  );
+});

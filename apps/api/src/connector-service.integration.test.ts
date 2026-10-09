@@ -2582,7 +2582,7 @@ describe.sequential("connector service", () => {
       // Database claims can exceed the default one-second poll window under coverage.
       // Keep both provider calls held until the concurrency assertion has observed them.
       await vi.waitFor(() => expect(updateMailThread).toHaveBeenCalledTimes(2), {
-        timeout: 10_000,
+        timeout: process.env.CI ? 10_000 : 1_000,
       });
     } finally {
       releaseWrites?.();

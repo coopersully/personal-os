@@ -93,6 +93,23 @@ function archivedReviewRow(
   return row as typeof financeReviewCases.$inferSelect;
 }
 
+function archivedReviewContext(
+  context: Record<string, unknown>,
+): NonNullable<FinanceInboxCase["context"]> {
+  // The first published 0105 archive recorded transactionDate but did not
+  // record institution. Keep that immutable evidence readable after 0109.
+  const date = context.date ?? context.transactionDate;
+  if (typeof date !== "string")
+    throw new AppError("internal_error", "A retained Finance review lost its date.");
+  const current = { ...context };
+  delete current.transactionDate;
+  return {
+    ...current,
+    date,
+    institution: typeof context.institution === "string" ? context.institution : "",
+  } as NonNullable<FinanceInboxCase["context"]>;
+}
+
 function historyValue(
   row: typeof financeReviewCases.$inferSelect,
   context?: NonNullable<FinanceInboxCase["context"]>,
@@ -382,7 +399,12 @@ export function createInboxService({ db, now }: Options) {
       );
       return {
         items: hydrated.map((entry) => ({
-          ...historySummary(entry.row, entry.context ?? contexts.get(entry.row.transactionId)),
+          ...historySummary(
+            entry.row,
+            entry.archived && entry.context
+              ? archivedReviewContext(entry.context)
+              : (contexts.get(entry.row.transactionId) ?? undefined),
+          ),
           archived: entry.archived,
         })),
         nextCursor: rows.rows.length > query.limit ? (page.at(-1)?.id ?? null) : null,
@@ -469,7 +491,7 @@ export function createInboxService({ db, now }: Options) {
           if (!archive) throw new AppError("not_found", "Finance review not found.");
           const retained = archivedReviewRow(archive.snapshot);
           return {
-            ...historyValue(retained, archive.context as NonNullable<FinanceInboxCase["context"]>),
+            ...historyValue(retained, archivedReviewContext(archive.context)),
             archived: true,
             relatedTransactionAvailable: await relatedAvailable(retained.resolution),
             retainedQuestions: archive.questions.map((question) => ({

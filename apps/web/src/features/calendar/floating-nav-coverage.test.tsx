@@ -44,14 +44,12 @@ const googleCalendar = {
 } as Calendar;
 
 function renderCalendar(calendars: Calendar[] = [localCalendar, googleCalendar]) {
+  const client = new QueryClient({
+    defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+  });
+  client.setQueryData(["me"], user);
   return render(
-    <QueryClientProvider
-      client={
-        new QueryClient({
-          defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
-        })
-      }
-    >
+    <QueryClientProvider client={client}>
       <MemoryRouter>
         <CalendarFloatingNav
           anchor={{ day: 23, month: 8, year: 2026 }}
@@ -167,6 +165,7 @@ describe("Calendar floating navigation edge states", () => {
     const queryClient = new QueryClient({
       defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
     });
+    queryClient.setQueryData(["me"], user);
     const renderNav = (calendars: Calendar[]) => (
       <QueryClientProvider client={queryClient}>
         <MemoryRouter>

@@ -40,10 +40,10 @@ it.each([
 ])("uses the appropriate initial task destination on %s", async (path, listId, projectId) => {
   const onCreate = vi.fn();
   const user = userEvent.setup();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["me"], { id: "owner" });
   render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+    <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[path]}>
         <TasksCreateButton onCreate={onCreate} />
       </MemoryRouter>

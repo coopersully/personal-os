@@ -41,17 +41,13 @@ function setup(
   placement?: { listId: string; projectId: string | null },
 ) {
   const close = vi.fn();
+  const user = { id: "owner", planningTimezone: "UTC" } as User;
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["me"], user);
   render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+    <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[path]}>
-        <TaskDialog
-          close={close}
-          task={task}
-          placement={placement}
-          user={{ planningTimezone: "UTC" } as User}
-        />
+        <TaskDialog close={close} task={task} placement={placement} user={user} />
       </MemoryRouter>
     </QueryClientProvider>,
   );

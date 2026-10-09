@@ -19,14 +19,12 @@ it.each([
     }),
   );
   mocks.getDomainProfile.mockResolvedValue(null);
+  const user = { id: "owner", planningTimezone: "UTC" } as User;
+  const client = new QueryClient();
+  client.setQueryData(["me"], user);
   render(
-    <QueryClientProvider client={new QueryClient()}>
-      <EventDialog
-        calendars={[] as Calendar[]}
-        close={vi.fn()}
-        event={undefined}
-        user={{ planningTimezone: "UTC" } as User}
-      />
+    <QueryClientProvider client={client}>
+      <EventDialog calendars={[] as Calendar[]} close={vi.fn()} event={undefined} user={user} />
     </QueryClientProvider>,
   );
   const end = screen.getByLabelText("Ends") as HTMLInputElement;

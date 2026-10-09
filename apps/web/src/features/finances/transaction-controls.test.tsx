@@ -18,17 +18,11 @@ const api = vi.hoisted(() => ({
   })),
 }));
 function render(ui: React.ReactNode) {
-  return testingRender(
-    <QueryClientProvider
-      client={
-        new QueryClient({
-          defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-        })
-      }
-    >
-      {ui}
-    </QueryClientProvider>,
-  );
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  client.setQueryData(["me"], { id: "owner" });
+  return testingRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
 }
 vi.mock("../../api.js", () => ({ api, errorMessage: (error: Error) => error.message }));
 function CurrentLocation() {

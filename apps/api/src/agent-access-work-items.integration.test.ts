@@ -404,6 +404,43 @@ describe.sequential("Agent Access work-item projection", () => {
     expect(page.summary.byDomain.tasks).toBeGreaterThan(0);
   });
 
+  it("rejects out-of-scope items returned by a domain projection override", async () => {
+    const service = createAgentAccessWorkItemService({
+      cursorSigningKey: "agent-access-test-signing-key",
+      db: database.db,
+      now: () => snapshot,
+      sourceReaders: {
+        financeEffects: async () => [
+          {
+            action: { label: "Open Mail", to: "/mail" },
+            actionAt: null,
+            domain: "mail",
+            id: "unexpected-mail-effect",
+            kind: "review",
+            priority: "person_review",
+            source: null,
+            summary: "An incorrectly routed item must not widen access.",
+            title: "Unexpected Mail effect",
+            updatedAt: snapshot.toISOString(),
+          },
+        ],
+      },
+    });
+    const financePrincipal = {
+      ...principal,
+      scopes: new Set<AccessScope>(["finances:read"]),
+    };
+    const page = await service.list(financePrincipal, { limit: 100 }, publishedDomains);
+    const search = await service.searchItems(financePrincipal, "finances");
+
+    expect(page.items.length).toBeGreaterThan(0);
+    expect(page.items.every((item) => item.domain === "finances")).toBe(true);
+    expect(page.items.some((item) => item.id === "unexpected-mail-effect")).toBe(false);
+    expect(search.items.some((item) => item.id === "unexpected-mail-effect")).toBe(false);
+    expect(page.unavailableDomains).toEqual([]);
+    expect(search.unavailableSources).toEqual([]);
+  });
+
   it("keeps searchable review sources available when a sibling source fails", async () => {
     const log = vi.fn();
     const service = createAgentAccessWorkItemService({

@@ -351,10 +351,12 @@ export function createInboxService({ db, now }: Options) {
 
     async listFinanceReviewHistory(userId: string, rawQuery: unknown) {
       const query = financeReviewHistoryQuerySchema.parse(rawQuery);
-      // Resolve the owned anchor before scanning either history source. Text preserves
-      // PostgreSQL microseconds that a JavaScript Date would truncate.
-      const anchor = query.cursor
-        ? await db.execute<{ first_seen_at: string }>(sql`
+      return db.transaction(
+        async (tx) => {
+          // Resolve the owned anchor before scanning either history source. Text preserves
+          // PostgreSQL microseconds that a JavaScript Date would truncate.
+          const anchor = query.cursor
+            ? await tx.execute<{ first_seen_at: string }>(sql`
             SELECT first_seen_at::text FROM finance_review_cases
             WHERE user_id=${userId}::uuid AND id=${query.cursor}::uuid
             UNION ALL
@@ -362,21 +364,21 @@ export function createInboxService({ db, now }: Options) {
             WHERE user_id=${userId}::uuid AND id=${query.cursor}::uuid
             LIMIT 1
           `)
-        : null;
-      const anchorTimestamp = anchor?.rows[0]?.first_seen_at;
-      if (query.cursor && !anchorTimestamp)
-        throw new AppError("invalid_request", "Review history cursor is unavailable.");
-      const cursorBound = query.cursor
-        ? sql`(first_seen_at,id) < (${anchorTimestamp}::timestamptz,${query.cursor}::uuid)`
-        : sql`true`;
-      // Bound each indexed source before merging; neither branch needs to read
-      // the owner's entire history to fill a page.
-      const rows = await db.execute<{
-        id: string;
-        snapshot: Record<string, unknown>;
-        context: FinanceInboxCase["context"] | null;
-        archived: boolean;
-      }>(sql`
+            : null;
+          const anchorTimestamp = anchor?.rows[0]?.first_seen_at;
+          if (query.cursor && !anchorTimestamp)
+            throw new AppError("invalid_request", "Review history cursor is unavailable.");
+          const cursorBound = query.cursor
+            ? sql`(first_seen_at,id) < (${anchorTimestamp}::timestamptz,${query.cursor}::uuid)`
+            : sql`true`;
+          // Bound each indexed source before merging; neither branch needs to read
+          // the owner's entire history to fill a page.
+          const rows = await tx.execute<{
+            id: string;
+            snapshot: Record<string, unknown>;
+            context: FinanceInboxCase["context"] | null;
+            archived: boolean;
+          }>(sql`
         SELECT id,snapshot,context,archived FROM (
           (SELECT id,first_seen_at,to_jsonb(r) AS snapshot,NULL::jsonb AS context,false AS archived
            FROM finance_review_cases r
@@ -390,25 +392,31 @@ export function createInboxService({ db, now }: Options) {
         ) history
         ORDER BY first_seen_at DESC,id DESC LIMIT ${query.limit + 1}
       `);
-      const page = rows.rows.slice(0, query.limit);
-      const hydrated = page.map((entry) => ({ ...entry, row: archivedReviewRow(entry.snapshot) }));
-      const contexts = await transactionContexts(
-        userId,
-        hydrated.filter((e) => !e.archived).map((e) => e.row),
-        db,
+          const page = rows.rows.slice(0, query.limit);
+          const hydrated = page.map((entry) => ({
+            ...entry,
+            row: archivedReviewRow(entry.snapshot),
+          }));
+          const contexts = await transactionContexts(
+            userId,
+            hydrated.filter((e) => !e.archived).map((e) => e.row),
+            tx,
+          );
+          return {
+            items: hydrated.map((entry) => ({
+              ...historySummary(
+                entry.row,
+                entry.archived && entry.context
+                  ? archivedReviewContext(entry.context)
+                  : (contexts.get(entry.row.transactionId) ?? undefined),
+              ),
+              archived: entry.archived,
+            })),
+            nextCursor: rows.rows.length > query.limit ? (page.at(-1)?.id ?? null) : null,
+          };
+        },
+        { accessMode: "read only", isolationLevel: "repeatable read" },
       );
-      return {
-        items: hydrated.map((entry) => ({
-          ...historySummary(
-            entry.row,
-            entry.archived && entry.context
-              ? archivedReviewContext(entry.context)
-              : (contexts.get(entry.row.transactionId) ?? undefined),
-          ),
-          archived: entry.archived,
-        })),
-        nextCursor: rows.rows.length > query.limit ? (page.at(-1)?.id ?? null) : null,
-      };
     },
 
     async getFinanceReviewHistoryItem(userId: string, id: string) {

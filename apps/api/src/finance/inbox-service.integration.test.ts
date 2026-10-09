@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import {
   createDatabaseClient,
+  type Database,
   type DatabaseClient,
   financeAccounts,
   financeCategories,
@@ -450,6 +451,110 @@ describe.sequential("transaction-backed Finance Inbox", () => {
         .from(financeReviewArchives)
         .where(eq(financeReviewArchives.userId, historyUserId)),
     ).toEqual([]);
+  });
+
+  it("keeps a history page and source context on one snapshot during deletion", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "History snapshot",
+        email: `history-snapshot-${randomUUID()}@example.com`,
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("History snapshot owner was not created.");
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Snapshot bank",
+        name: "Checking",
+        provider: "manual",
+        userId: owner.id,
+      })
+      .returning();
+    if (!account) throw new Error("History snapshot account was not created.");
+    const transactions = await database.db
+      .insert(financeTransactions)
+      .values(
+        ["Anchor merchant", "Source merchant"].map((merchant) => ({
+          accountId: account.id,
+          amount: 900,
+          direction: "expense" as const,
+          merchant,
+          transactionDate: "2026-10-08",
+          userId: owner.id,
+        })),
+      )
+      .returning();
+    const [anchorTransaction, sourceTransaction] = transactions;
+    if (!anchorTransaction || !sourceTransaction) throw new Error("Transactions were not created.");
+    const cases = await database.db
+      .insert(financeReviewCases)
+      .values([
+        {
+          userId: owner.id,
+          transactionId: anchorTransaction.id,
+          stableKey: `snapshot:${anchorTransaction.id}`,
+          status: "resolved",
+          reasonCode: "unusual_amount",
+          evidence: { source: "anchor" },
+          impactAmount: 900,
+          firstSeenAt: new Date("2026-10-09T12:00:01Z"),
+        },
+        {
+          userId: owner.id,
+          transactionId: sourceTransaction.id,
+          stableKey: `snapshot:${sourceTransaction.id}`,
+          status: "resolved",
+          reasonCode: "unusual_amount",
+          evidence: { source: "page" },
+          impactAmount: 900,
+          firstSeenAt: new Date("2026-10-09T12:00:00Z"),
+        },
+      ])
+      .returning();
+    const [anchorCase, sourceCase] = cases;
+    if (!anchorCase || !sourceCase) throw new Error("Review cases were not created.");
+
+    let deleted = false;
+    const wrappedDb = Object.create(database.db) as Database;
+    const originalTransaction = database.db.transaction.bind(database.db);
+    const wrappedTransaction: Database["transaction"] = (callback, config) =>
+      originalTransaction(async (tx) => {
+        const observed = Object.create(tx) as typeof tx;
+        const execute = tx.execute.bind(tx);
+        let statementCount = 0;
+        observed.execute = (async (...args: Parameters<typeof tx.execute>) => {
+          const result = await execute(...args);
+          if (++statementCount === 2) {
+            await database.db
+              .delete(financeTransactions)
+              .where(eq(financeTransactions.id, sourceTransaction.id));
+            deleted = true;
+          }
+          return result;
+        }) as typeof tx.execute;
+        return callback(observed);
+      }, config);
+    wrappedDb.transaction = wrappedTransaction;
+    const service = createInboxService({ db: wrappedDb, now: () => new Date() });
+    const page = await service.listFinanceReviewHistory(owner.id, {
+      cursor: anchorCase.id,
+      limit: 1,
+    });
+    expect(deleted).toBe(true);
+    expect(page.items).toMatchObject([
+      {
+        id: sourceCase.id,
+        archived: false,
+        context: { merchant: "Source merchant", institution: "Snapshot bank" },
+      },
+    ]);
+    expect(await service.getFinanceReviewHistoryItem(owner.id, sourceCase.id)).toMatchObject({
+      archived: true,
+      context: { merchant: "Source merchant" },
+    });
+    await database.db.delete(users).where(eq(users.id, owner.id));
   });
 
   it("keeps clarification open, then classifies with trusted agent provenance", async () => {

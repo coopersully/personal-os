@@ -6,6 +6,8 @@ import {
   financeContextualAnswers,
   financeContextualQuestions,
   financeEventTransactions,
+  financeReviewActionRequests,
+  financeReviewAnswers,
   financeReviewArchives,
   financeReviewCases,
   financeTransactionRelationships,
@@ -31,6 +33,14 @@ import {
   lockFinanceMaintenanceLineage,
   supersedeFinanceMaintenanceLineage,
 } from "./maintenance-rebuild.js";
+import {
+  finishMaintenanceReviewFromApp,
+  recordMaintenanceReviewAppAnswer,
+} from "./review-action-service.js";
+import { financeReviewPrompt } from "./review-prompt.js";
+
+export { financeReviewPrompt } from "./review-prompt.js";
+
 import { withFinanceInboxPresentation } from "./presentation-service.js";
 import { appendFinanceProfile } from "./profile-writer.js";
 import { nextFinanceTransactionRevision } from "./transaction-revision-lock.js";
@@ -151,31 +161,6 @@ function historySummary(
     status: row.status,
     transactionId: row.transactionId,
   };
-}
-
-export function financeReviewPrompt(
-  reason: FinanceReviewReason,
-  evidence: Record<string, unknown>,
-): string {
-  if (typeof evidence.prompt === "string" && evidence.prompt.trim()) {
-    return evidence.prompt.trim().slice(0, 1_000);
-  }
-  const merchant = typeof evidence.merchant === "string" ? ` at ${evidence.merchant}` : "";
-  const prompts: Record<FinanceReviewReason, string> = {
-    budget_variance: "Was this budget variance expected, and should the budget change?",
-    category_ambiguity: `What did this transaction${merchant} represent?`,
-    merchant_identity: `What was this transaction${merchant} for?`,
-    missing_provenance: "What is the source and purpose of this transaction?",
-    possible_duplicate: "Are these charges duplicates, or are both legitimate?",
-    possible_transfer: "Was this movement a transfer between your own accounts?",
-    profile_fact: "What should this financial profile fact be?",
-    recurring_status: "Is this still a recurring obligation?",
-    refund_or_reversal: "Was this transaction a refund or reversal of another charge?",
-    reimbursement: "Which expense did this reimbursement offset?",
-    source_freshness: "Does this account need to be reconnected or updated manually?",
-    unusual_amount: `Was this unusually large transaction${merchant} expected and legitimate?`,
-  };
-  return prompts[reason];
 }
 
 function prompt(row: typeof financeReviewCases.$inferSelect): string {
@@ -480,15 +465,52 @@ export function createInboxService({ db, now }: Options) {
                     asc(financeContextualAnswers.id),
                   )
               : [];
+            const requests = await tx
+              .select()
+              .from(financeReviewActionRequests)
+              .where(
+                and(
+                  eq(financeReviewActionRequests.userId, userId),
+                  eq(financeReviewActionRequests.reviewCaseId, id),
+                ),
+              )
+              .orderBy(asc(financeReviewActionRequests.actionRevision));
+            const canonicalAnswers = await tx
+              .select({
+                id: financeReviewAnswers.id,
+                text: financeReviewAnswers.text,
+                sourceKind: financeReviewAnswers.sourceKind,
+                recordedAt: financeReviewAnswers.recordedAt,
+              })
+              .from(financeReviewAnswers)
+              .where(
+                and(
+                  eq(financeReviewAnswers.userId, userId),
+                  eq(financeReviewAnswers.reviewCaseId, id),
+                ),
+              )
+              .orderBy(asc(financeReviewAnswers.recordedAt), asc(financeReviewAnswers.id));
             return {
               ...historyValue(row, contexts.get(row.transactionId)),
               archived: false,
               relatedTransactionAvailable: await relatedAvailable(row.resolution),
-              retainedQuestions: questions,
-              retainedAnswers: answers.map((answer) => ({
-                ...answer,
-                recordedAt: answer.recordedAt.toISOString(),
-              })),
+              retainedQuestions: [
+                ...questions,
+                ...requests.map((request) => ({
+                  id: request.id,
+                  prompt: request.prompt,
+                  state: request.state,
+                })),
+              ],
+              retainedAnswers: [...answers, ...canonicalAnswers]
+                .sort(
+                  (a, b) =>
+                    a.recordedAt.getTime() - b.recordedAt.getTime() || a.id.localeCompare(b.id),
+                )
+                .map((answer) => ({
+                  ...answer,
+                  recordedAt: answer.recordedAt.toISOString(),
+                })),
             };
           }
           const [archive] = await tx
@@ -572,9 +594,11 @@ export function createInboxService({ db, now }: Options) {
                 : eq(financeReviewCases.resolutionProvenance, review.resolutionProvenance),
             );
             if (input.resolution.type === "clarify") {
+              const terminal = await finishMaintenanceReviewFromApp(tx, review, "consume");
               const [saved] = await tx
                 .update(financeReviewCases)
                 .set({
+                  ...(terminal ? { humanAction: terminal } : {}),
                   resolution: { answer: input.answer, ...input.resolution },
                   resolutionProvenance: {
                     actorId: context.actorId,
@@ -591,9 +615,22 @@ export function createInboxService({ db, now }: Options) {
                     unchangedResolution,
                   ),
                 )
-                .returning({ id: financeReviewCases.id });
+                .returning({
+                  id: financeReviewCases.id,
+                  revision: financeReviewCases.contextualRevision,
+                });
               if (!saved)
                 throw new AppError("conflict", "That Finance Inbox case is already resolved.");
+              if (terminal)
+                await recordMaintenanceReviewAppAnswer(
+                  tx,
+                  review,
+                  saved.revision,
+                  terminal,
+                  input.resolution.clarification,
+                  context,
+                  now(),
+                );
               return null;
             }
             if (
@@ -708,6 +745,7 @@ export function createInboxService({ db, now }: Options) {
                 },
               );
             }
+            const terminal = await finishMaintenanceReviewFromApp(tx, review, "withdraw");
             const [resolved] = await tx
               .update(financeReviewCases)
               .set({
@@ -717,6 +755,7 @@ export function createInboxService({ db, now }: Options) {
                   actorType: context.actorType,
                   requestId: context.requestId,
                 },
+                ...(terminal ? { humanAction: terminal } : {}),
                 resolvedAt: now(),
                 resolvedByActorId: context.actorId,
                 resolvedByActorType: context.actorType,

@@ -7,7 +7,7 @@ import {
   oauthRefreshTokens,
 } from "@personal-os/database";
 import type { AccessScope } from "@personal-os/domain";
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { AppError } from "./errors.js";
 import { generateToken, hashToken } from "./security.js";
 
@@ -47,15 +47,22 @@ export function createOAuthService(options: { db: Database; now: () => Date; res
       throw new AppError("invalid_request", "The redirect URI is not registered for this client.");
     return { id: client.id, name: client.name };
   };
-  const issue = async (userId: string, clientId: string, scopes: AccessScope[]) => {
+  const issue = async (
+    userId: string,
+    clientId: string,
+    scopes: AccessScope[],
+    authorizationConnectionId?: string,
+    executor: Pick<Database, "insert"> = db,
+  ) => {
     const token = generateToken("mcp");
     const refreshToken = generateToken("mcp_refresh");
     const expiresAt = new Date(now().getTime() + 60 * 60_000);
     const refreshExpiresAt = new Date(now().getTime() + 30 * 86_400_000);
-    const [access] = await db
+    const [access] = await executor
       .insert(accessTokens)
       .values({
         audience: resource,
+        ...(authorizationConnectionId ? { authorizationConnectionId } : {}),
         clientId,
         expiresAt,
         name: `MCP OAuth (${clientId})`,
@@ -65,7 +72,7 @@ export function createOAuthService(options: { db: Database; now: () => Date; res
       })
       .returning();
     if (!access) throw new AppError("internal_error", "Could not issue OAuth access token.");
-    await db.insert(oauthRefreshTokens).values({
+    await executor.insert(oauthRefreshTokens).values({
       accessTokenId: access.id,
       clientId,
       expiresAt: refreshExpiresAt,
@@ -134,6 +141,9 @@ export function createOAuthService(options: { db: Database; now: () => Date; res
     async revokeAuthorizedClient(userId: string, clientId: string) {
       const current = now();
       await db.transaction(async (transaction) => {
+        await transaction.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify([userId, clientId, resource])}, 0))`,
+        );
         await transaction
           .update(accessTokens)
           .set({ revokedAt: current })
@@ -236,20 +246,46 @@ export function createOAuthService(options: { db: Database; now: () => Date; res
         )
         .limit(1);
       if (!record) throw new AppError("unauthorized", "The refresh token is invalid or expired.");
-      const [replaced] = await db
-        .update(oauthRefreshTokens)
-        .set({ replacedAt: current })
-        .where(and(eq(oauthRefreshTokens.id, record.id), isNull(oauthRefreshTokens.replacedAt)))
-        .returning({ id: oauthRefreshTokens.id });
-      if (!replaced) throw new AppError("unauthorized", "The refresh token has already been used.");
-      const [access] = await db
-        .select()
-        .from(accessTokens)
-        .where(eq(accessTokens.id, record.accessTokenId))
-        .limit(1);
-      if (!access || access.audience !== resource || access.revokedAt)
-        throw new AppError("unauthorized", "The refresh token is no longer valid.");
-      return issue(record.userId, record.clientId, access.scopes);
+      return db.transaction(async (transaction) => {
+        // Revocation and rotation share a grant lock. Recheck the refresh after acquiring it;
+        // neither a stale read nor an in-flight rotation can create authority after revocation.
+        await transaction.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify([record.userId, record.clientId, resource])}, 0))`,
+        );
+        const [replaced] = await transaction
+          .update(oauthRefreshTokens)
+          .set({ replacedAt: current })
+          .where(
+            and(
+              eq(oauthRefreshTokens.id, record.id),
+              isNull(oauthRefreshTokens.replacedAt),
+              gt(oauthRefreshTokens.expiresAt, current),
+            ),
+          )
+          .returning({ id: oauthRefreshTokens.id });
+        if (!replaced)
+          throw new AppError("unauthorized", "The refresh token has already been used.");
+        const [access] = await transaction
+          .select()
+          .from(accessTokens)
+          .where(eq(accessTokens.id, record.accessTokenId))
+          .limit(1);
+        if (
+          !access ||
+          access.audience !== resource ||
+          access.revokedAt ||
+          access.userId !== record.userId ||
+          access.clientId !== record.clientId
+        )
+          throw new AppError("unauthorized", "The refresh token is no longer valid.");
+        return issue(
+          record.userId,
+          record.clientId,
+          access.scopes,
+          access.authorizationConnectionId,
+          transaction,
+        );
+      });
     },
     parseScopes(value: string | undefined): AccessScope[] {
       const scopes = value?.split(" ").filter(Boolean) ?? [...defaultScopes];

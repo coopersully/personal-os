@@ -88,7 +88,8 @@ export function createTextingRecoveryService(options: {
     inboundMessageId: string,
     binding: typeof textReplyBindings.$inferSelect,
   ): FinanceSmsRecoveryCommand | null {
-    if (binding.workKind !== "question" || !binding.canonicalAnswer) return null;
+    if (!["question", "approval"].includes(binding.workKind) || !binding.canonicalAnswer)
+      return null;
     return {
       operationId: binding.operationId,
       work: {

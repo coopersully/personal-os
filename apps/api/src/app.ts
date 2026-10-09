@@ -39,6 +39,7 @@ import { createAgentAccessWorkItemService } from "./agent-access-work-items.js";
 import { createAssistantService } from "./assistant-service.js";
 import { createAuditService } from "./audit.js";
 import { createAuthService } from "./auth-service.js";
+import { createAutomationHostService } from "./automation-host-service.js";
 import { calendarProviderReconciliationLog } from "./calendar-provider-log.js";
 import { createCalendarService } from "./calendar-service.js";
 import { createCalendarStewardshipService } from "./calendar-stewardship-service.js";
@@ -59,13 +60,22 @@ import {
 import { createFinanceMaintenanceIntentService } from "./finance/maintenance-intent-service.js";
 import { createFinancePositionService } from "./finance/position-service.js";
 import { createFinanceSmsPort } from "./finance/sms-answer-port.js";
+import { createFinanceSmsApprovalService } from "./finance/sms-approval-service.js";
+import { createFinanceSmsContextDispatcher } from "./finance/sms-context-dispatcher.js";
+import { resolveFinanceWorks } from "./finance/work-resolver.js";
 import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceChallengeService } from "./finance-challenge-service.js";
+import { createFinanceHostDispatcher } from "./finance-host-dispatcher.js";
 import { createFinanceMaintenanceService } from "./finance-maintenance-service.js";
+import {
+  createFinanceNotificationDispatcher,
+  runFinanceReconciliationStages,
+} from "./finance-notification-runtime.js";
 import { createFinancePeriodReviewService } from "./finance-period-review-service.js";
 import { createFinancePlaybookService } from "./finance-playbook-service.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService } from "./finance-service.js";
+import { createFinanceSmsAcknowledgementDispatcher } from "./finance-sms-acknowledgement.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
 import { createGoalsService } from "./goals-service.js";
 import { createGooglePubSubAuth, GooglePubSubAuthError } from "./google-pubsub-auth.js";
@@ -82,6 +92,7 @@ import { createReminderService } from "./reminder-service.js";
 import { readBoundedRequestBody } from "./request-body.js";
 import { createRitualService } from "./ritual-service.js";
 import { registerAssistantRoutes } from "./routes/assistant.js";
+import { registerAutomationHostRoutes } from "./routes/automation-hosts.js";
 import { registerCalendarRoutes } from "./routes/calendar.js";
 import { registerFinanceRoutes } from "./routes/finances.js";
 import { registerGoalsRoutes } from "./routes/goals.js";
@@ -112,7 +123,7 @@ import { createTextingRecoveryDispatcher } from "./texting-recovery-dispatcher.j
 import { createTextingRecoveryRuntime } from "./texting-recovery-runtime.js";
 import { createTextingRecoveryService } from "./texting-recovery-service.js";
 import { createTextingService } from "./texting-service.js";
-import { createSmsAdmission } from "./texting-sms-admission.js";
+import { createSmsAdmission, createSmsApprovalAdmission } from "./texting-sms-admission.js";
 import type { AppDependencies, AppEnv, Principal } from "./types.js";
 import { createWeatherService } from "./weather-service.js";
 import { createWorkspaceMaintenanceService } from "./workspace-maintenance-service.js";
@@ -147,6 +158,7 @@ export type PersonalOsApp = Hono<AppEnv> & {
   dispatchDueMailMaintenance: () => Promise<void>;
   dispatchDueFinanceMaintenance: () => Promise<void>;
   runTextingRecovery: () => Promise<void> | null;
+  runFinanceNotifications: () => Promise<void> | null;
   quiesceTextingRecovery: () => void;
   superviseICloudMail: () => Promise<void>;
   syncDueConnectors: () => Promise<{
@@ -458,12 +470,22 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     db: dependencies.db,
     now,
   });
+  const financeActions = createFinanceActionService({ db: dependencies.db, finances, now });
   const financeSms = createFinanceSmsPort({
-    admitSmsAnswer: createSmsAdmission({ enabled: () => textingConfig.enabled }),
+    decideSmsApproval: createFinanceSmsApprovalService({
+      db: dependencies.db,
+      actions: financeActions,
+      admit: createSmsApprovalAdmission({
+        enabled: () => textingConfig.enabled && textingConfig.financeSmsEnabled === true,
+      }),
+      now,
+    }),
+    admitSmsAnswer: createSmsAdmission({
+      enabled: () => textingConfig.enabled && textingConfig.financeSmsEnabled === true,
+    }),
     db: dependencies.db,
     now,
   });
-  const financeActions = createFinanceActionService({ db: dependencies.db, finances, now });
   const financePlaybook = createFinancePlaybookService({ finances, now });
   const assistant = createAssistantService({
     appBaseUrl: dependencies.config.appBaseUrl,
@@ -670,9 +692,43 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   });
   const notifications = createNotificationService({
     db: dependencies.db,
+    resolveWork: resolveFinanceWorks,
+    deliveryEnabled: () => textingConfig.enabled && textingConfig.financeSmsEnabled === true,
     origin: dependencies.config.appBaseUrl,
     transport: texting,
     now,
+  });
+  const dispatchFinanceNotifications = createFinanceNotificationDispatcher({
+    db: dependencies.db,
+    notifications,
+    enabled: () => textingConfig.enabled && textingConfig.financeSmsEnabled === true,
+  });
+  const dispatchFinanceHosts = createFinanceHostDispatcher({
+    db: dependencies.db,
+    now,
+    encryptionKey: dependencies.config.encryptionKey,
+    fetch: dependencies.fetch ?? globalThis.fetch,
+    ...(dependencies.log ? { log: dependencies.log } : {}),
+  });
+  const dispatchFinanceSmsContext = createFinanceSmsContextDispatcher({
+    db: dependencies.db,
+    enabled: () => textingConfig.enabled && textingConfig.financeSmsEnabled === true,
+    now,
+  });
+  const dispatchFinanceAcknowledgements = createFinanceSmsAcknowledgementDispatcher({
+    db: dependencies.db,
+    recovery: textingRecovery,
+    texting,
+    enabled: () => textingConfig.enabled && textingConfig.financeSmsEnabled === true,
+    now,
+  });
+  const financeNotificationRuntime = createTextingRecoveryRuntime(async (shouldContinue) => {
+    await runFinanceReconciliationStages([
+      { name: "context", run: () => dispatchFinanceSmsContext(shouldContinue) },
+      { name: "acknowledgement", run: () => dispatchFinanceAcknowledgements(shouldContinue) },
+      { name: "host", run: () => dispatchFinanceHosts(shouldContinue) },
+      { name: "notification", run: () => dispatchFinanceNotifications(shouldContinue) },
+    ]);
   });
 
   app.use("*", async (context, next) => {
@@ -1063,6 +1119,8 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/rituals/*", authenticate);
   app.use("/v1/motives/*", authenticate);
   app.use("/v1/motives", authenticate);
+  app.use("/v1/automation-hosts", authenticate);
+  app.use("/v1/automation-hosts/*", authenticate);
   app.use("/v1/finances/*", authenticate);
   app.use("/v1/finances", authenticate);
   app.use("/v1/mailboxes", authenticate);
@@ -1390,6 +1448,14 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     ...(twilio ? { validateWebhook: twilio.validateWebhook } : {}),
   });
   registerTextingRecoveryRoutes({ app, recovery: textingRecovery });
+  registerAutomationHostRoutes({
+    app,
+    hosts: createAutomationHostService({
+      db: dependencies.db,
+      now,
+      encryptionKey: dependencies.config.encryptionKey,
+    }),
+  });
   registerNotificationRoutes({ app, notifications });
 
   app.get("/v1/audit", async (context) => {
@@ -1422,7 +1488,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     runTextingRecovery() {
       return textingRecoveryRuntime.run();
     },
+    runFinanceNotifications() {
+      return financeNotificationRuntime.run();
+    },
     quiesceTextingRecovery() {
+      financeNotificationRuntime.quiesce();
       textingRecoveryRuntime.quiesce();
     },
     async backfillFinanceProviderItems() {

@@ -18,6 +18,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Progress } from "@/components/ui/progress";
 import { workspaceIdentities } from "@/components/workspace-identity";
 import { api } from "../../api.js";
+import { FinanceContextualQuestionPage } from "../finances/contextual-question.js";
 import { FinanceReviewHistory } from "../finances/review-page.js";
 import { ReviewActions } from "./review-actions.js";
 
@@ -122,8 +123,12 @@ function ReviewFlow({
         {query.data &&
         initialId !== "open" &&
         !query.data.items.some((item) => item.id === initialId) ? (
-          <ResponsiveDialogBody>
-            <p role="status">This review is no longer available. It may already be resolved.</p>
+          <ResponsiveDialogBody className="pb-4 pr-12">
+            {workspace === "finances" && initialId.startsWith("finance-contextual:") ? (
+              <FinanceContextualQuestionPage id={initialId.slice("finance-contextual:".length)} />
+            ) : (
+              <p role="status">This review is no longer available. It may already be resolved.</p>
+            )}
             {workspace === "finances" ? <FinanceHistoryDisclosure /> : null}
           </ResponsiveDialogBody>
         ) : query.data ? (

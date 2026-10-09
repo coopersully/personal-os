@@ -453,6 +453,13 @@ function questionFromRow(row: typeof financeAgentActionReviews.$inferSelect): Fi
  * only source of bypass authority is the persisted Finance settings row.
  */
 export function createFinanceActionService({ db, finances, now }: FinanceActionServiceOptions) {
+  type ActionTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+  function actionTransaction<T>(
+    executor: ActionTransaction | undefined,
+    run: (tx: ActionTransaction) => Promise<T>,
+  ): Promise<T> {
+    return executor ? run(executor) : db.transaction(run);
+  }
   async function prepare(
     actionKind: SupportedActionKind,
     rawInput: Record<string, unknown>,
@@ -3419,14 +3426,18 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         .limit(limit);
       return rows.map(questionFromRow);
     },
-    async approve<T>(id: string, context: MutationContext): Promise<FinanceActionOutcome<T>> {
+    async approve<T>(
+      id: string,
+      context: MutationContext,
+      executor?: ActionTransaction,
+    ): Promise<FinanceActionOutcome<T>> {
       if (context.principal.actorType !== "user") {
         throw new AppError(
           "forbidden",
           "Only an interactive user can approve a Finance action review.",
         );
       }
-      const approval = await db.transaction(async (tx) => {
+      const approval = await actionTransaction(executor, async (tx) => {
         const [preview] = await tx
           .select()
           .from(financeAgentActionReviews)
@@ -3559,14 +3570,14 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         throw new AppError("conflict", approval.message);
       return approval as FinanceActionOutcome<T>;
     },
-    async dismiss(id: string, context: MutationContext) {
+    async dismiss(id: string, context: MutationContext, executor?: ActionTransaction) {
       if (context.principal.actorType !== "user") {
         throw new AppError(
           "forbidden",
           "Only an interactive user can dismiss a Finance action review.",
         );
       }
-      return db.transaction(async (tx) => {
+      return actionTransaction(executor, async (tx) => {
         const [review] = await tx
           .select()
           .from(financeAgentActionReviews)

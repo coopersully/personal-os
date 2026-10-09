@@ -35,6 +35,7 @@ import {
   connectorAuthorizationOutcomeSchema,
 } from "@personal-os/domain";
 import { createAssistantApiClient } from "./features/assistant.js";
+import { createAutomationHostApi } from "./features/automation-hosts.js";
 import { createCalendarApiClient } from "./features/calendar.js";
 import { createDesktopReleaseApiClient } from "./features/desktop-release.js";
 import { createFinanceApi } from "./features/finances.js";
@@ -206,6 +207,7 @@ export function createApiClient(options: ClientOptions) {
       );
     },
     ...createFinanceApi(request),
+    ...createAutomationHostApi(request),
     ...createCalendarApiClient(request),
     ...createGoalsApiClient(request),
     ...createRitualsApiClient(request),

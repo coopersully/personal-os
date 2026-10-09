@@ -6,7 +6,6 @@ import {
   createDatabaseClient,
   financeAccounts,
   financeReviewArchives,
-  financeReviewCases,
   financeTransactions,
   migrateDatabase,
   users,
@@ -79,20 +78,21 @@ it("upgrades a database that already applied the first published 0105 archive", 
       )
       .returning();
     if (!transactions[0] || !transactions[1]) throw new Error("Transactions were not created.");
-    const cases = await database.db
-      .insert(financeReviewCases)
-      .values(
-        transactions.map((transaction) => ({
-          userId: owner.id,
-          transactionId: transaction.id,
-          stableKey: `archive-upgrade:${transaction.id}`,
-          status: "resolved" as const,
-          reasonCode: "unusual_amount" as const,
-          evidence: { source: "upgrade regression" },
-          impactAmount: 1200,
-        })),
-      )
-      .returning();
+    // The fixture is deliberately still on original 0105. Use only its columns;
+    // the current ORM schema also contains fields introduced by later migrations.
+    const cases: { id: string }[] = [];
+    for (const transaction of transactions) {
+      const inserted = await database.pool.query<{ id: string }>(
+        "INSERT INTO finance_review_cases (user_id,transaction_id,stable_key,status,reason_code,evidence,impact_amount_cents) VALUES ($1,$2,$3,'resolved','unusual_amount',$4,1200) RETURNING id",
+        [
+          owner.id,
+          transaction.id,
+          `archive-upgrade:${transaction.id}`,
+          JSON.stringify({ source: "upgrade regression" }),
+        ],
+      );
+      cases.push(...inserted.rows);
+    }
     const [legacyCase, upgradedCase] = cases;
     if (!legacyCase || !upgradedCase) throw new Error("Review cases were not created.");
 

@@ -1577,7 +1577,7 @@ function AuthenticatedApp({ user }: { user: User }) {
 
 function LegacyReviewRedirect({ workspace }: { workspace: "mail" | "calendar" | "finances" }) {
   const [params] = useSearchParams();
-  const item = params.get("item");
+  const item = params.get("item") ?? params.get("case");
   const question = params.get("question");
   const approval = params.get("approval");
   const contextual = params.get("contextualQuestion");

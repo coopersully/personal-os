@@ -144,12 +144,19 @@ describe.sequential("Finance merchant facade compatibility", () => {
   it("excludes foreign-owner aliases linked to an owned merchant", async () => {
     const owned = await seedMerchant(userId, "Owned merchant");
     await database.db.insert(financeMerchantAliases).values([
-      { userId, merchantId: owned.id, rawName: "Own alias", normalizedName: "own alias" },
+      {
+        userId,
+        merchantId: owned.id,
+        rawName: "Own alias",
+        normalizedName: "own alias",
+        source: "user",
+      },
       {
         userId: foreignId,
         merchantId: owned.id,
         rawName: "Foreign private alias",
         normalizedName: "foreign private alias",
+        source: "user",
       },
     ]);
     expect(await service.listMerchants(userId)).toEqual([

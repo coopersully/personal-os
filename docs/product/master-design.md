@@ -115,7 +115,7 @@ App
 Settings
 ├── Back to app
 ├── Account: Profile settings, password, log out
-├── Personal: User Knowledge, Goals, Priorities, Motives, Reviews
+├── Personal: User Knowledge, Goals, Priorities, Motives
 ├── Experience: Appearance, wallpaper where supported, locale & time
 ├── History & access: Activity, sessions, invitations, account recovery, privacy, exports
 ├── Communications: Shared notification policy, channel connections/defaults, widgets

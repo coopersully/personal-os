@@ -221,6 +221,7 @@ export function createAuthService(options: AuthServiceOptions) {
         .where(eq(accessTokens.id, record.id));
       return {
         actorId: record.id,
+        authorizationConnectionId: record.authorizationConnectionId,
         actorType: "agent",
         scopes: new Set(record.scopes),
         userId: record.userId,

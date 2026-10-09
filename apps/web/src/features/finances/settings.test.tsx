@@ -103,6 +103,10 @@ const savedFinanceProfile = {
 const mocks = vi.hoisted(() => ({
   getFinanceConfiguration: vi.fn(),
   getNotificationStatus: vi.fn(),
+  listAutomationHostConnections: vi.fn().mockResolvedValue([]),
+  listAutomationHostSchedules: vi.fn().mockResolvedValue([]),
+  listFinanceAnswerContinuations: vi.fn().mockResolvedValue([]),
+  listFinanceHostRuns: vi.fn().mockResolvedValue([]),
   listFinanceGoals: vi.fn(),
   listFinanceAccounts: vi.fn(),
   getDomainProfile: vi.fn(),

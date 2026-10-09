@@ -210,6 +210,10 @@ export const iloToolCatalog = {
     destructive: true,
     policy: "approve_each",
   }),
+  get_finance_continuations: read("finances", ["finances:maintain"]),
+  observe_finance_host_schedule: write("finances", ["finances:maintain"], {
+    policy: "approved_rule",
+  }),
   maintain_finances: write("finances", ["finances:maintain"], {
     idempotent: false,
     openWorld: false,

@@ -135,6 +135,7 @@ import { createFinanceLedgerService } from "./finance/ledger-service.js";
 import { supersedeFinanceMaintenanceLineage } from "./finance/maintenance-rebuild.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import { appendFinanceProfile } from "./finance/profile-writer.js";
+import { issueMaintenanceReviewQuestion } from "./finance/review-action-service.js";
 import { createSetupService } from "./finance/setup-service.js";
 import {
   financeCandidateActionFingerprint,
@@ -6331,6 +6332,7 @@ export function createFinanceService({
             },
             tx,
           );
+          await issueMaintenanceReviewQuestion(tx, input.userId, projectedReview.id);
           activeReviewIds.add(projectedReview.id);
         }
         return { created: items.length, total: activeReviewIds.size };

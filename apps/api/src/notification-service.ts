@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   auditEvents,
   type Database,
@@ -7,6 +8,7 @@ import {
   notificationPreferences,
   textingConnections,
   textMessages,
+  textReplyBindings,
   users,
 } from "@personal-os/database";
 import {
@@ -25,12 +27,13 @@ import {
   resetFinanceNotificationPreferencesSchema,
   validateNotificationResolution,
 } from "@personal-os/domain";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { AppError } from "./errors.js";
 import type {
   NotificationTransaction,
   NotificationWorkResolver,
 } from "./notification-work-resolver.js";
+import { createTextReplyBindings } from "./texting-reply-binding.js";
 import type { createTextingService } from "./texting-service.js";
 import type { Principal } from "./types.js";
 
@@ -42,6 +45,8 @@ type Options = {
   origin: string;
   transport: Pick<ReturnType<typeof createTextingService>, "sendNotification">;
   resolveWork?: NotificationWorkResolver;
+  /** Runtime activation is separate from resolver registration; production must opt in. */
+  deliveryEnabled?: () => boolean;
   now?: () => Date;
 };
 
@@ -244,6 +249,8 @@ export function createNotificationService(options: Options) {
     authorize(principal);
     const refs = publishNotificationInputSchema.parse(input).work;
     if (!options.resolveWork) return unavailable;
+    if (options.deliveryEnabled?.() === false)
+      return { state: "unavailable", reason: "delivery_not_enabled" } as const;
     if (new Set(refs.map((r) => r.id.toLowerCase())).size !== refs.length)
       throw new AppError("invalid_request", "Each work item may appear once.");
     return options.db.transaction(async (tx) => {
@@ -374,6 +381,8 @@ export function createNotificationService(options: Options) {
   async function claim(principal: Principal) {
     authorize(principal);
     if (!options.resolveWork) return unavailable;
+    if (options.deliveryEnabled?.() === false)
+      return { state: "unavailable", reason: "delivery_not_enabled" } as const;
     await options.db.transaction(async (tx) => {
       await lockUser(tx, principal.userId);
       await reconcile(tx, principal.userId);
@@ -496,6 +505,8 @@ export function createNotificationService(options: Options) {
   async function deliver(principal: Principal, claim: { id: string; claimId: string }) {
     authorize(principal);
     if (!options.resolveWork) return unavailable;
+    if (options.deliveryEnabled?.() === false)
+      return { state: "unavailable", reason: "delivery_not_enabled" } as const;
     // No transaction or domain lock crosses the provider call. A committed submitting attempt
     // is never retried; status reconciliation preserves uncertainty after process loss.
     try {
@@ -591,19 +602,80 @@ export function createNotificationService(options: Options) {
             .where(eq(notificationDeliveryAttempts.id, attempt.id));
           return null;
         }
+        let questions =
+          works.length <= 3 &&
+          works.every((work) => work.work.kind === "question" && work.questionPrompt)
+            ? works
+            : works.length === 1 &&
+                works[0]?.work.kind === "approval" &&
+                effective.detail === "context" &&
+                works[0].disclosure === "context" &&
+                works[0].context &&
+                !/(?:\d[ .()-]*){5}|@|https?:|[\r\n]/iu.test(works[0].context)
+              ? works
+              : [];
+        // Keep the existing reply namespace intact: a delayed reply must never target a
+        // newer message that restarts numbering at one. Additional work stays answerable in-app.
+        if (questions.length) {
+          const [openBinding] = await tx
+            .select({ id: textReplyBindings.id })
+            .from(textReplyBindings)
+            .where(
+              and(
+                eq(textReplyBindings.userId, user.id),
+                eq(textReplyBindings.connectionId, connection.id),
+                eq(textReplyBindings.consentEpoch, connection.consentEpoch),
+                eq(textReplyBindings.state, "open"),
+                gt(textReplyBindings.expiresAt, now()),
+              ),
+            )
+            .limit(1);
+          if (openBinding) questions = [];
+        }
         let body = composeNotification({
           works,
           now: now(),
           timeZone: user.planningTimezone,
           detail: effective.detail,
           origin,
+          replyable: questions.length > 0,
         });
-        // SMS Unicode can multiply segments; fall back to a short review summary, never truncate facts.
-        if (body.length > 250 || /[^\x20-\x7E]/u.test(body))
-          body = `nohmi: ${works.length} Finance item${works.length === 1 ? "" : "s"} need review. ${origin}/settings?section=reviews`;
+        // Provider segment limits preserve facts by reducing disclosure, never truncating them.
+        if (body.length > 250 || /[^\x20-\x7E]/u.test(body)) {
+          questions = [];
+          body = `nohmi: ${works.length} Finance item${works.length === 1 ? "" : "s"} need review. ${origin}/finances?review=open`;
+        }
         return {
           body,
           queued: async (messageId: string) => {
+            if (questions.length)
+              await createTextReplyBindings(
+                tx,
+                user.id,
+                connection,
+                messageId,
+                questions.map((question, index) => ({
+                  outboundMessageId: messageId,
+                  itemNumber: index + 1,
+                  work: question.work,
+                  answerMode:
+                    question.work.kind === "approval"
+                      ? ("choices" as const)
+                      : ("free_text" as const),
+                  answerVocabulary:
+                    question.work.kind === "approval" ? ["approve", "reject"] : null,
+                  expiresAt: new Date(
+                    Math.min(
+                      now().getTime() + 24 * 60 * 60_000,
+                      question.expiresAt
+                        ? new Date(question.expiresAt).getTime()
+                        : Number.POSITIVE_INFINITY,
+                    ),
+                  ).toISOString(),
+                  operationId: randomUUID(),
+                })),
+                now(),
+              );
             await tx
               .update(notificationDeliveryAttempts)
               .set({
@@ -666,8 +738,15 @@ export function createNotificationService(options: Options) {
         .orderBy(desc(notificationIntents.updatedAt))
         .limit(100);
       return {
-        capability: options.resolveWork ? ("available" as const) : ("unavailable" as const),
-        reason: options.resolveWork ? null : "producer_not_registered",
+        capability:
+          options.resolveWork && options.deliveryEnabled?.() !== false
+            ? ("available" as const)
+            : ("unavailable" as const),
+        reason: !options.resolveWork
+          ? "producer_not_registered"
+          : options.deliveryEnabled?.() === false
+            ? "delivery_not_enabled"
+            : null,
         timeZone: user.planningTimezone,
         preferences: rows.map((r) => ({
           scope: r.scope,

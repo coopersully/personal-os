@@ -1,4 +1,4 @@
-import { errorMonitor, EventEmitter } from "node:events";
+import { EventEmitter, errorMonitor } from "node:events";
 import { resolve } from "node:path";
 import {
   auditEvents,

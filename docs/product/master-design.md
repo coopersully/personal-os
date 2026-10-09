@@ -115,7 +115,7 @@ App
 Settings
 ├── Back to app
 ├── Account: Profile settings, password, log out
-├── Personal: User Knowledge, Goals, Priorities, Motives, Reviews
+├── Personal: User Knowledge, Goals, Priorities, Motives
 ├── Experience: Appearance, wallpaper where supported, locale & time
 ├── History & access: Activity, sessions, invitations, account recovery, privacy, exports
 ├── Communications: Shared notification policy, channel connections/defaults, widgets
@@ -356,13 +356,21 @@ while retaining domain-owned conditions, actions, validation, and execution.
 **Token/scopes:** new credentials use domain read/write scopes plus audit and bookmark reads. `automations:read` remains a compatibility label for reading the daily brief. `automations:write` is inactive and unavailable on new tokens. Workspace permissions currently apply at the workspace level except where a provider-selected destination is explicitly enforced; the UI must not invent per-source credential controls.
 Planned Tracking adds `tracking:read` and `tracking:write` with selected Tracker sources; those scopes are not shipped yet.
 
-**Reviews:** `/reviews`, owned by Today, is the account-wide action queue for work that explicitly
-requires the person: questions, approvals, connector failures, recovery steps, and other Review or
-Attention items. Kind and workspace filters are URL-owned, results are cursor-paginated, and every
-action routes to the domain that owns the decision. Informational state, routine success, and work
-nohmi can recover automatically do not enter the queue; setup and access configuration never appear
-as queue work merely because they exist. Legacy `/settings?section=reviews` links redirect while
-preserving filters.
+**Reviews:** the [workspace Reviews contract](../design/pages/reviews.md) owns the current
+presentation: a workspace-scoped dialog or mobile drawer opened from its attention alert,
+workspace Settings header, or the **Items needing review** workspace search result. It collects work that explicitly requires the person: questions,
+approvals, connector failures, recovery steps, and other Review or Attention items. Results are
+cursor-paginated and every action retains domain-owned authority. Informational state, routine
+success, and work nohmi can recover automatically do not enter the flow; setup and access
+configuration never appear as review work merely because they exist. This supersedes the earlier
+Today-owned account-wide `/reviews` queue while keeping the underlying workspace in place.
+Legacy workspace decision links enter the scoped flow; `/reviews` and
+`/settings?section=reviews` currently fall back to Account. Some notification and agent link
+producers still emit those old destinations; the Reviews contract records this unresolved
+implementation gap. Do not claim those generated links preserve their requested review target.
+The accepted multi-workspace Texting requirement below still needs a unified destination: the
+shipped single-workspace flow does not fulfill that target, and this reconciliation does not
+replace it with a newly selected routing design.
 
 Centralized Settings is the canonical editor for account-wide identity, security, privacy ceilings,
 review bypass, shared notification policy, channel connections/defaults, connected-agent
@@ -415,12 +423,14 @@ coherent response without reproducing domain expertise.
   `yesterday`, or `tomorrow` immediately before sending.
 - SMS is formal, short, and concise. It may include as many directly answerable questions or exact
   reviews as reasonably fit, with a hard cap of three. If even two would make the text difficult to
-  scan, include only one. Every multi-item message includes the unified Settings-owned Reviews link;
+  scan, include only one. The accepted target is one unified Reviews link for every multi-item message;
   when more items remain, it summarizes the overflow. Texting does not send separate proactive
   messages per item or workspace.
 - A self-contained single question omits the link. Texting adds an exact-item or workspace link when
   that question needs more context or is too long for a reasonable SMS; every multi-item message
-  uses the unified Reviews link.
+  uses the unified Reviews link. This cross-workspace destination remains unimplemented after
+  the workspace flow cutover; the [Texting contract](texting-operations.md) distinguishes the
+  accepted requirement from the current legacy-link fallback.
 - Quiet hours default to 10:00 PM–8:00 AM in the person's current time zone. Proactive maintenance
   texts wait until the window ends unless the person selects `any time`; direct replies to the
   person's messages remain immediate. Multiple deferred items consolidate into one Reviews alert.
@@ -433,7 +443,8 @@ coherent response without reproducing domain expertise.
   wording, evidence, confidence, rediscovery, or internal progress alone do not qualify; quiet
   hours and send-time revalidation still apply.
 - SMS links require normal nohmi authentication and contain no bearer credential or action
-  authority. After sign-in, the app returns the person to the requested review destination.
+  authority. The accepted behavior is to return the person to the requested review destination
+  after sign-in; the current legacy-link fallback to Account does not satisfy that requirement.
 - A global review-bypass setting applies to every channel. When enabled, policy-authorized
   reversible work may execute directly; when disabled, it enters exact review, which may be
   approved by a bound, unexpired SMS response.
@@ -575,7 +586,8 @@ The research basis is recorded in the 2026-07-18 product analysis. Key experienc
 
 ### Contextual review flow
 
-Reviews open from a workspace attention alert or the actions beside its Settings title. A shared
+Reviews open from a workspace attention alert, the actions beside its Settings title, or the
+**Items needing review** workspace search result. A shared
 responsive dialog/drawer presents one decision at a time, using domain-owned controls and evidence.
 Progress shows completed, remaining, and total items. Advance only after the server confirms a
 resolution; Later never counts as completion. Reconnection and source repair remain explicit source

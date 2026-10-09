@@ -74,16 +74,24 @@ workspace.
 A short, self-contained single question does not include a redundant link. The message stays brief
 and directly answerable by text unless evidence or context is needed to decide safely.
 
-The multi-item link opens the existing unified Reviews destination at
-`/settings?section=reviews`, where the person can see all outstanding Review and Attention work
-across available workspaces—including questions, approvals, connector failures, and recovery
-steps—filter it, and follow each item to its owning domain. A single-item context link may still open
-that exact item or owning workspace.
+The accepted multi-item target is one unified Reviews destination where the person can see all
+outstanding Review and Attention work across available workspaces—including questions, approvals,
+connector failures, and recovery steps—and follow each item to its owning domain. A single-item
+context link may open that exact item or owning workspace.
+
+**Current implementation gap:** at `fe983085`, producers still emit the former
+`/settings?section=reviews` destination, but it now falls back to Account. The shipped
+[Reviews flow](../design/pages/reviews.md) is scoped to one workspace and does not implement the
+accepted cross-workspace destination. The old URL is not evidence that multi-item review navigation
+works. The producer/schema inventory and verification needs are recorded in that contract; the
+accepted cross-workspace requirement remains pending rather than being silently narrowed to one
+workspace. This checkpoint does not select a new route or claim a completed migration.
 
 Opening the link requires normal nohmi authentication. The URL carries no bearer credential,
 approval authority, answer, or sensitive item content; possession of the phone or receipt of the
-SMS is not a web session. If authentication is required, nohmi returns the person to the requested
-review destination after sign-in.
+SMS is not a web session. The accepted behavior is to return the person to the requested review
+destination after sign-in. The current legacy URL instead resumes through the old redirects and
+lands on Account; authentication does not repair the missing review destination.
 
 Example: “Dinner yesterday was unusually large. Are you expecting reimbursement? Reply yes, no, or
 unsure.”
@@ -289,8 +297,9 @@ explicit local offset.
 
 The shipped implementation provides verification, consent, conversation history, guarded manual
 reads and sends, delivery lifecycle, webhook handling, and MCP tools for reading and sending. It
-also has the authenticated Settings-owned Reviews destination, which aggregates available Review
-and Attention work across the four workspaces with filters and domain-owned action links. Current
+has a shared authenticated Reviews flow scoped to one workspace, with domain-owned actions.
+The older cross-workspace queue component remains unrouted; generated legacy links fall back to
+Account. The accepted unified multi-workspace destination is therefore still a gap. Current
 sources include reconnect-required Mail and Calendar accounts, but complete connector-failure and
 recovery coverage remains target work. Texting does not yet provide general-inbox intent
 classification, work-node answers, cross-workspace child
@@ -392,8 +401,9 @@ per-child `accepted`, `waiting`, `uncertain`, `blocked`, and `unavailable` state
 verified success from unresolved siblings. Public reasons are redacted: a terminal non-accepted
 answer with an unrecognized private reason is `answer_not_applied`, while an unknown nonterminal
 reason remains `processing_uncertain`. The response omits answer text, operation and binding UUIDs,
-provider IDs, phone data, and raw Finance outcomes; its only destination is the ordinary
-`/settings?section=reviews` page.
+provider IDs, phone data, and raw Finance outcomes. Its `reviewHref` is still the literal legacy
+`/settings?section=reviews` URL; that URL currently falls back to Account rather than opening
+the requested recovery work. The status read is available, but review navigation remains a gap.
 
 An internal, owner-scoped `runPage` reconciles bounded unfinished claims. For attached children,
 it inspects the exact Finance receipt before same-key execution or result projection; unattached
@@ -459,9 +469,10 @@ local wall time at each invocation: both occurrences of a repeated DST hour rema
 hour has no invented offset. The next bounded invocation rechecks eligibility against the current
 zone, preferences, expiry and domain state. No nohmi recurring notification schedule is introduced.
 
-T0 messages summarize up to three safe contextual labels, with an overflow count and an ordinary
-authenticated link to `/settings?section=reviews`. This is a general Reviews destination, not an
-exact-item or approval link. Messages do not advertise reply choices or numeric answer references.
+T0 messages summarize up to three safe contextual labels, with an overflow count and the legacy
+`/settings?section=reviews` link. It currently falls back to Account and does not open the
+requested review work; it carries no exact-item binding or approval authority. Messages do not
+advertise reply choices or numeric answer references.
 A domain disclosure ceiling and the global privacy ceiling constrain workspace preferences; a user
 preference cannot expand the permitted context. Sensitive or oversized content falls back to a
 short review summary. Notification rows contain references and delivery state, not copies of SMS

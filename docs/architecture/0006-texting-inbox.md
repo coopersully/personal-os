@@ -47,6 +47,12 @@ or the items need richer context, it renders a brief formal summary. Every multi
 includes the unified Reviews link. Texting sends one notification across workspaces rather than
 serializing the whole queue into SMS or sending one proactive message per item or domain.
 
+**Implementation distinction:** this is the accepted cross-workspace target, not a claim that the
+current link works. At the `fe983085` source checkpoint, the emitted legacy URL falls back to
+Account and the shipped Reviews flow is scoped to one workspace. The
+[Texting contract](../product/texting-operations.md) and [Reviews contract](../design/pages/reviews.md)
+record that gap without changing this target or selecting a replacement route.
+
 Each item in a multi-item message receives a short numeric reference bound to that exact outbound
 message and proposal revision. Replies must identify the number for every answered item; a direct
 bounded answer without a reference is accepted only when one unambiguous active item exists.

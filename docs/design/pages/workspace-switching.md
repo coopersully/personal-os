@@ -35,8 +35,10 @@ Setup. Change password and Log out remain actions inside the Account page rather
 than navigation destinations.
 
 Today has no contextual sidebar; Tasks remains the workspace owner for
-Reminders. Goals, Motives, Reviews, Activity, and setup remain inside account
-utilities rather than becoming workspace destinations.
+Reminders. Goals, Motives, Activity, and setup remain inside account utilities rather than
+becoming workspace destinations. [Reviews](reviews.md) is a workspace-scoped dialog/drawer
+opened from its attention alert, Settings header, or workspace search; it is not a separate
+account utility or workspace identity.
 
 At 900 px and below, the desktop rail/sidebar is replaced by the bottom
 workspace dock. Its active-workspace trigger exposes the same manifest-ordered

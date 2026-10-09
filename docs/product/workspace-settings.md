@@ -182,7 +182,11 @@ reasonably fit, with a hard cap of three. If two or three would make the message
 Texting includes fewer. Every multi-item message includes the unified cross-workspace Reviews link;
 when more work remains, it adds a short overflow summary rather than sending separate messages per
 item or workspace. Multi-item messages number each item and bind those references to the exact
-message and proposal revisions; replies identify every answered number.
+message and proposal revisions; replies identify every answered number. This is the accepted
+Texting target. Its unified cross-workspace destination is not implemented by the current scoped
+Reviews flow, and emitted legacy links fall back to Account; see the
+[Texting implementation gap](texting-operations.md#workspace-maintenance-notifications) and
+[Reviews contract](../design/pages/reviews.md).
 
 A self-contained single question omits the link unless the person needs more context or the
 necessary content is too long for a reasonable text.

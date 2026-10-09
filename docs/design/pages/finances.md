@@ -181,8 +181,9 @@ Review.
 
 - The overview distinguishes current balances and posted activity from
   forecasts or pending transactions.
-- Review work is visible in both the primary overview block and Finance
-  navigation.
+- Review work opens in the [shared workspace Reviews flow](reviews.md) from the Finance
+  attention alert, Finance Settings header, or workspace search. The flow retains Finance-owned decisions and
+  authorization; Finance Views and Today do not advertise separate review pages.
 - Canonical Review leads with its current bounded question. Older maintenance
   approvals disclose their individual prepared changes inside the labelled
   compatibility queue.

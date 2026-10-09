@@ -440,6 +440,10 @@ it("reloads unavailable Finance account names before an exact reviewed selection
         updatedAt: "2026-10-09T00:00:00.000Z",
         createdAt: "2026-10-09T00:00:00.000Z",
         synchronization: {
+          failureCode: null,
+          failureCount: 0,
+          lastAttemptAt: null,
+          recovery: null,
           state: "current",
           message: null,
           lastSuccessAt: "2026-10-09T00:00:00.000Z",

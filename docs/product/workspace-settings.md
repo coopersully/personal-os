@@ -1,7 +1,7 @@
 # nohmi per-workspace settings
 
 - Status: Accepted target product contract
-- Last reconciled: 2026-09-11
+- Last reconciled: 2026-10-07
 
 ## Purpose
 
@@ -238,13 +238,48 @@ question or blocked result rather than an inferred permission.
 
 ## Current implementation boundary
 
-Current settings are distributed across account settings, connections, workspace access, domain
-profiles, Finance settings, Texting, and feature-specific pages. Review bypass is one revisioned
-global account policy edited beside workspace access. Its current direct-execution registration is
-limited to exact reversible Finance operations; it cannot grant scopes, activate rules, override
-stronger approvals, or authorize another domain. The complete shared per-workspace structure,
-canonical workspace editors, centralized read-only overview, maintenance guidance model, and SMS
-controls above are target behavior and must not be presented as shipped.
+Workspace presentation preferences are account-owned, with one owner-bound row per workspace.
+The shared settings module exposes a workspace-discriminated contract: every read returns only that
+workspace's fields, fully resolved defaults, and its revision. Untouched defaults have revision zero
+and do not initialize storage. PATCH fields never supply read-time defaults; the response matches a
+subsequent read. Writes require the workspace's write scope and an interactive person, reject stale
+revisions, and record an audit event. The app serializes settings and contextual Display changes
+through the same per-workspace save path. Each edit retains the revision observed by its UI; only
+successful queued changes from that client advance it. A concurrent remote change produces a
+conflict rather than silently rebasing captured values onto a newer revision. Explicit URL choices override saved defaults without
+saving the link's choices back to the account.
+
+| Workspace | Persisted preferences |
+| --- | --- |
+| Calendar | View, weekends, follow behavior, Sunday/Monday week start, default new-event duration (60 minutes initially; 5–1440 supported) |
+| Tasks | Sort, grouping, row details, collection sorting, pins, default capture list, completed-item visibility in container views |
+| Mail | Conversation layout, list density, desktop split width |
+| Finances | Transaction view/card grouping and selected spending, cash, and investment accounts |
+| All four | Include completed/archived material in search |
+
+Finance account selections distinguish `null` (all eligible accounts, including newly added accounts)
+from an explicit empty selection. They affect presentation only, never `includeInPlanning` or account
+semantics. Existing browser-session selections are not silently adopted: the old keys contain no
+owner identity. Missing or no-longer-eligible accounts are excluded when resolving a saved view.
+Task capture defaults must reference an owned active list when saved; unavailable defaults fall back
+to Inbox visibly. Explicit list/project destinations and existing tasks retain their destinations.
+Saved completed visibility applies to container views, while explicit lifecycle views and URL
+filters keep their own meaning.
+
+Workspace settings consolidate editing, not data ownership. Mail inbox style, important-email
+handling, and low-priority disposition/retention remain in the versioned domain profile. Calendar
+source destination, buffers, and privacy remain in its versioned profile. Editing those controls
+preserves other profile fields and does not activate action rules. Finance household/income facts,
+financial profile revisions, budgets, and guidance retain their existing canonical stores; its
+configuration endpoint assembles them with independent unavailable states.
+
+The current notification policy supports global defaults and a Finance override. Finance Settings
+shows the effective values and inheritance; a revision-guarded, audited reset removes the Finance
+override without changing global preferences. Recreating an override cannot reuse a previous
+revision. The global disclosure ceiling still applies. Other workspaces' notification overrides and
+the complete shared maintenance/SMS sections above remain target behavior, not shipped controls.
+Review bypass remains one revisioned global account policy and cannot grant scopes, activate rules,
+override stronger approvals, or authorize unregistered domain operations.
 
 ### Desktop distribution
 

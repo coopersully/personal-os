@@ -99,8 +99,21 @@ Preparation only reads and locks through the supplied transaction. After admissi
 parent locks cover answer/audit foreign keys, the operation lock covers receipt uniqueness,
 question UPDATE covers answer revision uniqueness, and transaction UPDATE covers producer
 uniqueness. No pool query, external callback, child-to-parent trigger or repeated-question lock
-batch is introduced. The Reviews projection revalidates each question in its own transaction;
+batch is introduced in the answer mutation path. The Reviews projection revalidates each
+question in its own transaction;
 projection failures remain errors for the composition layer to mark as unavailable.
+
+Notification publication may carry 1–100 exact Finance work references. The internal
+`resolveContextualWorks` read port accepts that entire set in one caller-owned transaction;
+the notification caller must pass the complete set once rather than loop the single-question
+resolver. It admits the owner, previews owned contextual questions, then takes SHARE NOWAIT
+locks in stable table and ID order: accounts, transactions, review cases, questions. It checks
+the locked parent identities and revisions before returning results in input order. Duplicate
+IDs are rejected; foreign or unsupported work is unavailable; answered exact references are
+resolved; stale references are stale. Any contention or changed membership aborts the caller's
+transaction as a retryable conflict. This port is read-only and does not publish, send, or
+consume a Texting binding. Application composition and notification batch calls remain
+Integration-owned.
 
 Private database-owned parent generations detect semantic changes and ABA, including referential
 SET NULL updates. OLD/NEW-only triggers reject counter reset and overflow and exclude observation

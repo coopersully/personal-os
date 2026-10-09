@@ -1,26 +1,35 @@
-import type { WorkspacePreferences } from "@personal-os/domain";
-import { useQueryClient } from "@tanstack/react-query";
+import {
+  getDefaultWorkspacePreferences,
+  type TasksWorkspacePreferences,
+} from "@personal-os/domain";
 import { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api } from "@/api";
-import { useFeedbackMutation } from "@/lib/use-feedback-mutation";
-import { useWorkspacePreferences } from "../workspace-search/preferences";
+import {
+  useSaveWorkspacePreferences,
+  useWorkspacePreferences,
+} from "../workspace-settings/preferences";
 
 /** Explicit links override saved defaults without changing the account's preferences. */
 export function taskPresentationParams(
   params: URLSearchParams,
-  preferences?: WorkspacePreferences,
+  preferences?: TasksWorkspacePreferences,
 ) {
   const next = new URLSearchParams(params);
+  const values = { ...getDefaultWorkspacePreferences("tasks"), ...preferences };
   const defaults = {
-    sort: preferences?.taskSort ?? "default",
-    group: preferences?.taskGroup ?? "none",
-    details:
-      preferences?.taskRowDetails?.join(",") || (preferences?.taskRowDetails ? "none" : "estimate"),
-    containerSort: preferences?.taskContainerSort ?? "updated",
+    sort: values.taskSort,
+    group: values.taskGroup,
+    details: values.taskRowDetails.join(",") || "none",
+    containerSort: values.taskContainerSort,
   };
   for (const [key, value] of Object.entries(defaults)) {
     if (!next.has(key)) next.set(key, value);
+  }
+  // Lifecycle views and explicit filters keep their own semantics.
+  const view = params.get("view");
+  const container = !view || (view === "all" && (params.has("list") || params.has("project")));
+  if (container && !next.has("status") && values.showCompletedTasks) {
+    next.set("status", "open_and_completed");
   }
   return next;
 }
@@ -35,30 +44,5 @@ export function useTaskPresentationParams() {
 }
 
 export function useSaveTaskPresentation() {
-  const cache = useQueryClient();
-  return useFeedbackMutation({
-    scope: { id: "tasks-presentation-preferences" },
-    feedback: { action: "save your Tasks display preferences", safeToRetry: false },
-    mutationFn: async (
-      preferences: Partial<
-        Pick<
-          WorkspacePreferences,
-          "taskSort" | "taskGroup" | "taskRowDetails" | "taskContainerSort"
-        >
-      >,
-    ) => {
-      // Read the revision when this queued write starts, not when the menu rendered.
-      const current = await api.getWorkspaceSettings("tasks");
-      return api.updateWorkspaceSettings("tasks", {
-        expectedRevision: current.revision,
-        preferences,
-      });
-    },
-    onSuccess: (data) => {
-      cache.setQueryData(["workspace-settings", "tasks"], data);
-    },
-    onError: () => {
-      void cache.invalidateQueries({ queryKey: ["workspace-settings", "tasks"] });
-    },
-  });
+  return useSaveWorkspacePreferences("tasks");
 }

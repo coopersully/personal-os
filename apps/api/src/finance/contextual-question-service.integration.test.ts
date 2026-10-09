@@ -26,7 +26,7 @@ import { type FinanceTransaction, loadFinanceAuthorization } from "./context.js"
 import { readFinanceContextualWork } from "./contextual-question-projection.js";
 import { createFinanceContextualQuestionService } from "./contextual-question-service.js";
 import { createInboxService } from "./inbox-service.js";
-import { resolveSmsQuestion } from "./work-resolver.js";
+import { resolveContextualWorks, resolveSmsQuestion } from "./work-resolver.js";
 
 describe.sequential("real contextual question producer", () => {
   let container: StartedPostgreSqlContainer;
@@ -268,6 +268,227 @@ describe.sequential("real contextual question producer", () => {
       },
     };
   }
+  async function batchFixture() {
+    const first = await questionFixture();
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({ userId: first.userId, provider: "manual", institution: "Manual", name: "Second" })
+      .returning();
+    if (!account) throw new Error("Missing second account");
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        userId: first.userId,
+        accountId: account.id,
+        amount: 2100,
+        merchant: "Dinner",
+        direction: "expense",
+        transactionDate: "2026-09-22",
+      })
+      .returning();
+    if (!transaction) throw new Error("Missing second transaction");
+    const created = await first.service.createQuestion(
+      transaction.id,
+      { operationId: randomUUID() },
+      first.context,
+    );
+    if (created.state !== "available") throw new Error("Missing second question");
+    return { first, second: created.question, account, transaction };
+  }
+  it("resolves a reversed two-parent notification batch using exact current work", async () => {
+    const f = await batchFixture();
+    const refs = [f.second.work, f.first.question.work];
+    const results = await database.db.transaction((tx) =>
+      resolveContextualWorks(f.first.userId, refs, tx),
+    );
+    expect(results).toHaveLength(2);
+    expect(results.map((result) => result.state)).toEqual(["current", "current"]);
+    expect(results[0]).toMatchObject({ value: { work: refs[0] } });
+    expect(results[1]).toMatchObject({ value: { work: refs[1] } });
+  });
+  it("keeps exact resolved, stale, foreign and unsupported work unavailable to notification publication", async () => {
+    const f = await batchFixture();
+    expect(await f.first.service.answerWork(f.first.answer, f.first.context)).toMatchObject({
+      state: "accepted",
+    });
+    const foreign = await questionFixture();
+    const refs = [
+      f.first.question.work,
+      { ...f.first.question.work, id: randomUUID() },
+      { ...f.second.work, actionRevision: "2" },
+      foreign.question.work,
+      { ...f.second.work, id: randomUUID(), kind: "approval" as const },
+    ];
+    expect(
+      (await database.db.transaction((tx) => resolveContextualWorks(f.first.userId, refs, tx))).map(
+        (result) => result.state,
+      ),
+    ).toEqual(["resolved", "unavailable", "stale", "unavailable", "unavailable"]);
+    expect(
+      (
+        await database.db.transaction((tx) =>
+          resolveContextualWorks(f.first.userId, [f.second.work], tx),
+        )
+      ).map((result) => result.state),
+    ).toEqual(["current"]);
+  });
+  it("rejects duplicate batch IDs and preserves the 1–100 work contract", async () => {
+    const f = await questionFixture();
+    await expect(
+      database.db.transaction((tx) =>
+        resolveContextualWorks(f.userId, [f.question.work, f.question.work], tx),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      database.db.transaction((tx) =>
+        resolveContextualWorks(
+          f.userId,
+          [f.question.work, { ...f.question.work, id: f.question.id.toUpperCase() }],
+          tx,
+        ),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      database.db.transaction((tx) => resolveContextualWorks(f.userId, [], tx)),
+    ).rejects.toThrow();
+    const hundred = Array.from({ length: 100 }, () => ({
+      ...f.question.work,
+      id: randomUUID(),
+      kind: "approval" as const,
+    }));
+    expect(
+      (await database.db.transaction((tx) => resolveContextualWorks(f.userId, hundred, tx))).map(
+        (result) => result.state,
+      ),
+    ).toEqual(Array(100).fill("unavailable"));
+    await expect(
+      database.db.transaction((tx) =>
+        resolveContextualWorks(
+          f.userId,
+          Array.from({ length: 101 }, (_, index) => ({
+            ...f.question.work,
+            id: index ? randomUUID() : f.question.id,
+          })),
+          tx,
+        ),
+      ),
+    ).rejects.toThrow();
+  });
+  it.each([
+    "finance_accounts",
+    "finance_transactions",
+    "finance_review_cases",
+    "finance_contextual_questions",
+  ])("maps %s batch lock contention to a retryable conflict", async (table) => {
+    const f = await batchFixture();
+    const id =
+      table === "finance_accounts"
+        ? f.account.id
+        : table === "finance_transactions"
+          ? f.transaction.id
+          : table === "finance_review_cases"
+            ? f.second.reviewCaseId
+            : f.second.id;
+    const blocker = await database.pool.connect();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query(`SELECT id FROM ${table} WHERE id=$1 FOR UPDATE`, [id]);
+      await expect(
+        database.db.transaction((tx) =>
+          resolveContextualWorks(f.first.userId, [f.first.question.work, f.second.work], tx),
+        ),
+      ).rejects.toMatchObject({ code: "conflict", details: { retryable: true } });
+    } finally {
+      await blocker.query("ROLLBACK");
+      blocker.release();
+    }
+    expect(
+      (
+        await database.db.transaction((tx) =>
+          resolveContextualWorks(f.first.userId, [f.second.work, f.first.question.work], tx),
+        )
+      ).map((result) => result.state),
+    ).toEqual(["current", "current"]);
+  });
+  it.each([
+    "finance_accounts",
+    "finance_transactions",
+    "finance_review_cases",
+    "finance_contextual_questions",
+  ])("aborts a batch when %s disappears after the owned preview", async (table) => {
+    const f = await questionFixture();
+    const id =
+      table === "finance_accounts"
+        ? f.account.id
+        : table === "finance_transactions"
+          ? f.transaction.id
+          : table === "finance_review_cases"
+            ? f.question.reviewCaseId
+            : f.question.id;
+    const single = createDatabaseClient({ connectionString: container.getConnectionUri(), max: 1 });
+    const client = await single.pool.connect();
+    const original = client.query.bind(client);
+    let deleted = false;
+    const query = vi.spyOn(client, "query").mockImplementation((async (
+      input: { text: string },
+      values: unknown[],
+    ) => {
+      const result = await original(input, values);
+      if (!deleted && /from "finance_contextual_questions"/i.test(input.text)) {
+        deleted = true;
+        await database.pool.query(`DELETE FROM ${table} WHERE id=$1`, [id]);
+      }
+      return result;
+    }) as typeof client.query);
+    client.release();
+    try {
+      await expect(
+        single.db.transaction((tx) => resolveContextualWorks(f.userId, [f.question.work], tx)),
+      ).rejects.toMatchObject({ code: "conflict", details: { retryable: true } });
+      expect(deleted).toBe(true);
+    } finally {
+      query.mockRestore();
+      await single.close();
+    }
+  });
+  it.each([
+    ["40001", true],
+    ["23514", false],
+  ])("classifies PostgreSQL %s during a batch parent lock", async (code, retryable) => {
+    const f = await questionFixture();
+    const single = createDatabaseClient({ connectionString: container.getConnectionUri(), max: 1 });
+    const client = await single.pool.connect();
+    const original = client.query.bind(client);
+    let intercepted = false;
+    const query = vi.spyOn(client, "query").mockImplementation((async (
+      input: { text: string },
+      values: unknown[],
+    ) => {
+      if (/from "finance_accounts"/i.test(input.text) && /for share nowait/i.test(input.text)) {
+        intercepted = true;
+        throw Object.assign(new Error("simulated PostgreSQL failure"), { code });
+      }
+      return original(input, values);
+    }) as typeof client.query);
+    client.release();
+    try {
+      const resolving = single.db.transaction((tx) =>
+        resolveContextualWorks(f.userId, [f.question.work], tx),
+      );
+      if (retryable) {
+        await expect(resolving).rejects.toMatchObject({
+          code: "conflict",
+          details: { retryable: true },
+        });
+      } else {
+        await expect(resolving).rejects.toMatchObject({ cause: { code } });
+      }
+      expect(intercepted).toBe(true);
+    } finally {
+      query.mockRestore();
+      await single.close();
+    }
+  });
   it.each([
     "finance_accounts",
     "finance_transactions",

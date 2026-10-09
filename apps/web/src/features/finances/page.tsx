@@ -108,11 +108,16 @@ import {
 import { TooltipContent, TooltipTrigger, Tooltip as UiTooltip } from "@/components/ui/tooltip";
 import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import { api } from "../../api.js";
-import { InlineError } from "../../components/async-state.js";
+import { InlineError, QueryFeedback } from "../../components/async-state.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+import {
+  useSaveWorkspacePreferences,
+  useWorkspacePreferences,
+} from "../workspace-settings/preferences";
+import { financeAccountPreferenceKeys, selectedFinanceAccounts } from "./account-preferences";
 import { FinanceBudgetBucketManager } from "./bucket-manager.js";
 import { FinanceCategoryDialog } from "./category-dialog";
 import { AddTransactionContext } from "./contextual-question.js";
@@ -154,7 +159,8 @@ export function FinancesPage() {
   const currentMonth = new Date().toISOString().slice(0, 7);
   const [budgetMonth, setBudgetMonth] = useState(currentMonth);
   const [budgetPacePeriod, setBudgetPacePeriod] = useState<FinanceBudgetPacePeriod>("week");
-  const [accountScopes, setAccountScopes] = useState<Record<string, string[]>>({});
+  const accountPreferences = useWorkspacePreferences("finances");
+  const saveAccountPreferences = useSaveWorkspacePreferences("finances");
   const overview = useQuery({
     queryFn: () =>
       section === "budgets"
@@ -163,16 +169,10 @@ export function FinancesPage() {
     queryKey: ["finance-overview", section === "budgets" ? budgetMonth : currentMonth],
   });
   const scopedSpendAccountIds = overview.data
-    ? (accountScopes.spend ??
-      readSessionAccountScope("spend") ??
-      overview.data.accounts.map((account) => account.id))
+    ? selectedFinanceAccounts(overview.data.accounts, "spend", accountPreferences.data?.preferences)
     : [];
   const hasCustomSpendScope =
-    overview.data !== undefined &&
-    (scopedSpendAccountIds.length !== overview.data.accounts.length ||
-      scopedSpendAccountIds.some(
-        (id) => !overview.data.accounts.some((account) => account.id === id),
-      ));
+    overview.data !== undefined && accountPreferences.data?.preferences.spendAccountIds != null;
   const scopedSpending = useQuery({
     enabled: section === "overview" && hasCustomSpendScope,
     queryFn: () => api.getFinanceOverviewForAccounts(currentMonth, scopedSpendAccountIds),
@@ -498,13 +498,8 @@ export function FinancesPage() {
   if (!overview.data) return <FinancePageSkeleton />;
   const finance = overview.data;
   const budgetHasPlan = finance.budgets.length > 0;
-  const selectedAccounts = (scope: "spend" | "cash" | "investments") => {
-    const eligible = finance.accounts.filter((account) =>
-      scope === "spend" ? true : account.kind === (scope === "cash" ? "cash" : "investment"),
-    );
-    const saved = accountScopes[scope] ?? readSessionAccountScope(scope);
-    return saved ?? eligible.map((account) => account.id);
-  };
+  const selectedAccounts = (scope: "spend" | "cash" | "investments") =>
+    selectedFinanceAccounts(finance.accounts, scope, accountPreferences.data?.preferences);
   const spentThisMonth = hasCustomSpendScope
     ? (scopedSpending.data?.spendingThisMonth ?? 0)
     : finance.spendingThisMonth;
@@ -1444,9 +1439,28 @@ export function FinancesPage() {
       />
       <AccountScopeDialog
         accounts={finance.accounts}
-        onChange={(scope, ids) => {
-          setAccountScopes((current) => ({ ...current, [scope]: ids }));
-          sessionStorage.setItem(`finance-account-scope:${scope}`, JSON.stringify(ids));
+        disabled={!accountPreferences.isSuccess || saveAccountPreferences.isPending}
+        feedback={
+          <>
+            <QueryFeedback
+              query={accountPreferences}
+              title="Couldn’t load saved account selections."
+            />
+            <MutationFeedback feedback={saveAccountPreferences.feedback} />
+          </>
+        }
+        onReset={(scope) =>
+          saveAccountPreferences.mutate({ [financeAccountPreferenceKeys[scope]]: null })
+        }
+        onChange={(scope, id, checked) => {
+          saveAccountPreferences.mutate((current) => {
+            const selected = selectedFinanceAccounts(finance.accounts, scope, current);
+            return {
+              [financeAccountPreferenceKeys[scope]]: checked
+                ? [...new Set([...selected, id])]
+                : selected.filter((selectedId) => selectedId !== id),
+            };
+          });
         }}
         onOpenChange={(open) => !open && setScopeDialog(null)}
         scope={scopeDialog}
@@ -1642,6 +1656,9 @@ function FinanceAtAGlance({ status }: { status: FinanceStatus }) {
 }
 
 function AccountScopeDialog({
+  disabled,
+  feedback,
+  onReset,
   accounts,
   onChange,
   onOpenChange,
@@ -1649,8 +1666,11 @@ function AccountScopeDialog({
   selectedIds,
   transactions,
 }: {
+  disabled: boolean;
+  feedback: ReactNode;
+  onReset: (scope: "spend" | "cash" | "investments") => void;
   accounts: FinanceAccount[];
-  onChange: (scope: "spend" | "cash" | "investments", ids: string[]) => void;
+  onChange: (scope: "spend" | "cash" | "investments", id: string, checked: boolean) => void;
   onOpenChange: (open: boolean) => void;
   scope: "spend" | "cash" | "investments" | null;
   selectedIds: string[];
@@ -1669,9 +1689,13 @@ function AccountScopeDialog({
         <ShadcnDialogHeader>
           <ShadcnDialogTitle>{title}</ShadcnDialogTitle>
           <ShadcnDialogDescription>
-            Selections are saved for this browser session.
+            Selections are saved to your Finance workspace across devices.
           </ShadcnDialogDescription>
         </ShadcnDialogHeader>
+        {feedback}
+        <ShadcnButton variant="secondary" disabled={disabled} onClick={() => onReset(scope)}>
+          Use all eligible accounts
+        </ShadcnButton>
         <ShadcnFieldGroup>
           {eligible.map((account) => {
             const value =
@@ -1688,16 +1712,10 @@ function AccountScopeDialog({
             return (
               <ShadcnField key={account.id} orientation="horizontal">
                 <ShadcnCheckbox
+                  disabled={disabled}
                   checked={selectedIds.includes(account.id)}
                   id={`scope-${scope}-${account.id}`}
-                  onCheckedChange={(checked) =>
-                    onChange(
-                      scope,
-                      checked
-                        ? [...selectedIds, account.id]
-                        : selectedIds.filter((id) => id !== account.id),
-                    )
-                  }
+                  onCheckedChange={(checked) => onChange(scope, account.id, checked === true)}
                 />
                 <ShadcnFieldLabel htmlFor={`scope-${scope}-${account.id}`}>
                   {account.name} · {formatMoney(value)}
@@ -3230,17 +3248,6 @@ function downloadFinanceCsv(name: string, rows: Array<Record<string, unknown>>) 
 
 function accountKindLabel(kind: "cash" | "investment" | "debt" | "other") {
   return { cash: "Cash", debt: "Debt", investment: "Investment", other: "Other asset" }[kind];
-}
-
-function readSessionAccountScope(scope: "spend" | "cash" | "investments"): string[] | null {
-  try {
-    const value: unknown = JSON.parse(
-      sessionStorage.getItem(`finance-account-scope:${scope}`) ?? "null",
-    );
-    return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : null;
-  } catch {
-    return null;
-  }
 }
 
 function formatTransactionDate(value: string) {

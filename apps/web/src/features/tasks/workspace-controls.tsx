@@ -1,4 +1,4 @@
-import type { TaskList, TaskProject, WorkspacePreferences } from "@personal-os/domain";
+import type { TaskList, TaskProject, TasksWorkspacePreferences } from "@personal-os/domain";
 import { type FormEvent, useId, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
@@ -101,7 +101,7 @@ export function WorkspaceSort({
             value={value}
             onValueChange={(next) => {
               navigate(withWorkspaceOption(routeParams, "sort", next));
-              save.mutate({ taskSort: next as WorkspacePreferences["taskSort"] });
+              save.mutate({ taskSort: next as TasksWorkspacePreferences["taskSort"] });
             }}
           >
             {sortOptions.map(([key, label]) => (
@@ -140,7 +140,7 @@ export function WorkspaceDisplay({
             value={params.get("group") ?? "none"}
             onValueChange={(next) => {
               navigate(withWorkspaceOption(routeParams, "group", next));
-              save.mutate({ taskGroup: next as WorkspacePreferences["taskGroup"] });
+              save.mutate({ taskGroup: next as TasksWorkspacePreferences["taskGroup"] });
             }}
           >
             {groupOptions.map(([key, label]) => (
@@ -173,7 +173,7 @@ export function WorkspaceDisplay({
                   : details.filter((value) => value !== key);
                 save.mutate({
                   taskRowDetails: next.filter((value) => value !== "none") as NonNullable<
-                    WorkspacePreferences["taskRowDetails"]
+                    TasksWorkspacePreferences["taskRowDetails"]
                   >,
                 });
                 navigate(
@@ -253,7 +253,7 @@ export function WorkspaceFilters({
   const [custom, setCustom] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
-  const count = workspaceFilterKeys.filter((key) => params.has(key)).length;
+  const count = workspaceFilterKeys.filter((key) => routeParams.has(key)).length;
   const global = Boolean(params.get("view"));
   const history = params.get("view") === "history";
   const set = (key: string, value: string) =>
@@ -292,6 +292,7 @@ export function WorkspaceFilters({
     const next = new URLSearchParams(routeParams);
     for (const key of [...workspaceFilterKeys, ...(global ? ["list", "project"] : [])]) {
       const value = draft.get(key);
+      if (key === "status" && !routeParams.has(key) && value === params.get(key)) continue;
       if (value) next.set(key, value);
       else next.delete(key);
     }
@@ -373,6 +374,7 @@ export function WorkspaceFilters({
                         ]
                       : [
                           ["open", "Open"],
+                          ["open_and_completed", "Open & completed"],
                           ["all", "All statuses"],
                           ["completed", "Completed"],
                           ["cancelled", "Cancelled tasks"],
@@ -585,12 +587,13 @@ export function WorkspaceFilterChips({
     overdue: "Overdue",
     dated: "Has date",
     scheduled: "Has time",
+    open_and_completed: "Open & completed",
   };
   const chips: { key: string; keys: string[]; label: string }[] = [];
   for (const key of workspaceFilterKeys.filter(
     (key) => !key.endsWith("After") && !key.endsWith("Before"),
   )) {
-    const value = params.get(key);
+    const value = (key === "status" ? routeParams : params).get(key);
     if (value) chips.push({ key, keys: [key], label: `${labels[key]}: ${values[value] ?? value}` });
   }
   for (const [prefix, label] of [

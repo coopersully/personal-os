@@ -181,3 +181,32 @@ it("summarizes one-sided, preset, and absent ranges", () => {
   );
   expect(screen.queryByRole("group", { name: "Active task filters" })).not.toBeInTheDocument();
 });
+
+it("does not expose saved completed visibility as a removable URL filter", () => {
+  mount(
+    <WorkspaceFilterChips
+      params={new URLSearchParams("status=open_and_completed")}
+      routeParams={new URLSearchParams()}
+      timeZone="UTC"
+      lists={lists}
+      projects={projects}
+    />,
+  );
+  expect(screen.queryByRole("button", { name: /Remove Status/ })).not.toBeInTheDocument();
+});
+it("does not freeze saved completed visibility when applying another filter", async () => {
+  const user = userEvent.setup();
+  mount(
+    <WorkspaceFilters
+      params={new URLSearchParams("status=open_and_completed")}
+      routeParams={new URLSearchParams()}
+      timeZone="UTC"
+      lists={lists}
+      projects={projects}
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: /Filters/ }));
+  await user.selectOptions(screen.getByLabelText("Priority"), "high");
+  await user.click(screen.getByRole("button", { name: "Apply filters" }));
+  expect(screen.getByLabelText("location")).toHaveTextContent("/tasks?priority=high");
+});

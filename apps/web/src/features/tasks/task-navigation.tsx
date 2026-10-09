@@ -37,7 +37,7 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
-import { useWorkspacePreferences } from "../workspace-search/preferences";
+import { useWorkspacePreferences } from "../workspace-settings/preferences";
 import { TaskListDialog } from "./task-list-dialog";
 import { getTaskListIcon } from "./task-list-icons";
 import { TaskProjectDialog } from "./task-project-dialog";

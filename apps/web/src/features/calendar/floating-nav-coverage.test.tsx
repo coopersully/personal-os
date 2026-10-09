@@ -10,6 +10,8 @@ import { CalendarFloatingNav } from "./floating-nav.js";
 
 const mocks = vi.hoisted(() => ({
   createEvent: vi.fn(),
+  getWorkspaceSettings: vi.fn(),
+  getDomainProfile: vi.fn(),
   listEvents: vi.fn(),
   searchWeatherLocations: vi.fn(),
 }));
@@ -74,6 +76,11 @@ describe("Calendar floating navigation edge states", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mocks.createEvent.mockReset();
+    mocks.getWorkspaceSettings.mockResolvedValue({
+      revision: 1,
+      preferences: { defaultEventDurationMinutes: 60 },
+    });
+    mocks.getDomainProfile.mockResolvedValue(null);
     mocks.listEvents.mockReset();
     mocks.searchWeatherLocations.mockReset();
   });
@@ -378,4 +385,26 @@ describe("Calendar floating navigation edge states", () => {
       background: "#777ce3",
     });
   });
+});
+
+it("uses the saved duration and approved destination for new events", async () => {
+  mocks.getWorkspaceSettings.mockResolvedValue({
+    revision: 1,
+    preferences: { defaultEventDurationMinutes: 90 },
+  });
+  mocks.getDomainProfile.mockResolvedValue({
+    status: "active",
+    preferences: { defaultCalendarId: googleCalendar.id },
+  });
+  mocks.createEvent.mockResolvedValue({ conferenceStatus: null });
+  const browser = userEvent.setup();
+  renderCalendar();
+  await browser.click(screen.getByRole("button", { name: "Create event" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: /Google/ })).toBeInTheDocument());
+  await browser.type(screen.getByRole("textbox", { name: "Title" }), "Preference event");
+  await browser.click(screen.getByRole("button", { name: "Create event" }));
+  await waitFor(() => expect(mocks.createEvent).toHaveBeenCalled());
+  const event = mocks.createEvent.mock.lastCall?.[0];
+  expect(event.calendarId).toBe(googleCalendar.id);
+  expect(Date.parse(event.endsAt) - Date.parse(event.startsAt)).toBe(90 * 60_000);
 });

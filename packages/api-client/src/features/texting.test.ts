@@ -70,3 +70,15 @@ it("reads one exact Finance reply status without a mutation or query-bearing des
   expect(request).toHaveBeenCalledWith(`/v1/texting/finance-replies/${inboundMessageId}/status`);
   expect(request).toHaveBeenCalledTimes(1);
 });
+
+it("resets only the Finance notification override with its revision", async () => {
+  const request = vi.fn(async () => ({})) as unknown as Parameters<
+    typeof createTextingApiClient
+  >[0];
+  const api = createTextingApiClient(request, () => "");
+  await api.resetFinanceNotificationPreferences({ expectedRevision: 3 });
+  expect(request).toHaveBeenCalledWith("/v1/texting/notifications/preferences/finances", {
+    method: "DELETE",
+    body: JSON.stringify({ expectedRevision: 3 }),
+  });
+});

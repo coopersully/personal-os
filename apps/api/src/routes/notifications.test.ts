@@ -15,6 +15,7 @@ it("maps bounded notification operations and rejects authority and input expansi
   const status = { capability: "unavailable", reason: "producer_not_registered" };
   const notifications = {
     status: vi.fn(async () => status),
+    resetFinancePreferences: vi.fn(async () => ({ scope: "finances", inherited: true })),
     savePreferences: vi.fn(async () => ({})),
     publish: vi.fn(async () => status),
     drain: vi.fn(async () => status),
@@ -50,14 +51,57 @@ it("maps bounded notification operations and rejects authority and input expansi
   }
   expect(notifications.publish).not.toHaveBeenCalled();
   expect(notifications.drain).not.toHaveBeenCalled();
+  expect(
+    (
+      await app.request(
+        "/v1/texting/notifications/preferences/finances",
+        json("DELETE", { expectedRevision: 2 }),
+      )
+    ).status,
+  ).toBe(200);
+  expect(notifications.resetFinancePreferences).toHaveBeenCalledWith(principal, {
+    expectedRevision: 2,
+  });
+  for (const body of [{}, { expectedRevision: null }, { expectedRevision: 2, scope: "global" }]) {
+    expect(
+      (await app.request("/v1/texting/notifications/preferences/finances", json("DELETE", body)))
+        .status,
+    ).toBe(400);
+  }
+  expect(
+    (
+      await app.request(
+        "/v1/texting/notifications/preferences/global",
+        json("DELETE", { expectedRevision: 2 }),
+      )
+    ).status,
+  ).toBe(404);
   principal.actorType = "agent";
+  expect(
+    (
+      await app.request(
+        "/v1/texting/notifications/preferences/finances",
+        json("DELETE", { expectedRevision: 2 }),
+      )
+    ).status,
+  ).toBe(403);
   expect(
     (await app.request("/v1/texting/notifications/preferences/global", json("PATCH", input)))
       .status,
   ).toBe(403);
   principal.scopes = new Set(["texting:read", "texting:write"]);
   expect((await app.request("/v1/texting/notifications")).status).toBe(403);
+  principal.actorType = "user";
   principal.scopes = new Set(["texting:read", "finances:read"]);
+  expect(
+    (
+      await app.request(
+        "/v1/texting/notifications/preferences/finances",
+        json("DELETE", { expectedRevision: 2 }),
+      )
+    ).status,
+  ).toBe(403);
+  principal.actorType = "agent";
   expect(
     (await app.request("/v1/texting/notifications/preferences/global", json("PATCH", input)))
       .status,

@@ -24,6 +24,7 @@ import type {
 } from "@personal-os/domain";
 import {
   addLocalDays,
+  getDefaultWorkspacePreferences,
   localDateAt,
   localDateRange,
   localDateTimeToUtc,
@@ -310,6 +311,7 @@ import {
   calendarQueryKeys,
   calendarViewFromSearch,
 } from "./features/calendar/page.js";
+import { useDefaultCalendarId } from "./features/calendar/preferences";
 import { useFollowScroll } from "./features/calendar/use-follow-scroll";
 import {
   CalendarAppBarControls,
@@ -355,6 +357,7 @@ import {
 import { SettingsSearch, settingsDescriptions } from "./features/settings/settings-search.js";
 import { SetupSettings } from "./features/settings/setup-settings.js";
 import { useSettingsSidebarCounts } from "./features/settings/sidebar-counts.js";
+import { WorkspaceGuidance } from "./features/settings/workspace-guidance";
 import { TaskRow, TasksCreateButton, TasksSidebar } from "./features/tasks/page.js";
 import { TaskDialog } from "./features/tasks/task-dialog.js";
 import { TasksAppBarControls } from "./features/tasks/workspace-header.js";
@@ -364,11 +367,9 @@ import { TextingSettings } from "./features/texting/page.js";
 import { RitualSettings } from "./features/tracking/ritual-settings.js";
 import { RitualSetupOffer } from "./features/tracking/ritual-setup-offer.js";
 import type { SearchAction } from "./features/workspace-search/catalog.js";
-import {
-  useWorkspacePreferences,
-  WorkspacePreferencesSection,
-} from "./features/workspace-search/preferences.js";
 import { WorkspaceFinder } from "./features/workspace-search/search.js";
+import { useWorkspacePreferences } from "./features/workspace-settings/preferences.js";
+import { WorkspacePreferencesSection } from "./features/workspace-settings/section";
 import { useMediaQuery } from "./hooks/use-media-query.js";
 import {
   formatCalendarDate,
@@ -2990,7 +2991,8 @@ function CalendarPage({
   const view = calendarViewFromSearch(requestedView, defaultView);
   const includeWeekends = searchParams.has("weekends")
     ? searchParams.get("weekends") !== "0"
-    : (calendarPreferences.data?.preferences.showWeekends ?? true);
+    : (calendarPreferences.data?.preferences.showWeekends ??
+      getDefaultWorkspacePreferences("calendar").showWeekends);
   const requestedAnchor = searchParams.get("date");
   const requestedEventId = searchParams.get("event");
   const anchor = /^\d{4}-\d{2}-\d{2}$/.test(requestedAnchor ?? "")
@@ -3004,9 +3006,12 @@ function CalendarPage({
       }
       return next;
     });
+  const weekStartsOn =
+    calendarPreferences.data?.preferences.weekStartsOn ??
+    getDefaultWorkspacePreferences("calendar").weekStartsOn;
   const days = useMemo(
-    () => calendarPeriodDays(view, anchor, includeWeekends),
-    [anchor, includeWeekends, view],
+    () => calendarPeriodDays(view, anchor, includeWeekends, weekStartsOn),
+    [anchor, includeWeekends, view, weekStartsOn],
   );
   const range = useMemo(
     () =>
@@ -3072,7 +3077,8 @@ function CalendarPage({
     sameLocalDate(anchor, today) &&
     (searchParams.has("follow")
       ? searchParams.get("follow") !== "0"
-      : (calendarPreferences.data?.preferences.autoFollowToday ?? true));
+      : (calendarPreferences.data?.preferences.autoFollowToday ??
+        getDefaultWorkspacePreferences("calendar").autoFollowToday));
   const disableFollowToday = () => updateCalendarState({ follow: "0" });
   const eventsByDay = useMemo(() => {
     const records = events.data ?? [];
@@ -3567,8 +3573,12 @@ function DayCalendarView({
     minute: localDateTimeAt(currentTime, timeZone).minute,
     week: false,
     programmatic: programmaticScrollPosition,
-    snapEnabled: followPreferences.data?.preferences.snapToFollow ?? true,
-    sensitivity: followPreferences.data?.preferences.followSnapSensitivity ?? "balanced",
+    snapEnabled:
+      followPreferences.data?.preferences.snapToFollow ??
+      getDefaultWorkspacePreferences("calendar").snapToFollow,
+    sensitivity:
+      followPreferences.data?.preferences.followSnapSensitivity ??
+      getDefaultWorkspacePreferences("calendar").followSnapSensitivity,
     onEnter: onEnterFollow,
     onExit: onExitFollow,
   });
@@ -3775,8 +3785,12 @@ function WeekCalendarView({
     minute: localDateTimeAt(currentTime, timeZone).minute,
     week: true,
     programmatic: programmaticScrollPosition,
-    snapEnabled: followPreferences.data?.preferences.snapToFollow ?? true,
-    sensitivity: followPreferences.data?.preferences.followSnapSensitivity ?? "balanced",
+    snapEnabled:
+      followPreferences.data?.preferences.snapToFollow ??
+      getDefaultWorkspacePreferences("calendar").snapToFollow,
+    sensitivity:
+      followPreferences.data?.preferences.followSnapSensitivity ??
+      getDefaultWorkspacePreferences("calendar").followSnapSensitivity,
     onEnter: onEnterFollow,
     onExit: onExitFollow,
   });
@@ -4070,7 +4084,10 @@ function CalendarCreateSelection({ selection }: { selection: CalendarRangeSelect
       className="calendar-create-selection"
       role="status"
       style={{
-        height: Math.max(minuteToTimelinePixels(endMinute - startMinute), 12),
+        height: Math.max(
+          minuteToTimelinePixels(Math.min(endMinute, calendarMinutesPerDay) - startMinute),
+          12,
+        ),
         top: minuteToTimelinePixels(startMinute),
       }}
     >
@@ -4082,6 +4099,10 @@ function CalendarCreateSelection({ selection }: { selection: CalendarRangeSelect
 
 function useCalendarRangeSelection(onCreateRange: (draft: EventDraft) => void, timeZone: string) {
   const [selection, setSelection] = useState<CalendarRangeSelection | null>(null);
+  const preferences = useWorkspacePreferences("calendar");
+  const defaultDuration =
+    preferences.data?.preferences.defaultEventDurationMinutes ??
+    getDefaultWorkspacePreferences("calendar").defaultEventDurationMinutes;
   const selectionRef = useRef<CalendarRangeSelection | null>(null);
   const updateSelection = (next: CalendarRangeSelection | null) => {
     selectionRef.current = next;
@@ -4155,7 +4176,7 @@ function useCalendarRangeSelection(onCreateRange: (draft: EventDraft) => void, t
         updateSelection({
           active: true,
           anchorMinute: 9 * 60,
-          currentMinute: 10 * 60,
+          currentMinute: 9 * 60 + defaultDuration,
           day,
           originClientY: 0,
           pointerId: null,
@@ -4170,7 +4191,7 @@ function useCalendarRangeSelection(onCreateRange: (draft: EventDraft) => void, t
     updateSelection({
       ...current,
       currentMinute: Math.min(
-        calendarMinutesPerDay,
+        Math.max(calendarMinutesPerDay, current.anchorMinute + defaultDuration),
         Math.max(0, current.currentMinute + (event.key === "ArrowDown" ? 15 : -15)),
       ),
     });
@@ -4682,13 +4703,13 @@ function CalendarBlankContextMenu({
   timeZone: string;
 }) {
   const queryClient = useQueryClient();
+  const preferences = useWorkspacePreferences("calendar");
+  const defaultDuration =
+    preferences.data?.preferences.defaultEventDurationMinutes ??
+    getDefaultWorkspacePreferences("calendar").defaultEventDurationMinutes;
   const canPaste = typeof navigator.clipboard?.readText === "function";
   const startsAt = localDateTimeToUtc(day, minute, timeZone).toISOString();
-  const endsAt = localDateTimeToUtc(
-    day,
-    Math.min(minute + 60, calendarMinutesPerDay - 1),
-    timeZone,
-  ).toISOString();
+  const endsAt = new Date(new Date(startsAt).getTime() + defaultDuration * 60_000).toISOString();
   const paste = useFeedbackMutation({
     feedback: { action: "paste this event" },
     mutationFn: async () => {
@@ -5101,8 +5122,8 @@ function MonthCalendarView({
         className="calendar-secondary-app-bar calendar-secondary-app-bar--month"
       >
         <WorkspaceSecondaryAppBarContent className="month-weekdays" aria-hidden="true">
-          {calendarWeekdayLabels.map((label) => (
-            <span key={label}>{label}</span>
+          {days.slice(0, 7).map((day) => (
+            <span key={localDateKey(day)}>{formatLocalDate(day, { weekday: "short" })}</span>
           ))}
         </WorkspaceSecondaryAppBarContent>
       </WorkspaceSecondaryAppBar>
@@ -6141,6 +6162,7 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
         <div className="settings-stack">
           <WorkspacePreferencesSection workspace="calendar" />
           <CalendarsSettings setEditor={setEditor} />
+          <WorkspaceGuidance domain="calendar" />
           <WorkspaceSettings domain="calendar" />
         </div>
       ) : null}
@@ -9532,7 +9554,7 @@ function EventVisibilityList({
   );
 }
 
-function EventDialog({
+export function EventDialog({
   calendars,
   close,
   draft,
@@ -9546,6 +9568,35 @@ function EventDialog({
   user: User;
 }) {
   const queryClient = useQueryClient();
+  const preferences = useWorkspacePreferences("calendar");
+  const defaultDuration =
+    preferences.data?.preferences.defaultEventDurationMinutes ??
+    getDefaultWorkspacePreferences("calendar").defaultEventDurationMinutes;
+  const defaultCalendarId = useDefaultCalendarId();
+  const [selectedCalendarId, setSelectedCalendarId] = useState<string | null>(null);
+  const [startValue, setStartValue] = useState(() =>
+    toDateTimeLocal(draft?.startsAt ?? event?.startsAt, user.planningTimezone, 1),
+  );
+  const defaultEnd = useCallback(
+    () =>
+      toDateTimeLocal(
+        new Date(
+          Date.parse(dateTimeLocalToIso(startValue, user.planningTimezone)) +
+            defaultDuration * 60_000,
+        ).toISOString(),
+        user.planningTimezone,
+      ),
+    [defaultDuration, startValue, user.planningTimezone],
+  );
+  const [endValue, setEndValue] = useState(() =>
+    draft?.endsAt || event?.endsAt
+      ? toDateTimeLocal(draft?.endsAt ?? event?.endsAt, user.planningTimezone)
+      : defaultEnd(),
+  );
+  const endEdited = useRef(false);
+  useEffect(() => {
+    if (!event && !draft && !endEdited.current && startValue) setEndValue(defaultEnd());
+  }, [defaultEnd, event, draft, startValue]);
   const writable = calendars.filter((calendar) => calendar.isWritable);
   const mutation = useFeedbackMutation({
     feedback: { action: "save this event", form: true },
@@ -9599,7 +9650,14 @@ function EventDialog({
         <label className="field">
           <span>Calendar</span>
           <select
-            defaultValue={event?.calendarId ?? writable[0]?.id}
+            value={
+              event?.calendarId ??
+              selectedCalendarId ??
+              writable.find((calendar) => calendar.id === defaultCalendarId)?.id ??
+              writable[0]?.id ??
+              ""
+            }
+            onChange={(changeEvent) => setSelectedCalendarId(changeEvent.target.value)}
             disabled={Boolean(event)}
             name="calendarId"
             required
@@ -9613,18 +9671,19 @@ function EventDialog({
         </label>
         <div className="form-grid">
           <Field
-            defaultValue={toDateTimeLocal(
-              draft?.startsAt ?? event?.startsAt,
-              user.planningTimezone,
-              1,
-            )}
+            value={startValue}
+            onChange={(changeEvent) => setStartValue(changeEvent.target.value)}
             label="Starts"
             name="startsAt"
             type="datetime-local"
             required
           />
           <Field
-            defaultValue={toDateTimeLocal(draft?.endsAt ?? event?.endsAt, user.planningTimezone, 2)}
+            value={endValue}
+            onChange={(changeEvent) => {
+              endEdited.current = true;
+              setEndValue(changeEvent.target.value);
+            }}
             label="Ends"
             name="endsAt"
             type="datetime-local"
@@ -9919,7 +9978,6 @@ export function formatMinutes(value: number) {
 export function minuteToTime(value: number) {
   return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
 }
-const calendarWeekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function formatLocalDate(date: LocalDate, options: Intl.DateTimeFormatOptions): string {
   return new Intl.DateTimeFormat("en", { ...options, timeZone: "UTC" }).format(

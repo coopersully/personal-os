@@ -2,7 +2,7 @@ import { expect, type Page, test } from "@playwright/test";
 import type {
   WorkspacePreferences,
   WorkspaceSettings,
-} from "../packages/domain/src/workspace-search.js";
+} from "../packages/domain/src/workspace-settings.js";
 
 async function preserveWorkspacePreferences(
   page: Page,
@@ -20,6 +20,11 @@ async function preserveWorkspacePreferences(
       original.preferences[key as keyof WorkspacePreferences] ?? fallback,
     ]),
   );
+  const baseline = await page.request.patch(path, {
+    headers: { origin: new URL(page.url()).origin },
+    data: { expectedRevision: original.revision, preferences: defaults },
+  });
+  expect(baseline.ok()).toBeTruthy();
   return async () => {
     const latest = await page.request.get(path);
     expect(latest.ok()).toBeTruthy();
@@ -94,6 +99,8 @@ test("Calendar remembers its view and opening and snap preferences", async ({ pa
     autoFollowToday: true,
     snapToFollow: true,
     followSnapSensitivity: "balanced",
+    weekStartsOn: "sunday",
+    defaultEventDurationMinutes: 60,
   });
   try {
     await page.goto("/calendar");
@@ -110,6 +117,19 @@ test("Calendar remembers its view and opening and snap preferences", async ({ pa
     await page.goto("/settings?section=calendar");
     await expect(page.getByLabel("Preferred view", { exact: true })).toHaveValue("month");
     await page.getByLabel("Preferred view", { exact: true }).selectOption("day");
+    const weekStart = page.getByLabel("Week starts on", { exact: true });
+    await expect(weekStart).toBeEnabled();
+    await weekStart.selectOption("monday");
+    const duration = page.getByLabel("Default event duration (minutes)", { exact: true });
+    await expect(duration).toBeEnabled();
+    await duration.fill("90");
+    const durationSaved = page.waitForResponse(
+      (response) =>
+        response.url().includes("/workspaces/calendar/settings") &&
+        response.request().method() === "PATCH",
+    );
+    await duration.blur();
+    expect((await durationSaved).ok()).toBeTruthy();
     const autoFollow = page.getByRole("switch", { name: "Automatically follow today" });
     await expect(autoFollow).toBeEnabled();
     await autoFollow.click();
@@ -129,6 +149,8 @@ test("Calendar remembers its view and opening and snap preferences", async ({ pa
       .toBe(0);
     await page.goto("/settings?section=calendar");
     await expect(autoFollow).not.toBeChecked();
+    await expect(weekStart).toHaveValue("monday");
+    await expect(duration).toHaveValue("90");
     await expect(snap).not.toBeChecked();
     await expect(page.getByLabel("Follow snap sensitivity", { exact: true })).toHaveValue(
       "generous",
@@ -196,7 +218,14 @@ test("Tasks keeps view switching and utilities in one responsive header", async 
     await expect(
       uncheckedRadio.locator('[data-slot="dropdown-menu-radio-item-indicator"]'),
     ).toBeVisible();
+    const sortSaved = page.waitForResponse(
+      (response) =>
+        response.url().includes("/workspaces/tasks/settings") &&
+        response.request().method() === "PATCH" &&
+        response.request().postDataJSON()?.preferences?.taskSort === "title",
+    );
     await uncheckedRadio.click();
+    expect((await sortSaved).ok()).toBeTruthy();
     await expect(page).toHaveURL(/sort=title/);
     await header.getByRole("button", { name: "Display", exact: true }).click();
     const notes = page.getByRole("menuitemcheckbox", { name: "Notes", exact: true });
@@ -206,7 +235,15 @@ test("Tasks keeps view switching and utilities in one responsive header", async 
     expect(
       await checkbox.evaluate((el) => parseFloat(getComputedStyle(el).borderRadius)),
     ).toBeLessThan(8);
+    const detailsSaved = page.waitForResponse(
+      (response) =>
+        response.url().includes("/workspaces/tasks/settings") &&
+        response.request().method() === "PATCH" &&
+        JSON.stringify(response.request().postDataJSON()?.preferences?.taskRowDetails) ===
+          JSON.stringify(["estimate", "notes"]),
+    );
     await notes.press("Space");
+    expect((await detailsSaved).ok()).toBeTruthy();
     await expect(notes).toHaveAttribute("aria-checked", "true");
     await expect(
       page.getByRole("menuitemcheckbox", { name: "Estimates", exact: true }),
@@ -295,14 +332,28 @@ test("Tasks collections support browsing, searching, and sorting lists and proje
     await expect(
       page.getByRole("list", { name: "Lists", exact: true }).getByText("Work", { exact: true }),
     ).toBeVisible();
+    const pinSaved = page.waitForResponse(
+      (response) =>
+        response.url().includes("/workspaces/tasks/settings") &&
+        response.request().method() === "PATCH" &&
+        response.request().postDataJSON()?.preferences?.pinnedListIds?.length === 1,
+    );
     await page.getByRole("button", { name: "Pin Work", exact: true }).click();
+    expect((await pinSaved).ok()).toBeTruthy();
     await expect(page.getByRole("button", { name: "Unpin Work", exact: true })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
     await page.reload();
     await expect(page.getByRole("button", { name: "Unpin Work", exact: true })).toBeVisible();
+    const unpinSaved = page.waitForResponse(
+      (response) =>
+        response.url().includes("/workspaces/tasks/settings") &&
+        response.request().method() === "PATCH" &&
+        response.request().postDataJSON()?.preferences?.pinnedListIds?.length === 0,
+    );
     await page.getByRole("button", { name: "Unpin Work", exact: true }).click();
+    expect((await unpinSaved).ok()).toBeTruthy();
     await expect(page.getByRole("button", { name: "Pin Work", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Filter lists" }).click();
     await page.getByRole("searchbox", { name: "Search lists" }).fill("Work");
@@ -320,7 +371,14 @@ test("Tasks collections support browsing, searching, and sorting lists and proje
         .getByText("Autumn program opening", { exact: true }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Sort projects" }).click();
+    const sortSaved = page.waitForResponse(
+      (response) =>
+        response.url().includes("/workspaces/tasks/settings") &&
+        response.request().method() === "PATCH" &&
+        response.request().postDataJSON()?.preferences?.taskContainerSort === "target",
+    );
     await page.getByRole("menuitemradio", { name: "Target date", exact: true }).click();
+    expect((await sortSaved).ok()).toBeTruthy();
     await expect(page).toHaveURL(/containerSort=target/);
     await page
       .getByRole("list", { name: "Projects", exact: true })

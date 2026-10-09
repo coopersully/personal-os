@@ -1,4 +1,10 @@
-import { expect, test } from "@playwright/test";
+import type {
+  FinanceConfiguration,
+  TaskList,
+  TaskProject,
+  WorkspaceSettings,
+} from "@personal-os/domain";
+import { expect, type Page, test } from "@playwright/test";
 
 test("two editors retain attempted workspace values and explicitly recover repeated conflicts", async ({
   page,
@@ -197,3 +203,227 @@ for (const workspace of ["calendar", "mail"] as const) {
     }
   });
 }
+
+async function openSettingsSection(page: Page, mobile: boolean, label: string) {
+  if (mobile) {
+    await page.getByRole("button", { name: "Switch workspace" }).click();
+    await page
+      .getByRole("menu", { name: "Switch workspace" })
+      .getByRole("menuitem", { name: "Settings", exact: true })
+      .click();
+    await page.getByRole("button", { name: "Workspace actions" }).click();
+    await page
+      .getByRole("dialog", { name: "Settings" })
+      .getByRole("link", { name: label, exact: true })
+      .click();
+  } else {
+    await page
+      .getByRole("navigation", { name: "Workspace navigation" })
+      .getByRole("link", { name: "Settings", exact: true })
+      .click();
+    await page
+      .getByRole("complementary", { name: "Account utility navigation" })
+      .getByRole("link", { name: label, exact: true })
+      .click();
+  }
+}
+
+test("Finance account selection recovery stays readable after reopening and navigating to Settings", async ({
+  page,
+}, info) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  const path = "/v1/workspaces/finances/settings";
+  const origin = new URL(page.url()).origin;
+  const original = (await (await page.request.get(path)).json()) as WorkspaceSettings<"finances">;
+  const configurationResponse = await page.request.get("/v1/finances/configuration");
+  expect(configurationResponse.ok()).toBeTruthy();
+  const configuration = (await configurationResponse.json()) as FinanceConfiguration;
+  if (configuration.accounts.state !== "loaded")
+    throw new Error("Fixture Finance accounts unavailable");
+  const checking = configuration.accounts.value.accounts.find(
+    (account) => account.name === "Everyday checking",
+  );
+  if (!checking) throw new Error("Fixture checking account unavailable");
+  let writes = 0;
+  page.on("request", (request) => {
+    if (request.method() === "PATCH" && request.url().endsWith(path)) writes++;
+  });
+  try {
+    const seed = await page.request.patch(path, {
+      headers: { origin },
+      data: {
+        expectedRevision: original.revision,
+        preferences: { spendAccountIds: [checking.id], financeTransactionGroup: "category" },
+      },
+    });
+    expect(seed.ok()).toBeTruthy();
+    const seeded = (await seed.json()) as WorkspaceSettings<"finances">;
+    await page.goto("/finances");
+    await page.route(`**${path}`, async (route) => {
+      if (route.request().method() === "PATCH")
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: {
+              code: "conflict",
+              message: "These preferences changed. Reload and try again.",
+              requestId: "e2e-finance-selection",
+            },
+          }),
+        });
+      else await route.continue();
+    });
+    await page
+      .getByRole("button", { name: "Spent this month: configure included accounts", exact: true })
+      .click();
+    const dialog = page.getByRole("dialog", { name: "Accounts included in spending" });
+    const choice = dialog.getByLabel(/Everyday checking/);
+    await expect(choice).toBeEnabled();
+    await expect(choice).toBeChecked();
+    await choice.click();
+    await expect(dialog.getByText("Your change: None selected")).toBeVisible();
+    await expect(choice).toBeDisabled();
+    await dialog.getByRole("button", { name: "Refresh latest settings" }).click();
+    await expect(dialog.getByText("Latest: Everyday checking", { exact: true })).toBeVisible();
+    expect(writes).toBe(1);
+    await page.keyboard.press("Escape");
+    await page
+      .getByRole("button", { name: "Review unsaved account selections", exact: true })
+      .click();
+    await expect(dialog.getByText("Your change: None selected")).toBeVisible();
+    await expect(dialog.getByText("Latest: Everyday checking", { exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await openSettingsSection(page, !!info.project.use.isMobile, "Finances");
+    await expect(page.getByText("Your change: None selected")).toBeVisible();
+    await expect(page.getByText("Latest: Everyday checking", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Refresh latest settings" }).click();
+    await expect(page.getByRole("button", { name: "Use latest settings" })).toBeEnabled();
+    expect(writes).toBe(1);
+    await page.screenshot({
+      path: info.outputPath("finance-contextual-recovery.png"),
+      fullPage: true,
+    });
+    await page.getByRole("button", { name: "Use latest settings" }).click();
+    await expect(page.getByText("Your change: None selected")).toHaveCount(0);
+    expect(writes).toBe(1);
+    const latest = (await (await page.request.get(path)).json()) as WorkspaceSettings<"finances">;
+    expect(latest.preferences).toEqual(seeded.preferences);
+  } finally {
+    await page.unroute(`**${path}`);
+    const latest = (await (await page.request.get(path)).json()) as WorkspaceSettings<"finances">;
+    expect(
+      (
+        await page.request.patch(path, {
+          headers: { origin },
+          data: { expectedRevision: latest.revision, preferences: original.preferences },
+        })
+      ).ok(),
+    ).toBeTruthy();
+  }
+});
+
+test("Tasks failed project pin reaches Settings and reapplies only its reviewed revision without losing other pins", async ({
+  page,
+}, info) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  const path = "/v1/workspaces/tasks/settings";
+  const origin = new URL(page.url()).origin;
+  const original = (await (await page.request.get(path)).json()) as WorkspaceSettings<"tasks">;
+  const listsResponse = await page.request.get("/v1/task-lists?limit=100");
+  const projectsResponse = await page.request.get("/v1/task-projects?limit=100");
+  expect(listsResponse.ok()).toBeTruthy();
+  expect(projectsResponse.ok()).toBeTruthy();
+  const lists = (await listsResponse.json()) as { items: TaskList[] };
+  const projects = (await projectsResponse.json()) as { items: TaskProject[] };
+  const work = lists.items.find((list) => list.name === "Work");
+  const project = projects.items.find((item) => item.name === "Autumn program opening");
+  if (!work || !project) throw new Error("Fixture task containers unavailable");
+  const attempts: Array<{ expectedRevision: number; preferences: unknown }> = [];
+  try {
+    const seed = await page.request.patch(path, {
+      headers: { origin },
+      data: {
+        expectedRevision: original.revision,
+        preferences: { pinnedListIds: [work.id], pinnedProjectIds: [] },
+      },
+    });
+    expect(seed.ok()).toBeTruthy();
+    const seeded = (await seed.json()) as WorkspaceSettings<"tasks">;
+    await page.goto("/tasks?view=projects");
+    await page.route(`**${path}`, async (route) => {
+      if (route.request().method() !== "PATCH") {
+        await route.continue();
+        return;
+      }
+      attempts.push(route.request().postDataJSON());
+      if (attempts.length === 1)
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: {
+              code: "conflict",
+              message: "These preferences changed. Reload and try again.",
+              requestId: "e2e-task-pin",
+            },
+          }),
+        });
+      else await route.continue();
+    });
+    const pin = page.getByRole("button", { name: "Pin Autumn program opening", exact: true });
+    await expect(pin).toBeEnabled();
+    await pin.click();
+    await expect(pin).toBeDisabled();
+    await page
+      .getByRole("link", { name: "Review unsaved pin preferences", exact: true })
+      .first()
+      .click();
+    await expect(page).toHaveURL(/settings\?section=tasks/);
+    await expect(
+      page.getByText("Your change: Autumn program opening", { exact: true }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Refresh latest settings" }).click();
+    await expect(page.getByText("Latest: None pinned", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Reapply reviewed change" })).toBeEnabled();
+    expect(attempts).toHaveLength(1);
+    const reviewed = (await (await page.request.get(path)).json()) as WorkspaceSettings<"tasks">;
+    await page.screenshot({
+      path: info.outputPath("tasks-contextual-recovery.png"),
+      fullPage: true,
+    });
+    const replay = page.waitForResponse(
+      (response) => response.request().method() === "PATCH" && response.url().endsWith(path),
+    );
+    await page.getByRole("button", { name: "Reapply reviewed change" }).click();
+    expect((await replay).ok()).toBeTruthy();
+    await expect(
+      page.getByText("Your change: Autumn program opening", { exact: true }),
+    ).toHaveCount(0);
+    expect(attempts).toEqual([
+      { expectedRevision: seeded.revision, preferences: { pinnedProjectIds: [project.id] } },
+      { expectedRevision: reviewed.revision, preferences: { pinnedProjectIds: [project.id] } },
+    ]);
+    const saved = (await (await page.request.get(path)).json()) as WorkspaceSettings<"tasks">;
+    expect(saved.preferences).toEqual({ ...seeded.preferences, pinnedProjectIds: [project.id] });
+  } finally {
+    await page.unroute(`**${path}`);
+    const latest = (await (await page.request.get(path)).json()) as WorkspaceSettings<"tasks">;
+    expect(
+      (
+        await page.request.patch(path, {
+          headers: { origin },
+          data: { expectedRevision: latest.revision, preferences: original.preferences },
+        })
+      ).ok(),
+    ).toBeTruthy();
+  }
+});

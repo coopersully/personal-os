@@ -1028,6 +1028,7 @@ describe.sequential("connector service", () => {
       db: database.db,
       encryptionKey,
       google: cancellableGoogle,
+      icloud: mockICloud(),
       now: () => timestamp,
       shutdown: {
         deadlineMs: () => timestamp.getTime() + 105_000,
@@ -1056,6 +1057,7 @@ describe.sequential("connector service", () => {
       db: database.db,
       encryptionKey,
       google: cancellableGoogle,
+      icloud: mockICloud(),
       now: () => timestamp,
     });
     await expect(retryService.syncStaleAccounts()).resolves.toBeUndefined();
@@ -2577,11 +2579,16 @@ describe.sequential("connector service", () => {
     expect(updateMailThread).not.toHaveBeenCalled();
     const boundedRun = service.dispatchDueMailRuleWork();
     try {
-      await vi.waitFor(() => expect(updateMailThread).toHaveBeenCalledTimes(2));
+      // Database claims can exceed the default one-second poll window under coverage.
+      // Keep both provider calls held until the concurrency assertion has observed them.
+      await vi.waitFor(() => expect(updateMailThread).toHaveBeenCalledTimes(2), {
+        timeout: 10_000,
+      });
     } finally {
       releaseWrites?.();
+      // Even a failed assertion must drain this run before shared fixtures are reused.
+      await boundedRun;
     }
-    await boundedRun;
     expect(updateMailThread).toHaveBeenCalledTimes(6);
     expect(maximumWrites).toBe(2);
     await expect(

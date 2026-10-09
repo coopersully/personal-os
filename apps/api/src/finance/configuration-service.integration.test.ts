@@ -42,9 +42,7 @@ describe.sequential("Finance configuration ownership and read purity", () => {
         finish();
       });
     });
-    EventEmitter.prototype.on.call(database.pool, errorMonitor, (error: unknown) =>
-      connectionErrors.push(error),
-    );
+    database.pool.on("error", (error: unknown) => connectionErrors.push(error));
     await migrateDatabase(database.db, resolve(process.cwd(), "packages/database/migrations"));
   }, 120000);
   afterAll(async () => {
@@ -53,14 +51,19 @@ describe.sequential("Finance configuration ownership and read purity", () => {
     try {
       await database?.close();
       await Promise.all(clientEnds);
-      if (connectionErrors.length) {
-        throw new AggregateError(
-          connectionErrors,
-          "Finance configuration fixture connection failed.",
-        );
-      }
-    } finally {
+    } catch (error) {
+      connectionErrors.push(error);
+    }
+    try {
       await container?.stop();
+    } catch (error) {
+      connectionErrors.push(error);
+    }
+    if (connectionErrors.length) {
+      throw new AggregateError(
+        connectionErrors,
+        "Finance configuration fixture connection failed.",
+      );
     }
   });
   it("returns owner-scoped data without creating setup, preferences, budgets, or execution", async () => {

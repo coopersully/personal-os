@@ -475,8 +475,21 @@ it.each([
   );
 
   await screen.findByText(message);
-  mocks.getNotificationStatus.mockResolvedValue(saved(6));
+  let releaseRead!: (value: NotificationStatus) => void;
+  mocks.getNotificationStatus.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        releaseRead = resolve;
+      }),
+  );
   await userEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  await waitFor(() => expect(releaseRead).toBeTypeOf("function"));
+  expect(screen.getByText(message)).toBeInTheDocument();
+  for (const name of ["Refresh latest settings", "Use latest settings", "Reapply reviewed change"])
+    expect(screen.getByRole("button", { name })).toBeDisabled();
+  expect(update).toHaveBeenCalledTimes(1);
+  await act(async () => releaseRead(saved(6)));
+
   await waitFor(() =>
     expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeEnabled(),
   );

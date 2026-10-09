@@ -23,7 +23,6 @@ import {
   financeIncomeStreams,
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
-  financeMerchantAliases,
   financeMerchants,
   financeProfiles,
   financeProviderItems,
@@ -63,7 +62,6 @@ import type {
   FinanceIncomeStream,
   FinanceLedgerHealth,
   FinanceMaintenanceCandidateItemDraft,
-  FinanceMerchant,
   FinanceOverview,
   FinanceProfile,
   FinanceReceiptReview,
@@ -132,6 +130,9 @@ import { readFinanceConfiguration } from "./finance/configuration-service.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./finance/context.js";
 import { createInboxService } from "./finance/inbox-service.js";
 import { createFinanceLedgerService } from "./finance/ledger-service.js";
+import { normalizedMerchant, titleCaseMerchant } from "./finance/merchant-identity.js";
+import { createFinanceMerchantService } from "./finance/merchant-service.js";
+
 import { supersedeFinanceMaintenanceLineage } from "./finance/maintenance-rebuild.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import { appendFinanceProfile } from "./finance/profile-writer.js";
@@ -168,6 +169,8 @@ import { createFinanceReimbursementService } from "./finance-reimbursement-servi
 import { auditAttentionItemMetadata, serializeAttentionItem } from "./serialization.js";
 import type { Principal, RequestLog } from "./types.js";
 import { createWorkspaceSettingsService } from "./workspace-settings/service.js";
+
+export { normalizedMerchant, titleCaseMerchant } from "./finance/merchant-identity.js";
 
 type MaintenanceMutationAttribution = {
   idempotencyKey: string;
@@ -317,21 +320,6 @@ function approvedProfileFrom(
     : null;
 }
 
-export function titleCaseMerchant(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/\b\w/g, (letter) => letter.toUpperCase())
-    .replace(/\b(Usa|Llc|Inc|Ny|Ca)\b/g, (word) => word.toUpperCase());
-}
-
-export function normalizedMerchant(merchant: string) {
-  return merchant
-    .toLowerCase()
-    .replace(/[*#]\d+\b/g, " ")
-    .replace(/\b\d{4,}\b/g, " ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
 export function formatCurrency(cents: number) {
   return new Intl.NumberFormat("en-US", { currency: "USD", style: "currency" }).format(cents / 100);
 }
@@ -701,18 +689,6 @@ function budget(row: typeof financeBudgets.$inferSelect): FinanceBudget {
     updatedAt: row.updatedAt.toISOString(),
   };
 }
-function merchant(
-  row: typeof financeMerchants.$inferSelect,
-  aliases: string[] = [],
-): FinanceMerchant {
-  return {
-    aliases,
-    behavior: row.behavior,
-    displayName: row.displayName,
-    id: row.id,
-    isUserConfirmed: row.isUserConfirmed,
-  };
-}
 function accountAuditSnapshot(value: FinanceAccount) {
   return {
     id: value.id,
@@ -750,13 +726,6 @@ function maintenanceAuditAttribution(
 ) {
   return context.maintenance ? { maintenance: context.maintenance, source } : {};
 }
-function merchantAuditSnapshot(value: FinanceMerchant) {
-  return {
-    id: value.id,
-    isUserConfirmed: value.isUserConfirmed,
-  };
-}
-
 export function createFinanceService({
   db,
   encryptionKey,
@@ -768,6 +737,7 @@ export function createFinanceService({
   searchReceiptCandidates,
 }: Options) {
   const canonicalAccounts = createFinanceAccountService({ db, now });
+  const merchants = createFinanceMerchantService({ db, now });
   const budgetBuckets = createFinanceBudgetBucketService({ db, now });
   const inbox = createInboxService({ db, now });
   const canonicalLedger = createFinanceLedgerService({ db, now });
@@ -1629,53 +1599,7 @@ export function createFinanceService({
     };
   }
 
-  async function merchantFor(
-    userId: string,
-    rawMerchant: string,
-    source: "agent" | "provider" | "user",
-    executor: FinanceWriteExecutor = db,
-  ) {
-    const normalizedName = normalizedMerchant(rawMerchant);
-    const [alias] = await executor
-      .select({ merchant: financeMerchants })
-      .from(financeMerchantAliases)
-      .innerJoin(financeMerchants, eq(financeMerchantAliases.merchantId, financeMerchants.id))
-      .where(
-        and(
-          eq(financeMerchantAliases.userId, userId),
-          eq(financeMerchantAliases.normalizedName, normalizedName),
-        ),
-      )
-      .limit(1);
-    if (alias) return alias.merchant;
-    const [merchant] = await executor
-      .insert(financeMerchants)
-      .values({
-        displayName: titleCaseMerchant(normalizedName || rawMerchant),
-        normalizedName,
-        userId,
-      })
-      .onConflictDoUpdate({
-        set: { updatedAt: now() },
-        target: [financeMerchants.userId, financeMerchants.normalizedName],
-      })
-      .returning();
-    const resolved = requireDatabaseRecord(merchant, "The merchant could not be saved.");
-    await executor
-      .insert(financeMerchantAliases)
-      .values({
-        confidence: 10_000,
-        merchantId: resolved.id,
-        normalizedName,
-        rawName: rawMerchant,
-        source,
-        userId,
-      })
-      .onConflictDoNothing({
-        target: [financeMerchantAliases.userId, financeMerchantAliases.normalizedName],
-      });
-    return resolved;
-  }
+  const merchantFor = merchants.merchantFor;
 
   async function merchantConfidenceThreshold(
     userId: string,
@@ -2403,15 +2327,6 @@ export function createFinanceService({
       revision: obligation.updatedAt.toISOString(),
       sourceType: "finance_recurring_obligation",
     };
-  }
-  async function ownedMerchant(userId: string, id: string, executor: FinanceReadExecutor = db) {
-    const [row] = await executor
-      .select()
-      .from(financeMerchants)
-      .where(and(eq(financeMerchants.id, id), eq(financeMerchants.userId, userId)))
-      .limit(1);
-    if (!row) throw new AppError("not_found", "The finance merchant was not found.");
-    return row;
   }
   async function enrichTransaction(
     row: typeof financeTransactions.$inferSelect,
@@ -5666,29 +5581,7 @@ export function createFinanceService({
       );
     },
     async listMerchants(userId: string, limit = 50) {
-      const merchants = await db
-        .select()
-        .from(financeMerchants)
-        .where(eq(financeMerchants.userId, userId))
-        .orderBy(desc(financeMerchants.updatedAt), financeMerchants.displayName)
-        .limit(limit);
-      if (merchants.length === 0) return [];
-      const aliases = await db
-        .select()
-        .from(financeMerchantAliases)
-        .where(
-          inArray(
-            financeMerchantAliases.merchantId,
-            merchants.map((item) => item.id),
-          ),
-        )
-        .orderBy(financeMerchantAliases.rawName);
-      return merchants.map((item) =>
-        merchant(
-          item,
-          aliases.filter((alias) => alias.merchantId === item.id).map((alias) => alias.rawName),
-        ),
-      );
+      return merchants.listMerchants(userId, limit);
     },
     async updateMerchant(
       id: string,
@@ -5696,89 +5589,14 @@ export function createFinanceService({
       context: MutationContext,
       executor: FinanceWriteExecutor = db,
     ) {
-      const before = await ownedMerchant(context.principal.userId, id, executor);
-      const updated = requireDatabaseRecord(
-        (
-          await executor
-            .update(financeMerchants)
-            .set({
-              displayName: input.displayName,
-              isUserConfirmed:
-                context.principal.actorType === "user" ? true : before.isUserConfirmed,
-              updatedAt: now(),
-            })
-            .where(eq(financeMerchants.id, before.id))
-            .returning()
-        )[0],
-        "The finance merchant could not be updated.",
-      );
-      await executor.insert(auditEvents).values(
-        auditValues({
-          action: "finance.merchant_renamed",
-          after: {
-            ...merchantAuditSnapshot(merchant(updated)),
-            changedFields: ["displayName"],
-          },
-          before: merchantAuditSnapshot(merchant(before)),
-          entityId: updated.id,
-          entityType: "finance_merchant",
-          ...context,
-        }),
-      );
-      return merchant(updated);
+      return merchants.updateMerchant(id, input, context, executor);
     },
     async mergeMerchants(
       input: MergeFinanceMerchantsInput,
       context: MutationContext,
       executor?: FinanceActionWriteExecutor,
     ) {
-      const merge = async (tx: FinanceActionWriteExecutor) => {
-        const locked = await tx
-          .select()
-          .from(financeMerchants)
-          .where(
-            and(
-              eq(financeMerchants.userId, context.principal.userId),
-              inArray(financeMerchants.id, [input.sourceMerchantId, input.targetMerchantId]),
-            ),
-          )
-          .orderBy(financeMerchants.id)
-          .for("update");
-        const source = locked.find((item) => item.id === input.sourceMerchantId);
-        const target = locked.find((item) => item.id === input.targetMerchantId);
-        if (!source || !target) {
-          throw new AppError("not_found", "One of the finance merchants was not found.");
-        }
-        await tx
-          .update(financeMerchantAliases)
-          .set({ merchantId: target.id, updatedAt: now() })
-          .where(eq(financeMerchantAliases.merchantId, source.id));
-        await tx
-          .update(financeTransactions)
-          .set({ merchantId: target.id, updatedAt: now() })
-          .where(eq(financeTransactions.merchantId, source.id));
-        await tx
-          .update(financeClassificationDecisions)
-          .set({ merchantId: target.id })
-          .where(eq(financeClassificationDecisions.merchantId, source.id));
-        await tx.delete(financeMerchants).where(eq(financeMerchants.id, source.id));
-        await tx.insert(auditEvents).values(
-          auditValues({
-            action: "finance.merchants_merged",
-            after: {
-              rationaleProvided: true,
-              sourceMerchantId: source.id,
-              targetMerchantId: target.id,
-            },
-            before: merchantAuditSnapshot(merchant(source)),
-            entityId: target.id,
-            entityType: "finance_merchant",
-            ...context,
-          }),
-        );
-        return merchant(target);
-      };
-      return executor ? merge(executor) : db.transaction(merge);
+      return merchants.mergeMerchants(input, context, executor);
     },
     async getBudgetStatus(userId: string, month = now().toISOString().slice(0, 7)) {
       const [budgets, allocations, transactions] = await Promise.all([

@@ -16,7 +16,8 @@
   placement: `/reviews` falls back to Account, and the old queue component is retained but not
   routed. See the [Reviews contract](../design/pages/reviews.md) for exact links and recovery.
 - [Finance](../design/pages/finances.md) includes editable configuration, partial-read recovery,
-  reliable blur saves, compact transaction cards, responsive details, category/context editing,
+  scalar saves on blur or selection, complete collection-row saves on leaving the row, compact
+  transaction cards, responsive details, category/context editing,
   and saved display/group preferences. Configuration remains separate from explicit budget
   preparation and record-checking operations; incomplete evidence is not silently filled in.
 - [Mail](../design/pages/mail.md) includes authenticated attachment preview/download with bounded

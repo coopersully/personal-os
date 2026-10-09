@@ -127,7 +127,13 @@ describe("Pinterest wallpaper service", () => {
       }),
       update,
     } as unknown as Database;
-    const service = createPinterestService({ db, now: () => now });
+    const service = createPinterestService({
+      db,
+      now: () => now,
+      fetch: vi
+        .fn()
+        .mockImplementation(async () => boardResponse('"https://i.pinimg.com/736x/valid.jpg"')),
+    });
     const input = {
       backgroundColor: "#123456",
       backgroundMode: "custom" as const,
@@ -163,11 +169,27 @@ describe("Pinterest wallpaper service", () => {
     );
   });
 
+  it("rejects unresolved submitted boards before any database write", async () => {
+    const db = databaseWithBoard("https://www.pinterest.com/example/board/");
+    const update = vi.fn();
+    const insert = vi.fn();
+    Object.assign(db, { update, insert });
+    const service = createPinterestService({
+      db,
+      fetch: vi.fn().mockResolvedValue(new Response("missing board")),
+    });
+    await expect(
+      service.updateSettings("user-1", { boardUrl: "https://www.pinterest.com/example/missing/" }),
+    ).rejects.toThrow("could not resolve");
+    expect(update).not.toHaveBeenCalled();
+    expect(insert).not.toHaveBeenCalled();
+  });
+
   it("sanitizes a public board URL, upgrades image size, and repeats the available Pins", async () => {
     const fetch = vi
       .fn()
       .mockResolvedValue(
-        new Response(
+        boardResponse(
           ['"https://i.pinimg.com/236x/first.jpg"', '"https://i.pinimg.com/474x/second.png"'].join(
             "",
           ),
@@ -199,11 +221,12 @@ describe("Pinterest wallpaper service", () => {
   it("rejects an empty public board response", async () => {
     const service = createPinterestService({
       db: databaseWithBoard("https://www.pinterest.com/example/mindset/"),
-      fetch: vi.fn().mockResolvedValue(new Response("No image data")),
+      fetch: vi.fn().mockResolvedValue(boardResponse("No image data")),
     });
 
     await expect(service.pins("user-1", 4)).rejects.toMatchObject({
-      message: "Pinterest did not expose any images from that public board.",
+      message:
+        "Pinterest could not resolve that public board and its images. Check that the board exists and is public.",
     });
   });
 
@@ -226,7 +249,7 @@ describe("Pinterest wallpaper service", () => {
     await expect(
       createPinterestService({
         db: databaseWithBoard("https://www.pinterest.com/example/mindset/"),
-        fetch: vi.fn().mockResolvedValue(new Response("Unavailable", { status: 503 })),
+        fetch: vi.fn().mockResolvedValue(boardResponse("Unavailable", { status: 503 })),
       }).pins("user-1", 4),
     ).rejects.toMatchObject({ message: "Pinterest could not load that public board right now." });
   });
@@ -236,7 +259,7 @@ describe("Pinterest wallpaper service", () => {
       db: databaseWithBoard("https://pinterest.com/example/mindset/"),
       fetch: vi
         .fn()
-        .mockResolvedValue(new Response('"https://i.pinimg.com/originals/original.webp"')),
+        .mockResolvedValue(boardResponse('"https://i.pinimg.com/originals/original.webp"')),
     });
 
     await expect(service.pins("user-1", 1)).resolves.toEqual([
@@ -311,7 +334,7 @@ describe("Pinterest wallpaper service", () => {
     const page = Array.from({ length: 20 }, (_, i) => `"https://i.pinimg.com/236x/${i}.jpg"`).join(
       " ",
     );
-    const fetch = vi.fn().mockImplementation(async () => new Response(page));
+    const fetch = vi.fn().mockImplementation(async () => boardResponse(page));
     const db = databaseWithBoard("https://www.pinterest.com/example/board/");
     const afterMidnight = createPinterestService({
       db,
@@ -328,3 +351,23 @@ describe("Pinterest wallpaper service", () => {
     expect(local).not.toEqual(await afterMidnight.pins("u", 12));
   });
 });
+
+function boardResponse(body?: BodyInit | null, init?: ResponseInit): Response {
+  if (typeof body !== "string" || !body.includes("https://i.pinimg.com/"))
+    return new Response(body, init);
+  const pins = [...body.matchAll(/https:\/\/i\.pinimg\.com\/[^"\s]+/g)].map((match) => ({
+    type: "pin",
+    images: { "736x": { url: match[0] } },
+  }));
+  const resources = {
+    BoardResource: Object.fromEntries(
+      ["board", "mindset"].map((slug) => [
+        slug,
+        { data: { id: "test-board", url: `/example/${slug}/` } },
+      ]),
+    ),
+    BoardFeedResource: { '[ ["board_id", "test-board"] ]': { data: pins } },
+  };
+  const page = `<script id="__PWS_INITIAL_PROPS__" type="application/json">${JSON.stringify({ initialReduxState: { resources } })}</script>`;
+  return new Response(body.length === 4 * 1024 * 1024 ? page.padEnd(body.length, " ") : page, init);
+}

@@ -36,58 +36,37 @@ enum WallpaperLayout {
     guard width > 0, height > 0 else {
       throw NativeError.message("Wallpaper padding leaves no usable frame")
     }
-    if options.layout == "stack" {
-      let positions: [(Double, Double)] = [
-        (0.03, 0.10), (0.39, 0.06), (0.17, 0.34), (0.51, 0.40), (0, 0.53), (0.33, 0.61),
-      ]
-      return ratios.prefix(6).enumerated().map { index, ratio in
-        let cardWidth = width * (0.32 + options.tileSize * 0.0048)
-        // Stack cards preserve their source ratio, matching the existing preview.
-        // The mosaic fit setting applies to the grid layout.
-        let drawWidth = cardWidth
-        let drawHeight = drawWidth * ratio
-        return WallpaperTile(
-          index: index,
-          frame: CGRect(
-            x: left + width * positions[index].0, y: top + height * positions[index].1,
-            width: drawWidth, height: drawHeight),
-          angle: (index % 2 == 0 ? -1 : 1) * options.rotationDegrees, cover: false)
-      }
-    }
-    let count = min(ratios.count, max(2, min(5, Int((7 - options.tileSize / 18).rounded()))))
-    let columns = (0..<count).map { column in ratios.indices.filter { $0 % count == column } }
-    let sums = columns.map { $0.reduce(0.0) { $0 + ratios[$1] } }
-    let availableWidth = width - Double(count - 1) * gap
-    guard availableWidth > 0 else {
-      throw NativeError.message("Wallpaper spacing leaves no usable columns")
-    }
-    let sharedHeight = min(
-      columns.map { height - Double($0.count - 1) * gap }.min() ?? height,
-      availableWidth / sums.reduce(0.0) { $0 + 1 / $1 })
-    guard sharedHeight > 0 else {
-      throw NativeError.message("Wallpaper spacing leaves no usable rows")
-    }
+    // Size controls density, never the distance from the center. Repeat actual pins
+    // to cover every column; clipping at the frame is intentional in preserve mode.
+    let targetWidth = (160 + (options.tileSize - 32) * 10) * scale
+    let count = max(1, Int(ceil((width + gap) / (targetWidth + gap))))
+    let w = (width - Double(count - 1) * gap) / Double(count)
+    guard w > 0 else { throw NativeError.message("Wallpaper spacing leaves no usable columns") }
     let fill = options.mosaicFit == "fill"
-    let widths = sums.map { fill ? availableWidth / Double(count) : sharedHeight / $0 }
-    let gridWidth = widths.reduce(0, +) + Double(count - 1) * gap
-    var x = left + (fill ? 0 : (width - gridWidth) / 2)
+    let rows = max(1, Int((height / (w + gap)).rounded()))
+    let fillHeight = (height - Double(rows - 1) * gap) / Double(rows)
     var tiles: [WallpaperTile] = []
-    for (columnIndex, indices) in columns.enumerated() {
-      let w = widths[columnIndex]
-      let columnHeight = w * sums[columnIndex] + Double(indices.count - 1) * gap
-      var y = top + (fill ? 0 : (height - columnHeight) / 2)
-      for (row, index) in indices.enumerated() {
-        let h =
-          fill
-          ? (height - Double(indices.count - 1) * gap) / Double(indices.count) : w * ratios[index]
-        tiles.append(
-          WallpaperTile(
-            index: index, frame: CGRect(x: x, y: y, width: w, height: h),
-            angle: (row + columnIndex) % 2 == 0
-              ? -options.rotationDegrees * 0.15 : options.rotationDegrees * 0.15, cover: fill))
+    var sequence = 0
+    for column in 0..<count {
+      var y = top
+      var row = 0
+      while y < top + height - 0.001 {
+        let index = sequence % ratios.count
+        let h = fill ? fillHeight : max(scale, w * ratios[index])
+        let angle = Double((row + column) % 2 == 0 ? -1 : 1) * options.rotationDegrees
+        // Expand stacked photos around their cell to create overlap. Grid cells
+        // retain the explicit gap. Both layouts cover the complete padded frame.
+        let overlap = options.layout == "stack" ? w * 0.06 : 0
+        tiles.append(WallpaperTile(
+          index: index,
+          frame: CGRect(x: left + Double(column) * (w + gap) - overlap,
+                        y: y - overlap, width: w + overlap * 2, height: h * (1 + overlap * 2 / w)),
+          angle: angle, cover: fill))
         y += h + gap
+        row += 1
+        sequence += 1
+        guard tiles.count <= 4096 else { throw NativeError.message("Too many wallpaper tiles") }
       }
-      x += w + gap
     }
     return tiles
   }
@@ -194,6 +173,11 @@ enum WallpaperController {
     NSGraphicsContext.current = context
     backdrop(options, images: images).setFill()
     NSBezierPath(rect: CGRect(origin: .zero, size: size)).fill()
+    // Keep edge padding consistent even with rotated or overlapping photos.
+    NSBezierPath(rect: CGRect(x: options.paddingStart * scale,
+      y: options.paddingBottom * scale,
+      width: size.width - (options.paddingStart + options.paddingEnd) * scale,
+      height: size.height - (options.paddingTop + options.paddingBottom) * scale)).addClip()
     for tile in tiles {
       let cgImage = images[tile.index]
       let source = CGSize(width: cgImage.width, height: cgImage.height)
@@ -225,7 +209,7 @@ enum WallpaperController {
   }
   static func prepare(_ object: [String: Any]) throws -> [String: Any] {
     guard let raw = object["request"], let paths = object["imagePaths"] as? [String],
-      (4...20).contains(paths.count), let directory = object["outputDirectory"] as? String,
+      (1...20).contains(paths.count), let directory = object["outputDirectory"] as? String,
       !NSScreen.screens.isEmpty
     else { throw NativeError.message("Missing wallpaper images or displays") }
     let options = try JSONDecoder().decode(
@@ -243,6 +227,17 @@ enum WallpaperController {
     let images = paths.compactMap { unique[$0] }
     guard images.count == paths.count else {
       throw NativeError.message("Not enough usable Pinterest images")
+    }
+    if object["preview"] as? Bool == true {
+      guard let screen = NSScreen.screens.first, let id = screenID(screen),
+        let displayID = UInt32(id), let mode = CGDisplayCopyDisplayMode(displayID)
+      else { throw NativeError.message("Display dimensions unavailable") }
+      let reduction = min(1, 1200 / Double(mode.pixelWidth))
+      let size = CGSize(width: Double(mode.pixelWidth) * reduction,
+                        height: Double(mode.pixelHeight) * reduction)
+      let png = try render(options, images: images, size: size,
+                           scale: screen.backingScaleFactor * reduction)
+      return ["image": "data:image/png;base64," + png.base64EncodedString()]
     }
     let output = URL(fileURLWithPath: directory, isDirectory: true)
     // Prepare every display before changing any current desktop image.
@@ -290,7 +285,7 @@ enum WallpaperController {
     var applied = 0
     for (screen, target) in zip(screens, targets) {
       do {
-        try NSWorkspace.shared.setDesktopImageURL(target, for: screen, options: [:])
+        try NSWorkspace.shared.setDesktopImageURL(target, for: screen, options: [.imageScaling: NSImageScaling.scaleProportionallyUpOrDown.rawValue, .allowClipping: true])
         applied += 1
         if let id = screenID(screen) { activePaths[id] = target.path }
       } catch { failures.append("\(screen.localizedName): \(error.localizedDescription)") }

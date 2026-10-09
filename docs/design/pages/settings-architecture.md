@@ -12,14 +12,14 @@ history distinct. Preserve a single canonical editor for each value and all exis
 | Account | Profile, Connections, Security & access, Activity log |
 | Personal | Goals, Motives, Rituals |
 | Workspaces | Calendar, Tasks, Mail, Finances |
-| App | Appearance, Notifications (where supported), Texting, Desktop app, Desktop pet (native) |
+| App | Appearance, Wallpaper (native), Notifications (where supported), Texting, Desktop app, Desktop pet (native) |
 
 Connections owns external-account management and links to connected-assistant credentials.
 Security & access owns password/session controls, approval policy and the cross-workspace access
 overview. Invitations are permission-gated within that area. Assistant-specific permission editing
 remains at its existing canonical connection editor. Workspace pages link to scoped access details.
 Setup is available from Profile and contextual workspace recovery, not a permanent sidebar item.
-Wallpaper belongs beneath Appearance. Desktop pet is a primary App destination, alongside Desktop app; it must remain directly reachable in both sidebar and narrow-layout navigation. Secondary pages remain
+Wallpaper is a primary App sidebar page, with a persistent preview beside its controls. Desktop pet is a primary App destination, alongside Desktop app; it must remain directly reachable in both sidebar and narrow-layout navigation. Secondary pages remain
 searchable, show their parent, and select their parent's sidebar row. Search indexes fields as
 well as pages, including secondary destinations; platform and invitation permissions still apply.
 

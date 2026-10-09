@@ -11,7 +11,7 @@ describe("Pinterest public board connector", () => {
     const fetch = vi
       .fn()
       .mockResolvedValue(
-        new Response(
+        boardResponse(
           [
             image,
             image,
@@ -37,7 +37,7 @@ describe("Pinterest public board connector", () => {
       vi
         .fn()
         .mockResolvedValue(
-          new Response(
+          boardResponse(
             `"https://i.pinimg.com/236x/${"a".repeat(2100)}.jpg" ` +
               Array.from({ length: 110 }, (_, i) => `"https://i.pinimg.com/236x/${i}.png"`).join(
                 " ",
@@ -46,6 +46,17 @@ describe("Pinterest public board connector", () => {
         ),
     );
     expect(bounded).toHaveLength(100);
+  });
+
+  it("rejects discovery images and feeds belonging to another board", async () => {
+    await expect(
+      fetchPinterestBoardPins(board, vi.fn().mockResolvedValue(new Response(image))),
+    ).rejects.toMatchObject({ code: "not_found" });
+    const response = boardResponse(image);
+    const page = (await response.text()).replaceAll("/example/board/", "/example/different/");
+    await expect(
+      fetchPinterestBoardPins(board, vi.fn().mockResolvedValue(new Response(page))),
+    ).rejects.toMatchObject({ code: "not_found" });
   });
 
   it("rejects untrusted URLs without making a network request", async () => {
@@ -66,8 +77,8 @@ describe("Pinterest public board connector", () => {
 
   it("rejects redirects, provider failures, network failures and empty bodies", async () => {
     for (const response of [
-      new Response(null, { status: 302, headers: { location: "http://127.0.0.1/private" } }),
-      new Response("Unavailable", { status: 503 }),
+      boardResponse(null, { status: 302, headers: { location: "http://127.0.0.1/private" } }),
+      boardResponse("Unavailable", { status: 503 }),
     ]) {
       await expect(
         fetchPinterestBoardPins(board, vi.fn().mockResolvedValue(response)),
@@ -76,7 +87,7 @@ describe("Pinterest public board connector", () => {
     await expect(
       fetchPinterestBoardPins(board, vi.fn().mockRejectedValue(new Error("network"))),
     ).rejects.toMatchObject({ code: "service_unavailable" });
-    for (const response of [new Response(null), new Response("No image data")]) {
+    for (const response of [boardResponse(null), boardResponse("No image data")]) {
       await expect(
         fetchPinterestBoardPins(board, vi.fn().mockResolvedValue(response)),
       ).rejects.toMatchObject({ code: "not_found" });
@@ -89,7 +100,7 @@ describe("Pinterest public board connector", () => {
         board,
         vi
           .fn()
-          .mockResolvedValue(new Response(image, { headers: { "content-length": "9999999" } })),
+          .mockResolvedValue(boardResponse(image, { headers: { "content-length": "9999999" } })),
       ),
     ).rejects.toThrow("4 MiB");
     const cancel = vi.fn();
@@ -101,10 +112,10 @@ describe("Pinterest public board connector", () => {
       cancel,
     });
     await expect(
-      fetchPinterestBoardPins(board, vi.fn().mockResolvedValue(new Response(stream))),
+      fetchPinterestBoardPins(board, vi.fn().mockResolvedValue(boardResponse(stream))),
     ).rejects.toThrow("4 MiB");
     expect(cancel).toHaveBeenCalled();
-    const exact = new Response(image + " ".repeat(4 * 1024 * 1024 - image.length));
+    const exact = boardResponse(image + " ".repeat(4 * 1024 * 1024 - image.length));
     await expect(
       fetchPinterestBoardPins(board, vi.fn().mockResolvedValue(exact)),
     ).resolves.toHaveLength(1);
@@ -120,10 +131,33 @@ describe("Pinterest public board connector", () => {
     expect(fetch.mock.calls[0]?.[1].signal.aborted).toBe(true);
     const cancel = vi.fn();
     const stream = new ReadableStream<Uint8Array>({ cancel });
-    const stalled = fetchPinterestBoardPins(board, vi.fn().mockResolvedValue(new Response(stream)));
+    const stalled = fetchPinterestBoardPins(
+      board,
+      vi.fn().mockResolvedValue(boardResponse(stream)),
+    );
     const stalledRejection = expect(stalled).rejects.toMatchObject({ code: "service_unavailable" });
     await vi.advanceTimersByTimeAsync(10_000);
     await stalledRejection;
     expect(cancel).toHaveBeenCalled();
   });
 });
+
+function boardResponse(body?: BodyInit | null, init?: ResponseInit): Response {
+  if (typeof body !== "string" || !body.includes("https://i.pinimg.com/"))
+    return new Response(body, init);
+  const pins = [...body.matchAll(/https:\/\/i\.pinimg\.com\/[^"\s]+/g)].map((match) => ({
+    type: "pin",
+    images: { "736x": { url: match[0] } },
+  }));
+  const resources = {
+    BoardResource: Object.fromEntries(
+      ["board", "mindset"].map((slug) => [
+        slug,
+        { data: { id: "test-board", url: `/example/${slug}/` } },
+      ]),
+    ),
+    BoardFeedResource: { '[ ["board_id", "test-board"] ]': { data: pins } },
+  };
+  const page = `<script id="__PWS_INITIAL_PROPS__" type="application/json">${JSON.stringify({ initialReduxState: { resources } })}</script>`;
+  return new Response(body.length === 4 * 1024 * 1024 ? page.padEnd(body.length, " ") : page, init);
+}

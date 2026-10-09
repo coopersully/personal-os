@@ -50,6 +50,9 @@ pub struct DesktopSettings {
     pub launch_at_login: bool,
     pub pet_enabled: bool,
     pub pet_color: String,
+    pub pet_scale: f64,
+    pub pet_sleep_enabled: bool,
+    pub pet_sleep_after_seconds: f64,
     pub pet_workspaces: Vec<String>,
     pub widget_workspaces: Vec<String>,
     pub notifications: NotificationSettings,
@@ -61,6 +64,9 @@ impl Default for DesktopSettings {
             launch_at_login: !cfg!(debug_assertions),
             pet_enabled: false,
             pet_color: "#C7D23C".into(),
+            pet_scale: 1.0,
+            pet_sleep_enabled: true,
+            pet_sleep_after_seconds: 3.0,
             pet_workspaces: vec!["tasks".into(), "reminders".into(), "calendar".into()],
             widget_workspaces: vec!["tasks".into(), "reminders".into(), "calendar".into()],
             notifications: NotificationSettings::default(),
@@ -70,6 +76,14 @@ impl Default for DesktopSettings {
 impl DesktopSettings {
     pub fn validate(&mut self) -> Result<(), String> {
         self.server_url = canonical_server(&self.server_url)?;
+        if !self.pet_scale.is_finite() || !(0.5..=2.0).contains(&self.pet_scale) {
+            return Err("Choose a pet scale between 50% and 200%.".into());
+        }
+        if !self.pet_sleep_after_seconds.is_finite()
+            || !(1.0..=300.0).contains(&self.pet_sleep_after_seconds)
+        {
+            return Err("Choose an idle delay between 1 and 300 seconds.".into());
+        }
         if !crate::is_hex_color(&self.pet_color) {
             return Err("Choose a six-digit pet color.".into());
         }
@@ -271,12 +285,29 @@ fn server_switch_cleanup(
 #[tauri::command]
 pub async fn desktop_save_settings(
     app: tauri::AppHandle,
-    mut settings: DesktopSettings,
+    settings: DesktopSettings,
 ) -> Result<serde_json::Value, String> {
-    settings.validate()?;
+    save_settings(app, Some(settings)).await
+}
+pub async fn disable_pet(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    save_settings(app, None).await
+}
+async fn save_settings(
+    app: tauri::AppHandle,
+    replacement: Option<DesktopSettings>,
+) -> Result<serde_json::Value, String> {
     // Match mutation lock order: ritual fence, then settings/account state.
     let ritual_runtime = app.state::<crate::ritual::RitualRuntime>();
     let _ritual_guard = ritual_runtime.lock.lock().await;
+    let mut settings = match replacement {
+        Some(settings) => settings,
+        None => {
+            let mut settings = app.state::<DesktopState>().settings.lock().await.clone();
+            settings.pet_enabled = false;
+            settings
+        }
+    };
+    settings.validate()?;
     let switching =
         app.state::<DesktopState>().settings.lock().await.server_url != settings.server_url;
     if switching {
@@ -391,6 +422,7 @@ pub async fn desktop_native_action(
 ) -> Result<serde_json::Value, String> {
     if ![
         "request_notification_permission",
+        "request_accessibility_permission",
         "test_notification",
         "reset_pet_position",
         "quick_access",
@@ -406,6 +438,36 @@ pub async fn desktop_native_action(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sleep_preferences_default_and_validate() {
+        let mut settings: DesktopSettings = serde_json::from_str("{}").unwrap();
+        assert!(settings.pet_sleep_enabled);
+        assert_eq!(settings.pet_sleep_after_seconds, 3.0);
+        for delay in [0.0, -1.0, 301.0, f64::NAN, f64::INFINITY] {
+            settings.pet_sleep_after_seconds = delay;
+            assert!(settings.validate().is_err());
+        }
+        settings.pet_sleep_after_seconds = 60.0;
+        settings.pet_sleep_enabled = false;
+        settings.validate().unwrap();
+        let restored: DesktopSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert!(!restored.pet_sleep_enabled);
+        assert_eq!(restored.pet_sleep_after_seconds, 60.0);
+    }
+    #[test]
+    fn pet_scale_defaults_and_rejects_unsafe_sizes() {
+        let mut settings: DesktopSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.pet_scale, 1.0);
+        for scale in [0.5, 1.0, 2.0] {
+            settings.pet_scale = scale;
+            assert!(settings.validate().is_ok());
+        }
+        for scale in [0.49, 2.01, f64::NAN, f64::INFINITY] {
+            settings.pet_scale = scale;
+            assert!(settings.validate().is_err());
+        }
+    }
     #[test]
     fn server_origins_are_canonical_and_transport_safe() {
         assert_eq!(
@@ -509,4 +571,17 @@ pub async fn desktop_take_action(app: tauri::AppHandle) -> Option<serde_json::Va
         .lock()
         .await
         .take()
+}
+
+#[tauri::command]
+pub async fn desktop_preview_pet_scale(app: tauri::AppHandle, scale: f64) -> Result<(), String> {
+    if !scale.is_finite() || !(0.5..=2.0).contains(&scale) {
+        return Err("Invalid pet scale.".into());
+    }
+    crate::native::call(
+        &app,
+        serde_json::json!({"op":"preview_pet_scale","scale":scale}),
+    )
+    .await?;
+    Ok(())
 }

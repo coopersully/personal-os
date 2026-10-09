@@ -27,6 +27,8 @@ for (const width of [390, 1100, 1440]) {
           calendarIds: [],
         },
       };
+      const savedSettings = localStorage.getItem("desktop-test-settings");
+      if (savedSettings) Object.assign(settings, JSON.parse(savedSettings));
       Object.assign(window, {
         isTauri: true,
         __TAURI_EVENT_PLUGIN_INTERNALS__: { unregisterListener: () => {} },
@@ -35,8 +37,19 @@ for (const width of [390, 1100, 1440]) {
           transformCallback: () => 1,
           invoke: async (
             command: string,
-            args: { request?: { path: string; method: string; body: string | null } },
+            args: {
+              settings?: typeof settings;
+              request?: { path: string; method: string; body: string | null };
+            },
           ) => {
+            if (command === "desktop_save_settings" && args.settings) {
+              Object.assign(settings, args.settings);
+              localStorage.setItem("desktop-test-settings", JSON.stringify(settings));
+              return {
+                settings,
+                native: { loginStatus: "notRegistered", notificationPermission: "denied" },
+              };
+            }
             if (command === "desktop_update_status")
               return { phase: "unavailable", startupBlocking: false, installedVersion: "0.1.0" };
             if (command === "desktop_settings")
@@ -109,6 +122,87 @@ for (const width of [390, 1100, 1440]) {
       }
       await expectContained();
       await page.screenshot({ path: `/tmp/nohmi-${section}-${width}.png`, fullPage: true });
+    }
+    await page.goto("/settings?section=appearance");
+    const themeCards = page.locator(".appearance-picker .choice-card");
+    for (const card of await themeCards.all()) {
+      const label = await card.locator(".choice-card__label").boundingBox();
+      const preview = await card.locator(".choice-card__preview").boundingBox();
+      expect(label!.y + label!.height).toBeLessThanOrEqual(preview!.y);
+    }
+    await page.goto("/settings?section=wallpaper");
+    await expect(page.getByRole("heading", { name: "Wallpaper", exact: true })).toBeVisible();
+    for (const title of ["Layout", "Appearance", "Framing"]) {
+      await expect(
+        page
+          .locator('[data-slot="card"]')
+          .filter({ has: page.getByRole("heading", { name: title, exact: true }) }),
+      ).toHaveCount(1);
+    }
+    if (width >= 1100) {
+      const settingsBounds = await page.locator(".wallpaper-editor__settings").boundingBox();
+      const previewBounds = await page.locator(".wallpaper-editor__preview").boundingBox();
+      expect(previewBounds!.x).toBeGreaterThanOrEqual(settingsBounds!.x + settingsBounds!.width);
+      expect(Math.abs(previewBounds!.y - settingsBounds!.y)).toBeLessThan(2);
+    }
+    const preview = page.getByRole("region", { name: "Wallpaper preview" });
+    const save = page.getByRole("button", { name: "Save board" });
+    await expect(page.locator('[data-slot="input-group"]').filter({ has: save })).toHaveCount(1);
+    for (const slider of await page.getByRole("slider").all()) {
+      await slider.focus();
+      await slider.press("End");
+      await expectContained();
+      await slider.press("Home");
+      await expectContained();
+    }
+    await page.getByText(/^Link edge padding/).scrollIntoViewIfNeeded();
+    const bounds = await preview.boundingBox();
+    expect(bounds!.y).toBeGreaterThanOrEqual(0);
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(844);
+    const tracks = await page
+      .locator('[data-slot="slider-track"]')
+      .evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().height));
+    expect(tracks.every((height) => height > 0)).toBe(true);
+    await page.screenshot({ path: `/tmp/nohmi-wallpaper-page-${width}.png` });
+    const refresh = page.getByRole("button", { name: "Refresh wallpaper" });
+    await expect(
+      page.locator(".wallpaper-editor__preview").getByRole("button", { name: "Refresh wallpaper" }),
+    ).toBeVisible();
+    // This fixture board is deliberately fictional; failures must not permit applying it.
+    await expect(refresh).toBeDisabled();
+    await page.goto("/settings?section=notifications");
+    await expect(page.getByRole("switch", { name: "Enable notifications" })).toBeVisible();
+    const fromBounds = await page.getByLabel("From", { exact: true }).boundingBox();
+    const untilBounds = await page.getByLabel("Until", { exact: true }).boundingBox();
+    if (width >= 640) {
+      expect(Math.abs(fromBounds!.y - untilBounds!.y)).toBeLessThan(2);
+      expect(untilBounds!.x).toBeGreaterThan(fromBounds!.x + fromBounds!.width);
+    } else {
+      expect(untilBounds!.y).toBeGreaterThan(fromBounds!.y + fromBounds!.height);
+    }
+    await expect(page.getByRole("switch", { name: "Tasks due" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Save preferences" })).toHaveCount(0);
+    await page.getByRole("switch", { name: "Enable notifications" }).click();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            JSON.parse(localStorage.getItem("desktop-test-settings") ?? "{}").notifications
+              ?.enabled,
+        ),
+      )
+      .toBe(true);
+    for (const workspace of ["Calendar", "Tasks", "Mail", "Finances"]) {
+      await page.goto("/settings?section=notifications");
+      await expect(page.getByRole("switch", { name: "Enable notifications" })).toBeChecked();
+      await page.getByRole("link", { name: `${workspace} Notification settings` }).click();
+      await expect(page).toHaveURL(new RegExp(`section=${workspace.toLowerCase()}&field=`));
+      const heading = page.getByRole("heading", { name: "Notifications", exact: true });
+      await expect(heading).toBeFocused();
+      const box = await heading.boundingBox();
+      expect(box!.y).toBeGreaterThanOrEqual(0);
+      expect(box!.y).toBeLessThan(844);
+      await expect(page.getByRole("button", { name: "Save preferences" })).toHaveCount(0);
     }
     async function expectContained() {
       const overflow = await page.evaluate(() => {

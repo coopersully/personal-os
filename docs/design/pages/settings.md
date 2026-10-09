@@ -1,5 +1,15 @@
 # Settings
 
+
+**Required: Sonner for all settings errors and discrete action feedback.** Pending, success,
+and failure messages for notification tests, connection tests, refreshes, permissions, and
+native actions must never appear as inline paragraphs, status rows, Alerts, banners, or cards.
+Use one loading toast updated to the confirmed outcome; put recovery guidance in its description.
+Do not replay cached results on page load. Background autosave success stays silent. Actual
+permission/configuration state and field correction/retry controls may remain inline, but never
+replace a Sonner error. Tests must assert Sonner and no inline action-result message.
+See [the canonical feedback rule](../feedback.md).
+
 The immediate job is to inspect or change a preference, account, or connection.
 Use the shared [feedback rubric](../feedback.md) for every operation.
 
@@ -9,6 +19,30 @@ Use the shared [feedback rubric](../feedback.md) for every operation.
   verification and unavailable platform capabilities remain contextual Alerts.
 - Keep unsaved drafts and one-time invitation/token values visible through failed
   refreshes. Never replace cached settings with an empty-success state.
+- Desktop wallpaper is a primary sidebar page. Keep its live preview sticky beside scrolling
+  controls at desktop widths, including a 1100px app window. On phone-sized surfaces only,
+  place the preview above them. Board, Layout, Appearance, and Framing are separate cards.
+  Layout and image adjustments are inline; reserve
+  room for slider thumbs at both limits and show the complete track. Save the board through
+  a tooltip-labelled checkmark action at the URL input’s trailing edge. Refresh remains a
+  tooltip-labelled icon action on the Preview card, with confirmation before replacing the desktop wallpaper.
+  Preview uses the native renderer at the primary display’s aspect ratio and proportional scale;
+  it must never substitute illustrative images or guessed backdrop colors. Grid and Stack
+  repeat resolved board images across the padded frame. Size controls density, rotation uses
+  the displayed angle, and spacing/corners/padding use display points (scaled on Retina).
+  Preserve keeps source proportions and clips at the outer frame; Fill crops each tile.
+  Invalid/unresolved boards fail before saving. Failed downloads or decoding disable Refresh
+  and preserve the current desktop. Apply uses the same ordered images shown in the preview.
+- Appearance option labels sit above their previews.
+- Preference toggles, selections, and committed numeric/color changes save automatically;
+  do not add a page-wide Save preferences button. Serialize desktop writes, preserve unrelated
+  preferences, and roll back failures with actionable feedback. Explicit board URL submission
+  and server connection changes remain named actions.
+- Notifications owns only global permission, enablement, sound, privacy, and quiet hours.
+  Workspace links navigate and focus each workspace’s Notifications card. Tasks owns due
+  tasks and reminders, Calendar owns event timing and calendar selection, and Mail owns
+  new-mail alerts and account selection. Finances shows its unsupported desktop-alert state
+  until that capability exists.
 - Wallpaper board URLs are drafts until confirmed saved; failure preserves the
   typed URL, field correction, and Save board action. Other direct preferences
   roll back to their saved value when an update fails.
@@ -175,3 +209,9 @@ belongs to the rail; the account summary does not add a Today at a Glance launch
 
 [Settings information architecture](settings-architecture.md) supersedes earlier sidebar grouping
 and the placement of Reviews in Settings. Use its parent/secondary-page and workspace layout rules.
+
+Settings failures are announced through Sonner, including autosave, validation responses,
+queries, native actions, updates, and routine recovery. Keep inline field guidance and retry
+controls where useful, preserve edits, and do not automatically retry uncertain writes.
+Repeated polling of the same unresolved failure must not repeatedly announce it; recovery
+clears its toast. Quiet-hour From and Until controls share a row on larger screens.

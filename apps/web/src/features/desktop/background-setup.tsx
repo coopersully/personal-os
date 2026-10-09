@@ -11,6 +11,7 @@ import {
   CollapsibleTrigger,
 } from "../../components/ui/collapsible.js";
 import { ItemGroup } from "../../components/ui/item.js";
+import { useSettingsError } from "../../lib/settings-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import {
   type DesktopStatus,
@@ -47,8 +48,11 @@ export function BackgroundSetup({
     refetchInterval: 10000,
   });
   const rituals = useQuery({ queryKey: ["rituals"], queryFn: api.listRituals });
+  useSettingsError(local.error, "Couldn’t check local routine status.");
+  useSettingsError(rituals.error, "Couldn’t load routines.");
   const startup = useFeedbackMutation({
     mutationKey: ["desktop-startup"],
+    scope: { id: "desktop-preferences" },
     feedback: { action: "enable launch at login", safeToRetry: true, form: false },
     mutationFn: async () => {
       const current = await getDesktopSettings();
@@ -74,7 +78,7 @@ export function BackgroundSetup({
   const link = (target: string, label: string) =>
     target === section ? undefined : dirty || saving ? (
       <Button type="button" disabled size="sm" variant="outline">
-        {label} — save preferences first
+        {label} — saving preferences
       </Button>
     ) : (
       <Button asChild size="sm" variant="outline">

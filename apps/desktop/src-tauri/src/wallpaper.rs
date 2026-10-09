@@ -80,8 +80,8 @@ fn validate_url(raw: &str) -> Result<url::Url, String> {
 }
 impl WallpaperRequest {
     fn validate(&self) -> Result<(), String> {
-        if !(4..=20).contains(&self.image_urls.len()) {
-            return Err("Choose between 4 and 20 Pinterest images.".into());
+        if !(1..=20).contains(&self.image_urls.len()) {
+            return Err("Choose between 1 and 20 Pinterest images.".into());
         }
         for url in &self.image_urls {
             validate_url(url)?;
@@ -121,8 +121,10 @@ impl WallpaperRequest {
         Ok(())
     }
 }
-fn current(app: &AppHandle, generation: u64, revision: u64) -> Result<(), String> {
-    revision_current(settings_revision(), revision)?;
+fn current(app: &AppHandle, generation: u64, revision: Option<u64>) -> Result<(), String> {
+    if let Some(revision) = revision {
+        revision_current(settings_revision(), revision)?;
+    }
     if app
         .state::<crate::desktop::DesktopState>()
         .generation
@@ -269,6 +271,25 @@ pub async fn apply_for_revision(
     generation: u64,
     revision: u64,
 ) -> Result<String, String> {
+    render_for_revision(app, request, generation, revision, false).await
+}
+
+pub async fn preview(app: &AppHandle, request: WallpaperRequest) -> Result<String, String> {
+    let generation = app
+        .state::<crate::desktop::DesktopState>()
+        .generation
+        .load(Ordering::SeqCst);
+    render_for_revision(app, request, generation, settings_revision(), true).await
+}
+
+async fn render_for_revision(
+    app: &AppHandle,
+    request: WallpaperRequest,
+    generation: u64,
+    revision: u64,
+    preview: bool,
+) -> Result<String, String> {
+    let revision = if preview { None } else { Some(revision) };
     request.validate()?;
     current(app, generation, revision)?;
     if !cfg!(target_os = "macos") {
@@ -361,14 +382,17 @@ pub async fn apply_for_revision(
     .map_err(|e| e.to_string())??;
     let prepared = async {
         current(app,generation,revision)?;
-        crate::native::call(app, serde_json::json!({"op":"wallpaper_prepare", "request":request, "imagePaths": paths, "outputDirectory":output})).await?;
+        let rendered = crate::native::call(app, serde_json::json!({"op":"wallpaper_prepare", "request":request, "imagePaths": paths, "outputDirectory":output, "preview":preview})).await?;
         current(app,generation,revision)?;
-        Ok::<_,String>(())
+        Ok::<_,String>(rendered)
     }.await;
-    if let Err(error) = prepared {
-        let _ = std::fs::remove_dir_all(&output);
-        return Err(error);
-    }
+    let prepared = match prepared {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&output);
+            return Err(error);
+        }
+    };
     // All images decoded successfully; only now promote sources to the persistent cache.
     tauri::async_runtime::spawn_blocking(move || {
         for (url, bytes) in images {
@@ -377,6 +401,14 @@ pub async fn apply_for_revision(
     })
     .await
     .map_err(|e| e.to_string())?;
+    if preview {
+        let _ = std::fs::remove_dir_all(&output);
+        current(app, generation, revision)?;
+        return prepared["image"]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| "macOS did not return a wallpaper preview.".into());
+    }
     if let Err(error) = current(app, generation, revision) {
         let _ = std::fs::remove_dir_all(&output);
         return Err(error);

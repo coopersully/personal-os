@@ -3,6 +3,8 @@ import { ApiClientError } from "@personal-os/api-client";
 export type FeedbackOptions = {
   action: string;
   success?: string;
+  pending?: string;
+  successDescription?: string;
   form?: boolean;
   safeToRetry?: boolean;
 };
@@ -25,6 +27,12 @@ const knownCorrections: Record<string, { field: string; message: string }> = {
     field: "endsAt",
     message: "End time must be after start time.",
   },
+  "Pinterest could not resolve that public board and its images. Check that the board exists and is public.":
+    {
+      field: "boardUrl",
+      message:
+        "Check that this Pinterest board exists and is public. Your saved board and wallpaper have not changed.",
+    },
   "Workday end must be after the start.": {
     field: "workdayEndMinute",
     message: "Workday end must be after workday start.",

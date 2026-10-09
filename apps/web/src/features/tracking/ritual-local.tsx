@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
 import { Button } from "../../components/ui/button.js";
 import { classifyMutationError } from "../../lib/feedback.js";
+import { useSettingsError } from "../../lib/settings-feedback.js";
 export function RitualLocal({ recoveryOnly = false }: { recoveryOnly?: boolean } = {}) {
   const [confirm, setConfirm] = useState(false);
   const [error, setError] = useState("");
@@ -21,6 +22,16 @@ export function RitualLocal({ recoveryOnly = false }: { recoveryOnly?: boolean }
       }),
     refetchInterval: 10000,
   });
+  useSettingsError(error, error);
+  useSettingsError(local.error, "Couldn’t load local routine status.");
+  useSettingsError(
+    local.data?.storageWarning,
+    "Routine storage needs attention. Export pending changes before resetting local data.",
+  );
+  useSettingsError(
+    local.data?.deliveryHealth,
+    "Routine changes have not synced. Check your connection; nohmi will retry.",
+  );
   async function discard() {
     setError("");
     try {

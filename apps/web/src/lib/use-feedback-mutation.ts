@@ -5,9 +5,11 @@ import {
   type UseMutationOptions,
   useMutation,
 } from "@tanstack/react-query";
-import { useId, useMemo, useRef } from "react";
+import { useContext, useId, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import { classifyMutationError, type FeedbackOptions } from "./feedback.js";
+
+import { SettingsFeedbackContext } from "./settings-feedback.js";
 
 type Attempt<T> = { toastId: string; callerContext: T | undefined; preparationFailed: boolean };
 
@@ -23,6 +25,7 @@ export function useFeedbackMutation<
   }: UseMutationOptions<TData, TError, TVariables, TOnMutateResult> & { feedback: FeedbackOptions },
   queryClient?: QueryClient,
 ) {
+  const settingsFeedback = useContext(SettingsFeedbackContext);
   const operationId = useId();
   const sequence = useRef(0);
   const latest = useRef<Attempt<TOnMutateResult> | null>(null);
@@ -42,6 +45,7 @@ export function useFeedbackMutation<
           preparationFailed: false,
         };
         latest.current = attempt;
+        if (options.pending) toast.loading(options.pending, { id: attempt.toastId });
         preparing.current.set(context, attempt);
         try {
           attempt.callerContext = await mutationOptions.onMutate?.(variables, context);
@@ -58,7 +62,10 @@ export function useFeedbackMutation<
           ...options,
           ...(attempt?.preparationFailed ? { safeToRetry: true } : {}),
         });
-        if (attempt === latest.current && !failure.persistent)
+        if (
+          attempt === latest.current &&
+          (settingsFeedback || options.pending || !failure.persistent)
+        )
           toast.error(failure.message, {
             id: attempt?.toastId,
             duration: Number.POSITIVE_INFINITY,
@@ -75,7 +82,11 @@ export function useFeedbackMutation<
             context,
           );
           if (attempt !== latest.current) return;
-          if (options.success) toast.success(options.success, { id: attempt?.toastId });
+          if (options.success)
+            toast.success(options.success, {
+              id: attempt?.toastId,
+              ...(options.successDescription ? { description: options.successDescription } : {}),
+            });
           else toast.dismiss(attempt?.toastId);
         } catch {
           if (attempt !== latest.current) return;

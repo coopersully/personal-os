@@ -20,6 +20,9 @@ export type DesktopSettings = {
   launchAtLogin: boolean;
   petEnabled: boolean;
   petColor: string;
+  petScale?: number;
+  petSleepEnabled?: boolean;
+  petSleepAfterSeconds?: number;
   petWorkspaces: string[];
   widgetWorkspaces: string[];
   notifications: NotificationSettings;
@@ -31,7 +34,11 @@ export type DesktopStatus = {
   mailError?: string | null;
   native: {
     error?: string;
+    accessibilityPermission?: boolean;
+    dockGeometryAvailable?: boolean;
     notificationPermission?: string;
+    notificationPermissionPending?: boolean;
+    testNotificationStatus?: "idle" | "sending" | "accepted" | "failed";
     notificationAlertsAvailable?: boolean;
     notificationSoundsAvailable?: boolean;
     launchAtLogin?: boolean;
@@ -94,3 +101,5 @@ export const desktopFetch: typeof fetch = async (input, init) => {
     headers: { "content-type": "application/json" },
   });
 };
+
+export const previewPetScale = (scale: number) => invoke("desktop_preview_pet_scale", { scale });

@@ -409,6 +409,38 @@ describe.sequential("Finance SMS atomic answer port", () => {
       code: "internal_error",
     });
   });
+  it("refuses an accepted canonical receipt without its immutable answer evidence", async () => {
+    const f = await fixture("valid", true);
+    await database.db
+      .update(financeReviewCases)
+      .set({ reasonCode: "category_ambiguity" })
+      .where(eq(financeReviewCases.id, f.command.work.id));
+    await database.db.transaction((tx) =>
+      issueMaintenanceReviewQuestion(tx, f.userId, f.command.work.id),
+    );
+    expect(await answer(f)).toMatchObject({ state: "blocked" });
+    await database.db
+      .update(financeMutationRecords)
+      .set({
+        response: {
+          operationId: f.command.operationId,
+          state: "accepted",
+          reasonCode: null,
+          work: [],
+          resultRevision: (BigInt(f.command.work.revision) + 1n).toString(),
+        },
+      })
+      .where(eq(financeMutationRecords.idempotencyKey, f.command.operationId));
+    await expect(port().inspectSmsReceipt(f.userId, f.command)).rejects.toMatchObject({
+      code: "internal_error",
+    });
+    expect(
+      await database.db
+        .select()
+        .from(financeReviewAnswers)
+        .where(eq(financeReviewAnswers.userId, f.userId)),
+    ).toEqual([]);
+  });
   it("answers canonical maintenance questions atomically and rediscovery cannot reissue consumed authority", async () => {
     const f = await fixture("valid", true);
     const accepted = await answer(f);

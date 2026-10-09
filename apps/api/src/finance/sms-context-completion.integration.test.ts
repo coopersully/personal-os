@@ -548,13 +548,17 @@ describe.sequential("signed Finance context SMS and durable completion", () => {
     "accepted",
     "blocked",
     "mixed",
+    "mixed_unavailable",
     "multiple_accepted",
     "multiple_blocked",
     "waiting",
   ] as const)("acknowledges %s receipt state once without claiming financial completion", async (mode) => {
     const f = await approvalFixture();
     await database.db.transaction((tx) => f.decide(f.command, f.context, tx));
-    const child = (state: "accepted" | "blocked" | "waiting", itemNumber: number) => ({
+    const child = (
+      state: "accepted" | "blocked" | "unavailable" | "waiting",
+      itemNumber: number,
+    ) => ({
       bindingId: randomUUID(),
       operationId: randomUUID(),
       itemNumber,
@@ -569,11 +573,13 @@ describe.sequential("signed Finance context SMS and durable completion", () => {
           ? [child("blocked", 1)]
           : mode === "mixed"
             ? [child("accepted", 1), child("blocked", 2)]
-            : mode === "multiple_accepted"
-              ? [child("accepted", 1), child("accepted", 2)]
-              : mode === "multiple_blocked"
-                ? [child("accepted", 1), child("blocked", 2), child("blocked", 3)]
-                : [child("accepted", 1)];
+            : mode === "mixed_unavailable"
+              ? [child("accepted", 1), child("unavailable", 2)]
+              : mode === "multiple_accepted"
+                ? [child("accepted", 1), child("accepted", 2)]
+                : mode === "multiple_blocked"
+                  ? [child("accepted", 1), child("blocked", 2), child("blocked", 3)]
+                  : [child("accepted", 1)];
     const ack = acknowledge(undefined, undefined, {
       inspectClaim: async () => ({
         inboundMessageId: f.message.id,
@@ -598,7 +604,8 @@ describe.sequential("signed Finance context SMS and durable completion", () => {
     else {
       expect(body).toContain("maintenance may still be waiting");
       if (mode === "multiple_accepted") expect(body).toContain("Saved 2 replies");
-      if (mode === "mixed") expect(body).toContain("1 other reply needs review");
+      if (mode === "mixed" || mode === "mixed_unavailable")
+        expect(body).toContain("1 other reply needs review");
       if (mode === "multiple_blocked") expect(body).toContain("2 other replies need review");
     }
   });

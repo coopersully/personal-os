@@ -169,8 +169,8 @@ export function createFinanceSmsAcknowledgementDispatcher(options: {
           const acceptedCount = (receipt?.children ?? []).filter(
             (child) => child.state === "accepted",
           ).length;
-          const blockedCount = (receipt?.children ?? []).filter(
-            (child) => child.state === "blocked",
+          const reviewCount = (receipt?.children ?? []).filter(
+            (child) => child.state === "blocked" || child.state === "unavailable",
           ).length;
           return {
             body:
@@ -180,7 +180,7 @@ export function createFinanceSmsAcknowledgementDispatcher(options: {
                   ? "nohmi: Saved your Finance context. No transaction, amount or bookkeeping change was assumed. Review or revise it in nohmi."
                   : acceptedCount === 0
                     ? "nohmi: Your Finance reply could not apply to the current work. No decision was applied. Review the current proposal or question in nohmi."
-                    : `nohmi: Saved ${acceptedCount === 1 ? "your reply" : `${acceptedCount} replies`}.${blockedCount ? ` ${blockedCount} other ${blockedCount === 1 ? "reply needs" : "replies need"} review in nohmi.` : ""} Finance maintenance may still be waiting for its host or another decision. Review progress in nohmi.`,
+                    : `nohmi: Saved ${acceptedCount === 1 ? "your reply" : `${acceptedCount} replies`}.${reviewCount ? ` ${reviewCount} other ${reviewCount === 1 ? "reply needs" : "replies need"} review in nohmi.` : ""} Finance maintenance may still be waiting for its host or another decision. Review progress in nohmi.`,
             queued: async (messageId) => {
               if (stored)
                 await tx

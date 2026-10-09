@@ -13,7 +13,9 @@ const configuration = (name = "Everyday checking") =>
   ({
     accounts: {
       state: "loaded",
-      value: { accounts: [{ id: "checking", name, kind: "cash", balance: 20 }] },
+      value: {
+        accounts: [{ id: "00000000-0000-4000-8000-000000000123", name, kind: "cash", balance: 20 }],
+      },
     },
   }) as unknown as FinanceConfiguration;
 afterEach(() => {
@@ -45,7 +47,7 @@ function mount(otherWriter = false) {
 }
 it("opens truthful view selections without a snapshot, retains conflict after reopening and refreshes without writing", async () => {
   const saved = resolveWorkspaceSettings("finances", {
-    spendAccountIds: ["checking"],
+    spendAccountIds: ["00000000-0000-4000-8000-000000000123"],
     revision: 4,
   });
   vi.spyOn(api, "getFinanceConfiguration").mockResolvedValue(configuration());
@@ -113,7 +115,10 @@ it("fences deferred account names through A to B to A and requires fresh expansi
 it("discovers another hook's retained attempt without opening view settings first", async () => {
   vi.spyOn(api, "getFinanceConfiguration").mockResolvedValue(configuration());
   vi.spyOn(api, "getWorkspaceSettings").mockResolvedValue(
-    resolveWorkspaceSettings("finances", { cashAccountIds: ["checking"], revision: 2 }),
+    resolveWorkspaceSettings("finances", {
+      cashAccountIds: ["00000000-0000-4000-8000-000000000123"],
+      revision: 2,
+    }),
   );
   const update = vi
     .spyOn(api, "updateWorkspaceSettings")
@@ -142,7 +147,10 @@ it("reloads unavailable account names in retained recovery without saving until 
     } as unknown as FinanceConfiguration)
     .mockResolvedValue(configuration());
   vi.spyOn(api, "getWorkspaceSettings").mockResolvedValue(
-    resolveWorkspaceSettings("finances", { cashAccountIds: ["checking"], revision: 6 }),
+    resolveWorkspaceSettings("finances", {
+      cashAccountIds: ["00000000-0000-4000-8000-000000000123"],
+      revision: 6,
+    }),
   );
   const update = vi
     .spyOn(api, "updateWorkspaceSettings")

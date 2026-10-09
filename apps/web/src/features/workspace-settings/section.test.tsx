@@ -212,7 +212,10 @@ it("fences account names and retained recovery across mounted Settings A to B to
   }
   const configuration = (name: string) =>
     ({
-      accounts: { state: "loaded", value: { accounts: [{ id: "checking", name }] } },
+      accounts: {
+        state: "loaded",
+        value: { accounts: [{ id: "00000000-0000-4000-8000-000000000123", name }] },
+      },
     }) as unknown as FinanceConfiguration;
   let release!: (value: FinanceConfiguration) => void;
   const load = vi
@@ -226,7 +229,10 @@ it("fences account names and retained recovery across mounted Settings A to B to
     .mockResolvedValueOnce(configuration("B checking"))
     .mockResolvedValue(configuration("New A checking"));
   vi.mocked(api.getWorkspaceSettings).mockResolvedValue(
-    resolveWorkspaceSettings("finances", { cashAccountIds: ["checking"], revision: 3 }),
+    resolveWorkspaceSettings("finances", {
+      cashAccountIds: ["00000000-0000-4000-8000-000000000123"],
+      revision: 3,
+    }),
   );
   vi.mocked(api.updateWorkspaceSettings).mockRejectedValue(new Error("Save uncertain"));
   const cache = new QueryClient({

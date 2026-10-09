@@ -357,8 +357,8 @@ while retaining domain-owned conditions, actions, validation, and execution.
 Planned Tracking adds `tracking:read` and `tracking:write` with selected Tracker sources; those scopes are not shipped yet.
 
 **Reviews:** the [workspace Reviews contract](../design/pages/reviews.md) owns the current
-presentation: a workspace-scoped dialog or mobile drawer opened from its attention alert or
-workspace Settings header. It collects work that explicitly requires the person: questions,
+presentation: a workspace-scoped dialog or mobile drawer opened from its attention alert,
+workspace Settings header, or the **Items needing review** workspace search result. It collects work that explicitly requires the person: questions,
 approvals, connector failures, recovery steps, and other Review or Attention items. Results are
 cursor-paginated and every action retains domain-owned authority. Informational state, routine
 success, and work nohmi can recover automatically do not enter the flow; setup and access
@@ -443,7 +443,8 @@ coherent response without reproducing domain expertise.
   wording, evidence, confidence, rediscovery, or internal progress alone do not qualify; quiet
   hours and send-time revalidation still apply.
 - SMS links require normal nohmi authentication and contain no bearer credential or action
-  authority. After sign-in, the app returns the person to the requested review destination.
+  authority. The accepted behavior is to return the person to the requested review destination
+  after sign-in; the current legacy-link fallback to Account does not satisfy that requirement.
 - A global review-bypass setting applies to every channel. When enabled, policy-authorized
   reversible work may execute directly; when disabled, it enters exact review, which may be
   approved by a bound, unexpired SMS response.
@@ -585,7 +586,8 @@ The research basis is recorded in the 2026-07-18 product analysis. Key experienc
 
 ### Contextual review flow
 
-Reviews open from a workspace attention alert or the actions beside its Settings title. A shared
+Reviews open from a workspace attention alert, the actions beside its Settings title, or the
+**Items needing review** workspace search result. A shared
 responsive dialog/drawer presents one decision at a time, using domain-owned controls and evidence.
 Progress shows completed, remaining, and total items. Advance only after the server confirms a
 resolution; Later never counts as completion. Reconnection and source repair remain explicit source

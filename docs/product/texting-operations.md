@@ -89,8 +89,9 @@ workspace. This checkpoint does not select a new route or claim a completed migr
 
 Opening the link requires normal nohmi authentication. The URL carries no bearer credential,
 approval authority, answer, or sensitive item content; possession of the phone or receipt of the
-SMS is not a web session. If authentication is required, nohmi returns the person to the requested
-review destination after sign-in.
+SMS is not a web session. The accepted behavior is to return the person to the requested review
+destination after sign-in. The current legacy URL instead resumes through the old redirects and
+lands on Account; authentication does not repair the missing review destination.
 
 Example: “Dinner yesterday was unusually large. Are you expecting reimbursement? Reply yes, no, or
 unsure.”

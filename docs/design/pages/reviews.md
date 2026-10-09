@@ -6,10 +6,12 @@ desktop and a drawer on mobile. The underlying workspace or Settings page stays 
 
 ## Entry and retained layout
 
-Exactly two product entry locations: the workspace's attention alert (SidebarFooter/SidebarMenu for
+Two persistent product entry locations are the workspace's attention alert (SidebarFooter/SidebarMenu for
 Mail, Tasks and Finances; beside the Calendar title), and the action at the top right of its workspace
 Settings header. Use the shared hand icon and **N items need review**, with singular grammar. Pending
 work uses semantic warning tones; confirmed zero is neutral; unavailable counts never display zero.
+Workspace search also exposes **Items needing review**, linking to `/<workspace>?review=open`
+and opening the same scoped flow. It is a search result, not a separate queue or review authority.
 
 The previous `ReviewsPage` bento layout remains in code, with its search, filters and sorting, but is
 not routed or advertised. `/<workspace>/decisions` and old Finance/Mail review links redirect into the

@@ -12,7 +12,8 @@ and parent/secondary-page placement.
   channel connections/defaults, connected-agent credentials/scopes, and User Knowledge controls
   in centralized Settings. Reviews is domain-owned operational work in the
   [workspace Reviews flow](../design/pages/reviews.md), opened from the workspace attention alert
-  or its Settings header; it is not an account preference or a separate Today queue.
+  or its Settings header, and also reachable from workspace search; it is not an account
+  preference or a separate Today queue.
 - Edit sources, source meanings, maintenance behavior, notification overrides, rules, learning,
   recovery, data controls, and domain access posture inside the owning workspace.
 - Let centralized Settings summarize cross-workspace health, readiness, effective policy, override

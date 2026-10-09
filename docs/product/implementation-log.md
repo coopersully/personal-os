@@ -11,7 +11,7 @@
   [workspace layout contract](../design/workspace-layout-architecture.md) explains intrinsic chrome,
   pane versus page scrolling, and preserving a single control instance across responsive layouts.
 - Reviews now opens in a workspace-scoped dialog or mobile drawer from the workspace attention
-  alert or workspace Settings header. The underlying page stays in place; domain actions retain
+  alert, workspace Settings header, or workspace search. The underlying page stays in place; domain actions retain
   their authority and revision checks. This supersedes the October 1 Today-owned `/reviews`
   placement: `/reviews` falls back to Account, and the old queue component is retained but not
   routed. Some notification and agent producers still emit legacy links that land on Account;

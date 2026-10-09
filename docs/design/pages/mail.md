@@ -98,7 +98,8 @@ chain-of-thought. Changed evidence produces a successor; a published review is n
 Mail owns all judgments and mutations in its domain/API. Shared Integration changes are limited to
 owner-fenced connector work dispatch, application composition and routing, deterministic QA data,
 and privacy-minimized projection of open Mail questions or a represented blocked run into the
-[workspace Reviews flow](reviews.md), opened from Mail’s attention alert or Settings header.
+[workspace Reviews flow](reviews.md), opened from Mail’s attention alert, Settings header, or
+workspace search.
 The flow composes Mail-owned APIs and retains their exact question/rule revisions and approval
 bindings; it never duplicates or bypasses domain mutation authority.
 

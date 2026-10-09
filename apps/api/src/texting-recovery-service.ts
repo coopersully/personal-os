@@ -425,79 +425,7 @@ export function createTextingRecoveryService(options: {
     const selected = claims.slice(0, limit);
     const results: TextingRecoveryClaim[] = [];
     for (const claim of selected) {
-      let bindings = await options.db
-        .select()
-        .from(textReplyBindings)
-        .where(
-          and(eq(textReplyBindings.userId, userId), eq(textReplyBindings.inboundClaimId, claim.id)),
-        )
-        .orderBy(asc(textReplyBindings.itemNumber));
-      if (!bindings.length) {
-        let bound: Awaited<ReturnType<typeof bindInboundReply>>;
-        try {
-          bound = await bindInboundReply(
-            options.db,
-            userId,
-            claim.messageId,
-            options.enabled,
-            current(),
-          );
-        } catch {
-          results.push({
-            inboundMessageId: claim.messageId,
-            state: "uncertain",
-            reason: "binding_uncertain",
-            children: [],
-          });
-          continue;
-        }
-        if (bound.state !== "pending") {
-          results.push({
-            inboundMessageId: claim.messageId,
-            state: bound.state,
-            reason: bound.reason,
-            children: [],
-          });
-          continue;
-        }
-        bindings = await options.db
-          .select()
-          .from(textReplyBindings)
-          .where(
-            and(
-              eq(textReplyBindings.userId, userId),
-              eq(textReplyBindings.inboundClaimId, claim.id),
-            ),
-          )
-          .orderBy(asc(textReplyBindings.itemNumber));
-      }
-      const children: TextingRecoveryChild[] = [];
-      for (const binding of bindings) {
-        if (
-          binding.state !== "accepted" &&
-          binding.state !== "blocked" &&
-          binding.state !== "unavailable" &&
-          !UNFINISHED_STATES.includes(binding.state as (typeof UNFINISHED_STATES)[number])
-        )
-          continue;
-        try {
-          children.push(await attachedChild(userId, claim.messageId, claim, binding));
-        } catch {
-          children.push({
-            bindingId: binding.id,
-            operationId: binding.operationId,
-            state: "uncertain",
-            reason: "child_recovery_failed",
-            terminal: false,
-          });
-        }
-      }
-      results.push({
-        inboundMessageId: claim.messageId,
-        state: "attached",
-        reason: null,
-        children,
-      });
+      results.push(await processClaim(userId, claim));
     }
     const last = selected.at(-1);
     let expirationSweep: TextingRecoveryPage["expirationSweep"];
@@ -518,5 +446,116 @@ export function createTextingRecoveryService(options: {
     };
   }
 
-  return { runPage, inspectClaim };
+  async function processClaim(
+    userId: string,
+    claim: typeof textInboundClaims.$inferSelect,
+  ): Promise<TextingRecoveryClaim> {
+    let bindings = await options.db
+      .select()
+      .from(textReplyBindings)
+      .where(
+        and(eq(textReplyBindings.userId, userId), eq(textReplyBindings.inboundClaimId, claim.id)),
+      )
+      .orderBy(asc(textReplyBindings.itemNumber));
+    if (!bindings.length) {
+      let bound: Awaited<ReturnType<typeof bindInboundReply>>;
+      try {
+        bound = await bindInboundReply(
+          options.db,
+          userId,
+          claim.messageId,
+          options.enabled,
+          current(),
+        );
+      } catch {
+        return {
+          inboundMessageId: claim.messageId,
+          state: "uncertain",
+          reason: "binding_uncertain",
+          children: [],
+        };
+      }
+      if (bound.state !== "pending") {
+        return {
+          inboundMessageId: claim.messageId,
+          state: bound.state,
+          reason: bound.reason,
+          children: [],
+        };
+      }
+      bindings = await options.db
+        .select()
+        .from(textReplyBindings)
+        .where(
+          and(eq(textReplyBindings.userId, userId), eq(textReplyBindings.inboundClaimId, claim.id)),
+        )
+        .orderBy(asc(textReplyBindings.itemNumber));
+    }
+    const children: TextingRecoveryChild[] = [];
+    for (const binding of bindings) {
+      if (
+        binding.state !== "accepted" &&
+        binding.state !== "blocked" &&
+        binding.state !== "unavailable" &&
+        !UNFINISHED_STATES.includes(binding.state as (typeof UNFINISHED_STATES)[number])
+      )
+        continue;
+      try {
+        children.push(await attachedChild(userId, claim.messageId, claim, binding));
+      } catch {
+        children.push({
+          bindingId: binding.id,
+          operationId: binding.operationId,
+          state: "uncertain",
+          reason: "child_recovery_failed",
+          terminal: false,
+        });
+      }
+    }
+    return {
+      inboundMessageId: claim.messageId,
+      state: "attached",
+      reason: null,
+      children,
+    };
+  }
+
+  /** Recheck the exact signed owner/claim pair selected by a trusted database scan. */
+  async function recoverClaim(
+    userId: string,
+    claimId: string,
+  ): Promise<TextingRecoveryClaim | null> {
+    idSchema.parse(userId);
+    idSchema.parse(claimId);
+    const attached = options.db
+      .select({ id: textReplyBindings.id })
+      .from(textReplyBindings)
+      .where(
+        and(eq(textReplyBindings.userId, userId), eq(textReplyBindings.inboundClaimId, claimId)),
+      );
+    const unfinished = options.db
+      .select({ id: textReplyBindings.id })
+      .from(textReplyBindings)
+      .where(
+        and(
+          eq(textReplyBindings.userId, userId),
+          eq(textReplyBindings.inboundClaimId, claimId),
+          inArray(textReplyBindings.state, UNFINISHED_STATES),
+        ),
+      );
+    const [claim] = await options.db
+      .select()
+      .from(textInboundClaims)
+      .where(
+        and(
+          eq(textInboundClaims.userId, userId),
+          eq(textInboundClaims.id, claimId),
+          or(notExists(attached), exists(unfinished)),
+        ),
+      )
+      .limit(1);
+    return claim ? processClaim(userId, claim) : null;
+  }
+
+  return { runPage, inspectClaim, recoverClaim };
 }

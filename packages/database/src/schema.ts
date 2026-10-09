@@ -4869,6 +4869,8 @@ export const calendarWorkspaceSettings = pgTable(
   "calendar_workspace_settings",
   {
     ...workspacePreferenceColumns(),
+    weekStartsOn: text("week_starts_on").notNull().default("sunday"),
+    defaultEventDurationMinutes: integer("default_event_duration_minutes").notNull().default(60),
     calendarView: text("calendar_view")
       .$type<"auto" | "day" | "week" | "month">()
       .notNull()
@@ -4890,6 +4892,14 @@ export const calendarWorkspaceSettings = pgTable(
       "calendar_workspace_settings_snap_check",
       sql`${table.followSnapSensitivity} IN ('precise', 'balanced', 'generous')`,
     ),
+    check(
+      "calendar_workspace_settings_week_start_check",
+      sql`${table.weekStartsOn} IN ('sunday', 'monday')`,
+    ),
+    check(
+      "calendar_workspace_settings_duration_check",
+      sql`${table.defaultEventDurationMinutes} BETWEEN 5 AND 1440`,
+    ),
     check("calendar_workspace_settings_revision_check", sql`${table.revision} > 0`),
   ],
 );
@@ -4897,6 +4907,8 @@ export const tasksWorkspaceSettings = pgTable(
   "tasks_workspace_settings",
   {
     ...workspacePreferenceColumns(),
+    defaultCaptureListId: uuid("default_capture_list_id"),
+    showCompletedTasks: boolean("show_completed_tasks").notNull().default(false),
     taskSort: text("task_sort").notNull().default("default"),
     taskGroup: text("task_group").notNull().default("none"),
     taskRowDetails: text("task_row_details")
@@ -4952,6 +4964,9 @@ export const financesWorkspaceSettings = pgTable(
   "finances_workspace_settings",
   {
     ...workspacePreferenceColumns(),
+    spendAccountIds: uuid("spend_account_ids").array(),
+    cashAccountIds: uuid("cash_account_ids").array(),
+    investmentAccountIds: uuid("investment_account_ids").array(),
     financeTransactionView: text("finance_transaction_view").notNull().default("table"),
     financeTransactionGroup: text("finance_transaction_group").notNull().default("none"),
   },

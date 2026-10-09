@@ -1,8 +1,8 @@
 import type {
   FinanceAccount,
   FinanceCategory,
+  FinancesWorkspacePreferences,
   FinanceTransaction,
-  WorkspacePreferences,
 } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useRef, useState } from "react";
@@ -105,7 +105,8 @@ export function FinanceTransactionControls({
               value={view}
               onValueChange={(value) => {
                 savePresentation.mutate({
-                  financeTransactionView: value as WorkspacePreferences["financeTransactionView"],
+                  financeTransactionView:
+                    value as FinancesWorkspacePreferences["financeTransactionView"],
                 });
                 setParams((current) => {
                   const next = new URLSearchParams(current);
@@ -328,7 +329,7 @@ export function FinanceTransactionControls({
                 onValueChange={(value) => {
                   savePresentation.mutate({
                     financeTransactionGroup:
-                      value as WorkspacePreferences["financeTransactionGroup"],
+                      value as FinancesWorkspacePreferences["financeTransactionGroup"],
                   });
                   setParams((current) => {
                     const next = new URLSearchParams(current);

@@ -1,6 +1,7 @@
 import { z } from "zod";
+import { workspaceSchema } from "./workspace-settings.js";
 
-export const searchableWorkspaceSchema = z.enum(["calendar", "tasks", "mail", "finances"]);
+export const searchableWorkspaceSchema = workspaceSchema;
 export type SearchableWorkspace = z.infer<typeof searchableWorkspaceSchema>;
 export const workspaceSearchQuerySchema = z.object({
   kind: z.enum(["all", "content", "reviews"]).default("all"),
@@ -27,90 +28,3 @@ export type WorkspaceSearchPage = {
   coverage: "synced";
   unavailable?: Array<"reviews">;
 };
-
-export const taskSortPreferenceSchema = z.enum([
-  "default",
-  "date",
-  "reserved",
-  "priority",
-  "newest",
-  "oldest",
-  "title",
-  "estimate",
-]);
-export const taskGroupPreferenceSchema = z.enum(["none", "date", "list", "project"]);
-export const taskRowDetailsPreferenceSchema = z.array(z.enum(["estimate", "tags", "notes"])).max(3);
-export const taskContainerSortPreferenceSchema = z.enum(["updated", "name", "newest", "target"]);
-
-export const mailListDensityPreferenceSchema = z.enum(["compact", "comfortable", "expanded"]);
-export const mailListWidthPreferenceSchema = z.number().finite().min(5).max(95);
-export const financeTransactionViewPreferenceSchema = z.enum(["table", "cards"]);
-export const financeTransactionGroupPreferenceSchema = z.enum([
-  "none",
-  "date",
-  "category",
-  "merchant",
-  "direction",
-  "posting",
-]);
-export const workspacePreferencesSchema = z.object({
-  mailConversationLayout: z.enum(["split", "single"]).optional(),
-  mailListDensity: mailListDensityPreferenceSchema.optional(),
-  mailListWidth: mailListWidthPreferenceSchema.optional(),
-  financeTransactionView: financeTransactionViewPreferenceSchema.optional(),
-  financeTransactionGroup: financeTransactionGroupPreferenceSchema.optional(),
-  taskSort: taskSortPreferenceSchema.optional(),
-  taskGroup: taskGroupPreferenceSchema.optional(),
-  taskRowDetails: taskRowDetailsPreferenceSchema.optional(),
-  taskContainerSort: taskContainerSortPreferenceSchema.optional(),
-  pinnedListIds: z.array(z.uuid()).max(100).default([]),
-  pinnedProjectIds: z.array(z.uuid()).max(100).default([]),
-  includeArchivedInSearch: z.boolean().default(true),
-  calendarView: z.enum(["auto", "day", "week", "month"]).default("auto"),
-  showWeekends: z.boolean().default(true),
-  autoFollowToday: z.boolean().default(true),
-  snapToFollow: z.boolean().default(true),
-  followSnapSensitivity: z.enum(["precise", "balanced", "generous"]).default("balanced"),
-});
-export type WorkspacePreferences = z.infer<typeof workspacePreferencesSchema>;
-export type WorkspaceSettings = {
-  workspace: SearchableWorkspace;
-  revision: number;
-  preferences: WorkspacePreferences;
-};
-export const updateWorkspaceSettingsSchema = z
-  .object({
-    expectedRevision: z.number().int().min(0),
-    // PATCH fields must not carry read-time defaults: omitted preferences stay unchanged.
-    preferences: z
-      .object({
-        mailConversationLayout: z.enum(["split", "single"]).optional(),
-        mailListDensity: mailListDensityPreferenceSchema.optional(),
-        mailListWidth: mailListWidthPreferenceSchema.optional(),
-        financeTransactionView: financeTransactionViewPreferenceSchema.optional(),
-        financeTransactionGroup: financeTransactionGroupPreferenceSchema.optional(),
-        taskSort: taskSortPreferenceSchema.optional(),
-        taskGroup: taskGroupPreferenceSchema.optional(),
-        taskRowDetails: taskRowDetailsPreferenceSchema.optional(),
-        taskContainerSort: taskContainerSortPreferenceSchema.optional(),
-        pinnedListIds: workspacePreferencesSchema.shape.pinnedListIds.removeDefault().optional(),
-        pinnedProjectIds: workspacePreferencesSchema.shape.pinnedProjectIds
-          .removeDefault()
-          .optional(),
-        includeArchivedInSearch: workspacePreferencesSchema.shape.includeArchivedInSearch
-          .removeDefault()
-          .optional(),
-        calendarView: workspacePreferencesSchema.shape.calendarView.removeDefault().optional(),
-        showWeekends: workspacePreferencesSchema.shape.showWeekends.removeDefault().optional(),
-        autoFollowToday: workspacePreferencesSchema.shape.autoFollowToday
-          .removeDefault()
-          .optional(),
-        snapToFollow: workspacePreferencesSchema.shape.snapToFollow.removeDefault().optional(),
-        followSnapSensitivity: workspacePreferencesSchema.shape.followSnapSensitivity
-          .removeDefault()
-          .optional(),
-      })
-      .strict(),
-  })
-  .strict();
-export type UpdateWorkspaceSettings = z.infer<typeof updateWorkspaceSettingsSchema>;

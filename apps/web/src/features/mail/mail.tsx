@@ -1,3 +1,4 @@
+import { getDefaultWorkspacePreferences } from "@personal-os/domain";
 import { MessageAttachments } from "@/components/message-attachments";
 
 export { formatAttachmentSize } from "@/components/message-attachments";
@@ -284,7 +285,9 @@ export function MailPage({ user }: { user: User }) {
   const listScope = mailListScopeFromSearch(params);
   const [composeIntent, setComposeIntent] = useState<ComposeIntent | null>(null);
   const { settings: layoutSettings, save: saveLayout } = useMailLayoutPreferences();
-  const density = layoutSettings.data?.preferences.mailListDensity ?? "comfortable";
+  const density =
+    layoutSettings.data?.preferences.mailListDensity ??
+    getDefaultWorkspacePreferences("mail").mailListDensity;
   const enabled = useMemo(
     () => accounts.data?.filter((account) => account.mailEnabled) ?? [],
     [accounts.data],
@@ -337,8 +340,12 @@ export function MailPage({ user }: { user: User }) {
     queryKey: ["mail-thread", selectedId],
   });
   const selected = listed ?? loaded.data;
-  const conversationLayout = layoutSettings.data?.preferences.mailConversationLayout ?? "split";
-  const listWidth = layoutSettings.data?.preferences.mailListWidth ?? 34;
+  const conversationLayout =
+    layoutSettings.data?.preferences.mailConversationLayout ??
+    getDefaultWorkspacePreferences("mail").mailConversationLayout;
+  const listWidth =
+    layoutSettings.data?.preferences.mailListWidth ??
+    getDefaultWorkspacePreferences("mail").mailListWidth;
   const readerLayout = useMemo(
     () => ({ "mail-list": listWidth, "mail-reader": 100 - listWidth }),
     [listWidth],

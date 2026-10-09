@@ -23,6 +23,7 @@ import { api } from "../../api.js";
 import { InlineError, QueryFeedback } from "../../components/async-state.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+import { FinanceNotificationPreferences } from "../notifications/finance-preferences";
 import { FinanceConfigurationEditor } from "./configuration-editor.js";
 
 const financeHumanOnlyActionLabels = {
@@ -80,6 +81,7 @@ export function FinanceSettings() {
   return (
     <div className="agent-access" id="guidance">
       <FinanceConfigurationEditor />
+      <FinanceNotificationPreferences />
       <QueryFeedback query={setup} title="Couldn’t load finance setup." />
       <QueryFeedback query={agentProfile} title="Couldn’t load finance guidance." />
       <MutationFeedback feedback={activate.feedback} />

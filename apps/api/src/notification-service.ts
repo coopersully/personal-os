@@ -20,6 +20,7 @@ import {
   notificationEligibility,
   notificationPreferencesSchema,
   publishNotificationInputSchema,
+  resetFinanceNotificationPreferencesSchema,
   validateNotificationResolution,
 } from "@personal-os/domain";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
@@ -111,7 +112,22 @@ export function createNotificationService(options: Options) {
         );
       if ((previous?.revision ?? null) !== input.expectedRevision)
         throw new AppError("conflict", "Notification preferences changed. Reload before saving.");
-      const revision = (previous?.revision ?? 0) + 1;
+      // A deleted override must not reuse an old revision when it is recreated.
+      const [history] = previous
+        ? []
+        : await tx
+            .select({
+              revision: sql<number>`coalesce(max((${auditEvents.before}->>'revision')::integer), 0)`,
+            })
+            .from(auditEvents)
+            .where(
+              and(
+                eq(auditEvents.userId, principal.userId),
+                eq(auditEvents.action, "notifications.preferences.reset"),
+                sql`${auditEvents.before}->>'scope' = ${scope}`,
+              ),
+            );
+      const revision = (previous?.revision ?? Number(history?.revision ?? 0)) + 1;
       await tx
         .insert(notificationPreferences)
         .values({ userId: principal.userId, scope, revision, preferences: value })
@@ -133,6 +149,56 @@ export function createNotificationService(options: Options) {
         after: { scope, revision, preferences: value },
       });
       return { scope, revision, preferences: value };
+    });
+  }
+  async function resetFinancePreferences(
+    principal: Principal,
+    input: { expectedRevision: number },
+  ) {
+    authorize(principal);
+    if (principal.actorType !== "user")
+      throw new AppError("forbidden", "Only the person can change notification preferences.");
+    const { expectedRevision } = resetFinanceNotificationPreferencesSchema.parse(input);
+    return options.db.transaction(async (tx) => {
+      await lockUser(tx, principal.userId);
+      const [previous] = await tx
+        .select()
+        .from(notificationPreferences)
+        .where(
+          and(
+            eq(notificationPreferences.userId, principal.userId),
+            eq(notificationPreferences.scope, "finances"),
+          ),
+        );
+      if (!previous || previous.revision !== expectedRevision)
+        throw new AppError(
+          "conflict",
+          "Notification preferences changed. Reload before resetting.",
+        );
+      await tx
+        .delete(notificationPreferences)
+        .where(
+          and(
+            eq(notificationPreferences.userId, principal.userId),
+            eq(notificationPreferences.scope, "finances"),
+          ),
+        );
+      await tx.insert(auditEvents).values({
+        userId: principal.userId,
+        actorId: principal.actorId,
+        actorType: principal.actorType,
+        requestId: crypto.randomUUID(),
+        action: "notifications.preferences.reset",
+        entityType: "notification_preferences",
+        entityId: principal.userId,
+        before: {
+          scope: "finances",
+          revision: previous.revision,
+          preferences: previous.preferences,
+        },
+        after: { scope: "finances", inherited: true },
+      });
+      return { scope: "finances", inherited: true } as const;
     });
   }
   async function resolve(tx: NotificationTransaction, userId: string, ref: FinanceHumanWorkRef) {
@@ -580,5 +646,5 @@ export function createNotificationService(options: Options) {
     const claimed = await claim(principal);
     return claimed.state === "claimed" ? deliver(principal, claimed) : claimed;
   }
-  return { savePreferences, publish, claim, deliver, drain, status };
+  return { savePreferences, resetFinancePreferences, publish, claim, deliver, drain, status };
 }

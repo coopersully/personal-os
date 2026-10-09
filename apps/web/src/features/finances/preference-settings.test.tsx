@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { workspacePreferencesSchema } from "@personal-os/domain";
+import { financesWorkspacePreferencesSchema } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { WorkspacePreferencesSection } from "../workspace-search/preferences";
+import { WorkspacePreferencesSection } from "../workspace-settings/section";
 
 const api = vi.hoisted(() => ({ getWorkspaceSettings: vi.fn(), updateWorkspaceSettings: vi.fn() }));
 vi.mock("@/api", () => ({ api, errorMessage: (error: Error) => error.message }));
@@ -12,7 +12,7 @@ it("edits transaction defaults in Finance settings while preserving the other pr
   const saved = {
     workspace: "finances",
     revision: 5,
-    preferences: workspacePreferencesSchema.parse({
+    preferences: financesWorkspacePreferencesSchema.parse({
       financeTransactionView: "cards",
       financeTransactionGroup: "merchant",
     }),

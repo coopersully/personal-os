@@ -728,3 +728,15 @@ outstanding. Duplicate navigation entries are removed and legacy review links
 redirect into the flow. The earlier review grid remains in source but is not routed.
 Source repairs that require their original editor keep an explicit source link.
 See [review interaction standards](../design/pages/reviews.md).
+
+## 2026-10-07 — Workspace settings consolidation
+
+- Isolated typed settings contracts and API/web modules from workspace search; resolved defaults
+  consistently without read-time writes and unified preference mutation/cache behavior.
+- Added Calendar week-start and event-duration defaults, Task capture-list and completed visibility,
+  and durable Finance display-account selections with owner validation.
+- Exposed existing Mail and Calendar profile controls without duplicating domain records or
+  bypassing rule approval; added Finance notification inheritance and audited override reset.
+- Preserved account-wide policy, versioned Finance facts/budgets, source semantics, and transient
+  URL/device state boundaries. Validation evidence is recorded with the change, not implied by this
+  entry as a production deployment claim.

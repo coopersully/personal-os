@@ -26,7 +26,7 @@ test("the repository QA fixture login exposes representative workspace data", as
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
 
-  await page.goto("/calendar?follow=0");
+  await page.goto(`/calendar?follow=0&view=${test.info().project.use.isMobile ? "day" : "week"}`);
   await expect(page.getByText("Product strategy review", { exact: true })).toBeVisible();
   const overlapPin = page.getByRole("button", { name: "Spread 5 overlapping events" });
   await expect(overlapPin).toHaveCSS("opacity", test.info().project.use.isMobile ? "1" : "0");
@@ -113,6 +113,8 @@ test("desktop navigation fills the viewport while long content scrolls independe
   page,
 }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-chromium", "Desktop shell geometry");
+  // This flow checks three workspaces and nine Calendar view/viewport combinations, then restores settings.
+  test.setTimeout(90_000);
   await page.setViewportSize({ width: 1280, height: 480 });
   await page.goto("/");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");

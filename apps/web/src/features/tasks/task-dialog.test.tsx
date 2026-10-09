@@ -11,10 +11,16 @@ const api = vi.hoisted(() => ({
   listTaskLists: vi.fn(),
   listTaskProjects: vi.fn(),
   restoreTask: vi.fn(),
+  getWorkspaceSettings: vi.fn(),
 }));
 vi.mock("../../api", () => ({ api, errorMessage: (error: Error) => error.message }));
 beforeEach(() => {
   vi.clearAllMocks();
+  api.getWorkspaceSettings.mockResolvedValue({
+    workspace: "tasks",
+    revision: 0,
+    preferences: { defaultCaptureListId: "work" },
+  });
   api.listTaskLists.mockResolvedValue({
     items: [
       { id: "inbox", name: "Inbox", kind: "inbox", availability: "active" },
@@ -29,14 +35,23 @@ beforeEach(() => {
     nextCursor: null,
   });
 });
-function setup(path: string, task?: Task) {
+function setup(
+  path: string,
+  task?: Task,
+  placement?: { listId: string; projectId: string | null },
+) {
   const close = vi.fn();
   render(
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
       <MemoryRouter initialEntries={[path]}>
-        <TaskDialog close={close} task={task} user={{ planningTimezone: "UTC" } as User} />
+        <TaskDialog
+          close={close}
+          task={task}
+          placement={placement}
+          user={{ planningTimezone: "UTC" } as User}
+        />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -46,6 +61,8 @@ it.each([
   ["/tasks?project=launch", "work", "launch"],
   ["/tasks?list=work", "work", ""],
   ["/tasks?list=missing", "inbox", ""],
+  ["/tasks?list=inbox", "inbox", ""],
+  ["/tasks", "work", ""],
 ])("initializes new task placement from %s", async (path, listId, projectId) => {
   setup(path);
   await waitFor(() => expect(screen.getByRole("combobox", { name: "List" })).toHaveValue(listId));
@@ -83,4 +100,61 @@ it("restores a trashed task with the current revision", async () => {
   await user.click(screen.getByRole("button", { name: "Restore task" }));
   await waitFor(() => expect(api.restoreTask).toHaveBeenCalledWith("t", { expectedRevision: 4 }));
   await waitFor(() => expect(close).toHaveBeenCalledOnce());
+});
+
+it.each([
+  "missing",
+  "archived",
+  null,
+])("falls back to Inbox when the saved list is %s", async (defaultCaptureListId) => {
+  api.getWorkspaceSettings.mockResolvedValue({
+    workspace: "tasks",
+    revision: 1,
+    preferences: { defaultCaptureListId },
+  });
+  api.listTaskLists.mockResolvedValue({
+    items: [
+      { id: "inbox", name: "Inbox", kind: "inbox", availability: "active" },
+      { id: "archived", name: "Old work", kind: "standard", availability: "archived" },
+    ],
+    nextCursor: null,
+  });
+  setup("/tasks");
+  await waitFor(() => expect(screen.getByRole("combobox", { name: "List" })).toHaveValue("inbox"));
+});
+it("preserves an existing task destination despite saved capture settings", async () => {
+  setup("/tasks", {
+    id: "existing",
+    title: "Existing task",
+    listId: "inbox",
+    projectId: null,
+    lifecycle: "open",
+    deletedAt: null,
+    revision: 1,
+    tags: [],
+    source: { provider: "local" },
+  } as unknown as Task);
+  await waitFor(() => expect(screen.getByRole("combobox", { name: "List" })).toHaveValue("inbox"));
+});
+
+it("preserves explicit creation placement", async () => {
+  setup("/tasks", undefined, { listId: "inbox", projectId: null });
+  await waitFor(() => expect(screen.getByRole("combobox", { name: "List" })).toHaveValue("inbox"));
+});
+it("waits for a saved capture destination instead of locking in Inbox", async () => {
+  let resolveSettings: (value: unknown) => void = () => {};
+  api.getWorkspaceSettings.mockReturnValue(
+    new Promise((resolve) => {
+      resolveSettings = resolve;
+    }),
+  );
+  setup("/tasks");
+  await screen.findByRole("option", { name: "Inbox" });
+  expect(screen.getByRole("combobox", { name: "List" })).toHaveValue("");
+  resolveSettings({
+    workspace: "tasks",
+    revision: 0,
+    preferences: { defaultCaptureListId: "work" },
+  });
+  await waitFor(() => expect(screen.getByRole("combobox", { name: "List" })).toHaveValue("work"));
 });

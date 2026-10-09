@@ -1,3 +1,5 @@
+import { getDefaultWorkspacePreferences } from "@personal-os/domain";
+
 export { calendarSearchResults, parseCalendarDateQuery } from "./search-date";
 
 import type {
@@ -74,6 +76,10 @@ import { api } from "../../api.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+
+import { useWorkspacePreferences } from "../workspace-settings/preferences.js";
+
+import { useDefaultCalendarId } from "./preferences.js";
 
 type FloatingMode = "closed" | "create" | "date";
 type FloatingSurfaceState = FloatingMode | "details";
@@ -241,6 +247,7 @@ function DateJumpCard({
   onNavigate: (date: LocalDate) => void;
   timeZone: string;
 }) {
+  const preferences = useWorkspacePreferences("calendar");
   const selected = calendarDate(anchor);
   return (
     <Card aria-label="Jump to date" className="calendar-floating-nav__card" size="sm">
@@ -252,6 +259,7 @@ function DateJumpCard({
         <section aria-label="Calendar date picker">
           <DatePicker
             autoFocus
+            weekStartsOn={preferences.data?.preferences.weekStartsOn === "monday" ? 1 : 0}
             captionLayout="dropdown"
             endMonth={new Date(Date.UTC(anchor.year + 25, 11, 1, 12))}
             mode="single"
@@ -390,6 +398,7 @@ function EventDateTimeControl({
   timeZone: string;
 }) {
   const [open, setOpen] = useState(false);
+  const preferences = useWorkspacePreferences("calendar");
   const selected = calendarDate(date);
   const dateLabel = new Intl.DateTimeFormat("en", {
     day: "numeric",
@@ -415,6 +424,7 @@ function EventDateTimeControl({
           </PopoverTrigger>
           <PopoverContent align="start" className="w-auto">
             <DatePicker
+              weekStartsOn={preferences.data?.preferences.weekStartsOn === "monday" ? 1 : 0}
               captionLayout="dropdown"
               defaultMonth={selected}
               endMonth={new Date(Date.UTC(referenceYear + 25, 11, 1, 12))}
@@ -591,6 +601,11 @@ function InlineEventComposer({
   user: User;
 }) {
   const queryClient = useQueryClient();
+  const preferences = useWorkspacePreferences("calendar");
+  const defaultDuration =
+    preferences.data?.preferences.defaultEventDurationMinutes ??
+    getDefaultWorkspacePreferences("calendar").defaultEventDurationMinutes;
+  const defaultCalendarId = useDefaultCalendarId();
   const writable = useMemo(
     () =>
       calendars
@@ -604,11 +619,11 @@ function InlineEventComposer({
   const start = draft
     ? new Date(draft.startsAt)
     : roundToQuarterHour(new Date(Date.now() + 30 * 60_000));
-  const end = draft ? new Date(draft.endsAt) : new Date(start.getTime() + 60 * 60_000);
+  const end = draft ? new Date(draft.endsAt) : new Date(start.getTime() + defaultDuration * 60_000);
   const initialStart = toDateTimeLocal(start, timeZone);
   const initialEnd = toDateTimeLocal(end, timeZone);
   const [allDay, setAllDay] = useState(false);
-  const [calendarId, setCalendarId] = useState(writable[0]?.id ?? "");
+  const [calendarId, setCalendarId] = useState<string | null>(null);
   const [calendarPickerOpen, setCalendarPickerOpen] = useState(false);
   const [conferenceChoice, setConferenceChoice] = useState<ConferenceChoice>("none");
   const [showConferencing, setShowConferencing] = useState(false);
@@ -620,11 +635,8 @@ function InlineEventComposer({
   const [endTime, setEndTime] = useState(initialEnd.slice(11));
   const endWasEdited = useRef(Boolean(draft));
   const [scheduleError, setScheduleError] = useState<string | null>(null);
-  const selectedCalendar = writable.find((calendar) => calendar.id === calendarId) ?? writable[0];
-  useEffect(() => {
-    const nextCalendarId = selectedCalendar?.id ?? "";
-    if (calendarId !== nextCalendarId) setCalendarId(nextCalendarId);
-  }, [calendarId, selectedCalendar?.id]);
+  const selectedCalendar =
+    writable.find((calendar) => calendar.id === (calendarId ?? defaultCalendarId)) ?? writable[0];
   useEffect(() => {
     if (conferenceChoice === "google_meet" && selectedCalendar?.provider !== "google") {
       setConferenceChoice("none");
@@ -641,13 +653,16 @@ function InlineEventComposer({
       const nextStart = localDateTimeToUtc(nextStartDate, timeToMinute(nextStartTime), timeZone);
       const currentEnd = localDateTimeToUtc(endDate, timeToMinute(endTime), timeZone);
       if (endWasEdited.current && currentEnd > nextStart) return;
-      const nextEnd = toDateTimeLocal(new Date(nextStart.getTime() + 60 * 60_000), timeZone);
+      const nextEnd = toDateTimeLocal(
+        new Date(nextStart.getTime() + defaultDuration * 60_000),
+        timeZone,
+      );
       const nextEndDate = parseLocalDate(nextEnd.slice(0, 10));
       const nextEndTime = nextEnd.slice(11);
       if (compareLocalDates(endDate, nextEndDate) !== 0) setEndDate(nextEndDate);
       if (endTime !== nextEndTime) setEndTime(nextEndTime);
     },
-    [allDay, endDate, endTime, timeZone],
+    [allDay, defaultDuration, endDate, endTime, timeZone],
   );
   const setValidatedEnd = (nextEndDate: LocalDate, nextEndTime: string) => {
     endWasEdited.current = true;
@@ -658,7 +673,10 @@ function InlineEventComposer({
     const startsAt = localDateTimeToUtc(startDate, timeToMinute(startTime), timeZone);
     const endsAt = localDateTimeToUtc(nextEndDate, timeToMinute(nextEndTime), timeZone);
     if (endsAt <= startsAt) {
-      const defaultEnd = toDateTimeLocal(new Date(startsAt.getTime() + 60 * 60_000), timeZone);
+      const defaultEnd = toDateTimeLocal(
+        new Date(startsAt.getTime() + defaultDuration * 60_000),
+        timeZone,
+      );
       setEndDate(parseLocalDate(defaultEnd.slice(0, 10)));
       setEndTime(defaultEnd.slice(11));
       return;
@@ -702,7 +720,7 @@ function InlineEventComposer({
     setScheduleError(null);
     mutation.mutate({
       allDay,
-      calendarId,
+      calendarId: selectedCalendar?.id ?? "",
       conferenceProvider: conferenceChoice === "google_meet" ? "google_meet" : null,
       conferenceUrl: conferenceChoice === "link" ? nullable(form.get("conferenceUrl")) : null,
       endsAt,

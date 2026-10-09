@@ -1,15 +1,14 @@
 import {
   addLocalDays,
+  getDefaultWorkspacePreferences,
   type LocalDate,
   localDateAt,
   localDateToIso,
   parseLocalDate,
   type User,
 } from "@personal-os/domain";
-import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api } from "@/api";
 import { ActionButton as ShadcnButton } from "@/components/action-button";
 import {
   CalendarIcon,
@@ -32,8 +31,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useMediaQuery } from "@/hooks/use-media-query";
-import { useFeedbackMutation } from "@/lib/use-feedback-mutation";
-import { useWorkspacePreferences } from "../workspace-search/preferences.js";
+import {
+  useSaveWorkspacePreferences,
+  useWorkspacePreferences,
+} from "../workspace-settings/preferences.js";
 import { type CalendarView, calendarPeriodDays, calendarViewFromSearch } from "./page.js";
 
 const calendarViews: Array<{ icon: Icon; label: string; value: CalendarView }> = [
@@ -58,14 +59,18 @@ export function CalendarAppBarIdentity({
   const view = calendarViewFromSearch(searchParams.get("view"), defaultView);
   const includeWeekends = searchParams.has("weekends")
     ? searchParams.get("weekends") !== "0"
-    : (preferences.data?.preferences.showWeekends ?? true);
+    : (preferences.data?.preferences.showWeekends ??
+      getDefaultWorkspacePreferences("calendar").showWeekends);
   const requestedAnchor = searchParams.get("date");
   const anchor = /^\d{4}-\d{2}-\d{2}$/.test(requestedAnchor ?? "")
     ? parseLocalDate(requestedAnchor as string)
     : localDateAt(new Date(), user.planningTimezone);
+  const weekStartsOn =
+    preferences.data?.preferences.weekStartsOn ??
+    getDefaultWorkspacePreferences("calendar").weekStartsOn;
   const days = useMemo(
-    () => calendarPeriodDays(view, anchor, includeWeekends),
-    [anchor, includeWeekends, view],
+    () => calendarPeriodDays(view, anchor, includeWeekends, weekStartsOn),
+    [anchor, includeWeekends, view, weekStartsOn],
   );
   const start = days[0] as LocalDate;
   const end = days[days.length - 1] as LocalDate;
@@ -118,19 +123,7 @@ export function CalendarAppBarControls({
   user: User;
   accounts: ReactNode;
 }) {
-  const queryClient = useQueryClient();
-  const saveCalendarView = useFeedbackMutation({
-    scope: { id: "calendar-view-preference" },
-    feedback: { action: "save Calendar view", safeToRetry: true },
-    mutationFn: async (calendarView: "day" | "week" | "month") => {
-      const current = await api.getWorkspaceSettings("calendar");
-      return api.updateWorkspaceSettings("calendar", {
-        expectedRevision: current.revision,
-        preferences: { calendarView },
-      });
-    },
-    onSuccess: (data) => queryClient.setQueryData(["workspace-settings", "calendar"], data),
-  });
+  const saveCalendarView = useSaveWorkspacePreferences("calendar");
   const [searchParams, setSearchParams] = useSearchParams();
   const compactCalendar = useMediaQuery("(max-width: 560px)");
   const compactPeriodNavigation = useMediaQuery("(max-width: 600px)");
@@ -165,7 +158,7 @@ export function CalendarAppBarControls({
   const selectView = (value: string) => {
     if (value === "day" || value === "week" || value === "month") {
       updateCalendarState({ view: value });
-      saveCalendarView.mutate(value);
+      saveCalendarView.mutate({ calendarView: value });
     }
   };
   const goToToday = () => {
@@ -226,7 +219,8 @@ export function CalendarAppBarControls({
             aria-pressed={
               (searchParams.has("follow")
                 ? searchParams.get("follow") !== "0"
-                : (preferences.data?.preferences.autoFollowToday ?? true)) &&
+                : (preferences.data?.preferences.autoFollowToday ??
+                  getDefaultWorkspacePreferences("calendar").autoFollowToday)) &&
               (!requestedAnchor ||
                 requestedAnchor === localDateToIso(localDateAt(new Date(), user.planningTimezone)))
             }

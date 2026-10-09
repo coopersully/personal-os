@@ -53,8 +53,9 @@ function mountReader(headerHeight = 64, reducedMotion = false) {
     const height = this.classList.contains("mail-reader__history-nav") ? headerHeight : 200;
     return { top, bottom: top + height, left: 0, right: 390, x: 0, y: top, width: 390, height, toJSON: () => ({}) };
   });
-  const scrollTo = vi.fn(function (this: HTMLElement, options: ScrollToOptions) {
+  const scrollTo = vi.fn(function (this: HTMLElement, options?: ScrollToOptions | number, y?: number) {
     if (typeof options === "object") this.scrollTop = options.top ?? 0;
+    else this.scrollTop = y ?? 0;
     fireEvent.scroll(this);
   });
   const result = render(

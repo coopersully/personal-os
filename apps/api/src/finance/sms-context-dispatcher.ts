@@ -7,6 +7,7 @@ import {
   textReplyBindings,
   users,
 } from "@personal-os/database";
+import { financeContextTextSchema } from "@personal-os/domain";
 import { and, asc, eq, gt, notExists, or } from "drizzle-orm";
 import { FinanceClaimReconciliationError } from "../finance-reconciliation-errors.js";
 import { bindInboundReply } from "../texting-reply-binding.js";
@@ -80,7 +81,11 @@ export function createFinanceSmsContextDispatcher(options: {
       try {
         // Only an explicit new-context command is routed here. Other messages remain recoverable
         // by the exact question coordinator, which determines whether routing is ambiguous.
-        if (!/^Finance(?: context)?:\s*\S/iu.test(message.body)) {
+        const contextText = message.body.replace(/^Finance(?: context)?:\s*/iu, "").trim();
+        if (
+          !/^Finance(?: context)?:\s*\S/iu.test(message.body) ||
+          !financeContextTextSchema.safeParse(contextText).success
+        ) {
           const binding = await bindInboundReply(
             options.db,
             claim.userId,
@@ -171,7 +176,7 @@ export function createFinanceSmsContextDispatcher(options: {
             {
               type: "create",
               operationId: claim.id,
-              text: message.body.replace(/^Finance(?: context)?:\s*/iu, "").trim(),
+              text: contextText,
               validFrom: null,
               validThrough: null,
               participants: [],

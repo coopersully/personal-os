@@ -664,7 +664,14 @@ export function createNotificationService(options: Options) {
                       : ("free_text" as const),
                   answerVocabulary:
                     question.work.kind === "approval" ? ["approve", "reject"] : null,
-                  expiresAt: new Date(now().getTime() + 24 * 60 * 60_000).toISOString(),
+                  expiresAt: new Date(
+                    Math.min(
+                      now().getTime() + 24 * 60 * 60_000,
+                      question.expiresAt
+                        ? new Date(question.expiresAt).getTime()
+                        : Number.POSITIVE_INFINITY,
+                    ),
+                  ).toISOString(),
                   operationId: randomUUID(),
                 })),
                 now(),

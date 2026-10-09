@@ -145,14 +145,22 @@ describe.sequential("signed Finance context SMS and durable completion", () => {
     "\u200D",
     "\uFE0F",
     "paid\u0001",
-  ])("does not save or acknowledge invisible or control-bearing context %j", async (text) => {
+  ])("terminalizes invalid context with one clarification and no financial evidence %j", async (text) => {
     await fixture(`Finance: ${text}`);
-    await expect(dispatch()()).rejects.toThrow("Finance SMS context reconciliation failed");
+    const run = dispatch();
+    await run();
+    await run();
+    await dispatch()();
     expect(await database.db.select().from(financeContexts)).toEqual([]);
-    expect(await database.db.select().from(financeSmsCompletions)).toEqual([]);
+    expect(await database.db.select().from(financeSmsCompletions)).toMatchObject([
+      { disposition: "clarification_required", contextId: null },
+    ]);
     const ack = acknowledge();
     await ack.run();
-    expect(ack.send).not.toHaveBeenCalled();
+    await ack.run();
+    expect(ack.send).toHaveBeenCalledTimes(1);
+    expect(ack.send.mock.calls[0]?.[0].body).toContain("could not safely attach");
+    expect(await database.db.select().from(financeMutationRecords)).toEqual([]);
   });
   it("captures verbatim prospective context once with SMS provenance and no inferred financial fields", async () => {
     const f = await fixture();

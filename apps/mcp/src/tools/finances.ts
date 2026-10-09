@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { ApiClientError, type PersonalOsApiClient } from "@personal-os/api-client";
 import {
   answerFinanceReviewInputSchema,
+  automationHostScheduleObservationInputSchema,
   type FinanceReceiptReview,
   type FinanceToolResult,
   financeMaintenanceInputSchema,
@@ -178,6 +179,32 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       financeApiResult(() => api.setupFinances(financeSetupInputSchema.parse(input))),
   );
 
+  server.registerTool(
+    "get_finance_continuations",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the current host schedule version, observed health, and accepted Finance answer continuations bound to this exact active host schedule and authorization connection. Use the returned schedule version and state for observe_finance_host_schedule. Follow nextCursor while hasMore is true to read every page. Continue each pending item with maintain_finances operation continue and the returned continuation ID; retain the run ID through challenge, approval and verification.",
+      inputSchema: z.object({ scheduleId: id, cursor: id.optional() }),
+      title: "Read Finance continuations",
+    },
+    async (input) => apiResult(() => api.getFinanceContinuations(input.scheduleId, input.cursor)),
+  );
+  server.registerTool(
+    "observe_finance_host_schedule",
+    {
+      annotations: { openWorldHint: false },
+      description:
+        "Record the host's observed active or paused state. Only the originally bound Finance maintenance connection may report observations. This does not create, repair or reschedule host work.",
+      inputSchema: z.object({
+        scheduleId: id,
+        observation: automationHostScheduleObservationInputSchema,
+      }),
+      title: "Observe Finance host schedule",
+    },
+    async (input) =>
+      apiResult(() => api.observeAutomationHostSchedule(input.scheduleId, input.observation)),
+  );
   server.registerTool(
     "maintain_finances",
     {

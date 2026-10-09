@@ -539,6 +539,7 @@ describe.sequential("real contextual question producer", () => {
         active: true,
         expiresAt: null,
         disclosure: "minimal",
+        questionPrompt: "What was this transaction for?",
         context: null,
         occurredAt: null,
         destination: `/finances/review?contextualQuestion=${f.question.id}`,

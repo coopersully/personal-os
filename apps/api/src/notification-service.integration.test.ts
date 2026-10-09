@@ -10,6 +10,7 @@ import {
   textingConnections,
   textingConsentEvents,
   textMessages,
+  textReplyBindings,
   users,
 } from "@personal-os/database";
 import {
@@ -134,7 +135,7 @@ describe.sequential("durable notifications", () => {
       disclosure: "context",
       context: "Dinner",
       occurredAt: "2026-03-07T23:00:00Z",
-      destination: "/settings?section=reviews",
+      destination: "/finances?review=open",
       ...extra,
     };
     await database.db.execute(sql`INSERT INTO notification_test_work VALUES (${work.id}, ${owner}, ${JSON.stringify(value)}::jsonb)
@@ -413,6 +414,24 @@ describe.sequential("durable notifications", () => {
     ]);
     expect(await database.db.query.auditEvents.findMany()).toHaveLength(audits.length + 1);
     expect(send).not.toHaveBeenCalled();
+  });
+  it("keeps successive question notifications in one reply namespace", async () => {
+    await putWork(ref, { questionPrompt: "What was this purchase for?" });
+    await service.publish(principal, { work: [ref] });
+    await service.drain(principal);
+    const original = await database.db.select().from(textReplyBindings);
+    expect(original).toHaveLength(1);
+    expect(send.mock.calls[0]?.[0].body).toContain("Reply with the item number and answer");
+    current = new Date(current.getTime() + 60_000);
+    await putWork(secondRef, { questionPrompt: "What was the next purchase for?" });
+    await service.publish(principal, { work: [secondRef] });
+    await service.drain(principal);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1]?.[0].body).toContain("/finances?review=open");
+    expect(send.mock.calls[1]?.[0].body).not.toContain("Reply with the item number and answer");
+    const remaining = await database.db.select().from(textReplyBindings);
+    expect(remaining).toEqual(original);
+    expect(remaining[0]?.workId).toBe(ref.id);
   });
   it("deduplicates wording and evidence refreshes while keeping semantic attempt history", async () => {
     await service.publish(principal, { work: [ref] });

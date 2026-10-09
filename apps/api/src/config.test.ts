@@ -79,6 +79,7 @@ describe("API configuration", () => {
         accountSid: "",
         authToken: "",
         enabled: false,
+        financeSmsEnabled: false,
         messagingServiceSid: "",
         senderPhoneNumber: "",
         verifyServiceSid: "",

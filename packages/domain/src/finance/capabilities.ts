@@ -1,5 +1,19 @@
 export const financeCapabilityManifest = [
   {
+    apiOperation: "getFinanceContinuations",
+    capability: "workflow.answer_continuations",
+    mcpTool: "get_finance_continuations",
+    mode: "read",
+    requiredScope: "finances:maintain",
+  },
+  {
+    apiOperation: "observeAutomationHostSchedule",
+    capability: "workflow.host_observation",
+    mcpTool: "observe_finance_host_schedule",
+    mode: "write",
+    requiredScope: "finances:maintain",
+  },
+  {
     apiOperation: "getFinancePlaybook",
     capability: "policy.playbook",
     mcpTool: "get_finance_playbook",

@@ -799,6 +799,27 @@
       "when": 1791319000000,
       "tag": "0109_finance_review_history_archive_upgrade",
       "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1791320000000,
+      "tag": "0106_finance_review_action_authority",
+      "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "7",
+      "when": 1791558000000,
+      "tag": "0107_finance_host_continuation",
+      "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "7",
+      "when": 1791562000000,
+      "tag": "0108_finance_sms_completion",
+      "breakpoints": true
     }
   ]
 }

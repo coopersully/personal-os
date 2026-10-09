@@ -181,6 +181,19 @@ maintenance and two-way Finance SMS at launch, including durable answers and con
 the original agent session ends. Users retain equivalent inspection and manual correction in the
 app. Shared Texting owns the conversation; Finance owns meaning, policy and bookkeeping.
 
+An explicit `Finance:` or `Finance context:` SMS records the person's note verbatim as prospective
+context. It does not infer an amount, recipient, matching transaction or bookkeeping change. An
+unbound ambiguous reply requires clarification. Acknowledgments confirm durable domain receipts;
+quiet hours, consent, delivery limits and uncertain provider submission remain visible pending
+states. Acknowledging an answer does not claim that its maintenance run has finished.
+
+SMS may approve or reject one exact, current, reversible transaction categorization after its
+complete safe proposal and numbered choices have been delivered. It cannot create a permanent
+merchant rule, change budget authority, credentials, recipients or connection scopes, or approve
+an entire maintenance batch. Those decisions require the authenticated app. Stale proposals never
+apply through an old SMS binding.
+
+
 ### Goal
 
 Finances is a unified budget, cash-flow, account-balance, transaction, and net-worth application

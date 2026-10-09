@@ -13,6 +13,7 @@
   upgraded additively. Full verification on the current base remains pending; this branch does not
   activate SMS, matching, or reusable User Knowledge.
 
+
 ## 2026-10-07 — Workspace layout, Finance configuration, and Mail recovery merge
 
 - [PR #223 — Standardize workspace layouts and Finance configuration](https://github.com/coopersully/personal-os/pull/223)
@@ -783,3 +784,73 @@ See [review interaction standards](../design/pages/reviews.md).
 - Preserved account-wide policy, versioned Finance facts/budgets, source semantics, and transient
   URL/device state boundaries. Validation evidence is recorded with the change, not implied by this
   entry as a production deployment claim.
+
+
+## Finance answers and host continuation — source implementation (2026-10-09)
+
+The consolidated completion branch adds immutable case-owned maintenance question issuance,
+shared app/SMS answer consumption, exact question and answer retention, and a durable accepted-answer
+continuation outbox. Automatic Finance notification discovery uses bounded owner-scoped pages,
+current-work checks, existing consent/disclosure/quiet-hour policy, and at most three reply bindings.
+Rediscovery repairs publication failures without reissuing consumed question authority.
+
+Finance settings prepares tenant-bound Codex or Claude setup and shows waiting answers, observed
+host health, revoked connections, and unconfirmed delivery. Hosts use the original live maintenance
+grant to read accepted evidence and resume one case-scoped canonical run. Claude routine session
+creation is recorded separately from maintenance completion; uncertain fires are not repeated.
+Migration `0106` owns issuance and answer invariants; `0107` preserves OAuth connection identity and
+adds isolated encrypted host credentials and continuation bindings. Source deletion retains exact
+questions and answers; account deletion is distinct from the user purge that erases their archive.
+
+This entry records the completion implementation and its limits. The pull request records exact
+integrated verification and merge evidence. Production SMS activation and separate real
+Codex/Claude unattended latency, usage, and completion trials are not certified by this source.
+
+
+The same completion branch adds explicit signed `Finance:` prospective context capture,
+receipt-confirmed durable SMS acknowledgments and a narrow reversible categorization approval
+port. Migration `0108` preserves the immutable inbound claim and adds a separate completion ledger
+with owner-scoped message/context provenance. The real existing categorization writer, Finance
+mutation receipt and Texting binding consumption share one transaction. Stronger decisions remain
+in the authenticated app. Source tests cover no inferred financial fields, restart/uncertain-send
+deduplication, exact approve/reject replay and stale or stronger proposal refusal; integrated release
+verification is recorded in the pull request. Host delivery serializes case answers and checks the original
+schedule-bound grant on resumed runs and challenge submission.
+
+
+Independent edge review repaired terminal continuation projection after resume, dispatch
+revalidation during concurrent polling, stale submitting delivery visibility, per-routine credential
+failure isolation, and cursor pagination. Explicit audited human recovery can release an uncertain
+pending delivery or move a nonexecuting waiting run to a live polling Codex host; execution leases and
+original binding/timestamp fences prevent silent adoption. Focused host regression tests exercise
+these transitions. Receipt-confirmed acknowledgments also distinguish accepted replies from stale
+approvals for which no decision was applied.
+
+
+The completion branch also recovers a host-accepted session that never invokes nohmi: after the
+routine's declared maximum latency (at least two minutes), a person who checked the host can
+release each still-pending answer without a maintenance run. Coalesced sibling answers retain
+independent fences; an observed run or unreleased pending sibling prevents a replacement fire.
+Original session identity remains in the audit. Handoff diagnostics record only correlation ID,
+claim count, duration and a safe outcome code; logging failure cannot undo a committed handoff.
+The migration journal contract includes the separate SMS completion ledger, and disabled
+notification publication has an explicit typed unavailable result.
+
+A saved contextual answer's exact app link can reopen its owner-scoped read-only result after it
+leaves outstanding work. Browser acceptance creates a real manual transaction and context question,
+checks answer replay and unchanged ledger values, and checks another owner's access is refused.
+Full integrated verification remains required before release.
+
+
+Final integration repairs isolate the ordered context, acknowledgment, host and notification phases:
+a failed phase does not starve the others, and the pass still reports failure. SMS context scanning
+excludes revoked/old-epoch admissions and processes healthy owners despite transient lock failures;
+invalid admission never produces an acknowledgment. Ending a host schedule erases its encrypted
+trigger credential. Routine fires claim one exact case answer, leave sibling cases pending, and
+allow a new answer to wake only the same original idle waiting case. Moving an existing waiting
+run is limited to a polling Codex schedule; event-only Claude routines need a fresh answer event
+and are not offered as silent recovery targets. Source links preserve the exact case identity.
+
+The consolidated Finance completion branch also gates pending question reply admission with the default-off Finance SMS switch. Verified disabled-rollout app composition leaves contextual and canonical replies pending without receipts, answers or continuations. Terminal admission results preserve policy/authority/delivery reasons, and ordered reconciliation reports fixed stage identifiers and validated failure counts without provider text. Focused regression evidence covers these behaviors; the pull request records the exact-main full verifier.
+
+Final host binding validates the Claude API trigger identity before activation. Successive replyable Finance notifications preserve the existing live reply namespace and direct additional work to app review, preventing duplicate item numbers without retargeting delayed replies. Focused regression verification covers both repairs; integrated full verification is recorded in the pull request.

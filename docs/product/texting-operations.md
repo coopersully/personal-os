@@ -514,3 +514,31 @@ reconciliation uses a separate bounded transaction and processes only changed de
 This local order does not establish a shared Finance gate or make any Finance work kind available.
 The configured first-party origin is validated at construction (HTTP or HTTPS, no credentials,
 path, query or fragment); request headers cannot choose the destination.
+
+
+### Finance completion branch (2026-10-09; source evidence)
+
+The Finance producer now issues exact canonical questions, with complete allowlisted question
+wording and at most three numbered reply bindings. Custom or sensitive prompts and oversized
+messages use an authenticated app link without reply authority. One safe reversible categorization
+proposal may carry exact `approve` and `reject` choices when context disclosure is enabled. The
+private admission port rechecks the signed inbound claim, owner, consent epoch, actual outbound
+handoff, binding expiry and current Finance proposal, then commits the existing Finance writer,
+immutable receipt and binding consumption in one transaction. Bare `yes` grants no approval.
+
+Explicit `Finance:` context capture uses signed inbound evidence and records the original note,
+claim and message provenance without inferred financial fields. A separate immutable completion
+ledger preserves routing and links one durable outbound acknowledgment. Provider uncertainty or
+process restart never produces a second acknowledgment. Shared transport consent, quiet hours,
+limits and disablement still apply. The thirty-second bounded scheduler targets prompt receipt
+acknowledgment; delivery delays and external host completion require separate observation.
+
+Accepted answers may wait for a selected host, a live grant or another decision. Acknowledgments
+state that distinction. Only the bound original maintenance grant may continue the case. Claude
+fires dispatch one exact case answer per session; unrelated answers remain pending until its run settles. Uncertain or submitted fires are
+not retried. A human may move an undispatched waiting answer to a different live host.
+
+These are branch implementation claims. Full verification, current review and real authorized
+transport plus separate Codex and Claude continuation trials remain release evidence requirements.
+
+The Finance SMS switch gates pending question admission as well as approvals and delivery. Disabling it leaves previously bound replies retryable without a financial receipt or answer. Terminal admission outcomes retain policy, authority or delivery reason codes; they do not blame a registered Finance producer for a consent or handoff failure.

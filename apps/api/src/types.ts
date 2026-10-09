@@ -21,6 +21,7 @@ import type { EmailDelivery } from "./email-delivery.js";
 import type { RuntimeLifecycle } from "./runtime-lifecycle.js";
 
 export type Principal = {
+  authorizationConnectionId?: string;
   actorId: string;
   actorType: Extract<ActorType, "agent" | "user">;
   scopes: ReadonlySet<AccessScope>;
@@ -59,6 +60,8 @@ export type RequestLog = {
   code?: string | undefined;
   disposition?: ConnectorSyncRecovery;
   durationMs: number;
+  claimCount?: number;
+  hostOutcome?: "accepted" | "uncertain" | "unavailable";
   eligibleAccountCount?: number;
   event:
     | "calendar_provider_reconciliation"
@@ -75,6 +78,7 @@ export type RequestLog = {
     | "connector_recovery_failed"
     | "desktop_release_unavailable"
     | "finance_sync_health_initialized"
+    | "finance_host_handoff"
     | "finance_receipt_mail_search_failed"
     | "mail_rule_work_dispatch_failed"
     | "finance_configuration_section_failed"

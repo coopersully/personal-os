@@ -500,7 +500,42 @@ describe("database schema contracts", () => {
       "0104_finance_review_history_index",
       "0105_finance_review_history_archive",
       "0109_finance_review_history_archive_upgrade",
+      "0106_finance_review_action_authority",
+      "0107_finance_host_continuation",
+      "0108_finance_sms_completion",
     ]);
+  });
+
+  it("keeps SMS completion evidence bound to its signed claim, context and acknowledgement", async () => {
+    const completion = getTableConfig(requiredTable("financeSmsCompletions"));
+    expect(completion.foreignKeys.map((key) => key.getName())).toEqual(
+      expect.arrayContaining([
+        "finance_sms_completions_claim_fk",
+        "finance_sms_completions_context_fk",
+        "finance_sms_completions_ack_fk",
+      ]),
+    );
+    const claim = completion.foreignKeys.find(
+      (key) => key.getName() === "finance_sms_completions_claim_fk",
+    );
+    expect(claim?.reference().columns.map((column) => column.name)).toEqual([
+      "user_id",
+      "claim_id",
+      "connection_id",
+    ]);
+    expect(claim?.onDelete).toBe("cascade");
+    expect(completion.checks.map((check) => check.name)).toEqual(
+      expect.arrayContaining([
+        "finance_sms_completions_disposition_check",
+        "finance_sms_completions_context_check",
+      ]),
+    );
+    const migration = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0108_finance_sms_completion.sql"),
+      "utf8",
+    );
+    expect(migration).toContain("Finance SMS completion evidence is immutable");
+    expect(migration).toContain("Finance SMS completion evidence remains until owner deletion");
   });
 
   it("keeps Finance review history ordering aligned with migration 0104", async () => {

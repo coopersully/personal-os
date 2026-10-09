@@ -1,14 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import {
+  accessTokens,
   createDatabaseClient,
   type DatabaseClient,
   financeAccounts,
+  financeAnswerContinuations,
   financeLedgerChallenges,
   financeMaintenanceCandidates,
   financeMaintenanceRuns,
   financePeriodReviews,
   financeSetupSessions,
+  financeTransactions,
   migrateDatabase,
   users,
   workspaceMaintenanceRuns,
@@ -17,9 +20,13 @@ import {
 import type { FinanceStatus } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, sql } from "drizzle-orm";
+import { createAutomationHostService } from "../automation-host-service.js";
+import { createFinanceHostDispatcher } from "../finance-host-dispatcher.js";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
 import type { Principal } from "../types.js";
+import { answerContextualWork } from "./answer-service.js";
+import { createFinanceContextualQuestionService } from "./contextual-question-service.js";
 import { createFinanceMaintenanceIntentService } from "./maintenance-intent-service.js";
 import { legacyMaintenanceScope } from "./maintenance-service.js";
 
@@ -117,6 +124,201 @@ describe.sequential("canonical Finance intent and historical adoption", () => {
     if (!run) throw new Error("Missing old run");
     return run;
   }
+  it("continues a saved answer only through its bound live grant and replays the same bounded run", async () => {
+    const f = await fixture();
+    const encryptionKey = Buffer.alloc(32, 7).toString("base64");
+    const connectionId = randomUUID();
+    const [token] = await database.db
+      .insert(accessTokens)
+      .values({
+        userId: f.userId,
+        name: "Host",
+        authorizationConnectionId: connectionId,
+        tokenHash: randomUUID(),
+        scopes: ["finances:maintain"],
+      })
+      .returning();
+    if (!token) throw new Error("token");
+    const human: Principal = {
+      userId: f.userId,
+      actorId: f.userId,
+      actorType: "user",
+      scopes: new Set(["finances:read", "finances:write"]),
+    };
+    const agent: Principal = {
+      ...f.principal,
+      actorId: token.id,
+      authorizationConnectionId: connectionId,
+    };
+    const hosts = createAutomationHostService({ db: database.db, now, encryptionKey });
+    const schedule = await hosts.create(human, {
+      tenantAuthorizationConnectionId: connectionId,
+      label: "Routine",
+      requestedScopes: ["finances:maintain"],
+      hostSurface: "claude_code_routine",
+      trigger: { type: "event", expectedMaximumLatencyMinutes: 15 },
+    });
+    await hosts.bind(human, schedule.schedule.id, {
+      expectedVersion: 1,
+      expectedState: "setup_pending",
+      hostSurface: "claude_code_routine",
+      hostAutomationId: "trig_01ABCDEFGHJKLMNOPQRSTUVW",
+    });
+    await hosts.saveFireToken(human, schedule.schedule.id, "sk-ant-oat01-abcdefghijklmno", 2);
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({ userId: f.userId, name: "Cash", institution: "Cash", provider: "manual" })
+      .returning();
+    if (!account) throw new Error("account");
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        userId: f.userId,
+        accountId: account.id,
+        merchant: "Merchant",
+        transactionDate: "2026-09-15",
+        amount: 1200,
+        direction: "expense",
+      })
+      .returning();
+    if (!transaction) throw new Error("transaction");
+    const context = { principal: human, requestId: "host-answer" };
+    const question = await createFinanceContextualQuestionService({
+      db: database.db,
+    }).createQuestion(transaction.id, { operationId: randomUUID() }, context);
+    if (question.state !== "available") throw new Error("question");
+    const operationId = randomUUID();
+    expect(
+      (
+        await answerContextualWork(
+          { db: database.db },
+          {
+            operationId,
+            work: question.question.work,
+            text: "Lunch",
+            source: { kind: "app", messageId: null },
+          },
+          context,
+        )
+      ).state,
+    ).toBe("accepted");
+    const [outbox] = await database.db
+      .select()
+      .from(financeAnswerContinuations)
+      .where(eq(financeAnswerContinuations.operationId, operationId));
+    if (!outbox) throw new Error("outbox");
+    expect(outbox.automationScheduleId).toBeNull();
+    await expect(
+      f.service.maintainFinances(
+        {
+          operation: "continue",
+          continuationId: outbox.id,
+          automationScheduleId: schedule.schedule.id,
+        },
+        agent,
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await hosts.bindAnswer(human, outbox.id, schedule.schedule.id);
+    expect(await hosts.continuations(agent, schedule.schedule.id)).toMatchObject({
+      schedule: { id: schedule.schedule.id, version: 3 },
+      continuations: [
+        { id: outbox.id, state: "pending", answer: { text: "Lunch", sourceKind: "app" } },
+      ],
+    });
+    await expect(hosts.bindAnswer(human, outbox.id, schedule.schedule.id)).resolves.toEqual({
+      id: outbox.id,
+    });
+    const fetch = vi.fn(
+      async (_input: Parameters<typeof globalThis.fetch>[0], _init?: RequestInit) =>
+        Response.json({
+          type: "routine_fire",
+          claude_code_session_id: "session_01HJKLMNOPQRSTUVWXYZ",
+        }),
+    );
+    const dispatch = createFinanceHostDispatcher({ db: database.db, now, encryptionKey, fetch });
+    expect(await dispatch()).toEqual({ processed: 1 });
+    await expect(hosts.bindAnswer(human, outbox.id, schedule.schedule.id)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    expect(await dispatch()).toEqual({ processed: 0 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0]?.[0]).toBe(
+      "https://api.anthropic.com/v1/claude_code/routines/trig_01ABCDEFGHJKLMNOPQRSTUVW/fire",
+    );
+    const input = {
+      operation: "continue" as const,
+      continuationId: outbox.id,
+      automationScheduleId: schedule.schedule.id,
+    };
+    await expect(
+      f.service.maintainFinances(input, { ...agent, authorizationConnectionId: randomUUID() }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    const [existingRun] = await database.db
+      .insert(workspaceMaintenanceRuns)
+      .values({
+        userId: f.userId,
+        domain: "finances",
+        rulebookVersion: "test-v1",
+        scope: {
+          type: "target",
+          entityType: "finance_review_case",
+          id: question.question.reviewCaseId,
+        },
+        status: "queued",
+      })
+      .returning();
+    if (!existingRun) throw new Error("existing run");
+    await expect(f.service.maintainFinances(input, agent)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({
+        authorizationConnectionId: randomUUID(),
+        automationScheduleId: schedule.schedule.id,
+      })
+      .where(eq(workspaceMaintenanceRuns.id, existingRun.id));
+    await expect(f.service.maintainFinances(input, agent)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    expect(
+      (
+        await database.db
+          .select()
+          .from(financeAnswerContinuations)
+          .where(eq(financeAnswerContinuations.id, outbox.id))
+      )[0]?.maintenanceRunId,
+    ).toBeNull();
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({
+        authorizationConnectionId: connectionId,
+        automationScheduleId: schedule.schedule.id,
+      })
+      .where(eq(workspaceMaintenanceRuns.id, existingRun.id));
+    const first = await f.service.maintainFinances(input, agent),
+      replay = await f.service.maintainFinances(input, agent);
+    expect(first.data.run?.scope).toEqual({
+      type: "target",
+      entityType: "finance_review_case",
+      id: question.question.reviewCaseId,
+    });
+    expect(first.data.run?.id).toBe(existingRun.id);
+    expect(replay.data.run?.id).toBe(first.data.run?.id);
+    expect(
+      (
+        await database.db
+          .select()
+          .from(financeAnswerContinuations)
+          .where(eq(financeAnswerContinuations.id, outbox.id))
+      )[0],
+    ).toMatchObject({
+      state: "accepted",
+      maintenanceRunId: first.data.run?.id,
+      fireState: "accepted",
+      hostSessionId: "session_01HJKLMNOPQRSTUVWXYZ",
+    });
+  });
   it("starts/resumes one canonical run, exposes durable progress and denies read-only callers", async () => {
     const f = await fixture();
     const [left, right] = await Promise.all([

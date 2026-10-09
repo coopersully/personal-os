@@ -107,6 +107,18 @@ beforeEach(() => {
   api.listFinanceActionReviews.mockResolvedValue([]);
 });
 
+it("opens the exact case linked by a continuation instead of the next question", async () => {
+  api.getFinanceInbox.mockResolvedValue(
+    response([
+      review(),
+      { ...review(nextId), evidence: { merchant: "Linked source", transactionId } },
+    ]),
+  );
+  mount(`/finances/review?case=${nextId}`);
+  expect(await screen.findByText("Linked source")).toBeVisible();
+  expect(screen.queryByText("Cafe Example")).not.toBeInTheDocument();
+});
+
 it("loads bounded review history and exact evidence without changing the active question", async () => {
   const user = userEvent.setup();
   const first: FinanceReviewHistorySummary = {

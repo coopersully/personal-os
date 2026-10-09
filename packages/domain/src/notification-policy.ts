@@ -35,20 +35,24 @@ export const notificationWorkSchema = z
     active: z.boolean(),
     expiresAt: isoDateTimeSchema.nullable(),
     disclosure: notificationDetailSchema,
+    questionPrompt: z.string().trim().min(1).max(120).nullable().optional(),
     context: z.string().trim().min(1).max(120).nullable(),
     occurredAt: isoDateTimeSchema.nullable(),
     destination: z.union([
-      z.literal("/settings?section=reviews"),
+      z.literal("/finances?review=open"),
       z.templateLiteral(["/finances/review?contextualQuestion=", z.uuid()]),
+      z.templateLiteral(["/finances/review?case=", z.uuid()]),
     ]),
   })
   .strict()
   .refine(
     (value) =>
-      value.destination === "/settings?section=reviews" ||
+      value.destination === "/finances?review=open" ||
       (value.work.kind === "question" &&
         value.destination ===
-          `/finances/review?contextualQuestion=${encodeURIComponent(value.work.id)}`),
+          `/finances/review?contextualQuestion=${encodeURIComponent(value.work.id)}`) ||
+      (value.work.kind === "question" &&
+        value.destination === `/finances/review?case=${encodeURIComponent(value.work.id)}`),
     { message: "Contextual destinations must match the exact question.", path: ["destination"] },
   );
 export type NotificationWork = z.infer<typeof notificationWorkSchema>;
@@ -145,15 +149,17 @@ function relativeDate(instant: string, now: Date, timeZone: string) {
   }).format(date);
 }
 
-/** T0 directs review to the app; no reply vocabulary or numeric answer bindings are advertised. */
+/** Reply instructions are enabled only when the caller creates exact durable answer bindings. */
 export function composeNotification(input: {
   works: NotificationWork[];
   now: Date;
   timeZone: string;
   detail: "minimal" | "context";
   origin: string;
+  replyable?: boolean;
 }) {
   const labels = input.works.slice(0, 3).map((work) => {
+    if (input.replyable && work.questionPrompt) return work.questionPrompt;
     const label = work.context;
     // Defense in depth, not a sensitivity classifier: the domain's disclosure ceiling is mandatory.
     const safe = label && !/(?:\d[ .()-]*){5}|@|https?:|[\r\n]/iu.test(label);
@@ -161,11 +167,27 @@ export function composeNotification(input: {
     const date = work.occurredAt
       ? ` (${relativeDate(work.occurredAt, input.now, input.timeZone)})`
       : "";
-    return `${label.slice(0, 60)}${date}`;
+    return `${label}${work.work.kind === "approval" ? "" : date}`;
   });
+  if (
+    input.replyable &&
+    input.works.length <= 3 &&
+    input.works.every((work) => work.work.kind === "question" && work.questionPrompt)
+  )
+    return `nohmi: ${labels.map((label, index) => `${index + 1}. ${label}`).join("; ")}. Reply with the item number and answer. Review: ${new URL(input.origin).origin}/finances?review=open`;
+  if (
+    input.replyable &&
+    input.works.length === 1 &&
+    input.works[0]?.work.kind === "approval" &&
+    input.detail === "context" &&
+    input.works[0].disclosure === "context" &&
+    input.works[0].context &&
+    labels[0] !== "Finance item"
+  )
+    return `nohmi: 1. ${labels[0]} Reply 1 approve or 1 reject. Review: ${new URL(input.origin).origin}/finances?review=open`;
   const overflow = input.works.length > 3 ? `; ${input.works.length - 3} more` : "";
   const origin = new URL(input.origin).origin;
-  return `nohmi: Review needed: ${labels.join("; ")}${overflow}. Review: ${origin}/settings?section=reviews`;
+  return `nohmi: Review needed: ${labels.join("; ")}${overflow}. Review: ${origin}/finances?review=open`;
 }
 
 export const notificationResolutionSchema = z.discriminatedUnion("state", [
@@ -207,7 +229,7 @@ export type NotificationDeliveryState = z.infer<typeof notificationDeliveryState
 
 export const notificationStatusSchema = z.object({
   capability: z.enum(["available", "unavailable"]),
-  reason: z.literal("producer_not_registered").nullable(),
+  reason: z.enum(["producer_not_registered", "delivery_not_enabled"]).nullable(),
   timeZone: z.string(),
   preferences: z.array(
     z.object({
@@ -240,4 +262,4 @@ export const notificationStatusSchema = z.object({
 export type NotificationStatus = z.infer<typeof notificationStatusSchema>;
 export type PublishNotificationResult =
   | { state: "accepted"; intentIds: string[] }
-  | { state: "unavailable"; reason: "producer_not_registered" };
+  | { state: "unavailable"; reason: "producer_not_registered" | "delivery_not_enabled" };

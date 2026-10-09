@@ -146,7 +146,7 @@ function FinanceInboxReviewPage() {
   const result = inbox.data;
   const question = result?.communication.nextQuestion;
   const [searchParams, setSearchParams] = useSearchParams();
-  const requestedItem = searchParams.get("item");
+  const requestedItem = searchParams.get("item") ?? searchParams.get("case");
   const requestedQuestion = searchParams.get("question") ?? undefined;
   const requestedApproval = searchParams.get("approval") ?? undefined;
   const review =

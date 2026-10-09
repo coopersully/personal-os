@@ -4,7 +4,14 @@ import type {
   TaskProject,
   WorkspaceSettings,
 } from "../packages/domain/src/index.js";
-import { type APIRequestContext, expect, type Page, request, test } from "@playwright/test";
+import {
+  type APIRequestContext,
+  type BrowserContext,
+  expect,
+  type Page,
+  request,
+  test,
+} from "@playwright/test";
 
 test("two editors retain attempted workspace values and explicitly recover repeated conflicts", async ({
   page,
@@ -17,33 +24,35 @@ test("two editors retain attempted workspace values and explicitly recover repea
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   const path = "/v1/workspaces/calendar/settings";
-  const original = await (await page.request.get(path)).json();
   const origin = new URL(page.url()).origin;
   const restoreContext = await request.newContext({
     baseURL: origin,
     storageState: await page.context().storageState(),
   });
-  const seed = await page.request.patch(path, {
-    headers: { origin },
-    data: {
-      expectedRevision: original.revision,
-      preferences: { calendarView: "auto", weekStartsOn: "sunday" },
-    },
-  });
-  expect(seed.ok()).toBeTruthy();
-  const secondContext = await browser.newContext({
-    storageState: await page.context().storageState(),
-    baseURL: origin,
-    ...(info.project.use.viewport ? { viewport: info.project.use.viewport } : {}),
-    isMobile: info.project.use.isMobile ?? false,
-    hasTouch: info.project.use.hasTouch ?? false,
-  });
-  const second = await secondContext.newPage();
-  let secondWrites = 0;
-  second.on("request", (request) => {
-    if (request.method() === "PATCH" && request.url().endsWith(path)) secondWrites++;
-  });
+  let original: WorkspaceSettings<"calendar"> | undefined;
+  let secondContext: BrowserContext | undefined;
   try {
+    original = (await (await restoreContext.get(path)).json()) as WorkspaceSettings<"calendar">;
+    const seed = await page.request.patch(path, {
+      headers: { origin },
+      data: {
+        expectedRevision: original.revision,
+        preferences: { calendarView: "auto", weekStartsOn: "sunday" },
+      },
+    });
+    expect(seed.ok()).toBeTruthy();
+    secondContext = await browser.newContext({
+      storageState: await page.context().storageState(),
+      baseURL: origin,
+      ...(info.project.use.viewport ? { viewport: info.project.use.viewport } : {}),
+      isMobile: info.project.use.isMobile ?? false,
+      hasTouch: info.project.use.hasTouch ?? false,
+    });
+    const second = await secondContext.newPage();
+    let secondWrites = 0;
+    second.on("request", (request) => {
+      if (request.method() === "PATCH" && request.url().endsWith(path)) secondWrites++;
+    });
     await page.goto("/settings?section=calendar");
     await second.goto("/settings?section=calendar");
     await expect(page.getByLabel("Preferred view")).toBeEnabled();
@@ -97,9 +106,9 @@ test("two editors retain attempted workspace values and explicitly recover repea
     ).toBeTruthy();
   } finally {
     try {
-      await secondContext.close();
+      await secondContext?.close();
     } finally {
-      await restoreSettings(restoreContext, path, origin, original.preferences);
+      await restoreSettings(restoreContext, path, origin, original?.preferences);
     }
   }
 });
@@ -120,22 +129,25 @@ for (const workspace of ["calendar", "mail"] as const) {
       baseURL: origin,
       storageState: await page.context().storageState(),
     });
-    const original = await (await page.request.get(path)).json();
-    const preferences =
-      workspace === "calendar" ? { calendarView: "week" } : { mailConversationLayout: "split" };
-    expect(
-      (
-        await page.request.patch(path, {
-          headers: { origin },
-          data: { expectedRevision: original.revision, preferences },
-        })
-      ).ok(),
-    ).toBeTruthy();
-    let writes = 0;
-    page.on("request", (request) => {
-      if (request.method() === "PATCH" && request.url().endsWith(path)) writes++;
-    });
+    let original: WorkspaceSettings<typeof workspace> | undefined;
     try {
+      original = (await (await restoreContext.get(path)).json()) as WorkspaceSettings<
+        typeof workspace
+      >;
+      const preferences =
+        workspace === "calendar" ? { calendarView: "week" } : { mailConversationLayout: "split" };
+      expect(
+        (
+          await page.request.patch(path, {
+            headers: { origin },
+            data: { expectedRevision: original.revision, preferences },
+          })
+        ).ok(),
+      ).toBeTruthy();
+      let writes = 0;
+      page.on("request", (request) => {
+        if (request.method() === "PATCH" && request.url().endsWith(path)) writes++;
+      });
       await page.goto(`/${workspace}`);
       await page.route(`**${path}`, async (route) => {
         if (route.request().method() === "PATCH")
@@ -176,7 +188,7 @@ for (const workspace of ["calendar", "mail"] as const) {
       await expect(page.getByText(attempted)).toHaveCount(0);
       expect(writes).toBe(1);
     } finally {
-      await restoreSettings(restoreContext, path, origin, original.preferences);
+      await restoreSettings(restoreContext, path, origin, original?.preferences);
     }
   });
 }
@@ -219,25 +231,26 @@ test("Finance account selection recovery stays readable after reopening and navi
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   const path = "/v1/workspaces/finances/settings";
   const origin = new URL(page.url()).origin;
-  const original = (await (await page.request.get(path)).json()) as WorkspaceSettings<"finances">;
-  const configurationResponse = await page.request.get("/v1/finances/configuration");
-  expect(configurationResponse.ok()).toBeTruthy();
-  const configuration = (await configurationResponse.json()) as FinanceConfiguration;
-  if (configuration.accounts.state !== "loaded")
-    throw new Error("Fixture Finance accounts unavailable");
-  const checking = configuration.accounts.value.accounts.find(
-    (account) => account.name === "Everyday checking",
-  );
-  if (!checking) throw new Error("Fixture checking account unavailable");
   const restoreContext = await request.newContext({
     baseURL: origin,
     storageState: await page.context().storageState(),
   });
-  let writes = 0;
-  page.on("request", (request) => {
-    if (request.method() === "PATCH" && request.url().endsWith(path)) writes++;
-  });
+  let original: WorkspaceSettings<"finances"> | undefined;
   try {
+    original = (await (await restoreContext.get(path)).json()) as WorkspaceSettings<"finances">;
+    const configurationResponse = await page.request.get("/v1/finances/configuration");
+    expect(configurationResponse.ok()).toBeTruthy();
+    const configuration = (await configurationResponse.json()) as FinanceConfiguration;
+    if (configuration.accounts.state !== "loaded")
+      throw new Error("Fixture Finance accounts unavailable");
+    const checking = configuration.accounts.value.accounts.find(
+      (account) => account.name === "Everyday checking",
+    );
+    if (!checking) throw new Error("Fixture checking account unavailable");
+    let writes = 0;
+    page.on("request", (request) => {
+      if (request.method() === "PATCH" && request.url().endsWith(path)) writes++;
+    });
     const seed = await page.request.patch(path, {
       headers: { origin },
       data: {
@@ -300,7 +313,7 @@ test("Finance account selection recovery stays readable after reopening and navi
     const latest = (await (await page.request.get(path)).json()) as WorkspaceSettings<"finances">;
     expect(latest.preferences).toEqual(seeded.preferences);
   } finally {
-    await restoreSettings(restoreContext, path, origin, original.preferences);
+    await restoreSettings(restoreContext, path, origin, original?.preferences);
   }
 });
 
@@ -318,18 +331,19 @@ test("Tasks failed project pin reaches Settings and reapplies only its reviewed 
     baseURL: origin,
     storageState: await page.context().storageState(),
   });
-  const original = (await (await page.request.get(path)).json()) as WorkspaceSettings<"tasks">;
-  const listsResponse = await page.request.get("/v1/task-lists?limit=100");
-  const projectsResponse = await page.request.get("/v1/task-projects?limit=100");
-  expect(listsResponse.ok()).toBeTruthy();
-  expect(projectsResponse.ok()).toBeTruthy();
-  const lists = (await listsResponse.json()) as { items: TaskList[] };
-  const projects = (await projectsResponse.json()) as { items: TaskProject[] };
-  const work = lists.items.find((list) => list.name === "Work");
-  const project = projects.items.find((item) => item.name === "Autumn program opening");
-  if (!work || !project) throw new Error("Fixture task containers unavailable");
-  const attempts: Array<{ expectedRevision: number; preferences: unknown }> = [];
+  let original: WorkspaceSettings<"tasks"> | undefined;
   try {
+    original = (await (await restoreContext.get(path)).json()) as WorkspaceSettings<"tasks">;
+    const listsResponse = await page.request.get("/v1/task-lists?limit=100");
+    const projectsResponse = await page.request.get("/v1/task-projects?limit=100");
+    expect(listsResponse.ok()).toBeTruthy();
+    expect(projectsResponse.ok()).toBeTruthy();
+    const lists = (await listsResponse.json()) as { items: TaskList[] };
+    const projects = (await projectsResponse.json()) as { items: TaskProject[] };
+    const work = lists.items.find((list) => list.name === "Work");
+    const project = projects.items.find((item) => item.name === "Autumn program opening");
+    if (!work || !project) throw new Error("Fixture task containers unavailable");
+    const attempts: Array<{ expectedRevision: number; preferences: unknown }> = [];
     const seed = await page.request.patch(path, {
       headers: { origin },
       data: {
@@ -396,7 +410,7 @@ test("Tasks failed project pin reaches Settings and reapplies only its reviewed 
     const saved = (await (await page.request.get(path)).json()) as WorkspaceSettings<"tasks">;
     expect(saved.preferences).toEqual({ ...seeded.preferences, pinnedProjectIds: [project.id] });
   } finally {
-    await restoreSettings(restoreContext, path, origin, original.preferences);
+    await restoreSettings(restoreContext, path, origin, original?.preferences);
   }
 });
 
@@ -407,6 +421,7 @@ async function restoreSettings(
   preferences: unknown,
 ) {
   try {
+    if (preferences === undefined) return;
     const latestResponse = await context.get(path);
     expect(latestResponse.ok()).toBeTruthy();
     const latest = await latestResponse.json();

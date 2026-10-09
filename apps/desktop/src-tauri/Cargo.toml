@@ -1,6 +1,6 @@
 [package]
 name = "personal-os"
-version = "0.1.0"
+version = "0.1.8"
 description = "A shared daily surface for people and their agents"
 authors = ["nohmi contributors"]
 edition = "2021"

@@ -69,7 +69,7 @@ test("saved manual context survives reload without changing the ledger and stays
     expect(saved.ok()).toBe(true);
     expect((await saved.json()).state).toBe("accepted");
     const command = saved.request().postDataJSON() as FinanceAnswer;
-    await expect(page.getByText("Context saved. The financial review remains open.")).toBeVisible();
+    await expect(page.getByText(/1 completed · \d+ left · \d+ total/)).toBeVisible();
     await page.reload();
     await expect(page.getByText("Context saved. The financial review remains open.")).toBeVisible();
     const replay = await page.request.post("/v1/finances/contextual-questions/answer", {

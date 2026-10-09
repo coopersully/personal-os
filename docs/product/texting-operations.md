@@ -74,11 +74,18 @@ workspace.
 A short, self-contained single question does not include a redundant link. The message stays brief
 and directly answerable by text unless evidence or context is needed to decide safely.
 
-The multi-item link opens the existing unified Reviews destination at
-`/settings?section=reviews`, where the person can see all outstanding Review and Attention work
-across available workspaces—including questions, approvals, connector failures, and recovery
-steps—filter it, and follow each item to its owning domain. A single-item context link may still open
-that exact item or owning workspace.
+The accepted multi-item target is one unified Reviews destination where the person can see all
+outstanding Review and Attention work across available workspaces—including questions, approvals,
+connector failures, and recovery steps—and follow each item to its owning domain. A single-item
+context link may open that exact item or owning workspace.
+
+**Current implementation gap:** at `fe983085`, producers still emit the former
+`/settings?section=reviews` destination, but it now falls back to Account. The shipped
+[Reviews flow](../design/pages/reviews.md) is scoped to one workspace and does not implement the
+accepted cross-workspace destination. The old URL is not evidence that multi-item review navigation
+works. The producer/schema inventory and verification needs are recorded in that contract; the
+accepted cross-workspace requirement remains pending rather than being silently narrowed to one
+workspace. This checkpoint does not select a new route or claim a completed migration.
 
 Opening the link requires normal nohmi authentication. The URL carries no bearer credential,
 approval authority, answer, or sensitive item content; possession of the phone or receipt of the

@@ -368,6 +368,9 @@ Legacy workspace decision links enter the scoped flow; `/reviews` and
 `/settings?section=reviews` currently fall back to Account. Some notification and agent link
 producers still emit those old destinations; the Reviews contract records this unresolved
 implementation gap. Do not claim those generated links preserve their requested review target.
+The accepted multi-workspace Texting requirement below still needs a unified destination: the
+shipped single-workspace flow does not fulfill that target, and this reconciliation does not
+replace it with a newly selected routing design.
 
 Centralized Settings is the canonical editor for account-wide identity, security, privacy ceilings,
 review bypass, shared notification policy, channel connections/defaults, connected-agent
@@ -420,12 +423,14 @@ coherent response without reproducing domain expertise.
   `yesterday`, or `tomorrow` immediately before sending.
 - SMS is formal, short, and concise. It may include as many directly answerable questions or exact
   reviews as reasonably fit, with a hard cap of three. If even two would make the text difficult to
-  scan, include only one. Every multi-item message includes the unified Settings-owned Reviews link;
+  scan, include only one. The accepted target is one unified Reviews link for every multi-item message;
   when more items remain, it summarizes the overflow. Texting does not send separate proactive
   messages per item or workspace.
 - A self-contained single question omits the link. Texting adds an exact-item or workspace link when
   that question needs more context or is too long for a reasonable SMS; every multi-item message
-  uses the unified Reviews link.
+  uses the unified Reviews link. This cross-workspace destination remains unimplemented after
+  the workspace flow cutover; the [Texting contract](texting-operations.md) distinguishes the
+  accepted requirement from the current legacy-link fallback.
 - Quiet hours default to 10:00 PM–8:00 AM in the person's current time zone. Proactive maintenance
   texts wait until the window ends unless the person selects `any time`; direct replies to the
   person's messages remain immediate. Multiple deferred items consolidate into one Reviews alert.

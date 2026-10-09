@@ -23,12 +23,29 @@ At the `fe983085` source checkpoint, the notification policy and delivery servic
 `/settings?section=reviews`, and the assistant context advertises `/reviews` as its approvals
 link. Both fall back to Account rather than opening the requested review. The workspace entry
 locations above work, but generated notification/agent links are not a completed navigation
-cutover. They need migration to an exact supported workspace target with navigation coverage;
-no target-preservation or end-to-end notification review-link claim is established yet.
+cutover. Single-workspace targets need supported scoped links with navigation coverage.
+[Texting](../../product/texting-operations.md) also retains an accepted requirement for one
+unified destination when a message spans workspaces. The current flow accepts only one
+workspace, so that cross-workspace destination is not implemented. Migrating single-workspace
+links alone cannot satisfy it; do not substitute one workspace for the complete requested set
+or claim that the current UI fulfills this target. This documentation records the divergence
+without selecting a new cross-workspace routing design.
 
-The owning producers are `packages/domain/src/notification-policy.ts`,
-`apps/api/src/notification-service.ts`, and `apps/api/src/assistant-service.ts`; routing lives in
-`apps/web/src/app.tsx`. This limitation does not change domain approval or recovery requirements.
+Known producers and contracts that must be reconciled together include:
+
+- `packages/domain/src/notification-policy.ts` and `apps/api/src/notification-service.ts`: SMS
+  composition and delivery links.
+- `apps/api/src/assistant-service.ts`: assistant context approval links.
+- `apps/api/src/routes/texting-recovery.ts` and the literal `reviewHref` schema in
+  `packages/domain/src/texting.ts`: Finance reply recovery links.
+- `apps/mcp/src/app-links.ts`, attached by `apps/mcp/src/tool-surface.ts`: assistant and default
+  MCP approval links.
+- `apps/web/src/app.tsx`: legacy redirects and the single-workspace flow host.
+
+Migration evidence must cover notification composition/delivery, assistant context, Texting schema
+and recovery route tests, MCP app-link/tool-result tests, and authenticated browser navigation.
+Tests that merely assert the old URL do not prove the destination opens the requested work.
+This limitation does not change domain approval or recovery requirements.
 
 ## Session behavior
 

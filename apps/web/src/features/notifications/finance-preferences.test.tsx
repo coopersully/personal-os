@@ -431,3 +431,73 @@ it("keeps the newest explicitly reviewed reset revision when refresh completions
     refetch.mockRestore();
   }
 });
+
+it.each([
+  "conflict",
+  "uncertain",
+] as const)("retains %s recovery while an exact reviewed replay is pending", async (outcome) => {
+  const initialError =
+    outcome === "conflict"
+      ? new ApiClientError({ status: 409, code: "conflict", message: "Changed" })
+      : new Error("Network interrupted");
+  const message =
+    outcome === "conflict"
+      ? "Another editor changed these settings. Your attempted change was rejected."
+      : "The change may have been saved. Refresh checks the current values without writing.";
+  let rejectReplay!: (error: Error) => void;
+
+  const saved = (revision: number) => ({
+    ...status,
+    preferences: [
+      { scope: "finances" as const, revision, preferences: defaultNotificationPreferences },
+    ],
+  });
+  mocks.getNotificationStatus.mockResolvedValue(saved(4));
+  const update = mocks.resetFinanceNotificationPreferences;
+  update.mockReset();
+  update.mockRejectedValueOnce(initialError).mockImplementationOnce(
+    () =>
+      new Promise((_resolve, reject) => {
+        rejectReplay = reject;
+      }),
+  );
+  render(
+    <QueryClientProvider
+      client={accountClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      })}
+    >
+      <FinanceNotificationPreferences />
+    </QueryClientProvider>,
+  );
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Use global notification preferences" }),
+  );
+
+  await screen.findByText(message);
+  mocks.getNotificationStatus.mockResolvedValue(saved(6));
+  await userEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeEnabled(),
+  );
+  expect(update).toHaveBeenCalledTimes(1);
+  expect(screen.getByText(message)).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Reapply reviewed change" }));
+  await waitFor(() => expect(update).toHaveBeenLastCalledWith({ expectedRevision: 6 }));
+  expect(screen.getByText(message)).toBeInTheDocument();
+  expect(
+    screen.queryByText(
+      "The change could not be applied. Refresh the current values before trying again.",
+    ),
+  ).not.toBeInTheDocument();
+  for (const name of ["Refresh latest settings", "Use latest settings", "Reapply reviewed change"])
+    expect(screen.getByRole("button", { name })).toBeDisabled();
+  await act(async () =>
+    rejectReplay(new ApiClientError({ status: 403, code: "forbidden", message: "Denied" })),
+  );
+  await screen.findByText(
+    "The change could not be applied. Refresh the current values before trying again.",
+  );
+  expect(screen.queryByText(message)).not.toBeInTheDocument();
+  expect(update).toHaveBeenCalledTimes(2);
+});

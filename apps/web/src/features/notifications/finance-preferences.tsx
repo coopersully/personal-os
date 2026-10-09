@@ -7,6 +7,7 @@ import { MutationFeedback } from "@/components/mutation-feedback";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
+import { classifyMutationError } from "@/lib/feedback";
 import { useFeedbackMutation } from "@/lib/use-feedback-mutation";
 import { SettingsSection } from "../settings/settings-layout";
 import {
@@ -38,7 +39,10 @@ function SessionFinanceNotificationPreferences({
 }) {
   const cache = useQueryClient();
   const current = () => sameSession(cache, session);
-  const [recovery, setRecovery] = useState<{ reviewed?: NotificationStatus }>();
+  const [recovery, setRecovery] = useState<{
+    outcome: "conflict" | "uncertain" | "rejected";
+    reviewed?: NotificationStatus;
+  }>();
   const refreshSequence = useRef(0);
   const query = useQuery({
     queryKey: ["notification-status"],
@@ -63,8 +67,18 @@ function SessionFinanceNotificationPreferences({
       if (!sameSession(cache, started)) throw new Error("Your account session changed.");
       return api.resetFinanceNotificationPreferences({ expectedRevision });
     },
-    onError: (_error, attempt) => {
-      if (sameSession(cache, attempt.session)) setRecovery({});
+    onError: (error, attempt) => {
+      if (!sameSession(cache, attempt.session)) return;
+      const feedback = classifyMutationError(error, {
+        action: "use global Finance notification preferences",
+        safeToRetry: false,
+      });
+      setRecovery({
+        outcome:
+          feedback.kind === "conflict" || feedback.kind === "uncertain"
+            ? feedback.kind
+            : "rejected",
+      });
     },
     onSuccess: async (_saved, attempt) => {
       if (!sameSession(cache, attempt.session)) return;
@@ -100,13 +114,7 @@ function SessionFinanceNotificationPreferences({
             <FinanceNotificationPreferenceSummary status={recovery.reviewed} />
           ) : null}
           <SettingsSaveRecovery
-            outcome={
-              reset.feedback?.kind === "conflict"
-                ? "conflict"
-                : reset.feedback?.kind === "uncertain"
-                  ? "uncertain"
-                  : "rejected"
-            }
+            outcome={recovery.outcome}
             title="Finance notification reset has not been confirmed."
             pending={query.isFetching || reset.isPending || !canEdit}
             reviewed={!!recovery.reviewed}
@@ -122,7 +130,7 @@ function SessionFinanceNotificationPreferences({
             onRefresh={async () => {
               if (!current()) return;
               const sequence = ++refreshSequence.current;
-              setRecovery({});
+              setRecovery({ outcome: recovery.outcome });
               const latest = await query.refetch();
               if (
                 sequence === refreshSequence.current &&
@@ -130,7 +138,7 @@ function SessionFinanceNotificationPreferences({
                 !latest.isError &&
                 latest.data
               )
-                setRecovery({ reviewed: latest.data });
+                setRecovery({ outcome: recovery.outcome, reviewed: latest.data });
             }}
             onAccept={() => {
               if (!current()) return;

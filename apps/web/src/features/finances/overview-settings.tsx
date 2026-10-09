@@ -64,7 +64,7 @@ function OverviewSettings() {
     <WorkspacePreferenceRecovery
       workspace="finances"
       formatValue={formatValue}
-      unavailable={!accounts}
+      unavailable={!!recoveryScope && !accounts}
     />
   );
   const disabled =

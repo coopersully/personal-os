@@ -95,7 +95,7 @@ test("two editors retain attempted workspace values and explicitly recover repea
     expect((await firstAgain).ok()).toBeTruthy();
     await second.getByRole("button", { name: "Reapply reviewed change" }).click();
     await expect(second.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
-    expect(secondWrites).toBe(2);
+    await expect.poll(() => secondWrites).toBe(2);
     await expect(second.getByText("Your change: day")).toBeVisible();
     await second.getByRole("button", { name: "Refresh latest settings" }).click();
     await expect(second.getByRole("button", { name: "Reapply reviewed change" })).toBeEnabled();

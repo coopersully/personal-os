@@ -13,6 +13,7 @@ import {
 } from "../../components/ui/card.js";
 import { Field, FieldContent, FieldDescription, FieldLabel } from "../../components/ui/field.js";
 import { Switch } from "../../components/ui/switch.js";
+import { classifyMutationError } from "../../lib/feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import {
   type PreferenceSession,
@@ -40,6 +41,7 @@ function SessionExecutionPolicySettingsCard({ session }: { session: PreferenceSe
   const refreshSequence = useRef(0);
   const [recovery, setRecovery] = useState<{
     attempted: boolean;
+    outcome: "conflict" | "uncertain" | "rejected";
     reviewed?: ExecutionPolicySettings;
   }>();
   const settings = useQuery({
@@ -67,9 +69,20 @@ function SessionExecutionPolicySettingsCard({ session }: { session: PreferenceSe
         reviewBypassEnabled,
       });
     },
-    onError: (_error, attempt, context) => {
+    onError: (error, attempt, context) => {
       if (!sameSession(queryClient, attempt.session)) return;
-      setRecovery({ attempted: attempt.reviewBypassEnabled });
+      const feedback = classifyMutationError(error, {
+        action: "save agent review policy",
+        safeToRetry: false,
+        form: false,
+      });
+      setRecovery({
+        attempted: attempt.reviewBypassEnabled,
+        outcome:
+          feedback.kind === "conflict" || feedback.kind === "uncertain"
+            ? feedback.kind
+            : "rejected",
+      });
       if (context?.previous) queryClient.setQueryData(queryKey, context.previous);
     },
     onMutate: async ({ reviewBypassEnabled, session: started }) => {
@@ -106,13 +119,7 @@ function SessionExecutionPolicySettingsCard({ session }: { session: PreferenceSe
         {!recovery ? <MutationFeedback feedback={update.feedback} /> : null}
         {recovery ? (
           <SettingsSaveRecovery
-            outcome={
-              update.feedback?.kind === "conflict"
-                ? "conflict"
-                : update.feedback?.kind === "uncertain"
-                  ? "uncertain"
-                  : "rejected"
-            }
+            outcome={recovery.outcome}
             title="Agent review policy change has not been confirmed."
             pending={settings.isFetching || update.isPending}
             reviewed={!!recovery.reviewed}
@@ -126,7 +133,7 @@ function SessionExecutionPolicySettingsCard({ session }: { session: PreferenceSe
             onRefresh={async () => {
               if (!current()) return;
               const sequence = ++refreshSequence.current;
-              setRecovery({ attempted: recovery.attempted });
+              setRecovery({ attempted: recovery.attempted, outcome: recovery.outcome });
               const latest = await settings.refetch();
               if (
                 sequence === refreshSequence.current &&
@@ -134,7 +141,11 @@ function SessionExecutionPolicySettingsCard({ session }: { session: PreferenceSe
                 !latest.isError &&
                 latest.data
               )
-                setRecovery({ attempted: recovery.attempted, reviewed: latest.data });
+                setRecovery({
+                  attempted: recovery.attempted,
+                  outcome: recovery.outcome,
+                  reviewed: latest.data,
+                });
             }}
             onAccept={() => {
               if (!current()) return;

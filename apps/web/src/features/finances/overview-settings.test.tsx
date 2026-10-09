@@ -25,7 +25,13 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
-function OtherWriter({ transactionView = false }: { transactionView?: boolean }) {
+function OtherWriter({
+  transactionView = false,
+  mixed = false,
+}: {
+  transactionView?: boolean;
+  mixed?: boolean;
+}) {
   const save = useSaveWorkspacePreferences("finances");
   const preferences = useWorkspacePreferences("finances");
   return (
@@ -33,14 +39,20 @@ function OtherWriter({ transactionView = false }: { transactionView?: boolean })
       type="button"
       disabled={!preferences.isSuccess}
       onClick={() =>
-        save.mutate(transactionView ? { financeTransactionView: "cards" } : { cashAccountIds: [] })
+        save.mutate(
+          mixed
+            ? { financeTransactionView: "cards", cashAccountIds: [] }
+            : transactionView
+              ? { financeTransactionView: "cards" }
+              : { cashAccountIds: [] },
+        )
       }
     >
       Other writer
     </button>
   );
 }
-function mount(otherWriter = false, transactionView = false) {
+function mount(otherWriter = false, transactionView = false, mixed = false) {
   const cache = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -48,7 +60,7 @@ function mount(otherWriter = false, transactionView = false) {
   render(
     <QueryClientProvider client={cache}>
       <MemoryRouter>
-        {otherWriter ? <OtherWriter transactionView={transactionView} /> : null}
+        {otherWriter ? <OtherWriter transactionView={transactionView} mixed={mixed} /> : null}
         <FinanceOverviewSettings />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -209,5 +221,79 @@ it("keeps non-account preference recovery visible without offering an unrelated 
     "/settings?section=finances",
   );
   expect(screen.getByRole("button", { name: "Refresh latest settings" })).toBeEnabled();
+  expect(update).toHaveBeenCalledTimes(1);
+});
+
+it("replays a non-account cross-hook intent with unavailable account names without enabling account selection", async () => {
+  vi.spyOn(api, "getFinanceConfiguration").mockResolvedValue({
+    ...configuration(),
+    accounts: { state: "unavailable" },
+  } as unknown as FinanceConfiguration);
+  const get = vi
+    .spyOn(api, "getWorkspaceSettings")
+    .mockResolvedValue(resolveWorkspaceSettings("finances", { revision: 2 }));
+  const update = vi
+    .spyOn(api, "updateWorkspaceSettings")
+    .mockRejectedValueOnce(
+      new ApiClientError({ status: 409, code: "conflict", message: "Changed" }),
+    )
+    .mockResolvedValue(
+      resolveWorkspaceSettings("finances", { revision: 7, financeTransactionView: "cards" }),
+    );
+  mount(true, true);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Other writer" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Other writer" }));
+  await screen.findByText("Your change: cards");
+  await screen.findByText(/Account names are unavailable/);
+  get.mockResolvedValue(
+    resolveWorkspaceSettings("finances", {
+      revision: 6,
+      financeTransactionView: "table",
+      cashAccountIds: [],
+    }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeEnabled(),
+  );
+  expect(update).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("button", { name: "Spending account view selections" })).toBeDisabled();
+  expect(
+    screen.queryByRole("button", { name: "Review unsaved account selections" }),
+  ).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Reapply reviewed change" }));
+  await waitFor(() =>
+    expect(update).toHaveBeenLastCalledWith(
+      "finances",
+      expect.objectContaining({
+        expectedRevision: 6,
+        preferences: { financeTransactionView: "cards" },
+      }),
+    ),
+  );
+});
+
+it.each([
+  false,
+  true,
+])("keeps unavailable account names blocking account recovery (mixed: %s)", async (mixed) => {
+  vi.spyOn(api, "getFinanceConfiguration").mockResolvedValue({
+    accounts: { state: "unavailable" },
+  } as unknown as FinanceConfiguration);
+  const get = vi
+    .spyOn(api, "getWorkspaceSettings")
+    .mockResolvedValue(resolveWorkspaceSettings("finances", { revision: 2 }));
+  const update = vi
+    .spyOn(api, "updateWorkspaceSettings")
+    .mockRejectedValue(new ApiClientError({ status: 409, code: "conflict", message: "Changed" }));
+  mount(true, false, mixed);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Other writer" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Other writer" }));
+  await screen.findByText("Your change: None selected");
+  get.mockResolvedValue(resolveWorkspaceSettings("finances", { revision: 6 }));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  await screen.findByText("Latest: All eligible accounts (including newly added accounts)");
+  expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Spending account view selections" })).toBeDisabled();
   expect(update).toHaveBeenCalledTimes(1);
 });

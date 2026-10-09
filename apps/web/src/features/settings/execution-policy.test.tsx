@@ -290,3 +290,71 @@ it("preserves the newest reviewed account-policy version when an older refresh c
   );
   expect(screen.getByText("Your change: Enabled")).toBeVisible();
 });
+
+it.each([
+  "conflict",
+  "uncertain",
+] as const)("retains %s recovery while an exact reviewed replay is pending", async (outcome) => {
+  const initialError =
+    outcome === "conflict"
+      ? new ApiClientError({ status: 409, code: "conflict", message: "Changed" })
+      : new Error("Network interrupted");
+  const message =
+    outcome === "conflict"
+      ? "Another editor changed these settings. Your attempted change was rejected."
+      : "The change may have been saved. Refresh checks the current values without writing.";
+  let rejectReplay!: (error: Error) => void;
+
+  const get = vi
+    .spyOn(api, "getExecutionPolicySettings")
+    .mockResolvedValue({ reviewBypassEnabled: false, version: 4 });
+  const update = vi
+    .spyOn(api, "updateExecutionPolicySettings")
+    .mockRejectedValueOnce(initialError)
+    .mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectReplay = reject;
+        }),
+    );
+  render(
+    <QueryClientProvider
+      client={accountClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      })}
+    >
+      <ExecutionPolicySettingsCard />
+    </QueryClientProvider>,
+  );
+  await waitFor(() => expect(screen.getByRole("switch")).toBeEnabled());
+  await userEvent.click(screen.getByRole("switch"));
+
+  await screen.findByText(message);
+  get.mockResolvedValue({ reviewBypassEnabled: false, version: 6 });
+  await userEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeEnabled(),
+  );
+  expect(update).toHaveBeenCalledTimes(1);
+  expect(screen.getByText(message)).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Reapply reviewed change" }));
+  await waitFor(() =>
+    expect(update).toHaveBeenLastCalledWith({ reviewBypassEnabled: true, expectedVersion: 6 }),
+  );
+  expect(screen.getByText(message)).toBeInTheDocument();
+  expect(
+    screen.queryByText(
+      "The change could not be applied. Refresh the current values before trying again.",
+    ),
+  ).not.toBeInTheDocument();
+  for (const name of ["Refresh latest settings", "Use latest settings", "Reapply reviewed change"])
+    expect(screen.getByRole("button", { name })).toBeDisabled();
+  await act(async () =>
+    rejectReplay(new ApiClientError({ status: 403, code: "forbidden", message: "Denied" })),
+  );
+  await screen.findByText(
+    "The change could not be applied. Refresh the current values before trying again.",
+  );
+  expect(screen.queryByText(message)).not.toBeInTheDocument();
+  expect(update).toHaveBeenCalledTimes(2);
+});

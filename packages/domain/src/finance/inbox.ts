@@ -61,11 +61,14 @@ export type FinanceReviewHistoryQuery = z.infer<typeof financeReviewHistoryQuery
 export type FinanceReviewHistoryItem = Omit<FinanceInboxCase, "economicEventId"> & {
   economicEventId: string | null;
   resolutionProvenance: Record<string, unknown> | null;
+  archived?: boolean;
+  retainedQuestions?: Record<string, unknown>[];
+  retainedAnswers?: Record<string, unknown>[];
 };
 export type FinanceReviewHistorySummary = Pick<
   FinanceInboxCase,
   "context" | "firstSeenAt" | "id" | "reason" | "resolvedAt" | "status"
-> & { transactionId: string };
+> & { transactionId: string; archived?: boolean };
 export type FinanceReviewHistoryPage = {
   items: FinanceReviewHistorySummary[];
   nextCursor: string | null;

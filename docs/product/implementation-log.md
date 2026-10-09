@@ -751,3 +751,5 @@ See [review interaction standards](../design/pages/reviews.md).
 - Preserved account-wide policy, versioned Finance facts/budgets, source semantics, and transient
   URL/device state boundaries. Validation evidence is recorded with the change, not implied by this
   entry as a production deployment claim.
+
+Finance review deletion retention: source transaction and account removal preserves owner-scoped read-only review, contextual questions, answers, exact evidence and outcome snapshots. User deletion erases the retained archive. Historical source links are unavailable after source removal.

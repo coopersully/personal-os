@@ -3007,6 +3007,26 @@ export const financeReviewCases = pgTable(
   ],
 );
 
+/** Read-only evidence retained when a source transaction or account is removed. */
+export const financeReviewArchives = pgTable(
+  "finance_review_archives",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull(),
+    snapshot: jsonb("snapshot").$type<Record<string, unknown>>().notNull(),
+    context: jsonb("context").$type<Record<string, unknown>>().notNull(),
+    questions: jsonb("questions").$type<Record<string, unknown>[]>().notNull(),
+    answers: jsonb("answers").$type<Record<string, unknown>[]>().notNull(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("finance_review_archives_owner_cursor_idx").on(table.userId, table.firstSeenAt, table.id),
+  ],
+);
+
 /** Retained historical protocol evidence; live execution uses workspaceMaintenanceRuns. */
 export const financeMaintenanceRuns = pgTable(
   "finance_maintenance_runs",

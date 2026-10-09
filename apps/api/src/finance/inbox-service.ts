@@ -4,6 +4,7 @@ import {
   financeCategories,
   financeClassificationDecisions,
   financeEventTransactions,
+  financeReviewArchives,
   financeReviewCases,
   financeTransactionRelationships,
   financeTransactionRevisions,
@@ -72,6 +73,22 @@ function caseValue(row: typeof financeReviewCases.$inferSelect): FinanceInboxCas
     stableKey: row.stableKey,
     status: row.status,
   };
+}
+
+function archivedReviewRow(
+  snapshot: Record<string, unknown>,
+): typeof financeReviewCases.$inferSelect {
+  const row = Object.fromEntries(
+    Object.entries(snapshot).map(([key, value]) => [
+      key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()),
+      value,
+    ]),
+  );
+  row.impactAmount = snapshot.impact_amount_cents;
+  for (const key of ["firstSeenAt", "lastSeenAt", "resolvedAt", "createdAt", "updatedAt"])
+    if (typeof row[key] === "string") row[key] = new Date(row[key] as string);
+  row.contextualRevision = BigInt(String(snapshot.contextual_revision));
+  return row as typeof financeReviewCases.$inferSelect;
 }
 
 function historyValue(
@@ -315,41 +332,42 @@ export function createInboxService({ db, now }: Options) {
 
     async listFinanceReviewHistory(userId: string, rawQuery: unknown) {
       const query = financeReviewHistoryQuerySchema.parse(rawQuery);
+      // Both sides preserve PostgreSQL microseconds and the original case identity.
+      const rows = await db.execute<{
+        id: string;
+        snapshot: Record<string, unknown>;
+        context: FinanceInboxCase["context"] | null;
+        archived: boolean;
+      }>(sql`
+        WITH history AS (
+          SELECT id,user_id,first_seen_at,to_jsonb(r) AS snapshot,NULL::jsonb AS context,false AS archived FROM finance_review_cases r WHERE user_id=${userId}::uuid
+          UNION ALL
+          SELECT id,user_id,first_seen_at,snapshot,context,true FROM finance_review_archives WHERE user_id=${userId}::uuid
+        )
+        SELECT id,snapshot,context,archived FROM history
+        WHERE ${query.cursor ? sql`(first_seen_at,id) < (SELECT first_seen_at,id FROM history WHERE id=${query.cursor}::uuid)` : sql`true`}
+        ORDER BY first_seen_at DESC,id DESC LIMIT ${query.limit + 1}
+      `);
       if (query.cursor) {
-        const [anchor] = await db
-          .select({ id: financeReviewCases.id })
-          .from(financeReviewCases)
-          .where(
-            and(eq(financeReviewCases.userId, userId), eq(financeReviewCases.id, query.cursor)),
-          )
-          .limit(1);
-        if (!anchor) throw new AppError("invalid_request", "Review history cursor is unavailable.");
+        const anchor = await db.execute(
+          sql`SELECT id FROM finance_review_cases WHERE user_id=${userId}::uuid AND id=${query.cursor}::uuid UNION ALL SELECT id FROM finance_review_archives WHERE user_id=${userId}::uuid AND id=${query.cursor}::uuid`,
+        );
+        if (!anchor.rows.length)
+          throw new AppError("invalid_request", "Review history cursor is unavailable.");
       }
-      // Compare against the stored anchor timestamp inside PostgreSQL. A JS Date would
-      // truncate microseconds and could skip rows created within the same millisecond.
-      const afterCursor = query.cursor
-        ? sql`(${financeReviewCases.firstSeenAt}, ${financeReviewCases.id}) <
-            (SELECT first_seen_at, id FROM finance_review_cases
-             WHERE user_id = ${userId}::uuid AND id = ${query.cursor}::uuid)`
-        : undefined;
-      const rows = await db
-        .select({
-          firstSeenAt: financeReviewCases.firstSeenAt,
-          id: financeReviewCases.id,
-          reasonCode: financeReviewCases.reasonCode,
-          resolvedAt: financeReviewCases.resolvedAt,
-          status: financeReviewCases.status,
-          transactionId: financeReviewCases.transactionId,
-        })
-        .from(financeReviewCases)
-        .where(and(eq(financeReviewCases.userId, userId), afterCursor))
-        .orderBy(desc(financeReviewCases.firstSeenAt), desc(financeReviewCases.id))
-        .limit(query.limit + 1);
-      const page = rows.slice(0, query.limit);
-      const contexts = await transactionContexts(userId, page, db);
+      const page = rows.rows.slice(0, query.limit);
+      const hydrated = page.map((entry) => ({ ...entry, row: archivedReviewRow(entry.snapshot) }));
+      const contexts = await transactionContexts(
+        userId,
+        hydrated.filter((e) => !e.archived).map((e) => e.row),
+        db,
+      );
       return {
-        items: page.map((row) => historySummary(row, contexts.get(row.transactionId))),
-        nextCursor: rows.length > query.limit ? (page.at(-1)?.id ?? null) : null,
+        items: hydrated.map((entry) => ({
+          ...historySummary(entry.row, entry.context ?? contexts.get(entry.row.transactionId)),
+          archived: entry.archived,
+        })),
+        nextCursor: rows.rows.length > query.limit ? (page.at(-1)?.id ?? null) : null,
       };
     },
 
@@ -359,9 +377,25 @@ export function createInboxService({ db, now }: Options) {
         .from(financeReviewCases)
         .where(and(eq(financeReviewCases.userId, userId), eq(financeReviewCases.id, id)))
         .limit(1);
-      if (!row) throw new AppError("not_found", "Finance review not found.");
-      const contexts = await transactionContexts(userId, [row], db);
-      return historyValue(row, contexts.get(row.transactionId));
+      if (row) {
+        const contexts = await transactionContexts(userId, [row], db);
+        return { ...historyValue(row, contexts.get(row.transactionId)), archived: false };
+      }
+      const [archive] = await db
+        .select()
+        .from(financeReviewArchives)
+        .where(and(eq(financeReviewArchives.userId, userId), eq(financeReviewArchives.id, id)))
+        .limit(1);
+      if (!archive) throw new AppError("not_found", "Finance review not found.");
+      return {
+        ...historyValue(
+          archivedReviewRow(archive.snapshot),
+          archive.context as NonNullable<FinanceInboxCase["context"]>,
+        ),
+        archived: true,
+        retainedQuestions: archive.questions,
+        retainedAnswers: archive.answers,
+      };
     },
 
     async answerFinanceReview(

@@ -6,8 +6,11 @@ import {
   financeAccounts,
   financeCategories,
   financeCategoryRules,
+  financeContextualAnswers,
+  financeContextualQuestions,
   financeEconomicEvents,
   financeProfileVersions,
+  financeReviewArchives,
   financeReviewCases,
   financeTransactions,
   migrateDatabase,
@@ -319,6 +322,94 @@ describe.sequential("transaction-backed Finance Inbox", () => {
       service.listFinanceReviewHistory(historyUserId, { cursor: "not-a-uuid" }),
     ).rejects.toThrow();
     await expect(service.listFinanceReviewHistory(historyUserId, { limit: 51 })).rejects.toThrow();
+    await database.db.insert(financeContextualQuestions).values({
+      id: randomUUID(),
+      userId: historyUserId,
+      subtype: "manual_transaction_purpose_v1",
+      reviewCaseId: ids[0],
+      transactionId: transactions[0].id,
+      accountId: accounts[0].id,
+      accountRevision: accounts[0].contextualRevision,
+      transactionRevision: transactions[0].contextualRevision,
+      reviewRevision: 1n,
+      prompt: "Purpose?",
+      merchant: "History merchant",
+      amount: 1200,
+      transactionDate: "2026-10-07",
+      state: "answered",
+      workRevision: 2n,
+    });
+    const [question] = await database.db
+      .select()
+      .from(financeContextualQuestions)
+      .where(eq(financeContextualQuestions.userId, historyUserId));
+    if (!question) throw new Error("Missing retained question fixture");
+    await database.db.insert(financeContextualAnswers).values({
+      userId: historyUserId,
+      questionId: question.id,
+      operationId: randomUUID(),
+      answeredWorkRevision: 1n,
+      answeredActionRevision: 1n,
+      resultingWorkRevision: 2n,
+      text: "For groceries",
+      sourceKind: "app",
+      actorType: "user",
+      actorId: historyUserId,
+      requestId: "retention-test",
+      recordedAt: new Date(),
+    });
+    await database.db
+      .delete(financeTransactions)
+      .where(eq(financeTransactions.id, transactions[0].id));
+    const retained = await service.getFinanceReviewHistoryItem(historyUserId, ids[0]);
+    expect(retained).toMatchObject({
+      archived: true,
+      evidence: { source: "first" },
+      context: { merchant: "History merchant" },
+      retainedAnswers: [{ text: "For groceries" }],
+      retainedQuestions: [{ prompt: "Purpose?" }],
+    });
+    expect(
+      (await service.listFinanceReviewHistory(historyUserId, { limit: 2 })).items.map(
+        (item) => item.id,
+      ),
+    ).toEqual(tiedIds);
+    expect(
+      (
+        await service.listFinanceReviewHistory(historyUserId, {
+          cursor: first.nextCursor,
+          limit: 2,
+        })
+      ).items.map((item) => item.id),
+    ).toEqual([ids[2]]);
+    await expect(service.getFinanceReviewHistoryItem(otherUser.id, ids[0])).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await expect(
+      database.db
+        .update(financeReviewArchives)
+        .set({ context: {} })
+        .where(eq(financeReviewArchives.id, ids[0])),
+    ).rejects.toThrow();
+    await database.db.delete(financeAccounts).where(eq(financeAccounts.id, accounts[1].id));
+    expect(await service.getFinanceReviewHistoryItem(otherUser.id, foreignId)).toMatchObject({
+      archived: true,
+      evidence: { private: "Do not disclose" },
+    });
+    await database.db.delete(users).where(eq(users.id, otherUser.id));
+    expect(
+      await database.db
+        .select()
+        .from(financeReviewArchives)
+        .where(eq(financeReviewArchives.userId, otherUser.id)),
+    ).toEqual([]);
+    await database.db.delete(users).where(eq(users.id, historyUserId));
+    expect(
+      await database.db
+        .select()
+        .from(financeReviewArchives)
+        .where(eq(financeReviewArchives.userId, historyUserId)),
+    ).toEqual([]);
   });
 
   it("keeps clarification open, then classifies with trusted agent provenance", async () => {
@@ -466,7 +557,26 @@ describe.sequential("transaction-backed Finance Inbox", () => {
       },
       requestId: "concurrent-clarification",
     });
-    const attempts = await Promise.allSettled(
+    // Hold the case until both requests have observed the same resolution. Scheduling alone
+    // cannot prove a race: two genuinely sequential clarifications may both be valid.
+    let release: () => void = () => {};
+    let held: () => void = () => {};
+    const barrier = new Promise<void>((resolve) => {
+      held = resolve;
+    });
+    const blocker = database.db.transaction(async (tx) => {
+      await tx
+        .select()
+        .from(financeReviewCases)
+        .where(eq(financeReviewCases.id, review.id))
+        .for("update");
+      held();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    });
+    await barrier;
+    const pendingAttempts = Promise.allSettled(
       ["first note", "second note"].map((answer, index) =>
         service.answerFinanceReview(
           review.id,
@@ -479,6 +589,21 @@ describe.sequential("transaction-backed Finance Inbox", () => {
         ),
       ),
     );
+    try {
+      await vi.waitFor(
+        async () => {
+          const blocked = await database.pool.query(
+            "SELECT count(*)::int AS count FROM pg_stat_activity WHERE query LIKE '%update \"finance_review_cases\"%' AND cardinality(pg_blocking_pids(pid))>0",
+          );
+          expect(blocked.rows[0]?.count).toBe(2);
+        },
+        { timeout: 5000 },
+      );
+    } finally {
+      release();
+    }
+    await blocker;
+    const attempts = await pendingAttempts;
     expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
     expect(attempts.filter((attempt) => attempt.status === "rejected")).toHaveLength(1);
   });

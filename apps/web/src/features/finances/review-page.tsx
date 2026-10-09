@@ -352,7 +352,12 @@ function FinanceReviewHistory() {
             <div className="grid gap-3 text-sm">
               <p>{detail.data.prompt ?? detail.data.reason.replaceAll("_", " ")}</p>
               <p>Status: {detail.data.status}</p>
-              {detail.data.transactionId ? (
+              {detail.data.archived ? (
+                <p className="text-sm text-muted-foreground">
+                  Source removed. This review is retained as read-only history.
+                </p>
+              ) : null}
+              {detail.data.transactionId && !detail.data.archived ? (
                 <Link
                   className="underline underline-offset-4"
                   to={`/finances/transactions?transactionId=${encodeURIComponent(detail.data.transactionId)}`}

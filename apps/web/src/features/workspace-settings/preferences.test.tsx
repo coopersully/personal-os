@@ -138,3 +138,54 @@ it("does not rebase a queued local edit over a remote write after its predecesso
   expect(settings.preferences.taskSort).toBe("title");
   expect(settings.preferences.taskRowDetails).toEqual(["notes"]);
 });
+
+it("retains attempted values across refresh failure and uses only the explicitly reviewed revision", async () => {
+  let settings = resolveWorkspaceSettings("tasks");
+  const read = vi.spyOn(api, "getWorkspaceSettings").mockImplementation(async () => settings);
+  const update = vi.spyOn(api, "updateWorkspaceSettings").mockRejectedValue(new Error("Changed"));
+  const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  cache.setQueryData(["workspace-settings", "tasks"], settings);
+  const hook = renderHook(() => useSaveWorkspacePreferences("tasks"), {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={cache}>{children}</QueryClientProvider>
+    ),
+  });
+  act(() => hook.result.current.mutate({ taskSort: "priority" }));
+  await waitFor(() =>
+    expect(hook.result.current.recovery?.attempted).toEqual({ taskSort: "priority" }),
+  );
+  await waitFor(() => expect(cache.isFetching()).toBe(0));
+  read.mockRejectedValueOnce(new Error("Offline"));
+  await act(async () => {
+    await hook.result.current.refreshRecovery();
+  });
+  expect(hook.result.current.recovery?.reviewed).toBeUndefined();
+  act(() => hook.result.current.reapplyReviewed());
+  expect(update).toHaveBeenCalledTimes(1);
+  settings = resolveWorkspaceSettings("tasks", { revision: 4, taskSort: "title" });
+  await act(async () => {
+    await hook.result.current.refreshRecovery();
+  });
+  expect(update).toHaveBeenCalledTimes(1);
+  // A later remote change must not become an unseen revision for reapply.
+  settings = resolveWorkspaceSettings("tasks", { revision: 5, taskSort: "date" });
+  act(() => hook.result.current.reapplyReviewed());
+  await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+  expect(update).toHaveBeenLastCalledWith("tasks", {
+    expectedRevision: 4,
+    preferences: { taskSort: "priority" },
+  });
+  await waitFor(() => expect(hook.result.current.recovery?.reviewed).toBeUndefined());
+  await act(async () => {
+    await hook.result.current.refreshRecovery();
+  });
+  update.mockResolvedValue(
+    resolveWorkspaceSettings("tasks", { revision: 6, taskSort: "priority" }),
+  );
+  act(() => hook.result.current.reapplyReviewed());
+  await waitFor(() => expect(hook.result.current.recovery).toBeUndefined());
+  expect(update).toHaveBeenLastCalledWith("tasks", {
+    expectedRevision: 5,
+    preferences: { taskSort: "priority" },
+  });
+});

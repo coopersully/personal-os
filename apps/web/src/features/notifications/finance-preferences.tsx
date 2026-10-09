@@ -1,5 +1,6 @@
 import { defaultNotificationPreferences, type NotificationStatus } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { api } from "@/api";
 import { QueryFeedback } from "@/components/async-state";
 import { MutationFeedback } from "@/components/mutation-feedback";
@@ -8,10 +9,12 @@ import { Button } from "@/components/ui/button";
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
 import { useFeedbackMutation } from "@/lib/use-feedback-mutation";
 import { SettingsSection } from "../settings/settings-layout";
+import { SettingsSaveRecovery } from "../workspace-settings/save-recovery";
 
 /** Mount only with both Finance and Texting access, matching the notification status API. */
 export function FinanceNotificationPreferences({ canEdit = true }: { canEdit?: boolean }) {
   const cache = useQueryClient();
+  const [recovery, setRecovery] = useState<{ reviewed?: NotificationStatus }>();
   const query = useQuery({
     queryKey: ["notification-status"],
     queryFn: () => api.getNotificationStatus(),
@@ -21,7 +24,9 @@ export function FinanceNotificationPreferences({ canEdit = true }: { canEdit?: b
     feedback: { action: "use global Finance notification preferences", safeToRetry: false },
     mutationFn: (expectedRevision: number) =>
       api.resetFinanceNotificationPreferences({ expectedRevision }),
+    onError: () => setRecovery({}),
     onSuccess: async () => {
+      setRecovery(undefined);
       cache.setQueryData<NotificationStatus>(["notification-status"], (current) =>
         current
           ? {
@@ -39,30 +44,66 @@ export function FinanceNotificationPreferences({ canEdit = true }: { canEdit?: b
   return (
     <SettingsSection
       title="Finance text notifications"
-      description="SMS preferences for Finance reviews. Delivery also depends on Texting consent and readiness."
+      description="Reset removes the Finance override and uses global preferences, or product defaults when global is unconfigured. The global message-detail limit still applies. Delivery depends on Texting consent and readiness."
     >
       <QueryFeedback query={query} title="Couldn’t load Finance notification preferences." />
       {query.isPending ? <p>Loading notification preferences…</p> : null}
-      {query.data ? <FinanceNotificationPreferenceSummary status={query.data} /> : null}
-      <MutationFeedback feedback={reset.feedback} />
-      {reset.isError ? (
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={query.isFetching}
-          onClick={async () => {
-            const latest = await query.refetch();
-            if (!latest.isError) reset.reset();
-          }}
-        >
-          Reload notification preferences
-        </Button>
+      {query.data && !recovery?.reviewed ? (
+        <FinanceNotificationPreferenceSummary status={query.data} />
+      ) : null}
+      {!recovery ? <MutationFeedback feedback={reset.feedback} /> : null}
+      {recovery ? (
+        <>
+          {recovery.reviewed ? (
+            <FinanceNotificationPreferenceSummary status={recovery.reviewed} />
+          ) : null}
+          <SettingsSaveRecovery
+            outcome={
+              reset.feedback?.kind === "conflict"
+                ? "conflict"
+                : reset.feedback?.kind === "uncertain"
+                  ? "uncertain"
+                  : "rejected"
+            }
+            title="Finance notification reset has not been confirmed."
+            pending={query.isFetching || reset.isPending || !canEdit}
+            reviewed={!!recovery.reviewed}
+            rows={[
+              {
+                label: "Finance notification source",
+                attempted: "Use global preferences (product defaults when global is unconfigured)",
+                current: recovery.reviewed?.preferences.some((row) => row.scope === "finances")
+                  ? "Finance override — values shown above"
+                  : "Already using global preferences",
+              },
+            ]}
+            onRefresh={async () => {
+              setRecovery({});
+              const latest = await query.refetch();
+              if (!latest.isError && latest.data) setRecovery({ reviewed: latest.data });
+            }}
+            onAccept={() => {
+              setRecovery(undefined);
+              reset.reset();
+            }}
+            onReapply={() => {
+              const latestOverride = recovery.reviewed?.preferences.find(
+                (row) => row.scope === "finances",
+              );
+              if (latestOverride) reset.mutate(latestOverride.revision);
+              else {
+                setRecovery(undefined);
+                reset.reset();
+              }
+            }}
+          />
+        </>
       ) : null}
       {override && canEdit ? (
         <Button
           type="button"
           variant="secondary"
-          disabled={reset.isPending}
+          disabled={reset.isPending || !!recovery}
           onClick={() => reset.mutate(override.revision)}
         >
           {reset.isPending ? "Resetting…" : "Use global notification preferences"}

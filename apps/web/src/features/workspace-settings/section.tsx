@@ -15,24 +15,65 @@ import { Switch } from "@/components/ui/switch";
 import { SettingsSection } from "../settings/settings-layout";
 import { listAllTaskLists } from "../tasks/page";
 import { useSaveWorkspacePreferences, useWorkspacePreferences } from "./preferences";
+import { SettingsSaveRecovery } from "./save-recovery";
+
+function preferenceLabel(value: unknown, key: string): string {
+  if (value === null)
+    return key === "defaultCaptureListId"
+      ? "Inbox (product default)"
+      : "All eligible accounts (including newly added accounts)";
+  if (typeof value === "boolean") return value ? "Enabled" : "Disabled";
+  if (Array.isArray(value)) return value.length ? value.join(", ") : "None selected";
+  return String(value ?? "Unavailable").replaceAll("_", " ");
+}
 
 type Save<W extends Workspace> = ReturnType<typeof useSaveWorkspacePreferences<W>>;
 function PreferenceSection<W extends Workspace>({
   workspace,
   children,
+  formatValue = preferenceLabel,
 }: {
   workspace: W;
+  formatValue?: (value: unknown, key: string) => string;
   children: (values: WorkspacePreferences<W>, save: Save<W>, disabled: boolean) => ReactNode;
 }) {
   const query = useWorkspacePreferences(workspace);
   const save = useSaveWorkspacePreferences(workspace);
   const values = (query.data?.preferences ??
     getDefaultWorkspacePreferences(workspace)) as WorkspacePreferences<W>;
-  const disabled = !query.isSuccess || save.isPending;
+  const disabled = !query.isSuccess || save.isPending || !!save.recovery;
   return (
     <SettingsSection title="Workspace preferences">
       <QueryFeedback query={query} title="Couldn’t load preferences." />
-      <MutationFeedback feedback={save.feedback} />
+      {!save.recovery ? <MutationFeedback feedback={save.feedback} /> : null}
+      <p className="text-sm text-muted-foreground">
+        Unconfigured preferences use this workspace’s product defaults.
+      </p>
+      {save.recovery ? (
+        <SettingsSaveRecovery
+          outcome={
+            save.feedback?.kind === "conflict"
+              ? "conflict"
+              : save.feedback?.kind === "uncertain"
+                ? "uncertain"
+                : "rejected"
+          }
+          title="Workspace preference change has not been confirmed."
+          pending={query.isFetching || save.isPending}
+          reviewed={!!save.recovery.reviewed}
+          rows={Object.entries(save.recovery.attempted).map(([key, value]) => ({
+            label: key.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase()),
+            attempted: formatValue(value, key),
+            current: formatValue(
+              (save.recovery?.reviewed?.preferences as Record<string, unknown> | undefined)?.[key],
+              key,
+            ),
+          }))}
+          onRefresh={() => void save.refreshRecovery()}
+          onAccept={save.acceptLatest}
+          onReapply={save.reapplyReviewed}
+        />
+      ) : null}
       <FieldGroup>
         {children(values, save, disabled)}
         <Toggle
@@ -254,7 +295,16 @@ function MailPreferences() {
 function TasksPreferences() {
   const lists = useQuery({ queryKey: ["task-lists"], queryFn: listAllTaskLists });
   return (
-    <PreferenceSection workspace="tasks">
+    <PreferenceSection
+      workspace="tasks"
+      formatValue={(value, key) => {
+        if (key === "defaultCaptureListId" && typeof value === "string")
+          return (
+            lists.data?.items.find((list) => list.id === value)?.name ?? "Unavailable capture list"
+          );
+        return preferenceLabel(value, key);
+      }}
+    >
       {(values, save, disabled) => (
         <>
           <QueryFeedback query={lists} title="Couldn’t load capture lists." />

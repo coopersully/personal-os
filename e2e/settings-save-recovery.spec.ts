@@ -1,0 +1,97 @@
+import { expect, test } from "@playwright/test";
+
+test("two editors retain attempted workspace values and explicitly recover repeated conflicts", async ({
+  page,
+  browser,
+}, info) => {
+  test.setTimeout(90_000);
+  await page.goto("/");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  const path = "/v1/workspaces/calendar/settings";
+  const original = await (await page.request.get(path)).json();
+  const origin = new URL(page.url()).origin;
+  const seed = await page.request.patch(path, {
+    headers: { origin },
+    data: {
+      expectedRevision: original.revision,
+      preferences: { calendarView: "auto", weekStartsOn: "sunday" },
+    },
+  });
+  expect(seed.ok()).toBeTruthy();
+  const secondContext = await browser.newContext({
+    storageState: await page.context().storageState(),
+    baseURL: origin,
+    ...(info.project.use.viewport ? { viewport: info.project.use.viewport } : {}),
+    isMobile: info.project.use.isMobile ?? false,
+    hasTouch: info.project.use.hasTouch ?? false,
+  });
+  const second = await secondContext.newPage();
+  let secondWrites = 0;
+  second.on("request", (request) => {
+    if (request.method() === "PATCH" && request.url().endsWith(path)) secondWrites++;
+  });
+  try {
+    await page.goto("/settings?section=calendar");
+    await second.goto("/settings?section=calendar");
+    await expect(page.getByLabel("Preferred view")).toBeEnabled();
+    await expect(second.getByLabel("Preferred view")).toBeEnabled();
+    const firstSave = page.waitForResponse(
+      (response) => response.request().method() === "PATCH" && response.url().endsWith(path),
+    );
+    await page.getByLabel("Preferred view").selectOption("month");
+    expect((await firstSave).ok()).toBeTruthy();
+    await second.getByLabel("Preferred view").selectOption("day");
+    await expect(second.getByText("Your change: day")).toBeVisible();
+    await expect(
+      second.getByText(
+        "Another editor changed these settings. Your attempted change was rejected.",
+      ),
+    ).toBeVisible();
+    await expect(second.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
+    await second.route(`**${path}`, async (route) => {
+      if (route.request().method() === "GET") {
+        await route.abort();
+      } else await route.continue();
+    });
+    await second.getByRole("button", { name: "Refresh latest settings" }).click();
+    await expect(second.getByText("Couldn’t load preferences.")).toBeVisible();
+    await expect(second.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
+    expect(secondWrites).toBe(1);
+    await second.unroute(`**${path}`);
+    await second.getByRole("button", { name: "Refresh latest settings" }).click();
+    await expect(second.getByText("Latest: month")).toBeVisible();
+    await second.screenshot({ path: info.outputPath("reviewed-conflict.png"), fullPage: true });
+    const firstAgain = page.waitForResponse(
+      (response) => response.request().method() === "PATCH" && response.url().endsWith(path),
+    );
+    await page.getByLabel("Week starts on").selectOption("monday");
+    expect((await firstAgain).ok()).toBeTruthy();
+    await second.getByRole("button", { name: "Reapply reviewed change" }).click();
+    await expect(second.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
+    expect(secondWrites).toBe(2);
+    await expect(second.getByText("Your change: day")).toBeVisible();
+    await second.getByRole("button", { name: "Refresh latest settings" }).click();
+    await expect(second.getByRole("button", { name: "Reapply reviewed change" })).toBeEnabled();
+    await second.getByRole("button", { name: "Reapply reviewed change" }).click();
+    await expect(second.getByLabel("Preferred view")).toHaveValue("day");
+    await expect(second.getByLabel("Preferred view")).toBeEnabled();
+    expect(secondWrites).toBe(3);
+    const current = await (await page.request.get(path)).json();
+    expect(current.preferences.weekStartsOn).toBe("monday");
+    await second.screenshot({ path: info.outputPath("recovered-settings.png"), fullPage: true });
+    expect(
+      await second.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBeTruthy();
+  } finally {
+    await secondContext.close();
+    const latest = await (await page.request.get(path)).json();
+    const restored = await page.request.patch(path, {
+      headers: { origin },
+      data: { expectedRevision: latest.revision, preferences: original.preferences },
+    });
+    expect(restored.ok()).toBeTruthy();
+  }
+});

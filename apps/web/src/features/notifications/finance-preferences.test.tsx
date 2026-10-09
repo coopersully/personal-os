@@ -131,15 +131,16 @@ it("retains the override after a failed reset", async () => {
   await userEvent.click(
     await screen.findByRole("button", { name: "Use global notification preferences" }),
   );
-  await waitFor(() =>
-    expect(
-      screen.getByRole("button", { name: "Use global notification preferences" }),
-    ).toBeEnabled(),
-  );
+  expect(
+    await screen.findByText(
+      "Finance notification reset has not been confirmed. Review the latest settings before applying your change.",
+    ),
+  ).toBeInTheDocument();
   expect(screen.getByText("Overridden for Finances")).toBeInTheDocument();
   expect(
-    await screen.findByRole("button", { name: "Reload notification preferences" }),
-  ).toBeInTheDocument();
+    screen.getByRole("button", { name: "Use global notification preferences" }),
+  ).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Refresh latest settings" })).toBeEnabled();
 });
 
 it("omits reset controls without edit access", async () => {
@@ -158,4 +159,56 @@ it("omits reset controls without edit access", async () => {
   expect(
     screen.queryByRole("button", { name: "Use global notification preferences" }),
   ).not.toBeInTheDocument();
+});
+
+it("retains reset intent through read failure and repeated conflicts without resetting an unseen revision", async () => {
+  const makeStatus = (revision: number) => ({
+    ...status,
+    preferences: [
+      { scope: "finances" as const, revision, preferences: defaultNotificationPreferences },
+    ],
+  });
+  mocks.getNotificationStatus.mockResolvedValue(makeStatus(4));
+  mocks.resetFinanceNotificationPreferences.mockRejectedValue(new Error("Changed"));
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <FinanceNotificationPreferences />
+    </QueryClientProvider>,
+  );
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Use global notification preferences" }),
+  );
+  await screen.findByRole("button", { name: "Refresh latest settings" });
+  mocks.getNotificationStatus.mockRejectedValueOnce(new Error("Offline"));
+  await userEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Refresh latest settings" })).toBeEnabled(),
+  );
+  expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
+  const callsBefore = mocks.resetFinanceNotificationPreferences.mock.calls.length;
+  mocks.getNotificationStatus.mockResolvedValue(makeStatus(6));
+  await userEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeEnabled(),
+  );
+  expect(mocks.resetFinanceNotificationPreferences).toHaveBeenCalledTimes(callsBefore);
+  mocks.getNotificationStatus.mockResolvedValue(makeStatus(7));
+  await userEvent.click(screen.getByRole("button", { name: "Reapply reviewed change" }));
+  await waitFor(() =>
+    expect(mocks.resetFinanceNotificationPreferences).toHaveBeenLastCalledWith({
+      expectedRevision: 6,
+    }),
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled(),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Use latest settings" })).toBeEnabled(),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Use latest settings" }));
+  expect(mocks.resetFinanceNotificationPreferences).toHaveBeenCalledTimes(callsBefore + 1);
+  expect(screen.getByRole("button", { name: "Use global notification preferences" })).toBeEnabled();
 });

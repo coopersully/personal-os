@@ -5,6 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { useState } from "react";
 import { api } from "@/api";
 import { useFeedbackMutation } from "@/lib/use-feedback-mutation";
 
@@ -23,6 +24,7 @@ export type WorkspacePreferenceChange<W extends Workspace> =
 type SaveAttempt<W extends Workspace> = {
   change: WorkspacePreferenceChange<W>;
   observed: WorkspaceSettings<W> | undefined;
+  attempted?: Partial<WorkspacePreferences<W>>;
 };
 type SaveQueue = { pending: number; advances: Map<number, WorkspaceSettings<Workspace>> };
 const queues = new WeakMap<QueryClient, Map<Workspace, SaveQueue>>();
@@ -30,7 +32,12 @@ const queues = new WeakMap<QueryClient, Map<Workspace, SaveQueue>>();
 export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
   const cache = useQueryClient();
   // Bind the intent to what this render observed, not a later server read.
-  const observed = useWorkspacePreferences(workspace).data;
+  const query = useWorkspacePreferences(workspace);
+  const observed = query.data;
+  const [recovery, setRecovery] = useState<{
+    attempted: Partial<WorkspacePreferences<W>>;
+    reviewed?: WorkspaceSettings<W>;
+  }>();
   let workspaceQueues = queues.get(cache);
   if (!workspaceQueues) {
     workspaceQueues = new Map();
@@ -45,7 +52,8 @@ export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
   const mutation = useFeedbackMutation({
     scope: { id: `workspace-settings:${workspace}` },
     feedback: { action: "save workspace preferences", safeToRetry: false },
-    mutationFn: async ({ change, observed }: SaveAttempt<W>) => {
+    mutationFn: async (attempt: SaveAttempt<W>) => {
+      const { change, observed } = attempt;
       if (!observed) throw new Error("Load workspace preferences before saving.");
       let current = observed;
       // Only our successful queued writes can advance this observed revision.
@@ -59,6 +67,7 @@ export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
         typeof change === "function"
           ? change(current.preferences as WorkspacePreferences<W>)
           : change;
+      attempt.attempted = preferences;
       const data = await api.updateWorkspaceSettings(workspace, {
         expectedRevision: current.revision,
         preferences,
@@ -67,12 +76,14 @@ export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
       return data;
     },
     onSuccess: async (data: WorkspaceSettings<W>) => {
+      setRecovery(undefined);
       await cache.cancelQueries({ queryKey: workspaceSettingsKey(workspace) });
       cache.setQueryData(workspaceSettingsKey(workspace), data);
       if (workspace === "finances")
         void cache.invalidateQueries({ queryKey: ["finance-configuration"] });
     },
-    onError: () => {
+    onError: (_error, attempt) => {
+      if (attempt.attempted) setRecovery({ attempted: attempt.attempted });
       void cache.invalidateQueries({ queryKey: workspaceSettingsKey(workspace) });
     },
     onSettled: () => {
@@ -96,6 +107,23 @@ export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
   return {
     ...mutation,
     variables: mutation.variables?.change,
+    recovery,
+    refreshRecovery: async () => {
+      setRecovery((current) => (current ? { attempted: current.attempted } : current));
+      const latest = await query.refetch();
+      const reviewed = latest.data;
+      if (!latest.isError && reviewed)
+        setRecovery((current) => (current ? { ...current, reviewed } : current));
+    },
+    acceptLatest: () => {
+      setRecovery(undefined);
+      mutation.reset();
+    },
+    reapplyReviewed: () => {
+      if (!recovery?.reviewed) return;
+      saves.pending++;
+      mutation.mutate({ change: recovery.attempted, observed: recovery.reviewed });
+    },
     mutate: (change: WorkspacePreferenceChange<W>, caller?: Caller) => {
       saves.pending++;
       mutation.mutate({ change, observed }, callbacks(caller));

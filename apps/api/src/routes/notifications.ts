@@ -38,6 +38,7 @@ export function registerNotificationRoutes(options: {
         await notifications.resetFinancePreferences(
           context.get("principal"),
           await parseBody(context, resetFinanceNotificationPreferencesSchema),
+          context.get("requestId"),
         ),
       ),
   );
@@ -47,6 +48,7 @@ export function registerNotificationRoutes(options: {
         context.get("principal"),
         notificationScopeSchema.parse(context.req.param("scope")),
         await parseBody(context, saveNotificationPreferencesSchema),
+        context.get("requestId"),
       ),
     ),
   );

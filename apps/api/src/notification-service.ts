@@ -26,11 +26,13 @@ import {
   validateNotificationResolution,
 } from "@personal-os/domain";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import type {
   NotificationTransaction,
   NotificationWorkResolver,
 } from "./notification-work-resolver.js";
+import { assertSettingsRevision } from "./settings-save.js";
 import type { createTextingService } from "./texting-service.js";
 import type { Principal } from "./types.js";
 
@@ -96,6 +98,7 @@ export function createNotificationService(options: Options) {
       expectedRevision: number | null;
       preferences: NotificationPreferences;
     },
+    requestId = crypto.randomUUID(),
   ) {
     authorize(principal);
     if (principal.actorType !== "user")
@@ -112,8 +115,11 @@ export function createNotificationService(options: Options) {
             eq(notificationPreferences.scope, scope),
           ),
         );
-      if ((previous?.revision ?? null) !== input.expectedRevision)
-        throw new AppError("conflict", "Notification preferences changed. Reload before saving.");
+      assertSettingsRevision(
+        previous?.revision ?? null,
+        input.expectedRevision,
+        "Notification preferences changed. Reload before saving.",
+      );
       // A deleted override must not reuse an old revision when it is recreated.
       const [history] = previous
         ? []
@@ -137,25 +143,26 @@ export function createNotificationService(options: Options) {
           target: [notificationPreferences.userId, notificationPreferences.scope],
           set: { revision, preferences: value, updatedAt: now() },
         });
-      await tx.insert(auditEvents).values({
-        userId: principal.userId,
-        actorId: principal.actorId,
-        actorType: principal.actorType,
-        requestId: crypto.randomUUID(),
-        action: "notifications.preferences.updated",
-        entityType: "notification_preferences",
-        entityId: principal.userId,
-        before: previous
-          ? { scope, revision: previous.revision, preferences: previous.preferences }
-          : null,
-        after: { scope, revision, preferences: value },
-      });
+      await tx.insert(auditEvents).values(
+        auditValues({
+          principal,
+          requestId,
+          action: "notifications.preferences.updated",
+          entityType: "notification_preferences",
+          entityId: principal.userId,
+          before: previous
+            ? { scope, revision: previous.revision, preferences: previous.preferences }
+            : null,
+          after: { scope, revision, preferences: value },
+        }),
+      );
       return { scope, revision, preferences: value };
     });
   }
   async function resetFinancePreferences(
     principal: Principal,
     input: { expectedRevision: number },
+    requestId = crypto.randomUUID(),
   ) {
     authorize(principal);
     if (principal.actorType !== "user")
@@ -172,11 +179,16 @@ export function createNotificationService(options: Options) {
             eq(notificationPreferences.scope, "finances"),
           ),
         );
-      if (!previous || previous.revision !== expectedRevision)
+      if (!previous)
         throw new AppError(
           "conflict",
           "Notification preferences changed. Reload before resetting.",
         );
+      assertSettingsRevision(
+        previous.revision,
+        expectedRevision,
+        "Notification preferences changed. Reload before resetting.",
+      );
       await tx
         .delete(notificationPreferences)
         .where(
@@ -185,21 +197,21 @@ export function createNotificationService(options: Options) {
             eq(notificationPreferences.scope, "finances"),
           ),
         );
-      await tx.insert(auditEvents).values({
-        userId: principal.userId,
-        actorId: principal.actorId,
-        actorType: principal.actorType,
-        requestId: crypto.randomUUID(),
-        action: "notifications.preferences.reset",
-        entityType: "notification_preferences",
-        entityId: principal.userId,
-        before: {
-          scope: "finances",
-          revision: previous.revision,
-          preferences: previous.preferences,
-        },
-        after: { scope: "finances", inherited: true },
-      });
+      await tx.insert(auditEvents).values(
+        auditValues({
+          principal,
+          requestId,
+          action: "notifications.preferences.reset",
+          entityType: "notification_preferences",
+          entityId: principal.userId,
+          before: {
+            scope: "finances",
+            revision: previous.revision,
+            preferences: previous.preferences,
+          },
+          after: { scope: "finances", inherited: true },
+        }),
+      );
       return { scope: "finances", inherited: true } as const;
     });
   }

@@ -147,6 +147,14 @@ it("recovers authoritative settings after a rejected write", async () => {
     expect(vi.mocked(api.getWorkspaceSettings).mock.calls.length).toBeGreaterThan(1),
   );
   await waitFor(() => expect(screen.getByLabelText("Transaction view")).toHaveValue("table"));
+  expect(screen.getByText("Your change: cards")).toBeInTheDocument();
+  expect(screen.getByLabelText("Transaction view")).toBeDisabled();
+  await user.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Use latest settings" })).toBeEnabled(),
+  );
+  expect(screen.getByText("Latest: table")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Use latest settings" }));
   await select(user, "Transaction view", "cards", { financeTransactionView: "cards" });
 });
 

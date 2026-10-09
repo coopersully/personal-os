@@ -1,7 +1,7 @@
 # nohmi per-workspace settings
 
 - Status: Accepted target product contract
-- Last reconciled: 2026-10-07
+- Last reconciled: 2026-10-08
 
 ## Purpose
 
@@ -292,3 +292,28 @@ substitutes a guessed installer or stale success for a failed release read.
 
 The accepted [Settings information architecture](../design/pages/settings-architecture.md) defines
 configuration navigation, contextual setup, local history, and workspace-scoped Reviews placement.
+
+### Save and recovery contracts
+
+The three settings stores deliberately retain different semantics:
+
+| Settings | Ownership and serialization | Revision and reset/default behavior |
+| --- | --- | --- |
+| Typed workspace preferences | Interactive owner; per-user/workspace transaction lock; mutation and audit commit together | Missing revision 0; every accepted partial save advances it. Product defaults and typed null sentinels belong to that workspace. Finance account selection null means all eligible accounts; an empty selection means none. |
+| Notification policy | Interactive owner with existing Texting/Finance access; account row lock shared with notification operations; mutation and audit commit together | Missing revision null; first save starts at 1. Finance reset removes only its override, inheriting configured global values or product defaults, subject to the global disclosure ceiling. Reset audit records fence recreation so old revisions stay stale. |
+| Account review policy | Interactive owner; account-wide transaction lock; changed policy and audit commit together | Missing policy is off/version 1. An unchanged exact-version save neither advances the version nor audits. Off remains an explicit account value; there is no workspace inheritance or delete reset. |
+
+Compatible exact-revision comparisons and audit construction can share mechanics; storage,
+authorization, locks, defaults, revision advancement and reset remain domain-owned. Notification
+preference HTTP mutations retain their originating request ID in the audit record.
+
+Settings recovery retains the attempted change in transient view state. A known revision conflict
+explains rejection; an uncertain transport result explains that the change may already be saved.
+Refreshing loads authoritative values without writing and keeps failed reads recoverable. The person
+can explicitly accept the latest settings or reapply the displayed attempt against the exact version
+just reviewed. A second conflict requires another review, never a silent retry with a newer version.
+Workspace saves continue to bind intent to the observed revision; only that client's own successful
+queued writes can advance it. Neither preference history nor a universal settings store is introduced.
+
+The global notification editor remains a separate integration surface; these recovery controls cover
+workspace preference settings, account review policy and the Finance notification reset.

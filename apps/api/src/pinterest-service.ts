@@ -51,6 +51,19 @@ export function createPinterestService({
       .from(pinterestConnections)
       .where(eq(pinterestConnections.userId, userId))
       .limit(1);
+    // Resolve a submitted board before changing persisted preferences or scheduled work.
+    if (input.boardUrl) {
+      try {
+        await fetchPinterestBoardPins(input.boardUrl, requestFetch);
+      } catch (error) {
+        if (error instanceof PinterestBoardError)
+          throw new AppError(
+            error.code === "not_found" ? "invalid_request" : error.code,
+            error.message,
+          );
+        throw error;
+      }
+    }
     const values = {
       ...(input.backgroundColor === undefined ? {} : { backgroundColor: input.backgroundColor }),
       ...(input.backgroundMode === undefined ? {} : { backgroundMode: input.backgroundMode }),

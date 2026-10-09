@@ -29,6 +29,7 @@ import { NativeSelect, NativeSelectOption } from "../../components/ui/native-sel
 import { Spinner } from "../../components/ui/spinner.js";
 import { Textarea } from "../../components/ui/textarea.js";
 import { classifyMutationError } from "../../lib/feedback.js";
+import { useSettingsError } from "../../lib/settings-feedback.js";
 import { isDesktop } from "../desktop/bridge.js";
 import {
   enableRitualPresentation,
@@ -142,6 +143,9 @@ function RitualForm({
   const [preview, setPreview] = useState<RitualState | null>(null);
   const [opening, setOpening] = useState(false);
   const [message, setMessage] = useState("");
+  const [actionError, setActionError] = useState("");
+  useSettingsError(error, error);
+  useSettingsError(actionError, actionError);
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const previousDefinitionId = useRef(definition?.id);
@@ -269,12 +273,13 @@ function RitualForm({
   async function show() {
     setOpening(true);
     setMessage("");
+    setActionError("");
     try {
       const state = await makeRitualPreview(previewDefinition);
       if (isDesktop()) await showRitualPreview(state);
       else setPreview(state);
     } catch (e) {
-      setMessage(
+      setActionError(
         classifyMutationError(e, { action: "show this ritual", safeToRetry: true }).message,
       );
     } finally {
@@ -282,12 +287,14 @@ function RitualForm({
     }
   }
   async function automatic(enabled: boolean) {
+    setActionError("");
+    setMessage("");
     try {
       await enableRitualPresentation(enabled);
       await cache.invalidateQueries({ queryKey: ["ritual-local"] });
       setMessage(enabled ? "Automatic rituals enabled" : "Automatic rituals paused");
     } catch (e) {
-      setMessage(
+      setActionError(
         classifyMutationError(e, {
           action: enabled ? "enable automatic rituals" : "pause automatic rituals",
           safeToRetry: true,
@@ -357,7 +364,26 @@ function RitualForm({
             {isDesktop() ? (
               <>
                 <RitualLocal />
-                <div className="flex gap-2">
+                <div className="flex min-w-0 flex-col items-start gap-2">
+                  <Button
+                    asChild={!dirty && !busy}
+                    disabled={dirty || busy}
+                    variant="ghost"
+                    size="sm"
+                  >
+                    {dirty || busy ? (
+                      "Background settings"
+                    ) : (
+                      <a href="/settings?section=desktop">Background settings</a>
+                    )}
+                  </Button>
+                  {dirty || busy ? (
+                    <p className="text-sm text-muted-foreground">
+                      Save routine changes before leaving this page.
+                    </p>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap gap-2">
                   <Button variant="outline" onClick={() => void automatic(true)}>
                     Enable
                   </Button>
@@ -367,6 +393,7 @@ function RitualForm({
                 </div>
               </>
             ) : null}
+            {actionError ? <p role="alert">{actionError}</p> : null}
             {message ? <p role="status">{message}</p> : null}
             {busy || (dirty && !error) ? (
               <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">

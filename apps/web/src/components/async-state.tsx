@@ -1,4 +1,5 @@
 import { ApiClientError } from "@personal-os/api-client";
+import { useSettingsError } from "../lib/settings-feedback.js";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert.js";
 import { Button } from "./ui/button.js";
 import { WorkspaceSkeleton, type WorkspaceSkeletonKind } from "./workspace-skeleton.js";
@@ -18,6 +19,8 @@ export function InlineError({
   retry?: () => unknown;
   stale?: boolean;
 }) {
+  const settingsFeedback = useSettingsError(error, title, retry);
+  if (settingsFeedback) return null;
   const description =
     error instanceof ApiClientError && error.status === 401
       ? "Your session has expired. Sign in again to continue."

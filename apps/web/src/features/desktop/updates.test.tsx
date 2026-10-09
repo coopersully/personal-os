@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
+import { ApiClientError } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { createAppQueryClient } from "../../lib/query-client.js";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), desktop: true }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -156,4 +158,33 @@ it("supports retrying an unreadable settings status", async () => {
   mount(<DesktopUpdates />);
   fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
   expect(await screen.findByText("Installed version 0.1.0")).toBeInTheDocument();
+});
+
+it("keeps sign-in reachable after the server returns an unauthenticated session", async () => {
+  status.startupBlocking = false;
+  status.phase = "unavailable";
+  const client = createAppQueryClient({ queries: { retry: false } });
+  render(
+    <QueryClientProvider client={client}>
+      <DesktopStartupGate>
+        <input aria-label="Sign in email" />
+      </DesktopStartupGate>
+    </QueryClientProvider>,
+  );
+  await screen.findByRole("textbox", { name: "Sign in email" });
+  await expect(
+    client.fetchQuery({
+      queryKey: ["me"],
+      queryFn: async () => {
+        throw new ApiClientError({
+          status: 401,
+          code: "unauthorized",
+          message: "Authentication is required.",
+        });
+      },
+    }),
+  ).rejects.toMatchObject({ status: 401 });
+  expect(screen.getByRole("textbox", { name: "Sign in email" })).toBeInTheDocument();
+  expect(client.getQueryState(["desktop-update-status"])?.status).toBe("success");
+  client.clear();
 });

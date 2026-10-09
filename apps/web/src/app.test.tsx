@@ -1384,14 +1384,16 @@ function defaults() {
   });
   mocks.isTauri.mockReturnValue(false);
   mocks.invoke.mockImplementation((command: string) =>
-    command === "desktop_preview_environment"
-      ? {
-          hasNotch: false,
-          platform: "macos",
-          safeArea: { bottom: 0, end: 0, start: 0, top: 24 },
-          screen: { height: 900, width: 1440 },
-        }
-      : undefined,
+    command === "preview_pinterest_wallpaper"
+      ? "data:image/png;base64,dGVzdA=="
+      : command === "desktop_preview_environment"
+        ? {
+            hasNotch: false,
+            platform: "macos",
+            safeArea: { bottom: 0, end: 0, start: 0, top: 24 },
+            screen: { height: 900, width: 1440 },
+          }
+        : undefined,
   );
   mocks.openUrl.mockResolvedValue(undefined);
   mocks.setAlwaysOnTop.mockResolvedValue(undefined);
@@ -9407,8 +9409,8 @@ describe("ilo web app", () => {
     await browser.type(screen.getByLabelText("Target date"), "2026-09-01");
     await browser.click(screen.getByRole("button", { name: "Create goal" }));
     expect(
-      await screen.findByText(/Couldn’t confirm whether we could create this goal/),
-    ).toBeInTheDocument();
+      await screen.findAllByText(/Couldn’t confirm whether we could create this goal/),
+    ).not.toHaveLength(0);
     goals.unmount();
     const motives = setup("/motives");
     expect(
@@ -9422,8 +9424,8 @@ describe("ilo web app", () => {
     await browser.type(screen.getByLabelText("Motive"), "Rejected motive");
     await browser.click(screen.getByRole("button", { name: "Create motive" }));
     expect(
-      await screen.findByText(/Couldn’t confirm whether we could create this motive/),
-    ).toBeInTheDocument();
+      await screen.findAllByText(/Couldn’t confirm whether we could create this motive/),
+    ).not.toHaveLength(0);
     motives.unmount();
     mocks.listGoals.mockRejectedValue(new Error("Goals unavailable"));
     const brokenGoals = setup("/goals");
@@ -9717,21 +9719,21 @@ describe("ilo web app", () => {
       ),
     ).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Public board URL")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Refresh now" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Refresh wallpaper" })).not.toBeInTheDocument();
     expect(mocks.getPinterestWallpaperSettings).not.toHaveBeenCalled();
     webView.unmount();
 
     mocks.isTauri.mockReturnValue(true);
     mocks.listPinterestPins.mockRejectedValueOnce(new Error("Pinterest is unavailable"));
     const failedPreview = setup("/settings?section=wallpaper");
-    expect(await screen.findByLabelText("Mosaic fit")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Fine-tune collage appearance" }),
-    ).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Wallpaper", level: 1 })).toBeInTheDocument();
+    expect(screen.getByLabelText("Mosaic fit")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Wallpaper" })).toBeInTheDocument();
     expect(await screen.findByText("Couldn’t load wallpaper preview.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeDisabled();
     expect(
-      screen.getByRole("img", { name: "Pinterest image preview could not load" }),
-    ).toHaveTextContent("Pinterest images could not load.");
+      screen.queryByRole("img", { name: "Wallpaper rendered for your display" }),
+    ).not.toBeInTheDocument();
     failedPreview.unmount();
 
     let finishSave: (() => void) | undefined;
@@ -9750,7 +9752,8 @@ describe("ilo web app", () => {
     const pendingSave = setup("/settings?section=wallpaper");
     const browser = userEvent.setup();
     await browser.click(await screen.findByRole("radio", { name: "Overlapping stack" }));
-    expect(screen.getByRole("button", { name: "Refresh now" })).toBeDisabled();
+    await browser.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeDisabled();
     finishSave?.();
     pendingSave.unmount();
   }, 10_000);
@@ -9777,10 +9780,17 @@ describe("ilo web app", () => {
     };
     const browser = userEvent.setup();
 
+    const settingsErrorToast = vi.spyOn(toast, "error");
     mocks.getPinterestWallpaperSettings.mockRejectedValueOnce(new Error("Settings unavailable"));
     const failedSettings = setup("/settings?section=wallpaper");
-    expect(await screen.findByText("Couldn’t load wallpaper settings.")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(settingsErrorToast).toHaveBeenCalledWith(
+        "Couldn’t load wallpaper settings.",
+        expect.anything(),
+      ),
+    );
     failedSettings.unmount();
+    settingsErrorToast.mockRestore();
 
     mocks.getPinterestWallpaperSettings.mockResolvedValue(settings);
     mocks.updatePinterestWallpaperSettings.mockRejectedValueOnce(
@@ -9790,12 +9800,13 @@ describe("ilo web app", () => {
     const boardUrl = await screen.findByLabelText("Public board URL");
     await waitFor(() => expect(boardUrl).toHaveValue(settings.boardUrl));
     fireEvent.change(boardUrl, { target: { value: "https://www.pinterest.com/test/other/" } });
-    fireEvent.blur(boardUrl);
+    await browser.click(screen.getByRole("button", { name: "Save board" }));
     expect(
       await screen.findByText(
         "Couldn’t save this board URL. Your changes are still unsaved. Try again.",
       ),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeDisabled();
     failedUpdate.unmount();
 
     let finishPins:
@@ -9808,14 +9819,16 @@ describe("ilo web app", () => {
         }),
     );
     const tooFewPins = setup("/settings?section=wallpaper");
-    await browser.click(await screen.findByRole("button", { name: "Refresh now" }));
-    expect(screen.getByRole("button", { name: "Refreshing" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Refresh wallpaper" })).toBeDisabled();
+    await waitFor(() => expect(finishPins).toBeDefined());
     finishPins?.([
       { id: "pin-1", imageUrl: "https://example.com/1.jpg", title: null },
       { id: "pin-2", imageUrl: "https://example.com/2.jpg", title: null },
       { id: "pin-3", imageUrl: "https://example.com/3.jpg", title: null },
     ]);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh now" })).toBeEnabled());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeEnabled(),
+    );
     tooFewPins.unmount();
 
     mocks.getPinterestWallpaperSettings.mockResolvedValue({
@@ -9830,36 +9843,83 @@ describe("ilo web app", () => {
       })),
     );
     mocks.invoke.mockImplementation((command: string) =>
-      command === "apply_pinterest_wallpaper"
-        ? Promise.reject("Desktop wallpaper failed")
-        : {
-            hasNotch: false,
-            platform: "macos",
-            safeArea: { bottom: 0, end: 0, start: 0, top: 24 },
-            screen: { height: 900, width: 1440 },
-          },
+      command === "preview_pinterest_wallpaper"
+        ? "data:image/png;base64,dGVzdA=="
+        : command === "apply_pinterest_wallpaper"
+          ? Promise.reject("Desktop wallpaper failed")
+          : {
+              hasNotch: false,
+              platform: "macos",
+              safeArea: { bottom: 0, end: 0, start: 0, top: 24 },
+              screen: { height: 900, width: 1440 },
+            },
     );
     const stringFailure = setup("/settings?section=wallpaper");
-    await browser.click(await screen.findByRole("button", { name: "Refresh now" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeEnabled(),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeEnabled(),
+    );
+    await browser.click(screen.getByRole("button", { name: "Refresh wallpaper" }));
+    await browser.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => expect(mocks.invoke).toHaveBeenCalled());
     stringFailure.unmount();
 
     mocks.invoke.mockImplementation((command: string) =>
-      command === "apply_pinterest_wallpaper"
-        ? Promise.reject(new Error("Desktop wallpaper failed"))
-        : {
-            hasNotch: false,
-            platform: "macos",
-            safeArea: { bottom: 0, end: 0, start: 0, top: 24 },
-            screen: { height: 900, width: 1440 },
-          },
+      command === "preview_pinterest_wallpaper"
+        ? "data:image/png;base64,dGVzdA=="
+        : command === "apply_pinterest_wallpaper"
+          ? Promise.reject(new Error("Desktop wallpaper failed"))
+          : {
+              hasNotch: false,
+              platform: "macos",
+              safeArea: { bottom: 0, end: 0, start: 0, top: 24 },
+              screen: { height: 900, width: 1440 },
+            },
     );
     setup("/settings?section=wallpaper");
-    await browser.click(await screen.findByRole("button", { name: "Refresh now" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeEnabled(),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeEnabled(),
+    );
+    await browser.click(screen.getByRole("button", { name: "Refresh wallpaper" }));
+    await browser.click(screen.getByRole("button", { name: "Refresh" }));
     expect(
       await screen.findByText("Couldn’t refresh the wallpaper. Try again."),
     ).toBeInTheDocument();
   }, 10_000);
+
+  it("blocks wallpaper application when native preview decoding fails and allows retry", async () => {
+    mocks.isTauri.mockReturnValue(true);
+    mocks.listPinterestPins.mockResolvedValue([
+      { id: "one", imageUrl: "https://i.pinimg.com/736x/one.jpg", title: null },
+    ]);
+    const originalInvoke = mocks.invoke.getMockImplementation();
+    let failed = true;
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "preview_pinterest_wallpaper" && failed)
+        return Promise.reject("Could not decode a Pinterest image");
+      return originalInvoke?.(command);
+    });
+    setup("/settings?section=wallpaper");
+    expect(await screen.findByText("Couldn’t render wallpaper.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeDisabled();
+    expect(
+      screen.queryByRole("img", { name: "Wallpaper rendered for your display" }),
+    ).not.toBeInTheDocument();
+    expect(mocks.recordPinterestWallpaperApplied).not.toHaveBeenCalled();
+    failed = false;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeEnabled(),
+    );
+    expect(
+      screen.getByRole("img", { name: "Wallpaper rendered for your display" }),
+    ).toHaveAttribute("src", "data:image/png;base64,dGVzdA==");
+  });
 
   it("does not reapply today's scheduled Pinterest wallpaper", async () => {
     mocks.isTauri.mockReturnValue(true);
@@ -9923,7 +9983,7 @@ describe("ilo web app", () => {
     });
     mocks.listPinterestPins.mockResolvedValue(pins);
     const browser = userEvent.setup();
-    const view = setup("/settings?section=wallpaper");
+    setup("/settings?section=wallpaper");
 
     const boardUrl = await screen.findByLabelText("Public board URL");
     fireEvent.blur(boardUrl);
@@ -9938,7 +9998,7 @@ describe("ilo web app", () => {
     fireEvent.change(boardUrl, {
       target: { value: "https://www.pinterest.com/example/new-board/" },
     });
-    fireEvent.blur(boardUrl);
+    await browser.click(screen.getByRole("button", { name: "Save board" }));
     await waitFor(() =>
       expect(mocks.updatePinterestWallpaperSettings).toHaveBeenCalledWith(
         expect.objectContaining({ boardUrl: expect.any(String) }),
@@ -9946,21 +10006,24 @@ describe("ilo web app", () => {
       ),
     );
 
+    expect(screen.getAllByRole("slider").length).toBeGreaterThan(0);
     await browser.click(screen.getByRole("radio", { name: "Overlapping stack" }));
     await browser.click(screen.getByRole("radio", { name: "Tiled grid" }));
     await browser.click(screen.getByRole("radio", { name: "Fill the rectangular frame" }));
     await browser.click(screen.getByRole("radio", { name: "Color-matched backdrop" }));
     await browser.click(screen.getByRole("radio", { name: "Daily random backdrop" }));
-    expect(
-      view.container
-        .querySelector<HTMLElement>(".pinterest-wallpaper-preview__canvas")
-        ?.style.getPropertyValue("--wallpaper-background"),
-    ).toBe("#E9DFD0");
-
     await browser.click(screen.getByRole("radio", { name: "Custom backdrop" }));
     const color = await screen.findByLabelText("Custom backdrop color");
     fireEvent.change(color, { target: { value: "#123456" } });
     fireEvent.blur(color);
+
+    const size = screen.getByRole("slider", { name: "Image size" });
+    const initialSize = size.getAttribute("aria-valuenow");
+    size.focus();
+    await browser.keyboard("{ArrowRight}");
+    await waitFor(() => expect(size).not.toHaveAttribute("aria-valuenow", initialSize));
+    await browser.keyboard("{ArrowLeft}");
+    await waitFor(() => expect(size).toHaveAttribute("aria-valuenow", initialSize));
 
     for (const slider of screen.getAllByRole("slider")) {
       slider.focus();
@@ -9975,20 +10038,19 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("checkbox", { name: "Link edge padding" }));
     await browser.click(screen.getByRole("checkbox", { name: "Show desktop safe areas" }));
 
-    const previewImage = view.container.querySelector<HTMLImageElement>(
-      ".pinterest-wallpaper-preview__tile",
+    await waitFor(() =>
+      expect(
+        screen.getByRole("img", { name: "Wallpaper rendered for your display" }),
+      ).toHaveAttribute("src", "data:image/png;base64,dGVzdA=="),
     );
-    expect(previewImage).not.toBeNull();
-    if (previewImage) {
-      fireEvent.load(previewImage);
-      Object.defineProperties(previewImage, {
-        naturalHeight: { configurable: true, value: 200 },
-        naturalWidth: { configurable: true, value: 100 },
-      });
-      fireEvent.load(previewImage);
-      fireEvent.load(previewImage);
-    }
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      "preview_pinterest_wallpaper",
+      expect.objectContaining({
+        request: expect.objectContaining({ imageUrls: pins.map((pin) => pin.imageUrl) }),
+      }),
+    );
 
+    await browser.keyboard("{Escape}");
     await browser.click(screen.getByRole("checkbox", { name: "Refresh every day" }));
     await waitFor(() =>
       expect(mocks.updatePinterestWallpaperSettings).toHaveBeenCalledWith(
@@ -9996,7 +10058,18 @@ describe("ilo web app", () => {
         expect.anything(),
       ),
     );
-    await browser.click(screen.getByRole("button", { name: "Refresh now" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeEnabled(),
+    );
+    await browser.click(screen.getByRole("button", { name: "Refresh wallpaper" }));
+    expect(mocks.recordPinterestWallpaperApplied).not.toHaveBeenCalled();
+    await browser.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(mocks.recordPinterestWallpaperApplied).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeEnabled(),
+    );
+    await browser.click(screen.getByRole("button", { name: "Refresh wallpaper" }));
+    await browser.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => expect(mocks.recordPinterestWallpaperApplied).toHaveBeenCalled());
     expect(mocks.invoke).toHaveBeenCalledWith(
       "apply_pinterest_wallpaper",

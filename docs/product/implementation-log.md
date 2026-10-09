@@ -47,6 +47,28 @@
   The full verification command was stopped after 60 seconds in the deployment-drain scenario
   stage; full coverage/build verification is not claimed. This is branch work, not deployment.
 
+## 2026-10-05 — Desktop background setup (source)
+
+- Tracked by [COO-77 — Guide desktop background setup and macOS permissions](https://linear.app/coopersully/issue/COO-77/guide-desktop-background-setup-and-macos-permissions)
+  and [PR #218 — Guide desktop background setup](https://github.com/coopersully/personal-os/pull/218).
+- UI refinement removes the application-wide ritual setup offer, promotes Desktop pet to a
+  primary Settings destination, groups desktop preferences by decision, and hides login server
+  configuration behind a dialog. Ritual background navigation uses a compact, bounded action.
+- Desktop and Pet settings now guide login startup, OS notification alerts, pet enablement,
+  and morning routine readiness through the shared readiness dialog. Routine settings link
+  back to setup. Pending login approval opens macOS Login Items directly.
+- Settings refresh OS evidence while visible and on return from System Settings, preserving
+  unsaved edits. Setup saves launch-at-login independently of those drafts.
+- Local desktop verification after the main catch-up exposed a signed-out startup loop.
+  Native updater status now survives API session expiry, keeping login reachable while
+  authenticated query data is still cleared. Regression coverage exercises both paths.
+- The existing resident runtime remains responsible for close-window operation and wake
+  recovery. Explicit Quit still exits; there is no new persistent helper. Already scheduled
+  OS notifications may outlive Quit.
+- Signed-installation approval, login relaunch, and actual OS delivery still require native
+  smoke verification; source checks do not establish those runtime capabilities. See
+  [desktop background setup](../design/pages/desktop-background.md).
+
 ## 2026-10-05 — Calendar opening and Follow preferences (branch implementation)
 
 - Calendar remembers an explicitly selected view in account-owned Calendar settings. Normal entry

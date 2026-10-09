@@ -78,6 +78,19 @@ pnpm verify
 
 This includes repository mirror checks, lint, type checking, coverage enforcement (95% statements/functions/lines and 94% branches), production builds, and desktop/mobile E2E acceptance tests.
 
+## Frontend Feedback: Sonner Required
+
+- All settings errors and discrete action feedback MUST use Sonner. This includes notification
+  tests, connection tests, permission requests, refreshes, native actions, and autosave failures.
+- Never add an inline paragraph, status row, Alert, banner, or card for an action's pending,
+  success, or failure message. `role="status"` and asynchronous native completion do not exempt it.
+- For an asynchronous action, update one Sonner toast from loading to the confirmed outcome.
+  OS acceptance is not proof that a notification banner appeared; say exactly what is confirmed.
+- Successful background autosaves stay silent. Actual permission/configuration state and field
+  correction/retry controls may remain beside settings; they do not replace Sonner error feedback.
+- Regression tests must assert Sonner delivery AND the absence of inline action-result copy.
+  Follow `docs/design/feedback.md`; this rule takes precedence over generic inline-alert guidance.
+
 ## Frontend Icons
 
 - reicon is the only permitted icon pack. Import every glyph from

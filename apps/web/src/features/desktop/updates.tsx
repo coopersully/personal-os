@@ -19,6 +19,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
+import { useSettingsError } from "../../lib/settings-feedback.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { isDesktop } from "./bridge.js";
 import {
   checkForUpdate,
@@ -32,6 +34,7 @@ const updateKey = ["desktop-update-status"];
 function useStatus() {
   return useQuery({
     queryKey: updateKey,
+    meta: { sessionIndependent: true },
     queryFn: getUpdateStatus,
     enabled: isDesktop(),
     refetchInterval: (query) =>
@@ -126,8 +129,21 @@ export function DesktopUpdates() {
   const cache = useQueryClient();
   const [confirm, setConfirm] = useState(false);
   const refresh = () => cache.invalidateQueries({ queryKey: updateKey });
-  const check = useMutation({ mutationFn: checkForUpdate, onSettled: refresh });
-  const restart = useMutation({ mutationFn: restartForUpdate, onSettled: refresh });
+  const check = useFeedbackMutation({
+    mutationFn: checkForUpdate,
+    onSettled: refresh,
+    feedback: { action: "check for updates", safeToRetry: true },
+  });
+  const restart = useFeedbackMutation({
+    mutationFn: restartForUpdate,
+    onSettled: refresh,
+    feedback: { action: "restart to update" },
+  });
+  useSettingsError(status.error, "Couldn’t read desktop update status.");
+  useSettingsError(
+    status.data?.error,
+    "Couldn’t complete the desktop update. Try checking again or download the latest release.",
+  );
   if (!isDesktop()) return null;
   const busy = status.data && ["checking", "downloading", "installing"].includes(status.data.phase);
   return (

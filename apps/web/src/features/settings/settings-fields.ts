@@ -210,21 +210,31 @@ export const settingsFields: SettingsField[] = [
       { reveal: [kind === "morning" ? "Morning" : "Evening"], fallbackTarget: "Response type" },
     ),
   ),
-  ...fields("wallpaper", [
-    ["Public board URL", "pinterest-board-url", "pinterest board link"],
-    ["Refresh every day", "pinterest-daily", "daily automatic wallpaper"],
-    ["Layout", "Layout", "mosaic stacked collage"],
-    ["Mosaic fit", "Mosaic fit", "crop contain cover"],
-    ["Backdrop", "Backdrop", "background color match daily"],
-    ["Image size", "pinterest-tile-size", "tile scale"],
-    ["Rotation", "pinterest-rotation", "tilt angle"],
-    ["Image gap", "pinterest-frame-spacing", "spacing"],
-    ["Image corners", "pinterest-corner-radius", "round radius"],
-    ["Link edge padding", "pinterest-padding-linked", "framing margins"],
-    ["Top padding", "pinterest-padding-top", "framing margins"],
+  ...fields(
+    "wallpaper",
+    [
+      ["Public board URL", "pinterest-board-url", "pinterest board link"],
+      ["Refresh every day", "pinterest-daily", "daily automatic wallpaper"],
+    ],
+    { desktopOnly: true },
+  ),
+  ...fields(
+    "wallpaper",
+    [
+      ["Layout", "Layout", "mosaic stacked collage"],
+      ["Mosaic fit", "Mosaic fit", "crop contain cover"],
+      ["Backdrop", "Backdrop", "background color match daily"],
+      ["Image size", "pinterest-tile-size", "tile scale"],
+      ["Rotation", "pinterest-rotation", "tilt angle"],
+      ["Image gap", "pinterest-frame-spacing", "spacing"],
+      ["Image corners", "pinterest-corner-radius", "round radius"],
+      ["Link edge padding", "pinterest-padding-linked", "framing margins"],
+      ["Top padding", "pinterest-padding-top", "framing margins"],
 
-    ["Show desktop safe areas", "pinterest-desktop-overlay", "widget"],
-  ]),
+      ["Show desktop safe areas", "pinterest-desktop-overlay", "widget"],
+    ],
+    { desktopOnly: true },
+  ),
   ...fields(
     "wallpaper",
     [
@@ -232,7 +242,7 @@ export const settingsFields: SettingsField[] = [
       ["Start padding", "pinterest-padding-start", "left framing margins"],
       ["End padding", "pinterest-padding-end", "right framing margins"],
     ],
-    { fallbackTarget: "pinterest-padding-top" },
+    { desktopOnly: true, fallbackTarget: "pinterest-padding-top" },
   ),
   ...fields("desktop", [["Custom API server", "desktop-server", "self hosted endpoint url"]], {
     desktopOnly: true,
@@ -253,18 +263,39 @@ export const settingsFields: SettingsField[] = [
   ]),
   ...fields("notifications", [
     ["Enable notifications", "Enable notifications", "alerts"],
-    ["Tasks due", "Tasks due"],
-    ["Reminders due", "Reminders due"],
-    ["Upcoming events", "Upcoming events"],
-    ["Minutes before an event", "event-notice", "advance notice lead time"],
-    ["Calendar selection", "Calendar selection"],
-    ["New mail", "New mail", "email"],
-    ["Mail accounts", "Mail accounts"],
     ["Play notification sounds", "Play notification sounds", "audio mute"],
     ["Show message previews", "Show message previews", "privacy"],
     ["Quiet hours start", "quiet-start", "from do not disturb"],
     ["Quiet hours end", "quiet-end", "until do not disturb"],
   ]),
+  ...["calendar", "tasks", "mail", "finances"].flatMap((section) =>
+    fields(section, [["Notifications", "Notifications", "desktop alerts"]], { desktopOnly: true }),
+  ),
+  ...fields(
+    "tasks",
+    [
+      ["Tasks due", "Tasks due"],
+      ["Reminders due", "Reminders due"],
+    ],
+    { desktopOnly: true },
+  ),
+  ...fields(
+    "calendar",
+    [
+      ["Upcoming events", "Upcoming events"],
+      ["Minutes before an event", "event-notice"],
+      ["Calendar selection", "Calendar selection"],
+    ],
+    { desktopOnly: true },
+  ),
+  ...fields(
+    "mail",
+    [
+      ["New mail", "New mail"],
+      ["Mail accounts", "Mail accounts"],
+    ],
+    { desktopOnly: true },
+  ),
   ...fields("invitations", [["Expires after", "invite-expiry", "invitation expiry duration"]]),
   ...fields("texting", [
     ["Country", "Country", "phone dialing code"],

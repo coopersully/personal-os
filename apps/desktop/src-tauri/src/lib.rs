@@ -2,6 +2,7 @@ mod coordinator;
 mod desktop;
 mod lifecycle;
 mod native;
+mod pet;
 mod preferences;
 mod ritual;
 mod transport;
@@ -66,9 +67,13 @@ pub fn run() {
             desktop::desktop_take_action,
             desktop::desktop_save_settings,
             desktop::desktop_native_action,
+            desktop::desktop_preview_pet_scale,
+            pet::pet_snapshot,
+            pet::pet_action,
             transport::desktop_request,
             transport::desktop_test_connection,
             apply_pinterest_wallpaper,
+            preview_pinterest_wallpaper,
             desktop_preview_environment
         ])
         .build(tauri::generate_context!())
@@ -82,6 +87,14 @@ pub fn run() {
             #[cfg(not(target_os = "macos"))]
             let _ = (app, event);
         });
+}
+
+#[tauri::command]
+async fn preview_pinterest_wallpaper(
+    app: tauri::AppHandle,
+    request: wallpaper::WallpaperRequest,
+) -> Result<String, String> {
+    wallpaper::preview(&app, request).await
 }
 
 #[tauri::command]

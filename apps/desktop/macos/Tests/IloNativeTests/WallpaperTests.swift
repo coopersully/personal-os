@@ -16,7 +16,7 @@ final class WallpaperTests: XCTestCase {
       options(), size: CGSize(width: 1440, height: 900), scale: 1, ratios: ratios)
     let retina = try WallpaperLayout.tiles(
       options(), size: CGSize(width: 2880, height: 1800), scale: 2, ratios: ratios)
-    XCTAssertEqual(normal.count, 6)
+    XCTAssertGreaterThanOrEqual(normal.count, 6)
     for (a, b) in zip(normal, retina) {
       XCTAssertEqual(a.frame.height / a.frame.width, ratios[a.index], accuracy: 0.00001)
       XCTAssertEqual(a.frame.minX * 2, b.frame.minX, accuracy: 0.00001)
@@ -25,7 +25,7 @@ final class WallpaperTests: XCTestCase {
       XCTAssertGreaterThanOrEqual(a.frame.minX, 40)
       XCTAssertGreaterThanOrEqual(a.frame.minY, 50)
       XCTAssertLessThanOrEqual(a.frame.maxX, 1410.001)
-      XCTAssertLessThanOrEqual(a.frame.maxY, 880.001)
+      XCTAssertLessThan(a.frame.minY, 880)
     }
   }
   func testFillCoversPaddedColumnsExactly() throws {
@@ -45,18 +45,45 @@ final class WallpaperTests: XCTestCase {
     let stack = try WallpaperLayout.tiles(
       options(layout: "stack"), size: CGSize(width: 1440, height: 900), scale: 1,
       ratios: [1, 2, 0.5, 1, 1, 1, 1])
-    XCTAssertEqual(stack.count, 6)
+    XCTAssertGreaterThanOrEqual(stack.count, 6)
     XCTAssertEqual(stack[1].frame.height / stack[1].frame.width, 2, accuracy: 0.00001)
     let fill = try WallpaperLayout.tiles(
       options("fill", layout: "stack"), size: CGSize(width: 1440, height: 900), scale: 1,
       ratios: [1, 2, 1, 1])
-    XCTAssertFalse(fill.contains(where: \.cover))
+    XCTAssertTrue(fill.allSatisfy(\.cover))
     XCTAssertThrowsError(
       try WallpaperLayout.tiles(
         options(), size: CGSize(width: 50, height: 50), scale: 1, ratios: [1, 1, 1, 1]))
     XCTAssertThrowsError(
       try WallpaperLayout.tiles(
         options(), size: CGSize(width: 1440, height: 900), scale: 1, ratios: [.infinity]))
+  }
+  func testOnePinRepeatsToCoverFrameAtEverySizeAndPreviewScale() throws {
+    for layout in ["grid", "stack"] {
+      for fit in ["preserve", "fill"] {
+        for tileSize in [32.0, 64.0, 96.0] {
+          var o = options(fit, layout: layout)
+          o.tileSize = tileSize
+          o.frameSpacing = 0
+          o.paddingTop = 0; o.paddingBottom = 0; o.paddingStart = 0; o.paddingEnd = 0
+          let full = try WallpaperLayout.tiles(o, size: CGSize(width: 2880, height: 1800), scale: 2, ratios: [0.7])
+          let preview = try WallpaperLayout.tiles(o, size: CGSize(width: 1200, height: 750), scale: 2 * 1200 / 2880, ratios: [0.7])
+          XCTAssertEqual(full.count, preview.count)
+          XCTAssertTrue(full.allSatisfy { $0.index == 0 })
+          for (a, b) in zip(full, preview) {
+            XCTAssertEqual(a.frame.minX * 1200 / 2880, b.frame.minX, accuracy: 0.001)
+            XCTAssertEqual(a.frame.minY * 1200 / 2880, b.frame.minY, accuracy: 0.001)
+            XCTAssertEqual(a.frame.width * 1200 / 2880, b.frame.width, accuracy: 0.001)
+          }
+          // Sample every region, including all four corners: no empty center-only collage.
+          for x in stride(from: 0.5, through: 2879.5, by: 80) {
+            for y in stride(from: 0.5, through: 1799.5, by: 80) {
+              XCTAssertTrue(full.contains { $0.frame.contains(CGPoint(x: x, y: y)) })
+            }
+          }
+        }
+      }
+    }
   }
   func testCorruptImageAndRenderedPixelDimensions() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(

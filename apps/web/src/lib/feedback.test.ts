@@ -248,3 +248,19 @@ describe("mutation feedback classification", () => {
     expect(expired.persistent).toBe(true);
   });
 });
+
+it("explains an unresolved Pinterest board beside its URL", () => {
+  const feedback = classifyMutationError(
+    new ApiClientError({
+      code: "invalid_request",
+      status: 400,
+      message:
+        "Pinterest could not resolve that public board and its images. Check that the board exists and is public.",
+    }),
+    { action: "save this board URL", form: true, safeToRetry: true },
+  );
+  expect(feedback.kind).toBe("validation");
+  expect(feedback.fields.boardUrl).toBe(
+    "Check that this Pinterest board exists and is public. Your saved board and wallpaper have not changed.",
+  );
+});

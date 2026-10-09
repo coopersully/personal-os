@@ -93,18 +93,78 @@ export async function fetchPinterestBoardPins(
             activeReader = undefined;
           }
         }
+        // Pinterest can return a successful discovery/login page for a missing board.
+        // Accept only the board resource and its feed, never unrelated page images.
+        const script = page.match(
+          /<script[^>]*id=["']__PWS_INITIAL_PROPS__["'][^>]*>([\s\S]*?)<\/script>/i,
+        )?.[1];
+        let resources: Record<string, Record<string, { data?: unknown }>> = {};
+        try {
+          resources = script ? (JSON.parse(script).initialReduxState?.resources ?? {}) : {};
+        } catch {
+          /* Unrecognized provider responses fail closed below. */
+        }
+        const board = Object.values(resources.BoardResource ?? {})
+          .map((entry) => entry.data)
+          .find((data): data is { id: string; url: string } => {
+            if (
+              !data ||
+              typeof data !== "object" ||
+              !("id" in data) ||
+              !("url" in data) ||
+              typeof data.id !== "string" ||
+              typeof data.url !== "string"
+            )
+              return false;
+            try {
+              const resourceUrl = new URL(data.url, url.origin);
+              return (
+                resourceUrl.origin === url.origin &&
+                resourceUrl.pathname.replace(/\/$/, "") === url.pathname.replace(/\/$/, "")
+              );
+            } catch {
+              return false;
+            }
+          });
         const images = new Set<string>();
-        for (const match of page.matchAll(
-          /https:\/\/i\.pinimg\.com\/(?:\d+x|originals)\/[^"\\\s?]+?\.(?:avif|jpe?g|png|webp)/gi,
-        )) {
-          const image = match[0].replace(/\/\d+x\//, "/736x/");
-          if (image.length <= 2048) images.add(image);
+        for (const [key, entry] of Object.entries(resources.BoardFeedResource ?? {})) {
+          if (!board || !Array.isArray(entry.data)) continue;
+          let options: unknown;
+          try {
+            options = JSON.parse(key);
+          } catch {
+            continue;
+          }
+          if (
+            !Array.isArray(options) ||
+            !options.some(
+              (pair) => Array.isArray(pair) && pair[0] === "board_id" && pair[1] === board.id,
+            )
+          )
+            continue;
+          for (const pin of entry.data) {
+            if (pin?.type !== "pin") continue;
+            const image =
+              pin.images?.["736x"]?.url ??
+              pin.images?.orig?.url ??
+              pin.images?.["474x"]?.url ??
+              pin.images?.["236x"]?.url;
+            if (typeof image !== "string" || image.length > 2048) continue;
+            if (
+              !/^https:\/\/i\.pinimg\.com\/(?:\d+x|originals)\/[^"\\\s?]+?\.(?:avif|jpe?g|png|webp)$/i.test(
+                image,
+              )
+            )
+              continue;
+            images.add(image.replace(/\/\d+x\//, "/736x/"));
+            if (images.size >= 100) break;
+          }
           if (images.size >= 100) break;
         }
         if (!images.size) {
           throw new PinterestBoardError(
             "not_found",
-            "Pinterest did not expose any images from that public board.",
+            "Pinterest could not resolve that public board and its images. Check that the board exists and is public.",
           );
         }
         return [...images].map((imageUrl) => ({ id: imageUrl, imageUrl, title: null }));

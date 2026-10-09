@@ -3,6 +3,25 @@ import Darwin
 import Foundation
 import UserNotifications
 
+/// UserNotifications looks in Library/Sounds, not Tauri's Resources/sounds folder.
+enum NotificationSound {
+  static let filename = "notification-soft-click.wav"
+  static var softClick: UNNotificationSound {
+    UNNotificationSound(named: UNNotificationSoundName(rawValue: filename))
+  }
+  static func install() throws {
+    guard let source = Bundle.main.url(forResource: "notification-soft-click", withExtension: "wav", subdirectory: "sounds") else {
+      throw NativeError.message("The notification sound is missing. Reinstall nohmi to restore it.")
+    }
+    let library = try FileManager.default.url(for: .libraryDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+    let directory = library.appendingPathComponent("Sounds", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let destination = directory.appendingPathComponent(filename)
+    let data = try Data(contentsOf: source)
+    if (try? Data(contentsOf: destination)) != data { try data.write(to: destination, options: .atomic) }
+  }
+}
+
 /// Serializes OS additions across invalidation. A stale in-flight add is removed before
 /// a newer replacement with the same identifier is allowed to reach the OS.
 final class NotificationDeliveryQueue {
@@ -192,7 +211,7 @@ enum PendingNotificationPolicy {
       return nil
     }
     c.userInfo["fireAt"] = fire.timeIntervalSince1970
-    c.sound = p.sound ? .default : nil
+    c.sound = p.sound ? NotificationSound.softClick : nil
     if !p.preview {
       c.title =
         kind == "mail" ? "New mail" : (kind == "event" ? "Upcoming event" : "Due item in nohmi")
@@ -205,12 +224,24 @@ enum PendingNotificationPolicy {
   }
 }
 
+enum NotificationMaintenance {
+  static let testIdentifier = "nohmi.notification-test"
+  static func removableIdentifiers(_ requests: [UNNotificationRequest], keeping keep: (UNNotificationRequest) -> Bool) -> [String] {
+    requests.filter { $0.identifier != testIdentifier && !keep($0) }.map(\.identifier)
+  }
+}
+
 final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
   private let center = UNUserNotificationCenter.current()
   private var revision = 0
   private lazy var deliveryQueue = NotificationDeliveryQueue(
     submit: { [center] request in try await center.add(request) },
     remove: { [center] ids in center.removePendingNotificationRequests(withIdentifiers: ids) })
+  // Manual tests survive routine snapshot reconciliation; account clearing still fences them.
+  private lazy var testDeliveryQueue = NotificationDeliveryQueue(
+    submit: { [center] request in try await center.add(request) },
+    remove: { [center] ids in center.removePendingNotificationRequests(withIdentifiers: ids) })
+  var testNotificationStatus = "idle"
   private var deferredResponses = DeferredNotificationResponses<UNNotificationResponse>()
   private var outbox: MailDeliveryOutbox?
   private var mailSubmissions = Set<String>()
@@ -228,6 +259,7 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
     UserDefaults.standard.dictionary(forKey: "ilo.notificationLedger.v1") as? [String: Double]
     ?? [:]
   var permission = "notDetermined"
+  var permissionPending = false
   var alertAvailable = false
   var soundAvailable = false
   var lastError: String?
@@ -237,6 +269,7 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
   override init() {
     super.init()
     center.delegate = self
+    do { try NotificationSound.install() } catch { lastError = error.localizedDescription }
     let open = UNNotificationAction(identifier: "open", title: "Open nohmi", options: .foreground)
     let complete = UNNotificationAction(identifier: "complete", title: "Complete", options: [])
     let snooze = UNNotificationAction(identifier: "snooze", title: "Snooze 10 minutes", options: [])
@@ -255,7 +288,7 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
       ]))
     refreshPermission()
   }
-  func refreshPermission() {
+  func refreshPermission(completion: (() -> Void)? = nil) {
     center.getNotificationSettings { settings in
       DispatchQueue.main.async {
         self.permission =
@@ -263,16 +296,35 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
           ? "notDetermined" : (settings.authorizationStatus == .denied ? "denied" : "authorized")
         self.alertAvailable = settings.alertSetting == .enabled
         self.soundAvailable = settings.soundSetting == .enabled
+        completion?()
       }
     }
   }
   func requestPermission() {
-    center.requestAuthorization(options: [.alert, .sound, .badge]) { _, error in
-      DispatchQueue.main.async {
-        self.lastError = error.map { _ in
-          "macOS could not authorize notifications. Check System Settings → Notifications, or install the signed nohmi release."
+    guard !permissionPending else { return }
+    permissionPending = true
+    lastError = nil
+    center.getNotificationSettings { settings in
+      // macOS only prompts for an undecided authorization. A denial needs Settings.
+      if settings.authorizationStatus == .denied {
+        DispatchQueue.main.async {
+          self.permissionPending = false
+          self.refreshPermission()
+          guard let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension"),
+            NSWorkspace.shared.open(url) else {
+            self.lastError = "Could not open macOS notification settings. Open System Settings → Notifications and allow nohmi."
+            return
+          }
         }
-        self.refreshPermission()
+        return
+      }
+      self.center.requestAuthorization(options: [.alert, .sound, .badge]) { _, error in
+        DispatchQueue.main.async {
+          self.lastError = error.map { _ in
+            "macOS could not authorize notifications. Check System Settings → Notifications, or install the signed nohmi release."
+          }
+          self.refreshPermission { self.permissionPending = false }
+        }
       }
     }
   }
@@ -287,7 +339,7 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
     }
     UserDefaults.standard.set(ledger, forKey: "ilo.notificationLedger.v1")
   }
-  func clear(preservingColdResponses: Bool = false) {
+  func clear(preservingColdResponses: Bool = false, preservingTest: Bool = false) {
     revision += 1
     deliveryQueue.invalidate()
     deferredResponses.clear(preservingColdResponses: preservingColdResponses)
@@ -300,8 +352,26 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
       }
     } catch { lastError = error.localizedDescription }
     snapshot = nil
-    center.removeAllPendingNotificationRequests()
-    center.removeAllDeliveredNotifications()
+    if preservingTest {
+      let expected = revision
+      center.getPendingNotificationRequests { requests in
+        DispatchQueue.main.async {
+          guard expected == self.revision else { return }
+          self.center.removePendingNotificationRequests(withIdentifiers: NotificationMaintenance.removableIdentifiers(requests, keeping: { _ in false }))
+        }
+      }
+      center.getDeliveredNotifications { notifications in
+        DispatchQueue.main.async {
+          guard expected == self.revision else { return }
+          self.center.removeDeliveredNotifications(withIdentifiers: NotificationMaintenance.removableIdentifiers(notifications.map(\.request), keeping: { _ in false }))
+        }
+      }
+    } else {
+      testDeliveryQueue.invalidate()
+      testNotificationStatus = "idle"
+      center.removeAllPendingNotificationRequests()
+      center.removeAllDeliveredNotifications()
+    }
     ledger = [:]
     persist()
   }
@@ -319,7 +389,7 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
     let expected = revision
     if privacyChanged { center.removeAllDeliveredNotifications() }
     guard p.enabled else {
-      clear()
+      clear(preservingTest: true)
       snapshot = s
       return
     }
@@ -340,19 +410,19 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
               else { return nil }
               return (request.identifier, refreshed)
             })
-          let obsolete = pending.filter { request in
+          let obsolete = NotificationMaintenance.removableIdentifiers(pending) { request in
             if s.stale || request.content.userInfo["snoozed"] as? Bool == true
               || request.content.categoryIdentifier == "ilo.mail"
             {
-              return preserved[request.identifier] == nil
+              return preserved[request.identifier] != nil
             }
-            return !desired.contains(request.identifier)
-          }.map(\.identifier)
+            return desired.contains(request.identifier)
+          }
           self.center.removePendingNotificationRequests(withIdentifiers: obsolete)
           for request in preserved.values { self.enqueue(request) }
           self.center.removeDeliveredNotifications(
-            withIdentifiers: delivered.filter { !self.isCurrent($0.request.content.userInfo) }.map {
-              $0.request.identifier
+            withIdentifiers: NotificationMaintenance.removableIdentifiers(delivered.map(\.request)) {
+              self.isCurrent($0.content.userInfo)
             })
           for notification in delivered {
             self.ledger[notification.request.identifier] = notification.date.timeIntervalSince1970
@@ -381,7 +451,7 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
     content.title = alert.title
     content.body = alert.body
     content.categoryIdentifier = alert.conferenceURL == nil ? "ilo.\(alert.kind)" : "ilo.meeting"
-    if p.sound { content.sound = .default }
+    if p.sound { content.sound = NotificationSound.softClick }
     let occurrence =
       alert.kind == "event"
       ? s.events.first { $0.id == alert.materialID }?.startsAt
@@ -468,7 +538,7 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
         c.title = preferences.preview ? first.title : "New mail"
         c.body = "Open nohmi to view your inbox"
         c.categoryIdentifier = "ilo.mail"
-        if preferences.sound { c.sound = .default }
+        if preferences.sound { c.sound = NotificationSound.softClick }
         c.userInfo = [
           "kind": "mail", "id": first.mailAccountID, "path": first.path,
           "serverUrl": first.server, "accountId": first.userID,
@@ -496,14 +566,23 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
     guard permission == "authorized" else {
       throw NativeError.message("Enable macOS notification permission first")
     }
+    if preferences.sound { try NotificationSound.install() }
+    lastError = nil
     let c = UNMutableNotificationContent()
-    c.title = "nohmi notifications are ready"
-    c.body = "Your notification settings are working."
-    if preferences.sound { c.sound = .default }
-    enqueue(
-      UNNotificationRequest(
-        identifier: "ilo.test", content: c,
-        trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)))
+    c.title = "nohmi test notification"
+    c.body = "macOS delivered this test from nohmi."
+    if preferences.sound { c.sound = NotificationSound.softClick }
+    testNotificationStatus = "sending"
+    testDeliveryQueue.enqueue(
+      UNNotificationRequest(identifier: NotificationMaintenance.testIdentifier, content: c, trigger: nil)
+    ) { result in
+      switch result {
+      case .success: self.testNotificationStatus = "accepted"
+      case .failure(let error):
+        self.testNotificationStatus = "failed"
+        self.lastError = error.localizedDescription
+      }
+    }
   }
   func isCurrent(_ info: [AnyHashable: Any]) -> Bool {
     guard let snapshot else { return false }

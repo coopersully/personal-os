@@ -1,4 +1,20 @@
 import {
+  DayTimeline,
+  localDateTimeAt,
+  positionTimelineEvents,
+  type TimelineEventLayout,
+  type TimelinePositionable,
+  type TodayTimelineDensity,
+} from "./features/calendar/day-timeline.js";
+
+export {
+  positionTimelineEvents,
+  todayTimelineDensity,
+  todayTimelineItemRange,
+  todayTimelineStartMinute,
+} from "./features/calendar/day-timeline.js";
+
+import {
   ApiClientError,
   type CalendarAccount,
   type Session,
@@ -239,6 +255,12 @@ import {
 } from "@/components/ui/field";
 import { Input as ShadcnInput } from "@/components/ui/input";
 import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group";
+import {
   Item as ShadcnItem,
   ItemActions as ShadcnItemActions,
   ItemContent as ShadcnItemContent,
@@ -365,7 +387,6 @@ import { TasksWorkspacePage } from "./features/tasks/workspace-page.js";
 import { textingSettingsNavigationItem } from "./features/texting/manifest.js";
 import { TextingSettings } from "./features/texting/page.js";
 import { RitualSettings } from "./features/tracking/ritual-settings.js";
-import { RitualSetupOffer } from "./features/tracking/ritual-setup-offer.js";
 import type { SearchAction } from "./features/workspace-search/catalog.js";
 import { WorkspaceFinder } from "./features/workspace-search/search.js";
 import { useWorkspacePreferences } from "./features/workspace-settings/preferences.js";
@@ -377,6 +398,7 @@ import {
   formatOrdinalDate,
 } from "./lib/date-format.js";
 import { invalidateMaterial } from "./lib/material-queries.js";
+import { SettingsFeedbackContext } from "./lib/settings-feedback.js";
 import { formatRelativeTime } from "./lib/time-format.js";
 import { useFeedbackMutation } from "./lib/use-feedback-mutation.js";
 import { cn } from "./lib/utils.js";
@@ -1522,7 +1544,6 @@ function AuthenticatedApp({ user }: { user: User }) {
                 {pageTitle && navigationOwner.kind !== "account-utility" ? (
                   <h1 className="sr-only">{pageTitle}</h1>
                 ) : null}
-                {isTauri() ? <RitualSetupOffer userId={user.id} /> : null}
                 <WorkspaceRoutes
                   calendarTodaySnap={calendarTodaySnap}
                   calendars={calendars.data ?? []}
@@ -3924,21 +3945,6 @@ function WeekCalendarView({
   );
 }
 
-type TimelinePositionable = {
-  allDay: boolean;
-  endsAt: string;
-  id: string;
-  startsAt: string;
-};
-
-type TimelineEventLayout<T extends TimelinePositionable = CalendarEvent> = {
-  column: number;
-  columns: number;
-  endMinute: number;
-  event: T;
-  startMinute: number;
-};
-
 type TimelineEventCluster = {
   endMinute: number;
   layouts: TimelineEventLayout[];
@@ -5903,8 +5909,6 @@ const secondarySettings: Array<{
   { icon: ShieldCheckIcon, id: "workspace-access", label: "Workspace access", parent: "security" },
   { icon: LockIcon, id: "sessions", label: "Signed-in devices", parent: "security" },
   { icon: UserIcon, id: "invitations", label: "Invitations", parent: "security" },
-  { icon: ImageIcon, id: "wallpaper", label: "Wallpaper", parent: "appearance" },
-  { icon: SparklesIcon, id: "pet", label: "Desktop pet", parent: "desktop" },
 ];
 const settingsNavigation: Array<{
   items: Array<{ icon: Icon; id: SettingsSectionId; label: string }>;
@@ -5942,7 +5946,9 @@ const settingsNavigation: Array<{
       { icon: PaintBrushIcon, id: "appearance", label: "Appearance" },
       { icon: PulseIcon, id: "notifications", label: "Notifications" },
       { ...textingSettingsNavigationItem, id: "texting", label: "Texting" },
+      { icon: ImageIcon, id: "wallpaper", label: "Wallpaper" },
       { icon: MonitorIcon, id: "desktop", label: "Desktop app" },
+      { icon: SparklesIcon, id: "pet", label: "Desktop pet" },
     ],
   },
 ];
@@ -6085,7 +6091,21 @@ function SettingsSidebarNavigation({
   );
 }
 
-function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void; user: User }) {
+function SettingsPage(props: { setEditor: (editor: Editor) => void; user: User }) {
+  return (
+    <SettingsFeedbackContext.Provider value={true}>
+      <SettingsPageContent {...props} />
+    </SettingsFeedbackContext.Provider>
+  );
+}
+
+function SettingsPageContent({
+  setEditor,
+  user,
+}: {
+  setEditor: (editor: Editor) => void;
+  user: User;
+}) {
   const location = useLocation();
   const requestedSection = new URLSearchParams(location.search).get("section");
   if (requestedSection === "agents" || requestedSection === "automations") {
@@ -6148,12 +6168,14 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
       {section === "mail" ? (
         <div className="settings-stack">
           <WorkspacePreferencesSection workspace="mail" />
+          {isTauri() ? <DesktopSettingsPanel section="mail" /> : null}
           <WorkspaceSettings domain="mail" />
         </div>
       ) : null}
       {section === "finances" ? (
         <div className="settings-stack">
           <WorkspacePreferencesSection workspace="finances" />
+          {isTauri() ? <DesktopSettingsPanel section="finances" /> : null}
           <FinanceSettings />
           <WorkspaceSettings domain="finances" />
         </div>
@@ -6161,6 +6183,7 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
       {section === "calendar" ? (
         <div className="settings-stack">
           <WorkspacePreferencesSection workspace="calendar" />
+          {isTauri() ? <DesktopSettingsPanel section="calendar" /> : null}
           <CalendarsSettings setEditor={setEditor} />
           <WorkspaceGuidance domain="calendar" />
           <WorkspaceSettings domain="calendar" />
@@ -6169,6 +6192,7 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
       {section === "tasks" ? (
         <div className="settings-stack">
           <WorkspacePreferencesSection workspace="tasks" />
+          {isTauri() ? <DesktopSettingsPanel section="tasks" /> : null}
           <WorkspaceSettings domain="tasks" />
         </div>
       ) : null}
@@ -6232,18 +6256,6 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
       {section === "appearance" ? (
         <div className="settings-stack">
           <ThemeSettings user={user} />
-          {isTauri() ? (
-            <RelatedSettings
-              title="Desktop appearance"
-              items={[
-                {
-                  label: "Wallpaper",
-                  description: "Choose your desktop wallpaper and layout.",
-                  section: "wallpaper",
-                },
-              ]}
-            />
-          ) : null}
         </div>
       ) : null}
       {section === "rituals" ? <RitualSettings timeZone={user.planningTimezone} /> : null}
@@ -6273,23 +6285,7 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
       {section === "invitations" ? <InvitationsSettings /> : null}
       {section === "sessions" ? <SessionsSettings /> : null}
       {section === "texting" ? <TextingSettings /> : null}
-      {section === "desktop" ? (
-        <div className="settings-stack">
-          <DesktopDownloads />
-          {isTauri() ? (
-            <RelatedSettings
-              title="Desktop companion"
-              items={[
-                {
-                  label: "Desktop pet",
-                  description: "Choose your companion and its shortcuts.",
-                  section: "pet",
-                },
-              ]}
-            />
-          ) : null}
-        </div>
-      ) : null}
+      {section === "desktop" && !isTauri() ? <DesktopDownloads /> : null}
       {section === "wallpaper" ? <PinterestWallpaperSettingsPanel /> : null}
       {isTauri() && (section === "desktop" || section === "pet" || section === "notifications") ? (
         <DesktopSettingsPanel section={section} />
@@ -6850,15 +6846,20 @@ function XBookmarksConnectorRow({
   );
 }
 
-async function applyPinterestWallpaper(settings: PinterestWallpaperSettings): Promise<string[]> {
-  const pins = await api.listPinterestPins(
-    12,
-    isTauri()
-      ? localDateToIso(localDateAt(new Date(), Intl.DateTimeFormat().resolvedOptions().timeZone))
-      : undefined,
-  );
-  if (pins.length < 4) {
-    throw new Error("This board needs at least four image Pins to make a collage.");
+async function applyPinterestWallpaper(
+  settings: PinterestWallpaperSettings,
+  selectedPins?: PinterestPin[],
+): Promise<string[]> {
+  const pins =
+    selectedPins ??
+    (await api.listPinterestPins(
+      12,
+      isTauri()
+        ? localDateToIso(localDateAt(new Date(), Intl.DateTimeFormat().resolvedOptions().timeZone))
+        : undefined,
+    ));
+  if (!pins.length) {
+    throw new Error("This board has no usable image Pins. Your wallpaper has not changed.");
   }
   if (!isTauri()) {
     throw new Error("Pinterest wallpaper is available in the nohmi desktop app.");
@@ -6945,6 +6946,7 @@ function PinterestWallpaperSettingsPanel() {
 }
 
 function PinterestWallpaperDesktopSettingsPanel() {
+  const { confirm, confirmation } = useConfirmAction();
   const queryClient = useQueryClient();
   const settings = useQuery({
     queryFn: api.getPinterestWallpaperSettings ?? unavailablePinterestWallpaperSettings,
@@ -6953,7 +6955,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
   });
   const [boardUrl, setBoardUrl] = useState("");
   const boardEdited = useRef(false);
-  const [appliedImages, setAppliedImages] = useState<string[]>([]);
+  const [previewReady, setPreviewReady] = useState(false);
   const [backgroundColor, setBackgroundColor] = useState("#ffffff");
   const [cornerRadius, setCornerRadius] = useState(0);
   const [frameSpacing, setFrameSpacing] = useState(16);
@@ -6985,6 +6987,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
     ]);
   };
   const saveBoard = useFeedbackMutation({
+    scope: { id: "pinterest-wallpaper-settings" },
     feedback: { action: "save this board URL", form: true, safeToRetry: true },
     mutationFn: api.updatePinterestWallpaperSettings,
     onSuccess: async (next) => {
@@ -6994,6 +6997,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
     },
   });
   const update = useFeedbackMutation({
+    scope: { id: "pinterest-wallpaper-settings" },
     feedback: { action: "save wallpaper settings", safeToRetry: true },
     mutationFn: api.updatePinterestWallpaperSettings,
     onMutate: (input) => {
@@ -7043,17 +7047,15 @@ function PinterestWallpaperDesktopSettingsPanel() {
     },
     mutationFn: () => {
       if (!settings.data) throw new Error("Wallpaper settings are still loading.");
-      return applyPinterestWallpaper(settings.data);
+      if (!previewReady || !preview.data?.length)
+        throw new Error("Wait for a valid wallpaper preview before refreshing.");
+      return applyPinterestWallpaper(settings.data, preview.data);
     },
-    onSuccess: async (images) => {
-      setAppliedImages(images);
+    onSuccess: async () => {
       await invalidate();
     },
   });
   const value = settings.data;
-  const dailyBackdropTimestamp = value?.lastAppliedAt
-    ? new Date(value.lastAppliedAt).getTime()
-    : Date.now();
   const preview = useQuery({
     enabled: Boolean(value?.boardUrl),
     queryFn: () =>
@@ -7074,75 +7076,9 @@ function PinterestWallpaperDesktopSettingsPanel() {
     queryKey: ["desktop-preview-environment"],
     retry: false,
   });
-  return (
-    <SettingsSection
-      action={
-        <ShadcnButton
-          disabled={!value?.boardUrl || apply.isPending || update.isPending}
-          onClick={() => apply.mutate()}
-        >
-          <RefreshIcon data-icon="inline-start" className="size-[15px]" />
-          {apply.isPending ? "Refreshing" : "Refresh now"}
-        </ShadcnButton>
-      }
-      description="Paste a public board URL and nohmi will compose a fresh tiled collage from its Pins each day."
-      title="Pinterest wallpaper"
-    >
-      <QueryFeedback query={settings} title="Couldn’t load wallpaper settings." />
-      <QueryFeedback query={preview} title="Couldn’t load wallpaper preview." />
-      <QueryFeedback query={desktopEnvironment} title="Couldn’t load desktop settings." />
-
-      <ShadcnFieldGroup className="pinterest-wallpaper__controls">
-        <FeedbackForm
-          feedback={saveBoard.feedback}
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!saveBoard.isPending) saveBoard.mutate({ boardUrl: boardUrl.trim() || null });
-          }}
-        >
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="pinterest-board-url">Public board URL</ShadcnFieldLabel>
-            <ShadcnInput
-              autoComplete="url"
-              id="pinterest-board-url"
-              name="boardUrl"
-              disabled={saveBoard.isPending}
-              onBlur={(event) => {
-                if (boardEdited.current && event.currentTarget.checkValidity())
-                  event.currentTarget.form?.requestSubmit();
-              }}
-              onChange={(event) => {
-                boardEdited.current = true;
-                setBoardUrl(event.target.value);
-              }}
-              placeholder="https://www.pinterest.com/name/board-name/"
-              type="url"
-              value={boardUrl}
-            />
-            <ShadcnFieldDescription>
-              The board must be public. If Pinterest only exposes a few Pins, nohmi repeats them to
-              complete the collage.
-            </ShadcnFieldDescription>
-          </ShadcnField>
-          <ShadcnButton type="submit" disabled={saveBoard.isPending}>
-            {saveBoard.isPending ? "Saving board…" : "Save board"}
-          </ShadcnButton>
-        </FeedbackForm>
-        <ShadcnField orientation="horizontal">
-          <ShadcnCheckbox
-            checked={value?.enabled ?? false}
-            disabled={!value?.boardUrl || update.isPending}
-            id="pinterest-daily"
-            onCheckedChange={(checked) => update.mutate({ enabled: checked === true })}
-          />
-          <ShadcnFieldContent>
-            <ShadcnFieldLabel htmlFor="pinterest-daily">Refresh every day</ShadcnFieldLabel>
-            <ShadcnFieldDescription>
-              A new collage is applied at 8:00 AM while nohmi is running, and catches up when you
-              next open it.
-            </ShadcnFieldDescription>
-          </ShadcnFieldContent>
-        </ShadcnField>
+  const adjustments = (
+    <>
+      <SettingsSection title="Layout">
         <ShadcnField>
           <ShadcnFieldLabel>Layout</ShadcnFieldLabel>
           <SegmentedControl
@@ -7160,15 +7096,11 @@ function PinterestWallpaperDesktopSettingsPanel() {
             </SegmentedControlItem>
           </SegmentedControl>
           <ShadcnFieldDescription>
-            Grid keeps every image tidy. Stack layers them like pinned photos.
+            Grid tiles the frame. Stack overlaps repeated photos across the frame.
           </ShadcnFieldDescription>
         </ShadcnField>
-      </ShadcnFieldGroup>
-      <ShadcnFieldSet className="pinterest-wallpaper__fieldset">
-        <ShadcnFieldLegend>Appearance</ShadcnFieldLegend>
-        <ShadcnFieldDescription>
-          Tune how the board’s images are cropped, spaced, and presented.
-        </ShadcnFieldDescription>
+      </SettingsSection>
+      <SettingsSection title="Appearance">
         <ShadcnFieldGroup className="pinterest-wallpaper__controls">
           <ShadcnField>
             <ShadcnFieldLabel>Mosaic fit</ShadcnFieldLabel>
@@ -7187,8 +7119,8 @@ function PinterestWallpaperDesktopSettingsPanel() {
               </SegmentedControlItem>
             </SegmentedControl>
             <ShadcnFieldDescription>
-              Preserve keeps every image uncropped and centers the clean mosaic. Fill makes an exact
-              rectangle with equal edges by allowing a small, centered crop.
+              Preserve keeps image proportions, trimming photos at the frame edges. Fill crops each
+              photo into an even grid. Both repeat your Pins to fill the available space.
             </ShadcnFieldDescription>
           </ShadcnField>
           <ShadcnField>
@@ -7231,25 +7163,27 @@ function PinterestWallpaperDesktopSettingsPanel() {
               />
             ) : null}
             <ShadcnFieldDescription>
-              Match samples the board’s colors; Daily picks a fresh complementary color each
-              refresh.
+              Matched samples your images. Daily uses one color from a fixed palette each day.
             </ShadcnFieldDescription>
           </ShadcnField>
           <ShadcnField>
             <ShadcnFieldLabel htmlFor="pinterest-tile-size">
-              Image size · {tileSize}%
+              Image size · {Math.round(((tileSize - 32) / 64) * 100)}
             </ShadcnFieldLabel>
             <ShadcnSlider
               id="pinterest-tile-size"
-              max={96}
-              min={32}
-              onValueChange={(next) => setTileSize(next[0] ?? 64)}
-              onValueCommit={(next) => update.mutate({ tileSize: next[0] ?? 64 })}
-              step={4}
-              value={[tileSize]}
+              aria-label="Image size"
+              max={100}
+              min={0}
+              onValueChange={(next) => setTileSize(32 + Math.round((next[0] ?? 50) * 0.64))}
+              onValueCommit={(next) =>
+                update.mutate({ tileSize: 32 + Math.round((next[0] ?? 50) * 0.64) })
+              }
+              step={100 / 64}
+              value={[((tileSize - 32) / 64) * 100]}
             />
             <ShadcnFieldDescription>
-              Small shows more Pins; large lets each one breathe.
+              Small fits more columns; large fits fewer. Images repeat to fill the frame.
             </ShadcnFieldDescription>
           </ShadcnField>
           <ShadcnField>
@@ -7258,6 +7192,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
             </ShadcnFieldLabel>
             <ShadcnSlider
               id="pinterest-rotation"
+              aria-label="Rotation"
               max={16}
               min={0}
               onValueChange={(next) => setRotationDegrees(next[0] ?? 0)}
@@ -7266,15 +7201,16 @@ function PinterestWallpaperDesktopSettingsPanel() {
               value={[rotationDegrees]}
             />
             <ShadcnFieldDescription>
-              Add a little tilt, especially nice with the stacked layout.
+              Alternate photos tilt by this angle. Gaps reveal the backdrop.
             </ShadcnFieldDescription>
           </ShadcnField>
           <ShadcnField>
             <ShadcnFieldLabel htmlFor="pinterest-frame-spacing">
-              Image gap · {frameSpacing}px
+              {value?.layout === "stack" ? "Tile spacing" : "Image gap"} · {frameSpacing}px
             </ShadcnFieldLabel>
             <ShadcnSlider
               id="pinterest-frame-spacing"
+              aria-label="Image spacing"
               max={72}
               min={0}
               onValueChange={(next) => setFrameSpacing(next[0] ?? 16)}
@@ -7283,7 +7219,9 @@ function PinterestWallpaperDesktopSettingsPanel() {
               value={[frameSpacing]}
             />
             <ShadcnFieldDescription>
-              The space between images. The backdrop color shows through here.
+              {value?.layout === "stack"
+                ? "Space between tile positions. Stacked photos overlap their tiles."
+                : "The space between images. The backdrop color shows through here."}
             </ShadcnFieldDescription>
           </ShadcnField>
           <ShadcnField>
@@ -7292,6 +7230,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
             </ShadcnFieldLabel>
             <ShadcnSlider
               id="pinterest-corner-radius"
+              aria-label="Image corners"
               max={80}
               min={0}
               onValueChange={(next) => setCornerRadius(next[0] ?? 0)}
@@ -7299,17 +7238,11 @@ function PinterestWallpaperDesktopSettingsPanel() {
               step={2}
               value={[cornerRadius]}
             />
-            <ShadcnFieldDescription>
-              Round each image while keeping its full shape intact.
-            </ShadcnFieldDescription>
+            <ShadcnFieldDescription>Round the corners of each photo.</ShadcnFieldDescription>
           </ShadcnField>
         </ShadcnFieldGroup>
-      </ShadcnFieldSet>
-      <ShadcnFieldSet className="pinterest-wallpaper__fieldset">
-        <ShadcnFieldLegend>Framing</ShadcnFieldLegend>
-        <ShadcnFieldDescription>
-          Control the canvas around the collage and its desktop preview guides.
-        </ShadcnFieldDescription>
+      </SettingsSection>
+      <SettingsSection title="Framing">
         <ShadcnFieldGroup className="pinterest-wallpaper__controls">
           <ShadcnField orientation="horizontal">
             <ShadcnCheckbox
@@ -7349,6 +7282,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
               </ShadcnFieldLabel>
               <ShadcnSlider
                 id="pinterest-padding-top"
+                aria-label="Edge padding"
                 max={240}
                 min={0}
                 onValueChange={(next) => {
@@ -7382,6 +7316,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
                   </ShadcnFieldLabel>
                   <ShadcnSlider
                     id={`pinterest-padding-${edge}`}
+                    aria-label={`${label} padding`}
                     max={240}
                     min={0}
                     onValueChange={(next) => {
@@ -7425,65 +7360,167 @@ function PinterestWallpaperDesktopSettingsPanel() {
             </ShadcnField>
           ) : null}
         </ShadcnFieldGroup>
-      </ShadcnFieldSet>
-      {value?.boardUrl ? (
-        <PinterestWallpaperPreview
-          backgroundColor={backgroundColor}
-          backgroundMode={value.backgroundMode}
-          cornerRadius={cornerRadius}
-          layout={value.layout}
-          mosaicFit={value.mosaicFit}
-          pins={
-            preview.data ??
-            appliedImages.map((imageUrl, index) => ({
-              id: String(index),
-              imageUrl,
-              title: null,
-            }))
+      </SettingsSection>
+    </>
+  );
+  const wallpaperPreview = (
+    <PinterestWallpaperPreview
+      backgroundColor={backgroundColor}
+      backgroundMode={value?.backgroundMode ?? "white"}
+      cornerRadius={cornerRadius}
+      layout={value?.layout ?? "grid"}
+      mosaicFit={value?.mosaicFit ?? "preserve"}
+      pins={preview.data ?? []}
+      onReadyChange={setPreviewReady}
+      frameSpacing={frameSpacing}
+      paddingBottom={paddingBottom}
+      paddingEnd={paddingEnd}
+      paddingStart={paddingStart}
+      paddingTop={paddingTop}
+      rotationDegrees={rotationDegrees}
+      showDesktopOverlay={showDesktopOverlay}
+      {...(desktopEnvironment.data ? { desktopEnvironment: desktopEnvironment.data } : {})}
+      previewError={preview.error ? preview.error.message : null}
+      tileSize={tileSize}
+    />
+  );
+  return (
+    <div className="wallpaper-editor">
+      <div className="wallpaper-editor__preview">
+        <SettingsSection
+          title="Preview"
+          description="Primary display"
+          action={
+            <div className="flex items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <ShadcnButton
+                    aria-label={apply.isPending ? "Refreshing wallpaper" : "Refresh wallpaper"}
+                    size="icon-sm"
+                    variant="ghost"
+                    disabled={
+                      !value?.boardUrl ||
+                      boardUrl.trim() !== value.boardUrl ||
+                      !previewReady ||
+                      apply.isPending ||
+                      update.isPending ||
+                      saveBoard.isPending
+                    }
+                    onClick={() =>
+                      confirm({
+                        title: "Refresh wallpaper?",
+                        description:
+                          "Apply the previewed collage to this computer’s desktop wallpaper.",
+                        actionLabel: "Refresh",
+                        onConfirm: () => apply.mutate(),
+                      })
+                    }
+                  >
+                    <RefreshIcon aria-hidden="true" />
+                  </ShadcnButton>
+                </TooltipTrigger>
+                <TooltipContent>Refresh wallpaper</TooltipContent>
+              </Tooltip>
+            </div>
           }
-          frameSpacing={frameSpacing}
-          paddingBottom={paddingBottom}
-          paddingEnd={paddingEnd}
-          paddingStart={paddingStart}
-          paddingTop={paddingTop}
-          rotationDegrees={rotationDegrees}
-          {...(showDesktopOverlay && desktopEnvironment.data
-            ? { desktopEnvironment: desktopEnvironment.data }
-            : {})}
-          dailyBackdropTimestamp={dailyBackdropTimestamp}
-          previewError={preview.error ? "Couldn’t load the wallpaper preview. Try again." : null}
-          tileSize={tileSize}
-        />
-      ) : null}
+        >
+          {wallpaperPreview}
+          <MutationFeedback feedback={apply.feedback} />
+        </SettingsSection>
+      </div>
+      <div className="wallpaper-editor__settings settings-stack">
+        <SettingsSection
+          description="Paste a public board URL and nohmi will compose a fresh tiled collage from its Pins each day."
+          title="Pinterest wallpaper"
+        >
+          <QueryFeedback query={settings} title="Couldn’t load wallpaper settings." />
+          <QueryFeedback query={preview} title="Couldn’t load wallpaper preview." />
+          <QueryFeedback query={desktopEnvironment} title="Couldn’t load desktop settings." />
 
-      <MutationFeedback feedback={update.feedback} />
-      <MutationFeedback feedback={apply.feedback} />
-    </SettingsSection>
+          <ShadcnFieldGroup className="pinterest-wallpaper__controls">
+            <FeedbackForm
+              feedback={saveBoard.feedback}
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!saveBoard.isPending) saveBoard.mutate({ boardUrl: boardUrl.trim() || null });
+              }}
+            >
+              <ShadcnField>
+                <ShadcnFieldLabel htmlFor="pinterest-board-url">Public board URL</ShadcnFieldLabel>
+                <InputGroup>
+                  <InputGroupInput
+                    autoComplete="url"
+                    id="pinterest-board-url"
+                    name="boardUrl"
+                    disabled={saveBoard.isPending}
+                    onChange={(event) => {
+                      boardEdited.current = true;
+                      setBoardUrl(event.target.value);
+                    }}
+                    placeholder="https://www.pinterest.com/name/board-name/"
+                    type="url"
+                    value={boardUrl}
+                  />
+                  <InputGroupAddon align="inline-end">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <InputGroupButton
+                          aria-label="Save board"
+                          type="submit"
+                          size="icon-xs"
+                          disabled={saveBoard.isPending}
+                        >
+                          <CheckIcon aria-hidden="true" />
+                        </InputGroupButton>
+                      </TooltipTrigger>
+                      <TooltipContent>Save board</TooltipContent>
+                    </Tooltip>
+                  </InputGroupAddon>
+                </InputGroup>
+                <ShadcnFieldDescription>
+                  The board must be public. If Pinterest only exposes a few Pins, nohmi repeats them
+                  to complete the collage.
+                </ShadcnFieldDescription>
+              </ShadcnField>
+            </FeedbackForm>
+            <ShadcnField orientation="horizontal">
+              <ShadcnCheckbox
+                checked={value?.enabled ?? false}
+                disabled={!value?.boardUrl || update.isPending}
+                id="pinterest-daily"
+                onCheckedChange={(checked) => update.mutate({ enabled: checked === true })}
+              />
+              <ShadcnFieldContent>
+                <ShadcnFieldLabel htmlFor="pinterest-daily">Refresh every day</ShadcnFieldLabel>
+                <ShadcnFieldDescription>
+                  A new collage is applied at 8:00 AM while nohmi is running, and catches up when
+                  you next open it.
+                </ShadcnFieldDescription>
+              </ShadcnFieldContent>
+            </ShadcnField>
+          </ShadcnFieldGroup>
+
+          {confirmation}
+
+          <MutationFeedback feedback={update.feedback} />
+        </SettingsSection>
+        {adjustments}
+      </div>
+    </div>
   );
 }
 
 function PinterestWallpaperPreview({
-  backgroundColor,
-  backgroundMode,
-  cornerRadius,
-  dailyBackdropTimestamp,
-  frameSpacing,
-  layout,
-  mosaicFit,
-  paddingBottom,
-  paddingEnd,
-  paddingStart,
-  paddingTop,
   pins,
   previewError,
-  rotationDegrees,
   desktopEnvironment,
-  tileSize,
+  showDesktopOverlay,
+  onReadyChange,
+  ...appearance
 }: {
   backgroundColor: string;
   backgroundMode: PinterestWallpaperSettings["backgroundMode"];
   cornerRadius: number;
-  dailyBackdropTimestamp: number;
   frameSpacing: number;
   layout: PinterestWallpaperSettings["layout"];
   mosaicFit: PinterestWallpaperSettings["mosaicFit"];
@@ -7495,120 +7532,83 @@ function PinterestWallpaperPreview({
   previewError: string | null;
   rotationDegrees: number;
   desktopEnvironment?: DesktopPreviewEnvironment;
+  showDesktopOverlay: boolean;
   tileSize: number;
+  onReadyChange: (ready: boolean) => void;
 }) {
-  const [imageRatios, setImageRatios] = useState<Record<string, number>>({});
-  const imagePins = pins.slice(0, layout === "stack" ? 6 : 12);
-  const columns = Math.max(2, Math.min(5, Math.round(7 - tileSize / 18)));
-  const gridColumns = imagePins.length
-    ? Array.from({ length: columns }, (_, column) =>
-        imagePins.filter((_pin, index) => index % columns === column),
-      )
-    : [];
-  const stackPositions = [
-    [3, 10],
-    [39, 6],
-    [17, 34],
-    [51, 40],
-    [0, 53],
-    [33, 61],
-  ];
-  const cardSize = Math.round(32 + tileSize * 0.48);
+  const request = JSON.stringify({
+    ...appearance,
+    boardLabel: "Pinterest",
+    imageUrls: pins.map((pin) => pin.imageUrl),
+  });
+  const [settledRequest, setSettledRequest] = useState(request);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettledRequest(request), 250);
+    return () => clearTimeout(timer);
+  }, [request]);
+  const rendered = useQuery({
+    queryKey: ["native-wallpaper-preview", settledRequest, desktopEnvironment?.screen],
+    placeholderData: (previous) => previous,
+    enabled: isTauri() && pins.length > 0 && !previewError && request === settledRequest,
+    queryFn: async () => {
+      const { invoke } = await import("@tauri-apps/api/core");
+      try {
+        const image = await invoke<string>("preview_pinterest_wallpaper", {
+          request: JSON.parse(settledRequest),
+        });
+        if (typeof image !== "string" || !image.startsWith("data:image/png;base64,")) {
+          throw new Error("The desktop app could not render this wallpaper preview.");
+        }
+        return image;
+      } catch (error) {
+        throw error instanceof Error ? error : new Error(String(error));
+      }
+    },
+    retry: false,
+    gcTime: 0,
+    staleTime: 0,
+  });
+  const ready = Boolean(
+    rendered.data &&
+      !rendered.error &&
+      !rendered.isPlaceholderData &&
+      !rendered.isFetching &&
+      request === settledRequest &&
+      !previewError,
+  );
+  useEffect(() => {
+    onReadyChange(ready);
+  }, [onReadyChange, ready]);
+  const error = previewError ?? rendered.error?.message;
+  const visibleImage = !error && pins.length ? rendered.data : undefined;
   return (
     <section aria-label="Wallpaper preview" className="pinterest-wallpaper-preview">
-      <div className="pinterest-wallpaper-preview__heading">
-        <span>Live preview</span>
-        <small>
-          {imagePins.length ? `${imagePins.length} Pins shown` : "Previewing your layout"}
-        </small>
-      </div>
-      <div
-        className={`pinterest-wallpaper-preview__canvas pinterest-wallpaper-preview__canvas--${layout} pinterest-wallpaper-preview__canvas--${mosaicFit}`}
-        style={
-          {
-            "--wallpaper-background": previewBackground(
-              backgroundMode,
-              backgroundColor,
-              dailyBackdropTimestamp,
-            ),
-            "--wallpaper-gap": `${frameSpacing}px`,
-            "--wallpaper-padding-bottom": `${paddingBottom}px`,
-            "--wallpaper-padding-end": `${paddingEnd}px`,
-            "--wallpaper-padding-start": `${paddingStart}px`,
-            "--wallpaper-padding-top": `${paddingTop}px`,
-            "--wallpaper-radius": `${cornerRadius}px`,
-          } as React.CSSProperties
-        }
-      >
-        {previewError ? (
-          <PinterestWallpaperPlaceholder error={previewError} layout={layout} />
-        ) : !imagePins.length ? (
-          <PinterestWallpaperPlaceholder layout={layout} />
-        ) : layout === "grid" ? (
-          gridColumns.map((columnPins, columnIndex) => {
-            const columnRatio = columnPins.reduce(
-              (total, pin) => total + (imageRatios[pin.id] ?? 1),
-              0,
-            );
-            return (
-              <div
-                className="pinterest-wallpaper-preview__column"
-                key={columnPins.map((pin) => pin.id).join(":")}
-                style={{ flexGrow: 1 / Math.max(columnRatio, 0.1) }}
-              >
-                {columnPins.map((pin, index) => {
-                  const direction = (index + columnIndex) % 2 === 0 ? -1 : 1;
-                  return (
-                    <img
-                      alt=""
-                      className="pinterest-wallpaper-preview__tile"
-                      key={pin.id}
-                      onLoad={(event) => {
-                        const image = event.currentTarget;
-                        if (!image.naturalWidth || !image.naturalHeight) return;
-                        const ratio = image.naturalHeight / image.naturalWidth;
-                        setImageRatios((current) =>
-                          current[pin.id] === ratio ? current : { ...current, [pin.id]: ratio },
-                        );
-                      }}
-                      src={pin.imageUrl}
-                      style={
-                        {
-                          "--wallpaper-rotation": `${direction * rotationDegrees * 0.15}deg`,
-                        } as React.CSSProperties
-                      }
-                    />
-                  );
-                })}
-              </div>
-            );
-          })
+      <QueryFeedback query={{ ...rendered, data: undefined }} title="Couldn’t render wallpaper." />
+      <div className="pinterest-wallpaper-preview__canvas">
+        {visibleImage ? (
+          <img
+            alt="Wallpaper rendered for your display"
+            src={visibleImage}
+            className="block h-auto w-full"
+          />
         ) : (
-          imagePins.map((pin, index) => {
-            const [left, top] = stackPositions[index % stackPositions.length] ?? [0, 0];
-            const direction = index % 2 === 0 ? -1 : 1;
-            const rotation =
-              layout === "stack" ? direction * rotationDegrees : direction * rotationDegrees * 0.15;
-            return (
-              <img
-                alt=""
-                className="pinterest-wallpaper-preview__tile"
-                key={pin.id}
-                src={pin.imageUrl}
-                style={
-                  {
-                    "--wallpaper-left": `${left}%`,
-                    "--wallpaper-rotation": `${rotation}deg`,
-                    "--wallpaper-size": `${cardSize}%`,
-                    "--wallpaper-top": `${top}%`,
-                  } as React.CSSProperties
-                }
-              />
-            );
-          })
+          <p className="p-4 text-sm text-muted-foreground" role="status">
+            {error
+              ? "Preview unavailable. Your wallpaper has not changed."
+              : pins.length
+                ? "Rendering wallpaper…"
+                : "Save a public Pinterest board to preview its images."}
+          </p>
         )}
-        {desktopEnvironment ? <DesktopSafeAreaOverlay environment={desktopEnvironment} /> : null}
+        {visibleImage && showDesktopOverlay && desktopEnvironment ? (
+          <DesktopSafeAreaOverlay environment={desktopEnvironment} />
+        ) : null}
       </div>
+      {visibleImage && !ready ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          Updating preview…
+        </p>
+      ) : null}
     </section>
   );
 }
@@ -7634,60 +7634,6 @@ function DesktopSafeAreaOverlay({ environment }: { environment: DesktopPreviewEn
       <span className="pinterest-wallpaper-preview__safe-area-end" />
     </div>
   );
-}
-
-function PinterestWallpaperPlaceholder({
-  error,
-  layout,
-}: {
-  error?: string;
-  layout: PinterestWallpaperSettings["layout"];
-}) {
-  const tiles = ["sun", "leaf", "mountain", "stars", "wave", "cloud", "flower", "moon"];
-  return (
-    <div
-      aria-label={
-        error
-          ? "Pinterest image preview could not load"
-          : "Illustrated wallpaper placeholder while Pinterest images load"
-      }
-      className={`pinterest-wallpaper-placeholder pinterest-wallpaper-placeholder--${layout}`}
-      role="img"
-    >
-      {tiles.map((tile) => (
-        <div className="pinterest-wallpaper-placeholder__tile" key={tile}>
-          <ImageIcon aria-hidden="true" className="size-5" />
-          <span>Image</span>
-        </div>
-      ))}
-      <p aria-live="polite">
-        {error ? "Pinterest images could not load." : "Loading Pinterest images…"}
-      </p>
-    </div>
-  );
-}
-
-function previewBackground(
-  mode: PinterestWallpaperSettings["backgroundMode"],
-  customColor: string,
-  timestamp: number,
-): string {
-  if (mode === "custom") return customColor;
-  if (mode === "matched") return "#e4ddd8";
-  if (mode === "random") return pinterestDailyBackdrop(timestamp);
-  return "#ffffff";
-}
-
-function pinterestDailyBackdrop(timestamp: number): string {
-  const palette = ["#DCE8F2", "#E9DFD0", "#DCE9DC", "#EEE0EA", "#F0E5D3", "#E1E2F1"];
-  // Native application uses this device's current date, independently of another Mac's stamp.
-  const current = new Date();
-  const day = isTauri()
-    ? Math.floor(
-        Date.UTC(current.getFullYear(), current.getMonth(), current.getDate()) / 86_400_000,
-      )
-    : Math.floor(timestamp / 86_400_000);
-  return palette[((day % palette.length) + palette.length) % palette.length] ?? "#ffffff";
 }
 
 function ConnectorRow({
@@ -8827,25 +8773,6 @@ export function TodayTaskTimelineCard({
   );
 }
 
-const todayTimelinePixelsPerMinute = 1.5;
-type TodayTimelineDensity = "compact" | "full" | "short";
-
-export function todayTimelineStartMinute(currentMinute: number): number {
-  return Math.floor(currentMinute / 15) * 15;
-}
-
-export function todayTimelineItemRange(startMinute: number, endMinute: number) {
-  const start = Math.floor(startMinute / 15) * 15;
-  const end = Math.max(start + 15, Math.ceil(endMinute / 15) * 15);
-  return { end, start };
-}
-
-export function todayTimelineDensity(durationMinutes: number): TodayTimelineDensity {
-  if (durationMinutes <= 15) return "compact";
-  if (durationMinutes <= 30) return "short";
-  return "full";
-}
-
 function TodayTimeline({
   calendarColorsById,
   currentTime,
@@ -8859,122 +8786,37 @@ function TodayTimeline({
   onEditTask: (task: Task) => void;
   timeZone: string;
 }) {
-  const day = localDateAt(currentTime, timeZone);
-  const currentMinute = localDateTimeAt(currentTime, timeZone).minute;
-  const startMinute = todayTimelineStartMinute(currentMinute);
-  const layouts = positionTimelineEvents(items, day, timeZone);
-  const endMinute = Math.max(
-    startMinute,
-    ...layouts.map((layout) => todayTimelineItemRange(layout.startMinute, layout.endMinute).end),
-  );
-  const height = Math.max(
-    15 * todayTimelinePixelsPerMinute,
-    (endMinute - startMinute) * todayTimelinePixelsPerMinute,
-  );
-  const firstHourMinute = Math.ceil(startMinute / 60) * 60;
-  const hourTicks =
-    firstHourMinute > endMinute
-      ? []
-      : Array.from(
-          { length: Math.floor((endMinute - firstHourMinute) / 60) + 1 },
-          (_, index) => firstHourMinute + index * 60,
-        );
-  const minorTicks = Array.from(
-    { length: Math.floor((endMinute - startMinute) / 15) + 1 },
-    (_, index) => startMinute + index * 15,
-  ).filter((minute) => minute % 60 !== 0);
-  const gridTicks = Array.from(
-    { length: Math.floor((endMinute - startMinute) / 15) + 1 },
-    (_, index) => startMinute + index * 15,
-  );
-
   return (
-    // biome-ignore lint/a11y/useSemanticElements: The timeline interleaves its decorative time axis with event list items.
-    <div className="today-timeline" role="list" style={{ height }}>
-      <div aria-hidden="true" className="today-timeline__axis">
-        <span className="today-timeline__line" />
-        {hourTicks.map((minute) => (
-          <span
-            className="today-timeline__tick"
-            key={minute}
-            style={{ top: (minute - startMinute) * todayTimelinePixelsPerMinute }}
-          >
-            <span>{formatHour(Math.floor(minute / 60) % 24)}</span>
-            <i />
-          </span>
-        ))}
-        {minorTicks.map((minute) => (
-          <i
-            className="today-timeline__minor-tick"
-            data-half-hour={minute % 60 === 30 ? "true" : "false"}
-            data-slot="today-timeline-minor-tick"
-            key={minute}
-            style={{ top: (minute - startMinute) * todayTimelinePixelsPerMinute }}
+    <DayTimeline
+      currentTime={currentTime}
+      items={items}
+      timeZone={timeZone}
+      renderItem={(item, layoutStyle, density) =>
+        item.material.kind === "event" ? (
+          <TodayEventCard
+            key={item.id}
+            calendarColor={calendarColorsById.get(item.material.event.calendarId)}
+            currentTime={currentTime}
+            density={density}
+            event={item.material.event}
+            layoutStyle={layoutStyle}
+            timeZone={timeZone}
           />
-        ))}
-        {endMinute % 15 === 0 ? null : <i className="today-timeline__end-cap" />}
-      </div>
-      <div
-        aria-label={`Current time ${formatTime(currentTime.toISOString(), timeZone)}`}
-        className="calendar-now-line today-timeline__now"
-        role="timer"
-        style={{ top: (currentMinute - startMinute) * todayTimelinePixelsPerMinute }}
-      >
-        <span>{formatTime(currentTime.toISOString(), timeZone)}</span>
-        <i />
-      </div>
-      <div className="today-timeline__track">
-        <div aria-hidden="true" className="today-timeline__grid">
-          {gridTicks.map((minute) => (
-            <i
-              data-half-hour={minute % 60 === 30 ? "true" : "false"}
-              data-major={minute % 60 === 0 ? "true" : "false"}
-              data-slot="today-timeline-grid-line"
-              key={minute}
-              style={{ top: (minute - startMinute) * todayTimelinePixelsPerMinute }}
-            />
-          ))}
-        </div>
-        {layouts.map((layout) => {
-          const snappedRange = todayTimelineItemRange(layout.startMinute, layout.endMinute);
-          const visibleStartMinute = Math.max(startMinute, snappedRange.start);
-          const visibleEndMinute = Math.max(visibleStartMinute + 15, snappedRange.end);
-          const visibleDurationMinutes = visibleEndMinute - visibleStartMinute;
-          const columnGap = 8;
-          const layoutStyle = {
-            height: visibleDurationMinutes * todayTimelinePixelsPerMinute,
-            left: `calc(${(layout.column / layout.columns) * 100}% + ${layout.column === 0 ? 0 : columnGap / 2}px)`,
-            top: (visibleStartMinute - startMinute) * todayTimelinePixelsPerMinute,
-            width: `calc(${100 / layout.columns}% - ${layout.columns === 1 ? 0 : columnGap / 2}px)`,
-          } satisfies CSSProperties;
-          const { material } = layout.event;
-          if (material.kind === "event") {
-            return (
-              <TodayEventCard
-                calendarColor={calendarColorsById.get(material.event.calendarId)}
-                currentTime={currentTime}
-                density={todayTimelineDensity(visibleDurationMinutes)}
-                event={material.event}
-                key={layout.event.id}
-                layoutStyle={layoutStyle}
-                timeZone={timeZone}
-              />
-            );
-          }
-          return (
-            <TodayTaskTimelineCard
-              currentTime={currentTime}
-              density={todayTimelineDensity(visibleDurationMinutes)}
-              item={layout.event}
-              key={layout.event.id}
-              layoutStyle={layoutStyle}
-              onEdit={() => onEditTask(material.task)}
-              timeZone={timeZone}
-            />
-          );
-        })}
-      </div>
-    </div>
+        ) : (
+          <TodayTaskTimelineCard
+            key={item.id}
+            currentTime={currentTime}
+            density={density}
+            item={item}
+            layoutStyle={layoutStyle}
+            onEdit={() => {
+              if (item.material.kind === "task") onEditTask(item.material.task);
+            }}
+            timeZone={timeZone}
+          />
+        )
+      }
+    />
   );
 }
 
@@ -10199,79 +10041,8 @@ function differenceInLocalDays(from: LocalDate, to: LocalDate): number {
   );
 }
 
-function localDateTimeAt(value: Date | string, timeZone: string) {
-  const values = Object.fromEntries(
-    new Intl.DateTimeFormat("en", {
-      day: "numeric",
-      hour: "numeric",
-      hourCycle: "h23",
-      minute: "numeric",
-      month: "numeric",
-      second: "numeric",
-      timeZone,
-      year: "numeric",
-    })
-      .formatToParts(new Date(value))
-      .map((part) => [part.type, part.value]),
-  );
-  return {
-    date: {
-      day: Number(values.day),
-      month: Number(values.month),
-      year: Number(values.year),
-    } satisfies LocalDate,
-    minute: Number(values.hour) * 60 + Number(values.minute) + Number(values.second) / 60,
-  };
-}
-
 function minuteToTimelinePixels(minute: number): number {
   return (minute / 60) * calendarHourHeight;
-}
-
-export function positionTimelineEvents<T extends TimelinePositionable>(
-  events: T[],
-  day: LocalDate,
-  timeZone: string,
-): TimelineEventLayout<T>[] {
-  const intervals = events
-    .filter((event) => !event.allDay)
-    .map((event) => {
-      const start = localDateTimeAt(event.startsAt, timeZone);
-      const end = localDateTimeAt(event.endsAt, timeZone);
-      const startMinute = sameLocalDate(start.date, day) ? start.minute : 0;
-      const endMinute = sameLocalDate(end.date, day) ? end.minute : calendarMinutesPerDay;
-      const elapsedMinutes = Math.max(
-        15,
-        (new Date(event.endsAt).getTime() - new Date(event.startsAt).getTime()) / 60_000,
-      );
-      return {
-        endMinute: Math.min(
-          calendarMinutesPerDay,
-          Math.max(endMinute, startMinute + elapsedMinutes),
-        ),
-        event,
-        startMinute: Math.max(0, startMinute),
-      };
-    })
-    .sort(
-      (left, right) =>
-        left.startMinute - right.startMinute ||
-        left.endMinute - right.endMinute ||
-        left.event.id.localeCompare(right.event.id),
-    );
-  // Only simultaneous starts share horizontal lanes. Later starts paint above
-  // earlier events while retaining their actual time and duration geometry.
-  const simultaneous = new Map<number, typeof intervals>();
-  for (const interval of intervals) {
-    const start = new Date(interval.event.startsAt).getTime();
-    const group = simultaneous.get(start) ?? [];
-    group.push(interval);
-    simultaneous.set(start, group);
-  }
-  return intervals.map((interval) => {
-    const group = simultaneous.get(new Date(interval.event.startsAt).getTime()) as typeof intervals;
-    return { ...interval, column: group.indexOf(interval), columns: group.length };
-  });
 }
 
 function formatHour(hour: number): string {

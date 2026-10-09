@@ -20,6 +20,9 @@ struct NativeSettings: Codable {
   var launchAtLogin: Bool
   var petEnabled: Bool
   var petColor: String
+  var petScale: Double? = nil
+  var petSleepEnabled: Bool? = nil
+  var petSleepAfterSeconds: Double? = nil
   var petWorkspaces: [String]
   var widgetWorkspaces: [String]?
   var notifications: NotificationPreferences

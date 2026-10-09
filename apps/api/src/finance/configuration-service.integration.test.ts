@@ -1,4 +1,4 @@
-import { errorMonitor } from "node:events";
+import { errorMonitor, EventEmitter } from "node:events";
 import { resolve } from "node:path";
 import {
   auditEvents,
@@ -37,12 +37,14 @@ describe.sequential("Finance configuration ownership and read purity", () => {
       };
       client.once("end", finish);
       // Monitor errors without consuming the pool/client's normal error propagation.
-      client.on(errorMonitor, (error) => {
+      EventEmitter.prototype.on.call(client, errorMonitor, (error: unknown) => {
         connectionErrors.push(error);
         finish();
       });
     });
-    database.pool.on(errorMonitor, (error) => connectionErrors.push(error));
+    EventEmitter.prototype.on.call(database.pool, errorMonitor, (error: unknown) =>
+      connectionErrors.push(error),
+    );
     await migrateDatabase(database.db, resolve(process.cwd(), "packages/database/migrations"));
   }, 120000);
   afterAll(async () => {

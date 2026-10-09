@@ -6,7 +6,7 @@
   cases, plus an exact evidence read. A foreign or invalid cursor fails without exposing another
   user's case; missing and foreign exact IDs share the same unavailable result. A new
   owner/time/ID index supports ordered pages; review-case records and answer semantics are unchanged.
-- The Finance review page discloses older case status and exact recorded evidence on demand, with
+- The shared Finance Reviews dialog discloses older case status and exact recorded evidence on demand, with
   bounded continuation and local retry states. Focused PostgreSQL and UI tests cover status,
   timestamp ordering, ownership, pagination, and exact evidence. Source transaction and account
   deletion retain immutable owner-scoped review evidence; the first published archive migration is
@@ -783,5 +783,3 @@ See [review interaction standards](../design/pages/reviews.md).
 - Preserved account-wide policy, versioned Finance facts/budgets, source semantics, and transient
   URL/device state boundaries. Validation evidence is recorded with the change, not implied by this
   entry as a production deployment claim.
-
-Finance review deletion retention: source transaction and account removal preserves owner-scoped read-only review, contextual questions, answers, exact evidence and outcome snapshots. User deletion erases the retained archive. Historical source links are unavailable after source removal.

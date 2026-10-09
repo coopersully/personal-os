@@ -223,7 +223,8 @@ Review.
 
 ## Finance review history
 
-Finance review history is a read-only disclosure beside current Inbox work. It loads owned
+Finance review history is a read-only disclosure in the shared Finance Reviews flow, including
+when no Inbox work remains or an exact decision link is unavailable. It loads owned
 open, deferred, and resolved cases in bounded pages ordered by first-seen time and stable ID.
 Opening one row retrieves that exact case and shows its status, source evidence, and recorded
 outcome, including the action, answer, rationale, classification or relationship details, and

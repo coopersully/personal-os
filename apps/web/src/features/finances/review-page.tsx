@@ -273,7 +273,7 @@ function FinanceInboxReviewPage() {
   );
 }
 
-function FinanceReviewHistory() {
+export function FinanceReviewHistory() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const history = useInfiniteQuery({
     queryKey: ["finance-review-history"],

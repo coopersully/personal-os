@@ -14,10 +14,26 @@ import {
 } from "@/components/responsive-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Progress } from "@/components/ui/progress";
 import { workspaceIdentities } from "@/components/workspace-identity";
 import { api } from "../../api.js";
+import { FinanceReviewHistory } from "../finances/review-page.js";
 import { ReviewActions } from "./review-actions.js";
+
+function FinanceHistoryDisclosure() {
+  const [open, setOpen] = useState(false);
+  return (
+    <Collapsible onOpenChange={setOpen} open={open}>
+      <CollapsibleTrigger asChild>
+        <Button variant="ghost">Finance review history</Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="pt-4">
+        {open ? <FinanceReviewHistory /> : null}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
 
 export async function loadReviewSession(workspace: AgentAccessDomain, signal?: AbortSignal) {
   const first = await api.listAgentAccessWorkItems({ domain: workspace, limit: 10 });
@@ -101,7 +117,10 @@ function ReviewFlow({
         {query.data &&
         initialId !== "open" &&
         !query.data.items.some((item) => item.id === initialId) ? (
-          <p role="status">This review is no longer available. It may already be resolved.</p>
+          <ResponsiveDialogBody>
+            <p role="status">This review is no longer available. It may already be resolved.</p>
+            {workspace === "finances" ? <FinanceHistoryDisclosure /> : null}
+          </ResponsiveDialogBody>
         ) : query.data ? (
           <ReviewSession
             initialItems={query.data.items}
@@ -270,6 +289,7 @@ function ReviewSession({
             {message}
           </p>
         ) : null}
+        {workspace === "finances" ? <FinanceHistoryDisclosure /> : null}
       </ResponsiveDialogBody>
       <ResponsiveDialogFooter className="flex-row justify-end">
         {current ? (

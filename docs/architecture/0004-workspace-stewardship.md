@@ -78,6 +78,13 @@ Knowledge controls, and unified Reviews, plus a read-only cross-workspace overvi
 to exact domain controls. It must not persist or render a second editable copy of workspace-owned
 configuration.
 
+**Reviews placement supersession:** the paragraph above records the original ownership decision.
+The accepted October 1 [Settings architecture](../design/pages/settings-architecture.md) supersedes
+its Settings-owned Reviews placement; the current [workspace Reviews flow](../design/pages/reviews.md)
+retains domain-owned actions. Texting’s accepted cross-workspace destination is still unimplemented,
+and legacy central links fall back to Account. Preserve that target/implementation distinction;
+this historical ADR does not establish a working central Reviews route.
+
 Shared User Knowledge, context assembly, and promotion policy follow
 [`ADR 0005`](0005-user-knowledge.md). Workspaces declare the context they need but do not duplicate
 global knowledge in domain profiles.

@@ -303,17 +303,18 @@ describe.sequential("Finance notification composition", () => {
       return resolved;
     };
     const delivery = notifications(gatedResolver).deliver(owner.principal, claim);
-    await locked;
-
-    await expect(answer(owner, second.question.work)).rejects.toMatchObject({
-      code: "conflict",
-      details: { retryable: true },
-    });
-    expect(send).not.toHaveBeenCalled();
-    expect(await database.db.select().from(textMessages)).toEqual([]);
-
-    releaseResolver();
-    await delivery;
+    try {
+      await locked;
+      await expect(answer(owner, second.question.work)).rejects.toMatchObject({
+        code: "conflict",
+        details: { retryable: true },
+      });
+      expect(send).not.toHaveBeenCalled();
+      expect(await database.db.select().from(textMessages)).toEqual([]);
+    } finally {
+      releaseResolver();
+      await delivery;
+    }
 
     expect(send).toHaveBeenCalledTimes(1);
     expect(await database.db.select().from(textMessages)).toHaveLength(1);

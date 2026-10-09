@@ -49,7 +49,22 @@ it("retains a Mail layout attempt at its contextual control and after navigating
   const user = userEvent.setup();
   const layout = await screen.findByRole("button", { name: "Message list layout" });
   await waitFor(() => expect(layout).toBeEnabled());
+  // JSDOM has no layout: zero rectangles let the resizer's capture listener
+  // mistake toolbar clicks for separator hits. Keep the split pane below the toolbar.
+  for (const [id, left, width] of [
+    ["mail-list", 0, 340],
+    ["mail-reader", 344, 656],
+  ] as const) {
+    const panel = document.getElementById(id);
+    if (!panel) throw new Error(`Missing fixture panel ${id}`);
+    vi.spyOn(panel, "getBoundingClientRect").mockReturnValue(new DOMRect(left, 80, width, 600));
+  }
+  vi.spyOn(
+    screen.getByRole("separator", { name: "Resize conversation list" }),
+    "getBoundingClientRect",
+  ).mockReturnValue(new DOMRect(340, 80, 4, 600));
   await user.click(layout);
+  expect(layout).toHaveAttribute("aria-expanded", "true");
   await user.click(screen.getByRole("menuitemradio", { name: "Full-width view" }));
   expect(await screen.findByText("Your change: Full-width view")).toBeVisible();
   expect(layout).toBeDisabled();

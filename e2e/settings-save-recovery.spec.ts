@@ -4,7 +4,7 @@ import type {
   TaskProject,
   WorkspaceSettings,
 } from "../packages/domain/src/index.js";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, request, test } from "@playwright/test";
 
 test("two editors retain attempted workspace values and explicitly recover repeated conflicts", async ({
   page,
@@ -248,6 +248,10 @@ test("Finance account selection recovery stays readable after reopening and navi
     (account) => account.name === "Everyday checking",
   );
   if (!checking) throw new Error("Fixture checking account unavailable");
+  const restoreContext = await request.newContext({
+    baseURL: origin,
+    storageState: await page.context().storageState(),
+  });
   let writes = 0;
   page.on("request", (request) => {
     if (request.method() === "PATCH" && request.url().endsWith(path)) writes++;
@@ -278,10 +282,11 @@ test("Finance account selection recovery stays readable after reopening and navi
         });
       else await route.continue();
     });
+    await page.getByRole("button", { name: "Workspace view settings", exact: true }).click();
     await page
-      .getByRole("button", { name: "Spent this month: configure included accounts", exact: true })
+      .getByRole("button", { name: "Spending account view selections", exact: true })
       .click();
-    const dialog = page.getByRole("dialog", { name: "Accounts included in spending" });
+    const dialog = page.getByRole("dialog", { name: "Spending account view selections" });
     const choice = dialog.getByLabel(/Everyday checking/);
     await expect(choice).toBeEnabled();
     await expect(choice).toBeChecked();
@@ -314,16 +319,21 @@ test("Finance account selection recovery stays readable after reopening and navi
     const latest = (await (await page.request.get(path)).json()) as WorkspaceSettings<"finances">;
     expect(latest.preferences).toEqual(seeded.preferences);
   } finally {
-    await page.unroute(`**${path}`);
-    const latest = (await (await page.request.get(path)).json()) as WorkspaceSettings<"finances">;
-    expect(
-      (
-        await page.request.patch(path, {
-          headers: { origin },
-          data: { expectedRevision: latest.revision, preferences: original.preferences },
-        })
-      ).ok(),
-    ).toBeTruthy();
+    try {
+      const latest = (await (
+        await restoreContext.get(path)
+      ).json()) as WorkspaceSettings<"finances">;
+      expect(
+        (
+          await restoreContext.patch(path, {
+            headers: { origin },
+            data: { expectedRevision: latest.revision, preferences: original.preferences },
+          })
+        ).ok(),
+      ).toBeTruthy();
+    } finally {
+      await restoreContext.dispose();
+    }
   }
 });
 

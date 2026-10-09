@@ -317,3 +317,9 @@ queued writes can advance it. Neither preference history nor a universal setting
 
 The global notification editor remains a separate integration surface; these recovery controls cover
 workspace preference settings, account review policy and the Finance notification reset.
+
+The canonical Finance overview exposes Workspace view settings for saved spending, cash, and
+investment account display selections, independently of financial snapshot availability. These
+selections do not change the overview’s financial position totals, account meanings, or planning
+inclusion. Retained failures can be reviewed after closing the selector or navigating to Finance
+Settings; refreshing a recovery view does not save a change.

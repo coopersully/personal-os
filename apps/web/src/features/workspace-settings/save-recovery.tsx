@@ -133,7 +133,7 @@ export function WorkspacePreferenceRecovery<W extends Workspace>({
     <SettingsSaveRecovery
       outcome={save.recovery.outcome}
       title="Workspace preference change has not been confirmed."
-      pending={query.isFetching || save.isPending}
+      pending={query.isFetching || save.isWorkspacePending}
       reapplyUnavailable={unavailable}
       reviewed={!!save.recovery.reviewed}
       rows={Object.entries(save.recovery.attempted).map(([key, value]) => ({

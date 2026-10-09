@@ -5,7 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useId } from "react";
+import { useId, useSyncExternalStore } from "react";
 import { api } from "@/api";
 import { classifyMutationError } from "@/lib/feedback";
 import { useFeedbackMutation } from "@/lib/use-feedback-mutation";
@@ -46,9 +46,11 @@ type SaveAttempt<W extends Workspace> = {
   sequence: number;
   session: PreferenceSession;
   queue: SaveQueue;
+  revisionMode?: "reviewed";
 };
 type SaveQueue = {
   pending: number;
+  listeners: Set<() => void>;
   sequence: number;
   successfulFields: Map<string, number>;
   advances: Map<number, WorkspaceSettings<Workspace>>;
@@ -69,6 +71,10 @@ function recoveryOutcome(outcomes: Record<string, "conflict" | "uncertain" | "re
       : "rejected";
 }
 const recoveryPrefix = "workspace-settings-recovery";
+function changePending(queue: SaveQueue, change: number) {
+  queue.pending += change;
+  for (const changed of queue.listeners) changed();
+}
 const queues = new WeakMap<QueryClient, Map<string, SaveQueue>>();
 
 export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
@@ -108,10 +114,26 @@ export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
   }
   let queue = workspaceQueues.get(queueKey);
   if (!queue) {
-    queue = { pending: 0, sequence: 0, successfulFields: new Map(), advances: new Map() };
+    queue = {
+      pending: 0,
+      listeners: new Set(),
+      sequence: 0,
+      successfulFields: new Map(),
+      advances: new Map(),
+    };
     workspaceQueues.set(queueKey, queue);
   }
   const saves = queue;
+  const sharedPending = useSyncExternalStore(
+    (changed) => {
+      saves.listeners.add(changed);
+      return () => {
+        saves.listeners.delete(changed);
+      };
+    },
+    () => saves.pending,
+    () => saves.pending,
+  );
   const mutation = useFeedbackMutation({
     scope: { id: `workspace-settings:${identity}:${session.epoch}:${workspace}` },
     feedback: { action: "save workspace preferences", safeToRetry: false },
@@ -123,10 +145,14 @@ export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
       let current = observed;
       // Only our successful queued writes can advance this observed revision.
       // An unseen remote write must reach the API with a stale revision and conflict.
-      let next = saves.advances.get(current.revision);
-      while (next) {
-        current = next as WorkspaceSettings<W>;
-        next = saves.advances.get(current.revision);
+      // Explicit recovery replays the reviewed revision exactly, even if an own queued
+      // write succeeds after review. Ordinary queued intent keeps its advancement.
+      if (attempt.revisionMode !== "reviewed") {
+        let next = saves.advances.get(current.revision);
+        while (next) {
+          current = next as WorkspaceSettings<W>;
+          next = saves.advances.get(current.revision);
+        }
       }
       const preferences =
         typeof change === "function"
@@ -216,7 +242,8 @@ export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
       void cache.invalidateQueries({ queryKey: workspaceSettingsKey(workspace) });
     },
     onSettled: (_data, _error, attempt) => {
-      if (--attempt.queue.pending === 0) attempt.queue.advances.clear();
+      changePending(attempt.queue, -1);
+      if (attempt.queue.pending === 0) attempt.queue.advances.clear();
     },
   });
   type Caller = MutateOptions<WorkspaceSettings<W>, Error, WorkspacePreferenceChange<W>, unknown>;
@@ -247,6 +274,7 @@ export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
         ? mutation.feedback
         : null,
     recovery,
+    isWorkspacePending: sharedPending > 0,
     refreshRecovery: async () => {
       if (!currentOwner()) return;
       setRecovery((current) => {
@@ -265,24 +293,25 @@ export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
     },
     reapplyReviewed: () => {
       if (!recovery?.reviewed) return;
-      saves.pending++;
+      changePending(saves, 1);
       mutation.mutate({
         change: recovery.attempted,
         observed: recovery.reviewed,
+        revisionMode: "reviewed",
         sequence: ++saves.sequence,
         session,
         queue: saves,
       });
     },
     mutate: (change: WorkspacePreferenceChange<W>, caller?: Caller) => {
-      saves.pending++;
+      changePending(saves, 1);
       mutation.mutate(
         { change, observed, sequence: ++saves.sequence, session, queue: saves },
         callbacks(caller),
       );
     },
     mutateAsync: (change: WorkspacePreferenceChange<W>, caller?: Caller) => {
-      saves.pending++;
+      changePending(saves, 1);
       return mutation.mutateAsync(
         { change, observed, sequence: ++saves.sequence, session, queue: saves },
         callbacks(caller),

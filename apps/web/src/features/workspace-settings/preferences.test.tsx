@@ -2,10 +2,11 @@
 import { ApiClientError } from "@personal-os/api-client";
 import { resolveWorkspaceSettings } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { api } from "@/api";
 import { useSaveWorkspacePreferences } from "./preferences";
+import { WorkspacePreferenceRecovery } from "./save-recovery";
 
 afterEach(() => vi.restoreAllMocks());
 it("serializes different controls in one workspace and resolves queued relative changes against fresh state", async () => {
@@ -459,4 +460,85 @@ it("does not turn an uncertain same-field attempt into a known rejection when a 
     expect(hook.result.current.recovery?.attempted).toEqual({ taskSort: "title" }),
   );
   expect(hook.result.current.recovery?.outcome).toBe("uncertain");
+});
+
+it("keeps an explicit replay at its reviewed revision when another hook's same-field predecessor succeeds", async () => {
+  let settings = resolveWorkspaceSettings("tasks");
+  vi.spyOn(api, "getWorkspaceSettings").mockImplementation(async () => settings);
+  let completePredecessor!: () => void;
+  const conflict = new ApiClientError({ status: 409, code: "conflict", message: "Changed" });
+  const update = vi
+    .spyOn(api, "updateWorkspaceSettings")
+    .mockRejectedValueOnce(conflict)
+    .mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          completePredecessor = () => {
+            settings = resolveWorkspaceSettings("tasks", { taskSort: "title", revision: 1 });
+            done(settings);
+          };
+        }),
+    )
+    .mockRejectedValue(conflict);
+  const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  cache.setQueryData(["me"], { id: "owner" });
+  cache.setQueryData(["workspace-settings", "tasks"], settings);
+  const hooks = renderHook(
+    () => ({
+      writer: useSaveWorkspacePreferences("tasks"),
+      recovery: useSaveWorkspacePreferences("tasks"),
+    }),
+    {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={cache}>
+          {children}
+          <WorkspacePreferenceRecovery workspace="tasks" />
+        </QueryClientProvider>
+      ),
+    },
+  );
+  act(() => {
+    hooks.result.current.writer.mutate({ taskSort: "priority" });
+    hooks.result.current.writer.mutate({ taskSort: "title" });
+  });
+  await waitFor(() => expect(completePredecessor).toBeDefined());
+  await waitFor(() =>
+    expect(hooks.result.current.recovery.recovery?.attempted).toEqual({ taskSort: "priority" }),
+  );
+  expect(hooks.result.current.recovery.isPending).toBe(false);
+  expect(hooks.result.current.recovery.isWorkspacePending).toBe(true);
+  expect(screen.getByRole("button", { name: "Refresh latest settings" })).toBeDisabled();
+  // Exercise the race directly: UI is disabled, but correctness must also hold for
+  // a reviewed replay already captured when an own predecessor completes later.
+  await act(async () => {
+    await hooks.result.current.recovery.refreshRecovery();
+  });
+  expect(hooks.result.current.recovery.recovery?.reviewed?.revision).toBe(0);
+  expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
+  act(() => hooks.result.current.recovery.reapplyReviewed());
+  await act(async () => completePredecessor());
+  await waitFor(() => expect(update).toHaveBeenCalledTimes(3));
+  expect(update).toHaveBeenNthCalledWith(2, "tasks", {
+    expectedRevision: 0,
+    preferences: { taskSort: "title" },
+  });
+  expect(update).toHaveBeenNthCalledWith(3, "tasks", {
+    expectedRevision: 0,
+    preferences: { taskSort: "priority" },
+  });
+  await waitFor(() => expect(hooks.result.current.recovery.isWorkspacePending).toBe(false));
+  expect(hooks.result.current.recovery.recovery?.attempted).toEqual({ taskSort: "priority" });
+  expect(hooks.result.current.recovery.recovery?.reviewed).toBeUndefined();
+  await act(async () => {
+    await hooks.result.current.recovery.refreshRecovery();
+  });
+  act(() => hooks.result.current.recovery.reapplyReviewed());
+  await waitFor(() => expect(update).toHaveBeenCalledTimes(4));
+  expect(update).toHaveBeenLastCalledWith("tasks", {
+    expectedRevision: 1,
+    preferences: { taskSort: "priority" },
+  });
+  await waitFor(() => expect(hooks.result.current.recovery.isWorkspacePending).toBe(false));
+  expect(hooks.result.current.recovery.recovery?.attempted).toEqual({ taskSort: "priority" });
+  expect(hooks.result.current.recovery.recovery?.reviewed).toBeUndefined();
 });

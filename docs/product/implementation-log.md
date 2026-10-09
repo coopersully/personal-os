@@ -4,8 +4,8 @@
 
 - Added owner-scoped, bounded keyset history reads for open, deferred, and resolved Finance Inbox
   cases, plus an exact evidence read. A foreign or invalid cursor fails without exposing another
-  user's case; missing and foreign exact IDs share the same unavailable result. The existing
-  review-case tables and answer semantics are unchanged.
+  user's case; missing and foreign exact IDs share the same unavailable result. A new
+  owner/time/ID index supports ordered pages; review-case records and answer semantics are unchanged.
 - The Finance review page discloses older case status and exact recorded evidence on demand, with
   bounded continuation and local retry states. Focused PostgreSQL and UI tests cover status,
   timestamp ordering, ownership, pagination, and exact evidence. Full verification and review

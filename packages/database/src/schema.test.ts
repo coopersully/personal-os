@@ -26,6 +26,7 @@ import {
   financeProviderItems,
   financeReimbursementMatches,
   financeReimbursements,
+  financeReviewCases,
   financeTransactionAllocations,
   financeTransactions,
   mailCalendarCommitmentIntakes,
@@ -496,7 +497,25 @@ describe("database schema contracts", () => {
       "0101_calendar_creation_preferences",
       "0102_task_capture_preferences",
       "0103_finance_display_account_preferences",
+      "0104_finance_review_history_index",
     ]);
+  });
+
+  it("keeps Finance review history ordering aligned with migration 0104", async () => {
+    const reviews = getTableConfig(financeReviewCases);
+    const historyIndex = reviews.indexes.find(
+      (index) => index.config.name === "finance_review_cases_user_first_seen_id_idx",
+    );
+    expect(
+      historyIndex?.config.columns.map((column) => (column as { name?: string }).name),
+    ).toEqual(["user_id", "first_seen_at", "id"]);
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0104_finance_review_history_index.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain(
+      'CREATE INDEX "finance_review_cases_user_first_seen_id_idx" ON "finance_review_cases" USING btree ("user_id", "first_seen_at" DESC, "id" DESC);',
+    );
   });
 
   it("keeps reimbursement ownership, many-to-many credit matching, and migration 0062 aligned", async () => {

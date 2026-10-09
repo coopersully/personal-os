@@ -247,7 +247,10 @@ describe.sequential("transaction-backed Finance Inbox", () => {
         status: "resolved",
         reasonCode: "unusual_amount",
         evidence: { source: "third" },
-        resolution: { type: "dismiss", answer: "Expected" },
+        resolution: {
+          type: "dismiss",
+          rationale: "Consolidated into the canonical Finance Inbox case.",
+        },
         resolutionProvenance: {
           actorType: "user",
           actorId: historyUserId,
@@ -303,7 +306,7 @@ describe.sequential("transaction-backed Finance Inbox", () => {
       status: "resolved",
       evidence: { source: "third" },
       economicEventId: null,
-      resolution: { answer: "Expected" },
+      resolution: { rationale: "Consolidated into the canonical Finance Inbox case." },
       resolutionProvenance: { actorType: "user" },
     });
     await expect(

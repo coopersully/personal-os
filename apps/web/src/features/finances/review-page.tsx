@@ -361,11 +361,7 @@ function FinanceReviewHistory() {
                 </Link>
               ) : null}
               {detail.data.resolution ? (
-                <p>
-                  {typeof detail.data.resolution.answer === "string"
-                    ? `Recorded answer: ${detail.data.resolution.answer}`
-                    : "Resolution recorded"}
-                </p>
+                <FinanceReviewHistoryResolution resolution={detail.data.resolution} />
               ) : null}
               {detail.data.resolutionProvenance?.actorType === "user" ? (
                 <p>Recorded by you</p>
@@ -385,6 +381,50 @@ function FinanceReviewHistory() {
           ) : null}
         </DialogContent>
       </Dialog>
+    </section>
+  );
+}
+
+function FinanceReviewHistoryResolution({ resolution }: { resolution: Record<string, unknown> }) {
+  const relatedTransactionId =
+    typeof resolution.relatedTransactionId === "string" &&
+    idSchema.safeParse(resolution.relatedTransactionId).success
+      ? resolution.relatedTransactionId
+      : null;
+  return (
+    <section className="grid gap-1" aria-label="Recorded outcome">
+      <h3 className="font-medium">Recorded outcome</h3>
+      {typeof resolution.type === "string" ? (
+        <p>Action: {resolution.type.replaceAll("_", " ")}</p>
+      ) : null}
+      {typeof resolution.answer === "string" ? <p>Recorded answer: {resolution.answer}</p> : null}
+      {typeof resolution.rationale === "string" ? <p>Reason: {resolution.rationale}</p> : null}
+      {typeof resolution.clarification === "string" ? (
+        <p>Clarification: {resolution.clarification}</p>
+      ) : null}
+      {typeof resolution.meaning === "string" ? <p>Meaning: {resolution.meaning}</p> : null}
+      {typeof resolution.relationship === "string" ? (
+        <p>Relationship: {resolution.relationship.replaceAll("_", " ")}</p>
+      ) : null}
+      {typeof resolution.categoryId === "string" ? (
+        <p>Category reference: {resolution.categoryId}</p>
+      ) : null}
+      {relatedTransactionId ? (
+        <Link
+          className="underline underline-offset-4"
+          to={`/finances/transactions?transactionId=${encodeURIComponent(relatedTransactionId)}`}
+        >
+          Open related transaction
+        </Link>
+      ) : null}
+      {resolution.changes && typeof resolution.changes === "object" ? (
+        <div>
+          <p>Profile changes</p>
+          <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-xs">
+            {JSON.stringify(resolution.changes, null, 2)}
+          </pre>
+        </div>
+      ) : null}
     </section>
   );
 }

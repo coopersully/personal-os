@@ -171,6 +171,75 @@ it("loads bounded review history and exact evidence without changing the active 
   await user.click(screen.getByRole("button", { name: "Close" }));
   expect(screen.getByRole("heading", { name: "Was this groceries or a meal?" })).toBeVisible();
 });
+
+it.each([
+  {
+    name: "a consolidation reason",
+    resolution: {
+      type: "dismiss",
+      rationale: "Consolidated into the canonical Finance Inbox case.",
+    },
+    expected: "Reason: Consolidated into the canonical Finance Inbox case.",
+  },
+  {
+    name: "classification details",
+    resolution: { type: "classify_transaction", categoryId, meaning: "Prepared meals" },
+    expected: `Category reference: ${categoryId}`,
+  },
+  {
+    name: "a linked transaction",
+    resolution: {
+      type: "link_transactions",
+      relationship: "reimbursement",
+      relatedTransactionId: nextId,
+    },
+    expected: "Relationship: reimbursement",
+  },
+])("shows $name when a review has no answer text", async ({ resolution, expected }) => {
+  const user = userEvent.setup();
+  const summary: FinanceReviewHistorySummary = {
+    id: reviewId,
+    transactionId,
+    firstSeenAt: now,
+    reason: "category_ambiguity",
+    resolvedAt: now,
+    status: "resolved",
+    context: {
+      accountId: categoryId,
+      accountName: "Checking",
+      institution: "Bank",
+      merchant: "Cafe Example",
+      date: "2026-09-02",
+      amount: 42,
+      currencyCode: "USD",
+      direction: "expense",
+      pending: false,
+    },
+  };
+  const detail: FinanceReviewHistoryItem = {
+    ...review(),
+    ...summary,
+    resolution,
+    resolutionProvenance: null,
+  };
+  api.listFinanceReviewHistory.mockResolvedValue({ items: [summary], nextCursor: null });
+  api.getFinanceReviewHistoryItem.mockResolvedValue(detail);
+  mount();
+  await user.click(screen.getByRole("button", { name: "Older questions and approvals" }));
+  await user.click(await screen.findByRole("button", { name: "View evidence for Cafe Example" }));
+  expect(await screen.findByText(expected)).toBeVisible();
+  expect(screen.queryByText("Resolution recorded")).not.toBeInTheDocument();
+  if (resolution.type === "link_transactions") {
+    expect(screen.getByRole("link", { name: "Open related transaction" })).toHaveAttribute(
+      "href",
+      `/finances/transactions?transactionId=${nextId}`,
+    );
+  }
+  if (resolution.type === "classify_transaction") {
+    expect(screen.getByText("Meaning: Prepared meals")).toBeVisible();
+  }
+});
+
 it("shows the requested question and exact transaction evidence, then advances only after a typed answer returns", async () => {
   const user = userEvent.setup();
   let resolve: ((value: FinanceToolResult<FinanceInboxCase[]>) => void) | undefined;

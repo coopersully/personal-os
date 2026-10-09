@@ -2994,6 +2994,11 @@ export const financeReviewCases = pgTable(
     ),
     check("finance_review_cases_contextual_revision_check", sql`${table.contextualRevision} > 0`),
     index("finance_review_cases_user_status_idx").on(table.userId, table.status),
+    index("finance_review_cases_user_first_seen_id_idx").on(
+      table.userId,
+      table.firstSeenAt.desc(),
+      table.id.desc(),
+    ),
     uniqueIndex("finance_review_cases_active_stable_key_unique")
       .on(table.userId, table.stableKey)
       .where(sql`${table.status} in ('open', 'deferred')`),

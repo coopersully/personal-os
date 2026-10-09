@@ -1,7 +1,7 @@
 import {
-  type Database,
   attentionItems,
   calendarAccounts,
+  type Database,
   domainProfiles,
 } from "@personal-os/database";
 import type { AgentAccessDomain, AgentAccessWorkItem } from "@personal-os/domain";

@@ -130,10 +130,9 @@ import { readFinanceConfiguration } from "./finance/configuration-service.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./finance/context.js";
 import { createInboxService } from "./finance/inbox-service.js";
 import { createFinanceLedgerService } from "./finance/ledger-service.js";
+import { supersedeFinanceMaintenanceLineage } from "./finance/maintenance-rebuild.js";
 import { normalizedMerchant, titleCaseMerchant } from "./finance/merchant-identity.js";
 import { createFinanceMerchantService } from "./finance/merchant-service.js";
-
-import { supersedeFinanceMaintenanceLineage } from "./finance/maintenance-rebuild.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import { appendFinanceProfile } from "./finance/profile-writer.js";
 import { createSetupService } from "./finance/setup-service.js";

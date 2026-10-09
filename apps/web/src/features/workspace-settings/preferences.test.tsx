@@ -172,6 +172,7 @@ it("retains attempted values across refresh failure and uses only the explicitly
   await act(async () => {
     await hook.result.current.refreshRecovery();
   });
+  await waitFor(() => expect(hook.result.current.recovery?.reviewed?.revision).toBe(4));
   expect(update).toHaveBeenCalledTimes(1);
   // A later remote change must not become an unseen revision for reapply.
   settings = resolveWorkspaceSettings("tasks", { revision: 5, taskSort: "date" });
@@ -185,6 +186,7 @@ it("retains attempted values across refresh failure and uses only the explicitly
   await act(async () => {
     await hook.result.current.refreshRecovery();
   });
+  await waitFor(() => expect(hook.result.current.recovery?.reviewed?.revision).toBe(5));
   update.mockResolvedValue(
     resolveWorkspaceSettings("tasks", { revision: 6, taskSort: "priority" }),
   );
@@ -248,6 +250,7 @@ it("merges queued failed fields across hook instances and retains them after unr
   await act(async () => {
     await settingsPage.result.current.refreshRecovery();
   });
+  await waitFor(() => expect(settingsPage.result.current.recovery?.reviewed?.revision).toBe(1));
   expect(update).toHaveBeenCalledTimes(3);
   act(() => settingsPage.result.current.reapplyReviewed());
   await waitFor(() => expect(settingsPage.result.current.recovery).toBeUndefined());
@@ -513,7 +516,7 @@ it("keeps an explicit replay at its reviewed revision when another hook's same-f
   await act(async () => {
     await hooks.result.current.recovery.refreshRecovery();
   });
-  expect(hooks.result.current.recovery.recovery?.reviewed?.revision).toBe(0);
+  await waitFor(() => expect(hooks.result.current.recovery.recovery?.reviewed?.revision).toBe(0));
   expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
   act(() => hooks.result.current.recovery.reapplyReviewed());
   await act(async () => completePredecessor());
@@ -532,6 +535,7 @@ it("keeps an explicit replay at its reviewed revision when another hook's same-f
   await act(async () => {
     await hooks.result.current.recovery.refreshRecovery();
   });
+  await waitFor(() => expect(hooks.result.current.recovery.recovery?.reviewed?.revision).toBe(1));
   act(() => hooks.result.current.recovery.reapplyReviewed());
   await waitFor(() => expect(update).toHaveBeenCalledTimes(4));
   expect(update).toHaveBeenLastCalledWith("tasks", {

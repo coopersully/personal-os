@@ -662,8 +662,8 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     db: dependencies.db,
     recovery: textingRecovery,
   });
-  const textingRecoveryRuntime = createTextingRecoveryRuntime(async () => {
-    const result = await textingRecoveryDispatcher.runPass();
+  const textingRecoveryRuntime = createTextingRecoveryRuntime(async (shouldContinue) => {
+    const result = await textingRecoveryDispatcher.runPass({ shouldContinue });
     if (result.failed) {
       throw new Error(`Texting recovery failed for ${result.failed} claims.`);
     }

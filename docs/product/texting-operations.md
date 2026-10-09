@@ -417,9 +417,10 @@ other replicas may overlap safely through the existing exact Finance receipt rep
 
 Each pass attempts at most 25 claims. This is a work-count bound, not a bound on database rows scanned,
 query time, or wall-clock duration: eligibility uses attached/unfinished child checks, and a stalled
-database call can outlive the normal shutdown grace period. Quiesce stops new passes and the active
-pass remains tracked while shutdown drains; if the process is terminated after its grace period,
-persisted unfinished claims are eligible again on restart. An accepted Finance receipt is reconciled
+database call can outlive the normal shutdown grace period. Quiesce stops new passes and stops an
+active pass before its next claim; the current claim remains tracked while shutdown drains. If the
+process is terminated after its grace period, persisted unfinished claims are eligible again on
+restart. An accepted Finance receipt is reconciled
 before any same-key execution, including when Texting is disabled. When no completed receipt exists,
 disabled Texting, STOP, consent, delivery, unbound, and stale-evidence gates still apply.
 

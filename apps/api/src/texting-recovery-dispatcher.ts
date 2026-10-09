@@ -54,11 +54,18 @@ export function createTextingRecoveryDispatcher(options: { db: Database; recover
   }
 
   return {
-    async runPass(): Promise<{ attempted: number; failed: number }> {
+    async runPass(
+      input: { shouldContinue?: () => boolean } = {},
+    ): Promise<{ attempted: number; failed: number }> {
+      const shouldContinue = input.shouldContinue ?? (() => true);
+      if (!shouldContinue()) return { attempted: 0, failed: 0 };
       let candidates = await scan(cursor);
-      if (!candidates.length && cursor) candidates = await scan(null);
+      if (!candidates.length && cursor && shouldContinue()) candidates = await scan(null);
       let failed = 0;
+      let attempted = 0;
       for (const key of candidates) {
+        if (!shouldContinue()) break;
+        attempted += 1;
         try {
           await options.recovery.recoverClaim(key.userId, key.claimId);
         } catch {
@@ -68,7 +75,7 @@ export function createTextingRecoveryDispatcher(options: { db: Database; recover
           cursor = key;
         }
       }
-      return { attempted: candidates.length, failed };
+      return { attempted, failed };
     },
   };
 }

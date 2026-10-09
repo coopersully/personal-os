@@ -1,12 +1,14 @@
 /** Coalesce startup and tick invocations; quiesce fences new work and retains the current promise. */
-export function createTextingRecoveryRuntime<T>(dispatch: () => Promise<T>) {
+export function createTextingRecoveryRuntime<T>(
+  dispatch: (shouldContinue: () => boolean) => Promise<T>,
+) {
   let active: Promise<T> | null = null;
   let accepting = true;
   return {
     run(): Promise<T> | null {
       if (!accepting) return null;
       if (active) return active;
-      const work = Promise.resolve().then(dispatch);
+      const work = Promise.resolve().then(() => dispatch(() => accepting));
       active = work;
       void work
         .finally(() => {

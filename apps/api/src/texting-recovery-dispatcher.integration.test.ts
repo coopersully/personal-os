@@ -11,8 +11,10 @@ import {
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { createRuntimeLifecycle, shutdownApiRuntime } from "./runtime-lifecycle.js";
 import { encryptJson } from "./security.js";
 import { createTextingRecoveryDispatcher } from "./texting-recovery-dispatcher.js";
+import { createTextingRecoveryRuntime } from "./texting-recovery-runtime.js";
 import { createTextingRecoveryService } from "./texting-recovery-service.js";
 
 describe.sequential("durable Texting recovery dispatcher", () => {
@@ -29,6 +31,9 @@ describe.sequential("durable Texting recovery dispatcher", () => {
   afterAll(async () => {
     await database?.close();
     await container?.stop();
+  });
+  beforeEach(async () => {
+    await database.db.delete(users);
   });
 
   async function owner(userId: string) {
@@ -176,4 +181,61 @@ describe.sequential("durable Texting recovery dispatcher", () => {
     expect(await failingDispatcher.runPass()).toEqual({ attempted: 2, failed: 0 });
     expect(failures[25]).toBe(`${lowerOwner}/${lowerClaims[25]?.id}`);
   }, 120_000);
+
+  it("drains the current claim without starting another after quiesce, then resumes at the unattempted claim", async () => {
+    const connection = await owner(lowerOwner);
+    const firstClaim = await claim(lowerOwner, connection.id, connection.consentEpoch, 1);
+    const secondClaim = await claim(lowerOwner, connection.id, connection.consentEpoch, 2);
+    const attempted: string[] = [];
+    let signalStarted!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const dispatcher = createTextingRecoveryDispatcher({
+      db: database.db,
+      recovery: {
+        recoverClaim: async (_userId, claimId) => {
+          attempted.push(claimId);
+          if (claimId === firstClaim.id) {
+            signalStarted();
+            await held;
+          }
+          return null;
+        },
+      },
+    });
+    const runtime = createTextingRecoveryRuntime((shouldContinue) =>
+      dispatcher.runPass({ shouldContinue }),
+    );
+    const lifecycle = createRuntimeLifecycle();
+    let completed: { attempted: number; failed: number } | undefined;
+    let databaseClosed = false;
+    expect(
+      lifecycle.startBackgroundTask("startup-texting-recovery", async () => {
+        completed = (await runtime.run()) ?? undefined;
+      }),
+    ).toBe(true);
+    await started;
+    const drain = shutdownApiRuntime({
+      closeDatabase: async () => {
+        databaseClosed = true;
+      },
+      closeHttpServer: async () => {},
+      lifecycle,
+      stopScheduling: runtime.quiesce,
+      timeoutMs: 5_000,
+    });
+    expect(databaseClosed).toBe(false);
+    release();
+    await expect(drain).resolves.toBeUndefined();
+    expect(completed).toEqual({ attempted: 1, failed: 0 });
+    expect(attempted).toEqual([firstClaim.id]);
+    expect(databaseClosed).toBe(true);
+    expect(await dispatcher.runPass()).toEqual({ attempted: 1, failed: 0 });
+    expect(attempted).toEqual([firstClaim.id, secondClaim.id]);
+  }, 15_000);
 });

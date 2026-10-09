@@ -90,7 +90,7 @@ function mountReader(headerHeight = 64, reducedMotion = false) {
     </section>,
   );
   return {
-    viewport: result.getByRole("region", { name: "Message reader", exact: true }),
+    viewport: result.getByRole("region", { name: /^Message reader$/ }),
     scrollTo,
   };
 }

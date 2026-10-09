@@ -88,7 +88,10 @@ export function createFinanceWorkReaders(
   };
 }
 
-export function projectFinanceWork({ results, includePreview }: ProjectionInput): AgentAccessWorkItem[] {
+export function projectFinanceWork({
+  results,
+  includePreview,
+}: ProjectionInput): AgentAccessWorkItem[] {
   const items = projectAttention("finances", "Finances", "/finances", { results, includePreview });
   items.push(...(results.financeEffects ?? []));
   items.push(...(results.financeContextual ?? []));

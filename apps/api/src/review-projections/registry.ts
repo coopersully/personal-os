@@ -65,8 +65,10 @@ export function buildSourceReaders(db: Database, limit?: number): SourceReaders 
 export function projectItems(
   input: ProjectionInput & { accessibleDomains: Set<AgentAccessDomain> },
 ): AgentAccessWorkItem[] {
-  return [...input.accessibleDomains]
-    .flatMap((domain) => projections[domain](input))
-    // Domain providers cannot widen the caller's readable workspaces.
-    .filter((item) => input.accessibleDomains.has(item.domain));
+  return (
+    [...input.accessibleDomains]
+      .flatMap((domain) => projections[domain](input))
+      // Domain providers cannot widen the caller's readable workspaces.
+      .filter((item) => input.accessibleDomains.has(item.domain))
+  );
 }

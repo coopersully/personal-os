@@ -65,7 +65,10 @@ export function createMailReviewReaders(
   };
 }
 
-export function projectMailWork({ results, includePreview }: ProjectionInput): AgentAccessWorkItem[] {
+export function projectMailWork({
+  results,
+  includePreview,
+}: ProjectionInput): AgentAccessWorkItem[] {
   const items = projectAttention("mail", "Mail", "/mail", { results, includePreview });
   const representedRun = (results.mailRuns ?? []).toSorted(
     (left, right) => right.updatedAt.getTime() - left.updatedAt.getTime(),

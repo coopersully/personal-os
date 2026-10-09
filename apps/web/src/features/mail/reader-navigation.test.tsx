@@ -43,17 +43,36 @@ afterEach(() => {
 });
 
 function mountReader(headerHeight = 64, reducedMotion = false) {
-  vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: reducedMotion })));
-  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn(() => ({ matches: reducedMotion })),
+  );
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+    this: HTMLElement,
+  ) {
     const viewport = this.closest<HTMLElement>(".mail-reader");
     const index = viewport
       ? [...viewport.querySelectorAll(".mail-reader__message")].indexOf(this)
       : -1;
     const top = index < 0 ? 100 : 100 + headerHeight + index * 300 - (viewport?.scrollTop ?? 0);
     const height = this.classList.contains("mail-reader__history-nav") ? headerHeight : 200;
-    return { top, bottom: top + height, left: 0, right: 390, x: 0, y: top, width: 390, height, toJSON: () => ({}) };
+    return {
+      top,
+      bottom: top + height,
+      left: 0,
+      right: 390,
+      x: 0,
+      y: top,
+      width: 390,
+      height,
+      toJSON: () => ({}),
+    };
   });
-  const scrollTo = vi.fn(function (this: HTMLElement, options?: ScrollToOptions | number, y?: number) {
+  const scrollTo = vi.fn(function (
+    this: HTMLElement,
+    options?: ScrollToOptions | number,
+    y?: number,
+  ) {
     if (typeof options === "object") this.scrollTop = options.top ?? 0;
     else this.scrollTop = y ?? 0;
     fireEvent.scroll(this);
@@ -63,21 +82,39 @@ function mountReader(headerHeight = 64, reducedMotion = false) {
       aria-label="Message reader"
       className="mail-reader"
       style={{ scrollPaddingTop: 0 }}
-      ref={(node) => { if (node) node.scrollTo = scrollTo; }}
+      ref={(node) => {
+        if (node) node.scrollTo = scrollTo;
+      }}
     >
       <Reader messages={messages} thread={thread} timeZone="UTC" />
     </section>,
   );
-  return { viewport: result.getByRole("region", { name: "Message reader", exact: true }), scrollTo };
+  return {
+    viewport: result.getByRole("region", { name: "Message reader", exact: true }),
+    scrollTo,
+  };
 }
 
-it.each([false, true])("navigates to each nearest earlier message and removes the control at the start (reduced motion %s)", (reducedMotion) => {
+it.each([
+  false,
+  true,
+])("navigates to each nearest earlier message and removes the control at the start (reduced motion %s)", (reducedMotion) => {
   const { viewport, scrollTo } = mountReader(64, reducedMotion);
   expect(viewport.scrollTop).toBe(600);
-  fireEvent.click(screen.getByRole("button", { name: "2 more messages above. Go to previous message" }));
-  expect(scrollTo).toHaveBeenLastCalledWith({ top: 300, behavior: reducedMotion ? "instant" : "smooth" });
-  fireEvent.click(screen.getByRole("button", { name: "1 more message above. Go to previous message" }));
-  expect(scrollTo).toHaveBeenLastCalledWith({ top: 0, behavior: reducedMotion ? "instant" : "smooth" });
+  fireEvent.click(
+    screen.getByRole("button", { name: "2 more messages above. Go to previous message" }),
+  );
+  expect(scrollTo).toHaveBeenLastCalledWith({
+    top: 300,
+    behavior: reducedMotion ? "instant" : "smooth",
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "1 more message above. Go to previous message" }),
+  );
+  expect(scrollTo).toHaveBeenLastCalledWith({
+    top: 0,
+    behavior: reducedMotion ? "instant" : "smooth",
+  });
   expect(screen.queryByRole("button", { name: /Go to previous message/ })).not.toBeInTheDocument();
   expect(viewport.querySelector(".mail-reader__message")?.getBoundingClientRect().top).toBe(164);
 });
@@ -85,10 +122,14 @@ it.each([false, true])("navigates to each nearest earlier message and removes th
 it("uses the rendered header height with unpadded affordances and follows manual scrolling", () => {
   const { viewport, scrollTo } = mountReader(96);
   expect(viewport.scrollTop).toBe(600);
-  expect(viewport.querySelector(".mail-reader__message:last-of-type")?.getBoundingClientRect().top).toBe(196);
+  expect(
+    viewport.querySelector(".mail-reader__message:last-of-type")?.getBoundingClientRect().top,
+  ).toBe(196);
   viewport.scrollTop = 300;
   fireEvent.scroll(viewport);
-  fireEvent.click(screen.getByRole("button", { name: "1 more message above. Go to previous message" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "1 more message above. Go to previous message" }),
+  );
   expect(scrollTo).toHaveBeenLastCalledWith({ top: 0, behavior: "smooth" });
   expect(screen.queryByRole("button", { name: /Go to previous message/ })).not.toBeInTheDocument();
 });

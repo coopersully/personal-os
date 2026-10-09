@@ -223,17 +223,15 @@ describe.sequential("Finance merchant facade compatibility", () => {
     const transaction = await createTransaction(userId, "Source private merchant");
     const source = required((await service.listMerchants(userId))[0]);
     const target = await seedMerchant(userId, "Target private merchant");
-    await database.db
-      .insert(financeClassificationDecisions)
-      .values({
-        userId,
-        transactionId: transaction.id,
-        merchantId: source.id,
-        categoryName: "Synthetic category",
-        source: "user",
-        confidence: 10000,
-        outcome: "confirmed",
-      });
+    await database.db.insert(financeClassificationDecisions).values({
+      userId,
+      transactionId: transaction.id,
+      merchantId: source.id,
+      categoryName: "Synthetic category",
+      source: "user",
+      confidence: 10000,
+      outcome: "confirmed",
+    });
     const input = {
       sourceMerchantId: source.id,
       targetMerchantId: target.id,

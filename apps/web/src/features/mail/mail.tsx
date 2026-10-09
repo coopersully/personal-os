@@ -1019,12 +1019,13 @@ export function Reader({
   const initializedThread = useRef<string | null>(null);
   const [messagesAbove, setMessagesAbove] = useState(0);
   const previousMessageRef = useRef<HTMLElement | null>(null);
+  const historyHeaderRef = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => {
     const article = articleRef.current;
     const viewport = article?.closest<HTMLElement>(".mail-reader");
     if (!article || !viewport || !latestMessageId) return;
     const latest = article.querySelector<HTMLElement>(".mail-reader__message:last-of-type");
-    const scrollOffset = () => Number.parseFloat(getComputedStyle(viewport).scrollPaddingTop) || 16;
+    const scrollOffset = () => historyHeaderRef.current?.getBoundingClientRect().height || 64;
     const updateMessagesAbove = () => {
       const top = viewport.getBoundingClientRect().top + scrollOffset();
       const above = [...article.querySelectorAll<HTMLElement>(".mail-reader__message")].filter(
@@ -1070,7 +1071,7 @@ export function Reader({
 
   return (
     <article ref={articleRef} className="mail-reader__article">
-      <header className="mail-reader__history-nav">
+      <header ref={historyHeaderRef} className="mail-reader__history-nav">
         <h2 className="min-w-0 flex-1 truncate" title={thread.subject}>
           {thread.subject}
         </h2>
@@ -1083,7 +1084,7 @@ export function Reader({
               const viewport = articleRef.current?.closest<HTMLElement>(".mail-reader");
               const previous = previousMessageRef.current;
               if (!viewport || !previous) return;
-              const offset = Number.parseFloat(getComputedStyle(viewport).scrollPaddingTop) || 16;
+              const offset = historyHeaderRef.current?.getBoundingClientRect().height || 64;
               viewport.scrollTo({
                 top:
                   viewport.scrollTop +

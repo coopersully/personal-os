@@ -279,6 +279,52 @@ describe.sequential("Finance notification composition", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  it("holds real Finance locks through queued delivery before one provider submission", async () => {
+    const owner = await createOwner("Delivery lock race");
+    const first = await createQuestion(owner, "First");
+    const second = await createQuestion(owner, "Second");
+    const service = notifications();
+    await service.publish(owner.principal, { work: [first.question.work, second.question.work] });
+    const claim = await service.claim(owner.principal);
+    if (claim.state !== "claimed") throw new Error(`Expected claim, got ${claim.state}.`);
+
+    let releaseResolver = () => {};
+    let reportLocked = () => {};
+    const held = new Promise<void>((resolve) => {
+      releaseResolver = resolve;
+    });
+    const locked = new Promise<void>((resolve) => {
+      reportLocked = resolve;
+    });
+    const gatedResolver: typeof resolveContextualWorks = async (userId, work, tx) => {
+      const resolved = await resolveContextualWorks(userId, work, tx);
+      reportLocked();
+      await held;
+      return resolved;
+    };
+    const delivery = notifications(gatedResolver).deliver(owner.principal, claim);
+    await locked;
+
+    await expect(answer(owner, second.question.work)).rejects.toMatchObject({
+      code: "conflict",
+      details: { retryable: true },
+    });
+    expect(send).not.toHaveBeenCalled();
+    expect(await database.db.select().from(textMessages)).toEqual([]);
+
+    releaseResolver();
+    await delivery;
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(await database.db.select().from(textMessages)).toHaveLength(1);
+    expect(
+      (await database.db.select().from(notificationAttemptItems)).map((item) => item.work),
+    ).toEqual(expect.arrayContaining([first.question.work, second.question.work]));
+    expect((await service.status(owner.principal)).attempts[0]).toMatchObject({
+      state: "accepted",
+    });
+  });
+
   it("keeps the unregistered production boundary representable", async () => {
     const owner = await createOwner("Unregistered boundary");
     const question = await createQuestion(owner, "Unregistered");

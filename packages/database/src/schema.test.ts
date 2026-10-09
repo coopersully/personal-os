@@ -498,6 +498,7 @@ describe("database schema contracts", () => {
       "0102_task_capture_preferences",
       "0103_finance_display_account_preferences",
       "0104_finance_review_history_index",
+      "0105_finance_review_history_archive",
     ]);
   });
 

@@ -62,8 +62,9 @@ export type FinanceReviewHistoryItem = Omit<FinanceInboxCase, "economicEventId">
   economicEventId: string | null;
   resolutionProvenance: Record<string, unknown> | null;
   archived?: boolean;
-  retainedQuestions?: Record<string, unknown>[];
-  retainedAnswers?: Record<string, unknown>[];
+  relatedTransactionAvailable?: boolean;
+  retainedQuestions?: { id: string; prompt: string; state: string }[];
+  retainedAnswers?: { id: string; text: string; sourceKind: string; recordedAt: string }[];
 };
 export type FinanceReviewHistorySummary = Pick<
   FinanceInboxCase,

@@ -366,7 +366,10 @@ function FinanceReviewHistory() {
                 </Link>
               ) : null}
               {detail.data.resolution ? (
-                <FinanceReviewHistoryResolution resolution={detail.data.resolution} />
+                <FinanceReviewHistoryResolution
+                  resolution={detail.data.resolution}
+                  relatedAvailable={detail.data.relatedTransactionAvailable === true}
+                />
               ) : null}
               {detail.data.resolutionProvenance?.actorType === "user" ? (
                 <p>Recorded by you</p>
@@ -376,6 +379,29 @@ function FinanceReviewHistory() {
               {detail.data.resolvedAt ? (
                 <p>Resolved {new Date(detail.data.resolvedAt).toLocaleString()}</p>
               ) : null}
+              {detail.data.context ? (
+                <section aria-label="Recorded transaction context">
+                  <h3 className="font-medium">Recorded transaction context</h3>
+                  <p>
+                    {detail.data.context.merchant} · {detail.data.context.date}
+                  </p>
+                  <p>
+                    {detail.data.context.accountName}
+                    {detail.data.context.institution ? ` · ${detail.data.context.institution}` : ""}
+                  </p>
+                  <p>
+                    {detail.data.context.amount} {detail.data.context.currencyCode} ·{" "}
+                    {detail.data.context.direction}
+                    {detail.data.context.pending ? " · Pending" : ""}
+                  </p>
+                </section>
+              ) : null}
+              {detail.data.retainedQuestions?.map((question) => (
+                <p key={question.id}>Question: {question.prompt}</p>
+              ))}
+              {detail.data.retainedAnswers?.map((answer) => (
+                <p key={answer.id}>Recorded answer: {answer.text}</p>
+              ))}
               <div>
                 <h3 className="font-medium">Source evidence</h3>
                 <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-xs">
@@ -390,7 +416,13 @@ function FinanceReviewHistory() {
   );
 }
 
-function FinanceReviewHistoryResolution({ resolution }: { resolution: Record<string, unknown> }) {
+function FinanceReviewHistoryResolution({
+  resolution,
+  relatedAvailable,
+}: {
+  resolution: Record<string, unknown>;
+  relatedAvailable: boolean;
+}) {
   const relatedTransactionId =
     typeof resolution.relatedTransactionId === "string" &&
     idSchema.safeParse(resolution.relatedTransactionId).success
@@ -414,13 +446,15 @@ function FinanceReviewHistoryResolution({ resolution }: { resolution: Record<str
       {typeof resolution.categoryId === "string" ? (
         <p>Category reference: {resolution.categoryId}</p>
       ) : null}
-      {relatedTransactionId ? (
+      {relatedTransactionId && relatedAvailable ? (
         <Link
           className="underline underline-offset-4"
           to={`/finances/transactions?transactionId=${encodeURIComponent(relatedTransactionId)}`}
         >
           Open related transaction
         </Link>
+      ) : relatedTransactionId ? (
+        <p>Related transaction reference: {relatedTransactionId} (source unavailable)</p>
       ) : null}
       {resolution.changes && typeof resolution.changes === "object" ? (
         <div>

@@ -220,6 +220,7 @@ it.each([
     ...review(),
     ...summary,
     resolution,
+    relatedTransactionAvailable: true,
     resolutionProvenance: null,
   };
   api.listFinanceReviewHistory.mockResolvedValue({ items: [summary], nextCursor: null });
@@ -643,4 +644,49 @@ it("shows a selected transaction's evidence even when it is absent from the rela
   );
   expect(screen.getByRole("option", { name: "Selected transaction (see evidence)" })).toBeVisible();
   expect(screen.getByLabelText("Related transaction")).toHaveValue(nextId);
+});
+
+it("shows retained context and answers without linking a deleted related source", async () => {
+  const user = userEvent.setup();
+  const detail: FinanceReviewHistoryItem = {
+    ...review(),
+    economicEventId: null,
+    archived: true,
+    context: {
+      accountId: categoryId,
+      accountName: "Removed account",
+      institution: "Bank",
+      merchant: "Retained merchant",
+      date: "2026-09-02",
+      amount: 42,
+      currencyCode: "USD",
+      direction: "expense",
+      pending: false,
+    },
+    resolution: { type: "link_transactions", relatedTransactionId: nextId },
+    relatedTransactionAvailable: false,
+    resolutionProvenance: null,
+    retainedQuestions: [{ id: nextId, prompt: "Purpose?", state: "answered" }],
+    retainedAnswers: [
+      { id: categoryId, text: "For groceries", sourceKind: "app", recordedAt: now },
+    ],
+  };
+  api.listFinanceReviewHistory.mockResolvedValue({
+    items: [{ ...detail, transactionId }],
+    nextCursor: null,
+  });
+  api.getFinanceReviewHistoryItem.mockResolvedValue(detail);
+  mount();
+  await user.click(screen.getByRole("button", { name: "Older questions and approvals" }));
+  await user.click(
+    await screen.findByRole("button", { name: "View evidence for Retained merchant" }),
+  );
+  expect(await screen.findByText("Question: Purpose?")).toBeVisible();
+  expect(screen.getByText("Recorded answer: For groceries")).toBeVisible();
+  expect(screen.getByText("Removed account · Bank")).toBeVisible();
+  expect(
+    screen.getByText(`Related transaction reference: ${nextId} (source unavailable)`),
+  ).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Open related transaction" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Open transaction" })).not.toBeInTheDocument();
 });

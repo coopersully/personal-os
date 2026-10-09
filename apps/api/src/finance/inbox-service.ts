@@ -374,95 +374,103 @@ export function createInboxService({ db, now }: Options) {
     },
 
     async getFinanceReviewHistoryItem(userId: string, id: string) {
-      const [row] = await db
-        .select()
-        .from(financeReviewCases)
-        .where(and(eq(financeReviewCases.userId, userId), eq(financeReviewCases.id, id)))
-        .limit(1);
-      const relatedAvailable = async (resolution: Record<string, unknown> | null) => {
-        if (typeof resolution?.relatedTransactionId !== "string") return false;
-        const [related] = await db
-          .select({ id: financeTransactions.id })
-          .from(financeTransactions)
-          .where(
-            and(
-              eq(financeTransactions.userId, userId),
-              eq(financeTransactions.id, resolution.relatedTransactionId),
-            ),
-          )
-          .limit(1);
-        return Boolean(related);
-      };
-      if (row) {
-        const contexts = await transactionContexts(userId, [row], db);
-        const questions = await db
-          .select({
-            id: financeContextualQuestions.id,
-            prompt: financeContextualQuestions.prompt,
-            state: financeContextualQuestions.state,
-          })
-          .from(financeContextualQuestions)
-          .where(
-            and(
-              eq(financeContextualQuestions.userId, userId),
-              eq(financeContextualQuestions.reviewCaseId, id),
-            ),
-          )
-          .orderBy(asc(financeContextualQuestions.id));
-        const answers = questions.length
-          ? await db
-              .select({
-                id: financeContextualAnswers.id,
-                text: financeContextualAnswers.text,
-                sourceKind: financeContextualAnswers.sourceKind,
-                recordedAt: financeContextualAnswers.recordedAt,
-              })
-              .from(financeContextualAnswers)
+      return db.transaction(
+        async (tx) => {
+          const [row] = await tx
+            .select()
+            .from(financeReviewCases)
+            .where(and(eq(financeReviewCases.userId, userId), eq(financeReviewCases.id, id)))
+            .limit(1);
+          const relatedAvailable = async (resolution: Record<string, unknown> | null) => {
+            if (typeof resolution?.relatedTransactionId !== "string") return false;
+            const [related] = await tx
+              .select({ id: financeTransactions.id })
+              .from(financeTransactions)
               .where(
                 and(
-                  eq(financeContextualAnswers.userId, userId),
-                  inArray(
-                    financeContextualAnswers.questionId,
-                    questions.map((question) => question.id),
-                  ),
+                  eq(financeTransactions.userId, userId),
+                  eq(financeTransactions.id, resolution.relatedTransactionId),
                 ),
               )
-              .orderBy(asc(financeContextualAnswers.recordedAt), asc(financeContextualAnswers.id))
-          : [];
-        return {
-          ...historyValue(row, contexts.get(row.transactionId)),
-          archived: false,
-          relatedTransactionAvailable: await relatedAvailable(row.resolution),
-          retainedQuestions: questions,
-          retainedAnswers: answers.map((answer) => ({
-            ...answer,
-            recordedAt: answer.recordedAt.toISOString(),
-          })),
-        };
-      }
-      const [archive] = await db
-        .select()
-        .from(financeReviewArchives)
-        .where(and(eq(financeReviewArchives.userId, userId), eq(financeReviewArchives.id, id)))
-        .limit(1);
-      if (!archive) throw new AppError("not_found", "Finance review not found.");
-      const retained = archivedReviewRow(archive.snapshot);
-      return {
-        ...historyValue(retained, archive.context as NonNullable<FinanceInboxCase["context"]>),
-        archived: true,
-        relatedTransactionAvailable: await relatedAvailable(retained.resolution),
-        retainedQuestions: archive.questions.map((question) => ({
-          id: String(question.id),
-          prompt: String(question.prompt),
-          state: String(question.state),
-        })),
-        retainedAnswers: archive.answers.map((answer) => ({
-          id: String(answer.id),
-          text: String(answer.text),
-          sourceKind: String(answer.source_kind),
-          recordedAt: new Date(String(answer.recorded_at)).toISOString(),
-        })),
-      };
+              .limit(1);
+            return Boolean(related);
+          };
+          if (row) {
+            const contexts = await transactionContexts(userId, [row], tx);
+            const questions = await tx
+              .select({
+                id: financeContextualQuestions.id,
+                prompt: financeContextualQuestions.prompt,
+                state: financeContextualQuestions.state,
+              })
+              .from(financeContextualQuestions)
+              .where(
+                and(
+                  eq(financeContextualQuestions.userId, userId),
+                  eq(financeContextualQuestions.reviewCaseId, id),
+                ),
+              )
+              .orderBy(asc(financeContextualQuestions.id));
+            const answers = questions.length
+              ? await tx
+                  .select({
+                    id: financeContextualAnswers.id,
+                    text: financeContextualAnswers.text,
+                    sourceKind: financeContextualAnswers.sourceKind,
+                    recordedAt: financeContextualAnswers.recordedAt,
+                  })
+                  .from(financeContextualAnswers)
+                  .where(
+                    and(
+                      eq(financeContextualAnswers.userId, userId),
+                      inArray(
+                        financeContextualAnswers.questionId,
+                        questions.map((question) => question.id),
+                      ),
+                    ),
+                  )
+                  .orderBy(
+                    asc(financeContextualAnswers.recordedAt),
+                    asc(financeContextualAnswers.id),
+                  )
+              : [];
+            return {
+              ...historyValue(row, contexts.get(row.transactionId)),
+              archived: false,
+              relatedTransactionAvailable: await relatedAvailable(row.resolution),
+              retainedQuestions: questions,
+              retainedAnswers: answers.map((answer) => ({
+                ...answer,
+                recordedAt: answer.recordedAt.toISOString(),
+              })),
+            };
+          }
+          const [archive] = await tx
+            .select()
+            .from(financeReviewArchives)
+            .where(and(eq(financeReviewArchives.userId, userId), eq(financeReviewArchives.id, id)))
+            .limit(1);
+          if (!archive) throw new AppError("not_found", "Finance review not found.");
+          const retained = archivedReviewRow(archive.snapshot);
+          return {
+            ...historyValue(retained, archive.context as NonNullable<FinanceInboxCase["context"]>),
+            archived: true,
+            relatedTransactionAvailable: await relatedAvailable(retained.resolution),
+            retainedQuestions: archive.questions.map((question) => ({
+              id: String(question.id),
+              prompt: String(question.prompt),
+              state: String(question.state),
+            })),
+            retainedAnswers: archive.answers.map((answer) => ({
+              id: String(answer.id),
+              text: String(answer.text),
+              sourceKind: String(answer.source_kind),
+              recordedAt: new Date(String(answer.recorded_at)).toISOString(),
+            })),
+          };
+        },
+        { isolationLevel: "repeatable read" },
+      );
     },
 
     async answerFinanceReview(

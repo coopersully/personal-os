@@ -380,8 +380,12 @@ function FinanceReviewHistory() {
                 <p>Resolved {new Date(detail.data.resolvedAt).toLocaleString()}</p>
               ) : null}
               {detail.data.context ? (
-                <section aria-label="Recorded transaction context">
-                  <h3 className="font-medium">Recorded transaction context</h3>
+                <section aria-label="Source transaction context">
+                  <h3 className="font-medium">
+                    {detail.data.archived
+                      ? "Context when source was removed"
+                      : "Current source context"}
+                  </h3>
                   <p>
                     {detail.data.context.merchant} · {detail.data.context.date}
                   </p>
@@ -390,7 +394,8 @@ function FinanceReviewHistory() {
                     {detail.data.context.institution ? ` · ${detail.data.context.institution}` : ""}
                   </p>
                   <p>
-                    {detail.data.context.amount} {detail.data.context.currencyCode} ·{" "}
+                    {detail.data.context.amount}{" "}
+                    {detail.data.context.currencyCode ?? "Currency unavailable"} ·{" "}
                     {detail.data.context.direction}
                     {detail.data.context.pending ? " · Pending" : ""}
                   </p>

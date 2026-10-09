@@ -338,7 +338,12 @@ describe.sequential("Finance SMS recovery composition", () => {
     };
     const recovering = recovery(finance(gatedAdmission)).runPage(f.userId, { limit: 10 });
     try {
-      await locked;
+      await Promise.race([
+        locked,
+        recovering.then(() => {
+          throw new Error("Recovery finished before SMS consumption.");
+        }),
+      ]);
       await expect(manualAnswer(f)).rejects.toMatchObject({
         code: "conflict",
         details: { retryable: true },
@@ -380,14 +385,19 @@ describe.sequential("Finance SMS recovery composition", () => {
     const service = recovery();
     const recovering = service.runPage(f.userId, { limit: 10 });
     let firstPage: Awaited<typeof recovering>;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       firstPage = await Promise.race([
         recovering,
         new Promise<never>((_resolve, reject) => {
-          setTimeout(() => reject(new Error("Recovery waited on the app answer lock.")), 2_000);
+          timer = setTimeout(
+            () => reject(new Error("Recovery waited on the app answer lock.")),
+            2_000,
+          );
         }),
       ]);
     } finally {
+      if (timer) clearTimeout(timer);
       releaseManual();
       await answering;
       await recovering;

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { ApiClientError } from "@personal-os/api-client";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { api } from "@/api";
@@ -233,4 +233,60 @@ it.each([
     );
   }
   await waitFor(() => expect(screen.queryByText("Your change: Disabled")).not.toBeInTheDocument());
+});
+
+it("preserves the newest reviewed account-policy version when an older refresh completes later", async () => {
+  vi.spyOn(api, "getExecutionPolicySettings").mockResolvedValue({
+    reviewBypassEnabled: false,
+    version: 4,
+  });
+  const update = vi
+    .spyOn(api, "updateExecutionPolicySettings")
+    .mockRejectedValue(new ApiClientError({ status: 409, code: "conflict", message: "Changed" }));
+  type Result = Awaited<ReturnType<QueryObserver["refetch"]>>;
+  let older!: (result: Result) => void;
+  let newer!: (result: Result) => void;
+  vi.spyOn(QueryObserver.prototype, "refetch")
+    .mockImplementationOnce(
+      () =>
+        new Promise<Result>((resolve) => {
+          older = resolve;
+        }),
+    )
+    .mockImplementationOnce(
+      () =>
+        new Promise<Result>((resolve) => {
+          newer = resolve;
+        }),
+    );
+  render(
+    <QueryClientProvider client={accountClient({ defaultOptions: { queries: { retry: false } } })}>
+      <ExecutionPolicySettingsCard />
+    </QueryClientProvider>,
+  );
+  await waitFor(() => expect(screen.getByRole("switch")).toBeEnabled());
+  await userEvent.click(screen.getByRole("switch"));
+  await screen.findByText("Your change: Enabled");
+  const refresh = screen.getByRole("button", { name: "Refresh latest settings" });
+  act(() => {
+    refresh.click();
+    refresh.click();
+  });
+  await act(async () =>
+    newer({ data: { reviewBypassEnabled: true, version: 8 }, isError: false } as Result),
+  );
+  await screen.findByText("Latest: Enabled");
+  await act(async () =>
+    older({ data: { reviewBypassEnabled: false, version: 6 }, isError: false } as Result),
+  );
+  expect(screen.getByText("Latest: Enabled")).toBeVisible();
+  expect(screen.queryByText("Latest: Disabled")).not.toBeInTheDocument();
+  expect(update).toHaveBeenCalledTimes(1);
+  await userEvent.click(screen.getByRole("button", { name: "Reapply reviewed change" }));
+  await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+  expect(update).toHaveBeenLastCalledWith({ reviewBypassEnabled: true, expectedVersion: 8 });
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled(),
+  );
+  expect(screen.getByText("Your change: Enabled")).toBeVisible();
 });

@@ -52,6 +52,7 @@ type SaveQueue = {
   pending: number;
   listeners: Set<() => void>;
   sequence: number;
+  refreshSequence: number;
   successfulFields: Map<string, number>;
   advances: Map<number, WorkspaceSettings<Workspace>>;
 };
@@ -118,6 +119,7 @@ export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
       pending: 0,
       listeners: new Set(),
       sequence: 0,
+      refreshSequence: 0,
       successfulFields: new Map(),
       advances: new Map(),
     };
@@ -277,6 +279,7 @@ export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
     isWorkspacePending: sharedPending > 0,
     refreshRecovery: async () => {
       if (!currentOwner()) return;
+      const sequence = ++saves.refreshSequence;
       setRecovery((current) => {
         if (!current) return current;
         const { reviewed: _reviewed, ...unreviewed } = current;
@@ -284,7 +287,7 @@ export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
       });
       const latest = await query.refetch();
       const reviewed = latest.data;
-      if (!latest.isError && reviewed)
+      if (sequence === saves.refreshSequence && currentOwner() && !latest.isError && reviewed)
         setRecovery((current) => (current ? { ...current, reviewed } : current));
     },
     acceptLatest: () => {

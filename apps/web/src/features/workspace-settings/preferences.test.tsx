@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { ApiClientError } from "@personal-os/api-client";
 import { resolveWorkspaceSettings } from "@personal-os/domain";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
 import { act, renderHook, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { api } from "@/api";
@@ -648,4 +648,97 @@ it("rejects an awaited edit without a loaded snapshot and permits a new explicit
     preferences: { taskSort: "title" },
   });
   expect(cache.getQueryData(["workspace-settings", "tasks"])).toEqual(saved);
+});
+
+it.each([
+  "same-session",
+  "A-B-A",
+] as const)("orders reviewed refreshes across hooks and fences late %s completions", async (transition) => {
+  const original = resolveWorkspaceSettings("tasks", { revision: 4 });
+  vi.spyOn(api, "getWorkspaceSettings").mockResolvedValue(original);
+  const update = vi
+    .spyOn(api, "updateWorkspaceSettings")
+    .mockRejectedValue(new ApiClientError({ status: 409, code: "conflict", message: "Changed" }));
+  type Result = Awaited<ReturnType<QueryObserver["refetch"]>>;
+  let older!: (result: Result) => void;
+  let newer!: (result: Result) => void;
+  const refetch = vi
+    .spyOn(QueryObserver.prototype, "refetch")
+    .mockImplementationOnce(
+      () =>
+        new Promise<Result>((resolve) => {
+          older = resolve;
+        }),
+    )
+    .mockImplementationOnce(
+      () =>
+        new Promise<Result>((resolve) => {
+          newer = resolve;
+        }),
+    );
+  const cache = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  cache.setQueryData(["me"], { id: "A" });
+  cache.setQueryData(["workspace-settings", "tasks"], original);
+  const hook = renderHook(
+    () => ({
+      first: useSaveWorkspacePreferences("tasks"),
+      second: useSaveWorkspacePreferences("tasks"),
+    }),
+    {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={cache}>{children}</QueryClientProvider>
+      ),
+    },
+  );
+  await waitFor(() =>
+    expect(cache.getQueryData(["workspace-settings", "tasks"])).toEqual(original),
+  );
+  act(() => hook.result.current.first.mutate({ taskSort: "priority" }));
+  await waitFor(() =>
+    expect(hook.result.current.second.recovery?.attempted.taskSort).toBe("priority"),
+  );
+  let firstRead!: Promise<void>;
+  let secondRead!: Promise<void>;
+  act(() => {
+    firstRead = hook.result.current.first.refreshRecovery();
+    secondRead = hook.result.current.second.refreshRecovery();
+  });
+  expect(refetch).toHaveBeenCalledTimes(2);
+  const latest = resolveWorkspaceSettings("tasks", { taskSort: "title", revision: 8 });
+  await act(async () => {
+    newer({ data: latest, isError: false } as Result);
+    await secondRead;
+  });
+  await waitFor(() => expect(hook.result.current.first.recovery?.reviewed).toEqual(latest));
+  if (transition === "A-B-A") {
+    act(() => {
+      cache.setQueryData(["me"], { id: "B" });
+      cache.setQueryData(["me"], { id: "A" });
+    });
+    await waitFor(() => expect(hook.result.current.first.recovery).toBeUndefined());
+  }
+  await act(async () => {
+    older({
+      data: resolveWorkspaceSettings("tasks", { taskSort: "estimate", revision: 6 }),
+      isError: false,
+    } as Result);
+    await firstRead;
+  });
+  expect(update).toHaveBeenCalledTimes(1);
+  if (transition === "A-B-A") {
+    expect(hook.result.current.first.recovery).toBeUndefined();
+    expect(hook.result.current.second.recovery).toBeUndefined();
+  } else {
+    expect(hook.result.current.second.recovery?.reviewed).toEqual(latest);
+    act(() => hook.result.current.second.reapplyReviewed());
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+    expect(update).toHaveBeenLastCalledWith("tasks", {
+      expectedRevision: 8,
+      preferences: { taskSort: "priority" },
+    });
+    await waitFor(() => expect(hook.result.current.first.recovery?.reviewed).toBeUndefined());
+    expect(hook.result.current.first.recovery?.attempted.taskSort).toBe("priority");
+  }
 });

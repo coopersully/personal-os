@@ -1,6 +1,6 @@
 import type { ExecutionPolicySettings } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
@@ -37,6 +37,7 @@ export function ExecutionPolicySettingsCard() {
 function SessionExecutionPolicySettingsCard({ session }: { session: PreferenceSession }) {
   const queryClient = useQueryClient();
   const current = () => sameSession(queryClient, session);
+  const refreshSequence = useRef(0);
   const [recovery, setRecovery] = useState<{
     attempted: boolean;
     reviewed?: ExecutionPolicySettings;
@@ -124,9 +125,15 @@ function SessionExecutionPolicySettingsCard({ session }: { session: PreferenceSe
             ]}
             onRefresh={async () => {
               if (!current()) return;
+              const sequence = ++refreshSequence.current;
               setRecovery({ attempted: recovery.attempted });
               const latest = await settings.refetch();
-              if (current() && !latest.isError && latest.data)
+              if (
+                sequence === refreshSequence.current &&
+                current() &&
+                !latest.isError &&
+                latest.data
+              )
                 setRecovery({ attempted: recovery.attempted, reviewed: latest.data });
             }}
             onAccept={() => {

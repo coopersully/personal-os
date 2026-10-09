@@ -2,8 +2,8 @@
 import "@testing-library/jest-dom/vitest";
 import { ApiClientError } from "@personal-os/api-client";
 import {
-  financeAccountListSchema,
   type FinanceConfiguration,
+  financeAccountListSchema,
   resolveWorkspaceSettings,
   type SearchableWorkspace,
   taskListSchema,

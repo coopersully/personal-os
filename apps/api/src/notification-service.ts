@@ -15,10 +15,12 @@ import {
   type FinanceHumanWorkRef,
   type NotificationAttemptHistory,
   type NotificationPreferences,
+  type NotificationResolution,
   type NotificationStatus,
   type NotificationWork,
   notificationEligibility,
   notificationPreferencesSchema,
+  notificationResolutionSchema,
   publishNotificationInputSchema,
   resetFinanceNotificationPreferencesSchema,
   validateNotificationResolution,
@@ -201,25 +203,56 @@ export function createNotificationService(options: Options) {
       return { scope: "finances", inherited: true } as const;
     });
   }
-  async function resolve(tx: NotificationTransaction, userId: string, ref: FinanceHumanWorkRef) {
-    if (!options.resolveWork) return { state: "unavailable" } as const;
-    return validateNotificationResolution(ref, await options.resolveWork(userId, ref, tx));
+  async function resolveBatch(
+    tx: NotificationTransaction,
+    userId: string,
+    refs: FinanceHumanWorkRef[],
+  ) {
+    if (refs.length < 1 || refs.length > 100)
+      throw new AppError("internal_error", "Notification batch size is invalid.");
+    if (new Set(refs.map((ref) => ref.id.toLowerCase())).size !== refs.length)
+      throw new AppError("invalid_request", "Each work item may appear once.");
+    if (!options.resolveWork)
+      throw new AppError("internal_error", "Notification producer is absent.");
+    const results: unknown = await options.resolveWork(userId, refs, tx);
+    if (!Array.isArray(results) || results.length !== refs.length)
+      throw new AppError("internal_error", "Notification resolver returned an invalid batch.");
+    const resolved: NotificationResolution[] = [];
+    for (let index = 0; index < refs.length; index++) {
+      if (!Object.hasOwn(results, index))
+        throw new AppError("internal_error", "Notification resolver returned an incomplete batch.");
+      const result = results[index];
+      const parsed = notificationResolutionSchema.safeParse(result);
+      if (!parsed.success)
+        throw new AppError("internal_error", "Notification resolver returned invalid work.");
+      const reference = refs[index];
+      if (!reference)
+        throw new AppError("internal_error", "Notification batch position is invalid.");
+      const current = parsed.data.state === "current" ? parsed.data.value : null;
+      if (
+        current &&
+        (["id", "domain", "kind", "revision", "actionRevision"] as const).some(
+          (key) => current.work[key] !== reference[key],
+        )
+      )
+        throw new AppError("internal_error", "Notification resolver returned wrong work.");
+      resolved.push(validateNotificationResolution(reference, parsed.data));
+    }
+    return resolved;
   }
   async function publish(principal: Principal, input: { work: FinanceHumanWorkRef[] }) {
     authorize(principal);
     const refs = publishNotificationInputSchema.parse(input).work;
     if (!options.resolveWork) return unavailable;
-    if (new Set(refs.map((r) => r.id)).size !== refs.length)
+    if (new Set(refs.map((r) => r.id.toLowerCase())).size !== refs.length)
       throw new AppError("invalid_request", "Each work item may appear once.");
     return options.db.transaction(async (tx) => {
       await lockUser(tx, principal.userId);
+      const results = await resolveBatch(tx, principal.userId, refs);
+      if (results.some((result) => result.state !== "current"))
+        throw new AppError("conflict", "Current notification evidence is unavailable.");
       const ids: string[] = [];
-      for (const ref of [...refs].sort((a, b) => a.id.localeCompare(b.id))) {
-        const result = await resolve(tx, principal.userId, ref);
-        if (result.state !== "current")
-          throw new AppError("conflict", "Current notification evidence is unavailable.");
-      }
-      for (const ref of [...refs].sort((a, b) => a.id.localeCompare(b.id))) {
+      for (const ref of refs) {
         const [intent] = await tx
           .insert(notificationIntents)
           .values({
@@ -393,8 +426,18 @@ export function createNotificationService(options: Options) {
         .limit(100);
       const eligible: typeof intents = [];
       const decisions: { intent: (typeof intents)[number]; reason: string }[] = [];
-      for (const intent of intents.sort((a, b) => a.workId.localeCompare(b.workId))) {
-        const result = await resolve(tx, user.id, intent.work);
+      const orderedIntents = intents.sort((a, b) => a.workId.localeCompare(b.workId));
+      const results = orderedIntents.length
+        ? await resolveBatch(
+            tx,
+            user.id,
+            orderedIntents.map((intent) => intent.work),
+          )
+        : [];
+      for (const [index, intent] of orderedIntents.entries()) {
+        const result = results[index];
+        if (!result)
+          throw new AppError("internal_error", "Notification batch position is invalid.");
         const reason =
           result.state !== "current"
             ? result.state
@@ -493,9 +536,17 @@ export function createNotificationService(options: Options) {
               eq(notificationAttemptItems.attemptId, claim.id),
             ),
           );
+        const orderedItems = items.sort((a, b) => a.work.id.localeCompare(b.work.id));
+        const results = await resolveBatch(
+          tx,
+          user.id,
+          orderedItems.map((item) => item.work),
+        );
         const works: NotificationWork[] = [];
-        for (const item of items.sort((a, b) => a.work.id.localeCompare(b.work.id))) {
-          const result = await resolve(tx, user.id, item.work);
+        for (const [index, item] of orderedItems.entries()) {
+          const result = results[index];
+          if (!result)
+            throw new AppError("internal_error", "Notification batch position is invalid.");
           const reason =
             result.state !== "current"
               ? result.state

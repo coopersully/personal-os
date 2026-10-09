@@ -984,6 +984,108 @@ describe.sequential("Texting signed-claim recovery", () => {
     expect((await service.runPage(f.userId, { limit: 10 })).claims).toEqual([]);
   });
 
+  it("projects an exact completed receipt while Texting is disabled without executing Finance", async () => {
+    const f = await fixture();
+    const outcome: FinanceDomainOutcome = {
+      operationId: f.operationId,
+      state: "blocked",
+      work: [f.command.work],
+      resultRevision: null,
+      reasonCode: "stale_revision",
+    };
+    let executions = 0;
+    const service = createTextingRecoveryService({
+      db: database.db,
+      enabled: () => false,
+      finance: {
+        inspectSmsReceipt: async (owner, command) => {
+          expect(owner).toBe(f.userId);
+          expect(command).toEqual(f.command);
+          return { state: "completed", outcome };
+        },
+        executeAnswer: async () => {
+          executions += 1;
+          throw new Error("completed receipt must not execute");
+        },
+      },
+    });
+    const [claim] = await database.db
+      .select({ id: textInboundClaims.id })
+      .from(textInboundClaims)
+      .where(eq(textInboundClaims.messageId, f.inbound.id));
+    if (!claim) throw new Error("Missing claim");
+    expect(await service.recoverClaim(f.userId, claim.id)).toMatchObject({
+      children: [{ bindingId: f.binding.id, state: "blocked", reason: "stale_revision" }],
+    });
+    expect(executions).toBe(0);
+    const [stored] = await database.db
+      .select({ state: textReplyBindings.state })
+      .from(textReplyBindings)
+      .where(eq(textReplyBindings.id, f.binding.id));
+    expect(stored?.state).toBe("blocked");
+  });
+
+  it("allows overlapping replicas to settle one accepted child under the existing admission lock", async () => {
+    const f = await fixture();
+    const [claim] = await database.db
+      .select({ id: textInboundClaims.id })
+      .from(textInboundClaims)
+      .where(eq(textInboundClaims.messageId, f.inbound.id));
+    if (!claim) throw new Error("Missing claim");
+    const accepted: FinanceDomainOutcome & { state: "accepted" } = {
+      operationId: f.operationId,
+      state: "accepted",
+      work: [f.command.work],
+      resultRevision: "result-1",
+      reasonCode: null,
+    };
+    let receipt: FinanceDomainOutcome | null = null;
+    let mutations = 0;
+    let signalLocked!: () => void;
+    let release!: () => void;
+    const locked = new Promise<void>((resolve) => {
+      signalLocked = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const createReplica = () =>
+      createTextingRecoveryService({
+        db: database.db,
+        enabled: () => true,
+        finance: {
+          inspectSmsReceipt: async () =>
+            receipt ? { state: "completed", outcome: receipt } : { state: "absent" },
+          executeAnswer: async (userId, command) => {
+            await database.db.transaction(async (tx) => {
+              const admission = await createSmsAdmission({ enabled: () => true })(tx, {
+                ...command,
+                userId,
+              });
+              if (admission.state !== "verified") throw new Error("Missing admission");
+              signalLocked();
+              await held;
+              await admission.consume(accepted);
+              mutations += 1;
+            });
+            receipt = accepted;
+            return accepted;
+          },
+        },
+      });
+    const first = createReplica().recoverClaim(f.userId, claim.id);
+    try {
+      await locked;
+      const second = await createReplica().recoverClaim(f.userId, claim.id);
+      expect(second?.children[0]).toMatchObject({ state: "uncertain", terminal: false });
+    } finally {
+      release();
+    }
+    expect((await first)?.children[0]).toMatchObject({ state: "accepted", terminal: true });
+    expect(mutations).toBe(1);
+    expect(await createReplica().recoverClaim(f.userId, claim.id)).toBeNull();
+  }, 15_000);
+
   it("isolates a busy child so its sibling still gets an exact receipt status", async () => {
     const f = await fixture(2);
     if (!f.secondBinding) throw new Error("Missing second child");

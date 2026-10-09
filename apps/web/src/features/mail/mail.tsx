@@ -1036,12 +1036,14 @@ export function Reader({
     };
     const resize = () => {
       article.style.setProperty("--reader-height", `${viewport.clientHeight}px`);
+      article.style.setProperty("--reader-history-height", `${scrollOffset()}px`);
       article.style.setProperty("--last-message-height", `${latest?.offsetHeight ?? 0}px`);
       updateMessagesAbove();
     };
     resize();
     const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
     observer?.observe(viewport);
+    if (historyHeaderRef.current) observer?.observe(historyHeaderRef.current);
     if (latest) observer?.observe(latest);
     if (!loadingMessages && initializedThread.current !== thread.id) {
       const latest = article.querySelector<HTMLElement>(".mail-reader__message:last-child");

@@ -423,6 +423,18 @@ describe.sequential("Agent Access work-item projection", () => {
             title: "Unexpected Mail effect",
             updatedAt: snapshot.toISOString(),
           },
+          {
+            action: { label: "Open global work", to: "/" },
+            actionAt: null,
+            domain: null,
+            id: "unexpected-global-effect",
+            kind: "review",
+            priority: "person_review",
+            source: null,
+            summary: "A global override must not widen workspace access.",
+            title: "Unexpected global effect",
+            updatedAt: snapshot.toISOString(),
+          },
         ],
       },
     });
@@ -437,6 +449,8 @@ describe.sequential("Agent Access work-item projection", () => {
     expect(page.items.every((item) => item.domain === "finances")).toBe(true);
     expect(page.items.some((item) => item.id === "unexpected-mail-effect")).toBe(false);
     expect(search.items.some((item) => item.id === "unexpected-mail-effect")).toBe(false);
+    expect(page.items.some((item) => item.id === "unexpected-global-effect")).toBe(false);
+    expect(search.items.some((item) => item.id === "unexpected-global-effect")).toBe(false);
     expect(page.unavailableDomains).toEqual([]);
     expect(search.unavailableSources).toEqual([]);
   });

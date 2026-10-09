@@ -113,9 +113,12 @@ export function createFinanceMerchantService({ db, now }: { db: Database; now: (
         .select()
         .from(financeMerchantAliases)
         .where(
-          inArray(
-            financeMerchantAliases.merchantId,
-            merchants.map((item) => item.id),
+          and(
+            eq(financeMerchantAliases.userId, userId),
+            inArray(
+              financeMerchantAliases.merchantId,
+              merchants.map((item) => item.id),
+            ),
           ),
         )
         .orderBy(financeMerchantAliases.rawName);

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { MailMessage, MailThread } from "@personal-os/domain";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { Reader } from "./mail.js";
 
@@ -81,7 +81,6 @@ function mountReader(headerHeight = 64, reducedMotion = false) {
     <section
       aria-label="Message reader"
       className="mail-reader"
-      style={{ scrollPaddingTop: 0 }}
       ref={(node) => {
         if (node) node.scrollTo = scrollTo;
       }}
@@ -92,6 +91,9 @@ function mountReader(headerHeight = 64, reducedMotion = false) {
   return {
     viewport: result.getByRole("region", { name: /^Message reader$/ }),
     scrollTo,
+    resizeHeader: (height: number) => {
+      headerHeight = height;
+    },
   };
 }
 
@@ -101,6 +103,13 @@ it.each([
 ])("navigates to each nearest earlier message and removes the control at the start (reduced motion %s)", (reducedMotion) => {
   const { viewport, scrollTo } = mountReader(64, reducedMotion);
   expect(viewport.scrollTop).toBe(600);
+  expect(
+    viewport
+      .querySelector<HTMLElement>(".mail-reader__article")
+      ?.style.getPropertyValue("--reader-history-height"),
+  ).toBe(
+    `${viewport.querySelector<HTMLElement>(".mail-reader__history-nav")?.getBoundingClientRect().height}px`,
+  );
   fireEvent.click(
     screen.getByRole("button", { name: "2 more messages above. Go to previous message" }),
   );
@@ -123,6 +132,13 @@ it("uses the rendered header height with unpadded affordances and follows manual
   const { viewport, scrollTo } = mountReader(96);
   expect(viewport.scrollTop).toBe(600);
   expect(
+    viewport
+      .querySelector<HTMLElement>(".mail-reader__article")
+      ?.style.getPropertyValue("--reader-history-height"),
+  ).toBe(
+    `${viewport.querySelector<HTMLElement>(".mail-reader__history-nav")?.getBoundingClientRect().height}px`,
+  );
+  expect(
     viewport.querySelector(".mail-reader__message:last-of-type")?.getBoundingClientRect().top,
   ).toBe(196);
   viewport.scrollTop = 300;
@@ -132,4 +148,32 @@ it("uses the rendered header height with unpadded affordances and follows manual
   );
   expect(scrollTo).toHaveBeenLastCalledWith({ top: 0, behavior: "smooth" });
   expect(screen.queryByRole("button", { name: /Go to previous message/ })).not.toBeInTheDocument();
+});
+
+it("updates native snap spacing when the observed history header resizes", () => {
+  let resized = () => {};
+  const observe = vi.fn();
+  const disconnect = vi.fn();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(callback: () => void) {
+        resized = callback;
+      }
+      observe = observe;
+      disconnect = disconnect;
+    },
+  );
+  const { viewport, resizeHeader } = mountReader(64);
+  const header = viewport.querySelector(".mail-reader__history-nav");
+  expect(observe).toHaveBeenCalledWith(header);
+  resizeHeader(96);
+  act(() => resized());
+  expect(
+    viewport
+      .querySelector<HTMLElement>(".mail-reader__article")
+      ?.style.getPropertyValue("--reader-history-height"),
+  ).toBe("96px");
+  cleanup();
+  expect(disconnect).toHaveBeenCalledOnce();
 });

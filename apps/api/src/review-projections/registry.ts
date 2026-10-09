@@ -69,6 +69,6 @@ export function projectItems(
     [...input.accessibleDomains]
       .flatMap((domain) => projections[domain](input))
       // Domain providers cannot widen the caller's readable workspaces.
-      .filter((item) => input.accessibleDomains.has(item.domain))
+      .filter((item) => item.domain !== null && input.accessibleDomains.has(item.domain))
   );
 }

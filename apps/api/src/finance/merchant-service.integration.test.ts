@@ -141,6 +141,23 @@ describe.sequential("Finance merchant facade compatibility", () => {
     expect(await service.listMerchants(randomUUID())).toEqual([]);
   });
 
+  it("excludes foreign-owner aliases linked to an owned merchant", async () => {
+    const owned = await seedMerchant(userId, "Owned merchant");
+    await database.db.insert(financeMerchantAliases).values([
+      { userId, merchantId: owned.id, rawName: "Own alias", normalizedName: "own alias" },
+      {
+        userId: foreignId,
+        merchantId: owned.id,
+        rawName: "Foreign private alias",
+        normalizedName: "foreign private alias",
+      },
+    ]);
+    expect(await service.listMerchants(userId)).toEqual([
+      expect.objectContaining({ id: owned.id, aliases: ["Own alias"] }),
+    ]);
+    expect(await service.listMerchants(foreignId)).toEqual([]);
+  });
+
   it("replays canonical rename once, confirms user edits, and redacts names from audits", async () => {
     const row = await seedMerchant(userId, "Private original merchant");
     const input = { displayName: "Private corrected merchant", idempotencyKey: randomUUID() };

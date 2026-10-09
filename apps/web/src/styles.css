@@ -4230,7 +4230,7 @@ p {
 .mail-reader__message {
   position: relative;
   scroll-snap-align: start;
-  scroll-margin-top: 4rem;
+  scroll-margin-top: var(--reader-history-height, 4rem);
   background: var(--card);
   border-radius: var(--radius-xl);
   padding: 1.25rem;

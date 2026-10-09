@@ -53,7 +53,7 @@ Form fields remain Fields; rich choice cards and grouped activity disclosures
 retain their interaction-specific structures.
 
 Audit coverage: Profile, Setup, Appearance, Connections, Workspace access, Connected
-agents, Mail, Calendar, Tasks, Finances, Rituals, Reviews, Goals, Motives, Activity,
+agents, Mail, Calendar, Tasks, Finances, Rituals, Goals, Motives, Activity,
 Invitations, Sessions, Texting, Desktop, Wallpaper, Pet, and Notifications. Native-only
 sections share these primitives but also require native runtime QA for their actions.
 This follows the [shadcn Item guidance](https://ui.shadcn.com/docs/components/radix/item):
@@ -118,7 +118,7 @@ buttons behind card clipping as a substitute for responsive layout.
 
 ## Record anatomy
 
-Goals, Motives, Sessions, Connections, Reviews, and editable Ritual steps share `SettingsRecord` /
+Goals, Motives, Sessions, Connections, and editable Ritual steps share `SettingsRecord` /
 `SettingsRecordContent`, composed from shadcn Item on the secondary surface.
 Use a wrapping title at the top, with compact icon actions aligned to its top-right;
 descriptions and metadata get their own full-width rows beneath. Status badges use
@@ -140,9 +140,10 @@ shadcn Dialog containing the creation form. Keep the list full width and hide
 creation fields until requested. Close only after a successful save; errors and
 drafts remain available, and closing returns focus to the trigger. Settings search
 field destinations must reveal the matching creation dialog before focusing its
-field. Connections and Reviews use the shared record header for icon actions;
-keep provider health, capabilities, workspace, and review-kind metadata readable
-below, preserving semantic status colors and meaningful accessible action labels.
+field. Connections uses the shared record header for icon actions; keep provider health,
+capabilities, and workspace metadata readable below, preserving semantic status colors and
+meaningful accessible action labels. The retained legacy Reviews queue is not a current Settings
+record editor; active review presentation follows the [workspace Reviews contract](reviews.md).
 
 
 Account profile preferences autosave after a brief typing pause. Serialize writes
@@ -166,8 +167,8 @@ colors, and respect reduced motion.
 
 Account workspace summaries use a borderless workspace-tinted block, a title-sized unframed icon,
 and the shared sidebar attention dot inline with the title when setup or review work needs attention.
-Show a Workspace settings destination. Reviews opens only from the workspace alert or the action
-beside that workspace Settings title. Setup uses the settings
+Show a Workspace settings destination. Reviews opens from the workspace alert, the action
+beside that workspace Settings title, or workspace search. Setup uses the settings
 destination; do not add a duplicate Continue setup action or title arrow. Workspace navigation
 belongs to the rail; the account summary does not add a Today at a Glance launch button.
 

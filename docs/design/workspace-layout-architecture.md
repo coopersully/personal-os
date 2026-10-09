@@ -1,9 +1,11 @@
 # Workspace layout architecture
 
-Status: shared frame migration implemented on the workspace-layout-architecture
-branch, October 3, 2026. Product content and current action placements are preserved.
-The original audit below records the starting point; the implementation contract
-describes the new boundaries.
+Status: shared frame migration merged into `main` in
+[PR #223 — Standardize workspace layouts and Finance configuration](https://github.com/coopersully/personal-os/pull/223)
+at `99ecac3d` on October 7, 2026. The October 3 branch implementation and original audit
+below record the starting point; the implementation contract describes the current frame
+boundaries. Later action placements follow the owning page contracts, including
+[workspace Reviews](pages/reviews.md). This source checkpoint does not establish deployment.
 
 ## Purpose
 

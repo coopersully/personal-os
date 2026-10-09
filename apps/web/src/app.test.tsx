@@ -4707,6 +4707,9 @@ describe("ilo web app", () => {
 
     mocks.listTasks.mockResolvedValue({ items: [], nextCursor: null });
     const empty = setup("/tasks?view=scheduled");
+    await waitFor(() =>
+      expect(empty.location.value).toBe("/tasks?view=all&reserved=scheduled&sort=reserved"),
+    );
     expect(await screen.findByText("No matching items")).toBeInTheDocument();
     expect(screen.getByText("Try another filter or search.")).toBeInTheDocument();
     expect(empty.location.value).toBe("/tasks?view=all&reserved=scheduled&sort=reserved");
@@ -9611,8 +9614,9 @@ describe("ilo web app", () => {
     mocks.deleteXBookmarkAccount.mockRejectedValueOnce(new Error("Disconnect failed"));
     const browser = userEvent.setup();
     const connected = setup("/settings?section=connections");
-    await screen.findByRole("option", { name: "Reading" });
-    await browser.selectOptions(screen.getByLabelText("X bookmark folder"), "folder-2");
+    const folder = await screen.findByLabelText("X bookmark folder");
+    await within(folder).findByRole("option", { name: "Reading" });
+    await browser.selectOptions(folder, "folder-2");
     expect(
       await screen.findAllByText("Couldn’t select this bookmark folder. Try again."),
     ).not.toHaveLength(0);

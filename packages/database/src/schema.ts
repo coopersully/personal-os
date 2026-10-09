@@ -2994,11 +2994,40 @@ export const financeReviewCases = pgTable(
     ),
     check("finance_review_cases_contextual_revision_check", sql`${table.contextualRevision} > 0`),
     index("finance_review_cases_user_status_idx").on(table.userId, table.status),
+    index("finance_review_cases_user_first_seen_id_idx").on(
+      table.userId,
+      table.firstSeenAt.desc(),
+      table.id.desc(),
+    ),
     uniqueIndex("finance_review_cases_active_stable_key_unique")
       .on(table.userId, table.stableKey)
       .where(sql`${table.status} in ('open', 'deferred')`),
     index("finance_review_cases_event_idx").on(table.economicEventId),
     index("finance_review_cases_reopened_idx").on(table.reopenedFromId),
+  ],
+);
+
+/** Read-only evidence retained when a source transaction or account is removed. */
+export const financeReviewArchives = pgTable(
+  "finance_review_archives",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull(),
+    snapshot: jsonb("snapshot").$type<Record<string, unknown>>().notNull(),
+    context: jsonb("context").$type<Record<string, unknown>>().notNull(),
+    questions: jsonb("questions").$type<Record<string, unknown>[]>().notNull(),
+    answers: jsonb("answers").$type<Record<string, unknown>[]>().notNull(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("finance_review_archives_owner_cursor_idx").on(
+      table.userId,
+      table.firstSeenAt.desc(),
+      table.id.desc(),
+    ),
   ],
 );
 

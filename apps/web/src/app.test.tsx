@@ -534,6 +534,8 @@ const mocks = vi.hoisted(() => ({
   getFinanceBudget: vi.fn(),
   getCanonicalFinanceBudgetStatus: vi.fn(),
   getFinanceInbox: vi.fn(),
+  listFinanceReviewHistory: vi.fn(),
+  getFinanceReviewHistoryItem: vi.fn(),
   answerFinanceReview: vi.fn(),
   getFinanceTransaction: vi.fn(),
   listFinanceAccounts: vi.fn(),
@@ -1714,6 +1716,8 @@ beforeEach(() => {
     unavailableDomains: [],
     summary: { byDomain: {} },
   });
+  mocks.listFinanceReviewHistory.mockResolvedValue({ items: [], nextCursor: null });
+  mocks.getFinanceReviewHistoryItem.mockResolvedValue(null);
   const NativeDate = Date;
   class TestDate extends NativeDate {
     constructor(value?: string | number | Date) {
@@ -5218,6 +5222,76 @@ describe("ilo web app", () => {
       "href",
       "/finances/plan",
     );
+    view.unmount();
+  });
+
+  it("opens exact Finance review history from the routed shared flow without pending work", async () => {
+    const historyId = secondId;
+    const summary = {
+      id: historyId,
+      prompt: "What was this purchase?",
+      firstSeenAt: now,
+      reason: "category_ambiguity",
+      resolvedAt: now,
+      status: "resolved",
+      context: {
+        accountId: id,
+        accountName: "Checking",
+        institution: "Example Bank",
+        merchant: "Cafe Example",
+        date: "2026-07-12",
+        amount: 42,
+        currencyCode: "USD",
+        direction: "expense",
+        pending: false,
+      },
+    };
+    mocks.listFinanceReviewHistory.mockResolvedValue({ items: [summary], nextCursor: null });
+    mocks.getFinanceReviewHistoryItem.mockResolvedValue({
+      ...summary,
+      archived: true,
+      transactionId: id,
+      resolution: { type: "dismiss", answer: "Personal meal" },
+      evidence: { receipt: "Cafe Example" },
+      retainedQuestions: [],
+      retainedAnswers: [{ id, text: "Personal meal" }],
+    });
+    const browser = userEvent.setup();
+    const view = setup("/finances/review");
+    expect(await screen.findByText("You’re caught up")).toBeInTheDocument();
+    expect(view.location.value).toBe("/finances?review=open");
+    await browser.click(screen.getByRole("button", { name: "Finance review history" }));
+    expect(await screen.findByRole("heading", { name: "Review history" })).toBeInTheDocument();
+    expect(mocks.listFinanceReviewHistory).toHaveBeenCalledWith({ limit: 20 });
+    await browser.click(screen.getByRole("button", { name: "View evidence for Cafe Example" }));
+    expect(mocks.getFinanceReviewHistoryItem).toHaveBeenCalledWith(historyId);
+    expect(await screen.findAllByText("Recorded answer: Personal meal")).toHaveLength(2);
+    expect(screen.getByText(/Source removed. This review is retained/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open transaction" })).not.toBeInTheDocument();
+    view.unmount();
+  });
+
+  it("keeps Finance review history available when current work cannot load", async () => {
+    mocks.listAgentAccessWorkItems.mockRejectedValue(new Error("Current reviews unavailable"));
+    mocks.listFinanceReviewHistory.mockResolvedValue({
+      items: [
+        {
+          id: secondId,
+          firstSeenAt: now,
+          reason: "category_ambiguity",
+          resolvedAt: now,
+          status: "resolved",
+          context: { merchant: "Cafe Example" },
+        },
+      ],
+      nextCursor: null,
+    });
+    const browser = userEvent.setup();
+    const view = setup("/finances/review");
+    expect(await screen.findByText("Couldn’t load your review session.")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Finance review history" }));
+    expect(await screen.findByText("Cafe Example")).toBeInTheDocument();
+    expect(mocks.listFinanceReviewHistory).toHaveBeenCalledWith({ limit: 20 });
     view.unmount();
   });
 

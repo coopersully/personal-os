@@ -31,6 +31,7 @@ import {
   financePositionReadScopeSchema,
   financeReceiptReviewInputSchema,
   financeReviewDecisionInputSchema,
+  financeReviewHistoryQuerySchema,
   financeScenarioInputSchema,
   financeSetupInputSchema,
   financeTransactionQuerySchema,
@@ -745,6 +746,21 @@ export function registerFinanceRoutes({
   app.get("/v1/finances/inbox", async (context) =>
     context.json(await finances.getFinanceInbox(context.get("principal").userId)),
   );
+  app.get("/v1/finances/inbox/history", async (context) => {
+    context.header("Cache-Control", "no-store");
+    return context.json(
+      await finances.listFinanceReviewHistory(
+        context.get("principal").userId,
+        financeReviewHistoryQuerySchema.parse(context.req.query()),
+      ),
+    );
+  });
+  app.get("/v1/finances/inbox/history/:id", async (context) => {
+    context.header("Cache-Control", "no-store");
+    return context.json(
+      await finances.getFinanceReviewHistoryItem(context.get("principal").userId, routeId(context)),
+    );
+  });
   app.get("/v1/finances/maintenance", async (context) =>
     context.json(
       await canonicalMaintenance().history(

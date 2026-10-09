@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import type { AgentAccessDomain } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { loadReviewSession, ReviewFlowHost } from "./flow.js";
@@ -103,6 +103,26 @@ it("does not substitute another decision for an unavailable deep link", async ()
     await screen.findByText("This review is no longer available. It may already be resolved."),
   ).toBeVisible();
   expect(screen.queryByText("Protect travel time")).not.toBeInTheDocument();
+});
+
+it("keeps Finance history in its settled location as current work loads", async () => {
+  let resolveWork: ((value: unknown) => void) | undefined;
+  mocks.listAgentAccessWorkItems.mockImplementation(
+    () => new Promise((resolve) => (resolveWork = resolve)),
+  );
+  setup("/finances?review=open", "finances");
+  expect(await screen.findByText("Loading your decisions…")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Finance review history" })).not.toBeInTheDocument();
+  await act(async () => {
+    resolveWork?.({
+      items: [],
+      nextCursor: null,
+      unavailableDomains: [],
+      summary: { byDomain: { finances: 0 } },
+    });
+  });
+  expect(await screen.findByText("You’re caught up")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Finance review history" })).toBeVisible();
 });
 
 it("does not count a submitted action when the source status is unavailable", async () => {

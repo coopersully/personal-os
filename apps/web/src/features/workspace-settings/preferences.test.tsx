@@ -198,6 +198,83 @@ it("retains attempted values across refresh failure and uses only the explicitly
   });
 });
 
+it("does not resurrect accepted recovery after a pending cross-hook refresh completes", async () => {
+  let settings = resolveWorkspaceSettings("tasks", { revision: 3, taskSort: "title" });
+  const read = vi.spyOn(api, "getWorkspaceSettings").mockImplementation(async () => settings);
+  const update = vi
+    .spyOn(api, "updateWorkspaceSettings")
+    .mockRejectedValue(new Error("Write response lost"));
+  const cache = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  cache.setQueryData(["me"], { id: "owner" });
+  cache.setQueryData(["workspace-settings", "tasks"], settings);
+  const hooks = renderHook(
+    () => ({
+      first: useSaveWorkspacePreferences("tasks"),
+      second: useSaveWorkspacePreferences("tasks"),
+    }),
+    {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={cache}>{children}</QueryClientProvider>
+      ),
+    },
+  );
+  act(() => hooks.result.current.first.mutate({ taskSort: "priority" }));
+  await waitFor(() =>
+    expect(hooks.result.current.second.recovery?.attempted).toEqual({ taskSort: "priority" }),
+  );
+  await waitFor(() => expect(cache.isFetching()).toBe(0));
+  let release!: (value: typeof settings) => void;
+  read.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  let refreshing!: Promise<void>;
+  act(() => {
+    refreshing = hooks.result.current.first.refreshRecovery();
+  });
+  await waitFor(() => expect(cache.isFetching()).toBe(1));
+  act(() => hooks.result.current.second.acceptLatest());
+  await waitFor(() => expect(hooks.result.current.first.recovery).toBeUndefined());
+  settings = resolveWorkspaceSettings("tasks", { revision: 6, taskSort: "title" });
+  await act(async () => {
+    release(settings);
+    await refreshing;
+  });
+  expect(hooks.result.current.first.recovery).toBeUndefined();
+  expect(hooks.result.current.second.recovery).toBeUndefined();
+  expect(update).toHaveBeenCalledTimes(1);
+  act(() => hooks.result.current.second.mutate({ taskGroup: "list" }));
+  await waitFor(() =>
+    expect(hooks.result.current.first.recovery?.attempted).toEqual({ taskGroup: "list" }),
+  );
+  await waitFor(() => expect(cache.isFetching()).toBe(0));
+  settings = resolveWorkspaceSettings("tasks", {
+    revision: 8,
+    taskSort: "title",
+    taskGroup: "project",
+  });
+  await act(async () => {
+    await hooks.result.current.first.refreshRecovery();
+  });
+  await waitFor(() => expect(hooks.result.current.second.recovery?.reviewed?.revision).toBe(8));
+  expect(update).toHaveBeenCalledTimes(2);
+  update.mockResolvedValue(
+    resolveWorkspaceSettings("tasks", { revision: 9, taskSort: "title", taskGroup: "list" }),
+  );
+  act(() => hooks.result.current.second.reapplyReviewed());
+  await waitFor(() => expect(update).toHaveBeenCalledTimes(3));
+  expect(update).toHaveBeenLastCalledWith("tasks", {
+    expectedRevision: 8,
+    preferences: { taskGroup: "list" },
+  });
+  await waitFor(() => expect(hooks.result.current.first.recovery).toBeUndefined());
+  expect(hooks.result.current.second.recovery).toBeUndefined();
+});
+
 it("merges queued failed fields across hook instances and retains them after unrelated successful writes and navigation", async () => {
   let settings = resolveWorkspaceSettings("tasks");
   vi.spyOn(api, "getWorkspaceSettings").mockImplementation(async () => settings);

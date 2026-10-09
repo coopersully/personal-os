@@ -2,9 +2,12 @@
 import "@testing-library/jest-dom/vitest";
 import { ApiClientError } from "@personal-os/api-client";
 import {
+  financeAccountListSchema,
   type FinanceConfiguration,
   resolveWorkspaceSettings,
   type SearchableWorkspace,
+  taskListSchema,
+  taskProjectSchema,
 } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -201,6 +204,348 @@ it("saves Tasks completed visibility and explicitly resets a stale capture desti
       expect.objectContaining({ preferences: { showCompletedTasks: true } }),
     ),
   );
+});
+
+it("keeps pinned-project recovery readable through failed name loading and exact reviewed replay", async () => {
+  const listId = "00000000-0000-4000-8000-000000000121";
+  const projectId = "00000000-0000-4000-8000-000000000122";
+  const project = taskProjectSchema.parse({
+    id: projectId,
+    listId,
+    name: "Launch",
+    lifecycle: "open",
+    availability: "active",
+    archivedAt: null,
+    cancelledAt: null,
+    completedAt: null,
+    deletedAt: null,
+    createdAt: "2026-10-09T00:00:00.000Z",
+    updatedAt: "2026-10-09T00:00:00.000Z",
+    notes: null,
+    targetDate: null,
+    why: null,
+    revision: 1,
+    source: {
+      accountId: null,
+      provider: "local",
+      remoteId: projectId,
+      revision: "1",
+      sourceType: "task_project",
+    },
+  });
+  let rejectNames!: (error: Error) => void;
+  const names = vi
+    .spyOn(api, "listTaskProjects")
+    .mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectNames = reject;
+        }),
+    )
+    .mockResolvedValue({ items: [project], nextCursor: null });
+  let settings = resolveWorkspaceSettings("tasks", {
+    revision: 3,
+    taskSort: "title",
+    pinnedProjectIds: [],
+  });
+  vi.mocked(api.getWorkspaceSettings).mockImplementation(async () => settings);
+  const update = vi
+    .mocked(api.updateWorkspaceSettings)
+    .mockRejectedValueOnce(
+      new ApiClientError({ status: 409, code: "conflict", message: "Changed" }),
+    )
+    .mockImplementation(async (_workspace, input) => {
+      settings = resolveWorkspaceSettings("tasks", {
+        ...settings.preferences,
+        ...input.preferences,
+        revision: 7,
+      });
+      return settings;
+    });
+  function Writer() {
+    const query = useWorkspacePreferences("tasks");
+    const save = useSaveWorkspacePreferences("tasks");
+    return (
+      <button
+        type="button"
+        disabled={!query.isSuccess || save.isWorkspacePending}
+        onClick={() => save.mutate({ pinnedProjectIds: [projectId] })}
+      >
+        Pin Launch elsewhere
+      </button>
+    );
+  }
+  const cache = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  cache.setQueryData(["me"], { id: "owner" });
+  render(
+    <QueryClientProvider client={cache}>
+      <MemoryRouter>
+        <Writer />
+        <WorkspacePreferencesSection workspace="tasks" />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Pin Launch elsewhere" })).toBeEnabled(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Pin Launch elsewhere" }));
+  await waitFor(() => expect(names).toHaveBeenCalledTimes(1));
+  expect(screen.getByLabelText("Sort by")).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
+  await act(async () => rejectNames(new Error("Project names offline")));
+  await screen.findByText("Couldn’t load pinned project names.");
+  expect(update).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await screen.findByText("Your change: Launch");
+  expect(screen.getByLabelText("Sort by")).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
+  settings = resolveWorkspaceSettings("tasks", {
+    revision: 6,
+    taskSort: "title",
+    pinnedProjectIds: [],
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  await screen.findByText("Latest: None pinned");
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeEnabled(),
+  );
+  expect(update).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("button", { name: "Reapply reviewed change" }));
+  await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+  expect(update).toHaveBeenLastCalledWith("tasks", {
+    expectedRevision: 6,
+    preferences: { pinnedProjectIds: [projectId] },
+  });
+  await waitFor(() => expect(screen.getByLabelText("Sort by")).toBeEnabled());
+  expect(settings.preferences.taskSort).toBe("title");
+});
+
+it("represents a configured Inbox as the product default while reviewing a failed capture reset", async () => {
+  const id = "00000000-0000-4000-8000-000000000124";
+  const inbox = taskListSchema.parse({
+    id,
+    name: "Inbox",
+    kind: "inbox",
+    availability: "active",
+    color: null,
+    description: null,
+    icon: "list",
+    archivedAt: null,
+    deletedAt: null,
+    revision: 1,
+    createdAt: "2026-10-09T00:00:00.000Z",
+    updatedAt: "2026-10-09T00:00:00.000Z",
+    source: {
+      accountId: null,
+      provider: "local",
+      remoteId: id,
+      revision: "1",
+      sourceType: "task_list",
+    },
+  });
+  vi.mocked(api.listTaskLists).mockResolvedValue({ items: [inbox], nextCursor: null });
+  let settings = resolveWorkspaceSettings("tasks", {
+    revision: 3,
+    defaultCaptureListId: id,
+    showCompletedTasks: true,
+  });
+  vi.mocked(api.getWorkspaceSettings).mockImplementation(async () => settings);
+  const update = vi
+    .mocked(api.updateWorkspaceSettings)
+    .mockRejectedValue(new Error("Reset response lost"));
+  function Writer() {
+    const query = useWorkspacePreferences("tasks");
+    const save = useSaveWorkspacePreferences("tasks");
+    return (
+      <button
+        type="button"
+        disabled={!query.isSuccess}
+        onClick={() => save.mutate({ defaultCaptureListId: null })}
+      >
+        Reset capture destination elsewhere
+      </button>
+    );
+  }
+  const cache = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  cache.setQueryData(["me"], { id: "owner" });
+  render(
+    <QueryClientProvider client={cache}>
+      <MemoryRouter>
+        <Writer />
+        <WorkspacePreferencesSection workspace="tasks" />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  await waitFor(() => expect(screen.getByLabelText("Default capture list")).toBeEnabled());
+  expect(screen.getByLabelText("Default capture list")).toHaveValue("");
+  expect(screen.getByRole("option", { name: "Inbox" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Reset capture destination elsewhere" }));
+  await screen.findByText("Your change: Inbox (product default)");
+  expect(screen.getByLabelText("Default capture list")).toBeDisabled();
+  expect(update).toHaveBeenLastCalledWith("tasks", {
+    expectedRevision: 3,
+    preferences: { defaultCaptureListId: null },
+  });
+  settings = resolveWorkspaceSettings("tasks", {
+    revision: 6,
+    defaultCaptureListId: id,
+    showCompletedTasks: true,
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  await screen.findByText("Latest: Inbox");
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Use latest settings" })).toBeEnabled(),
+  );
+  expect(update).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("button", { name: "Use latest settings" }));
+  await waitFor(() => expect(screen.getByLabelText("Default capture list")).toBeEnabled());
+  expect(screen.getByLabelText("Default capture list")).toHaveValue("");
+  expect(
+    screen.getByRole("switch", { name: "Show completed tasks in lists and projects" }),
+  ).toBeChecked();
+  expect(update).toHaveBeenCalledTimes(1);
+});
+
+it("reloads unavailable Finance account names before an exact reviewed selection replay", async () => {
+  const known = "00000000-0000-4000-8000-000000000123";
+  const missing = "00000000-0000-4000-8000-000000000125";
+  let settings = resolveWorkspaceSettings("finances", {
+    revision: 3,
+    cashAccountIds: [],
+    financeTransactionView: "cards",
+    financeTransactionGroup: "category",
+  });
+  const accounts = financeAccountListSchema.parse({
+    accounts: [
+      {
+        id: known,
+        name: "Everyday checking",
+        institution: "Example Bank",
+        balance: 20,
+        currencyCode: "USD",
+        includeInPlanning: true,
+        kind: "cash",
+        kindSource: "provider",
+        ownershipType: "unknown",
+        ownershipShare: null,
+        provider: "plaid",
+        status: "connected",
+        providerType: "depository",
+        providerSubtype: "checking",
+        lastSyncedAt: "2026-10-09T00:00:00.000Z",
+        updatedAt: "2026-10-09T00:00:00.000Z",
+        createdAt: "2026-10-09T00:00:00.000Z",
+        synchronization: {
+          state: "current",
+          message: null,
+          lastSuccessAt: "2026-10-09T00:00:00.000Z",
+          nextRetryAt: null,
+        },
+      },
+    ],
+    accountSemantics: {
+      excludedAccountIds: [],
+      possibleDuplicateGroups: [],
+      trustworthy: true,
+      unresolvedOwnershipAccountIds: [],
+    },
+    totals: { cash: 20, debt: 0, investments: 0, netWorth: 20, otherAssets: 0 },
+  });
+  const unavailable: FinanceConfiguration = {
+    execution: { state: "unavailable" },
+    profile: { state: "unavailable" },
+    preferences: { state: "loaded", value: settings },
+    income: { state: "unavailable" },
+    budget: { state: "unavailable" },
+    accounts: { state: "unavailable" },
+    guidance: { state: "unavailable" },
+    capabilities: {
+      budget: { state: "unavailable", reason: null, href: null, action: null },
+      cashflow: { state: "unavailable", reason: null, href: null, action: null },
+      wealth: { state: "unavailable", reason: null, href: null, action: null },
+    },
+  };
+  const load = vi
+    .spyOn(api, "getFinanceConfiguration")
+    .mockResolvedValueOnce(unavailable)
+    .mockResolvedValue({ ...unavailable, accounts: { state: "loaded", value: accounts } });
+  vi.mocked(api.getWorkspaceSettings).mockImplementation(async () => settings);
+  const update = vi
+    .mocked(api.updateWorkspaceSettings)
+    .mockRejectedValueOnce(
+      new ApiClientError({ status: 409, code: "conflict", message: "Changed" }),
+    )
+    .mockImplementation(async (_workspace, input) => {
+      settings = resolveWorkspaceSettings("finances", {
+        ...settings.preferences,
+        ...input.preferences,
+        revision: 7,
+      });
+      return settings;
+    });
+  function Writer() {
+    const query = useWorkspacePreferences("finances");
+    const save = useSaveWorkspacePreferences("finances");
+    return (
+      <button
+        type="button"
+        disabled={!query.isSuccess}
+        onClick={() => save.mutate({ cashAccountIds: [known, missing] })}
+      >
+        Choose cash accounts elsewhere
+      </button>
+    );
+  }
+  const cache = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  cache.setQueryData(["me"], { id: "owner" });
+  render(
+    <QueryClientProvider client={cache}>
+      <MemoryRouter>
+        <Writer />
+        <WorkspacePreferencesSection workspace="finances" />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Choose cash accounts elsewhere" })).toBeEnabled(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Choose cash accounts elsewhere" }));
+  await screen.findByText(
+    "Account names are unavailable. Reload them before reapplying account selections.",
+  );
+  expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
+  expect(screen.getByLabelText("Transaction view")).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Reload account names" }));
+  await screen.findByText("Your change: Everyday checking, Unavailable account");
+  expect(load).toHaveBeenCalledTimes(2);
+  expect(update).toHaveBeenCalledTimes(1);
+  settings = resolveWorkspaceSettings("finances", {
+    revision: 6,
+    cashAccountIds: [],
+    financeTransactionView: "cards",
+    financeTransactionGroup: "category",
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  await screen.findByText("Latest: None selected");
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeEnabled(),
+  );
+  expect(update).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("button", { name: "Reapply reviewed change" }));
+  await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+  expect(update).toHaveBeenLastCalledWith("finances", {
+    expectedRevision: 6,
+    preferences: { cashAccountIds: [known, missing] },
+  });
+  await waitFor(() => expect(screen.getByLabelText("Transaction view")).toBeEnabled());
+  expect(settings.preferences.financeTransactionView).toBe("cards");
+  expect(settings.preferences.financeTransactionGroup).toBe("category");
 });
 
 it("fences account names and retained recovery across mounted Settings A to B to A with a late read", async () => {

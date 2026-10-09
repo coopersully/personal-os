@@ -14,7 +14,9 @@
   alert or workspace Settings header. The underlying page stays in place; domain actions retain
   their authority and revision checks. This supersedes the October 1 Today-owned `/reviews`
   placement: `/reviews` falls back to Account, and the old queue component is retained but not
-  routed. See the [Reviews contract](../design/pages/reviews.md) for exact links and recovery.
+  routed. Some notification and agent producers still emit legacy links that land on Account;
+  generated-link migration remains incomplete. See the
+  [Reviews contract](../design/pages/reviews.md) for exact links, this limitation, and recovery.
 - [Finance](../design/pages/finances.md) includes editable configuration, partial-read recovery,
   scalar saves on blur or selection, complete collection-row saves on leaving the row, compact
   transaction cards, responsive details, category/context editing,

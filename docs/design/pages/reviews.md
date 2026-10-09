@@ -17,6 +17,19 @@ workspace flow. Old Mail `reviewRule` links open the corresponding item in Setti
 must report unavailable instead of silently substituting a different decision. `/reviews` falls back
 to Account; Today, account summary cards and Finance's Views menu no longer advertise review pages.
 
+## Known generated-link gap
+
+At the `fe983085` source checkpoint, the notification policy and delivery service still generate
+`/settings?section=reviews`, and the assistant context advertises `/reviews` as its approvals
+link. Both fall back to Account rather than opening the requested review. The workspace entry
+locations above work, but generated notification/agent links are not a completed navigation
+cutover. They need migration to an exact supported workspace target with navigation coverage;
+no target-preservation or end-to-end notification review-link claim is established yet.
+
+The owning producers are `packages/domain/src/notification-policy.ts`,
+`apps/api/src/notification-service.ts`, and `apps/api/src/assistant-service.ts`; routing lives in
+`apps/web/src/app.tsx`. This limitation does not change domain approval or recovery requirements.
+
 ## Session behavior
 
 - Load all snapshot pages in server priority order. A session is scoped to one workspace.

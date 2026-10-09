@@ -356,13 +356,18 @@ while retaining domain-owned conditions, actions, validation, and execution.
 **Token/scopes:** new credentials use domain read/write scopes plus audit and bookmark reads. `automations:read` remains a compatibility label for reading the daily brief. `automations:write` is inactive and unavailable on new tokens. Workspace permissions currently apply at the workspace level except where a provider-selected destination is explicitly enforced; the UI must not invent per-source credential controls.
 Planned Tracking adds `tracking:read` and `tracking:write` with selected Tracker sources; those scopes are not shipped yet.
 
-**Reviews:** `/reviews`, owned by Today, is the account-wide action queue for work that explicitly
-requires the person: questions, approvals, connector failures, recovery steps, and other Review or
-Attention items. Kind and workspace filters are URL-owned, results are cursor-paginated, and every
-action routes to the domain that owns the decision. Informational state, routine success, and work
-nohmi can recover automatically do not enter the queue; setup and access configuration never appear
-as queue work merely because they exist. Legacy `/settings?section=reviews` links redirect while
-preserving filters.
+**Reviews:** the [workspace Reviews contract](../design/pages/reviews.md) owns the current
+presentation: a workspace-scoped dialog or mobile drawer opened from its attention alert or
+workspace Settings header. It collects work that explicitly requires the person: questions,
+approvals, connector failures, recovery steps, and other Review or Attention items. Results are
+cursor-paginated and every action retains domain-owned authority. Informational state, routine
+success, and work nohmi can recover automatically do not enter the flow; setup and access
+configuration never appear as review work merely because they exist. This supersedes the earlier
+Today-owned account-wide `/reviews` queue while keeping the underlying workspace in place.
+Legacy workspace decision links enter the scoped flow; `/reviews` and
+`/settings?section=reviews` currently fall back to Account. Some notification and agent link
+producers still emit those old destinations; the Reviews contract records this unresolved
+implementation gap. Do not claim those generated links preserve their requested review target.
 
 Centralized Settings is the canonical editor for account-wide identity, security, privacy ceilings,
 review bypass, shared notification policy, channel connections/defaults, connected-agent

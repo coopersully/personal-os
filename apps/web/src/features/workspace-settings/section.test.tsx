@@ -10,7 +10,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { api } from "@/api";
-import { useSaveWorkspacePreferences } from "./preferences";
+import { useSaveWorkspacePreferences, useWorkspacePreferences } from "./preferences";
 import { WorkspacePreferencesSection } from "./section";
 
 beforeEach(() => {
@@ -204,8 +204,13 @@ it("saves Tasks completed visibility and explicitly resets a stale capture desti
 it("fences account names and retained recovery across mounted Settings A to B to A with a late read", async () => {
   function Writer() {
     const save = useSaveWorkspacePreferences("finances");
+    const preferences = useWorkspacePreferences("finances");
     return (
-      <button type="button" onClick={() => save.mutate({ cashAccountIds: [] })}>
+      <button
+        type="button"
+        disabled={!preferences.isSuccess}
+        onClick={() => save.mutate({ cashAccountIds: [] })}
+      >
         Attempt cash selection
       </button>
     );
@@ -247,11 +252,17 @@ it("fences account names and retained recovery across mounted Settings A to B to
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Attempt cash selection" })).toBeEnabled(),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Attempt cash selection" }));
   await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
   act(() => cache.setQueryData(["me"], { id: "B" }));
   await waitFor(() =>
     expect(screen.queryByText("Your change: None selected")).not.toBeInTheDocument(),
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Attempt cash selection" })).toBeEnabled(),
   );
   fireEvent.click(screen.getByRole("button", { name: "Attempt cash selection" }));
   await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
@@ -263,6 +274,9 @@ it("fences account names and retained recovery across mounted Settings A to B to
   );
   await act(async () => release(configuration("Old A checking")));
   expect(screen.queryByText(/Old A checking|B checking/)).not.toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Attempt cash selection" })).toBeEnabled(),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Attempt cash selection" }));
   await waitFor(() => expect(load).toHaveBeenCalledTimes(3));
   fireEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));

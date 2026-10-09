@@ -6,7 +6,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { api } from "@/api";
-import { useSaveWorkspacePreferences } from "../workspace-settings/preferences";
+import {
+  useSaveWorkspacePreferences,
+  useWorkspacePreferences,
+} from "../workspace-settings/preferences";
 import { FinanceOverviewSettings } from "./overview-settings";
 
 const configuration = (name = "Everyday checking") =>
@@ -24,8 +27,13 @@ afterEach(() => {
 });
 function OtherWriter() {
   const save = useSaveWorkspacePreferences("finances");
+  const preferences = useWorkspacePreferences("finances");
   return (
-    <button type="button" onClick={() => save.mutate({ cashAccountIds: [] })}>
+    <button
+      type="button"
+      disabled={!preferences.isSuccess}
+      onClick={() => save.mutate({ cashAccountIds: [] })}
+    >
       Other writer
     </button>
   );
@@ -124,6 +132,7 @@ it("discovers another hook's retained attempt without opening view settings firs
     .spyOn(api, "updateWorkspaceSettings")
     .mockRejectedValue(new ApiClientError({ status: 409, code: "conflict", message: "Changed" }));
   mount(true);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Other writer" })).toBeEnabled());
   fireEvent.click(screen.getByRole("button", { name: "Other writer" }));
   await screen.findByText("Your change: None selected");
   expect(screen.getByRole("link", { name: "Open Finance settings" })).toHaveAttribute(
@@ -156,6 +165,7 @@ it("reloads unavailable account names in retained recovery without saving until 
     .spyOn(api, "updateWorkspaceSettings")
     .mockRejectedValue(new ApiClientError({ status: 409, code: "conflict", message: "Changed" }));
   mount(true);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Other writer" })).toBeEnabled());
   fireEvent.click(screen.getByRole("button", { name: "Other writer" }));
   await screen.findByText("Your change: None selected");
   await screen.findByRole("button", { name: "Reload account names" });

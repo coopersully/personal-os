@@ -5,10 +5,17 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useId, useSyncExternalStore } from "react";
+import { useId } from "react";
 import { api } from "@/api";
 import { classifyMutationError } from "@/lib/feedback";
 import { useFeedbackMutation } from "@/lib/use-feedback-mutation";
+import {
+  type PreferenceSession,
+  preferenceSession,
+  registerSessionCleanup,
+  sameSession,
+  usePreferenceSession,
+} from "./account-save-session";
 
 export const workspaceSettingsKey = (workspace: Workspace) =>
   ["workspace-settings", workspace] as const;
@@ -49,48 +56,19 @@ type SaveQueue = {
 type PreferenceRecovery<W extends Workspace> = {
   attempted: Partial<WorkspacePreferences<W>>;
   fieldSequences: Record<string, number>;
+  fieldOutcomes: Record<string, "conflict" | "uncertain" | "rejected">;
   outcome: "conflict" | "uncertain" | "rejected";
   reviewed?: WorkspaceSettings<W>;
 };
+function recoveryOutcome(outcomes: Record<string, "conflict" | "uncertain" | "rejected">) {
+  const values = Object.values(outcomes);
+  return values.includes("uncertain")
+    ? "uncertain"
+    : values.every((value) => value === "conflict")
+      ? "conflict"
+      : "rejected";
+}
 const recoveryPrefix = "workspace-settings-recovery";
-const accountIdentity = (cache: QueryClient) =>
-  cache.getQueryData<{ id: string }>(["me"])?.id ?? null;
-type PreferenceSession = { owner: string | null; epoch: number };
-const sessions = new WeakMap<QueryClient, PreferenceSession>();
-function preferenceSession(cache: QueryClient): PreferenceSession {
-  let state = sessions.get(cache);
-  if (state) return state;
-  state = { owner: accountIdentity(cache), epoch: 0 };
-  sessions.set(cache, state);
-  const session = state;
-  cache.getQueryCache().subscribe((event) => {
-    if (event.query.queryKey.length !== 1 || event.query.queryKey[0] !== "me") return;
-    const next = accountIdentity(cache);
-    if (next === session.owner) return;
-    session.owner = next;
-    session.epoch++;
-    cache.removeQueries({ queryKey: [recoveryPrefix] });
-    cache.removeQueries({ queryKey: ["workspace-settings"] });
-    queues.get(cache)?.clear();
-  });
-  return session;
-}
-function sameSession(cache: QueryClient, captured: PreferenceSession) {
-  const current = preferenceSession(cache);
-  return !!captured.owner && current.owner === captured.owner && current.epoch === captured.epoch;
-}
-function usePreferenceSession(cache: QueryClient) {
-  preferenceSession(cache);
-  useSyncExternalStore(
-    (changed) =>
-      cache.getQueryCache().subscribe((event) => {
-        if (event.query.queryKey[0] === "me") changed();
-      }),
-    () => preferenceSession(cache).epoch,
-    () => preferenceSession(cache).epoch,
-  );
-  return { ...preferenceSession(cache) };
-}
 const queues = new WeakMap<QueryClient, Map<string, SaveQueue>>();
 
 export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
@@ -126,6 +104,7 @@ export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
   if (!workspaceQueues) {
     workspaceQueues = new Map();
     queues.set(cache, workspaceQueues);
+    registerSessionCleanup(cache, () => queues.get(cache)?.clear());
   }
   let queue = workspaceQueues.get(queueKey);
   if (!queue) {
@@ -170,6 +149,7 @@ export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
         if (!previous) return previous;
         const attempted = { ...previous.attempted };
         const fieldSequences = { ...previous.fieldSequences };
+        const fieldOutcomes = { ...previous.fieldOutcomes };
         for (const key of Object.keys(attempt.attempted ?? {})) {
           if (attempt.sequence < (fieldSequences[key] ?? 0)) continue;
           if (
@@ -179,10 +159,17 @@ export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
             continue;
           delete (attempted as Record<string, unknown>)[key];
           delete fieldSequences[key];
+          delete fieldOutcomes[key];
         }
         const { reviewed: _reviewed, ...unreviewed } = previous;
         return Object.keys(attempted).length
-          ? { ...unreviewed, attempted, fieldSequences }
+          ? {
+              ...unreviewed,
+              attempted,
+              fieldSequences,
+              fieldOutcomes,
+              outcome: recoveryOutcome(fieldOutcomes),
+            }
           : undefined;
       });
       if (!sameSession(cache, attempt.session)) return;
@@ -199,6 +186,13 @@ export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
         setRecovery((previous) => {
           const attempted = { ...previous?.attempted } as Partial<WorkspacePreferences<W>>;
           const fieldSequences = { ...previous?.fieldSequences };
+          const fieldOutcomes = { ...previous?.fieldOutcomes };
+          const kind = classifyMutationError(error, {
+            action: "save workspace preferences",
+            safeToRetry: false,
+          }).kind;
+          const outcome =
+            kind === "conflict" ? "conflict" : kind === "uncertain" ? "uncertain" : "rejected";
           for (const [key, value] of Object.entries(attempt.attempted ?? {})) {
             if (
               (saves.successfulFields.get(key) ?? 0) >= attempt.sequence ||
@@ -207,21 +201,14 @@ export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
               continue;
             (attempted as Record<string, unknown>)[key] = value;
             fieldSequences[key] = attempt.sequence;
+            fieldOutcomes[key] = fieldOutcomes[key] === "uncertain" ? "uncertain" : outcome;
           }
-          const kind = classifyMutationError(error, {
-            action: "save workspace preferences",
-            safeToRetry: false,
-          }).kind;
           return Object.keys(attempted).length
             ? {
                 attempted,
                 fieldSequences,
-                outcome:
-                  kind === "conflict"
-                    ? "conflict"
-                    : kind === "uncertain"
-                      ? "uncertain"
-                      : "rejected",
+                fieldOutcomes,
+                outcome: recoveryOutcome(fieldOutcomes),
               }
             : undefined;
         });

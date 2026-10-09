@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { ApiClientError } from "@personal-os/api-client";
 import { resolveWorkspaceSettings } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
@@ -389,4 +390,73 @@ it("rejects late reads from a replaced session and never writes without an authe
     resolveWorkspaceSettings("tasks", { taskSort: "priority", revision: 7 }),
   );
   expect(hook.result.current.recovery).toBeUndefined();
+});
+
+it("keeps uncertainty for an unresolved field after another field conflicts and clears only its confirmed intent", async () => {
+  let settings = resolveWorkspaceSettings("tasks");
+  vi.spyOn(api, "getWorkspaceSettings").mockImplementation(async () => settings);
+  const update = vi
+    .spyOn(api, "updateWorkspaceSettings")
+    .mockRejectedValueOnce(new Error("Connection lost after write"))
+    .mockRejectedValueOnce(
+      new ApiClientError({ status: 409, code: "conflict", message: "Changed" }),
+    )
+    .mockImplementation(async (_workspace, input) => {
+      settings = resolveWorkspaceSettings("tasks", {
+        ...settings.preferences,
+        ...input.preferences,
+        revision: 3,
+      });
+      return settings;
+    });
+  const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  cache.setQueryData(["me"], { id: "owner" });
+  cache.setQueryData(["workspace-settings", "tasks"], settings);
+  const hook = renderHook(() => useSaveWorkspacePreferences("tasks"), {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={cache}>{children}</QueryClientProvider>
+    ),
+  });
+  act(() => {
+    hook.result.current.mutate({ taskSort: "priority" });
+    hook.result.current.mutate({ taskGroup: "list" });
+  });
+  await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+  await waitFor(() =>
+    expect(hook.result.current.recovery?.attempted).toEqual({
+      taskSort: "priority",
+      taskGroup: "list",
+    }),
+  );
+  expect(hook.result.current.recovery?.outcome).toBe("uncertain");
+  act(() => hook.result.current.mutate({ taskSort: "priority" }));
+  await waitFor(() => expect(hook.result.current.isSuccess).toBe(true));
+  expect(hook.result.current.recovery?.attempted).toEqual({ taskGroup: "list" });
+  expect(hook.result.current.recovery?.outcome).toBe("conflict");
+});
+
+it("does not turn an uncertain same-field attempt into a known rejection when a newer value conflicts", async () => {
+  const settings = resolveWorkspaceSettings("tasks");
+  vi.spyOn(api, "getWorkspaceSettings").mockResolvedValue(settings);
+  vi.spyOn(api, "updateWorkspaceSettings")
+    .mockRejectedValueOnce(new Error("Connection lost"))
+    .mockRejectedValueOnce(
+      new ApiClientError({ status: 409, code: "conflict", message: "Changed" }),
+    );
+  const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  cache.setQueryData(["me"], { id: "owner" });
+  cache.setQueryData(["workspace-settings", "tasks"], settings);
+  const hook = renderHook(() => useSaveWorkspacePreferences("tasks"), {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={cache}>{children}</QueryClientProvider>
+    ),
+  });
+  act(() => {
+    hook.result.current.mutate({ taskSort: "priority" });
+    hook.result.current.mutate({ taskSort: "title" });
+  });
+  await waitFor(() =>
+    expect(hook.result.current.recovery?.attempted).toEqual({ taskSort: "title" }),
+  );
+  expect(hook.result.current.recovery?.outcome).toBe("uncertain");
 });

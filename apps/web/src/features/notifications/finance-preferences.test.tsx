@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { defaultNotificationPreferences, type NotificationStatus } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   FinanceNotificationPreferenceSummary,
@@ -22,6 +22,12 @@ const status: NotificationStatus = {
   intents: [],
   attempts: [],
 };
+function accountClient(options?: ConstructorParameters<typeof QueryClient>[0]) {
+  const cache = new QueryClient(options);
+  cache.setQueryData(["me"], { id: "owner-a" });
+  return cache;
+}
+
 it("shows inherited default preferences without claiming delivery readiness", () => {
   render(<FinanceNotificationPreferenceSummary status={status} />);
   expect(screen.getByText("Inherited from global preferences")).toBeInTheDocument();
@@ -75,9 +81,7 @@ it("honestly shows unavailable capability and disabled options", () => {
 it("shows a load error rather than presenting inherited defaults as saved state", async () => {
   mocks.getNotificationStatus.mockRejectedValue(new Error("Unavailable"));
   render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+    <QueryClientProvider client={accountClient({ defaultOptions: { queries: { retry: false } } })}>
       <FinanceNotificationPreferences />
     </QueryClientProvider>,
   );
@@ -101,9 +105,7 @@ it("resets the exact override and shows inheritance after success", async () => 
     inherited: true,
   });
   render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+    <QueryClientProvider client={accountClient({ defaultOptions: { queries: { retry: false } } })}>
       <FinanceNotificationPreferences />
     </QueryClientProvider>,
   );
@@ -122,9 +124,7 @@ it("retains the override after a failed reset", async () => {
   });
   mocks.resetFinanceNotificationPreferences.mockRejectedValue(new Error("Changed elsewhere"));
   render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+    <QueryClientProvider client={accountClient({ defaultOptions: { queries: { retry: false } } })}>
       <FinanceNotificationPreferences />
     </QueryClientProvider>,
   );
@@ -149,9 +149,7 @@ it("omits reset controls without edit access", async () => {
     preferences: [{ scope: "finances", revision: 4, preferences: defaultNotificationPreferences }],
   });
   render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+    <QueryClientProvider client={accountClient({ defaultOptions: { queries: { retry: false } } })}>
       <FinanceNotificationPreferences canEdit={false} />
     </QueryClientProvider>,
   );
@@ -171,9 +169,7 @@ it("retains reset intent through read failure and repeated conflicts without res
   mocks.getNotificationStatus.mockResolvedValue(makeStatus(4));
   mocks.resetFinanceNotificationPreferences.mockRejectedValue(new Error("Changed"));
   render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+    <QueryClientProvider client={accountClient({ defaultOptions: { queries: { retry: false } } })}>
       <FinanceNotificationPreferences />
     </QueryClientProvider>,
   );
@@ -211,4 +207,65 @@ it("retains reset intent through read failure and repeated conflicts without res
   await userEvent.click(screen.getByRole("button", { name: "Use latest settings" }));
   expect(mocks.resetFinanceNotificationPreferences).toHaveBeenCalledTimes(callsBefore + 1);
   expect(screen.getByRole("button", { name: "Use global notification preferences" })).toBeEnabled();
+});
+
+it.each([
+  "reject",
+  "resolve",
+  "refresh",
+] as const)("fences deferred Finance reset %s completion across logout and A to B to A", async (phase) => {
+  mocks.getNotificationStatus.mockReset();
+  mocks.resetFinanceNotificationPreferences.mockReset();
+  const ownedStatus: NotificationStatus = {
+    ...status,
+    preferences: [{ scope: "finances", revision: 4, preferences: defaultNotificationPreferences }],
+  };
+  mocks.getNotificationStatus.mockResolvedValue(ownedStatus);
+  let refreshStarted = false;
+  let reject!: (error: Error) => void;
+  let resolve!: (data: unknown) => void;
+  mocks.resetFinanceNotificationPreferences.mockImplementation(
+    () =>
+      new Promise((done, fail) => {
+        resolve = done;
+        reject = fail;
+      }),
+  );
+  const cache = accountClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={cache}>
+      <FinanceNotificationPreferences />
+    </QueryClientProvider>,
+  );
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Use global notification preferences" }),
+  );
+  await waitFor(() => expect(reject).toBeDefined());
+  if (phase === "refresh") {
+    await act(async () => reject(new Error("Offline")));
+    await screen.findByText(/Your change: Use global preferences/);
+    mocks.getNotificationStatus.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+          refreshStarted = true;
+        }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+    await waitFor(() => expect(refreshStarted).toBe(true));
+  }
+  act(() => {
+    cache.removeQueries({ queryKey: ["me"] });
+    cache.setQueryData(["me"], { id: "owner-b" });
+    cache.setQueryData(["me"], { id: "owner-a" });
+  });
+  await screen.findByRole("button", { name: "Use global notification preferences" });
+  await act(async () => {
+    if (phase === "reject") reject(new Error("Old failure"));
+    else resolve(phase === "refresh" ? status : { reset: true });
+  });
+  expect(screen.queryByText(/Your change: Use global preferences/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Reapply reviewed change" })).not.toBeInTheDocument();
+  expect(cache.getQueryData(["notification-status"])).toEqual(ownedStatus);
+  expect(mocks.resetFinanceNotificationPreferences).toHaveBeenCalledTimes(1);
 });

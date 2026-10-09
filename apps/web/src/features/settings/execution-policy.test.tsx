@@ -1,12 +1,18 @@
 // @vitest-environment jsdom
 import { ApiClientError } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { api } from "@/api";
 import { ExecutionPolicySettingsCard } from "./execution-policy";
 
 afterEach(() => vi.restoreAllMocks());
+function accountClient(options?: ConstructorParameters<typeof QueryClient>[0]) {
+  const cache = new QueryClient(options);
+  cache.setQueryData(["me"], { id: "owner-a" });
+  return cache;
+}
+
 it("retains a conflicted policy intent, survives a failed read and repeated conflict, and reapplies only the reviewed version", async () => {
   const get = vi
     .spyOn(api, "getExecutionPolicySettings")
@@ -16,11 +22,9 @@ it("retains a conflicted policy intent, survives a failed read and repeated conf
     .mockRejectedValue(new ApiClientError({ status: 409, code: "conflict", message: "Changed" }));
   render(
     <QueryClientProvider
-      client={
-        new QueryClient({
-          defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-        })
-      }
+      client={accountClient({
+        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+      })}
     >
       <ExecutionPolicySettingsCard />
     </QueryClientProvider>,
@@ -70,9 +74,7 @@ it("explicitly accepts latest policy without another write", async () => {
     .spyOn(api, "updateExecutionPolicySettings")
     .mockRejectedValue(new ApiClientError({ status: 409, code: "conflict", message: "Changed" }));
   render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+    <QueryClientProvider client={accountClient({ defaultOptions: { queries: { retry: false } } })}>
       <ExecutionPolicySettingsCard />
     </QueryClientProvider>,
   );
@@ -86,4 +88,96 @@ it("explicitly accepts latest policy without another write", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Use latest settings" }));
   expect(update).toHaveBeenCalledTimes(1);
   expect(screen.getByRole("switch")).not.toBeChecked();
+});
+
+it.each([
+  "reject",
+  "resolve",
+  "refresh",
+] as const)("fences deferred policy %s completion across logout and A to B to A", async (phase) => {
+  const get = vi
+    .spyOn(api, "getExecutionPolicySettings")
+    .mockResolvedValue({ reviewBypassEnabled: false, version: 1 });
+  let refreshStarted = false;
+  let reject!: (error: Error) => void;
+  let resolve!: (data: { reviewBypassEnabled: boolean; version: number }) => void;
+  const update = vi.spyOn(api, "updateExecutionPolicySettings").mockImplementation(
+    () =>
+      new Promise((done, fail) => {
+        resolve = done;
+        reject = fail;
+      }),
+  );
+  const cache = accountClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={cache}>
+      <ExecutionPolicySettingsCard />
+    </QueryClientProvider>,
+  );
+  await waitFor(() => expect(screen.getByRole("switch")).toBeEnabled());
+  await userEvent.click(screen.getByRole("switch"));
+  await waitFor(() => expect(reject).toBeDefined());
+  if (phase === "refresh") {
+    await act(async () => reject(new Error("Offline")));
+    await screen.findByText("Your change: Enabled");
+    get.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+          refreshStarted = true;
+        }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+    await waitFor(() => expect(refreshStarted).toBe(true));
+  }
+  act(() => {
+    cache.removeQueries({ queryKey: ["me"] });
+    cache.setQueryData(["me"], { id: "owner-b" });
+    cache.setQueryData(["me"], { id: "owner-a" });
+  });
+  await waitFor(() => expect(screen.getByRole("switch")).toBeEnabled());
+  await act(async () => {
+    if (phase === "reject") reject(new Error("Old failure"));
+    else resolve({ reviewBypassEnabled: true, version: 99 });
+  });
+  expect(screen.queryByText("Your change: Enabled")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Reapply reviewed change" })).not.toBeInTheDocument();
+  expect(screen.getByRole("switch")).not.toBeChecked();
+  expect(cache.getQueryData(["execution-policy"])).toEqual({
+    reviewBypassEnabled: false,
+    version: 1,
+  });
+  expect(update).toHaveBeenCalledTimes(1);
+});
+
+it("does not optimistically update or submit policy after the account changes during cancellation", async () => {
+  vi.spyOn(api, "getExecutionPolicySettings").mockResolvedValue({
+    reviewBypassEnabled: false,
+    version: 2,
+  });
+  const update = vi.spyOn(api, "updateExecutionPolicySettings");
+  const cache = accountClient({ defaultOptions: { queries: { retry: false } } });
+  let release!: () => void;
+  vi.spyOn(cache, "cancelQueries").mockImplementationOnce(
+    () =>
+      new Promise<void>((done) => {
+        release = done;
+      }),
+  );
+  render(
+    <QueryClientProvider client={cache}>
+      <ExecutionPolicySettingsCard />
+    </QueryClientProvider>,
+  );
+  await waitFor(() => expect(screen.getByRole("switch")).toBeEnabled());
+  await userEvent.click(screen.getByRole("switch"));
+  await waitFor(() => expect(release).toBeDefined());
+  act(() => {
+    cache.setQueryData(["me"], { id: "owner-b" });
+  });
+  await waitFor(() => expect(screen.getByRole("switch")).toBeEnabled());
+  await act(async () => release());
+  expect(update).not.toHaveBeenCalled();
+  expect(screen.getByRole("switch")).not.toBeChecked();
+  expect(screen.queryByText("Your change: Enabled")).not.toBeInTheDocument();
 });

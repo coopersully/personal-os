@@ -14,26 +14,52 @@ import {
 import { Field, FieldContent, FieldDescription, FieldLabel } from "../../components/ui/field.js";
 import { Switch } from "../../components/ui/switch.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
-
+import {
+  type PreferenceSession,
+  sameSession,
+  usePreferenceSession,
+} from "../workspace-settings/account-save-session";
 import { SettingsSaveRecovery } from "../workspace-settings/save-recovery";
 
 const queryKey = ["execution-policy"] as const;
 
 export function ExecutionPolicySettingsCard() {
   const queryClient = useQueryClient();
+  const session = usePreferenceSession(queryClient);
+  return (
+    <SessionExecutionPolicySettingsCard
+      key={`${session.owner}:${session.epoch}`}
+      session={session}
+    />
+  );
+}
+
+function SessionExecutionPolicySettingsCard({ session }: { session: PreferenceSession }) {
+  const queryClient = useQueryClient();
+  const current = () => sameSession(queryClient, session);
   const [recovery, setRecovery] = useState<{
     attempted: boolean;
     reviewed?: ExecutionPolicySettings;
   }>();
-  const settings = useQuery({ queryFn: api.getExecutionPolicySettings, queryKey });
+  const settings = useQuery({
+    queryKey,
+    enabled: !!session.owner,
+    queryFn: async () => {
+      if (!current()) throw new Error("Load your account before reading policy.");
+      const saved = await api.getExecutionPolicySettings();
+      if (!current()) throw new Error("Your account session changed.");
+      return saved;
+    },
+  });
   const update = useFeedbackMutation<
     ExecutionPolicySettings,
     Error,
-    { reviewBypassEnabled: boolean; expectedVersion: number },
+    { reviewBypassEnabled: boolean; expectedVersion: number; session: PreferenceSession },
     { previous: ExecutionPolicySettings | undefined }
   >({
     feedback: { action: "save agent review policy", safeToRetry: false, form: false },
-    mutationFn: ({ reviewBypassEnabled, expectedVersion }) => {
+    mutationFn: ({ reviewBypassEnabled, expectedVersion, session: started }) => {
+      if (!sameSession(queryClient, started)) throw new Error("Your account session changed.");
       if (!settings.data) throw new Error("Execution policy is unavailable.");
       return api.updateExecutionPolicySettings({
         expectedVersion,
@@ -41,23 +67,31 @@ export function ExecutionPolicySettingsCard() {
       });
     },
     onError: (_error, attempt, context) => {
+      if (!sameSession(queryClient, attempt.session)) return;
       setRecovery({ attempted: attempt.reviewBypassEnabled });
       if (context?.previous) queryClient.setQueryData(queryKey, context.previous);
     },
-    onMutate: async ({ reviewBypassEnabled }) => {
+    onMutate: async ({ reviewBypassEnabled, session: started }) => {
+      if (!sameSession(queryClient, started)) throw new Error("Your account session changed.");
       await queryClient.cancelQueries({ queryKey });
+      if (!sameSession(queryClient, started)) throw new Error("Your account session changed.");
       const previous = queryClient.getQueryData<ExecutionPolicySettings>(queryKey);
       if (previous) queryClient.setQueryData(queryKey, { ...previous, reviewBypassEnabled });
       return { previous };
     },
-    onSuccess: (saved) => {
+    onSuccess: (saved, attempt) => {
+      if (!sameSession(queryClient, attempt.session)) return;
       setRecovery(undefined);
       queryClient.setQueryData(queryKey, saved);
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey }),
+    onSettled: (_data, _error, attempt) =>
+      sameSession(queryClient, attempt.session)
+        ? queryClient.invalidateQueries({ queryKey })
+        : undefined,
   });
 
-  const unavailable = settings.isPending || update.isPending || !settings.data || !!recovery;
+  const unavailable =
+    !current() || settings.isPending || update.isPending || !settings.data || !!recovery;
   return (
     <Card className="settings-section">
       <CardHeader>
@@ -89,20 +123,23 @@ export function ExecutionPolicySettingsCard() {
               },
             ]}
             onRefresh={async () => {
+              if (!current()) return;
               setRecovery({ attempted: recovery.attempted });
               const latest = await settings.refetch();
-              if (!latest.isError && latest.data)
+              if (current() && !latest.isError && latest.data)
                 setRecovery({ attempted: recovery.attempted, reviewed: latest.data });
             }}
             onAccept={() => {
+              if (!current()) return;
               setRecovery(undefined);
               update.reset();
             }}
             onReapply={() => {
-              if (recovery.reviewed)
+              if (current() && recovery.reviewed)
                 update.mutate({
                   reviewBypassEnabled: recovery.attempted,
                   expectedVersion: recovery.reviewed.version,
+                  session,
                 });
             }}
           />
@@ -123,10 +160,11 @@ export function ExecutionPolicySettingsCard() {
             disabled={unavailable}
             id="global-review-bypass"
             onCheckedChange={(enabled) => {
-              if (settings.data)
+              if (current() && settings.data)
                 update.mutate({
                   reviewBypassEnabled: enabled,
                   expectedVersion: settings.data.version,
+                  session,
                 });
             }}
           />

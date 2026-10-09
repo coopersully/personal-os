@@ -10,7 +10,10 @@ and parent/secondary-page placement.
 - Give every setting one canonical editing surface.
 - Edit account-wide identity, security, privacy ceilings, review bypass, shared notification policy,
   channel connections/defaults, connected-agent credentials/scopes, and User Knowledge controls
-  in centralized Settings. Reviews is operational work owned by Today at `/reviews`.
+  in centralized Settings. Reviews is domain-owned operational work in the
+  [workspace Reviews flow](../design/pages/reviews.md), opened from the workspace attention alert
+  or its Settings header, and also reachable from workspace search; it is not an account
+  preference or a separate Today queue.
 - Edit sources, source meanings, maintenance behavior, notification overrides, rules, learning,
   recovery, data controls, and domain access posture inside the owning workspace.
 - Let centralized Settings summarize cross-workspace health, readiness, effective policy, override

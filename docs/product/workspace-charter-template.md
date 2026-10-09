@@ -136,8 +136,12 @@ Place every workspace-owned setting in one canonical editor inside the workspace
 read-only health, readiness, effective-policy, override, and outstanding-review summary that
 centralized Settings may show, plus deep links back to exact workspace controls. Do not create a
 second editable copy. Keep account-wide security, privacy ceilings, review bypass, notification
-policy, channel connections/defaults, connected-agent credentials/scopes, User Knowledge controls,
-and unified Reviews in centralized Settings.
+policy, channel connections/defaults, connected-agent credentials/scopes, and User Knowledge
+controls in centralized Settings. Project domain-owned questions and decisions into the shared
+[workspace Reviews flow](../design/pages/reviews.md); keep mutations and authorization in their
+owning domains. This follows the accepted [Settings architecture](../design/pages/settings-architecture.md),
+which supersedes the earlier central Reviews placement. Texting’s accepted cross-workspace
+destination remains pending; neither the scoped flow nor the legacy Settings URL fulfills it.
 
 Keep expert judgment and orchestration in the domain/API. Keep MCP stateless. List every
 Integration-owned composition-root or shared-infrastructure change separately so parallel branches

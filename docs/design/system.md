@@ -572,8 +572,8 @@ Keep options in one row; allow horizontal scrolling when constrained rather than
 turning the group into a grid or wrapping it into ambiguous rows. Do not restyle
 individual instances or add parallel segmented-button CSS.
 
-Current consumers: Today commitment filters; Calendar Day/Week/Month; Reviews work
-type; Rituals Morning/Evening/History; Finances budget period; wallpaper layout,
+Current consumers: Today commitment filters; Calendar Day/Week/Month;
+Rituals Morning/Evening/History; Finances budget period; wallpaper layout,
 image-fit and backdrop; agent permission presets. Calendar may hide visible labels
 at narrow widths while keeping accessible names and tooltips.
 

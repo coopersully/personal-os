@@ -156,12 +156,13 @@ unrelated tools.
   must remain immediately distinguishable at peripheral glance in both themes;
   muddy, gray-shifted variants are not a calmer substitute for workspace identity.
 - Today is nohmi's neutral daily workspace. It owns only the current-day operating
-  surface while summarizing the other workspaces. Goals, Motives, Reviews, and
-  Activity are personal account utilities in Settings. Reminders belong within
+  surface while summarizing the other workspaces. Goals, Motives, and Activity are personal
+  account utilities in Settings. [Reviews](pages/reviews.md) is a workspace-scoped dialog/drawer,
+  reached from workspace alerts, Settings headers, or workspace search. Reminders belong within
   Tasks and do not receive a separate workspace palette.
 - The only workspace identities are Today, Calendar, Tasks, Mail, and Finances.
   Account utilities (profile, setup, connections, security, connected agents, and workspace
-  access, goals, motives, reviews, and activity) are full-page utilities, never a sixth workspace.
+  access, goals, motives, and activity) are full-page utilities, never a sixth workspace.
 
 ### Typography
 

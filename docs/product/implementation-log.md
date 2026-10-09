@@ -8,8 +8,40 @@
   owner/time/ID index supports ordered pages; review-case records and answer semantics are unchanged.
 - The Finance review page discloses older case status and exact recorded evidence on demand, with
   bounded continuation and local retry states. Focused PostgreSQL and UI tests cover status,
-  timestamp ordering, ownership, pagination, and exact evidence. Full verification and review
-  remain pending; this branch does not activate SMS, matching, or reusable User Knowledge.
+  timestamp ordering, ownership, pagination, and exact evidence. Source transaction and account
+  deletion retain immutable owner-scoped review evidence; the first published archive migration is
+  upgraded additively. Full verification on the current base remains pending; this branch does not
+  activate SMS, matching, or reusable User Knowledge.
+
+## 2026-10-07 — Workspace layout, Finance configuration, and Mail recovery merge
+
+- [PR #223 — Standardize workspace layouts and Finance configuration](https://github.com/coopersully/personal-os/pull/223)
+  merged into `main` at `99ecac3d`. This is the merged-source checkpoint for the October 3–6
+  branch entries below. Their original verification notes describe those earlier checkpoints,
+  not the final merged verification result.
+- Shared workspace navigation, header slots, bounded search, and saved display preferences keep
+  controls consistent while domains retain record ownership. The
+  [workspace layout contract](../design/workspace-layout-architecture.md) explains intrinsic chrome,
+  pane versus page scrolling, and preserving a single control instance across responsive layouts.
+- Reviews now opens in a workspace-scoped dialog or mobile drawer from the workspace attention
+  alert, workspace Settings header, or workspace search. The underlying page stays in place; domain actions retain
+  their authority and revision checks. This supersedes the October 1 Today-owned `/reviews`
+  placement: `/reviews` falls back to Account, and the old queue component is retained but not
+  routed. Some notification and agent producers still emit legacy links that land on Account;
+  generated-link migration remains incomplete. See the
+  [Reviews contract](../design/pages/reviews.md) for exact links, this limitation, and recovery.
+- [Finance](../design/pages/finances.md) includes editable configuration, partial-read recovery,
+  scalar saves on blur or selection, complete collection-row saves on leaving the row, compact
+  transaction cards, responsive details, category/context editing,
+  and saved display/group preferences. Configuration remains separate from explicit budget
+  preparation and record-checking operations; incomplete evidence is not silently filled in.
+- [Mail](../design/pages/mail.md) includes authenticated attachment preview/download with bounded
+  provider reads and cancellation, maintenance recovery within Reviews, and preservation of
+  unresolved questions across scoped runs.
+- The PR records a full local verification pass at `7c362cf5` (3,371 unit/integration tests and
+  64 desktop/mobile acceptance tests, with two intentional skips) and successful subsequent
+  hosted CI. These establish source verification, not production deployment, installed desktop
+  acceptance, or live provider attachment access.
 
 ## 2026-10-06 — Finance configuration and prerequisites (branch implementation)
 

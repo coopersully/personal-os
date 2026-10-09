@@ -313,6 +313,261 @@ describe.sequential("Finance merchant facade compatibility", () => {
     expect(JSON.stringify(audits)).not.toContain("Private rationale");
   });
 
+  it("retargets only owned references while preserving source deletion foreign-key effects", async () => {
+    const ownedTransaction = await createTransaction(userId, "Owned merge source");
+    const source = required((await service.listMerchants(userId))[0]);
+    const target = await seedMerchant(userId, "Owned merge target");
+    const ownedAlias = required(
+      (
+        await database.db
+          .select()
+          .from(financeMerchantAliases)
+          .where(
+            and(
+              eq(financeMerchantAliases.userId, userId),
+              eq(financeMerchantAliases.merchantId, source.id),
+            ),
+          )
+      )[0],
+    );
+    const ownedDecision = required(
+      (
+        await database.db
+          .insert(financeClassificationDecisions)
+          .values({
+            userId,
+            transactionId: ownedTransaction.id,
+            merchantId: source.id,
+            categoryName: "Owned category",
+            source: "user",
+            confidence: 10000,
+            outcome: "confirmed",
+          })
+          .returning()
+      )[0],
+    );
+    const foreignLinkedTransaction = await createTransaction(
+      foreignId,
+      "Foreign linked transaction",
+    );
+    const foreignControlTransaction = await createTransaction(
+      foreignId,
+      "Foreign untouched control",
+    );
+    const foreignControlBefore = required(
+      (
+        await database.db
+          .select()
+          .from(financeTransactions)
+          .where(eq(financeTransactions.id, foreignControlTransaction.id))
+      )[0],
+    );
+    const foreignControlMerchant = required(
+      (
+        await database.db
+          .select()
+          .from(financeMerchants)
+          .where(eq(financeMerchants.id, required(foreignControlBefore.merchantId ?? undefined)))
+      )[0],
+    );
+    const foreignControlAlias = required(
+      (
+        await database.db
+          .select()
+          .from(financeMerchantAliases)
+          .where(
+            and(
+              eq(financeMerchantAliases.userId, foreignId),
+              eq(financeMerchantAliases.merchantId, foreignControlMerchant.id),
+            ),
+          )
+      )[0],
+    );
+    const foreignControlDecision = required(
+      (
+        await database.db
+          .insert(financeClassificationDecisions)
+          .values({
+            userId: foreignId,
+            transactionId: foreignControlTransaction.id,
+            merchantId: foreignControlMerchant.id,
+            categoryName: "Untouched category",
+            source: "user",
+            confidence: 10000,
+            outcome: "confirmed",
+          })
+          .returning()
+      )[0],
+    );
+    // Independent owner and merchant foreign keys permit these anomalous references.
+    await database.db
+      .update(financeTransactions)
+      .set({ merchantId: source.id })
+      .where(eq(financeTransactions.id, foreignLinkedTransaction.id));
+    const foreignAlias = required(
+      (
+        await database.db
+          .insert(financeMerchantAliases)
+          .values({
+            userId: foreignId,
+            merchantId: source.id,
+            rawName: "Foreign source alias",
+            normalizedName: "foreign source alias",
+            source: "user",
+          })
+          .returning()
+      )[0],
+    );
+    const foreignDecision = required(
+      (
+        await database.db
+          .insert(financeClassificationDecisions)
+          .values({
+            userId: foreignId,
+            transactionId: foreignLinkedTransaction.id,
+            merchantId: source.id,
+            categoryName: "Foreign category",
+            source: "user",
+            confidence: 10000,
+            outcome: "confirmed",
+          })
+          .returning()
+      )[0],
+    );
+    const input = {
+      sourceMerchantId: source.id,
+      targetMerchantId: target.id,
+      rationale: "Owner-scoped reference merge",
+      idempotencyKey: randomUUID(),
+    };
+    const result = await service.mergeFinanceMerchantRecords(input, canonical);
+    expect(await service.mergeFinanceMerchantRecords(input, canonical)).toEqual(result);
+    expect(result.data.id).toBe(target.id);
+    expect(
+      await database.db.select().from(financeMerchants).where(eq(financeMerchants.id, source.id)),
+    ).toHaveLength(0);
+    expect(
+      required(
+        (
+          await database.db
+            .select()
+            .from(financeMerchantAliases)
+            .where(eq(financeMerchantAliases.id, ownedAlias.id))
+        )[0],
+      ).merchantId,
+    ).toBe(target.id);
+    expect(
+      required(
+        (
+          await database.db
+            .select()
+            .from(financeTransactions)
+            .where(eq(financeTransactions.id, ownedTransaction.id))
+        )[0],
+      ).merchantId,
+    ).toBe(target.id);
+    expect(
+      required(
+        (
+          await database.db
+            .select()
+            .from(financeClassificationDecisions)
+            .where(eq(financeClassificationDecisions.id, ownedDecision.id))
+        )[0],
+      ).merchantId,
+    ).toBe(target.id);
+    // Source deletion still cascades aliases and nulls transaction/decision references.
+    expect(
+      await database.db
+        .select()
+        .from(financeMerchantAliases)
+        .where(eq(financeMerchantAliases.id, foreignAlias.id)),
+    ).toHaveLength(0);
+    expect(
+      required(
+        (
+          await database.db
+            .select()
+            .from(financeTransactions)
+            .where(eq(financeTransactions.id, foreignLinkedTransaction.id))
+        )[0],
+      ).merchantId,
+    ).toBeNull();
+    expect(
+      required(
+        (
+          await database.db
+            .select()
+            .from(financeClassificationDecisions)
+            .where(eq(financeClassificationDecisions.id, foreignDecision.id))
+        )[0],
+      ).merchantId,
+    ).toBeNull();
+    expect(
+      required(
+        (
+          await database.db
+            .select()
+            .from(financeTransactions)
+            .where(eq(financeTransactions.id, foreignControlTransaction.id))
+        )[0],
+      ),
+    ).toEqual(foreignControlBefore);
+    expect(
+      required(
+        (
+          await database.db
+            .select()
+            .from(financeMerchants)
+            .where(eq(financeMerchants.id, foreignControlMerchant.id))
+        )[0],
+      ),
+    ).toEqual(foreignControlMerchant);
+    expect(
+      required(
+        (
+          await database.db
+            .select()
+            .from(financeMerchantAliases)
+            .where(eq(financeMerchantAliases.id, foreignControlAlias.id))
+        )[0],
+      ),
+    ).toEqual(foreignControlAlias);
+    expect(
+      required(
+        (
+          await database.db
+            .select()
+            .from(financeClassificationDecisions)
+            .where(eq(financeClassificationDecisions.id, foreignControlDecision.id))
+        )[0],
+      ),
+    ).toEqual(foreignControlDecision);
+    const audits = await database.db
+      .select()
+      .from(auditEvents)
+      .where(
+        and(eq(auditEvents.userId, userId), eq(auditEvents.action, "finance.merchants_merged")),
+      );
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      userId,
+      requestId: canonical.requestId,
+      entityId: target.id,
+    });
+    expect(
+      await database.db
+        .select()
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.userId, foreignId),
+            eq(auditEvents.action, "finance.merchants_merged"),
+          ),
+        ),
+    ).toHaveLength(0);
+  });
+
   it("rolls canonical rename back when audit persistence fails and retains a failed receipt", async () => {
     const row = await seedMerchant(userId, "Audit rollback original");
     const input = { displayName: "Audit rollback changed", idempotencyKey: randomUUID() };

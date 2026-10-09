@@ -191,15 +191,30 @@ export function createFinanceMerchantService({ db, now }: { db: Database; now: (
         await tx
           .update(financeMerchantAliases)
           .set({ merchantId: target.id, updatedAt: now() })
-          .where(eq(financeMerchantAliases.merchantId, source.id));
+          .where(
+            and(
+              eq(financeMerchantAliases.userId, context.principal.userId),
+              eq(financeMerchantAliases.merchantId, source.id),
+            ),
+          );
         await tx
           .update(financeTransactions)
           .set({ merchantId: target.id, updatedAt: now() })
-          .where(eq(financeTransactions.merchantId, source.id));
+          .where(
+            and(
+              eq(financeTransactions.userId, context.principal.userId),
+              eq(financeTransactions.merchantId, source.id),
+            ),
+          );
         await tx
           .update(financeClassificationDecisions)
           .set({ merchantId: target.id })
-          .where(eq(financeClassificationDecisions.merchantId, source.id));
+          .where(
+            and(
+              eq(financeClassificationDecisions.userId, context.principal.userId),
+              eq(financeClassificationDecisions.merchantId, source.id),
+            ),
+          );
         await tx.delete(financeMerchants).where(eq(financeMerchants.id, source.id));
         await tx.insert(auditEvents).values(
           auditValues({

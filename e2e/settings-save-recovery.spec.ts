@@ -75,7 +75,12 @@ test("two editors retain attempted workspace values and explicitly recover repea
         await route.abort();
       } else await route.continue();
     });
+    const failedRead = second.waitForEvent(
+      "requestfailed",
+      (request) => request.method() === "GET" && request.url().endsWith(path),
+    );
     await second.getByRole("button", { name: "Refresh latest settings" }).click();
+    await failedRead;
     await expect(second.getByText("Couldn’t load preferences.")).toBeVisible();
     await expect(second.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
     expect(secondWrites).toBe(1);

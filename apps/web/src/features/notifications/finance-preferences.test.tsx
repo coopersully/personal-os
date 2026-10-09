@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { ApiClientError } from "@personal-os/api-client";
 import { defaultNotificationPreferences, type NotificationStatus } from "@personal-os/domain";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
@@ -363,4 +363,71 @@ it("removes only the override and inherits persisted global preferences after a 
   expect(mocks.resetFinanceNotificationPreferences).toHaveBeenLastCalledWith({
     expectedRevision: 4,
   });
+});
+
+it("keeps the newest explicitly reviewed reset revision when refresh completions arrive out of order", async () => {
+  mocks.getNotificationStatus.mockReset();
+  mocks.resetFinanceNotificationPreferences.mockReset();
+  const makeStatus = (revision: number, enabled: boolean): NotificationStatus => ({
+    ...status,
+    effective: { ...defaultNotificationPreferences, enabled },
+    preferences: [
+      { scope: "finances", revision, preferences: { ...defaultNotificationPreferences, enabled } },
+    ],
+  });
+  mocks.getNotificationStatus.mockResolvedValue(makeStatus(4, true));
+  mocks.resetFinanceNotificationPreferences.mockRejectedValue(new Error("Response lost"));
+  // Defer the observer results separately: cancellation is not proof that an older handler
+  // completion cannot arrive after the newer reviewed snapshot.
+  type Result = Awaited<ReturnType<QueryObserver["refetch"]>>;
+  let older!: (result: Result) => void;
+  let newer!: (result: Result) => void;
+  const refetch = vi
+    .spyOn(QueryObserver.prototype, "refetch")
+    .mockImplementationOnce(
+      () =>
+        new Promise<Result>((resolve) => {
+          older = resolve;
+        }),
+    )
+    .mockImplementationOnce(
+      () =>
+        new Promise<Result>((resolve) => {
+          newer = resolve;
+        }),
+    );
+  try {
+    render(
+      <QueryClientProvider
+        client={accountClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <FinanceNotificationPreferences />
+      </QueryClientProvider>,
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Use global notification preferences" }),
+    );
+    const refresh = await screen.findByRole("button", { name: "Refresh latest settings" });
+    act(() => {
+      refresh.click();
+      refresh.click();
+    });
+    expect(refetch).toHaveBeenCalledTimes(2);
+    await act(async () => newer({ data: makeStatus(8, false), isError: false } as Result));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeEnabled(),
+    );
+    expect(screen.getByText("Disabled")).toBeVisible();
+    await act(async () => older({ data: makeStatus(6, true), isError: false } as Result));
+    expect(screen.getByText("Disabled")).toBeVisible();
+    expect(screen.queryByText("Enabled")).not.toBeInTheDocument();
+    expect(mocks.resetFinanceNotificationPreferences).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole("button", { name: "Reapply reviewed change" }));
+    await waitFor(() => expect(mocks.resetFinanceNotificationPreferences).toHaveBeenCalledTimes(2));
+    expect(mocks.resetFinanceNotificationPreferences).toHaveBeenLastCalledWith({
+      expectedRevision: 8,
+    });
+  } finally {
+    refetch.mockRestore();
+  }
 });

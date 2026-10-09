@@ -1,6 +1,6 @@
 import { defaultNotificationPreferences, type NotificationStatus } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api } from "@/api";
 import { QueryFeedback } from "@/components/async-state";
 import { MutationFeedback } from "@/components/mutation-feedback";
@@ -39,6 +39,7 @@ function SessionFinanceNotificationPreferences({
   const cache = useQueryClient();
   const current = () => sameSession(cache, session);
   const [recovery, setRecovery] = useState<{ reviewed?: NotificationStatus }>();
+  const refreshSequence = useRef(0);
   const query = useQuery({
     queryKey: ["notification-status"],
     enabled: !!session.owner,
@@ -120,9 +121,15 @@ function SessionFinanceNotificationPreferences({
             ]}
             onRefresh={async () => {
               if (!current()) return;
+              const sequence = ++refreshSequence.current;
               setRecovery({});
               const latest = await query.refetch();
-              if (current() && !latest.isError && latest.data)
+              if (
+                sequence === refreshSequence.current &&
+                current() &&
+                !latest.isError &&
+                latest.data
+              )
                 setRecovery({ reviewed: latest.data });
             }}
             onAccept={() => {

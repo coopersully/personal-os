@@ -13,9 +13,7 @@ it("accepts exact missing and persisted domain revisions without treating defaul
   }
 });
 it("retains domain-specific conflict details", () => {
-  try {
-    assertSettingsRevision(3, 2, "Policy changed", { currentVersion: 3 });
-  } catch (error) {
-    expect(error).toMatchObject({ code: "conflict", details: { currentVersion: 3 } });
-  }
+  expect(() => assertSettingsRevision(3, 2, "Policy changed", { currentVersion: 3 })).toThrow(
+    expect.objectContaining({ code: "conflict", details: { currentVersion: 3 } }),
+  );
 });

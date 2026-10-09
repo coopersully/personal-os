@@ -8,6 +8,10 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  useSaveWorkspacePreferences,
+  useWorkspacePreferences,
+} from "../workspace-settings/preferences";
+import {
   BudgetMetricCard,
   FinanceBudgetAllocationChart,
   FinanceBudgetDetailDialog,
@@ -60,13 +64,30 @@ vi.mock("../../api.js", () => ({
   errorMessage: (error: unknown) => (error instanceof Error ? error.message : "Unknown error"),
 }));
 
-function renderPage(path: string) {
+function NonAccountPreferenceWriter() {
+  const save = useSaveWorkspacePreferences("finances");
+  const preferences = useWorkspacePreferences("finances");
+  return (
+    <>
+      <button
+        type="button"
+        disabled={!preferences.isSuccess}
+        onClick={() => save.mutate({ financeTransactionView: "cards" })}
+      >
+        Change transaction view
+      </button>
+      {save.recovery ? <p>Transaction view still unsaved</p> : null}
+    </>
+  );
+}
+function renderPage(path: string, nonAccountWriter = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["me"], { id: "owner" });
   return render(
     <QueryClientProvider client={client}>
       <TooltipProvider>
         <MemoryRouter initialEntries={[path]}>
+          {nonAccountWriter ? <NonAccountPreferenceWriter /> : null}
           <FinancesPage />
         </MemoryRouter>
       </TooltipProvider>
@@ -1750,4 +1771,22 @@ it("keeps readable Finance account-selection recovery reachable after closing it
   );
   expect(await screen.findByText("Your change: None selected")).toBeVisible();
   expect(api.updateWorkspaceSettings).toHaveBeenCalledTimes(1);
+});
+
+it("does not label another hook's transaction-view failure as an unsaved account selection", async () => {
+  api.updateWorkspaceSettings.mockRejectedValue(new Error("Offline"));
+  renderPage("/finances", true);
+  const change = await screen.findByRole("button", { name: "Change transaction view" });
+  await waitFor(() => expect(change).toBeEnabled());
+  fireEvent.click(change);
+  await waitFor(() => expect(api.updateWorkspaceSettings).toHaveBeenCalledTimes(1));
+  expect(api.updateWorkspaceSettings).toHaveBeenCalledWith(
+    "finances",
+    expect.objectContaining({ preferences: { financeTransactionView: "cards" } }),
+  );
+  expect(await screen.findByText("Transaction view still unsaved")).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: "Review unsaved account selections" }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });

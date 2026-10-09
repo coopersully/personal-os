@@ -32,6 +32,11 @@ function OverviewSettings() {
   const [scope, setScope] = useState<FinanceAccountScope | null>(null);
   const preferences = useWorkspacePreferences("finances");
   const save = useSaveWorkspacePreferences("finances");
+  const recoveryScope = (
+    Object.keys(financeAccountPreferenceKeys) as Array<keyof typeof financeAccountPreferenceKeys>
+  ).find(
+    (scope) => save.recovery && financeAccountPreferenceKeys[scope] in save.recovery.attempted,
+  );
   const configuration = useQuery({
     queryKey: ["finance-view-configuration", session.owner, session.epoch],
     enabled: !!session.owner && (expanded || !!save.recovery),
@@ -114,20 +119,8 @@ function OverviewSettings() {
                 view selections
               </Button>
             ))}
-            {save.recovery ? (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() =>
-                  setScope(
-                    save.recovery && "cashAccountIds" in save.recovery.attempted
-                      ? "cash"
-                      : save.recovery && "investmentAccountIds" in save.recovery.attempted
-                        ? "investments"
-                        : "spend",
-                  )
-                }
-              >
+            {recoveryScope ? (
+              <Button type="button" variant="secondary" onClick={() => setScope(recoveryScope)}>
                 Review unsaved account selections
               </Button>
             ) : null}

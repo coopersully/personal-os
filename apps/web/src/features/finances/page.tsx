@@ -165,6 +165,13 @@ export function FinancesPage() {
   const [budgetPacePeriod, setBudgetPacePeriod] = useState<FinanceBudgetPacePeriod>("week");
   const accountPreferences = useWorkspacePreferences("finances");
   const saveAccountPreferences = useSaveWorkspacePreferences("finances");
+  const recoveryScope = (
+    Object.keys(financeAccountPreferenceKeys) as Array<keyof typeof financeAccountPreferenceKeys>
+  ).find(
+    (scope) =>
+      saveAccountPreferences.recovery &&
+      financeAccountPreferenceKeys[scope] in saveAccountPreferences.recovery.attempted,
+  );
   const overview = useQuery({
     queryFn: () =>
       section === "budgets"
@@ -1441,21 +1448,11 @@ export function FinancesPage() {
         open={breakdownTransaction !== null}
         transaction={breakdownTransaction}
       />
-      {saveAccountPreferences.recovery && !scopeDialog ? (
+      {recoveryScope && !scopeDialog ? (
         <ShadcnButton
           type="button"
           variant="secondary"
-          onClick={() =>
-            setScopeDialog(
-              saveAccountPreferences.recovery &&
-                "spendAccountIds" in saveAccountPreferences.recovery.attempted
-                ? "spend"
-                : saveAccountPreferences.recovery &&
-                    "cashAccountIds" in saveAccountPreferences.recovery.attempted
-                  ? "cash"
-                  : "investments",
-            )
-          }
+          onClick={() => setScopeDialog(recoveryScope)}
         >
           Review unsaved account selections
         </ShadcnButton>

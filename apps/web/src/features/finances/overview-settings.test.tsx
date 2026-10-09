@@ -25,20 +25,22 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
-function OtherWriter() {
+function OtherWriter({ transactionView = false }: { transactionView?: boolean }) {
   const save = useSaveWorkspacePreferences("finances");
   const preferences = useWorkspacePreferences("finances");
   return (
     <button
       type="button"
       disabled={!preferences.isSuccess}
-      onClick={() => save.mutate({ cashAccountIds: [] })}
+      onClick={() =>
+        save.mutate(transactionView ? { financeTransactionView: "cards" } : { cashAccountIds: [] })
+      }
     >
       Other writer
     </button>
   );
 }
-function mount(otherWriter = false) {
+function mount(otherWriter = false, transactionView = false) {
   const cache = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -46,7 +48,7 @@ function mount(otherWriter = false) {
   render(
     <QueryClientProvider client={cache}>
       <MemoryRouter>
-        {otherWriter ? <OtherWriter /> : null}
+        {otherWriter ? <OtherWriter transactionView={transactionView} /> : null}
         <FinanceOverviewSettings />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -186,4 +188,26 @@ it("reloads unavailable account names in retained recovery without saving until 
     "finances",
     expect.objectContaining({ expectedRevision: 6, preferences: { cashAccountIds: [] } }),
   );
+});
+
+it("keeps non-account preference recovery visible without offering an unrelated account dialog", async () => {
+  vi.spyOn(api, "getFinanceConfiguration").mockResolvedValue(configuration());
+  vi.spyOn(api, "getWorkspaceSettings").mockResolvedValue(
+    resolveWorkspaceSettings("finances", { revision: 2 }),
+  );
+  const update = vi.spyOn(api, "updateWorkspaceSettings").mockRejectedValue(new Error("Offline"));
+  mount(true, true);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Other writer" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Other writer" }));
+  await screen.findByText("Your change: cards");
+  expect(
+    screen.queryByRole("button", { name: "Review unsaved account selections" }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Open Finance settings" })).toHaveAttribute(
+    "href",
+    "/settings?section=finances",
+  );
+  expect(screen.getByRole("button", { name: "Refresh latest settings" })).toBeEnabled();
+  expect(update).toHaveBeenCalledTimes(1);
 });

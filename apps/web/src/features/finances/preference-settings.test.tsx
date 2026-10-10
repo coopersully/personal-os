@@ -23,10 +23,10 @@ it("edits transaction defaults in Finance settings while preserving the other pr
     revision: 6,
     preferences: { ...saved.preferences, ...input.preferences },
   }));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["me"], { id: "owner" });
   render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+    <QueryClientProvider client={client}>
       <WorkspacePreferencesSection workspace="finances" />
     </QueryClientProvider>,
   );

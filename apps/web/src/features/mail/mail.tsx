@@ -1,5 +1,6 @@
 import { getDefaultWorkspacePreferences } from "@personal-os/domain";
 import { MessageAttachments } from "@/components/message-attachments";
+import { WorkspacePreferenceRecovery } from "../workspace-settings/save-recovery";
 
 export { formatAttachmentSize } from "@/components/message-attachments";
 
@@ -422,6 +423,7 @@ export function MailPage({ user }: { user: User }) {
             ? `${(drafts.data ?? []).filter((draft) => draft.sendStatus !== "sent").length} drafts`
             : `${threads.data?.length ?? 0} conversations`
         }
+        layoutDisabled={!layoutSettings.isSuccess || saveLayout.isPending || !!saveLayout.recovery}
         conversationLayout={conversationLayout}
         setConversationLayout={(mailConversationLayout) =>
           saveLayout.mutate({ mailConversationLayout })
@@ -481,7 +483,8 @@ export function MailPage({ user }: { user: User }) {
         {confirmation}
         <MutationFeedback feedback={deleteDraft.feedback} />
         <MutationFeedback feedback={reconcileDraft.feedback} />
-        <MutationFeedback feedback={saveLayout.feedback} />
+        {!saveLayout.recovery ? <MutationFeedback feedback={saveLayout.feedback} /> : null}
+        <WorkspacePreferenceRecovery workspace="mail" />
         <QueryFeedback query={layoutSettings} title="Couldn’t load Mail layout preferences." />
         <MutationFeedback feedback={updateThread.feedback} />
         <MutationFeedback feedback={snoozeThread.feedback} />
@@ -498,6 +501,9 @@ export function MailPage({ user }: { user: User }) {
           onLayoutChanged={(layout, metadata) => {
             const width = layout["mail-list"];
             if (
+              !saveLayout.recovery &&
+              !saveLayout.isPending &&
+              layoutSettings.isSuccess &&
               conversationLayout === "split" &&
               metadata.isUserInteraction &&
               width !== undefined &&
@@ -556,7 +562,11 @@ export function MailPage({ user }: { user: User }) {
               )}
             </section>
           </ResizablePanel>
-          <ResizableHandle aria-label="Resize conversation list" withHandle />
+          <ResizableHandle
+            disabled={!layoutSettings.isSuccess || saveLayout.isPending || !!saveLayout.recovery}
+            aria-label="Resize conversation list"
+            withHandle
+          />
           <ResizablePanel defaultSize="66%" id="mail-reader" minSize="360px">
             <section aria-label="Message reader" className="mail-reader">
               <QueryFeedback query={loaded} title="Couldn’t load the conversation." />
@@ -666,6 +676,7 @@ function MailSecondaryNavigation({
   countLabel,
   conversationLayout,
   setConversationLayout,
+  layoutDisabled,
   density,
   pending,
   forward,
@@ -682,6 +693,7 @@ function MailSecondaryNavigation({
   back: () => void;
   countLabel: string;
   conversationLayout: "split" | "single";
+  layoutDisabled: boolean;
   setConversationLayout: (layout: "split" | "single") => void;
   density: MailListDensity;
   pending: boolean;
@@ -824,6 +836,7 @@ function MailSecondaryNavigation({
             <TooltipTrigger asChild>
               <DropdownMenuTrigger asChild>
                 <Button
+                  disabled={layoutDisabled}
                   aria-label="Message list layout"
                   className="mail-secondary-nav__density"
                   size="icon"
@@ -1006,12 +1019,13 @@ export function Reader({
   const initializedThread = useRef<string | null>(null);
   const [messagesAbove, setMessagesAbove] = useState(0);
   const previousMessageRef = useRef<HTMLElement | null>(null);
+  const historyHeaderRef = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => {
     const article = articleRef.current;
     const viewport = article?.closest<HTMLElement>(".mail-reader");
     if (!article || !viewport || !latestMessageId) return;
     const latest = article.querySelector<HTMLElement>(".mail-reader__message:last-of-type");
-    const scrollOffset = () => Number.parseFloat(getComputedStyle(viewport).scrollPaddingTop) || 16;
+    const scrollOffset = () => historyHeaderRef.current?.getBoundingClientRect().height || 64;
     const updateMessagesAbove = () => {
       const top = viewport.getBoundingClientRect().top + scrollOffset();
       const above = [...article.querySelectorAll<HTMLElement>(".mail-reader__message")].filter(
@@ -1022,12 +1036,14 @@ export function Reader({
     };
     const resize = () => {
       article.style.setProperty("--reader-height", `${viewport.clientHeight}px`);
+      article.style.setProperty("--reader-history-height", `${scrollOffset()}px`);
       article.style.setProperty("--last-message-height", `${latest?.offsetHeight ?? 0}px`);
       updateMessagesAbove();
     };
     resize();
     const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
     observer?.observe(viewport);
+    if (historyHeaderRef.current) observer?.observe(historyHeaderRef.current);
     if (latest) observer?.observe(latest);
     if (!loadingMessages && initializedThread.current !== thread.id) {
       const latest = article.querySelector<HTMLElement>(".mail-reader__message:last-child");
@@ -1057,7 +1073,7 @@ export function Reader({
 
   return (
     <article ref={articleRef} className="mail-reader__article">
-      <header className="mail-reader__history-nav">
+      <header ref={historyHeaderRef} className="mail-reader__history-nav">
         <h2 className="min-w-0 flex-1 truncate" title={thread.subject}>
           {thread.subject}
         </h2>
@@ -1070,7 +1086,7 @@ export function Reader({
               const viewport = articleRef.current?.closest<HTMLElement>(".mail-reader");
               const previous = previousMessageRef.current;
               if (!viewport || !previous) return;
-              const offset = Number.parseFloat(getComputedStyle(viewport).scrollPaddingTop) || 16;
+              const offset = historyHeaderRef.current?.getBoundingClientRect().height || 64;
               viewport.scrollTo({
                 top:
                   viewport.scrollTop +

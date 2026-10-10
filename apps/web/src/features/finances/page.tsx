@@ -55,7 +55,6 @@ import {
   CardHeader as ShadcnCardHeader,
   CardTitle as ShadcnCardTitle,
 } from "@/components/ui/card";
-import { Checkbox as ShadcnCheckbox } from "@/components/ui/checkbox";
 import {
   Collapsible as ShadcnCollapsible,
   CollapsibleContent as ShadcnCollapsibleContent,
@@ -117,7 +116,12 @@ import {
   useSaveWorkspacePreferences,
   useWorkspacePreferences,
 } from "../workspace-settings/preferences";
+import {
+  preferenceValueLabel,
+  WorkspacePreferenceRecovery,
+} from "../workspace-settings/save-recovery";
 import { financeAccountPreferenceKeys, selectedFinanceAccounts } from "./account-preferences";
+import { AccountScopeDialog } from "./account-scope-dialog";
 import { FinanceBudgetBucketManager } from "./bucket-manager.js";
 import { FinanceCategoryDialog } from "./category-dialog";
 import { AddTransactionContext } from "./contextual-question.js";
@@ -161,6 +165,13 @@ export function FinancesPage() {
   const [budgetPacePeriod, setBudgetPacePeriod] = useState<FinanceBudgetPacePeriod>("week");
   const accountPreferences = useWorkspacePreferences("finances");
   const saveAccountPreferences = useSaveWorkspacePreferences("finances");
+  const recoveryScope = (
+    Object.keys(financeAccountPreferenceKeys) as Array<keyof typeof financeAccountPreferenceKeys>
+  ).find(
+    (scope) =>
+      saveAccountPreferences.recovery &&
+      financeAccountPreferenceKeys[scope] in saveAccountPreferences.recovery.attempted,
+  );
   const overview = useQuery({
     queryFn: () =>
       section === "budgets"
@@ -1437,16 +1448,47 @@ export function FinancesPage() {
         open={breakdownTransaction !== null}
         transaction={breakdownTransaction}
       />
+      {recoveryScope && !scopeDialog ? (
+        <ShadcnButton
+          type="button"
+          variant="secondary"
+          onClick={() => setScopeDialog(recoveryScope)}
+        >
+          Review unsaved account selections
+        </ShadcnButton>
+      ) : null}
       <AccountScopeDialog
         accounts={finance.accounts}
-        disabled={!accountPreferences.isSuccess || saveAccountPreferences.isPending}
+        disabled={
+          !accountPreferences.isSuccess ||
+          saveAccountPreferences.isPending ||
+          !!saveAccountPreferences.recovery
+        }
         feedback={
           <>
             <QueryFeedback
               query={accountPreferences}
               title="Couldn’t load saved account selections."
             />
-            <MutationFeedback feedback={saveAccountPreferences.feedback} />
+            {!saveAccountPreferences.recovery ? (
+              <MutationFeedback feedback={saveAccountPreferences.feedback} />
+            ) : null}
+            <WorkspacePreferenceRecovery
+              workspace="finances"
+              formatValue={(value, key) => {
+                if (Array.isArray(value) && key.endsWith("AccountIds"))
+                  return value.length
+                    ? value
+                        .map(
+                          (id) =>
+                            finance.accounts.find((account) => account.id === id)?.name ??
+                            "Unavailable account",
+                        )
+                        .join(", ")
+                    : "None selected";
+                return preferenceValueLabel(value, key);
+              }}
+            />
           </>
         }
         onReset={(scope) =>
@@ -1652,80 +1694,6 @@ function FinanceAtAGlance({ status }: { status: FinanceStatus }) {
         ) : null}
       </ShadcnCard>
     </section>
-  );
-}
-
-function AccountScopeDialog({
-  disabled,
-  feedback,
-  onReset,
-  accounts,
-  onChange,
-  onOpenChange,
-  scope,
-  selectedIds,
-  transactions,
-}: {
-  disabled: boolean;
-  feedback: ReactNode;
-  onReset: (scope: "spend" | "cash" | "investments") => void;
-  accounts: FinanceAccount[];
-  onChange: (scope: "spend" | "cash" | "investments", id: string, checked: boolean) => void;
-  onOpenChange: (open: boolean) => void;
-  scope: "spend" | "cash" | "investments" | null;
-  selectedIds: string[];
-  transactions: FinanceTransaction[];
-}) {
-  if (!scope) return null;
-  const eligible = accounts.filter(
-    (account) => scope === "spend" || account.kind === (scope === "cash" ? "cash" : "investment"),
-  );
-  const title =
-    scope === "spend" ? "Accounts included in spending" : `Accounts included in ${scope ?? ""}`;
-  const month = new Date().toISOString().slice(0, 7);
-  return (
-    <ShadcnDialog onOpenChange={onOpenChange} open={scope !== null}>
-      <ShadcnDialogContent>
-        <ShadcnDialogHeader>
-          <ShadcnDialogTitle>{title}</ShadcnDialogTitle>
-          <ShadcnDialogDescription>
-            Selections are saved to your Finance workspace across devices.
-          </ShadcnDialogDescription>
-        </ShadcnDialogHeader>
-        {feedback}
-        <ShadcnButton variant="secondary" disabled={disabled} onClick={() => onReset(scope)}>
-          Use all eligible accounts
-        </ShadcnButton>
-        <ShadcnFieldGroup>
-          {eligible.map((account) => {
-            const value =
-              scope === "spend"
-                ? transactions
-                    .filter(
-                      (item) =>
-                        item.accountId === account.id &&
-                        item.direction === "expense" &&
-                        item.date.startsWith(month),
-                    )
-                    .reduce((sum, item) => sum + item.amount, 0)
-                : (account.balance ?? 0);
-            return (
-              <ShadcnField key={account.id} orientation="horizontal">
-                <ShadcnCheckbox
-                  disabled={disabled}
-                  checked={selectedIds.includes(account.id)}
-                  id={`scope-${scope}-${account.id}`}
-                  onCheckedChange={(checked) => onChange(scope, account.id, checked === true)}
-                />
-                <ShadcnFieldLabel htmlFor={`scope-${scope}-${account.id}`}>
-                  {account.name} · {formatMoney(value)}
-                </ShadcnFieldLabel>
-              </ShadcnField>
-            );
-          })}
-        </ShadcnFieldGroup>
-      </ShadcnDialogContent>
-    </ShadcnDialog>
   );
 }
 

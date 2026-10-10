@@ -271,20 +271,24 @@ describe("complete finance plan", () => {
     api.reviseFinanceBudget.mockRejectedValue(new Error("Service unavailable"));
     mount();
     await userEvent.click(await screen.findByRole("button", { name: "Revise plan" }));
-    fireEvent.change(screen.getByLabelText("Rationale"), {
-      target: { value: "A revised rationale" },
-    });
+    fireEvent.change(
+      within(screen.getByRole("dialog", { name: "Revise version 3" })).getByLabelText("Rationale"),
+      { target: { value: "A revised rationale" } },
+    );
     await userEvent.click(screen.getByRole("button", { name: "Save proposal" }));
     expect(await screen.findByText("Proposal could not be saved")).toBeInTheDocument();
-    expect(screen.getByLabelText("Rationale")).toHaveValue("A revised rationale");
+    expect(
+      within(screen.getByRole("dialog", { name: "Revise version 3" })).getByLabelText("Rationale"),
+    ).toHaveValue("A revised rationale");
     await userEvent.click(screen.getByRole("button", { name: "Save proposal" }));
     await waitFor(() => expect(api.reviseFinanceBudget).toHaveBeenCalledTimes(2));
     expect(api.reviseFinanceBudget.mock.calls[0]?.[0]).toEqual(
       api.reviseFinanceBudget.mock.calls[1]?.[0],
     );
-    fireEvent.change(screen.getByLabelText("Rationale"), {
-      target: { value: "Another rationale" },
-    });
+    fireEvent.change(
+      within(screen.getByRole("dialog", { name: "Revise version 3" })).getByLabelText("Rationale"),
+      { target: { value: "Another rationale" } },
+    );
     await userEvent.click(screen.getByRole("button", { name: "Save proposal" }));
     await waitFor(() => expect(api.reviseFinanceBudget).toHaveBeenCalledTimes(3));
     expect(api.reviseFinanceBudget.mock.calls[2]?.[0].idempotencyKey).not.toBe(

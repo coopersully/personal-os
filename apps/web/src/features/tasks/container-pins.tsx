@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { PinIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,25 +22,38 @@ export function TaskContainerPin({
   const ids = query.data?.preferences[key] ?? [];
   const pinned = ids.includes(id);
   const save = useSaveWorkspacePreferences("tasks");
-  if (unpinOnly && !pinned) return null;
+  const pinRecovery =
+    !!save.recovery &&
+    ("pinnedListIds" in save.recovery.attempted || "pinnedProjectIds" in save.recovery.attempted);
+  if (unpinOnly && !pinned && !pinRecovery) return null;
   return (
-    <Button
-      size="icon-sm"
-      variant={pinned ? "secondary" : "ghost"}
-      aria-pressed={pinned}
-      aria-label={`${pinned ? "Unpin" : "Pin"} ${name}`}
-      title={`${pinned ? "Unpin" : "Pin"} ${name}`}
-      disabled={!query.isSuccess || save.isPending || (!pinned && ids.length >= 100)}
-      onClick={() => {
-        const shouldPin = !pinned;
-        save.mutate((current) => ({
-          [key]: shouldPin
-            ? [...new Set([...(current[key] ?? []), id])]
-            : (current[key] ?? []).filter((value) => value !== id),
-        }));
-      }}
-    >
-      <PinIcon aria-hidden="true" weight={pinned ? "Filled" : "Outline"} />
-    </Button>
+    <>
+      <Button
+        type="button"
+        size="icon-sm"
+        variant={pinned ? "secondary" : "ghost"}
+        aria-pressed={pinned}
+        aria-label={`${pinned ? "Unpin" : "Pin"} ${name}`}
+        title={`${pinned ? "Unpin" : "Pin"} ${name}`}
+        disabled={
+          !query.isSuccess || save.isPending || !!save.recovery || (!pinned && ids.length >= 100)
+        }
+        onClick={() => {
+          const shouldPin = !pinned;
+          save.mutate((current) => ({
+            [key]: shouldPin
+              ? [...new Set([...(current[key] ?? []), id])]
+              : (current[key] ?? []).filter((value) => value !== id),
+          }));
+        }}
+      >
+        <PinIcon aria-hidden="true" weight={pinned ? "Filled" : "Outline"} />
+      </Button>
+      {pinRecovery ? (
+        <Button asChild variant="secondary">
+          <Link to="/settings?section=tasks">Review unsaved pin preferences</Link>
+        </Button>
+      ) : null}
+    </>
   );
 }

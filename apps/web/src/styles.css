@@ -4188,7 +4188,6 @@ p {
   min-width: 0;
   overflow-y: auto;
   scroll-snap-type: y proximity;
-  scroll-padding-top: 4rem;
 }
 .mail-reader > [data-slot="empty"].mail-reader__empty {
   border: 0;
@@ -4231,6 +4230,7 @@ p {
 .mail-reader__message {
   position: relative;
   scroll-snap-align: start;
+  scroll-margin-top: var(--reader-history-height, 4rem);
   background: var(--card);
   border-radius: var(--radius-xl);
   padding: 1.25rem;

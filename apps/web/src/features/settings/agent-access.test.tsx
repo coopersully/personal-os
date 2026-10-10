@@ -98,6 +98,8 @@ function renderSettings(initialEntry = "/settings?section=workspace-access") {
   const queryClient = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false, gcTime: 0 } },
   });
+  queryClient.setQueryDefaults(["me"], { gcTime: Number.POSITIVE_INFINITY });
+  queryClient.setQueryData(["me"], { id: "owner" });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialEntry]}>

@@ -373,7 +373,13 @@ describe.sequential("durable notifications", () => {
     await expect(
       service.resetFinancePreferences(principal, { expectedRevision: 2 }),
     ).rejects.toThrow("changed");
-    expect(await service.resetFinancePreferences(principal, { expectedRevision: 1 })).toEqual({
+    expect(
+      await service.resetFinancePreferences(
+        principal,
+        { expectedRevision: 1 },
+        "finance-reset-request",
+      ),
+    ).toEqual({
       scope: "finances",
       inherited: true,
     });
@@ -385,6 +391,9 @@ describe.sequential("durable notifications", () => {
       expect.objectContaining({
         before: { scope: "finances", revision: 1, preferences: defaultNotificationPreferences },
         after: { scope: "finances", inherited: true },
+        requestId: "finance-reset-request",
+        actorId: owner,
+        actorType: "user",
       }),
     ]);
     expect(

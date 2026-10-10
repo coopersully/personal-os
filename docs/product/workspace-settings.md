@@ -1,7 +1,7 @@
 # nohmi per-workspace settings
 
 - Status: Accepted target product contract
-- Last reconciled: 2026-10-07
+- Last reconciled: 2026-10-08
 
 ## Purpose
 
@@ -296,3 +296,34 @@ substitutes a guessed installer or stale success for a failed release read.
 
 The accepted [Settings information architecture](../design/pages/settings-architecture.md) defines
 configuration navigation, contextual setup, local history, and workspace-scoped Reviews placement.
+
+### Save and recovery contracts
+
+The three settings stores deliberately retain different semantics:
+
+| Settings | Ownership and serialization | Revision and reset/default behavior |
+| --- | --- | --- |
+| Typed workspace preferences | Interactive owner; per-user/workspace transaction lock; mutation and audit commit together | Missing revision 0; every accepted partial save advances it. Product defaults and typed null sentinels belong to that workspace. Finance account selection null means all eligible accounts; an empty selection means none. |
+| Notification policy | Interactive owner with existing Texting/Finance access; account row lock shared with notification operations; mutation and audit commit together | Missing revision null; first save starts at 1. Finance reset removes only its override, inheriting configured global values or product defaults, subject to the global disclosure ceiling. Reset audit records fence recreation so old revisions stay stale. |
+| Account review policy | Interactive owner; account-wide transaction lock; changed policy and audit commit together | Missing policy is off/version 1. An unchanged exact-version save neither advances the version nor audits. Off remains an explicit account value; there is no workspace inheritance or delete reset. |
+
+Compatible exact-revision comparisons and audit construction can share mechanics; storage,
+authorization, locks, defaults, revision advancement and reset remain domain-owned. Notification
+preference HTTP mutations retain their originating request ID in the audit record.
+
+Settings recovery retains all unresolved field attempts in transient state shared by the current account, session and workspace. Newer failed values for the same field replace older failed values; an unrelated successful save cannot discard another field’s attempt. Matching confirmed saves and explicit acceptance clear only the corresponding intent. Each unresolved field retains its outcome; any uncertain field keeps the recovery explanation uncertain even when another attempt is rejected. A known revision conflict
+explains rejection; an uncertain transport result explains that the change may already be saved.
+Refreshing loads authoritative values without writing and keeps failed reads recoverable. The person
+can explicitly accept the latest settings or reapply the displayed attempt against the exact version
+just reviewed. Explicit replay never advances that revision through another queued write; a later write requires another review. Recovery controls wait for all queued writes in the workspace, including writes from another mounted control. Calendar and Mail expose this recovery at their contextual controls; Finance account selection shows readable account names and keeps a recovery entry after the dialog closes. Task pin failures link to their retained Settings recovery. Signing out or changing accounts clears transient attempts, including account review-policy and Finance notification-reset recovery; session generations fence late reads, mutation completions and callbacks, including switching away and back to the same account. A second conflict requires another review, never a silent retry with a newer version.
+Workspace saves continue to bind intent to the observed revision; only that client's own successful
+queued writes can advance it. Neither preference history nor a universal settings store is introduced.
+
+The global notification editor remains a separate integration surface; these recovery controls cover
+workspace preference settings, account review policy and the Finance notification reset.
+
+The canonical Finance overview exposes Workspace view settings for saved spending, cash, and
+investment account display selections, independently of financial snapshot availability. These
+selections do not change the overview’s financial position totals, account meanings, or planning
+inclusion. Retained failures can be reviewed after closing the selector or navigating to Finance
+Settings; refreshing a recovery view does not save a change.

@@ -39,7 +39,7 @@ it("maps bounded notification operations and rejects authority and input expansi
     (await app.request("/v1/texting/notifications/preferences/global", json("PATCH", input)))
       .status,
   ).toBe(200);
-  expect(notifications.savePreferences).toHaveBeenCalledWith(principal, "global", input);
+  expect(notifications.savePreferences).toHaveBeenCalledWith(principal, "global", input, "test");
   expect(
     (await app.request("/v1/texting/notifications/preferences/foreign", json("PATCH", input)))
       .status,
@@ -59,9 +59,11 @@ it("maps bounded notification operations and rejects authority and input expansi
       )
     ).status,
   ).toBe(200);
-  expect(notifications.resetFinancePreferences).toHaveBeenCalledWith(principal, {
-    expectedRevision: 2,
-  });
+  expect(notifications.resetFinancePreferences).toHaveBeenCalledWith(
+    principal,
+    { expectedRevision: 2 },
+    "test",
+  );
   for (const body of [{}, { expectedRevision: null }, { expectedRevision: 2, scope: "global" }]) {
     expect(
       (await app.request("/v1/texting/notifications/preferences/finances", json("DELETE", body)))

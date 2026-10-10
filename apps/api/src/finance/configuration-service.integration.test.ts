@@ -1,3 +1,4 @@
+import { EventEmitter, errorMonitor } from "node:events";
 import { resolve } from "node:path";
 import {
   auditEvents,
@@ -19,14 +20,51 @@ import { createFinanceService } from "../finance-service.js";
 describe.sequential("Finance configuration ownership and read purity", () => {
   let container: StartedPostgreSqlContainer;
   let database: DatabaseClient;
+  const pendingClientEnds = new Set<Promise<void>>();
+  const connectionErrors: unknown[] = [];
   beforeAll(async () => {
     container = await new PostgreSqlContainer("postgres:17.5-alpine").start();
     database = createDatabaseClient(container.getConnectionUri());
+    database.pool.on("connect", (client) => {
+      let settle = () => {};
+      const ended = new Promise<void>((resolve) => {
+        settle = resolve;
+      });
+      pendingClientEnds.add(ended);
+      const finish = () => {
+        pendingClientEnds.delete(ended);
+        settle();
+      };
+      client.once("end", finish);
+      // Monitor errors without consuming the pool/client's normal error propagation.
+      EventEmitter.prototype.on.call(client, errorMonitor, (error: unknown) => {
+        connectionErrors.push(error);
+        finish();
+      });
+    });
+    database.pool.on("error", (error: unknown) => connectionErrors.push(error));
     await migrateDatabase(database.db, resolve(process.cwd(), "packages/database/migrations"));
   }, 120000);
   afterAll(async () => {
-    await database?.close();
-    await container?.stop();
+    // pool.end resolves before pg's physical client-end callbacks complete.
+    const clientEnds = [...pendingClientEnds];
+    try {
+      await database?.close();
+      await Promise.all(clientEnds);
+    } catch (error) {
+      connectionErrors.push(error);
+    }
+    try {
+      await container?.stop();
+    } catch (error) {
+      connectionErrors.push(error);
+    }
+    if (connectionErrors.length) {
+      throw new AggregateError(
+        connectionErrors,
+        "Finance configuration fixture connection failed.",
+      );
+    }
   });
   it("returns owner-scoped data without creating setup, preferences, budgets, or execution", async () => {
     const [owner, other] = await database.db

@@ -202,6 +202,7 @@ function querySetup(route: string, cached?: { key: readonly unknown[]; value: un
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  client.setQueryData(["me"], { id: "finance-feedback-owner" });
   if (cached) client.setQueryData(cached.key, cached.value);
   render(
     <QueryClientProvider client={client}>

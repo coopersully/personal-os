@@ -2,12 +2,18 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 // @vitest-environment jsdom
 
 import type { User } from "@personal-os/domain";
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CalendarAppBarControls } from "./workspace-header.js";
+
+function preferenceClient() {
+  const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  cache.setQueryData(["me"], { id: "owner" });
+  return cache;
+}
 
 const mocks = vi.hoisted(() => ({
   getWorkspaceSettings: vi.fn(),
@@ -40,9 +46,7 @@ it("uses the compact view menu without losing calendar filters and follows Today
     <MemoryRouter
       initialEntries={["/calendar?view=week&date=2026-09-30&follow=0&calendars=personal"]}
     >
-      <QueryClientProvider
-        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-      >
+      <QueryClientProvider client={preferenceClient()}>
         <TooltipProvider>
           <Header />
         </TooltipProvider>
@@ -81,9 +85,7 @@ it.each([
   try {
     const { unmount } = render(
       <MemoryRouter initialEntries={[`/calendar${search}`]}>
-        <QueryClientProvider
-          client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-        >
+        <QueryClientProvider client={preferenceClient()}>
           <TooltipProvider>
             <CalendarAppBarControls
               accounts={null}
@@ -147,9 +149,7 @@ it.each([
           `/calendar?view=${view}&date=${start}&follow=0&calendars=personal&weekends=0`,
         ]}
       >
-        <QueryClientProvider
-          client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-        >
+        <QueryClientProvider client={preferenceClient()}>
           <TooltipProvider>
             <Header />
           </TooltipProvider>
@@ -177,4 +177,43 @@ it.each([
   } finally {
     vi.unstubAllGlobals();
   }
+});
+
+it("makes Calendar view conflicts reviewable at the contextual control", async () => {
+  mocks.updateWorkspaceSettings.mockClear();
+  mocks.getWorkspaceSettings.mockResolvedValue({
+    workspace: "calendar",
+    revision: 0,
+    preferences: { calendarView: "week" },
+  });
+  mocks.updateWorkspaceSettings.mockRejectedValue(new Error("Offline"));
+  const user = userEvent.setup();
+  render(
+    <MemoryRouter initialEntries={["/calendar?view=week"]}>
+      <QueryClientProvider client={preferenceClient()}>
+        <TooltipProvider>
+          <CalendarAppBarControls
+            accounts={null}
+            onToday={vi.fn()}
+            user={{ planningTimezone: "America/New_York" } as User}
+          />
+        </TooltipProvider>
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  await user.click(screen.getByRole("button", { name: "Calendar view: week" }));
+  await user.click(screen.getByRole("menuitemradio", { name: "Month" }));
+  expect(await screen.findByText("Your change: month")).toBeVisible();
+  mocks.getWorkspaceSettings.mockResolvedValue({
+    workspace: "calendar",
+    revision: 3,
+    preferences: { calendarView: "day" },
+  });
+  await user.click(screen.getByRole("button", { name: "Refresh latest settings" }));
+  expect(await screen.findByText("Latest: day")).toBeVisible();
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Use latest settings" })).toBeEnabled(),
+  );
+  await user.click(screen.getByRole("button", { name: "Use latest settings" }));
+  expect(mocks.updateWorkspaceSettings).toHaveBeenCalledTimes(1);
 });

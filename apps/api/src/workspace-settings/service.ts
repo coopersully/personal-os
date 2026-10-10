@@ -18,7 +18,7 @@ import {
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
-import type { Principal } from "../types.js";
+import { assertSettingsRevision, type SettingsMutationContext } from "../settings-save.js";
 
 const tables = {
   calendar: calendarWorkspaceSettings,
@@ -41,7 +41,7 @@ export function createWorkspaceSettingsService(db: Database) {
     async update<W extends Workspace>(
       workspace: W,
       value: unknown,
-      context: { principal: Principal; requestId: string },
+      context: SettingsMutationContext,
     ): Promise<WorkspaceSettings<W>> {
       if (context.principal.actorType !== "user")
         throw new AppError("forbidden", "Workspace preferences require an interactive user.");
@@ -60,8 +60,11 @@ export function createWorkspaceSettingsService(db: Database) {
         const table = tables[workspace as Workspace];
         const [row] = await tx.select().from(table).where(eq(table.userId, userId));
         const revision = row?.revision ?? 0;
-        if (revision !== input.expectedRevision)
-          throw new AppError("conflict", "These preferences changed. Reload and try again.");
+        assertSettingsRevision(
+          revision,
+          input.expectedRevision,
+          "These preferences changed. Reload and try again.",
+        );
         const resolved = resolveWorkspaceSettings(workspace, { ...row, ...input.preferences });
         if (resolved.workspace === "tasks") {
           const changes = workspaceSettingsUpdateSchemas.tasks.parse(value).preferences;

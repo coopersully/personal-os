@@ -3,36 +3,52 @@ import {
   type Workspace,
   type WorkspacePreferences,
 } from "@personal-os/domain";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
+import { api } from "@/api";
 import { QueryFeedback } from "@/components/async-state";
 import { MutationFeedback } from "@/components/mutation-feedback";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { SettingsSection } from "../settings/settings-layout";
-import { listAllTaskLists } from "../tasks/page";
+import { listAllTaskLists, listAllTaskProjects } from "../tasks/page";
+import { sameSession, usePreferenceSession } from "./account-save-session";
 import { useSaveWorkspacePreferences, useWorkspacePreferences } from "./preferences";
+import { preferenceValueLabel, WorkspacePreferenceRecovery } from "./save-recovery";
 
 type Save<W extends Workspace> = ReturnType<typeof useSaveWorkspacePreferences<W>>;
 function PreferenceSection<W extends Workspace>({
   workspace,
   children,
+  formatValue = preferenceValueLabel,
+  recoveryUnavailable = false,
 }: {
   workspace: W;
+  formatValue?: (value: unknown, key: string) => string;
+  recoveryUnavailable?: boolean;
   children: (values: WorkspacePreferences<W>, save: Save<W>, disabled: boolean) => ReactNode;
 }) {
   const query = useWorkspacePreferences(workspace);
   const save = useSaveWorkspacePreferences(workspace);
   const values = (query.data?.preferences ??
     getDefaultWorkspacePreferences(workspace)) as WorkspacePreferences<W>;
-  const disabled = !query.isSuccess || save.isPending;
+  const disabled = !query.isSuccess || save.isPending || !!save.recovery;
   return (
     <SettingsSection title="Workspace preferences">
       <QueryFeedback query={query} title="Couldn’t load preferences." />
-      <MutationFeedback feedback={save.feedback} />
+      {!save.recovery ? <MutationFeedback feedback={save.feedback} /> : null}
+      <p className="text-sm text-muted-foreground">
+        Unconfigured preferences use this workspace’s product defaults.
+      </p>
+      <WorkspacePreferenceRecovery
+        workspace={workspace}
+        formatValue={formatValue}
+        unavailable={recoveryUnavailable}
+      />
       <FieldGroup>
         {children(values, save, disabled)}
         <Toggle
@@ -253,11 +269,46 @@ function MailPreferences() {
 }
 function TasksPreferences() {
   const lists = useQuery({ queryKey: ["task-lists"], queryFn: listAllTaskLists });
+  const recovery = useSaveWorkspacePreferences("tasks").recovery;
+  const projects = useQuery({
+    queryKey: ["task-projects"],
+    queryFn: listAllTaskProjects,
+    enabled: !!recovery?.attempted.pinnedProjectIds,
+  });
   return (
-    <PreferenceSection workspace="tasks">
+    <PreferenceSection
+      workspace="tasks"
+      recoveryUnavailable={
+        !!recovery &&
+        ((!lists.isSuccess &&
+          ("pinnedListIds" in recovery.attempted ||
+            "defaultCaptureListId" in recovery.attempted)) ||
+          (!projects.isSuccess && "pinnedProjectIds" in recovery.attempted))
+      }
+      formatValue={(value, key) => {
+        if (key === "defaultCaptureListId" && typeof value === "string")
+          return (
+            lists.data?.items.find((list) => list.id === value)?.name ?? "Unavailable capture list"
+          );
+        if (Array.isArray(value) && (key === "pinnedListIds" || key === "pinnedProjectIds")) {
+          const items = key === "pinnedListIds" ? lists.data?.items : projects.data?.items;
+          return value.length
+            ? value
+                .map(
+                  (id) => items?.find((item) => item.id === id)?.name ?? "Unavailable saved item",
+                )
+                .join(", ")
+            : "None pinned";
+        }
+        return preferenceValueLabel(value, key);
+      }}
+    >
       {(values, save, disabled) => (
         <>
           <QueryFeedback query={lists} title="Couldn’t load capture lists." />
+          {recovery?.attempted.pinnedProjectIds ? (
+            <QueryFeedback query={projects} title="Couldn’t load pinned project names." />
+          ) : null}
           <Choice
             id="tasks-default-capture-list"
             label="Default capture list"
@@ -363,10 +414,68 @@ function TasksPreferences() {
   );
 }
 function FinancesPreferences() {
+  const cache = useQueryClient();
+  const session = usePreferenceSession(cache);
+  return <FinancesPreferencesForSession key={`${session.owner}:${session.epoch}`} />;
+}
+function FinancesPreferencesForSession() {
+  const cache = useQueryClient();
+  const session = usePreferenceSession(cache);
+  const recovery = useSaveWorkspacePreferences("finances").recovery;
+  const needsAccountNames =
+    !!recovery && Object.keys(recovery.attempted).some((key) => key.endsWith("AccountIds"));
+  const configuration = useQuery({
+    queryKey: ["finance-settings-account-names", session.owner, session.epoch],
+    queryFn: async () => {
+      const result = await api.getFinanceConfiguration();
+      if (!sameSession(cache, session)) throw new Error("Account session changed.");
+      return result;
+    },
+    enabled: !!session.owner && needsAccountNames,
+  });
+  const accounts =
+    configuration.data?.accounts.state === "loaded"
+      ? configuration.data.accounts.value.accounts
+      : undefined;
   return (
-    <PreferenceSection workspace="finances">
+    <PreferenceSection
+      workspace="finances"
+      recoveryUnavailable={needsAccountNames && !accounts}
+      formatValue={(value, key) => {
+        if (Array.isArray(value) && key.endsWith("AccountIds"))
+          return value.length
+            ? value
+                .map(
+                  (id) =>
+                    accounts?.find((account) => account.id === id)?.name ?? "Unavailable account",
+                )
+                .join(", ")
+            : "None selected";
+        return preferenceValueLabel(value, key);
+      }}
+    >
       {(values, save, disabled) => (
         <>
+          {needsAccountNames ? (
+            <QueryFeedback
+              query={configuration}
+              title="Couldn’t load account names for recovery."
+            />
+          ) : null}
+          {needsAccountNames && configuration.isSuccess && !accounts ? (
+            <>
+              <p>
+                Account names are unavailable. Reload them before reapplying account selections.
+              </p>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => void configuration.refetch()}
+              >
+                Reload account names
+              </Button>
+            </>
+          ) : null}
           <Choice
             id="financeTransactionView"
             label="Transaction view"

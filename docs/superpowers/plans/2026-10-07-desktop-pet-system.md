@@ -264,3 +264,22 @@ Interfaces: timeline layout accepts temporal items and a render callback so Toda
   separate immediate visual preview from durable settings work, and profile dragging, color,
   scaling, opening/closing, and sleeping before making performance claims. No new architecture
   has been selected yet. Earlier ship authorization does not waive verification/review gates.
+
+### Reassessment additions — 2026-10-09
+
+- User approved diagnosis first, then behavior contracts, card refinements, and live native
+  acceptance. Checkpoint `6699d6fb` was pushed; this is not release-ready.
+- Add accurate silhouette hit testing and actual click-through to underlying apps to the
+  diagnosis matrix at every scale, orientation, and sleep state. Shadows/transparent margins
+  must not intercept nearby controls.
+- Add configurable shoo: rapid pointer shaking over the pet relocates it to the farthest
+  usable anchor, with enable/disable and sensitivity settings. False-positive prevention is
+  a core requirement. The canonical desktop-background document separates the accepted intent
+  from proposed recognition/cooldown rules. User confirmed shoo is closed-card only:
+  never move the open card, and clear gesture history when opening so it cannot carry over
+  into the next closed state.
+
+The next pass now has a proposed spec at
+`docs/superpowers/specs/2026-10-09-desktop-pet-reliability-design.md` and execution plan at
+`docs/superpowers/plans/2026-10-09-desktop-pet-reliability.md`. They are written for review,
+not executed; retain this document as implementation history and checkpoint evidence.

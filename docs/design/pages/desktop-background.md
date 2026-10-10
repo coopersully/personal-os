@@ -329,5 +329,30 @@ do not equate passing tests with smooth native behavior.
   incomplete enabled rituals get a prominent item at the top. Reuse authoritative ritual
   completion state. Placement and interaction details remain to be discussed.
 
-The immediate request is to checkpoint and push existing work, preserve context, then reassess
-the system together. These requirements must not be represented as already shipped.
+- Pet input must closely follow the visible silhouette, including ears, scale, rotation,
+  and the visible portion of a sleeping pet. Transparent margins and shadows must not open
+  the pet or consume clicks intended for another app. Validate actual cross-application
+  click-through, not merely a view hit-test return value.
+- Add an optional “shoo” gesture: rapidly shaking the pointer over the pet moves it to the
+  farthest usable anchor from the pointer. Settings must allow disabling the gesture and
+  adjusting how deliberate/aggressive a shake must be. Ordinary hover, entering to click,
+  or normal pointer travel must not trigger it. Shoo works only while the card is closed
+  (confirmed 2026-10-09). Opening the card clears gesture history; an earlier shake must not
+  trigger relocation after the card closes. Shoo never moves an open card.
+
+Shoo design proposal, pending agreement: detect repeated substantial direction reversals
+within a short time window near the visible pet, rather than speed alone. Ignore button-down,
+drag, menu, and transition activity; clear stale gesture history and apply a cooldown after
+relocation. Use the existing Dock-safe anchors on the current display, scored from the pointer
+at recognition. Respect Reduce Motion and preserve pin intent. Start with Low/Medium/High
+sensitivity choices, calibrated against actual interaction traces; thresholds and defaults are
+not settled. The closed-card-only restriction above is an accepted requirement.
+
+The checkpoint has been pushed and the user approved an evidence-first system reassessment.
+These requirements must not be represented as already shipped.
+
+The proposed implementation design is recorded in
+[Desktop pet reliability and quick access](../../superpowers/specs/2026-10-09-desktop-pet-reliability-design.md),
+with its [implementation plan](../../superpowers/plans/2026-10-09-desktop-pet-reliability.md).
+Both are for review; proposed defaults and engineering approaches do not supersede the accepted
+requirements above until approved. The first implementation milestone is a measured diagnosis.

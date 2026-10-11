@@ -54,12 +54,16 @@ export function positionTimelineEvents<T extends TimelinePositionable>(
       const end = localDateTimeAt(event.endsAt, timeZone);
       const startMinute = sameLocalDate(start.date, day) ? start.minute : 0;
       const endMinute = sameLocalDate(end.date, day) ? end.minute : 1440;
-      const elapsedMinutes = Math.max(
-        15,
-        (new Date(event.endsAt).getTime() - new Date(event.startsAt).getTime()) / 60_000,
-      );
+      // Only repeated-hour events whose wall-clock end is not later need elapsed time.
+      const minimumMinutes =
+        sameLocalDate(start.date, day) && sameLocalDate(end.date, day) && end.minute <= start.minute
+          ? Math.max(
+              15,
+              (new Date(event.endsAt).getTime() - new Date(event.startsAt).getTime()) / 60_000,
+            )
+          : 15;
       return {
-        endMinute: Math.min(1440, Math.max(endMinute, startMinute + elapsedMinutes)),
+        endMinute: Math.min(1440, Math.max(endMinute, startMinute + minimumMinutes)),
         event,
         startMinute: Math.max(0, startMinute),
       };

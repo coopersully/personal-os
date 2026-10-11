@@ -4,6 +4,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { describe, expect, it, vi } from "vitest";
+import { SettingsFeedbackContext } from "./settings-feedback.js";
 import { useFeedbackMutation } from "./use-feedback-mutation.js";
 
 vi.mock("sonner", () => ({ toast: { dismiss: vi.fn(), success: vi.fn(), error: vi.fn() } }));
@@ -45,6 +46,30 @@ describe("useFeedbackMutation", () => {
     expect(toast.dismiss).toHaveBeenCalledWith(failureId);
     expect(toast.dismiss).not.toHaveBeenCalledWith(successId);
   });
+  it("announces uncertain settings writes without retrying or losing inline guidance", async () => {
+    vi.clearAllMocks();
+    const mutationFn = vi.fn().mockRejectedValue(new Error("private diagnostic"));
+    const { result } = renderHook(
+      () => useFeedbackMutation({ mutationFn, feedback: { action: "save settings", form: true } }),
+      {
+        wrapper: ({ children }) =>
+          wrapper({
+            children: (
+              <SettingsFeedbackContext.Provider value={true}>
+                {children}
+              </SettingsFeedbackContext.Provider>
+            ),
+          }),
+      },
+    );
+    act(() => result.current.mutate(undefined));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(mutationFn).toHaveBeenCalledOnce();
+    expect(toast.error).toHaveBeenCalledWith(result.current.feedback?.message, expect.anything());
+    expect(result.current.feedback?.persistent).toBe(true);
+    expect(result.current.feedback?.message).not.toContain("private diagnostic");
+  });
+
   it("does not toast or automatically retry an uncertain form write", async () => {
     vi.clearAllMocks();
     const mutationFn = vi.fn().mockRejectedValue(new Error("secret"));

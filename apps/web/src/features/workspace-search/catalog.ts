@@ -1,4 +1,5 @@
 import type { SearchableWorkspace, WorkspaceSearchResult } from "@personal-os/domain";
+import { isTauri } from "@tauri-apps/api/core";
 import { settingMatchScore, settingsFieldId, settingsFields } from "../settings/settings-fields";
 
 export type SearchAction =
@@ -96,10 +97,11 @@ export function workspaceCatalog(workspace: SearchableWorkspace, query: string):
     ...settingsFields
       .filter(
         (field) =>
-          field.section === workspace ||
-          (workspace === "calendar" &&
-            field.section === "profile" &&
-            ["Time zone", "Day start", "Day end"].includes(field.label)),
+          (!field.desktopOnly || isTauri()) &&
+          (field.section === workspace ||
+            (workspace === "calendar" &&
+              field.section === "profile" &&
+              ["Time zone", "Day start", "Day end"].includes(field.label))),
       )
       .map((field) => ({
         id: settingsFieldId(field),

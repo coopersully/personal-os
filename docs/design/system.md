@@ -217,6 +217,16 @@ mobile safe-area spacing remain stable. A feature may adjust layout through
 slot `className` values, but must not replace the responsive presentation,
 overlay behavior, or semantic anatomy.
 
+### Mandatory settings action feedback
+
+Settings errors and discrete action feedback MUST use Sonner. Never render notification-test
+results, connection-test results, refresh results, or native-action progress/results as inline
+paragraphs, status rows, Alerts, banners, or cards. Update one loading toast to its actual outcome;
+keep diagnostic next steps in its description. Cached status must not replay action results.
+Actual permission/configuration state and field correction/retry controls may remain inline,
+but never substitute for a Sonner error. Silent autosave success remains silent.
+This requirement overrides the generic contextual-alert guidance below. See [feedback.md](feedback.md).
+
 ### Honest capability and feedback states
 
 - Do not surface a navigation item or settings surface to a person who cannot

@@ -2367,61 +2367,10 @@ p {
   font-size: 10px;
 }
 .pinterest-wallpaper-preview__canvas {
-  aspect-ratio: 16 / 10;
-  background: color-mix(in srgb, var(--ink) 8%, var(--canvas));
+  background: var(--muted);
   border-radius: var(--radius);
-  isolation: isolate;
   overflow: hidden;
   position: relative;
-}
-.pinterest-wallpaper-preview__canvas--grid {
-  align-items: center;
-  background: var(--wallpaper-background);
-  display: flex;
-  gap: var(--wallpaper-gap);
-  padding: var(--wallpaper-padding-top) var(--wallpaper-padding-end) var(--wallpaper-padding-bottom) var(--wallpaper-padding-start);
-}
-.pinterest-wallpaper-preview__tile {
-  background: var(--muted);
-  display: block;
-  height: 100%;
-  object-fit: cover;
-  width: 100%;
-}
-.pinterest-wallpaper-preview__column {
-  display: flex;
-  flex-basis: 0;
-  flex-direction: column;
-  gap: var(--wallpaper-gap);
-  justify-content: center;
-  min-width: 0;
-}
-.pinterest-wallpaper-preview__canvas--grid .pinterest-wallpaper-preview__tile {
-  background: var(--wallpaper-background);
-  border-radius: var(--wallpaper-radius);
-  height: auto;
-  object-fit: contain;
-  transform: rotate(var(--wallpaper-rotation));
-}
-.pinterest-wallpaper-preview__canvas--fill .pinterest-wallpaper-preview__column {
-  height: 100%;
-  justify-content: stretch;
-}
-.pinterest-wallpaper-preview__canvas--fill .pinterest-wallpaper-preview__tile {
-  flex: 1;
-  height: 0;
-  object-fit: cover;
-}
-.pinterest-wallpaper-preview__canvas--stack .pinterest-wallpaper-preview__tile {
-  border: 5px solid var(--wallpaper-background);
-  border-radius: var(--wallpaper-radius);
-  height: auto;
-  left: var(--wallpaper-left);
-  position: absolute;
-  top: var(--wallpaper-top);
-  transform: rotate(var(--wallpaper-rotation));
-  width: var(--wallpaper-size);
-  z-index: 1;
 }
 .pinterest-wallpaper-preview__safe-area {
   inset: 0;
@@ -2468,83 +2417,10 @@ p {
   transform: translateX(-50%);
   width: min(18%, 86px);
 }
-.pinterest-wallpaper-placeholder {
-  box-sizing: border-box;
-  display: grid;
-  gap: var(--wallpaper-gap);
-  height: 100%;
-  padding: var(--wallpaper-padding-top) var(--wallpaper-padding-end) var(--wallpaper-padding-bottom) var(--wallpaper-padding-start);
-  position: relative;
-  width: 100%;
-}
-.pinterest-wallpaper-placeholder--grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-.pinterest-wallpaper-placeholder--stack {
-  align-items: center;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  padding-inline: 14%;
-  transform: rotate(-2deg);
-}
-.pinterest-wallpaper-placeholder__tile {
-  align-items: center;
-  animation: pinterest-wallpaper-pulse 1.8s ease-in-out infinite;
-  background: color-mix(in srgb, var(--wallpaper-background) 82%, var(--ink));
-  border: 1px solid color-mix(in srgb, var(--wallpaper-background) 60%, var(--ink));
-  border-radius: var(--wallpaper-radius);
-  color: color-mix(in srgb, var(--wallpaper-background) 20%, var(--ink));
-  display: flex;
-  flex-direction: column;
-  font-size: 11px;
-  gap: 5px;
-  justify-content: center;
-  min-height: 54px;
-}
-.pinterest-wallpaper-placeholder__tile:nth-child(3n) {
-  animation-delay: 240ms;
-}
-.pinterest-wallpaper-placeholder__tile:nth-child(4n) {
-  animation-delay: 480ms;
-}
-.pinterest-wallpaper-placeholder__tile:nth-child(5n) {
-  animation-delay: 720ms;
-}
-.pinterest-wallpaper-placeholder p {
-  align-items: center;
-  background: color-mix(in srgb, var(--wallpaper-background) 76%, var(--canvas));
-  border-radius: var(--radius-md);
-  bottom: 10px;
-  color: color-mix(in srgb, var(--wallpaper-background) 15%, var(--ink));
-  display: flex;
-  font-size: 11px;
-  left: 50%;
-  margin: 0;
-  padding: 6px 10px;
-  position: absolute;
-  transform: translateX(-50%);
-  white-space: nowrap;
-}
-@keyframes pinterest-wallpaper-pulse {
-  0%,
-  100% {
-    opacity: 0.72;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .pinterest-wallpaper-placeholder__tile {
-    animation: none;
-  }
-}
+
 @media (max-width: 620px) {
   .pinterest-wallpaper__padding-grid {
     grid-template-columns: 1fr;
-  }
-  .pinterest-wallpaper-placeholder--grid,
-  .pinterest-wallpaper-placeholder--stack {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 .empty-state,
@@ -7675,3 +7551,59 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 
 .finance-account-grid .finance-account-record { background: var(--secondary); border-radius: var(--radius-lg); }
 .workspace-header-controls-slot--leading { margin-inline-end: auto; }
+
+/* Keep wallpaper feedback in view while its controls scroll. */
+.wallpaper-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 1rem;
+  min-width: 0;
+}
+.wallpaper-editor > * { min-width: 0; }
+.wallpaper-editor__preview {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.wallpaper-editor__preview .pinterest-wallpaper-preview__canvas {
+  width: 100%;
+}
+@container settings (min-width: 32rem) {
+  .wallpaper-editor { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+  .wallpaper-editor__preview { top: 1rem; grid-column: 2; grid-row: 1; }
+  .wallpaper-editor__settings { grid-column: 1; grid-row: 1; }
+
+}
+.appearance-picker .choice-card__content {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+.appearance-picker .choice-card__preview {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+.appearance-picker .appearance-preview { width: 100%; }
+
+.wallpaper-editor__settings [data-slot="field-group"] { padding-inline: 0.5rem; }
+
+html.pet-window,
+html.pet-window body,
+html.pet-window #root {
+  background: transparent;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+}
+
+.pet-resize { position: absolute; z-index: 10; touch-action: none; }
+.pet-resize--n, .pet-resize--s { left: 10px; right: 10px; height: 6px; cursor: ns-resize; }
+.pet-resize--n { top: 0; }
+.pet-resize--s { bottom: 0; }
+.pet-resize--e, .pet-resize--w { top: 10px; bottom: 10px; width: 6px; cursor: ew-resize; }
+.pet-resize--e { right: 0; }
+.pet-resize--w { left: 0; }
+.pet-resize--ne, .pet-resize--nw, .pet-resize--se, .pet-resize--sw { width: 10px; height: 10px; }
+.pet-resize--ne { top: 0; right: 0; cursor: nesw-resize; }
+.pet-resize--nw { top: 0; left: 0; cursor: nwse-resize; }
+.pet-resize--se { bottom: 0; right: 0; cursor: nwse-resize; }
+.pet-resize--sw { bottom: 0; left: 0; cursor: nesw-resize; }

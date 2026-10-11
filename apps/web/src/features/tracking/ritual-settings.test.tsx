@@ -2,10 +2,20 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render as renderUi, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
+import { toast } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { SettingsFeedbackContext } from "../../lib/settings-feedback";
 import { RitualSettings } from "./ritual-settings.js";
 
-const render = (ui: ReactElement) => renderUi(<TooltipProvider>{ui}</TooltipProvider>);
+const render = (ui: ReactElement) =>
+  renderUi(
+    <SettingsFeedbackContext.Provider value={true}>
+      <TooltipProvider>{ui}</TooltipProvider>
+    </SettingsFeedbackContext.Provider>,
+  );
+
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), dismiss: vi.fn() } }));
+beforeEach(() => vi.mocked(toast.error).mockClear());
 
 const mocks = vi.hoisted(() => ({
   list: vi.fn(),
@@ -51,7 +61,13 @@ it("allows retrying a failed preview without implying settings were saved", asyn
   );
   const show = await screen.findByRole("button", { name: "Show morning ritual" });
   fireEvent.click(show);
-  expect(await screen.findByText("Couldn’t show this ritual. Try again.")).toBeInTheDocument();
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "Couldn’t show this ritual. Try again.",
+      expect.anything(),
+    ),
+  );
+  expect(screen.queryByText("Couldn’t show this ritual. Try again.")).not.toBeInTheDocument();
   expect(mocks.save).not.toHaveBeenCalled();
   fireEvent.click(show);
   expect(await screen.findByRole("dialog", { name: "Ritual preview" })).toBeInTheDocument();
@@ -77,13 +93,24 @@ it.each([
   );
   const toggle = await screen.findByRole("button", { name: button });
   fireEvent.click(toggle);
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      `Couldn’t ${action} automatic rituals. Try again.`,
+      expect.anything(),
+    ),
+  );
   expect(
-    await screen.findByText(`Couldn’t ${action} automatic rituals. Try again.`),
-  ).toBeInTheDocument();
+    screen.queryByText(`Couldn’t ${action} automatic rituals. Try again.`),
+  ).not.toBeInTheDocument();
   fireEvent.click(toggle);
+  await waitFor(() =>
+    expect(toast.success).toHaveBeenCalledWith(
+      enabled ? "Automatic rituals enabled" : "Automatic rituals paused",
+    ),
+  );
   expect(
-    await screen.findByText(enabled ? "Automatic rituals enabled" : "Automatic rituals paused"),
-  ).toBeInTheDocument();
+    screen.queryByText(enabled ? "Automatic rituals enabled" : "Automatic rituals paused"),
+  ).not.toBeInTheDocument();
   expect(mocks.automatic).toHaveBeenLastCalledWith(enabled);
 });
 it("offers opt-in defaults and saves explicit steps", async () => {
@@ -136,7 +163,13 @@ it("autosaves reordered custom steps and retains edits when saving fails", async
   fireEvent.keyDown(screen.getByRole("button", { name: "Reorder step 3" }), { key: "ArrowUp" });
   fireEvent.keyDown(screen.getByRole("button", { name: "Reorder step 1" }), { key: "ArrowDown" });
   fireEvent.click(screen.getAllByRole("button", { name: "Remove step" })[2]!);
-  expect(await screen.findByRole("alert")).toHaveTextContent("save ritual settings");
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining("save ritual settings"),
+      expect.anything(),
+    ),
+  );
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(screen.getByDisplayValue("07:15")).toBeInTheDocument();
   expect(mocks.save).toHaveBeenLastCalledWith(
     expect.objectContaining({
@@ -151,7 +184,12 @@ it("autosaves reordered custom steps and retains edits when saving fails", async
   mocks.list.mockRejectedValueOnce(new Error("private refresh failure"));
   expect(screen.queryByText("Saving", { exact: true })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Retry saving" }));
-  expect(await screen.findByText("Couldn’t refresh ritual settings. Try again.")).toBeVisible();
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "Couldn’t refresh ritual settings. Try again.",
+      expect.anything(),
+    ),
+  );
   expect(screen.queryByText(/making the change twice/)).not.toBeInTheDocument();
   mocks.save.mockImplementation(async (input) => ({ ...input, id: input.kind, revision: 1 }));
   fireEvent.click(screen.getByRole("button", { name: "Retry saving" }));
@@ -179,7 +217,13 @@ it("recovers from an unavailable server and retains definition revisions", async
       <RitualSettings timeZone="America/New_York" />
     </QueryClientProvider>,
   );
-  expect(await screen.findByRole("status")).toHaveTextContent("Couldn’t load ritual settings");
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining("Couldn’t load ritual settings"),
+      expect.anything(),
+    ),
+  );
+  expect(screen.queryByText("Couldn’t load ritual settings")).not.toBeInTheDocument();
   mocks.list.mockResolvedValue({ rituals: [definition] });
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   expect(await screen.findByDisplayValue("05:45")).toBeInTheDocument();
@@ -287,7 +331,12 @@ it("refreshes conflicting settings and rebases local edits onto the latest revis
   );
   await screen.findByDisplayValue("06:00");
   fireEvent.change(screen.getAllByLabelText("Available from")[0]!, { target: { value: "07:15" } });
-  expect(await screen.findByRole("alert")).toHaveTextContent("Your edits are preserved");
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining("Your edits are preserved"),
+      expect.anything(),
+    ),
+  );
   await waitFor(() =>
     expect(screen.getAllByLabelText("Time zone")[0]).toHaveValue("Europe/London"),
   );
@@ -360,4 +409,23 @@ it("inherits the existing shared zone when creating the second ritual", async ()
       expect.objectContaining({ kind: "night", enabled: true, timeZone: "Asia/Tokyo" }),
     ),
   );
+});
+
+it("blocks background setup navigation until ritual edits are saved", async () => {
+  mocks.desktop = true;
+  mocks.list.mockResolvedValue({ rituals: [] });
+  mocks.save.mockReset().mockRejectedValue(new Error("Offline"));
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <RitualSettings timeZone="UTC" />
+    </QueryClientProvider>,
+  );
+  await screen.findByRole("link", { name: "Background settings" });
+  fireEvent.change(screen.getAllByLabelText("Available from")[0]!, { target: { value: "07:15" } });
+  expect(screen.getByRole("button", { name: "Background settings" })).toBeDisabled();
+  expect(screen.queryByRole("link", { name: "Background settings" })).not.toBeInTheDocument();
+  await waitFor(() => expect(toast.error).toHaveBeenCalled());
+  expect(screen.getByRole("button", { name: "Background settings" })).toBeDisabled();
 });

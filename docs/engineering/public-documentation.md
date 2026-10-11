@@ -30,7 +30,10 @@ origin, localhost, or an unverified product domain. The documentation has no Jav
 requirement. Edit reviewed content in `apps/web/content/public`; `public:generate` renders all seven
 through the shared shadcn public layout before dev/build. Vite publishes compiled stylesheet links
 for these documents; nginx serves directory indexes before the app
-fallback. The PWA navigation fallback excludes these paths. Full document links intentionally use
+fallback. Extensionless public URLs redirect to a relative trailing-slash path, preserving the
+visitor's HTTPS origin behind the gateway rather than exposing the container's HTTP port.
+`deploy/mac-mini/public-nginx.test.mjs` exercises all seven redirects and directory indexes using
+the production nginx image and configuration. The PWA navigation fallback excludes these paths. Full document links intentionally use
 anchors, not client-side routing. The sign-in footer and SMS enrollment link to the same documents.
 
 The root product page is also rendered from `ProductLanding` during `public:generate`. Vite

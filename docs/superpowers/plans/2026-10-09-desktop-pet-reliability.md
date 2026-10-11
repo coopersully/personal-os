@@ -207,3 +207,20 @@ Read the spec and plan together. Recommended execution: native sequential work i
 because rendering, input, and motion share one controller and require repeated live inspection.
 Subagent-driven execution is an alternative only if selected, with isolated writable work.
 The first execution result must be Task 1's diagnosis, not an unverified replacement build.
+
+## Execution evidence — 2026-10-11
+
+Baseline: 75 native tests passed; local runtime restarted via `pnpm env:start`.
+A temporary native probe exercised 24 scale/anchor combinations without modifying saved user
+placements. At the top edge (100%), AppKit's unrotated `visibleRect` ends at logical y=40,
+while the sprite's ears extend to y=58 and rotation occurs only in the backing layer. Thus
+view clipping and rotated artwork use different coordinate systems. Side edges have the same
+mismatch on x. Proposed correction: rotate drawing coordinates inside the view, maintaining
+untransformed AppKit layout; require a raster regression and live acceptance before claiming fixed.
+Probe log: `/tmp/nohmi-pet-geometry-probe.log`. At bottom-center the conservative Dock obstacle
+correctly prevents tucking; actual Dock geometry remains a separate permission-dependent check.
+
+Color changes currently queue full serialized settings writes and native configuration per
+picker change; appearance previews have no color equivalent. Open/capture navigation always
+calls `hide`, regardless of pin. These paths are source-confirmed; timing and user-visible
+acceptance remain to be measured. Detailed execution ledger is in the ignored plan workspace.

@@ -159,11 +159,50 @@ async fn finance(
         format!("/v1/finances/position?{}", query.finish())
     };
     let value = get(app, server, account, path).await?;
-    let fact = &value["position"]["postedSpend"];
-    if fact["quality"].as_str().is_none() {
+    let fact = finance_fact(&value["position"]["postedSpend"])?;
+    Ok(json!({"range":range,"facts":[fact],"asOf":value["position"]["asOf"]}))
+}
+// Validate the consumed public money-fact contract before publishing it to the webview.
+fn finance_fact(value: &Value) -> Result<Value, String> {
+    let reasons = value["reasons"]
+        .as_array()
+        .ok_or("Invalid finance reasons.")?;
+    let valid_reason = |reason: &Value| {
+        matches!(
+            reason.as_str(),
+            Some(
+                "dependency_unavailable"
+                    | "source_unavailable"
+                    | "stale_evidence"
+                    | "incomplete_evidence"
+                    | "pending_transactions"
+                    | "unresolved_allocation"
+                    | "unresolved_reimbursement"
+                    | "missing_commitments"
+                    | "missing_protection_policy"
+                    | "unsupported_account_type"
+            )
+        )
+    };
+    if value["currency"] != "USD"
+        || !matches!(
+            value["quality"].as_str(),
+            Some("verified" | "qualified" | "unavailable")
+        )
+        || !value.get("cents").is_some_and(|cents| {
+            cents.is_null()
+                || cents.as_i64().is_some_and(|amount| {
+                    (-9_007_199_254_740_991..=9_007_199_254_740_991).contains(&amount)
+                })
+        })
+        || reasons.len() > 20
+        || !reasons.iter().all(valid_reason)
+    {
         return Err("Invalid finance evidence.".into());
     }
-    Ok(json!({"range":range,"facts":[fact],"asOf":value["position"]["asOf"]}))
+    Ok(
+        json!({"currency":value["currency"],"quality":value["quality"],"cents":value["cents"],"reasons":reasons}),
+    )
 }
 async fn bounded_section(
     enabled: bool,
@@ -437,6 +476,33 @@ mod tests {
         assert_eq!(cards[0]["urgent"], false);
         assert_eq!(cards[1]["status"], "Scheduled");
         assert_eq!(cards[1]["canOpen"], false);
+    }
+    #[test]
+    fn validates_finance_evidence_before_publishing_to_the_overlay() {
+        let valid = json!({"currency":"USD","quality":"qualified","cents":1234,"reasons":["stale_evidence"]});
+        assert!(finance_fact(&valid).is_ok());
+        let unavailable =
+            json!({"currency":"USD","quality":"unavailable","cents":null,"reasons":[]});
+        assert!(finance_fact(&unavailable).is_ok());
+        assert!(finance_fact(&json!({"quality":"qualified"})).is_err());
+        for (key, bad) in [
+            ("currency", json!("invalid")),
+            ("quality", json!("unknown")),
+            ("cents", json!("1234")),
+            ("cents", json!(1.5)),
+            ("cents", json!(9_007_199_254_740_992_i64)),
+            ("reasons", Value::Null),
+            ("reasons", json!([1])),
+            ("reasons", json!(["private provider message"])),
+            ("reasons", json!(vec!["stale_evidence"; 21])),
+        ] {
+            let mut broken = valid.clone();
+            broken[key] = bad;
+            assert!(finance_fact(&broken).is_err(), "accepted invalid {key}");
+        }
+        let mut missing = valid.clone();
+        missing.as_object_mut().unwrap().remove("cents");
+        assert!(finance_fact(&missing).is_err());
     }
     fn range() -> Value {
         json!({"start":"2026-10-11T04:00:00Z","today":"2026-10-11T04:00:00Z","end":"2026-10-12T04:00:00Z"})

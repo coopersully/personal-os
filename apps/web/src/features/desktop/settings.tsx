@@ -187,25 +187,36 @@ function DesktopSettingsContent({
         );
     },
   );
+  type SettingsPatch = Omit<Partial<DesktopSettings>, "notifications"> & {
+    notifications?: Partial<DesktopSettings["notifications"]>;
+  };
+  const pendingSettings = useRef<SettingsPatch>({});
+  useEffect(() => {
+    pendingSettings.current = {};
+  }, [query.data?.settings.serverUrl, query.data?.accountId]);
   const autosave = useFeedbackMutation({
     scope: { id: "desktop-preferences" },
     feedback: { action: "save desktop preferences", safeToRetry: true },
-    mutationFn: async ({
-      patch,
-    }: {
-      patch: Omit<Partial<DesktopSettings>, "notifications"> & {
-        notifications?: Partial<DesktopSettings["notifications"]>;
+    mutationFn: async ({ patch }: { patch: SettingsPatch; revision: number }) => {
+      // Scoped writes run serially. Carry failed fields into the next write so an
+      // unrelated queued edit cannot silently discard the earlier desired value.
+      pendingSettings.current = {
+        ...pendingSettings.current,
+        ...patch,
+        notifications: { ...pendingSettings.current.notifications, ...patch.notifications },
       };
-      revision: number;
-    }) => {
       const current = await getDesktopSettings();
       return saveDesktopSettings({
         ...current.settings,
-        ...patch,
-        notifications: { ...current.settings.notifications, ...patch.notifications },
+        ...pendingSettings.current,
+        notifications: {
+          ...current.settings.notifications,
+          ...pendingSettings.current.notifications,
+        },
       });
     },
     onSuccess: (value, input) => {
+      pendingSettings.current = {};
       cache.setQueryData(["desktop-settings"], value);
       if (input.revision === revision.current)
         setDraft((current) => ({
@@ -220,21 +231,9 @@ function DesktopSettingsContent({
           petScale: current?.petScale ?? value.settings.petScale ?? 1,
         }));
     },
-    onError: async (_error, input) => {
-      const current = await query.refetch();
-      if (input.revision === revision.current && current.data) {
-        const settings = current.data.settings;
-        setDraft((draft) => ({
-          ...settings,
-          notifications: {
-            ...settings.notifications,
-            quietStart: draft?.notifications.quietStart ?? null,
-            quietEnd: draft?.notifications.quietEnd ?? null,
-          },
-          petColor: draft?.petColor ?? settings.petColor,
-          petScale: draft?.petScale ?? settings.petScale ?? 1,
-        }));
-      }
+    onError: async () => {
+      // Keep the desired draft and pending patch available for the next save after Sonner reports the failure.
+      await query.refetch();
     },
   });
   useEffect(() => {
@@ -242,7 +241,11 @@ function DesktopSettingsContent({
       setDraft((current) => {
         if (!current) return query.data.settings;
         // Native context-menu changes must reach the switch without replacing local drafts.
-        if (autosave.isPending || current.petEnabled === query.data.settings.petEnabled)
+        if (
+          autosave.isPending ||
+          pendingSettings.current.petEnabled !== undefined ||
+          current.petEnabled === query.data.settings.petEnabled
+        )
           return current;
         return { ...current, petEnabled: query.data.settings.petEnabled };
       });

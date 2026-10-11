@@ -1106,3 +1106,45 @@ it("reports background native errors once through Sonner without an inline banne
   expect(screen.queryByText("macOS needs attention")).not.toBeInTheDocument();
   expect(screen.queryByText(status.native.error)).not.toBeInTheDocument();
 });
+
+it.each([
+  false,
+  true,
+])("retains failed fields through queued autosaves (second fails: %s)", async (secondFails) => {
+  mount({ section: "notifications" });
+  await screen.findByRole("switch", { name: "Enable notifications" });
+  const original = mocks.invoke.getMockImplementation();
+  if (!original) throw new Error("Missing native mock");
+  const first = deferred<void>();
+  let writes = 0;
+  mocks.invoke.mockImplementation(async (command, args) => {
+    if (command === "desktop_save_settings") {
+      writes++;
+      if (writes === 1) {
+        await first.promise;
+        throw new Error("Temporary write failure");
+      }
+      if (writes === 2 && secondFails) throw new Error("Still unavailable");
+    }
+    return original(command, args);
+  });
+  await userEvent.click(screen.getByRole("switch", { name: "Enable notifications" }));
+  await userEvent.click(screen.getByRole("switch", { name: "Play notification sounds" }));
+  await act(async () => first.resolve());
+  if (secondFails) {
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(screen.getByRole("switch", { name: "Enable notifications" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Play notification sounds" })).not.toBeChecked();
+    await userEvent.click(screen.getByRole("switch", { name: "Show message previews" }));
+  }
+  await waitFor(() =>
+    expect(status.settings.notifications).toMatchObject({
+      enabled: true,
+      sound: false,
+      preview: secondFails,
+    }),
+  );
+  expect(screen.getByRole("switch", { name: "Enable notifications" })).toBeChecked();
+  expect(screen.queryByText("Temporary write failure")).not.toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});

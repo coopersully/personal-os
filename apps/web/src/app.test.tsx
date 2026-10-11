@@ -2827,6 +2827,17 @@ describe("ilo web app", () => {
     window.history.replaceState({}, "", "/");
   });
 
+  it.each(["verifyEmail", "resetPassword"])("ignores an empty %s token", async (parameter) => {
+    const landing = setup(`/?${parameter}=`);
+    expect(
+      await screen.findByRole("heading", { name: "Mail, tasks, calendar, and money." }),
+    ).toBeInTheDocument();
+    landing.unmount();
+    const login = setup(`/login?${parameter}=`);
+    expect(await screen.findByRole("heading", { name: "To take care of" })).toBeInTheDocument();
+    expect(login.location.value).toBe("/today");
+  });
+
   it("returns to sign in after resetting a password with a cached signed-in session", async () => {
     const browser = userEvent.setup();
     const view = setup("/?resetPassword=reset-token");

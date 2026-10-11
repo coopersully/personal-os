@@ -11,7 +11,7 @@ John Cooper Sullivan operates nohmi. The user-confirmed support and privacy cont
 The browser root `/` now presents the product landing page. Authentication has dedicated `/login`,
 `/signup`, and `/forgot-password` routes. Authenticated visitors can still read the landing page;
 normal login opens `/today`, while protected links return to their validated local destination.
-Email verification/reset links remain compatible. Password reset clears cached account and
+Email verification/reset links remain compatible; empty token parameters are ignored. Password reset clears cached account and
 workspace data after session revocation, including for a signed-in visitor. The PWA starts at `/today` and the native desktop
 entry remains the application. Public page headers link home and to `/login`.
 
@@ -59,7 +59,8 @@ terms as a complete legal program; no jurisdiction, arbitration scheme, or legal
   Texting and profile number enrollment. It sends a Verify code only after consent, then activates
   the connection after verification. `packages/domain/src/texting.ts` versions the consent text;
   October 7 disclosures use `2026-10-07-v2`. Existing consent rows are not rewritten or treated as
-  having accepted this new version. Verification completion copies the challenge's recorded
+  having accepted this new version. Enrollment fields and cancellation stay disabled while a
+  verification request is pending, so a late result cannot reopen a canceled number change. Verification completion copies the challenge's recorded
   version, so a deployment between the two steps cannot relabel an older acceptance. Changing
   the number starts with an unchecked consent checkbox.
 - First outbound agent/maintenance messages include STOP instructions. Existing body/segment

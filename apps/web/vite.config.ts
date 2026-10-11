@@ -144,8 +144,8 @@ export default defineConfig(({ mode }) => {
             if (
               context.server &&
               (!["/", "/index.html"].includes(request.pathname) ||
-                request.searchParams.has("verifyEmail") ||
-                request.searchParams.has("resetPassword"))
+                request.searchParams.get("verifyEmail") ||
+                request.searchParams.get("resetPassword"))
             ) {
               return html;
             }

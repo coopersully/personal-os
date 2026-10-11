@@ -512,8 +512,8 @@ export function App() {
   if (
     location.pathname === "/" &&
     !isTauri() &&
-    !tokenQuery.has("verifyEmail") &&
-    !tokenQuery.has("resetPassword")
+    !tokenQuery.get("verifyEmail") &&
+    !tokenQuery.get("resetPassword")
   ) {
     return <ProductLanding />;
   }
@@ -556,7 +556,7 @@ function SessionApp() {
 function AppContent({ me }: { me: UseQueryResult<User> }) {
   const location = useLocation();
   const tokenQuery = new URLSearchParams(location.search);
-  const hasAuthToken = tokenQuery.has("verifyEmail") || tokenQuery.has("resetPassword");
+  const hasAuthToken = Boolean(tokenQuery.get("verifyEmail") || tokenQuery.get("resetPassword"));
   if (hasAuthToken) return <AuthScreen />;
   if (me.isPending) {
     return (

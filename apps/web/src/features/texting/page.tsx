@@ -89,6 +89,7 @@ export function TextingSettings({ profile = false }: { profile?: boolean }) {
             type="button"
             variant="ghost"
             className="self-start"
+            disabled={start.isPending || verify.isPending}
             onClick={() => {
               setEditing(false);
               setChallengeId(null);
@@ -209,6 +210,7 @@ export function TextingSettings({ profile = false }: { profile?: boolean }) {
                   <NativeSelect
                     className="w-full"
                     id="texting-country"
+                    disabled={start.isPending}
                     onChange={(event) => setCountry(event.target.value as "US" | "CA")}
                     value={country}
                   >
@@ -221,6 +223,7 @@ export function TextingSettings({ profile = false }: { profile?: boolean }) {
                   <Input
                     autoComplete="tel"
                     id="texting-phone"
+                    disabled={start.isPending}
                     name="phoneNumber"
                     required
                     onChange={(event) => setPhoneNumber(event.target.value)}
@@ -235,6 +238,7 @@ export function TextingSettings({ profile = false }: { profile?: boolean }) {
                   aria-describedby="texting-consent-description"
                   checked={consentAccepted}
                   id="texting-consent"
+                  disabled={start.isPending}
                   onCheckedChange={(value) => setConsentAccepted(value === true)}
                 />
                 <FieldContent>

@@ -34,7 +34,30 @@ import { SettingsFeedbackContext, useSettingsError } from "../../lib/settings-fe
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { DayTimeline } from "../calendar/day-timeline.js";
 
-type WorkItem = { id: string; title: string; dueAt?: string };
+type WorkItem = {
+  id: string;
+  title: string;
+  dueAt?: string;
+  group?: "overdue" | "upcoming" | "undated";
+};
+type ContentRange = { label: string; timeZone: string };
+type WorkContent = { items: WorkItem[]; partial: boolean; range: ContentRange };
+type MoneyFact = {
+  currency: string;
+  cents: number | null;
+  quality: "verified" | "qualified" | "unavailable";
+  reasons: string[];
+};
+type RitualCard = {
+  id: string;
+  kind: string;
+  logicalDate: string;
+  status: string;
+  urgent: boolean;
+  canOpen: boolean;
+  stale: boolean;
+  syncStatus: string;
+};
 type EventItem = {
   id: string;
   title: string;
@@ -44,7 +67,13 @@ type EventItem = {
   conferenceUrl?: string;
 };
 export type PetData = {
-  presentation?: { pinned: boolean; visible: boolean };
+  content?: {
+    rituals?: RitualCard[];
+    tasks?: WorkContent;
+    reminders?: WorkContent;
+    finances?: { range: ContentRange; facts?: MoneyFact[]; unavailable?: string };
+  };
+  presentation?: { pinned: boolean; visible: boolean; revision?: number };
   workspaces: string[];
   snapshot: null | {
     serverUrl: string;
@@ -105,9 +134,11 @@ function PetContent() {
   const cache = useQueryClient();
   const [visible, setVisible] = useState(true);
   const [pinned, setPinned] = useState(false);
+  const presentationRevision = useRef(-1);
   const [presentationError, setPresentationError] = useState<unknown>();
   const [now, setNow] = useState(() => new Date());
   const data = useQuery({
+    enabled: visible,
     queryKey: ["pet-snapshot"],
     queryFn: () => invoke<PetData>("pet_snapshot"),
     refetchInterval: false,
@@ -116,22 +147,27 @@ function PetContent() {
   const me = useQuery({ queryKey: ["me"], queryFn: api.getMe, retry: false });
   const snapshot = data.data?.snapshot;
   useEffect(() => {
-    if (data.data?.presentation) {
+    if (
+      data.data?.presentation &&
+      (data.data.presentation.revision ?? 0) >= presentationRevision.current
+    ) {
+      presentationRevision.current = data.data.presentation.revision ?? 0;
       setPinned(data.data.presentation.pinned);
       setVisible(data.data.presentation.visible);
     }
   }, [data.data?.presentation]);
   useEffect(() => {
     let disposed = false;
-    const subscription = listen<{ pinned: boolean; visible: boolean }>(
+    const subscription = listen<{ pinned: boolean; visible: boolean; revision?: number }>(
       "pet-presentation",
       ({ payload }) => {
-        if (disposed) return;
+        if (disposed || (payload.revision ?? 0) < presentationRevision.current) return;
+        presentationRevision.current = payload.revision ?? 0;
         setPinned(payload.pinned);
         setVisible(payload.visible);
         if (payload.visible) {
           setNow(new Date());
-          void cache.invalidateQueries({ queryKey: ["pet-snapshot"] });
+          void cache.invalidateQueries({ queryKey: ["pet-snapshot"] }, { cancelRefetch: false });
         }
       },
     ).catch(setPresentationError);
@@ -148,7 +184,8 @@ function PetContent() {
   useEffect(() => {
     let disposed = false;
     const subscription = listen("pet-snapshot-changed", () => {
-      if (!disposed) void cache.invalidateQueries({ queryKey: ["pet-snapshot"] });
+      if (!disposed)
+        void cache.invalidateQueries({ queryKey: ["pet-snapshot"] }, { cancelRefetch: false });
     }).catch(setPresentationError);
     return () => {
       disposed = true;
@@ -161,7 +198,8 @@ function PetContent() {
     feedback: { action: "complete the quick-access action" },
     mutationFn: act,
     onSuccess: (_result, value) => {
-      if (value.action === "ready") void cache.invalidateQueries({ queryKey: ["pet-snapshot"] });
+      if (value.action === "ready")
+        void cache.invalidateQueries({ queryKey: ["pet-snapshot"] }, { cancelRefetch: false });
     },
   });
   const complete = useFeedbackMutation({
@@ -187,7 +225,9 @@ function PetContent() {
     if (!visible) return;
     const timer = window.setInterval(() => {
       void act({ action: "refresh" })
-        .then(() => cache.invalidateQueries({ queryKey: ["pet-snapshot"] }))
+        .then(() =>
+          cache.invalidateQueries({ queryKey: ["pet-snapshot"] }, { cancelRefetch: false }),
+        )
         .catch(setPresentationError);
     }, 60_000);
     return () => window.clearInterval(timer);
@@ -314,8 +354,8 @@ function PetContent() {
         )}
       </section>
     ) : null;
-  function work(items: WorkItem[], kind: string, title: string) {
-    const visible = items.filter(
+  function work(items: WorkItem[], kind: string, title: string, content?: WorkContent) {
+    const visible = (content?.items ?? items).filter(
       (item) =>
         !(completed.snapshotKey === snapshotKey && completed.ids.includes(`${kind}:${item.id}`)),
     );
@@ -323,12 +363,26 @@ function PetContent() {
       <Card className="shrink-0">
         <CardHeader>
           <CardTitle>{title}</CardTitle>
+          {content ? (
+            <CardDescription>
+              {content.range.label} · {content.range.timeZone}
+            </CardDescription>
+          ) : null}
         </CardHeader>
         <CardContent>
           {visible.length ? (
             <ul className="flex flex-col gap-3">
-              {visible.map((item) => (
-                <li key={item.id} className="flex items-start gap-3">
+              {visible.map((item, index) => (
+                <li key={item.id} className="flex flex-wrap items-start gap-3">
+                  {item.group && item.group !== visible[index - 1]?.group ? (
+                    <h3 className="w-full text-xs font-medium text-muted-foreground">
+                      {item.group === "undated"
+                        ? "Undated"
+                        : item.group === "overdue"
+                          ? "Overdue"
+                          : "Upcoming"}
+                    </h3>
+                  ) : null}
                   <Checkbox
                     className="mt-1"
                     aria-label={`Complete ${item.title}`}
@@ -347,12 +401,58 @@ function PetContent() {
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-muted-foreground">Nothing due today or overdue.</p>
+            <p className="text-sm text-muted-foreground">Nothing in this date window.</p>
           )}
+          {content?.partial ? (
+            <p className="mt-3 text-sm text-muted-foreground">
+              Showing a limited result.{" "}
+              <Button
+                variant="link"
+                className="h-auto p-0"
+                onClick={() => open(kind === "task" ? "/tasks" : "/reminders")}
+              >
+                View all {title.toLowerCase()}
+              </Button>
+            </p>
+          ) : null}
         </CardContent>
       </Card>
     );
   }
+  const finance = data.data?.content?.finances;
+  const rituals = (urgent: boolean) =>
+    data.data?.content?.rituals
+      ?.filter((ritual) => ritual.urgent === urgent)
+      .map((ritual) => (
+        <Card key={ritual.id} className="shrink-0 gap-2 py-3">
+          <CardHeader className="px-3">
+            <CardTitle>{ritual.kind === "morning" ? "Morning ritual" : "Night ritual"}</CardTitle>
+            <CardDescription>
+              {ritual.stale ? "Status needs refreshing" : ritual.status}
+              {ritual.syncStatus !== "saved" ? " · Waiting to sync" : ""}
+            </CardDescription>
+          </CardHeader>
+          {ritual.canOpen && snapshot ? (
+            <CardContent className="px-3">
+              <Button
+                variant="secondary"
+                disabled={action.isPending}
+                aria-label={`Open ${ritual.kind} ritual`}
+                onClick={() =>
+                  action.mutate({
+                    action: "ritual",
+                    occurrenceId: ritual.id,
+                    serverUrl: snapshot.serverUrl,
+                    accountId: snapshot.accountId,
+                  })
+                }
+              >
+                Open ritual
+              </Button>
+            </CardContent>
+          ) : null}
+        </Card>
+      ));
   return (
     <main
       role="dialog"
@@ -428,17 +528,49 @@ function PetContent() {
           </Card>
         ) : (
           <>
+            {rituals(true)}
             {calendar}
-            {data.data?.workspaces.includes("tasks") ? work(snapshot.tasks, "task", "Tasks") : null}
-            {data.data?.workspaces.includes("reminders")
-              ? work(snapshot.reminders, "reminder", "Reminders")
+            {rituals(false)}
+            {data.data?.workspaces.includes("tasks")
+              ? work(snapshot.tasks, "task", "Tasks", data.data?.content?.tasks)
               : null}
-            {data.data?.workspaces.includes("finances") && snapshot.financeSummary ? (
+            {data.data?.workspaces.includes("reminders")
+              ? work(snapshot.reminders, "reminder", "Reminders", data.data?.content?.reminders)
+              : null}
+            {data.data?.workspaces.includes("finances") && (finance || snapshot.financeSummary) ? (
               <Card className="shrink-0">
                 <CardHeader>
                   <CardTitle>Finances</CardTitle>
+                  {finance ? (
+                    <CardDescription>Posted spending · {finance.range.label}</CardDescription>
+                  ) : null}
                 </CardHeader>
-                <CardContent>{snapshot.financeSummary}</CardContent>
+                <CardContent>
+                  {finance
+                    ? (finance.unavailable ??
+                      finance.facts?.map((fact) => (
+                        <div key={fact.currency} className="space-y-1">
+                          <p>
+                            {fact.cents === null || fact.quality === "unavailable"
+                              ? "Spending unavailable"
+                              : new Intl.NumberFormat(undefined, {
+                                  style: "currency",
+                                  currency: fact.currency,
+                                }).format(fact.cents / 100)}
+                          </p>
+                          {fact.quality !== "verified" ? (
+                            <p className="text-xs text-muted-foreground">
+                              {fact.quality === "qualified"
+                                ? "Qualified total"
+                                : "Incomplete evidence"}{" "}
+                              ·{" "}
+                              {fact.reasons.map((reason) => reason.replaceAll("_", " ")).join(", ")}
+                            </p>
+                          ) : null}
+                        </div>
+                      )))
+                    : snapshot.financeSummary}
+                </CardContent>
               </Card>
             ) : null}
           </>

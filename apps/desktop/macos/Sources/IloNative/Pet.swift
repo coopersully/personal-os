@@ -32,10 +32,13 @@ final class PetView: NSView {
   private var dragged = false
   private var hovering = false
   private var displayClock: CADisplayLink?
+  private var blinkTimer: Timer?
+  var hasAnimationClock: Bool { displayClock != nil }
   private var hoverAmount: CGFloat = 0
   private var acknowledgedAt: Double?
   func acknowledgeCompletion() {
     acknowledgedAt = CACurrentMediaTime()
+    restartAnimation()
     needsDisplay = true
   }
   private var lastFrame = CACurrentMediaTime()
@@ -44,7 +47,7 @@ final class PetView: NSView {
       if oldValue != animationActive { animationActive ? restartAnimation() : stopAnimation() }
     }
   }
-  var peeking = false { didSet { if oldValue != peeking { needsDisplay = true } } }
+  var peeking = false { didSet { if oldValue != peeking { needsDisplay = true; restartAnimation() } } }
   var peekOcclusion: CGFloat = 32 {
     didSet { if oldValue != peekOcclusion { needsDisplay = true } }
   }
@@ -68,12 +71,15 @@ final class PetView: NSView {
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
   deinit {
+    blinkTimer?.invalidate()
     displayClock?.invalidate()
     NotificationCenter.default.removeObserver(self)
     NSWorkspace.shared.notificationCenter.removeObserver(self)
   }
   override func viewDidMoveToWindow() { restartAnimation() }
   @objc func stopAnimation() {
+    blinkTimer?.invalidate()
+    blinkTimer = nil
     displayClock?.invalidate()
     displayClock = nil
   }
@@ -91,7 +97,7 @@ final class PetView: NSView {
     displayClock = clock
   }
   @objc private func animateFrame(_ clock: CADisplayLink) {
-    guard window?.isVisible == true else { return }
+    guard window?.isVisible == true else { stopAnimation(); return }
     let now = CACurrentMediaTime()
     let dt = min(0.1, now - lastFrame)
     lastFrame = now
@@ -104,6 +110,14 @@ final class PetView: NSView {
       || (acknowledgedAt.map { now - $0 < 0.5 } ?? false)
     {
       needsDisplay = true
+    }
+    if peeking && abs(target - hoverAmount) < 0.001 && phase >= 0.3
+      && !(acknowledgedAt.map { now - $0 < 0.5 } ?? false) {
+      stopAnimation()
+      blinkTimer = Timer.scheduledTimer(withTimeInterval: max(0.01, 5.6 - phase), repeats: false) { [weak self] _ in
+        self?.restartAnimation()
+      }
+      blinkTimer?.tolerance = 0.02
     }
   }
 

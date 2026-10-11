@@ -111,19 +111,42 @@ pub async fn pet_snapshot(
 ) -> Result<Value, String> {
     authorize_window(&window)?;
     let state = app.state::<DesktopState>();
-    let settings = state.settings.lock().await;
-    let account = state.account_id.lock().await;
-    let mut data = crate::native::call(&app, json!({"op":"pet_snapshot"})).await?;
-    #[cfg(target_os = "macos")]
+    let (settings, account, generation, mut data, ranges) = {
+        let settings = state.settings.lock().await;
+        let account = state.account_id.lock().await;
+        let mut data = crate::native::call(&app, json!({"op":"pet_snapshot"})).await?;
+        #[cfg(target_os = "macos")]
+        {
+            data["presentation"] =
+                crate::native::call(&app, json!({"op":"pet_presentation"})).await?;
+        }
+        if account.is_none()
+            || data["snapshot"]["accountId"].as_str() != account.as_deref()
+            || data["snapshot"]["serverUrl"].as_str() != Some(settings.server_url.as_str())
+        {
+            return Ok(
+                json!({"snapshot":null,"workspaces":[],"presentation":data["presentation"]}),
+            );
+        }
+        let ranges = crate::native::call(&app, json!({"op":"pet_content_ranges"})).await?;
+        (
+            settings.clone(),
+            account.clone().unwrap(),
+            state.generation.load(std::sync::atomic::Ordering::SeqCst),
+            data,
+            ranges,
+        )
+    };
+    data["content"] =
+        crate::pet_content::load(&app, &settings.server_url, &account, &settings, &ranges).await?;
+    let current = state.settings.lock().await;
+    if state.generation.load(std::sync::atomic::Ordering::SeqCst) != generation
+        || current.server_url != settings.server_url
+        || state.account_id.lock().await.as_deref() != Some(account.as_str())
     {
-        data["presentation"] = crate::native::call(&app, json!({"op":"pet_presentation"})).await?;
+        return Err("Your account changed. Reopen quick access.".into());
     }
-    if account.is_none()
-        || data["snapshot"]["accountId"].as_str() != account.as_deref()
-        || data["snapshot"]["serverUrl"].as_str() != Some(settings.server_url.as_str())
-    {
-        return Ok(json!({"snapshot":null,"workspaces":[],"presentation":data["presentation"]}));
-    }
+
     Ok(data)
 }
 #[tauri::command]
@@ -214,6 +237,19 @@ pub async fn pet_action(
         "refresh" => {
             app.state::<DesktopState>().refresh.notify_one();
             Ok(())
+        }
+        "ritual" => {
+            let server = value["serverUrl"]
+                .as_str()
+                .ok_or("Missing account context")?;
+            let account = value["accountId"]
+                .as_str()
+                .ok_or("Missing account context")?;
+            let occurrence = value["occurrenceId"]
+                .as_str()
+                .ok_or("Missing ritual occurrence")?;
+            crate::ritual::pet_open(&app, server, account, occurrence).await?;
+            dismiss_for_navigation(&app).await
         }
         "join" => {
             let state = app.state::<DesktopState>();

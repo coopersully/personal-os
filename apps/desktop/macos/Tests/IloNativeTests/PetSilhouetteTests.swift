@@ -3,6 +3,25 @@ import XCTest
 @testable import IloNative
 
 final class PetSilhouetteTests: XCTestCase {
+  func testSettledPeekDoesNotKeepADisplayClockRunning() {
+    _ = NSApplication.shared
+    let pet = PetView(frame: CGRect(x: 0,y: 0,width: 72,height: 72))
+    let window = NSWindow(contentRect: pet.bounds, styleMask: .borderless, backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = pet
+    window.orderFront(nil)
+    defer { pet.stopAnimation(); window.close() }
+    pet.peeking = true
+    pet.animationActive = true
+    let until = Date().addingTimeInterval(0.5)
+    while Date() < until { RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
+    // A blink can begin near this sampling point; wait beyond that short active segment.
+    if pet.hasAnimationClock {
+      let afterBlink = Date().addingTimeInterval(0.4)
+      while Date() < afterBlink { RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.02)) }
+    }
+    XCTAssertFalse(pet.hasAnimationClock)
+  }
   func testEyesStayCenteredInBodyForEveryBlinkAndBob() {
     for height: CGFloat in [1, 8.2, 9.2] {
       for bob: CGFloat in [-0.65, 0, 0.65] {

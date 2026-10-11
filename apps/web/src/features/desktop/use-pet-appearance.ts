@@ -41,6 +41,12 @@ export function usePetAppearance(
         if (!disposed) saved.current(status, value.revision);
       },
       () => {
+        if (disposed) {
+          toast.error("Couldn’t save pet appearance. Reopen pet settings to retry.", {
+            id: "pet-appearance-save",
+          });
+          return;
+        }
         toast.error("Couldn’t save pet appearance.", {
           id: "pet-appearance-save",
           action: {

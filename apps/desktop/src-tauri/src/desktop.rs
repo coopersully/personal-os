@@ -51,6 +51,12 @@ pub struct DesktopSettings {
     pub pet_enabled: bool,
     pub pet_color: String,
     pub pet_scale: f64,
+    pub pet_task_window: String,
+    pub pet_reminder_window: String,
+    pub pet_finance_window: String,
+    pub pet_tasks_include_overdue: bool,
+    pub pet_reminders_include_overdue: bool,
+    pub pet_show_rituals: bool,
     pub pet_shoo_enabled: bool,
     pub pet_shoo_sensitivity: String,
     pub pet_sleep_enabled: bool,
@@ -67,6 +73,12 @@ impl Default for DesktopSettings {
             pet_enabled: false,
             pet_color: "#C7D23C".into(),
             pet_scale: 1.0,
+            pet_task_window: "today".into(),
+            pet_reminder_window: "today".into(),
+            pet_finance_window: "month".into(),
+            pet_tasks_include_overdue: true,
+            pet_reminders_include_overdue: true,
+            pet_show_rituals: false,
             pet_shoo_enabled: false,
             pet_shoo_sensitivity: "medium".into(),
             pet_sleep_enabled: true,
@@ -80,6 +92,17 @@ impl Default for DesktopSettings {
 impl DesktopSettings {
     pub fn validate(&mut self) -> Result<(), String> {
         self.server_url = canonical_server(&self.server_url)?;
+        let windows = ["today", "week", "month", "next7", "next30", "allUpcoming"];
+        if !windows.contains(&self.pet_task_window.as_str())
+            || !windows.contains(&self.pet_reminder_window.as_str())
+        {
+            return Err("Choose a supported task or reminder date window.".into());
+        }
+        if !["today", "week", "month", "last30", "next30"]
+            .contains(&self.pet_finance_window.as_str())
+        {
+            return Err("Choose a supported finance date window.".into());
+        }
         if !["low", "medium", "high"].contains(&self.pet_shoo_sensitivity.as_str()) {
             return Err("Choose Low, Medium, or High shoo sensitivity.".into());
         }

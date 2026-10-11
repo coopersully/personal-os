@@ -143,12 +143,23 @@ describe("Pinterest public board connector", () => {
 });
 
 function boardResponse(body?: BodyInit | null, init?: ResponseInit): Response {
-  if (typeof body !== "string" || !body.includes("https://i.pinimg.com/"))
-    return new Response(body, init);
-  const pins = [...body.matchAll(/https:\/\/i\.pinimg\.com\/[^"\s]+/g)].map((match) => ({
-    type: "pin",
-    images: { "736x": { url: match[0] } },
-  }));
+  if (typeof body !== "string") return new Response(body, init);
+  const pins = [...body.matchAll(/https:\/\/[^"\s<>]+/g)].flatMap((match) => {
+    try {
+      const url = new URL(match[0]);
+      if (
+        url.protocol !== "https:" ||
+        url.hostname !== "i.pinimg.com" ||
+        url.username ||
+        url.password
+      )
+        return [];
+      return [{ type: "pin", images: { "736x": { url: url.href } } }];
+    } catch {
+      return [];
+    }
+  });
+  if (!pins.length) return new Response(body, init);
   const resources = {
     BoardResource: Object.fromEntries(
       ["board", "mindset"].map((slug) => [

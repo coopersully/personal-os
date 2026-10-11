@@ -3,6 +3,7 @@ mod desktop;
 mod lifecycle;
 mod native;
 mod pet;
+mod pet_content;
 mod preferences;
 mod ritual;
 mod transport;

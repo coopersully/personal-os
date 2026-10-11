@@ -274,6 +274,20 @@ final class NativeCompanion {
       }
       pet.moveOverlay(dx: dx, dy: dy)
       return ["ok": true]
+    case "pet_ritual_dates":
+      guard let definitions = object["definitions"] as? [[String: Any]], definitions.count <= 20 else { throw NativeError.message("Invalid ritual definitions") }
+      var dates: [String: String] = [:]
+      for definition in definitions {
+        guard let id = definition["id"] as? String, let zone = definition["timeZone"] as? String else { throw NativeError.message("Invalid ritual timezone") }
+        dates[id] = try PetContentWindow.make("today", timeZone: zone, now: Date()).json["throughDate"] as? String
+      }
+      return dates
+    case "pet_content_ranges":
+      guard let snapshot, let settings else { throw NativeError.message("Quick access is waiting for your account") }
+      let now = Date()
+      return ["tasks": try PetContentWindow.make(settings.petTaskWindow ?? "today", timeZone: snapshot.timeZone, now: now).json,
+        "reminders": try PetContentWindow.make(settings.petReminderWindow ?? "today", timeZone: snapshot.timeZone, now: now).json,
+        "finances": try PetContentWindow.make(settings.petFinanceWindow ?? "month", timeZone: snapshot.timeZone, now: now).json]
     case "pet_snapshot":
       guard let snapshot, let settings else { return ["ok": true, "snapshot": NSNull(), "workspaces": []] }
       let filtered = snapshot.filtered(workspaces: settings.petWorkspaces)

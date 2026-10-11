@@ -21,6 +21,12 @@ export type DesktopSettings = {
   petEnabled: boolean;
   petColor: string;
   petScale?: number;
+  petTaskWindow?: "today" | "week" | "month" | "next7" | "next30" | "allUpcoming";
+  petReminderWindow?: "today" | "week" | "month" | "next7" | "next30" | "allUpcoming";
+  petFinanceWindow?: "today" | "week" | "month" | "last30" | "next30";
+  petTasksIncludeOverdue?: boolean;
+  petRemindersIncludeOverdue?: boolean;
+  petShowRituals?: boolean;
   petShooEnabled?: boolean;
   petShooSensitivity?: "low" | "medium" | "high";
   petSleepEnabled?: boolean;

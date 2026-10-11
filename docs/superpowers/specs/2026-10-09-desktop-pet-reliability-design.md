@@ -1,6 +1,6 @@
 # Desktop pet reliability and quick access design
 
-Status: proposed design for review; no implementation or performance success claimed.
+Status: approved for implementation; see the plan checkpoint for implementation and verification evidence.
 Canonical requirements: `docs/design/pages/desktop-background.md`, Pet reassessment.
 Checkpoint: `6699d6fb` on `cooper/desktop-background-setup`.
 
@@ -12,7 +12,7 @@ scale. Quick access preserves explicit pin intent and shows useful, scoped commi
 ritual state. Prioritize rendering/input correctness, then latency, then additional content.
 
 The user approved diagnosis before fixes and confirmed shoo works only with the card closed.
-Defaults and algorithms below are recommendations for review, not previously approved facts.
+The user approved these defaults and algorithms with implementation authorization on 2026-10-11.
 
 ## Evidence and limits
 
@@ -195,3 +195,22 @@ reversal, drag during animation, anchor-close/reset, open-card navigation with p
 false positives, Dock resizing, and missing Accessibility permission. Where tooling cannot drive
 native input, explicitly obtain manual evidence instead of substituting accessibility activation.
 Resolve full verification failures before release; checkpoint commits may document known failures.
+
+## Implementation boundary decisions — 2026-10-11
+
+Pet ranges use Foundation Calendar in the verified account timezone, with Sunday-start weeks
+matching `startOfLocalWeek`. Task/reminder data comes from paginated `/v1/tasks` and
+`/v1/reminders` with range filters; end-exclusive filtering is applied before the display cap.
+Partial results are labelled and link to the owning workspace. The notification/widget snapshot
+is unchanged. Finance uses `/v1/finances/position?from=…&through=…` and its canonical
+`postedSpend` evidence, preserving currency, quality, and reasons. That domain currently supports
+USD evidence; unsupported/missing evidence is not converted or summed. Next30 finance remains
+disabled because an authoritative scheduled-outflow projection is unavailable.
+
+Ritual cards use the existing synchronized runtime plus `/v1/rituals/history`, selecting each
+ritual's local logical day. Current overnight occurrences keep their original logical date.
+Preview state is excluded; opening validates the exact current occurrence and account again.
+
+Cooper confirmed the installed drawing-coordinate sleep fix looks good and later confirmed rapid
+color/scale previews track smoothly and settle correctly. These are live qualitative results;
+they do not constitute the full native acceptance matrix or measured latency certification.

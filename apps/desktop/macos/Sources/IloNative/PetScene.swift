@@ -86,6 +86,7 @@ final class PetController: NSObject {
   private var spriteLayout = CGRect.null, dashboardLayout = CGRect.null
   private var spriteAngle: CGFloat = .nan
   private var dashboardTransform = CATransform3DIdentity
+  private var presentationRevision = 0
   private var lastVisible = false
   private var rendering = false
 
@@ -376,7 +377,7 @@ final class PetController: NSObject {
     ready = false
   }
   var presentationState: [String: Any] {
-    ["pinned": placements.pinned, "visible": ready && motion.target == 1, "state": motion.state]
+    ["pinned": placements.pinned, "visible": ready && motion.target == 1, "state": motion.state, "revision": presentationRevision]
   }
   func acknowledgeCompletion() { sprite.acknowledgeCompletion() }
   func setPinned(_ value: Bool) {
@@ -385,7 +386,8 @@ final class PetController: NSObject {
     render()
   }
   private func publish() {
-    action?([
+    presentationRevision += 1
+    action?(["revision": presentationRevision,
       "action": "pet_presentation", "pinned": placements.pinned,
       "visible": ready && motion.target == 1,
     ])

@@ -538,26 +538,24 @@ function DesktopSettingsContent({
               </Field>
               <FieldSet>
                 <FieldLegend>Show in quick access</FieldLegend>
-                {["tasks", "reminders", "calendar", "mail", "finances", "goals", "motives"].map(
-                  (workspace) => (
-                    <Field orientation="horizontal" key={workspace}>
-                      <Checkbox
-                        id={`pet-${workspace}`}
-                        checked={draft.petWorkspaces.includes(workspace)}
-                        onCheckedChange={(checked) =>
-                          update({
-                            petWorkspaces: checked
-                              ? [...draft.petWorkspaces, workspace]
-                              : draft.petWorkspaces.filter((value) => value !== workspace),
-                          })
-                        }
-                      />
-                      <FieldLabel htmlFor={`pet-${workspace}`}>
-                        {`${workspace[0]?.toUpperCase()}${workspace.slice(1)}`}
-                      </FieldLabel>
-                    </Field>
-                  ),
-                )}
+                {["tasks", "reminders", "calendar", "finances"].map((workspace) => (
+                  <Field orientation="horizontal" key={workspace}>
+                    <Checkbox
+                      id={`pet-${workspace}`}
+                      checked={draft.petWorkspaces.includes(workspace)}
+                      onCheckedChange={(checked) =>
+                        update({
+                          petWorkspaces: checked
+                            ? [...draft.petWorkspaces, workspace]
+                            : draft.petWorkspaces.filter((value) => value !== workspace),
+                        })
+                      }
+                    />
+                    <FieldLabel htmlFor={`pet-${workspace}`}>
+                      {`${workspace[0]?.toUpperCase()}${workspace.slice(1)}`}
+                    </FieldLabel>
+                  </Field>
+                ))}
               </FieldSet>
               <Button
                 type="button"
@@ -606,6 +604,86 @@ function DesktopSettingsContent({
                 <FieldDescription>
                   At an anchor with the card closed, tuck into the screen edge after this much
                   inactivity. Hover or click to wake.
+                </FieldDescription>
+              </Field>
+            </FieldGroup>
+          </SettingsSection>
+        ) : null}
+        {section === "pet" ? (
+          <SettingsSection title="Quick access content">
+            <FieldGroup>
+              <Toggle
+                label="Show rituals"
+                value={draft.petShowRituals ?? false}
+                onChange={(petShowRituals) => update({ petShowRituals })}
+              />
+              {(["tasks", "reminders"] as const).map((kind) => {
+                const key = kind === "tasks" ? "petTaskWindow" : "petReminderWindow";
+                const overdueKey =
+                  kind === "tasks" ? "petTasksIncludeOverdue" : "petRemindersIncludeOverdue";
+                return (
+                  <FieldGroup key={kind}>
+                    <Field>
+                      <FieldLabel htmlFor={`pet-${kind}-window`}>
+                        {kind === "tasks" ? "Tasks" : "Reminders"}
+                      </FieldLabel>
+                      <NativeSelect
+                        id={`pet-${kind}-window`}
+                        value={draft[key] ?? "today"}
+                        onChange={(event) => update({ [key]: event.target.value })}
+                      >
+                        {[
+                          ["today", "Today"],
+                          ["week", "This week"],
+                          ["month", "This month"],
+                          ["next7", "Next 7 days"],
+                          ["next30", "Next 30 days"],
+                          ["allUpcoming", "All upcoming"],
+                        ].map(([value, label]) => (
+                          <NativeSelectOption key={value} value={value}>
+                            {label}
+                          </NativeSelectOption>
+                        ))}
+                      </NativeSelect>
+                    </Field>
+                    <Toggle
+                      label={`Include overdue ${kind}`}
+                      value={draft[overdueKey] ?? true}
+                      onChange={(value) => update({ [overdueKey]: value })}
+                    />
+                  </FieldGroup>
+                );
+              })}
+              <Field>
+                <FieldLabel htmlFor="pet-finance-window">Finances</FieldLabel>
+                <NativeSelect
+                  id="pet-finance-window"
+                  value={draft.petFinanceWindow ?? "month"}
+                  onChange={(event) =>
+                    update({
+                      petFinanceWindow: event.target.value as NonNullable<
+                        DesktopSettings["petFinanceWindow"]
+                      >,
+                    })
+                  }
+                >
+                  {[
+                    ["today", "Today"],
+                    ["week", "This week"],
+                    ["month", "This month"],
+                    ["last30", "Last 30 days"],
+                  ].map(([value, label]) => (
+                    <NativeSelectOption key={value} value={value}>
+                      {label}
+                    </NativeSelectOption>
+                  ))}
+                  <NativeSelectOption value="next30" disabled>
+                    Next 30 days · unavailable
+                  </NativeSelectOption>
+                </NativeSelect>
+                <FieldDescription>
+                  Posted spending through today. Scheduled outflows are not yet available in quick
+                  access.
                 </FieldDescription>
               </Field>
             </FieldGroup>

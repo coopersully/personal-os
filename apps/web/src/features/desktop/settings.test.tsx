@@ -930,3 +930,26 @@ it("autosaves closed-card shoo preferences with conservative defaults", async ()
   await waitFor(() => expect(status.settings.petShooSensitivity).toBe("low"));
   expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
 });
+
+it("autosaves independent commitment and finance windows", async () => {
+  mount({ section: "pet" });
+  const tasks = await screen.findByRole("combobox", { name: "Tasks" });
+  await userEvent.selectOptions(tasks, "next30");
+  await waitFor(() => expect(status.settings.petTaskWindow).toBe("next30"));
+  await userEvent.selectOptions(screen.getByRole("combobox", { name: "Reminders" }), "week");
+  await waitFor(() => expect(status.settings.petReminderWindow).toBe("week"));
+  await userEvent.click(screen.getByRole("switch", { name: "Include overdue tasks" }));
+  await waitFor(() => expect(status.settings.petTasksIncludeOverdue).toBe(false));
+  await userEvent.selectOptions(screen.getByRole("combobox", { name: "Finances" }), "last30");
+  await waitFor(() => expect(status.settings.petFinanceWindow).toBe("last30"));
+  expect(status.settings.petTaskWindow).toBe("next30");
+  expect(screen.getByRole("option", { name: "Next 30 days · unavailable" })).toBeDisabled();
+});
+
+it("keeps ritual cards opt-in and autosaves the preference", async () => {
+  mount({ section: "pet" });
+  const toggle = await screen.findByRole("switch", { name: "Show rituals" });
+  expect(toggle).not.toBeChecked();
+  await userEvent.click(toggle);
+  await waitFor(() => expect(status.settings.petShowRituals).toBe(true));
+});

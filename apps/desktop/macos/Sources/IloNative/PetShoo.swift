@@ -2,6 +2,7 @@ import Foundation
 
 /// Observation only: this gesture never enlarges the native input region.
 struct PetShoo {
+  init(sensitivity: String) { self.sensitivity = sensitivity }
   var sensitivity: String
   private var start: CGPoint?
   private var began = 0.0, lastTime = 0.0

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 import { beforeEach, expect, it, vi } from "vitest";
@@ -251,4 +252,119 @@ it("refreshes once a minute while open and stops after unmount", async () => {
     view.unmount();
     vi.useRealTimers();
   }
+});
+
+it("renders scoped content, undated grouping and honest finance qualifications", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "pet_snapshot"
+      ? {
+          ...fixture,
+          workspaces: ["tasks", "finances"],
+          content: {
+            tasks: {
+              items: [{ id: "later", title: "Plan a trip", group: "undated" }],
+              partial: true,
+              range: { label: "All upcoming", timeZone: "America/New_York" },
+            },
+            finances: {
+              range: { label: "Last 30 days" },
+              facts: [
+                {
+                  currency: "USD",
+                  cents: 12345,
+                  quality: "qualified",
+                  reasons: ["stale_evidence"],
+                },
+              ],
+            },
+          },
+        }
+      : undefined,
+  );
+  mount();
+  expect(await screen.findByText("Plan a trip")).toBeInTheDocument();
+  expect(screen.queryByText("Review the draft")).not.toBeInTheDocument();
+  expect(screen.getByText("Undated")).toBeInTheDocument();
+  expect(screen.getByText(/Showing a limited result/)).toBeInTheDocument();
+  expect(screen.getByText(/America\/New_York/)).toBeInTheDocument();
+  expect(screen.getByText(/Last 30 days/)).toBeInTheDocument();
+  expect(screen.getByText(/Qualified total/)).toBeInTheDocument();
+});
+
+it("shows due rituals first and opens the canonical occurrence without unpinning", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "pet_snapshot"
+      ? {
+          ...fixture,
+          presentation: { pinned: true, visible: true },
+          content: {
+            rituals: [
+              {
+                id: "morning-1",
+                kind: "morning",
+                status: "Ready",
+                logicalDate: "2026-10-11",
+                urgent: true,
+                canOpen: true,
+                stale: false,
+                syncStatus: "saved",
+              },
+              {
+                id: "night-1",
+                kind: "night",
+                status: "Completed",
+                logicalDate: "2026-10-10",
+                urgent: false,
+                canOpen: false,
+                stale: false,
+                syncStatus: "saved",
+              },
+            ],
+          },
+        }
+      : undefined,
+  );
+  mount();
+  const open = await screen.findByRole("button", { name: "Open morning ritual" });
+  expect(screen.getByText("Completed")).toBeInTheDocument();
+  fireEvent.click(open);
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("pet_action", {
+      value: {
+        action: "ritual",
+        occurrenceId: "morning-1",
+        serverUrl: "https://example.test",
+        accountId: "account-a",
+      },
+    }),
+  );
+  expect(invoke).not.toHaveBeenCalledWith("pet_action", {
+    value: { action: "pin", pinned: false },
+  });
+});
+
+it("ignores older presentation snapshots after a newer native pin event", async () => {
+  let revision = 1;
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "pet_snapshot"
+      ? { ...fixture, presentation: { pinned: false, visible: true, revision: revision++ } }
+      : undefined,
+  );
+  mount();
+  await screen.findByRole("button", { name: "Pin quick access" });
+  const handler = vi.mocked(listen).mock.calls.find(([name]) => name === "pet-presentation")?.[1];
+  if (!handler) throw new Error("Presentation listener missing");
+  await act(async () =>
+    handler({
+      event: "pet-presentation",
+      id: 0,
+      payload: { pinned: true, visible: true, revision: 100 },
+    }),
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Unpin quick access" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    ),
+  );
 });

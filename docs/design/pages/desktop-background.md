@@ -359,3 +359,16 @@ requirements above until approved. The first implementation milestone is a measu
 
 The pet’s eyes remain horizontally centered on the body in every pose, including sleep, hover,
 rotation, and dragging. Eye spacing does not drift with screen position.
+
+Pet quick-access filters are independent for tasks and reminders (Today, This week, This month,
+Next 7 days, Next 30 days, All upcoming; overdue included by default). All upcoming may include
+an explicitly labelled Undated group. Windows use account-local calendar boundaries; capped
+results disclose the limit and link to the workspace. Finance ranges display the domain's
+canonical posted-spending evidence, including unavailable/qualified states. Next 30 days is
+unavailable until the domain supplies scheduled outflows. Only workspaces with pet content
+appear as visibility choices.
+
+Show rituals is opt-in. Due incomplete occurrences precede the calendar; completed, skipped,
+missed, and scheduled occurrences follow it. Use the ritual's logical date and canonical state,
+including overnight ownership. Opening a ritual validates account and occurrence and preserves
+pin intent. Presentation revisions prevent old refresh responses from reversing newer pin state.

@@ -10031,6 +10031,53 @@ describe("ilo web app", () => {
     expect(mocks.invoke).not.toHaveBeenCalledWith("apply_pinterest_wallpaper", expect.anything());
   });
 
+  it("retains failed wallpaper fields when a later queued edit saves", async () => {
+    mocks.isTauri.mockReturnValue(true);
+    let saved = await mocks.getPinterestWallpaperSettings();
+    mocks.getPinterestWallpaperSettings.mockImplementation(async () => saved);
+    let rejectFirst: ((error: Error) => void) | undefined;
+    mocks.updatePinterestWallpaperSettings
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectFirst = reject;
+          }),
+      )
+      .mockImplementation(async (input) => {
+        saved = { ...saved, ...input };
+        return saved;
+      });
+    const browser = userEvent.setup();
+    setup("/settings?section=wallpaper");
+    await browser.click(await screen.findByRole("radio", { name: "Overlapping stack" }));
+    await waitFor(() => expect(rejectFirst).toBeDefined());
+    await browser.click(screen.getByRole("radio", { name: "Fill the rectangular frame" }));
+    await act(async () => rejectFirst?.(new Error("Offline")));
+    await waitFor(() => expect(saved).toMatchObject({ layout: "stack", mosaicFit: "fill" }));
+    expect(screen.getByRole("radio", { name: "Overlapping stack" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Fill the rectangular frame" })).toBeChecked();
+    expect(mocks.updatePinterestWallpaperSettings).toHaveBeenLastCalledWith({
+      layout: "stack",
+      mosaicFit: "fill",
+    });
+  });
+
+  it("refreshes the wallpaper preview for the new local planning day", async () => {
+    mocks.isTauri.mockReturnValue(true);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const beforeMidnight = new Date("2026-10-11T23:59:59.900");
+    vi.setSystemTime(beforeMidnight);
+    const view = setup("/settings?section=wallpaper");
+    try {
+      await waitFor(() => expect(mocks.listPinterestPins).toHaveBeenCalledWith(12, "2026-10-11"));
+      vi.setSystemTime(new Date("2026-10-12T00:00:00"));
+      await waitFor(() => expect(mocks.listPinterestPins).toHaveBeenCalledWith(12, "2026-10-12"));
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
   it("previews, tunes, and applies a Pinterest desktop wallpaper", async () => {
     mocks.isTauri.mockReturnValue(true);
     let settings = {
@@ -10133,10 +10180,7 @@ describe("ilo web app", () => {
     await browser.keyboard("{Escape}");
     await browser.click(screen.getByRole("checkbox", { name: "Refresh every day" }));
     await waitFor(() =>
-      expect(mocks.updatePinterestWallpaperSettings).toHaveBeenCalledWith(
-        { enabled: true },
-        expect.anything(),
-      ),
+      expect(mocks.updatePinterestWallpaperSettings).toHaveBeenCalledWith({ enabled: true }),
     );
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeEnabled(),

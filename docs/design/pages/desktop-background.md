@@ -88,8 +88,11 @@ Existing HTTPS Pinterest origin restrictions remain; no additional credentials o
 The macOS preview command shares the download, decode, layout, backdrop, and composition pipeline
 with application. It returns a reduced PNG for the primary display without changing any desktop,
 removes temporary output, and caches only successfully decoded sources. Account/server changes
-cancel both paths; preference revisions also guard application. Preview snapshots may finish while
-preferences save, but the UI discards superseded results and disables Refresh while saving/rendering.
+cancel both paths; preference revisions also guard application. A separate preview generation
+cancels superseded queued work and active downloads without coupling preview drafts to persistence.
+The UI disables Refresh while saving/rendering or after a failed save. Failed setting patches remain
+in the draft and merge into the next save; overlapping acknowledgements preserve newer edits.
+Preview pin selection advances at local midnight, using the planning date in its query identity.
 All displays are prepared before application; existing partial-application errors remain explicit.
 
 Provider markup can change and a public board can become unavailable after validation. These

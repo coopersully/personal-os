@@ -46,11 +46,6 @@ export function createPinterestService({
   }
 
   async function updateSettings(userId: string, input: UpdatePinterestWallpaperSettingsInput) {
-    const [connection] = await db
-      .select()
-      .from(pinterestConnections)
-      .where(eq(pinterestConnections.userId, userId))
-      .limit(1);
     // Resolve a submitted board before changing persisted preferences or scheduled work.
     if (input.boardUrl) {
       try {
@@ -64,6 +59,11 @@ export function createPinterestService({
         throw error;
       }
     }
+    const [connection] = await db
+      .select()
+      .from(pinterestConnections)
+      .where(eq(pinterestConnections.userId, userId))
+      .limit(1);
     const values = {
       ...(input.backgroundColor === undefined ? {} : { backgroundColor: input.backgroundColor }),
       ...(input.backgroundMode === undefined ? {} : { backgroundMode: input.backgroundMode }),

@@ -6946,11 +6946,32 @@ function PinterestWallpaperSettingsPanel() {
   return <PinterestWallpaperDesktopSettingsPanel />;
 }
 
+function wallpaperPlanningDate() {
+  return localDateToIso(localDateAt(new Date(), Intl.DateTimeFormat().resolvedOptions().timeZone));
+}
+
 function PinterestWallpaperDesktopSettingsPanel() {
   const { confirm, confirmation } = useConfirmAction();
   const queryClient = useQueryClient();
+  type WallpaperPatch = Partial<Omit<PinterestWallpaperSettings, "lastAppliedAt">>;
+  const pendingSettings = useRef<WallpaperPatch>({});
+  const [planningDate, setPlanningDate] = useState(wallpaperPlanningDate);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const updateDay = () => {
+      setPlanningDate(wallpaperPlanningDate());
+      const midnight = new Date();
+      midnight.setHours(24, 0, 0, 0);
+      timer = setTimeout(updateDay, Math.max(1, midnight.getTime() - Date.now()));
+    };
+    updateDay();
+    return () => clearTimeout(timer);
+  }, []);
   const settings = useQuery({
-    queryFn: api.getPinterestWallpaperSettings ?? unavailablePinterestWallpaperSettings,
+    queryFn: async () => ({
+      ...(await (api.getPinterestWallpaperSettings ?? unavailablePinterestWallpaperSettings)()),
+      ...pendingSettings.current,
+    }),
     queryKey: ["pinterest-wallpaper"],
     retry: false,
   });
@@ -6993,33 +7014,34 @@ function PinterestWallpaperDesktopSettingsPanel() {
     mutationFn: api.updatePinterestWallpaperSettings,
     onSuccess: async (next) => {
       boardEdited.current = false;
-      queryClient.setQueryData(["pinterest-wallpaper"], next);
+      queryClient.setQueryData(["pinterest-wallpaper"], { ...next, ...pendingSettings.current });
       await invalidate();
     },
   });
   const update = useFeedbackMutation({
     scope: { id: "pinterest-wallpaper-settings" },
     feedback: { action: "save wallpaper settings", safeToRetry: true },
-    mutationFn: api.updatePinterestWallpaperSettings,
-    onMutate: (input) => {
-      const previous = queryClient.getQueryData<PinterestWallpaperSettings>([
-        "pinterest-wallpaper",
-      ]);
-      if (previous) {
-        const changed = Object.fromEntries(
-          Object.entries(input).filter(([, inputValue]) => inputValue !== undefined),
-        ) as Partial<PinterestWallpaperSettings>;
-        queryClient.setQueryData<PinterestWallpaperSettings>(["pinterest-wallpaper"], {
-          ...previous,
-          ...changed,
-        });
-      }
-      return { previous };
+    mutationFn: async (_input: WallpaperPatch) => {
+      const patch = { ...pendingSettings.current };
+      await api.updatePinterestWallpaperSettings(patch);
+      return patch;
     },
-    onError: (_error, _input, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(["pinterest-wallpaper"], context.previous);
-      }
+    onMutate: (input) => {
+      const changed = Object.fromEntries(
+        Object.entries(input).filter(([, inputValue]) => inputValue !== undefined),
+      ) as WallpaperPatch;
+      pendingSettings.current = { ...pendingSettings.current, ...changed };
+      queryClient.setQueryData<PinterestWallpaperSettings>(["pinterest-wallpaper"], (previous) =>
+        previous ? { ...previous, ...changed } : previous,
+      );
+    },
+    onSuccess: (patch) => {
+      // Acknowledging an older write must not discard edits queued while it ran.
+      pendingSettings.current = Object.fromEntries(
+        Object.entries(pendingSettings.current).filter(
+          ([key, value]) => patch[key as keyof WallpaperPatch] !== value,
+        ),
+      ) as WallpaperPatch;
     },
     onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: ["pinterest-wallpaper"] });
@@ -7059,16 +7081,8 @@ function PinterestWallpaperDesktopSettingsPanel() {
   const value = settings.data;
   const preview = useQuery({
     enabled: Boolean(value?.boardUrl),
-    queryFn: () =>
-      api.listPinterestPins(
-        12,
-        isTauri()
-          ? localDateToIso(
-              localDateAt(new Date(), Intl.DateTimeFormat().resolvedOptions().timeZone),
-            )
-          : undefined,
-      ),
-    queryKey: ["pinterest-wallpaper-preview", value?.boardUrl],
+    queryFn: () => api.listPinterestPins(12, isTauri() ? planningDate : undefined),
+    queryKey: ["pinterest-wallpaper-preview", value?.boardUrl, planningDate],
     retry: false,
   });
   const desktopEnvironment = useQuery({
@@ -7405,6 +7419,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
                       !previewReady ||
                       apply.isPending ||
                       update.isPending ||
+                      update.isError ||
                       saveBoard.isPending
                     }
                     onClick={() =>

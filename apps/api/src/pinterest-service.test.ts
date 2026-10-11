@@ -169,6 +169,43 @@ describe("Pinterest wallpaper service", () => {
     );
   });
 
+  it("reads settings after board validation when another writer creates the row", async () => {
+    let connection: Record<string, unknown> | undefined;
+    const update = vi.fn(() => ({
+      set: (values: Record<string, unknown>) => ({
+        where: () => ({ returning: async () => [{ ...connection, ...values }] }),
+      }),
+    }));
+    const insert = vi.fn(() => {
+      throw new Error("duplicate user settings");
+    });
+    const db = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => (connection ? [connection] : []),
+          }),
+        }),
+      }),
+      update,
+      insert,
+    } as unknown as Database;
+    const service = createPinterestService({
+      db,
+      fetch: vi.fn().mockImplementation(async () => {
+        connection = { id: "created-during-fetch", layout: "stack", tileSize: 72 };
+        return boardResponse('"https://i.pinimg.com/736x/valid.jpg"');
+      }),
+    });
+    await expect(
+      service.updateSettings("user-1", {
+        boardUrl: "https://www.pinterest.com/example/mindset/",
+      }),
+    ).resolves.toMatchObject({ layout: "stack", tileSize: 72 });
+    expect(insert).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledOnce();
+  });
+
   it("rejects unresolved submitted boards before any database write", async () => {
     const db = databaseWithBoard("https://www.pinterest.com/example/board/");
     const update = vi.fn();

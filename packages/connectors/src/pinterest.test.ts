@@ -172,3 +172,61 @@ function boardResponse(body?: BodyInit | null, init?: ResponseInit): Response {
   const page = `<script id="__PWS_INITIAL_PROPS__" type="application/json">${JSON.stringify({ initialReduxState: { resources } })}</script>`;
   return new Response(body.length === 4 * 1024 * 1024 ? page.padEnd(body.length, " ") : page, init);
 }
+
+it.each([
+  "{",
+  "{}",
+  '{"initialReduxState":{}}',
+])("fails closed for malformed or missing provider state: %s", async (state) => {
+  await expect(
+    fetchPinterestBoardPins(
+      board,
+      vi
+        .fn()
+        .mockResolvedValue(new Response(`<script id="__PWS_INITIAL_PROPS__">${state}</script>`)),
+    ),
+  ).rejects.toMatchObject({ code: "not_found" });
+});
+
+it("ignores malformed board/feed entries and uses safe alternate image sizes", async () => {
+  const resources = {
+    BoardResource: {
+      empty: {},
+      null: { data: null },
+      scalar: { data: 1 },
+      missingId: { data: { url: "/example/board/" } },
+      missingUrl: { data: { id: "b" } },
+      badId: { data: { id: 1, url: "/example/board/" } },
+      badUrl: { data: { id: "b", url: 1 } },
+      invalidUrl: { data: { id: "b", url: "https://[" } },
+      external: { data: { id: "b", url: "https://evil.test/example/board/" } },
+      valid: { data: { id: "b", url: "/example/board/" } },
+    },
+    BoardFeedResource: {
+      badData: { data: {} },
+      malformed: { data: [] },
+      "{}": { data: [] },
+      '[null,["other","b"],["board_id","another"]]': { data: [] },
+      '[["board_id","b"]]': {
+        data: [
+          null,
+          { type: "ad" },
+          { type: "pin" },
+          { type: "pin", images: { orig: { url: "https://i.pinimg.com/originals/original.png" } } },
+          { type: "pin", images: { "474x": { url: "https://i.pinimg.com/474x/medium.jpg" } } },
+          { type: "pin", images: { "236x": { url: "https://i.pinimg.com/236x/small.webp" } } },
+          { type: "pin", images: { orig: { url: "https://evil.test/image.png" } } },
+        ],
+      },
+    },
+  };
+  const response = new Response(
+    `<script id="__PWS_INITIAL_PROPS__">${JSON.stringify({ initialReduxState: { resources } })}</script>`,
+  );
+  const pins = await fetchPinterestBoardPins(board, vi.fn().mockResolvedValue(response));
+  expect(pins.map((pin) => pin.imageUrl)).toEqual([
+    "https://i.pinimg.com/originals/original.png",
+    "https://i.pinimg.com/736x/medium.jpg",
+    "https://i.pinimg.com/736x/small.webp",
+  ]);
+});

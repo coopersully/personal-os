@@ -1009,3 +1009,70 @@ it("retains half-entered quiet hours across an unrelated autosave", async () => 
     expect(status.settings.notifications).toMatchObject({ quietStart: "22:00", quietEnd: "07:00" }),
   );
 });
+
+it.each([
+  ["notFound", "macOS could not find the login item"],
+  ["unknown", "Could not confirm launch at login"],
+] as const)("explains unavailable startup registration: %s", async (loginStatus, text) => {
+  status.native.loginStatus = loginStatus;
+  mount();
+  await userEvent.click(await screen.findByRole("button", { name: "Review checks" }));
+  expect(screen.getByText(new RegExp(text))).toBeInTheDocument();
+  if (!loginStatus)
+    expect(screen.getByRole("button", { name: "Enable launch at login" })).toBeDisabled();
+});
+
+it.each([
+  "denied",
+  "notDetermined",
+])("explains incomplete notification readiness: %s", async (permission) => {
+  settings.notifications.enabled = true;
+  status.native.notificationPermission = permission;
+  mount();
+  await userEvent.click(await screen.findByRole("button", { name: "Review checks" }));
+  expect(
+    screen.getByText(
+      permission === "denied"
+        ? /Allow nohmi notifications in macOS/
+        : /Open Notifications to check macOS permission/,
+    ),
+  ).toBeInTheDocument();
+});
+
+it.each([
+  "recovery",
+  "storageWarning",
+  "deliveryHealth",
+])("withholds routine readiness when %s needs attention", async (key) => {
+  mocks.rituals.mockResolvedValue({
+    rituals: [{ kind: "morning", enabled: true, time: "08:00", timeZone: "UTC" }],
+  });
+  mocks.invoke.mockImplementation(async (command: string) => {
+    if (command === "desktop_settings") return status;
+    if (command === "ritual_local") return { enabled: true, [key]: true };
+    return { ok: true };
+  });
+  mount();
+  await userEvent.click(await screen.findByRole("button", { name: "Review checks" }));
+  expect(await screen.findByText(/Routine delivery needs attention/)).toBeInTheDocument();
+  expect(screen.queryByText(/Scheduled for 08:00/)).not.toBeInTheDocument();
+});
+
+it("distinguishes disabled macOS alerts and sounds from granted permission", async () => {
+  status.native.notificationPermission = "authorized";
+  status.native.notificationAlertsAvailable = false;
+  status.native.notificationSoundsAvailable = false;
+  mount({ section: "notifications" });
+  expect(await screen.findByText(/macOS alerts are off. Enable banners/)).toBeInTheDocument();
+  expect(screen.getByText(/Sounds are disabled in macOS/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Notifications allowed" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "macOS notification settings" })).toBeEnabled();
+});
+
+it("offers permission setup when native permission is unavailable", async () => {
+  status.native.notificationPermission = undefined;
+  mount({ section: "notifications" });
+  expect(await screen.findByText("macOS permission: unavailable")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Test notification" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Allow notifications" })).toBeEnabled();
+});

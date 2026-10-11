@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { toast } from "sonner";
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { type PetData, PetOverlay } from "./pet-overlay.js";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -24,6 +24,7 @@ const fixture: PetData = {
     events: [],
   },
 };
+afterEach(() => vi.useRealTimers());
 beforeEach(() => {
   vi.clearAllMocks();
   Object.defineProperty(window, "matchMedia", {
@@ -465,4 +466,253 @@ it.each([
     ).not.toBeInTheDocument();
   else expect(screen.getByRole("checkbox", { name: "Complete Take a break" })).toBeEnabled();
   if (failed === "finances") expect(screen.queryByText("Old summary")).not.toBeInTheDocument();
+});
+
+it("routes scoped task and reminder links and preserves grouping", async () => {
+  const range = { label: "This week", timeZone: "UTC" };
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "pet_snapshot"
+      ? {
+          ...fixture,
+          workspaces: ["tasks", "reminders"],
+          content: {
+            tasks: {
+              range,
+              partial: true,
+              items: [
+                { id: "a", title: "Late task", group: "overdue" },
+                { id: "b", title: "Soon task", group: "upcoming" },
+                { id: "c", title: "Another task", group: "upcoming" },
+              ],
+            },
+            reminders: {
+              range,
+              partial: true,
+              items: [{ id: "r", title: "Call back", group: "upcoming" }],
+            },
+          },
+        }
+      : undefined,
+  );
+  mount();
+  await screen.findByText("Late task");
+  expect(screen.getAllByText("Overdue")).toHaveLength(1);
+  expect(screen.getAllByText("Upcoming")).toHaveLength(2);
+  for (const [name, path] of [
+    ["Late task", "/tasks"],
+    ["Call back", "/reminders"],
+    ["View all tasks", "/tasks"],
+    ["View all reminders", "/reminders"],
+  ] as const) {
+    fireEvent.click(screen.getByRole("button", { name }));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith("pet_action", { value: { action: "open", path } }),
+    );
+  }
+});
+
+it("shows verified and unavailable finance evidence without inventing totals", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "pet_snapshot"
+      ? {
+          ...fixture,
+          workspaces: ["finances"],
+          content: {
+            finances: {
+              range: { label: "Today", timeZone: "UTC" },
+              facts: [
+                { currency: "USD", cents: 12345, quality: "verified", reasons: [] },
+                {
+                  currency: "EUR",
+                  cents: null,
+                  quality: "unavailable",
+                  reasons: ["missing_evidence"],
+                },
+                {
+                  currency: "GBP",
+                  cents: 100,
+                  quality: "unavailable",
+                  reasons: ["stale_evidence"],
+                },
+              ],
+            },
+          },
+        }
+      : undefined,
+  );
+  mount();
+  expect(await screen.findByText("$123.45")).toBeInTheDocument();
+  expect(screen.getAllByText("Spending unavailable")).toHaveLength(2);
+  expect(screen.queryByText("Qualified total")).not.toBeInTheDocument();
+  expect(screen.getByText(/missing evidence/)).toBeInTheDocument();
+});
+
+it("shows sign-in state for an empty native session", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "pet_snapshot" ? { workspaces: [], snapshot: null } : undefined,
+  );
+  mount();
+  expect(await screen.findByText("Sign in to see your day")).toBeInTheDocument();
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+});
+
+it("pauses refresh while hidden and ignores stale presentation events", async () => {
+  vi.useFakeTimers();
+  const view = mount();
+  try {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const handler = vi.mocked(listen).mock.calls.find(([name]) => name === "pet-presentation")?.[1];
+    if (!handler) throw new Error("Missing presentation listener");
+    await act(async () =>
+      handler({
+        event: "pet-presentation",
+        id: 0,
+        payload: { visible: false, pinned: true, revision: 10 },
+      }),
+    );
+    await act(async () =>
+      handler({
+        event: "pet-presentation",
+        id: 0,
+        payload: { visible: true, pinned: false, revision: 9 },
+      }),
+    );
+    vi.mocked(invoke).mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Unpin quick access" })).toBeInTheDocument();
+    view.unmount();
+    await act(async () =>
+      handler({
+        event: "pet-presentation",
+        id: 0,
+        payload: { visible: true, pinned: false, revision: 11 },
+      }),
+    );
+    expect(invoke).not.toHaveBeenCalled();
+  } finally {
+    view.unmount();
+    vi.useRealTimers();
+  }
+});
+
+it("ignores secondary drag buttons and supports pointer resize without dragging", async () => {
+  mount();
+  const move = await screen.findByRole("button", { name: "Move pet card" });
+  const resize = screen.getByRole("button", { name: "Resize pet card" });
+  vi.mocked(invoke).mockClear();
+  fireEvent(move, new MouseEvent("pointerdown", { bubbles: true, button: 2 }));
+  fireEvent.keyDown(move, { key: "a" });
+  fireEvent.keyDown(resize, { key: "a" });
+  expect(invoke).not.toHaveBeenCalled();
+  fireEvent(resize, new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("pet_action", { value: { action: "resize", edge: "se" } }),
+  );
+  expect(invoke).not.toHaveBeenCalledWith("pet_action", { value: { action: "drag" } });
+});
+
+it("offers calendar navigation and HTTPS conference joins only for today's future events", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-11T12:00:00Z"));
+  const now = new Date();
+  const later = new Date(now.getTime() + 60_000).toISOString();
+  const end = new Date(now.getTime() + 120_000).toISOString();
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "pet_snapshot"
+      ? {
+          ...fixture,
+          workspaces: ["calendar"],
+          snapshot: {
+            ...fixture.snapshot,
+            events: [
+              {
+                id: "day",
+                title: "Holiday",
+                startsAt: now.toISOString(),
+                endsAt: end,
+                allDay: true,
+              },
+              {
+                id: "meeting",
+                title: "Meeting",
+                startsAt: later,
+                endsAt: end,
+                allDay: false,
+                conferenceUrl: "https://meet.example.test/room",
+              },
+              {
+                id: "unsafe",
+                title: "Unsafe meeting",
+                startsAt: later,
+                endsAt: end,
+                allDay: false,
+                conferenceUrl: "http://meet.example.test/room",
+              },
+              {
+                id: "tomorrow",
+                title: "Tomorrow",
+                startsAt: new Date(now.getTime() + 86_400_000).toISOString(),
+                endsAt: new Date(now.getTime() + 87_000_000).toISOString(),
+                allDay: false,
+              },
+            ],
+          },
+        }
+      : undefined,
+  );
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Holiday · All day" }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("pet_action", {
+      value: { action: "open", path: "/calendar" },
+    }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Join Meeting" }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("pet_action", {
+      value: {
+        action: "join",
+        url: "https://meet.example.test/room",
+        serverUrl: "https://example.test",
+        accountId: "account-a",
+      },
+    }),
+  );
+  expect(screen.queryByRole("button", { name: "Join Unsafe meeting" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Tomorrow")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("Meeting"));
+});
+
+it("offers all-day navigation without an empty timed timeline", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "pet_snapshot"
+      ? {
+          ...fixture,
+          workspaces: ["calendar"],
+          snapshot: { ...fixture.snapshot, events: [] },
+        }
+      : undefined,
+  );
+  mount();
+  expect(await screen.findByText("No upcoming events today.")).toBeInTheDocument();
+});
+
+it("resizes from a card edge only on primary pointer input", async () => {
+  const view = mount();
+  await screen.findByRole("checkbox");
+  const edge = view.container.querySelector(".pet-resize--nw");
+  if (!edge) throw new Error("Missing northwest resize edge");
+  vi.mocked(invoke).mockClear();
+  fireEvent(edge, new MouseEvent("pointerdown", { bubbles: true, button: 2 }));
+  expect(invoke).not.toHaveBeenCalled();
+  fireEvent(edge, new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("pet_action", { value: { action: "resize", edge: "nw" } }),
+  );
+  expect(invoke).not.toHaveBeenCalledWith("pet_action", { value: { action: "drag" } });
 });

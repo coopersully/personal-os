@@ -50,3 +50,46 @@ it.each(["edit", "retry"])("recovers a rejected session on a later %s", async (m
     ),
   );
 });
+
+it("rejects a native session for a different account before sending appearance changes", async () => {
+  vi.mocked(beginPetAppearance).mockResolvedValue({
+    serverUrl: "https://example.test",
+    accountId: "other",
+    sessionId: "wrong-account",
+  });
+  const { result } = renderHook(() => usePetAppearance("https://example.test|a", vi.fn()));
+  act(() => {
+    result.current.change({ color: "#123456", scale: 1, revision: 1 });
+    result.current.commit();
+  });
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith("Couldn’t save pet appearance.", expect.anything()),
+  );
+  expect(savePetAppearance).not.toHaveBeenCalled();
+});
+
+it("flushes the last edit on unmount and reports a failed flush without a dead retry", async () => {
+  vi.mocked(beginPetAppearance).mockResolvedValue({
+    serverUrl: "https://example.test",
+    accountId: "a",
+    sessionId: "valid",
+  });
+  vi.mocked(savePetAppearance).mockRejectedValue(new Error("offline"));
+  const onSaved = vi.fn();
+  const { result, unmount } = renderHook(() => usePetAppearance("https://example.test|a", onSaved));
+  act(() => {
+    result.current.change({ color: "#123456", scale: 1, revision: 1 });
+    result.current.change({ color: "#654321", scale: 2, revision: 2 });
+  });
+  unmount();
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "Couldn’t save pet appearance. Reopen pet settings to retry.",
+      { id: "pet-appearance-save" },
+    ),
+  );
+  expect(savePetAppearance).toHaveBeenCalledWith(
+    expect.objectContaining({ color: "#654321", scale: 2, revision: 2 }),
+  );
+  expect(onSaved).not.toHaveBeenCalled();
+});

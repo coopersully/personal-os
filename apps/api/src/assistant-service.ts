@@ -35,9 +35,10 @@ import {
   serializeAttentionItem,
 } from "./serialization.js";
 import type { Principal } from "./types.js";
+import { requireWorkspaceExecution } from "./workspace-execution.js";
 
 type MutationContext = { principal: Principal; requestId: string };
-export type ProfileSourceTransaction = Pick<Database, "select">;
+export type ProfileSourceTransaction = Pick<Database, "select" | "query">;
 
 type SetupRecipe = {
   inspect: string[];
@@ -65,7 +66,7 @@ const setupRecipes: Record<AssistantDomain, SetupRecipe> = {
       "Read the existing Finance profile and guided setup context before asking questions.",
       "Inspect account identity, ledger health, review state, and suggested workflows without exposing balances unnecessarily.",
       "Learn planning goals, account meanings, review cadence, and alert preferences; ask only about unresolved choices.",
-      "Save Finance guidance as a draft. The agent cannot approve it.",
+      "Save Finance guidance as a draft. Activation requires explicit finances:execute authority and enabled review bypass, or owner approval.",
     ],
     requiredTools: [
       "get_domain_profile",
@@ -75,7 +76,7 @@ const setupRecipes: Record<AssistantDomain, SetupRecipe> = {
     ],
     review: [
       "Summarize the accounts, assumptions, and reviewed workflows covered by the draft.",
-      "Direct the person to Finances → Profile for signed-in approval.",
+      "Activate the exact inspected guidance only with current Finance execution authority and review bypass; otherwise request owner approval.",
       "Do not categorize transactions, resolve reviews, or alter accounts during setup.",
     ],
   },
@@ -162,6 +163,7 @@ export function createAssistantService({
     status: UpsertDomainProfileInput["status"],
     actorType: Principal["actorType"],
     preferences: UpsertDomainProfileInput["preferences"],
+    principal: Principal,
   ) => Promise<UpsertDomainProfileInput["preferences"] | undefined>;
 }) {
   async function findProfile(userId: string, domain: AssistantDomain) {
@@ -482,6 +484,8 @@ export function createAssistantService({
       let saved: typeof domainProfiles.$inferSelect;
       try {
         saved = await db.transaction(async (transaction) => {
+          if (input.domain === "finances" && input.status === "active")
+            await requireWorkspaceExecution(transaction, context.principal, "finances", now());
           const preferences =
             (await validateProfileSources(
               transaction,
@@ -491,6 +495,7 @@ export function createAssistantService({
               input.status,
               context.principal.actorType,
               input.preferences,
+              context.principal,
             )) ?? input.preferences;
           const values = {
             categories: input.categories,
@@ -546,15 +551,20 @@ export function createAssistantService({
             throw new AppError("conflict", "The domain profile changed while it was being saved.");
           }
           const recordsApproval =
-            profile.status === "active" &&
-            context.principal.actorType === "user" &&
-            profileRequiresApproval(profile.domain);
+            profile.status === "active" && profileRequiresApproval(profile.domain);
           if (recordsApproval) {
             await transaction
               .insert(domainProfileApprovals)
               .values({
                 approvedAt: updatedAt,
-                approvedByUserId: context.principal.userId,
+                approvedByUserId:
+                  context.principal.actorType === "user" ? context.principal.userId : null,
+                approvalSource:
+                  context.principal.actorType === "user"
+                    ? "user_instruction"
+                    : "agent_self_approval",
+                approvedByAgentId:
+                  context.principal.actorType === "agent" ? context.principal.actorId : null,
                 domain: profile.domain,
                 profile: serializeProfile(profile),
                 profileId: profile.id,
@@ -564,7 +574,14 @@ export function createAssistantService({
               .onConflictDoUpdate({
                 set: {
                   approvedAt: updatedAt,
-                  approvedByUserId: context.principal.userId,
+                  approvedByUserId:
+                    context.principal.actorType === "user" ? context.principal.userId : null,
+                  approvalSource:
+                    context.principal.actorType === "user"
+                      ? "user_instruction"
+                      : "agent_self_approval",
+                  approvedByAgentId:
+                    context.principal.actorType === "agent" ? context.principal.actorId : null,
                   profile: serializeProfile(profile),
                   profileId: profile.id,
                   profileVersion: profile.version,

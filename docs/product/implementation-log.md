@@ -1,5 +1,26 @@
 # nohmi — Implementation Log
 
+## 2026-10-11 — Explicit workspace agent execution
+
+- Added typed MCP paths for shipped Mail, Tasks/Reminders, Calendar, Finance and shared settings,
+  source and host-recovery operations. The [tool dictionary](../engineering/workspace-agent-tools.md)
+  is generated from actual discovery; the [execution matrix](../engineering/workspace-agent-execution.md)
+  records local MCP-to-API-to-PostgreSQL evidence rather than registration-only claims.
+- Explicit opt-in execution scopes plus owner-enabled bypass permit registered Mail send/reconciliation,
+  rule activation, Finance execution and settings operations. Existing grants are unchanged; agents
+  cannot change bypass, their own permissions, provider login/MFA or owner security settings.
+- Agent approvals retain their actor and approval source. Migrations `0110` and `0111`
+  add approval provenance and encrypted hosted-bank handoff state after the published history.
+- Hosted bank start persists its attempt and receipt before provider work; failures stay inspectable
+  and replay never repeats an uncertain provider request. Explicit source sync preserves agent
+  initiation in audit and revalidates consent atomically with its claim.
+- Hosted bank completion preserves exchange state and commits account attachment with its terminal
+  receipt. Provider login/provisioning and live external effects remain unverified by local tests.
+- This supersedes historical MCP no-send and actor-only restrictions for the explicitly registered
+  operations. Autonomous Mail maintenance still does not compose/send; response briefs remain
+  non-transmittable. See [capability boundaries](../engineering/workspace-agent-capabilities.md).
+- Implementation evidence does not establish production deployment or exhaustive input-variant coverage.
+
 ## 2026-10-10 — Finance history, continuations, and settings recovery merged
 
 - [PR #229 — Expose Finance review history and exact evidence](https://github.com/coopersully/personal-os/pull/229)
@@ -403,13 +424,15 @@ This log records delivered vertical slices against the master plan. It does not 
   application route/navigation composition, deterministic QA states, and redacted Mail
   question/blocker projection into Today-owned Reviews. Shared Reviews never owns Mail mutation.
 - At the time of this slice, Mail transmission was unavailable. This boundary was superseded by
-  the 2026-08-29 human-confirmed compose slice; autonomous and MCP transmission remain unavailable.
+  the 2026-08-29 human-confirmed compose slice; autonomous maintenance transmission remains unavailable. The later explicit MCP execution
+  contract is recorded in the 2026-10-11 entry.
 
 ## 2026-08-25 — Mail no-send boundary
 
 - Removed Gmail send authority, iCloud SMTP delivery, application TCP 587 egress, and every typed
   client, MCP, and web compose/send affordance. This historical contraction was superseded for the
-  signed-in human Mail surface on 2026-08-29; the MCP boundary remains in force.
+  signed-in human Mail surface on 2026-08-29 and for explicitly authorized MCP execution on
+  2026-10-11. Autonomous maintenance retains its no-send boundary.
 - Retained an authenticated compatibility window for historical Ilo drafts: owners can list,
   export locally, or permanently delete them, while former mutation endpoints return a permanent
   `410 feature_unavailable` response.

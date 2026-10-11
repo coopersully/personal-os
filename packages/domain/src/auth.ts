@@ -202,10 +202,13 @@ export const accessScopeSchema = z.enum([
   "reminders:write",
   "tasks:read",
   "tasks:write",
+  "tasks:execute",
   "calendar:read",
   "calendar:write",
+  "calendar:execute",
   "mail:read",
   "mail:write",
+  "mail:execute",
   "goals:read",
   "goals:write",
   "tracking:read",
@@ -215,10 +218,12 @@ export const accessScopeSchema = z.enum([
   "audit:read",
   "finances:read",
   "finances:write",
+  "finances:execute",
   "finances:maintain",
   "bookmarks:read",
   "texting:read",
   "texting:write",
+  "texting:execute",
 ]);
 export type AccessScope = z.infer<typeof accessScopeSchema>;
 

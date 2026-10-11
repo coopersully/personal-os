@@ -133,13 +133,14 @@ fit within the API deadline without retrying an unbounded provider workflow.
 The durable commit point is a `finance_account_connections` row in `pending` state, created before
 the provider request. A successful provider response stores the short-lived handoff artifact and
 its expiry before returning it. Provider rejection or transport failure changes the attempt to
-`failed` with a redacted, retryable error. Completed exchange changes it to `connected`; expired
+`failed` with a redacted error requiring a new attempt. Replay of the same key never repeats
+the provider request. Completed exchange changes it to `connected`; expired
 artifacts remain observable as pending-but-expired and require a new connection attempt. Process
 loss after the pending commit is therefore visible and recoverable rather than indistinguishable
 from a request that never started.
 
-API and MCP structured content may expose only the short-lived authorization artifact, provider,
-and expiry. It must never contain Plaid access tokens, refresh tokens, encrypted credentials, or
+Only execution-authorized start/completion responses may expose the short-lived authorization
+artifact, provider and expiry. Ordinary connection-status reads redact the bearer artifact. It must never contain Plaid access tokens, refresh tokens, encrypted credentials, or
 raw provider errors. Idempotency is scoped to the user and requested attempt; a failed attempt is
 retried with a new key, while replay of a completed key returns the original result.
 

@@ -54,6 +54,28 @@ per-workspace settings. The complete contracts are
 [`texting and SMS`](texting-operations.md) and
 [`per-workspace settings`](workspace-settings.md).
 
+## Agent parity verification
+
+Every supported workspace capability must have a documented typed agent path or a named
+provider-consent, security, or unsupported-capability boundary. Coverage includes settings,
+search, reviews, history, and recovery as well as ordinary domain records. Test each operation
+through MCP into the authenticated API and real persistence, with the documented behavior under
+both review-bypass settings. Registration tests and mocked API success do not establish working
+parity; verify returned data, persisted effects, ownership, and recovery outcomes. Provider runtime
+verification remains separate from deterministic tests.
+
+MCP coverage is measured by complete user outcomes and all supported operation variants, not by
+the number of tools. Tool names, typed arguments, lifecycle verbs, pagination, revisions, and
+recovery instructions must form a coherent interface across workspaces. Each operation has an
+executable example and a mapped execution test; a declared or skipped test does not establish
+coverage. Existing interface exceptions require explicit documentation and intentional migration.
+
+The [cross-workspace parity design](../superpowers/specs/2026-10-11-workspace-agent-parity-design.md)
+and [implementation plan](../superpowers/plans/2026-10-11-workspace-agent-parity.md) describe the
+approved implementation scope. The [capability inventory](../engineering/workspace-agent-capabilities.md)
+and [execution evidence](../engineering/workspace-agent-execution.md) distinguish branch-local
+implementation and verification from production deployment and provider consent.
+
 ## Workspace search
 
 Each workspace has one first-class search entry in its header. It searches the workspace's

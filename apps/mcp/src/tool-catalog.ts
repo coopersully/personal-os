@@ -48,7 +48,15 @@ function read(
   stage: IloToolStage = "inspect",
   options: Pick<IloToolDefinition, "openWorld" | "presentation"> = {},
 ): IloToolDefinition {
-  return { domain, policy: "read_only", readOnly: true, requiredScopes, stage, ...options };
+  return {
+    domain,
+    scopeMatch: domain === "assistant" ? "any" : "all",
+    policy: "read_only",
+    readOnly: true,
+    requiredScopes,
+    stage,
+    ...options,
+  };
 }
 
 function preview(
@@ -58,6 +66,7 @@ function preview(
 ): IloToolDefinition {
   return {
     domain,
+    scopeMatch: domain === "assistant" ? "any" : "all",
     idempotent: true,
     policy: "preview",
     readOnly: true,
@@ -79,6 +88,7 @@ function write(
 ): IloToolDefinition {
   return {
     domain,
+    scopeMatch: domain === "assistant" ? "any" : "all",
     policy: options.policy ?? "approve_each",
     readOnly: false,
     requiredScopes,
@@ -95,6 +105,192 @@ function write(
  * Feature modules own behavior; this catalog owns how that behavior is exposed.
  */
 export const iloToolCatalog = {
+  get_finance_profile: read("finances", ["finances:read"]),
+  disconnect_texting: write("texting", ["texting:write", "texting:execute"], {
+    policy: "approved_rule",
+    destructive: true,
+  }),
+  list_workspace_sources: {
+    ...read("assistant", ["mail:read", "calendar:read", "reminders:read"]),
+    scopeMatch: "all",
+  },
+  sync_workspace_source: {
+    ...write(
+      "assistant",
+      [
+        "mail:write",
+        "mail:execute",
+        "calendar:write",
+        "calendar:execute",
+        "reminders:write",
+        "tasks:write",
+        "tasks:execute",
+      ],
+      { openWorld: true, policy: "approved_rule" },
+    ),
+    scopeMatch: "all",
+  },
+  disconnect_workspace_source: {
+    ...write(
+      "assistant",
+      [
+        "mail:write",
+        "mail:execute",
+        "calendar:write",
+        "calendar:execute",
+        "reminders:write",
+        "tasks:write",
+        "tasks:execute",
+      ],
+      { destructive: true, policy: "approved_rule" },
+    ),
+    scopeMatch: "all",
+  },
+  list_automation_host_connections: read("finances", ["finances:read", "finances:maintain"]),
+  list_automation_host_schedules: read("finances", ["finances:read", "finances:maintain"]),
+  create_automation_host_schedule: write(
+    "finances",
+    ["finances:read", "finances:maintain", "finances:write", "finances:execute"],
+    { policy: "approved_rule" },
+  ),
+  bind_automation_host_schedule: write(
+    "finances",
+    ["finances:read", "finances:maintain", "finances:write", "finances:execute"],
+    { policy: "approved_rule" },
+  ),
+  update_automation_host_schedule: write(
+    "finances",
+    ["finances:read", "finances:maintain", "finances:write", "finances:execute"],
+    { policy: "approved_rule" },
+  ),
+  cancel_automation_host_schedule: write(
+    "finances",
+    ["finances:read", "finances:maintain", "finances:write", "finances:execute"],
+    { policy: "approved_rule" },
+  ),
+  revoke_automation_host_schedule: write(
+    "finances",
+    ["finances:read", "finances:maintain", "finances:write", "finances:execute"],
+    { policy: "approved_rule" },
+  ),
+  list_finance_host_runs: read("finances", ["finances:read", "finances:maintain"]),
+  list_finance_answer_continuations: read("finances", ["finances:read", "finances:maintain"]),
+  bind_finance_answer_continuation: write(
+    "finances",
+    ["finances:read", "finances:maintain", "finances:write", "finances:execute"],
+    { policy: "approved_rule", stage: "recover" },
+  ),
+  recover_finance_host_run: write(
+    "finances",
+    ["finances:read", "finances:maintain", "finances:write", "finances:execute"],
+    { policy: "approved_rule", stage: "recover" },
+  ),
+  reconcile_finance_host_delivery: write(
+    "finances",
+    ["finances:read", "finances:maintain", "finances:write", "finances:execute"],
+    { policy: "approved_rule", stage: "recover" },
+  ),
+  get_notification_settings: read("texting", ["texting:read", "finances:read"]),
+  get_texting_connection: read("texting", ["texting:read"]),
+  update_notification_settings: write(
+    "texting",
+    ["texting:read", "finances:read", "texting:write", "texting:execute"],
+    { policy: "approved_rule" },
+  ),
+  reset_finance_notification_settings: write(
+    "texting",
+    ["texting:read", "finances:read", "texting:write", "texting:execute"],
+    { policy: "approved_rule" },
+  ),
+  download_mail_attachment: read("mail", ["mail:read"], "inspect", { openWorld: true }),
+  get_finance_budget_policy_preview: read("finances", ["finances:read"]),
+  get_calendar_settings: read("calendar", ["calendar:read"]),
+  update_calendar_settings: write("calendar", ["calendar:write", "calendar:execute"], {
+    policy: "approved_rule",
+  }),
+  search_calendar: read("calendar", ["calendar:read"]),
+  get_task_settings: read("tasks", ["tasks:read"]),
+  update_task_settings: write("tasks", ["tasks:write", "tasks:execute"], {
+    policy: "approved_rule",
+  }),
+  search_tasks: read("tasks", ["tasks:read", "reminders:read"]),
+  get_mail_settings: read("mail", ["mail:read"]),
+  update_mail_settings: write("mail", ["mail:write", "mail:execute"], { policy: "approved_rule" }),
+  search_mail: read("mail", ["mail:read"]),
+  get_finance_settings: read("finances", ["finances:read"]),
+  update_finance_settings: write("finances", ["finances:write", "finances:execute"], {
+    policy: "approved_rule",
+  }),
+  search_finance: read("finances", ["finances:read"]),
+  get_finance_budget_policy: read("finances", ["finances:read"]),
+  create_finance_budget_policy: write("finances", ["finances:write", "finances:execute"], {
+    policy: "approved_rule",
+  }),
+  revise_finance_budget_policy: write("finances", ["finances:write", "finances:execute"], {
+    policy: "approved_rule",
+  }),
+  disable_finance_budget_policy: write("finances", ["finances:write", "finances:execute"], {
+    policy: "approved_rule",
+  }),
+  designate_finance_budget_baseline: write("finances", ["finances:write", "finances:execute"], {
+    policy: "approved_rule",
+  }),
+  preview_finance_budget_policy: preview("finances", ["finances:read"]),
+  create_finance_budget_revision_proposal: write(
+    "finances",
+    ["finances:write", "finances:execute"],
+    { policy: "approved_rule" },
+  ),
+  get_finance_budget_revision_proposal: read("finances", ["finances:read"]),
+  withdraw_finance_budget_revision_proposal: write(
+    "finances",
+    ["finances:write", "finances:execute"],
+    { policy: "approved_rule" },
+  ),
+  save_finance_budget_policy_preview: write("finances", ["finances:write", "finances:execute"], {
+    policy: "approved_rule",
+  }),
+  create_finance_contextual_question: write("finances", ["finances:write", "finances:execute"], {
+    policy: "approved_rule",
+  }),
+  get_finance_contextual_question: read("finances", ["finances:read"]),
+  answer_finance_contextual_question: write("finances", ["finances:write"], {
+    policy: "approved_rule",
+  }),
+  approve_finance_action_review: write("finances", ["finances:write", "finances:execute"], {
+    policy: "approved_rule",
+  }),
+  dismiss_finance_action_review: write("finances", ["finances:write", "finances:execute"], {
+    policy: "approved_rule",
+  }),
+  list_mail_drafts: read("mail", ["mail:read"]),
+  create_mail_draft: write("mail", ["mail:write"], { policy: "approved_rule" }),
+  update_mail_draft: write("mail", ["mail:write"], { policy: "approved_rule" }),
+  delete_mail_draft: write("mail", ["mail:write"], { policy: "approved_rule", destructive: true }),
+  send_mail_draft: write("mail", ["mail:write", "mail:execute"], {
+    policy: "approved_rule",
+    destructive: true,
+    openWorld: true,
+    idempotent: false,
+  }),
+  reconcile_mail_draft: write("mail", ["mail:write", "mail:execute"], { policy: "approved_rule" }),
+  activate_mail_rule: write("mail", ["mail:write", "mail:execute"], { policy: "approved_rule" }),
+  get_mail_maintenance_run: read("mail", ["mail:read"]),
+  get_mail_review: read("mail", ["mail:read"]),
+  get_mail_thread_stewardship: read("mail", ["mail:read"]),
+  preview_mail_response_brief: write("mail", ["mail:write"], { policy: "approved_rule" }),
+  set_mail_disposition: write("mail", ["mail:write", "mail:execute"], { policy: "approved_rule" }),
+  create_mail_obligation: write("mail", ["mail:write", "mail:execute"], {
+    policy: "approved_rule",
+  }),
+  update_mail_obligation: write("mail", ["mail:write", "mail:execute"], {
+    policy: "approved_rule",
+  }),
+  get_mail_question: read("mail", ["mail:read"]),
+  answer_mail_question: write("mail", ["mail:write", "mail:execute"], { policy: "approved_rule" }),
+  create_mail_stewardship_feedback: write("mail", ["mail:write", "mail:execute"], {
+    policy: "approved_rule",
+  }),
   get_ilo_context: read("assistant", [], "context"),
   get_ilo_setup: read("assistant", [], "context"),
   get_agent_setup_status: { ...read("assistant", [], "context"), compatibility: true },
@@ -138,6 +334,15 @@ export const iloToolCatalog = {
   list_activity: read("activity", ["audit:read"], "verify"),
   get_daily_brief: read("today", ["automations:read"], "context"),
 
+  create_calendar: write("calendar", ["calendar:write"], { policy: "approved_rule" }),
+  update_calendar: write("calendar", ["calendar:write"], { policy: "approved_rule" }),
+  delete_calendar: write("calendar", ["calendar:write"], {
+    policy: "approved_rule",
+    destructive: true,
+  }),
+  set_calendar_selection: write("calendar", ["calendar:write"], { policy: "approved_rule" }),
+  get_calendar_status: read("calendar", ["calendar:read"]),
+  get_calendar_review: read("calendar", ["calendar:read"]),
   list_calendars: read("calendar", ["calendar:read"]),
   list_events: read("calendar", ["calendar:read"]),
   get_event: read("calendar", ["calendar:read"]),
@@ -194,6 +399,29 @@ export const iloToolCatalog = {
   }),
   restore_reminder: write("reminders", ["reminders:write"]),
 
+  get_finance_configuration: read("finances", ["finances:read"]),
+  get_finance_budget_pace: read("finances", ["finances:read"]),
+  get_finance_position: read("finances", ["finances:read"]),
+  list_finance_review_history: read("finances", ["finances:read"]),
+  get_finance_review_history_item: read("finances", ["finances:read"]),
+  get_finance_maintenance_run: read("finances", ["finances:read"]),
+  list_finance_questions: read("finances", ["finances:read"]),
+  list_finance_action_reviews: read("finances", ["finances:read"]),
+  list_finance_budget_policies: read("finances", ["finances:read"]),
+  create_finance_account: write("finances", ["finances:write", "finances:execute"], {
+    policy: "approved_rule",
+  }),
+  create_finance_category: write("finances", ["finances:write", "finances:execute"], {
+    policy: "approved_rule",
+  }),
+  disconnect_finance_account: write("finances", ["finances:write", "finances:execute"], {
+    policy: "approved_rule",
+    destructive: true,
+  }),
+  delete_finance_account: write("finances", ["finances:write", "finances:execute"], {
+    policy: "approved_rule",
+    destructive: true,
+  }),
   get_finance_guided_setup: read("finances", ["finances:read"], "context"),
   get_finance_playbook: read("finances", ["finances:read"], "context"),
   get_finance_automation_settings: read("finances", ["finances:read"]),
@@ -262,7 +490,7 @@ export const iloToolCatalog = {
   merge_finance_merchants: write("finances", ["finances:write"], { policy: "approved_rule" }),
   create_finance_budget: write("finances", ["finances:write"], { policy: "approved_rule" }),
   manage_finance_budget_bucket: write("finances", ["finances:write"], { policy: "approved_rule" }),
-  update_finance_transaction: write("finances", ["finances:write"], {
+  update_finance_transaction: write("finances", ["finances:write", "finances:execute"], {
     policy: "approved_rule",
   }),
   update_finance_income_stream: write("finances", ["finances:write"], {
@@ -288,7 +516,7 @@ export const iloToolCatalog = {
     idempotent: true,
     policy: "approved_rule",
   }),
-  approve_finance_budget: write("finances", ["finances:write"], {
+  approve_finance_budget: write("finances", ["finances:write", "finances:execute"], {
     idempotent: true,
     policy: "approved_rule",
   }),
@@ -310,12 +538,24 @@ export const iloToolCatalog = {
   export_finance_data: read("finances", ["finances:read"]),
   list_finance_accounts: read("finances", ["finances:read"]),
   list_finance_budget_buckets: read("finances", ["finances:read"]),
-  start_finance_account_connection: write("finances", ["finances:write"], {
+  get_finance_category_budget_status: read("finances", ["finances:read"]),
+  get_finance_connection_capabilities: read("finances", ["finances:read"]),
+  resolve_finance_transaction_review: write(
+    "finances",
+    ["finances:read", "finances:write", "finances:execute"],
+    { policy: "approved_rule" },
+  ),
+  complete_finance_account_connection: write("finances", ["finances:write", "finances:execute"], {
+    openWorld: true,
+    idempotent: true,
+    policy: "approved_rule",
+  }),
+  start_finance_account_connection: write("finances", ["finances:write", "finances:execute"], {
     idempotent: true,
     openWorld: true,
     policy: "approved_rule",
   }),
-  sync_finance_accounts: write("finances", ["finances:write"], {
+  sync_finance_accounts: write("finances", ["finances:write", "finances:execute"], {
     openWorld: true,
     policy: "approved_rule",
   }),

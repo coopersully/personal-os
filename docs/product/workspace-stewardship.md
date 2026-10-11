@@ -130,8 +130,9 @@ Setup may return a large proposed rule set, grouped or paginated for usability, 
 it. Each rule must remain individually inspectable and deselectable in a dedicated preview covering
 condition, scope, source selection, representative matches and non-matches, action, consequences,
 conflicts and precedence, required authority, and disable/rollback behavior. Activation binds to
-the exact previewed versions; drift requires a new preview, and global review bypass does not
-activate action rules.
+the exact previewed versions; drift requires a new preview. Explicit workspace execution grants
+and enabled review bypass permit an agent to activate eligible rules after that same inspection.
+Bypass alone and ordinary write access do not authorize action-rule activation.
 
 ## Scheduling boundary
 

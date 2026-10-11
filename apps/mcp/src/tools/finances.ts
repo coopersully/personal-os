@@ -12,6 +12,7 @@ import {
   manageFinanceGoalInputSchema,
   manageFinanceRecurringItemInputSchema,
   manageFinanceRuleInputSchema,
+  updateFinanceTransactionInputSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
 import { apiResult } from "../tool-result.js";
@@ -171,7 +172,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, preserve unknowns or record an explicit skip, and show the first plan with its missing evidence. Budget activation requires an authenticated user decision bound to the current profile and proposal; agent tokens cannot activate it. Do not ask the user to name a tool.",
+        "Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, preserve unknowns or record an explicit skip, and show the first plan with its missing evidence. Budget activation binds the current profile and proposal. Agents require finances:execute, enabled review bypass and approvalSource agent_self_approval; never impersonate a user approval. Do not ask the user to name a tool.",
       inputSchema: financeSetupInputSchema,
       title: "Set up finances",
     },
@@ -223,8 +224,9 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
       description:
-        "Read resumable and settled Finance maintenance runs. Results expose canonical run status, typed next actions, and legacy recovery.",
+        "Read a bounded page of resumable and settled Finance maintenance runs. Pass nextCursor as cursor with the same filters. Results expose canonical run status, typed next actions, and legacy recovery.",
       inputSchema: {
+        cursor: id.optional(),
         limit: z.number().int().min(1).max(100).default(20),
         status: maintenanceRunStatusSchema.optional(),
       },
@@ -388,7 +390,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Submit an exact displayed proposal and profile revision for approval. Activation requires an authenticated user decision; agent tokens cannot activate a budget by claiming user_instruction or enabling review bypass.",
+        "Activate the exact inspected proposal and profile revision. Agents must use approvalSource agent_self_approval and have finances:write, explicit finances:execute, and enabled review bypass. Claiming user_instruction is rejected.",
       inputSchema: {
         approvalSource: z.enum(["user_instruction", "agent_self_approval"]),
         budgetVersionId: id,
@@ -430,17 +432,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
         "Create, revise, pause, resume, complete, or remove a financial goal. These are separate from general nohmi goals.",
-      inputSchema: {
-        changes: z.record(z.string(), z.unknown()).optional(),
-        deadline: z.iso.date().nullable().optional(),
-        expectedVersion: z.number().int().positive().optional(),
-        goalId: id.optional(),
-        idempotencyKey,
-        name: z.string().max(240).optional(),
-        operation: z.enum(["create", "update", "complete", "pause", "resume", "remove"]),
-        priority: z.enum(["low", "medium", "high"]).optional(),
-        targetAmount: z.number().nonnegative().optional(),
-      },
+      inputSchema: manageFinanceGoalInputSchema,
       title: "Manage Finance goal",
     },
     async (input) =>
@@ -570,11 +562,23 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   );
 
   server.registerTool(
+    "complete_finance_account_connection",
+    {
+      title: "Complete Finance account connection",
+      description:
+        "Check provider-confirmed consent for a hosted bank connection and persist connected accounts. Returns pending until the owner finishes consent at the URL from start_finance_account_connection. Never accepts or returns provider credentials. Safe to poll; uncertain token exchanges require fresh authorization. Requires finances:write, finances:execute and enabled review bypass for agents.",
+      inputSchema: { connectionId: id },
+    },
+    async ({ connectionId }) =>
+      financeApiResult(() => api.completeFinanceAccountConnection(connectionId)),
+  );
+
+  server.registerTool(
     "start_finance_account_connection",
     {
       annotations: { openWorldHint: true },
       description:
-        "Start a secure external bank connection when the user asks to connect an account. Return the provider handoff directly in chat; never send the user to the nohmi web application. The external provider may still require the user to authenticate and consent.",
+        "Start a secure external bank connection when the user asks to connect an account. Return the hosted HTTPS provider authorization URL directly in chat, then call complete_finance_account_connection after consent; never send the user to the nohmi web application. The external provider may still require the user to authenticate and consent. Requires finances:write, finances:execute and enabled review bypass for agents.",
       inputSchema: { idempotencyKey, provider: z.literal("plaid").default("plaid") },
       title: "Start Finance account connection",
     },
@@ -600,11 +604,16 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
         } catch (error) {
           issues.push({
             affectedWork: [accountId],
-            code: "account_sync_failed",
+            code: error instanceof ApiClientError ? error.code : "account_sync_failed",
             plainLanguage: error instanceof Error ? error.message : "This account did not sync.",
             remedy:
-              "Reconnect this account if its provider authorization expired, then retry only this account.",
-            retryable: true,
+              error instanceof ApiClientError && (error.status === 401 || error.status === 403)
+                ? "Use a valid credential with finances:write and finances:execute, and have the owner enable review bypass. Reconnecting the bank does not grant agent permission."
+                : "Inspect this account's connection diagnostic, resolve its reported cause, then retry only this account.",
+            retryable: !(
+              error instanceof ApiClientError &&
+              (error.status === 401 || error.status === 403)
+            ),
             scope: "account",
             unaffectedWork: accountIds.filter((id) => id !== accountId),
           });
@@ -625,7 +634,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
       description:
-        "Inspect one bank-connection attempt or connection state when setup, synchronization, or reauthorization needs diagnosis.",
+        "Inspect bank-connection status and redacted errors. This read never returns the bearer authorization URL. To recover that URL, replay start_finance_account_connection with the original idempotency key and current Finance execution authority plus bypass.",
       inputSchema: { connectionId: id },
       title: "Get Finance account connection",
     },
@@ -672,6 +681,8 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
         limit: z.number().int().min(1).max(200).default(50),
         pending: z.boolean().optional(),
         review: z.enum(["all", "needs_review", "resolved"]).default("all"),
+        sortBy: z.enum(["amount", "date", "merchant"]).default("date"),
+        sortDirection: z.enum(["asc", "desc"]).default("desc"),
         search: z.string().trim().min(1).max(160).optional(),
         to: z.iso.date().optional(),
       },
@@ -717,7 +728,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
       description:
-        "Read one ledger transaction with its classification and reconciliation evidence before changing or explaining it.",
+        "Read one ledger transaction with its classification and reconciliation evidence before changing or explaining it. Copy version into split_finance_transaction expectedVersion and updatedAt into category-review expectedTransactionUpdatedAt.",
       inputSchema: { transactionId: id },
       title: "Get Finance transaction",
     },
@@ -729,14 +740,11 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Correct a transaction category or note with provenance. Use classify_finance_transactions for reasoned batch categorization.",
-      inputSchema: {
-        category: z.string().min(1).max(80).nullable().optional(),
+        "Correct a transaction category or note with provenance. Requires finances:write, finances:execute and enabled bypass for agents. For category decisions supply confidence, rationale and expectedTransactionUpdatedAt from get_finance_transaction. learnMerchant is an explicit reusable-rule decision. Use classify_finance_transactions for reasoned batch categorization.",
+      inputSchema: updateFinanceTransactionInputSchema.safeExtend({
         idempotencyKey,
-        learnMerchant: z.boolean().optional(),
-        notes: z.string().max(4000).nullable().optional(),
         transactionId: id,
-      },
+      }),
       title: "Update Finance transaction",
     },
     async ({ transactionId, ...input }) =>

@@ -170,7 +170,7 @@ Discovery follows these rules:
    orient itself and repair setup. The legacy `get_agent_setup_status` alias is omitted from normal
    discovery; a bounded compatibility host can opt in through the server construction option while
    it migrates.
-2. A domain tool is advertised only when the token has one of its required scopes.
+2. A domain tool is advertised only when the token satisfies its catalog scope match. Multi-scope workspace tools require every listed grant; shared orientation tools may explicitly accept any listed read scope.
 3. A read-only server never advertises mutation tools, even when the token itself has write scopes.
 4. Every advertised tool has all four annotation hints, a shared output schema, an Ilo icon, and
    metadata identifying its domain, policy, and workflow stage.
@@ -266,13 +266,23 @@ reserved time is a Task schedule, not a new notification or autonomous execution
 
 Finance exposes the same canonical records and mutations as the portal. Read operations
 require `finances:read`; canonical setup, ledger, financial-profile, complete-budget,
-Inbox, and goal mutations require `finances:write`. Budgets can be created and revised through MCP. Activation requires an authenticated person
-and `user_instruction`; an agent cannot gain that authority by supplying the same label, even
-with global review bypass enabled. No agent budget-activation policy is registered. Connection handoffs, synchronization, account
-corrections, and transaction import have scoped tools; disconnection remains a signed-in-person
-portal action, and provider authentication
-and consent may still require the person. Money movement, bill payment, trading, and external
-subscription cancellation are not supported Finance effects.
+Inbox, and goal mutations require `finances:write`. Budget proposals remain version-bound.
+An agent may activate the exact inspected budget with `approvalSource: agent_self_approval`,
+`finances:write`, explicit `finances:execute`, and persisted review bypass. It cannot claim
+`user_instruction`. Active guidance records the same distinction in approval provenance.
+Sensitive execution grants are excluded from default OAuth scopes and are never added to old tokens.
+
+Connection handoffs return a hosted provider authorization URL. After owner authentication and
+consent, `complete_finance_account_connection` polls for the provider receipt and persists the
+connected accounts without exposing provider tokens. Synchronization, account management,
+reporting, contextual questions, action reviews, budget-policy preparation, and routine source
+ disconnection have scoped tools. Policy management reports `executionAvailable: false` while
+automatic budget-policy execution remains unimplemented. Money movement, bill payment, trading,
+and external subscription cancellation remain unsupported.
+
+The [complete tool dictionary](engineering/workspace-agent-tools.md) contains discovered schemas,
+required grants, descriptions and adapter links. The [capability and test inventory](engineering/workspace-agent-capabilities.md)
+distinguishes runtime execution evidence, provider simulations, semantic equivalents, and owner controls.
 
 The canonical Inbox (`get_finance_inbox`, `answer_finance_review`) and complete budget
 (`get_finance_budget`, `create_finance_budget`, `revise_finance_budget`, `approve_finance_budget`)
@@ -337,17 +347,19 @@ Mail is the first executable implementation:
 - `create_mail_attention_item` derives source attribution from an owned conversation and
   serializes same-thread/kind updates so important mail uses the shared attention envelope without
   duplicate open records.
-- agent sending is unavailable: `create_mail_draft` and `send_mail` are not registered MCP tools.
-  Durable drafts, exact confirmation, provider delivery, and ambiguous-send reconciliation belong
-  exclusively to the signed-in human Mail surface.
+- durable draft CRUD is available through scoped MCP tools. `send_mail_draft` and
+  `reconcile_mail_draft` additionally require `mail:execute`, `mail:write` and enabled review bypass.
+  Delivery binds to the observed draft revision and sender capability; uncertain effects must be
+  reconciled without blind resend. Autonomous maintenance does not compose or send messages.
 - proposed rules preview against a dated, bounded window of at most 200 recent cached
   conversations. The response names the window and reports when it may be truncated.
 - previously observed threads are retained when a provider returns its capped recent page; absence
   from that page is not treated as provider deletion. Reviewed Google archive and recoverable
   Trash rules, including one-day preferences, create durable work for matching observed and future
   synchronized conversations. Permanent deletion remains unavailable.
-- saved rules are re-reviewed with `review_mail_rule`, then activated only by the signed-in person
-  in **Settings → Workspace access → Mail**. The API rechecks the reviewed version,
+- saved rules are re-reviewed with `review_mail_rule`, then activated by the signed-in person
+  in **Settings → Workspace access → Mail**, or by an agent holding `mail:write` and `mail:execute`
+  with enabled review bypass. The API rechecks the reviewed version,
   candidate facts, action due states, and fingerprint inside one locked transaction, rejects
   preview drift, and atomically records
   `approved_rule` plus enabled state. Acceptance must state that the candidates are a bounded recent
@@ -390,13 +402,10 @@ remain `incomplete` while the qualified position producer reports `producer_not_
 uncertain income, exceptional resources, and liquid reserves do not silently fund them.
 Bookkeeping remains available during setup. When setup requests budget approval, the host reads
 `get_finance_budget` and presents the exact proposal, including all resources, allocations,
-rationale, and assumptions, for person-authenticated approval in the portal. The MCP agent cannot
-approve or activate a budget. The person-authenticated API approval operation
-`approve_finance_budget` uses the budget version; person-authenticated setup approval uses the
-setup session version. Both bind the matching `budgetVersionId` and echo
-`expectedProfileVersionId` from the displayed proposal. A changed profile or superseding proposal
-requires the person to review again. The portal follows this protocol without asking the person
-to copy instructions into an agent.
+rationale, and assumptions. `approve_finance_budget` binds the displayed budget version and
+`expectedProfileVersionId`. Appropriately scoped agents use `agent_self_approval` with enabled
+review bypass; authenticated owners use `user_instruction`. Setup approval additionally binds
+the setup session version. Changed profiles and superseding proposals require fresh inspection.
 
 `get_finance_snapshot` provides the ownership-qualified position; `get_finance_budget` returns
 the latest plan, including an explicit incomplete draft, and `get_finance_budget_status` the active plan. Creation and revision

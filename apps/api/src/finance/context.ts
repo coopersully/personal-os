@@ -8,6 +8,7 @@ import {
 import { and, eq, sql } from "drizzle-orm";
 import { AppError, isUniqueViolation } from "../errors.js";
 import type { Principal } from "../types.js";
+import { requireWorkspaceExecution } from "../workspace-execution.js";
 
 export type FinanceMutationContext = {
   actorId: string;
@@ -15,6 +16,7 @@ export type FinanceMutationContext = {
   bypassEnabled: boolean;
   canMutate: boolean;
   canSelfApprove: boolean;
+  executionPrincipal?: Principal;
   requestId: string;
   userId: string;
 };
@@ -30,13 +32,13 @@ export async function loadFinanceAuthorization(input: {
   const canMutate = input.principal.scopes.has("finances:write");
   const bypassEnabled = setting?.reviewBypassEnabled ?? false;
   return {
+    ...(input.principal.actorType === "agent" ? { executionPrincipal: input.principal } : {}),
     actorId: input.principal.actorId,
     actorType: input.principal.actorType,
     bypassEnabled,
     canMutate,
-    // Review bypass controls timing, not authority to activate a budget.
-    // Fail closed until the explicit Finance budget policy supplies that authority.
-    canSelfApprove: false,
+    // Only a new, explicit execution grant carries standing activation authority.
+    canSelfApprove: canMutate && bypassEnabled && input.principal.scopes.has("finances:execute"),
     requestId: input.requestId,
     userId: input.principal.userId,
   };
@@ -55,6 +57,21 @@ export function requireFinanceMutation(
       "Agent self-approval requires an explicit Finance budget activation policy.",
     );
   }
+}
+
+export async function requireFinanceExecution(
+  db: Pick<Database, "select">,
+  context: FinanceMutationContext,
+  at?: Date,
+) {
+  if (context.actorType === "user") return;
+  if (
+    !context.executionPrincipal ||
+    context.executionPrincipal.actorId !== context.actorId ||
+    context.executionPrincipal.userId !== context.userId
+  )
+    throw new AppError("forbidden", "Finance execution requires authenticated authority.");
+  await requireWorkspaceExecution(db, context.executionPrincipal, "finances", at);
 }
 
 type IdempotentOperation = {

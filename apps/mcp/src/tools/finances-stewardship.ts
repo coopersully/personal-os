@@ -376,9 +376,28 @@ export function registerFinanceStewardshipTools(server: McpServer, api: Personal
       annotations: readAnnotations,
       description:
         "Read finance accounts, budgets, recent transactions, spending, and the uncategorized review queue.",
-      inputSchema: z.object({}),
+      inputSchema: z
+        .object({
+          month: z
+            .string()
+            .regex(/^\d{4}-(0[1-9]|1[0-2])$/)
+            .optional(),
+          accountIds: z.array(z.uuid()).max(100).optional(),
+        })
+        .strict()
+        .refine(
+          (input) => input.accountIds === undefined || input.month !== undefined,
+          "Account filtering requires month.",
+        ),
       title: "Get finance overview",
     },
-    async () => apiResult(() => api.getFinanceOverview()),
+    async ({ month, accountIds }) =>
+      apiResult(() =>
+        month === undefined
+          ? api.getFinanceOverview()
+          : accountIds === undefined
+            ? api.getFinanceOverviewForMonth(month)
+            : api.getFinanceOverviewForAccounts(month, accountIds),
+      ),
   );
 }

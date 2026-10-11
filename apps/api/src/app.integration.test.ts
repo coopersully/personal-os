@@ -4917,7 +4917,7 @@ describe.sequential("ilo API", () => {
     });
   });
 
-  it("composes human-only budget policy management", async () => {
+  it("composes read-scoped budget policy management", async () => {
     const registration = await request("/v1/auth/register", {
       auth: "none",
       body: {
@@ -4951,13 +4951,8 @@ describe.sequential("ilo API", () => {
       headers: { authorization: `Bearer ${token}` },
     });
 
-    expect(rejected.status).toBe(403);
-    await expect(payload(rejected)).resolves.toMatchObject({
-      error: {
-        code: "forbidden",
-        message: "This operation requires an interactive user session.",
-      },
-    });
+    expect(rejected.status).toBe(200);
+    await expect(payload(rejected)).resolves.toEqual({ policies: [] });
   });
 
   it("enforces owner-issued, one-time invitations for private beta sign-up", async () => {
@@ -5935,7 +5930,7 @@ describe.sequential("ilo API", () => {
           body: { idempotencyKey: "route-connect", provider: "plaid" },
         })
       ).status,
-    ).toBe(400);
+    ).toBe(503);
     expect(
       (
         await request("/v1/finances/transactions/classify", {
@@ -6423,7 +6418,7 @@ describe.sequential("ilo API", () => {
       ).status,
     ).toBe(400);
     expect((await payload(await request("/v1/access-tokens"))).tokens).toHaveLength(1);
-    expect((await request("/v1/connectors", { auth: "agent" })).status).toBe(403);
+    expect((await request("/v1/connectors", { auth: "agent" })).status).toBe(200);
     const financeGuidanceDraft = {
       categories: [],
       domain: "finances",

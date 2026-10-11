@@ -126,6 +126,7 @@ import { createTextingService } from "./texting-service.js";
 import { createSmsAdmission, createSmsApprovalAdmission } from "./texting-sms-admission.js";
 import type { AppDependencies, AppEnv, Principal } from "./types.js";
 import { createWeatherService } from "./weather-service.js";
+import { requireWorkspaceSourceExecution } from "./workspace-execution.js";
 import { createWorkspaceMaintenanceService } from "./workspace-maintenance-service.js";
 import { createXBookmarksService } from "./x-bookmarks-service.js";
 
@@ -500,6 +501,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       status,
       actorType,
       preferences,
+      principal,
     ) => {
       if (domain === "mail") {
         await mail.validateProfileSources(transaction, userId, sourceIds);
@@ -517,7 +519,14 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
         );
       }
       if (domain === "finances") {
-        await finances.validateProfileSources(transaction, userId, sourceIds, status, actorType);
+        await finances.validateProfileSources(
+          transaction,
+          userId,
+          sourceIds,
+          status,
+          actorType,
+          principal,
+        );
       }
     },
   });
@@ -1134,8 +1143,25 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       throw new AppError("forbidden", "Verify your email before connecting an account.");
     await next();
   };
-  app.use("/v1/connectors", authenticate, requireHuman);
-  app.use("/v1/connectors/*", authenticate, requireHuman);
+  app.use("/v1/connectors", authenticate, async (context, next) => {
+    if (context.get("principal").actorType === "agent")
+      for (const scope of ["mail:read", "calendar:read", "reminders:read"] as const)
+        await requireScope(scope)(context, async () => {});
+    await next();
+  });
+  app.use("/v1/connectors/*", authenticate, async (context, next) => {
+    if (context.req.method === "GET" && context.req.path === "/v1/connectors") {
+      await next();
+      return;
+    }
+    const sharedMutation =
+      (context.req.method === "DELETE" && /^\/v1\/connectors\/[^/]+$/.test(context.req.path)) ||
+      (context.req.method === "POST" && /^\/v1\/connectors\/[^/]+\/sync$/.test(context.req.path));
+    if (sharedMutation) {
+      await requireWorkspaceSourceExecution(dependencies.db, context.get("principal"), now());
+      await next();
+    } else await requireHuman(context, next);
+  });
   app.use("/v1/connectors/google/start", requireVerifiedEmail);
   app.use("/v1/connectors/icloud", requireVerifiedEmail);
   app.use("/v1/x-bookmarks", authenticate);
@@ -1280,6 +1306,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       result: await connectors.syncAccount(
         context.get("principal").userId,
         context.req.param("id"),
+        { context: mutationContext(context) },
       ),
     }),
   );
@@ -1288,6 +1315,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       context.get("principal").userId,
       context.req.param("id"),
       context.get("requestId"),
+      context.get("principal"),
     );
     return context.body(null, 204);
   });
@@ -1381,13 +1409,15 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
 
   registerWorkspaceSearchRoutes({
     app,
+    now,
     db: dependencies.db,
     mutationContext,
     workItems: agentAccessWorkItems,
   });
-  registerMailRoutes({ app, mail, mutationContext });
+  registerMailRoutes({ app, db: dependencies.db, mail, mutationContext });
   registerMailStewardshipRoutes({
     app,
+    db: dependencies.db,
     maintenance: mailMaintenance,
     mutationContext,
     stewardship: mailStewardship,
@@ -1655,6 +1685,18 @@ function escapeHtml(value: string): string {
 }
 
 const oauthScopeLabels: Record<string, string> = {
+  "mail:execute":
+    "With review bypass enabled, send exact saved drafts, activate reviewed rules, reconcile delivery, and manage Mail stewardship and preferences. Combined Mail, Calendar, and Tasks execution grants also permit source sync and disconnection. Sending cannot be undone.",
+  "finances:execute":
+    "With review bypass enabled, activate inspected budgets and guidance, manage policies, accounts, reviews, bank sync, host recovery and Finance preferences.",
+  "calendar:execute":
+    "With review bypass enabled, manage Calendar workspace preferences and, with Mail and Tasks execution grants, sync or disconnect shared sources.",
+  "tasks:execute":
+    "With review bypass enabled, manage Tasks workspace preferences and, with Mail and Calendar execution grants, sync or disconnect shared sources.",
+  "texting:read": "Read Texting and notification status",
+  "texting:write": "Manage Texting messages",
+  "texting:execute":
+    "With review bypass enabled, manage notification preferences and disconnect the verified Texting destination, without widening the global disclosure ceiling.",
   "audit:read": "Read nohmi activity history",
   "automations:read": "Read the generated daily brief",
   "automations:write": "Legacy automation access (inactive)",

@@ -408,10 +408,10 @@ export function createApiClient(options: ClientOptions) {
       workspace: SearchableWorkspace,
       query: {
         q: string;
-        offset?: number;
-        limit?: number;
-        includeArchived?: boolean;
-        kind?: "all" | "content" | "reviews";
+        offset?: number | undefined;
+        limit?: number | undefined;
+        includeArchived?: boolean | undefined;
+        kind?: "all" | "content" | "reviews" | undefined;
       },
       signal?: AbortSignal,
     ): Promise<WorkspaceSearchPage> {

@@ -763,9 +763,20 @@ export function createFinanceApi(request: FinanceRequest) {
     ): Promise<FinanceToolResult<FinanceAccountConnection>> {
       return request(`/v1/finances/account-connections/${encodeURIComponent(id)}`);
     },
-    async startFinanceAccountConnection(
-      input: StartFinanceAccountConnectionInput,
+    async completeFinanceAccountConnection(
+      id: string,
     ): Promise<FinanceToolResult<FinanceAccountConnection>> {
+      return request(`/v1/finances/account-connections/${encodeURIComponent(id)}/complete`, {
+        method: "POST",
+      });
+    },
+    async startFinanceAccountConnection(input: StartFinanceAccountConnectionInput): Promise<
+      FinanceToolResult<{
+        connectionId: string;
+        status: FinanceAccountConnection["status"];
+        externalHandoff: FinanceAccountConnection["externalHandoff"];
+      }>
+    > {
       return request("/v1/finances/account-connections", {
         body: JSON.stringify(input),
         method: "POST",
@@ -789,7 +800,9 @@ export function createFinanceApi(request: FinanceRequest) {
         method: "POST",
       });
     },
-    async getFinanceTransaction(id: string): Promise<FinanceToolResult<FinanceTransaction>> {
+    async getFinanceTransaction(
+      id: string,
+    ): Promise<FinanceToolResult<FinanceTransaction & { version: number }>> {
       return request(`/v1/finances/transactions/${encodeURIComponent(id)}`);
     },
     async removeFinanceTransaction(

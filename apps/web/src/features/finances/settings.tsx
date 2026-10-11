@@ -31,6 +31,7 @@ const financeHumanOnlyActionLabels = {
   add_manual_transaction: "add manual transactions",
   apply_categorization: "apply category decisions",
   confirm_ambiguous_transfer: "confirm ambiguous transfers",
+  provider_authorization: "authenticate and consent with the bank provider",
   connect_or_disconnect_source: "connect or disconnect sources",
   create_merchant_rule: "create permanent merchant rules",
   import_transactions: "import transactions",

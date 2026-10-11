@@ -63,6 +63,7 @@ import {
   serializeMailThread,
 } from "./serialization.js";
 import type { Principal } from "./types.js";
+import { requireWorkspaceExecution } from "./workspace-execution.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 type MailSourceExecutor = Pick<Database, "select">;
@@ -719,27 +720,35 @@ export function createMailService({
       }
       const claimId = randomUUID();
       const claimedAt = now();
-      const [claimed] = await db
-        .update(mailDrafts)
-        .set({
-          sendClaimedAt: claimedAt,
-          sendClaimId: claimId,
-          sendStatus: "sending",
-          updatedAt: claimedAt,
-        })
-        .where(
-          and(
-            eq(mailDrafts.id, input.draftId),
-            eq(mailDrafts.userId, userId),
-            eq(mailDrafts.sendStatus, "draft"),
-            sql`date_trunc('milliseconds', ${mailDrafts.updatedAt}) = ${draft.updatedAt}`,
-            isNull(mailDrafts.sentAt),
-          ),
-        )
-        .returning({ id: mailDrafts.id });
-      if (!claimed) {
-        throw new AppError("conflict", "This draft is already being sent or changed.");
-      }
+      await db.transaction(async (tx) => {
+        await tx
+          .select({ id: mailDrafts.id })
+          .from(mailDrafts)
+          .where(and(eq(mailDrafts.id, input.draftId), eq(mailDrafts.userId, userId)))
+          .for("update");
+        await requireWorkspaceExecution(tx, context.principal, "mail", now());
+        const [claimed] = await tx
+          .update(mailDrafts)
+          .set({
+            sendClaimedAt: claimedAt,
+            sendClaimId: claimId,
+            sendStatus: "sending",
+            updatedAt: claimedAt,
+          })
+          .where(
+            and(
+              eq(mailDrafts.id, input.draftId),
+              eq(mailDrafts.userId, userId),
+              eq(mailDrafts.sendStatus, "draft"),
+              sql`date_trunc('milliseconds', ${mailDrafts.updatedAt}) = ${draft.updatedAt}`,
+              isNull(mailDrafts.sentAt),
+            ),
+          )
+          .returning({ id: mailDrafts.id });
+        if (!claimed) {
+          throw new AppError("conflict", "This draft is already being sent or changed.");
+        }
+      });
       try {
         await gateway.send(userId, draft.accountId, {
           body: draft.body,
@@ -894,6 +903,7 @@ export function createMailService({
       context: MutationContext,
     ): Promise<MailDraft> {
       return db.transaction(async (transaction) => {
+        await requireWorkspaceExecution(transaction, context.principal, "mail", now());
         const [draft] = await transaction
           .select()
           .from(mailDrafts)
@@ -1290,12 +1300,7 @@ export function createMailService({
       input: ActivateMailRuleInput,
       context: MutationContext,
     ): Promise<{ preview: MailRulePreview; rule: MailRule }> {
-      if (context.principal.actorType !== "user") {
-        throw new AppError(
-          "forbidden",
-          "Mail rule activation requires an interactive user session.",
-        );
-      }
+      await requireWorkspaceExecution(db, context.principal, "mail", now());
       const existing = await findRule(context.principal.userId, id);
       if (!existing) throw new AppError("not_found", "The mail rule was not found.");
       if (existing.version !== input.expectedVersion) {
@@ -1406,6 +1411,7 @@ export function createMailService({
         );
       }
       const updated = await db.transaction(async (transaction) => {
+        await requireWorkspaceExecution(transaction, context.principal, "mail", now());
         const lockedSources = await transaction
           .select({
             id: calendarAccounts.id,

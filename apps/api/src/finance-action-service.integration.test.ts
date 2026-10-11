@@ -1012,6 +1012,20 @@ describe.sequential("finance action service", () => {
         requestId: "settlement-human-repeat",
       }),
     ).resolves.toMatchObject({ status: "applied" });
+    expect(
+      await database.db.query.auditEvents.findMany({
+        where: eq(auditEvents.entityId, queued.review.id),
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "finance.action_review_approved",
+          actorType: "user",
+          actorId: fixture.ownerId,
+          requestId: "settlement-human-approve",
+        }),
+      ]),
+    );
     await expect(
       fixture.actions.settleFinanceMaintenanceCandidate(
         fixture.candidate.id,
@@ -7572,11 +7586,11 @@ describe.sequential("finance action service", () => {
     const agentContext = { principal: agent(userId), requestId: "agent-review-boundaries" };
 
     await expect(service.approve(missingId, agentContext)).rejects.toThrow(
-      "Only an interactive user",
+      "explicit finances:execute access",
     );
     await expect(service.approve(missingId, userContext)).rejects.toThrow("review was not found");
     await expect(service.dismiss(missingId, agentContext)).rejects.toThrow(
-      "Only an interactive user",
+      "explicit finances:execute access",
     );
     await expect(service.dismiss(missingId, userContext)).rejects.toThrow("review was not found");
     await expect(service.answerQuestion(missingId, "", userContext)).rejects.toThrow(

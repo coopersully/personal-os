@@ -19,13 +19,18 @@ workspace flow. Old Mail `reviewRule` links open the corresponding item in Setti
 must report unavailable instead of silently substituting a different decision. `/reviews` falls back
 to Account; Today, account summary cards and Finance's Views menu no longer advertise review pages.
 
-## Known generated-link gap
+## Generated links and remaining navigation gaps
 
-At the `fe983085` source checkpoint, the notification policy and delivery service still generate
-`/settings?section=reviews`, and the assistant context advertises `/reviews` as its approvals
-link. Both fall back to Account rather than opening the requested review. The workspace entry
-locations above work, but generated notification/agent links are not a completed navigation
-cutover. Single-workspace targets need supported scoped links with navigation coverage.
+At the `2d957702` merged-source checkpoint, Finance notification composition and delivery use
+`/finances?review=open`. Exact contextual-question and case links use
+`/finances/review?contextualQuestion=<uuid>` and `/finances/review?case=<uuid>`; the legacy Finance
+route redirects into the scoped flow while retaining the target. Saved contextual answers can
+reopen their owner-scoped read-only result after leaving outstanding work. These links let a
+person inspect the evidence behind a message without giving the URL approval authority.
+
+The cutover remains incomplete: assistant context still advertises `/reviews`, and Texting reply
+status still returns `/settings?section=reviews`. Both fall back to Account rather than opening
+the requested work. MCP approval mappings also retain legacy or bare workspace destinations.
 [Texting](../../product/texting-operations.md) also retains an accepted requirement for one
 unified destination when a message spans workspaces. The current flow accepts only one
 workspace, so that cross-workspace destination is not implemented. Migrating single-workspace
@@ -33,10 +38,10 @@ links alone cannot satisfy it; do not substitute one workspace for the complete 
 or claim that the current UI fulfills this target. This documentation records the divergence
 without selecting a new cross-workspace routing design.
 
-Known producers and contracts that must be reconciled together include:
+The producer and contract inventory distinguishes migrated Finance paths from remaining work:
 
 - `packages/domain/src/notification-policy.ts` and `apps/api/src/notification-service.ts`: SMS
-  composition and delivery links.
+  composition and delivery now use the Finance flow; preserve their routing coverage.
 - `apps/api/src/assistant-service.ts`: assistant context approval links.
 - `apps/api/src/routes/texting-recovery.ts` and the literal `reviewHref` schema in
   `packages/domain/src/texting.ts`: Finance reply recovery links.

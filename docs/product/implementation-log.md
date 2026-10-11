@@ -1,5 +1,32 @@
 # nohmi — Implementation Log
 
+## 2026-10-10 — Finance history, continuations, and settings recovery merged
+
+- [PR #229 — Expose Finance review history and exact evidence](https://github.com/coopersully/personal-os/pull/229)
+  merged at `2b45e83f`; [PR #235 — Complete Finance answers and host continuations](https://github.com/coopersully/personal-os/pull/235)
+  merged at `11e57410`; [PR #233 — Recover settings saves and modularize review and Finance services](https://github.com/coopersully/personal-os/pull/233)
+  merged at `2d957702`. This checkpoint supersedes branch-only delivery status in the October 8
+  history and October 9 continuation entries. Their original validation notes remain historical.
+- Finance history exposes bounded, owner-scoped case summaries and exact evidence without changing
+  active work. Transaction/account deletion retains immutable review evidence; user deletion removes
+  the archive. Published migration `0105` remains unchanged and `0109` upgrades deletion snapshots
+  additively. See the [Finance page contract](../design/pages/finances.md).
+- Canonical questions, exact app/SMS answers, notification discovery, signed prospective context,
+  bounded categorization approvals and durable acknowledgments now compose with host setup and
+  accepted-answer continuations. Durable receipts distinguish an accepted answer from completed
+  maintenance, and uncertain provider or host submissions are not blindly repeated. See
+  [Texting](texting-operations.md) and [automation hosts](automation-hosts.md).
+- Finance notification links open its scoped Reviews flow. Assistant, Texting recovery and some
+  MCP generated links still need migration; the accepted cross-workspace destination remains
+  unimplemented. See the [current navigation boundary](../design/pages/reviews.md).
+- [Settings recovery](workspace-settings.md) retains attempted changes after conflict or uncertain
+  delivery, lets a person inspect current values and explicitly reapply against that exact revision,
+  and fences account/session changes. Domain-owned review providers preserve aggregation and scope;
+  Finance merchant extraction retains domain and transaction boundaries.
+- Merge and source checks do not prove production rollout. Finance SMS remains disabled by default;
+  separate real Codex/Claude post-session journeys, latency/usage and authorized SMS delivery remain
+  launch acceptance requirements. Detailed verification belongs to each PR's final evidence record.
+
 ## 2026-10-08 — Finance review history read (branch implementation)
 
 - Added owner-scoped, bounded keyset history reads for open, deferred, and resolved Finance Inbox

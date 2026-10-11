@@ -565,3 +565,15 @@ post-session continuation trials, measured latency and usage remain launch evide
 Source merge does not establish production activation or provider delivery.
 
 The Finance SMS switch gates pending question admission as well as approvals and delivery. Disabling it leaves previously bound replies retryable without a financial receipt or answer. Terminal admission outcomes retain policy, authority or delivery reason codes; they do not blame a registered Finance producer for a consent or handoff failure.
+
+## Public program disclosures
+
+Public SMS terms and enrollment instructions are served at `/sms/`, with `/privacy/`, `/terms/`,
+and `/support/` available without authentication. Enrollment is optional; account creation does not
+authorize texts. The unchecked enrollment disclosure names the program, message types, variable
+frequency, message/data rates, STOP/HELP, and links to the same public policies. Consent version
+`2026-10-07-v2` identifies this disclosure; historical consent is not rewritten. SMS opt-in data and
+consent cannot be sold, shared, or transferred to third parties or affiliates, and mobile information
+is not shared for their marketing. Twilio and carriers process the information necessary to provide
+messaging. Follow the [submission evidence guide](../engineering/public-documentation.md) for the
+distinction between implemented pages, actual deployment, and provider approval.

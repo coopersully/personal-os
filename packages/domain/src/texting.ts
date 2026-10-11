@@ -3,7 +3,7 @@ import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "./common.js";
 import { financeHumanWorkRefSchema } from "./finance/workflow-contracts.js";
 
-export const textingConsentVersion = "2026-08-28-v1" as const;
+export const textingConsentVersion = "2026-10-07-v2" as const;
 export const textingCountrySchema = z.enum(["US", "CA"]);
 export const textingConnectionStateSchema = z.enum([
   "active",

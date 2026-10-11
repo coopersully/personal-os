@@ -4,7 +4,7 @@ for (const sizing of ["root font", "independent header"] as const) {
   test(`Mail native history navigation aligns below a 96px header (${sizing})`, async ({
     page,
   }) => {
-    await page.goto("/");
+    await page.goto("/login");
     await page.getByLabel("Email").fill("demo+full@nohmi.test");
     await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
     await page.getByRole("button", { name: "Log in" }).click();

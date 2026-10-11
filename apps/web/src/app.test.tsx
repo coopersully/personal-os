@@ -1752,6 +1752,42 @@ afterEach(() => {
 });
 
 describe("ilo web app", () => {
+  it("renders the product landing page without requesting a session", async () => {
+    setup("/");
+    expect(
+      await screen.findByRole("heading", { name: "Mail, tasks, calendar, and money." }),
+    ).toBeInTheDocument();
+    expect(mocks.getMe).not.toHaveBeenCalled();
+    expect(
+      within(screen.getByRole("navigation", { name: "Product navigation" })).getByRole("link", {
+        name: "Login",
+      }),
+    ).toHaveAttribute("href", "/login");
+    expect(screen.getAllByRole("link", { name: "Sign up" })[0]).toHaveAttribute("href", "/signup");
+  });
+
+  it("opens sign-up directly and keeps auth mode in the URL", async () => {
+    mocks.getMe.mockRejectedValue(new Error("unauthorized"));
+    const browser = userEvent.setup();
+    const view = setup("/signup");
+    expect(await screen.findByLabelText("Confirm password")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Already have an account? Sign in" }));
+    await waitFor(() => expect(view.location.value).toBe("/login"));
+    expect(await screen.findByRole("heading", { name: "Login" })).toBeInTheDocument();
+  });
+
+  it("returns to a protected destination after routed login", async () => {
+    mocks.getMe.mockRejectedValue(new Error("unauthorized"));
+    mocks.login.mockResolvedValue(user);
+    const browser = userEvent.setup();
+    const view = setup("/settings?section=security");
+    await screen.findByRole("heading", { name: "Login" });
+    expect(view.location.value).toBe("/login?next=%2Fsettings%3Fsection%3Dsecurity");
+    await browser.type(screen.getByLabelText("Email"), "test@example.com");
+    await browser.type(screen.getByLabelText("Password", { exact: true }), "LocalTestOnly123!");
+    await browser.click(screen.getByRole("button", { name: "Log in" }));
+    await waitFor(() => expect(view.location.value).toBe("/settings?section=security"));
+  });
   it("shows link-opening failures on the standalone downloads route", async () => {
     mocks.getDesktopRelease.mockResolvedValue({
       status: "available",
@@ -2766,7 +2802,7 @@ describe("ilo web app", () => {
 
     window.history.replaceState({}, "", "/?verifyEmail=verification-token");
     mocks.getMe.mockRejectedValueOnce(new Error("unauthorized"));
-    const verification = setup();
+    const verification = setup("/?verifyEmail=verification-token");
     await browser.click(await screen.findByRole("button", { name: "Confirm email" }));
     await waitFor(() =>
       expect(mocks.confirmEmailVerification).toHaveBeenCalledWith({
@@ -2778,7 +2814,7 @@ describe("ilo web app", () => {
 
     window.history.replaceState({}, "", "/?resetPassword=reset-token");
     mocks.getMe.mockRejectedValueOnce(new Error("unauthorized"));
-    const passwordReset = setup();
+    const passwordReset = setup("/?resetPassword=reset-token");
     await browser.type(await screen.findByLabelText("New password"), "LocalTestOnly123!");
     await browser.type(screen.getByLabelText("Confirm password"), "LocalTestOnly123!");
     await browser.click(screen.getByRole("button", { name: "Reset password" }));
@@ -2789,6 +2825,19 @@ describe("ilo web app", () => {
     });
     passwordReset.unmount();
     window.history.replaceState({}, "", "/");
+  });
+
+  it("returns to sign in after resetting a password with a cached signed-in session", async () => {
+    const browser = userEvent.setup();
+    const view = setup("/?resetPassword=reset-token");
+    await browser.type(await screen.findByLabelText("New password"), "LocalTestOnly123!");
+    await browser.type(screen.getByLabelText("Confirm password"), "LocalTestOnly123!");
+    await waitFor(() => expect(view.queryClient.getQueryData(["me"])).toEqual(user));
+    mocks.getMe.mockRejectedValue(new Error("unauthorized"));
+    await browser.click(screen.getByRole("button", { name: "Reset password" }));
+    await browser.click(await screen.findByRole("link", { name: "Return to sign in." }));
+    expect(await screen.findByRole("heading", { name: "Login" })).toBeInTheDocument();
+    expect(view.location.value).toBe("/login");
   });
 
   it("keeps authentication validation and one-time-link failures recoverable", async () => {
@@ -2847,7 +2896,7 @@ describe("ilo web app", () => {
           rejectReset = reject;
         }),
     );
-    const passwordReset = setup();
+    const passwordReset = setup("/?resetPassword=reset-token");
     await browser.type(await screen.findByLabelText("New password"), "LocalTestOnly123!");
     await browser.type(screen.getByLabelText("Confirm password"), "LocalTestOnly123!");
     await browser.click(screen.getByRole("button", { name: "Reset password" }));
@@ -10268,7 +10317,7 @@ describe("ilo web app", () => {
     window.history.replaceState({}, "", "/?resetPassword=reset-token");
     mocks.getMe.mockRejectedValueOnce(new Error("unauthorized"));
     const browser = userEvent.setup();
-    setup();
+    setup("/?resetPassword=reset-token");
     const password = await screen.findByLabelText("New password");
     const confirmation = screen.getByLabelText("Confirm password");
     await browser.type(password, "weak");

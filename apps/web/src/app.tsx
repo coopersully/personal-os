@@ -337,6 +337,11 @@ import {
   MailSidebar as MailFeatureSidebar,
 } from "./features/mail/mail.js";
 import { MailAppBarControls } from "./features/mail/workspace-header.js";
+import {
+  authenticationDestination,
+  isAuthenticationPath,
+} from "./features/public-site/auth-navigation.js";
+import { ProductLanding } from "./features/public-site/landing.js";
 import { ReminderRow, RemindersCreateButton } from "./features/reminders/page.js";
 import { ReviewFlowHost } from "./features/reviews/flow.js";
 import { ReviewNavigation } from "./features/reviews/navigation.js";
@@ -503,6 +508,15 @@ export function selectTodayTasks(
 }
 export function App() {
   const location = useLocation();
+  const tokenQuery = new URLSearchParams(location.search);
+  if (
+    location.pathname === "/" &&
+    !isTauri() &&
+    !tokenQuery.has("verifyEmail") &&
+    !tokenQuery.has("resetPassword")
+  ) {
+    return <ProductLanding />;
+  }
   if (location.pathname === "/downloads") {
     return (
       <>
@@ -540,6 +554,10 @@ function SessionApp() {
 }
 
 function AppContent({ me }: { me: UseQueryResult<User> }) {
+  const location = useLocation();
+  const tokenQuery = new URLSearchParams(location.search);
+  const hasAuthToken = tokenQuery.has("verifyEmail") || tokenQuery.has("resetPassword");
+  if (hasAuthToken) return <AuthScreen />;
   if (me.isPending) {
     return (
       <main className="center-screen">
@@ -547,7 +565,18 @@ function AppContent({ me }: { me: UseQueryResult<User> }) {
       </main>
     );
   }
-  if (me.isError && isUnauthorized(me.error)) return <AuthScreen />;
+  if (me.isError && isUnauthorized(me.error)) {
+    if (isAuthenticationPath(location.pathname)) return <AuthScreen />;
+    return (
+      <Navigate
+        replace
+        to={`/login?next=${encodeURIComponent(location.pathname + location.search + location.hash)}`}
+      />
+    );
+  }
+  if (me.data && isAuthenticationPath(location.pathname)) {
+    return <Navigate replace to={authenticationDestination(location.search)} />;
+  }
   if (me.isError && !me.data)
     return (
       <>
@@ -566,8 +595,6 @@ function AppContent({ me }: { me: UseQueryResult<User> }) {
 function AuthenticatedExperience({ user }: { user: User }) {
   useDocumentTheme(user.theme);
   const location = useLocation();
-  const verificationToken = new URLSearchParams(location.search).get("verifyEmail");
-  if (verificationToken) return <EmailVerificationScreen token={verificationToken} />;
   // A standalone flow owns the whole viewport and must resolve before the
   // redirect that sends unfinished accounts into it, or the redirect chases
   // its own destination and never renders.
@@ -633,7 +660,8 @@ function useDeviceWeatherLocation(enabled: boolean): DeviceWeatherLocation {
 
 function AuthScreen() {
   useDocumentTheme("system");
-  const params = new URLSearchParams(window.location.search);
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
   const verificationToken = params.get("verifyEmail");
   const passwordResetToken = params.get("resetPassword");
   if (verificationToken) return <EmailVerificationScreen token={verificationToken} />;
@@ -644,7 +672,11 @@ function AuthScreen() {
 
 function CredentialsScreen() {
   const queryClient = useQueryClient();
-  const [mode, setMode] = useState<"login" | "recovery" | "register">("login");
+  const location = useLocation();
+  const navigate = useNavigate();
+  const authPath = location.pathname.replace(/\/$/, "");
+  const mode =
+    authPath === "/signup" ? "register" : authPath === "/forgot-password" ? "recovery" : "login";
   const [inviteBlurred, setInviteBlurred] = useState(false);
   const [credentials, setCredentials] = useState({
     confirmPassword: "",
@@ -752,7 +784,9 @@ function CredentialsScreen() {
       inviteCode: "",
       password: "",
     }));
-    setMode(nextMode);
+    const path =
+      nextMode === "register" ? "/signup" : nextMode === "recovery" ? "/forgot-password" : "/login";
+    navigate(`${path}${location.search}`);
   };
   return (
     <AuthLayout>
@@ -893,11 +927,15 @@ function CredentialsScreen() {
 }
 
 function EmailVerificationScreen({ token }: { token: string }) {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const verification = useFeedbackMutation({
     feedback: { action: "confirm your email", form: true },
     mutationFn: () => api.confirmEmailVerification({ token }),
-    onSuccess: (user) => queryClient.setQueryData(["me"], user),
+    onSuccess: (user) => {
+      queryClient.setQueryData(["me"], user);
+      navigate("/today", { replace: true });
+    },
   });
   return (
     <AuthActionShell
@@ -923,20 +961,25 @@ function EmailVerificationScreen({ token }: { token: string }) {
 }
 
 function PasswordResetScreen({ token }: { token: string }) {
+  const queryClient = useQueryClient();
   const [complete, setComplete] = useState(false);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const reset = useFeedbackMutation({
     feedback: { action: "reset your password", form: true },
     mutationFn: () => api.resetPassword({ password, token }),
-    onSuccess: () => setComplete(true),
+    onSuccess: async () => {
+      // Reset revokes sessions; discard cached account/workspace data before another login.
+      await queryClient.resetQueries();
+      setComplete(true);
+    },
   });
   const passwordsMatch = confirmPassword.length > 0 && password === confirmPassword;
   return (
     <AuthActionShell title="Choose a new password">
       {complete ? (
         <p className="form-success" role="status">
-          Your password has been reset. Return to the app to sign in.
+          Your password has been reset. <Link to="/login">Return to sign in.</Link>
         </p>
       ) : (
         <FeedbackForm
@@ -978,14 +1021,26 @@ function AuthLayout({ children }: { children: ReactNode }) {
     <main className="auth-shell">
       <div className="auth-entry">
         <header className="auth-header">
-          <div className="auth-header__brand">
+          <Link to="/" aria-label="nohmi home" className="auth-header__brand">
             <span aria-hidden="true" className="auth-header__symbol">
               <NohmiBrandMark symbol />
             </span>
             <NohmiBrandMark />
-          </div>
+          </Link>
         </header>
         <section className="auth-form-wrap">{children}</section>
+        <nav
+          aria-label="About nohmi and policies"
+          className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted-foreground"
+        >
+          <a href="/about/">About nohmi</a>
+          <a href="/docs/">Guide</a>
+          <a href="/privacy/">Privacy policy</a>
+          <a href="/terms/">Terms of use</a>
+          <a href="/data-use/">Data use</a>
+          <a href="/sms/">SMS</a>
+          <a href="/support/">Support</a>
+        </nav>
       </div>
       <ShadcnCard aria-hidden="true" className="auth-brand-panel">
         <ShadcnCardContent>

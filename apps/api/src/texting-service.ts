@@ -199,7 +199,7 @@ export function createTextingService(options: Options) {
             .update(textingConnections)
             .set({
               consentEpoch: existing.consentEpoch + 1,
-              consentVersion: textingConsentVersion,
+              consentVersion: challenge.consentVersion,
               country: challenge.country,
               disconnectedAt: null,
               encryptedPhoneNumber: challenge.encryptedPhoneNumber,
@@ -215,7 +215,7 @@ export function createTextingService(options: Options) {
           const [createdConnection] = await tx
             .insert(textingConnections)
             .values({
-              consentVersion: textingConsentVersion,
+              consentVersion: challenge.consentVersion,
               country: challenge.country,
               encryptedPhoneNumber: challenge.encryptedPhoneNumber,
               phoneFingerprint: challenge.phoneFingerprint,

@@ -170,7 +170,17 @@ describe.sequential("texting service", () => {
       country: "US",
       phoneNumber: "+12125550123",
     });
+    // A deployment between requesting and checking the code must not rewrite consent.
+    await database.db
+      .update(textingVerificationChallenges)
+      .set({ consentVersion: "2026-08-28-v1" })
+      .where(eq(textingVerificationChallenges.id, approvedChallenge.id));
     const connection = await service.checkVerification(userId, approvedChallenge.id, "123456");
+    expect(
+      await database.db.query.textingConnections.findFirst({
+        where: eq(textingConnections.userId, userId),
+      }),
+    ).toMatchObject({ consentVersion: "2026-08-28-v1" });
     expect(connection).toMatchObject({ state: "active", senderPhoneNumber: "+18885550100" });
 
     const empty = await service.conversation(principal, "America/New_York", { limit: 100 });
@@ -357,7 +367,16 @@ describe.sequential("texting service", () => {
       country: "US",
       phoneNumber: "+12125550123",
     });
+    await database.db
+      .update(textingVerificationChallenges)
+      .set({ consentVersion: "2026-08-28-v1" })
+      .where(eq(textingVerificationChallenges.id, reconnect.id));
     expect((await service.checkVerification(userId, reconnect.id, "123456")).state).toBe("active");
+    expect(
+      await database.db.query.textingConnections.findFirst({
+        where: eq(textingConnections.userId, userId),
+      }),
+    ).toMatchObject({ consentVersion: "2026-08-28-v1" });
     await service.disconnect("22222222-2222-4222-8222-222222222222");
   }, 15_000);
 

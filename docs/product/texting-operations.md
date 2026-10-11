@@ -1,6 +1,6 @@
 # nohmi texting and SMS
 
-- Status: Living target product contract; transport foundation shipped, general inbox pending
+- Status: Living target product contract; transport and bounded Finance runtime merged, general inbox and live Finance launch evidence pending
 - Last reconciled: 2026-09-11
 
 ## Product role
@@ -79,11 +79,13 @@ outstanding Review and Attention work across available workspaces—including qu
 connector failures, and recovery steps—and follow each item to its owning domain. A single-item
 context link may open that exact item or owning workspace.
 
-**Current implementation gap:** at `fe983085`, producers still emit the former
-`/settings?section=reviews` destination, but it now falls back to Account. The shipped
+**Current implementation boundary:** at `2d957702`, Finance notifications use
+`/finances?review=open`, with exact Finance links available for contextual questions and cases.
+Texting reply-status responses still emit the former `/settings?section=reviews` destination,
+which falls back to Account; assistant and some MCP approval links also remain incomplete. The merged
 [Reviews flow](../design/pages/reviews.md) is scoped to one workspace and does not implement the
 accepted cross-workspace destination. The old URL is not evidence that multi-item review navigation
-works. The producer/schema inventory and verification needs are recorded in that contract; the
+works. The current producer/schema inventory and verification needs are recorded in that contract; the
 accepted cross-workspace requirement remains pending rather than being silently narrowed to one
 workspace. This checkpoint does not select a new route or claim a completed migration.
 
@@ -295,17 +297,21 @@ explicit local offset.
 
 ## Current gaps
 
-The shipped implementation provides verification, consent, conversation history, guarded manual
+The merged implementation provides verification, consent, conversation history, guarded manual
 reads and sends, delivery lifecycle, webhook handling, and MCP tools for reading and sending. It
 has a shared authenticated Reviews flow scoped to one workspace, with domain-owned actions.
 The older cross-workspace queue component remains unrouted; generated legacy links fall back to
 Account. The accepted unified multi-workspace destination is therefore still a gap. Current
 sources include reconnect-required Mail and Calendar accounts, but complete connector-failure and
 recovery coverage remains target work. Texting does not yet provide general-inbox intent
-classification, work-node answers, cross-workspace child
-intents, event-driven agent dispatch, `maintain_texting`, available Finance notification producers, general per-workspace SMS controls, or SMS-bound approvals.
-The T0 foundation below stores notification preferences and delivery lifecycle separately from the
-unavailable producer and routing capabilities.
+classification, work-node answers, cross-workspace child intents, a general event-driven agent
+dispatcher, `maintain_texting`, or general per-workspace SMS controls. The bounded Finance runtime
+does include notification discovery, signed `Finance:` context capture, exact question replies,
+restricted categorization approve/reject, durable acknowledgments and accepted-answer host
+continuations. These do not implement the general inbox or authorize stronger decisions by SMS.
+Finance SMS admission and delivery remain behind the default-off Finance SMS switch as well as
+shared transport consent and enablement. The merged-runtime section below supersedes the original
+T0 producer-availability and reply limitations; the foundation sections retain their historical scope.
 
 Local tests prove validation, persistence, signed-webhook handling, and degraded provider behavior
 with mocks. They do not prove production sender registration, carrier reachability, callback
@@ -440,6 +446,11 @@ owner-scoped expiry sweep remains available to its caller, without a new global 
 
 ## T0 notification implementation boundary
 
+This section records the original T0 foundation. Its absent-producer, non-replyable message and
+legacy-link statements describe that slice, not current composition. The merged Finance runtime
+below registers the real resolver and discovery loop, adds bounded reply/approval bindings, and
+uses the Finance review flow. Its delivery and uncertainty invariants still apply.
+
 The T0 notification slice adds owner-scoped notification preferences, durable work intents, and
 separate delivery-attempt history. It does not enable Finance SMS replies. Production notification status reports `producer_not_registered` until the authoritative Finance
 work resolver is registered. Only authenticated status and human preference updates are registered;
@@ -516,7 +527,15 @@ The configured first-party origin is validated at construction (HTTP or HTTPS, n
 path, query or fragment); request headers cannot choose the destination.
 
 
-### Finance completion branch (2026-10-09; source evidence)
+### Merged Finance runtime (2026-10-09; source evidence)
+
+[PR #235 — Complete Finance answers and host continuations](https://github.com/coopersully/personal-os/pull/235)
+merged at `11e57410`. `apps/api/src/app.ts` composes the real Finance resolver with notification
+publication and draining. `finance-notification-runtime.ts` discovers current owner-scoped work
+in bounded pages and repairs interrupted publication without reissuing consumed question authority.
+The ordered context, acknowledgment, host and notification phases attempt independent work even if
+one phase fails, then report the failure. This reconciles durable accepted work; external hosts
+continue to own recurring maintenance schedules.
 
 The Finance producer now issues exact canonical questions, with complete allowlisted question
 wording and at most three numbered reply bindings. Custom or sensitive prompts and oversized
@@ -538,7 +557,9 @@ state that distinction. Only the bound original maintenance grant may continue t
 fires dispatch one exact case answer per session; unrelated answers remain pending until its run settles. Uncertain or submitted fires are
 not retried. A human may move an undispatched waiting answer to a different live host.
 
-These are branch implementation claims. Full verification, current review and real authorized
-transport plus separate Codex and Claude continuation trials remain release evidence requirements.
+These are merged source claims. The PR's final verification record covers integrated local tests,
+builds, browser acceptance and review. Real authorized transport plus separate Codex and Claude
+post-session continuation trials, measured latency and usage remain launch evidence requirements.
+Source merge does not establish production activation or provider delivery.
 
 The Finance SMS switch gates pending question admission as well as approvals and delivery. Disabling it leaves previously bound replies retryable without a financial receipt or answer. Terminal admission outcomes retain policy, authority or delivery reason codes; they do not blame a registered Finance producer for a consent or handoff failure.

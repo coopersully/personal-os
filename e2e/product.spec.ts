@@ -20,7 +20,7 @@ async function selectCalendarView(page: Page, view: string) {
 }
 
 test("the repository QA fixture login exposes representative workspace data", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
@@ -116,7 +116,7 @@ test("desktop navigation fills the viewport while long content scrolls independe
   // This flow checks three workspaces and nine Calendar view/viewport combinations, then restores settings.
   test.setTimeout(90_000);
   await page.setViewportSize({ width: 1280, height: 480 });
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
@@ -334,7 +334,7 @@ test("desktop navigation fills the viewport while long content scrolls independe
 });
 
 test("Reviews and agent controls separate decisions from configuration", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
@@ -444,7 +444,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
       .click();
   };
 
-  await page.goto("/");
+  await page.goto("/login");
   await expect(page.getByRole("heading", { name: "Login" })).toBeVisible();
   await page.getByRole("button", { name: "Have an invite? Create an account" }).click();
   await page.getByLabel("Invite code").fill("E2E12345");
@@ -866,7 +866,7 @@ test("feedback keeps corrections in context and action failures in toasts", asyn
   page,
 }, testInfo) => {
   const email = `feedback+${testInfo.project.name}-${Date.now()}@example.com`;
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByRole("button", { name: "Have an invite? Create an account" }).click();
   await page.getByLabel("Name").fill("Feedback Person");
   await page.getByLabel("Invite code").fill("E2E12345");
@@ -940,7 +940,7 @@ test("Mail sync recovery remains reachable in constrained headers", async ({ pag
   if (testInfo.project.name === "desktop-chromium") {
     await page.setViewportSize({ width: 950, height: 640 });
   }
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();

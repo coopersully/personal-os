@@ -18,7 +18,7 @@ test("two editors retain attempted workspace values and explicitly recover repea
   browser,
 }, info) => {
   test.setTimeout(90_000);
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
@@ -123,7 +123,7 @@ for (const workspace of ["calendar", "mail"] as const) {
     page,
   }, info) => {
     const mobile = !!info.project.use.isMobile;
-    await page.goto("/");
+    await page.goto("/login");
     await page.getByLabel("Email").fill("demo+full@nohmi.test");
     await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
     await page.getByRole("button", { name: "Log in" }).click();
@@ -229,7 +229,7 @@ async function openSettingsSection(page: Page, mobile: boolean, label: string) {
 test("Finance account selection recovery stays readable after reopening and navigating to Settings", async ({
   page,
 }, info) => {
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
@@ -325,7 +325,7 @@ test("Finance account selection recovery stays readable after reopening and navi
 test("Tasks failed project pin reaches Settings and reapplies only its reviewed revision without losing other pins", async ({
   page,
 }, info) => {
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();

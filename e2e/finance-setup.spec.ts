@@ -8,7 +8,7 @@ if (!demoAccount) throw new Error("The demo-full QA fixture is required.");
 test("an incomplete first plan survives reload and leaves bookkeeping available", async ({
   page,
 }, testInfo) => {
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill(demoAccount.email);
   await page.getByLabel("Password", { exact: true }).fill(demoAccount.password);
   await page.getByRole("button", { name: "Log in" }).click();

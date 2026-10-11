@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test("settings support field search, ritual history, and resumable setup replay", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();

@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "dev": "vite --host 0.0.0.0",
+    "build": "pnpm public:generate && vite build",
+    "dev": "pnpm public:generate && vite --host 0.0.0.0",
     "dev:container": "pnpm dev",
     "preview": "vite preview --host 0.0.0.0",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "public:generate": "tsx --tsconfig tsconfig.json scripts/generate-public-documents.tsx"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

@@ -1,3 +1,4 @@
+import { textingConsentVersion } from "@personal-os/domain";
 import { createTextingApiClient } from "./texting.js";
 
 describe("texting API client", () => {
@@ -17,6 +18,7 @@ describe("texting API client", () => {
     await expect(
       api.startTextingVerification({
         consentAccepted: true,
+        consentVersion: textingConsentVersion,
         country: "US",
         phoneNumber: "+12125550123",
       }),

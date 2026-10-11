@@ -6,7 +6,6 @@ import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
-import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
 import { Badge } from "../../components/ui/badge.js";
 import { Button } from "../../components/ui/button.js";
 import { Checkbox } from "../../components/ui/checkbox.js";
@@ -312,6 +311,10 @@ function DesktopSettingsContent({
   });
   useSettingsError(query.data?.native.error, query.data?.native.error ?? "macOS needs attention.");
   useSettingsError(
+    query.data?.wallpaperError,
+    "Wallpaper could not refresh. nohmi will retry while it is running.",
+  );
+  useSettingsError(
     query.data?.mailError,
     "Couldn’t refresh mail notifications. Check your connection.",
   );
@@ -357,14 +360,6 @@ function DesktopSettingsContent({
   return (
     <div className="settings-stack min-w-0">
       {connectionOnly ? <RitualLocal recoveryOnly /> : null}
-      {query.data?.native.error ? (
-        <Alert variant="destructive">
-          <AlertTitle>macOS needs attention</AlertTitle>
-          <AlertDescription>
-            Check macOS permissions and reconnect the desktop app.
-          </AlertDescription>
-        </Alert>
-      ) : null}
       <MutationFeedback feedback={autosave.feedback} />
       <QueryFeedback query={query} title="Couldn’t refresh desktop preferences." staleOnly />
       <FeedbackForm
@@ -390,11 +385,6 @@ function DesktopSettingsContent({
                     value={draft.launchAtLogin}
                     onChange={(launchAtLogin) => update({ launchAtLogin })}
                   />
-                  {query.data?.wallpaperError ? (
-                    <p role="alert">
-                      Wallpaper could not refresh. nohmi will retry while it is running.
-                    </p>
-                  ) : null}
                   {background}
                 </SettingsSection>
                 <SettingsSection title="Widgets">

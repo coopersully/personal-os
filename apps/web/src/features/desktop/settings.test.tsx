@@ -434,12 +434,17 @@ describe("desktop preferences", () => {
   it("reports native test failures through Sonner without an inline action alert", async () => {
     status.native.notificationPermission = "authorized";
     status.native.testNotificationStatus = "failed";
-    mount({ section: "notifications" });
+    const { cache } = mount({ section: "notifications" });
     await userEvent.click(await screen.findByRole("button", { name: "Test notification" }));
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(vi.mocked(toast.error).mock.calls.at(-1)?.[1]?.id).toBe(
       vi.mocked(toast.loading).mock.calls.at(-1)?.[1]?.id,
     );
+    await act(async () => {
+      await cache.invalidateQueries({ queryKey: ["desktop-settings"] });
+    });
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(toast.success).not.toHaveBeenCalled();
     const errorMessage = vi.mocked(toast.error).mock.calls.at(-1)?.[0];
     expect(screen.queryByText(String(errorMessage))).not.toBeInTheDocument();
@@ -567,8 +572,18 @@ describe("desktop preferences", () => {
       native: { error: "Login registration needs approval", widgetsAvailable: true },
     };
     mount();
-    expect(await screen.findByText(/Check macOS permissions/)).toBeInTheDocument();
-    expect(screen.getByText(/Wallpaper could not refresh/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Login registration needs approval",
+        expect.anything(),
+      ),
+    );
+    expect(toast.error).toHaveBeenCalledWith(
+      "Wallpaper could not refresh. nohmi will retry while it is running.",
+      expect.anything(),
+    );
+    expect(screen.queryByText(/Check macOS permissions/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Wallpaper could not refresh/)).not.toBeInTheDocument();
     expect(
       screen.getByText("Native widgets are available through Edit Widgets on your desktop."),
     ).toBeInTheDocument();
@@ -1075,4 +1090,19 @@ it("offers permission setup when native permission is unavailable", async () => 
   expect(await screen.findByText("macOS permission: unavailable")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Test notification" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Allow notifications" })).toBeEnabled();
+});
+
+it("reports background native errors once through Sonner without an inline banner", async () => {
+  status.native.error = "Native background service unavailable";
+  const { cache } = mount({ section: "notifications" });
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(status.native.error, expect.anything()),
+  );
+  await act(async () => {
+    await cache.invalidateQueries({ queryKey: ["desktop-settings"] });
+  });
+  expect(toast.error).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(screen.queryByText("macOS needs attention")).not.toBeInTheDocument();
+  expect(screen.queryByText(status.native.error)).not.toBeInTheDocument();
 });

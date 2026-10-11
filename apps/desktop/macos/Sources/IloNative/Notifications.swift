@@ -578,9 +578,9 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
     ) { result in
       switch result {
       case .success: self.testNotificationStatus = "accepted"
-      case .failure(let error):
+      case .failure:
+        // The initiating test action owns its Sonner outcome, not the background error channel.
         self.testNotificationStatus = "failed"
-        self.lastError = error.localizedDescription
       }
     }
   }

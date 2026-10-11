@@ -191,6 +191,7 @@ function DesktopSettingsContent({
     notifications?: Partial<DesktopSettings["notifications"]>;
   };
   const pendingSettings = useRef<SettingsPatch>({});
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pending edits belong only to the account and server where they were made.
   useEffect(() => {
     pendingSettings.current = {};
   }, [query.data?.settings.serverUrl, query.data?.accountId]);

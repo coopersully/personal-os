@@ -67,7 +67,9 @@ type EventItem = {
   conferenceUrl?: string;
 };
 export type PetData = {
+  contentError?: string;
   content?: {
+    unavailable?: boolean;
     rituals?: RitualCard[];
     tasks?: WorkContent;
     reminders?: WorkContent;
@@ -145,7 +147,10 @@ function PetContent() {
     retry: false,
   });
   const me = useQuery({ queryKey: ["me"], queryFn: api.getMe, retry: false });
-  const snapshot = data.data?.snapshot;
+  const rawSnapshot = data.data?.snapshot;
+  const snapshot = rawSnapshot
+    ? { ...rawSnapshot, stale: rawSnapshot.stale || data.isError || !!data.data?.contentError }
+    : rawSnapshot;
   useEffect(() => {
     if (
       data.data?.presentation &&
@@ -238,6 +243,10 @@ function PetContent() {
     onSuccess: (_result, value) => setPinned(value),
   });
   useSettingsError(presentationError, "Couldn’t sync the pet window. Try reopening quick access.");
+  useSettingsError(
+    data.data?.contentError,
+    "Couldn’t refresh quick-access content. It will retry automatically.",
+  );
   useSettingsError(data.error, "Couldn’t load quick access. It will retry automatically.");
   useSettingsError(me.error, "Couldn’t refresh your account. Open nohmi to reconnect.");
   useEffect(() => {
@@ -428,7 +437,7 @@ function PetContent() {
           <CardHeader className="px-3">
             <CardTitle>{ritual.kind === "morning" ? "Morning ritual" : "Night ritual"}</CardTitle>
             <CardDescription>
-              {ritual.stale ? "Status needs refreshing" : ritual.status}
+              {ritual.stale || snapshot?.stale ? "Status needs refreshing" : ritual.status}
               {ritual.syncStatus !== "saved" ? " · Waiting to sync" : ""}
             </CardDescription>
           </CardHeader>
@@ -436,7 +445,7 @@ function PetContent() {
             <CardContent className="px-3">
               <Button
                 variant="secondary"
-                disabled={action.isPending}
+                disabled={action.isPending || snapshot.stale}
                 aria-label={`Open ${ritual.kind} ritual`}
                 onClick={() =>
                   action.mutate({
@@ -531,10 +540,10 @@ function PetContent() {
             {rituals(true)}
             {calendar}
             {rituals(false)}
-            {data.data?.workspaces.includes("tasks")
+            {!data.data?.content?.unavailable && data.data?.workspaces.includes("tasks")
               ? work(snapshot.tasks, "task", "Tasks", data.data?.content?.tasks)
               : null}
-            {data.data?.workspaces.includes("reminders")
+            {!data.data?.content?.unavailable && data.data?.workspaces.includes("reminders")
               ? work(snapshot.reminders, "reminder", "Reminders", data.data?.content?.reminders)
               : null}
             {data.data?.workspaces.includes("finances") && (finance || snapshot.financeSummary) ? (

@@ -104,6 +104,29 @@ fn authorize_window(window: &tauri::WebviewWindow) -> Result<(), String> {
         Err("This action belongs to quick access.".into())
     }
 }
+fn completion_body(kind: &str) -> Value {
+    if kind == "task" {
+        json!({})
+    } else {
+        json!({"completed":true})
+    }
+}
+fn publish_content(data: &mut Value, result: Result<Value, String>) -> Result<(), String> {
+    match result {
+        Ok(content) => {
+            data["content"] = content;
+            data["contentError"] = Value::Null;
+        }
+        Err(_) => {
+            // Publish native freshness/presentation even when this separate projection fails.
+            data["snapshot"]["stale"] = json!(true);
+            data["content"] = json!({"unavailable":true});
+            data["contentError"] = json!("Couldn’t refresh quick-access content.");
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn pet_snapshot(
     app: tauri::AppHandle,
@@ -137,8 +160,10 @@ pub async fn pet_snapshot(
             ranges,
         )
     };
-    data["content"] =
-        crate::pet_content::load(&app, &settings.server_url, &account, &settings, &ranges).await?;
+    publish_content(
+        &mut data,
+        crate::pet_content::load(&app, &settings.server_url, &account, &settings, &ranges).await,
+    )?;
     let current = state.settings.lock().await;
     if state.generation.load(std::sync::atomic::Ordering::SeqCst) != generation
         || current.server_url != settings.server_url
@@ -321,7 +346,7 @@ pub async fn pet_action(
                     server_url: server.into(),
                     path: format!("/v1/{kind}s/{id}/complete"),
                     method: "POST".into(),
-                    body: Some("{\"completed\":true}".into()),
+                    body: Some(completion_body(kind).to_string()),
                     expected_account_id: Some(account.into()),
                 },
             )
@@ -338,5 +363,33 @@ pub async fn pet_action(
             Ok(())
         }
         _ => Err("Unsupported quick-access action.".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn completion_bodies_match_domain_contract_fixture() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../../fixtures/pet-completion.json")).unwrap();
+        for kind in ["task", "reminder"] {
+            assert_eq!(completion_body(kind), fixture[kind]);
+        }
+    }
+    #[test]
+    fn content_failure_publishes_native_staleness_without_old_rituals() {
+        let mut data =
+            json!({"snapshot":{"accountId":"a","stale":true},"presentation":{"pinned":true}});
+        assert!(publish_content(&mut data, Err("offline".into())).is_ok());
+        assert_eq!(data["snapshot"]["stale"], true);
+        assert_eq!(data["presentation"]["pinned"], true);
+        assert_eq!(data["content"]["unavailable"], true);
+        assert!(data["content"]["rituals"].is_null());
+        let mut fresh = json!({"snapshot":{"accountId":"a","stale":false}});
+        publish_content(&mut fresh, Err("offline".into())).unwrap();
+        assert_eq!(fresh["snapshot"]["stale"], true);
+        publish_content(&mut fresh, Ok(json!({"tasks":{"items":[]}}))).unwrap();
+        assert!(fresh["contentError"].is_null());
     }
 }

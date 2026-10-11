@@ -240,3 +240,20 @@ Shoo thresholds have synthetic-trace coverage but still need real-pointer calibr
 Tasks 6–8 and full verification remain outstanding. Local HMR briefly failed because a new
 select import referenced an absent primitive; it now uses the existing NativeSelect and the
 app renders again.
+
+### Content and live acceptance checkpoint
+
+Commit `3b88a892` adds independent content windows, canonical ritual cards, settled-peek clock
+suspension, and presentation ordering. Verification at this checkpoint: 91 Swift tests, 63 Rust
+tests, and 62 focused desktop frontend tests passed. The debug build is installed as nohmi Local.
+Cooper confirmed rapid color/scale changes settle smoothly and correctly, then confirmed nearby
+underlying-app clicks and closed-pet shoo behavior look good. Native UI inspection also verified
+that opening nohmi from the pinned card preserves its pin and visibility. These are qualitative
+interaction results; no measured p95 latency or full multi-display acceptance is claimed.
+Full repository verification and fresh whole-branch review remain release gates.
+
+Follow-up: shoo needed to invalidate the prior card placement after an earlier opening. A native
+open/close/shoo/reopen regression failed before the fix and passes afterward; Cooper confirmed
+“Fixed” in the rebuilt app. Whole-branch review also found and corrected the task completion body
+and content-refresh freshness handling. Shared request fixtures now validate against domain
+schemas; failed refreshes preserve native freshness, disable stale actions, and notify via Sonner.

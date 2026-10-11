@@ -679,6 +679,8 @@ final class PetController: NSObject {
     cancelIdle()
     shooNeedsExit = true
     compactAnchor = anchor; cardAnchor = anchor
+    cardFollowsCompact = true
+    movedSinceOpening = false
     settleFrom = compact
     settleTo = geometry.anchors(size: compact.size)[anchor]
     settleCard = false

@@ -38,10 +38,11 @@ beforeEach(() => {
     command === "pet_snapshot" ? fixture : undefined,
   );
 });
-function mount() {
+function mount(client?: QueryClient) {
   return render(
     <QueryClientProvider
       client={
+        client ??
         new QueryClient({
           defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
         })
@@ -367,4 +368,60 @@ it("ignores older presentation snapshots after a newer native pin event", async 
       "true",
     ),
   );
+});
+
+it("disables cached actions and marks ritual status stale after a refresh failure", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  let failed = false;
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command !== "pet_snapshot") return;
+    if (failed) throw new Error("offline");
+    return {
+      ...fixture,
+      content: {
+        rituals: [
+          {
+            id: "r",
+            kind: "morning",
+            logicalDate: "2026-10-11",
+            status: "Ready",
+            urgent: true,
+            canOpen: true,
+            stale: false,
+            syncStatus: "saved",
+          },
+        ],
+      },
+    };
+  });
+  mount(client);
+  expect(await screen.findByRole("checkbox")).toBeEnabled();
+  expect(await screen.findByRole("button", { name: "Open morning ritual" })).toBeEnabled();
+  failed = true;
+  await act(async () => {
+    await client.refetchQueries({ queryKey: ["pet-snapshot"] });
+  });
+  await waitFor(() => expect(screen.getByRole("checkbox")).toBeDisabled());
+  expect(screen.getByRole("button", { name: "Open morning ritual" })).toBeDisabled();
+  expect(screen.getByText("Status needs refreshing")).toBeInTheDocument();
+  expect(screen.queryByText("Ready")).not.toBeInTheDocument();
+  expect(toast.error).toHaveBeenCalled();
+  expect(screen.queryByText("offline")).not.toBeInTheDocument();
+});
+it("delivers content refresh errors through Sonner without showing empty date windows", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "pet_snapshot"
+      ? {
+          ...fixture,
+          content: { unavailable: true },
+          contentError: "Couldn’t refresh quick-access content.",
+          snapshot: { ...fixture.snapshot, stale: true },
+        }
+      : undefined,
+  );
+  mount();
+  await waitFor(() => expect(toast.error).toHaveBeenCalled());
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(screen.queryByText("Nothing in this date window.")).not.toBeInTheDocument();
+  expect(screen.queryByText("Couldn’t refresh quick-access content.")).not.toBeInTheDocument();
 });

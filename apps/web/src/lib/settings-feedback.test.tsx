@@ -56,3 +56,24 @@ it("keeps settings failures in Sonner with a retry action and no duplicate alert
   fireEvent.click(screen.getByRole("button", { name: "Retry setting" }));
   expect(retry).toHaveBeenCalledOnce();
 });
+
+it("announces an existing error when enabled and dismisses it when disabled", () => {
+  vi.mocked(toast.error).mockClear();
+  vi.mocked(toast.dismiss).mockClear();
+  const error = new Error("offline");
+  const content = (enabled: boolean) => (
+    <SettingsFeedbackContext.Provider value={enabled}>
+      <InlineError error={error} title="Couldn’t load settings." retry={() => {}} />
+    </SettingsFeedbackContext.Provider>
+  );
+  const { rerender } = render(content(false));
+  expect(toast.error).not.toHaveBeenCalled();
+  rerender(content(true));
+  expect(toast.error).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText("Couldn’t load settings.")).not.toBeInTheDocument();
+  rerender(content(false));
+  expect(toast.dismiss).toHaveBeenCalledTimes(1);
+  expect(screen.getByText("Couldn’t load settings.")).toBeInTheDocument();
+  rerender(content(true));
+  expect(toast.error).toHaveBeenCalledTimes(2);
+});

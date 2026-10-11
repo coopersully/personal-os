@@ -164,7 +164,6 @@ export function RitualLocal({ recoveryOnly = false }: { recoveryOnly?: boolean }
           </Button>
         </div>
       ) : null}
-      {error ? <p role="alert">{error}</p> : null}
     </div>
   );
 }

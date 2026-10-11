@@ -129,6 +129,9 @@ beforeEach(() => {
         return status;
       }
       if (command === "desktop_save_settings") {
+        const n = args!.settings!.notifications;
+        if ((n.quietStart === null) !== (n.quietEnd === null))
+          throw new Error("Set both quiet-hours times.");
         status = {
           ...status,
           settings: {
@@ -253,7 +256,10 @@ describe("desktop preferences", () => {
     expect(screen.queryByRole("switch", { name: "Open at login" })).not.toBeInTheDocument();
     fireEvent.change(server, { target: { value: "https://custom.example.com" } });
     await userEvent.click(screen.getByRole("button", { name: "Test connection" }));
-    expect(await screen.findByText("Connection verified")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("Connection verified", expect.anything()),
+    );
+    expect(screen.queryByText("Connection verified")).not.toBeInTheDocument();
     expect(mocks.invoke).toHaveBeenCalledWith("desktop_test_connection", {
       serverUrl: "https://custom.example.com",
     });
@@ -272,7 +278,9 @@ describe("desktop preferences", () => {
     const server = screen.getByLabelText("Custom API server");
     fireEvent.change(server, { target: { value: "https://custom.example.com" } });
     await userEvent.click(screen.getByRole("button", { name: "Test connection" }));
-    await screen.findByText("Connection verified");
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("Connection verified", expect.anything()),
+    );
     fireEvent.change(server, { target: { value: "https://other.example.com" } });
     expect(screen.queryByText("Connection verified")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Use hosted nohmi" }));
@@ -952,4 +960,17 @@ it("keeps ritual cards opt-in and autosaves the preference", async () => {
   expect(toggle).not.toBeChecked();
   await userEvent.click(toggle);
   await waitFor(() => expect(status.settings.petShowRituals).toBe(true));
+});
+
+it("retains half-entered quiet hours across an unrelated autosave", async () => {
+  mount({ section: "notifications" });
+  fireEvent.change(await screen.findByLabelText("From"), { target: { value: "22:00" } });
+  await userEvent.click(screen.getByRole("switch", { name: "Show message previews" }));
+  await waitFor(() => expect(status.settings.notifications.preview).toBe(true));
+  expect(screen.getByLabelText("From")).toHaveValue("22:00");
+  expect(status.settings.notifications.quietStart).toBeNull();
+  fireEvent.change(screen.getByLabelText("Until"), { target: { value: "07:00" } });
+  await waitFor(() =>
+    expect(status.settings.notifications).toMatchObject({ quietStart: "22:00", quietEnd: "07:00" }),
+  );
 });

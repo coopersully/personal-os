@@ -157,13 +157,15 @@ export function DesktopUpdates() {
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        {status.data ? <UpdateProgress status={status.data} /> : null}
+        {status.data && status.data.phase !== "error" ? (
+          <UpdateProgress status={status.data} />
+        ) : null}
         {status.data?.checkedAt ? (
           <p className="text-sm text-muted-foreground">
             Last checked {new Date(status.data.checkedAt).toLocaleString()}
           </p>
         ) : null}
-        {status.error || check.error ? (
+        {status.error ? (
           <Alert>
             <AlertDescription>
               Could not read update status{" "}
@@ -215,11 +217,6 @@ export function DesktopUpdates() {
               Save your work before restarting. Your account and saved data will stay in place.
             </DialogDescription>
           </DialogHeader>
-          {restart.error ? (
-            <p role="alert">
-              {restart.error instanceof Error ? restart.error.message : String(restart.error)}
-            </p>
-          ) : null}
           <DialogFooter>
             <Button variant="ghost" disabled={restart.isPending} onClick={() => setConfirm(false)}>
               Not now

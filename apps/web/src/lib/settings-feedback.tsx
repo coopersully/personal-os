@@ -18,6 +18,11 @@ export function useSettingsError(error: unknown, message: string, retry?: () => 
     [id],
   );
   useEffect(() => {
+    if (!enabled) {
+      if (previous.current) toast.dismiss(id);
+      previous.current = null;
+      return;
+    }
     const key = error
       ? `${message}:${error instanceof Error ? error.message : String(error)}`
       : null;

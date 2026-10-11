@@ -148,7 +148,6 @@ function DesktopSettingsContent({
     return () => window.removeEventListener("focus", refresh);
   }, [cache]);
   const [draft, setDraft] = useState<DesktopSettings | null>(null);
-  const [tested, setTested] = useState<string | null>(null);
   const [advancedServerOpen, setAdvancedServerOpen] = useState(false);
   useEffect(() => {
     if (query.data && query.isFetchedAfterMount)
@@ -217,6 +216,11 @@ function DesktopSettingsContent({
         setDraft((current) => ({
           ...value.settings,
           serverUrl: current?.serverUrl ?? value.settings.serverUrl,
+          notifications: {
+            ...value.settings.notifications,
+            quietStart: current?.notifications.quietStart ?? null,
+            quietEnd: current?.notifications.quietEnd ?? null,
+          },
           petColor: current?.petColor ?? value.settings.petColor,
           petScale: current?.petScale ?? value.settings.petScale ?? 1,
         }));
@@ -227,6 +231,11 @@ function DesktopSettingsContent({
         const settings = current.data.settings;
         setDraft((draft) => ({
           ...settings,
+          notifications: {
+            ...settings.notifications,
+            quietStart: draft?.notifications.quietStart ?? null,
+            quietEnd: draft?.notifications.quietEnd ?? null,
+          },
           petColor: draft?.petColor ?? settings.petColor,
           petScale: draft?.petScale ?? settings.petScale ?? 1,
         }));
@@ -234,9 +243,14 @@ function DesktopSettingsContent({
     },
   });
   const test = useFeedbackMutation({
-    feedback: { action: "test the desktop connection", safeToRetry: true, form: false },
+    feedback: {
+      action: "test the desktop connection",
+      safeToRetry: true,
+      form: false,
+      pending: "Testing connection…",
+      success: "Connection verified",
+    },
     mutationFn: testDesktopServer,
-    onSuccess: (_, server) => setTested(server),
   });
   const action = useFeedbackMutation({
     feedback: { action: "complete the desktop action", safeToRetry: false, form: false },
@@ -308,6 +322,19 @@ function DesktopSettingsContent({
   const notification = (value: Partial<DesktopSettings["notifications"]>) => {
     setDraft({ ...draft, notifications: { ...draft.notifications, ...value } });
     autosave.mutate({ patch: { notifications: value }, revision: ++revision.current });
+  };
+
+  const quietHours = (
+    value: Partial<Pick<DesktopSettings["notifications"], "quietStart" | "quietEnd">>,
+  ) => {
+    const next = { ...draft.notifications, ...value };
+    setDraft({ ...draft, notifications: next });
+    const nextRevision = ++revision.current;
+    if ((next.quietStart === null) === (next.quietEnd === null))
+      autosave.mutate({
+        patch: { notifications: { quietStart: next.quietStart, quietEnd: next.quietEnd } },
+        revision: nextRevision,
+      });
   };
 
   const Group = connectionOnly ? ConnectionFields : SettingsSection;
@@ -418,7 +445,6 @@ function DesktopSettingsContent({
                           variant="outline"
                           onClick={() => {
                             update({ serverUrl: hostedServer });
-                            setTested(null);
                           }}
                         >
                           Use hosted nohmi
@@ -435,7 +461,6 @@ function DesktopSettingsContent({
                     </ItemActions>
                   </Item>
                 </ItemGroup>
-                {tested === hostedServer ? <p role="status">Hosted connection verified</p> : null}
                 <Collapsible open={advancedServerOpen} onOpenChange={setAdvancedServerOpen}>
                   <CollapsibleTrigger asChild>
                     <Button type="button" variant="ghost" aria-expanded={advancedServerOpen}>
@@ -451,7 +476,6 @@ function DesktopSettingsContent({
                           value={usesHostedServer ? "" : draft.serverUrl}
                           onChange={(event) => {
                             update({ serverUrl: event.target.value });
-                            setTested(null);
                           }}
                           placeholder="https://nohmi-api.example.com"
                           type="url"
@@ -470,9 +494,6 @@ function DesktopSettingsContent({
                       >
                         {test.isPending ? "Testing…" : "Test connection"}
                       </Button>
-                      {tested === draft.serverUrl && !usesHostedServer ? (
-                        <p role="status">Connection verified</p>
-                      ) : null}
                     </FieldGroup>
                   </CollapsibleContent>
                 </Collapsible>
@@ -841,7 +862,7 @@ function DesktopSettingsContent({
                       id="quiet-start"
                       type="time"
                       value={draft.notifications.quietStart ?? ""}
-                      onChange={(event) => notification({ quietStart: event.target.value || null })}
+                      onChange={(event) => quietHours({ quietStart: event.target.value || null })}
                     />
                   </Field>
                   <Field>
@@ -850,7 +871,7 @@ function DesktopSettingsContent({
                       id="quiet-end"
                       type="time"
                       value={draft.notifications.quietEnd ?? ""}
-                      onChange={(event) => notification({ quietEnd: event.target.value || null })}
+                      onChange={(event) => quietHours({ quietEnd: event.target.value || null })}
                     />
                   </Field>
                 </div>

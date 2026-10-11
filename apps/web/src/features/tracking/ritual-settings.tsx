@@ -7,6 +7,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Reorder, useDragControls } from "motion/react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
 import { MenuIcon, PlusIcon, TrashIcon } from "../../components/icons.js";
@@ -142,7 +143,6 @@ function RitualForm({
   const [error, setError] = useState("");
   const [preview, setPreview] = useState<RitualState | null>(null);
   const [opening, setOpening] = useState(false);
-  const [message, setMessage] = useState("");
   const [actionError, setActionError] = useState("");
   useSettingsError(error, error);
   useSettingsError(actionError, actionError);
@@ -272,7 +272,6 @@ function RitualForm({
   };
   async function show() {
     setOpening(true);
-    setMessage("");
     setActionError("");
     try {
       const state = await makeRitualPreview(previewDefinition);
@@ -288,11 +287,10 @@ function RitualForm({
   }
   async function automatic(enabled: boolean) {
     setActionError("");
-    setMessage("");
     try {
       await enableRitualPresentation(enabled);
       await cache.invalidateQueries({ queryKey: ["ritual-local"] });
-      setMessage(enabled ? "Automatic rituals enabled" : "Automatic rituals paused");
+      toast.success(enabled ? "Automatic rituals enabled" : "Automatic rituals paused");
     } catch (e) {
       setActionError(
         classifyMutationError(e, {
@@ -393,21 +391,10 @@ function RitualForm({
                 </div>
               </>
             ) : null}
-            {actionError ? <p role="alert">{actionError}</p> : null}
-            {message ? <p role="status">{message}</p> : null}
-            {busy || (dirty && !error) ? (
-              <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Spinner className="size-3" />
-                {dirty && !input.success ? "Finish the fields to save" : "Saving"}
-              </p>
-            ) : null}
             {error ? (
-              <>
-                <p role="alert">{error}</p>
-                <Button variant="ghost" onClick={() => void retrySaving()}>
-                  Retry saving
-                </Button>
-              </>
+              <Button variant="ghost" onClick={() => void retrySaving()}>
+                Retry saving
+              </Button>
             ) : null}
             {dirty && !input.success ? (
               <p>Complete each ritual step with a label and valid answer options to save.</p>

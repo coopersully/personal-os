@@ -1070,7 +1070,7 @@ it("distinguishes disabled macOS alerts and sounds from granted permission", asy
 });
 
 it("offers permission setup when native permission is unavailable", async () => {
-  status.native.notificationPermission = undefined;
+  delete status.native.notificationPermission;
   mount({ section: "notifications" });
   expect(await screen.findByText("macOS permission: unavailable")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Test notification" })).toBeDisabled();

@@ -175,6 +175,16 @@ the primary experience.
 
 ## Apply feedback consistently
 
+**Settings feedback invariant:** all settings errors and discrete action feedback MUST use
+Sonner. Never add inline pending/success/failure paragraphs, status rows, Alerts, banners, or
+cards for notification tests, connection tests, refreshes, permission requests, or native actions.
+Use one loading toast and update it on actual completion, with diagnostic next steps in its
+description. Do not replay cached success on page mount. Keep autosave success silent. Field
+corrections and actual permission/configuration state may remain inline but cannot replace the
+Sonner error. Test both the toast and the absence of inline action-result text. This overrides
+any generic inline-error guidance below; the canonical rule is `docs/design/feedback.md`.
+
+
 Follow `docs/design/feedback.md`. Use `useFeedbackMutation` with an explicit
 user-facing action and safe-retry classification. Render `MutationFeedback` for
 persistent failures; edit forms use `FeedbackForm`, named inputs, and field-name

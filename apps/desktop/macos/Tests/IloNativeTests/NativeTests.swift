@@ -487,3 +487,22 @@ extension NativeTests {
       PendingNotificationPolicy.refreshed(request, snapshot: s, preferences: p, now: now))
   }
 }
+
+extension NativeTests {
+  func testMaintenanceKeepsManualTestsWithoutPreservingObsoleteAlerts() {
+    let manual = request("Test", id: NotificationMaintenance.testIdentifier)
+    let obsolete = request("Old task", id: "old-task")
+    let current = request("Current task", id: "current-task")
+    XCTAssertEqual(
+      NotificationMaintenance.removableIdentifiers([manual, obsolete, current], keeping: { $0.identifier == "current-task" }),
+      ["old-task"])
+    // Privacy changes remove even current scheduled alerts, but preserve manual tests.
+    XCTAssertEqual(
+      NotificationMaintenance.removableIdentifiers([manual, obsolete, current], keeping: { _ in false }),
+      ["old-task", "current-task"])
+    // Even with scheduled notifications disabled, a user-triggered test stays visible.
+    XCTAssertEqual(
+      NotificationMaintenance.removableIdentifiers([manual, obsolete], keeping: { _ in false }),
+      ["old-task"])
+  }
+}

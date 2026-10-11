@@ -44,6 +44,25 @@ describe("query access recovery", () => {
     client.clear();
   });
 
+  it("preserves native updater status when the server session expires", async () => {
+    const client = createAppQueryClient({ queries: { retry: false } });
+    const status = { startupBlocking: false, phase: "unavailable" };
+    await client.fetchQuery({
+      queryKey: ["desktop-update-status"],
+      meta: { sessionIndependent: true },
+      queryFn: async () => status,
+    });
+    await expect(
+      client.fetchQuery({ queryKey: ["me"], queryFn: () => Promise.reject(denial(401)) }),
+    ).rejects.toMatchObject({ status: 401 });
+    expect(client.getQueryState(["desktop-update-status"])).toMatchObject({
+      status: "success",
+      data: status,
+      error: null,
+    });
+    client.clear();
+  });
+
   it("expires all cached session data and cancels late responses after a 401", async () => {
     const client = createAppQueryClient({ queries: { retry: false } });
     client.setQueryData(["me"], { id: "previous-person" });

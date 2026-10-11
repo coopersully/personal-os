@@ -67,7 +67,9 @@ terms as a complete legal program; no jurisdiction, arbitration scheme, or legal
   that the visitor never saw. Existing consent rows are not rewritten or treated as
   having accepted this new version. Enrollment fields and cancellation stay disabled while a
   verification request is pending, so a late result cannot reopen a canceled number change. Verification completion copies the challenge's recorded
-  version, so a deployment between the two steps cannot relabel an older acceptance. Changing
+  version, so a deployment between the two steps cannot relabel an older acceptance. Completion
+  atomically claims a still-pending, unexpired challenge in the connection transaction, so a late
+  provider approval cannot activate a cancelled challenge or replace accepted consent. Changing
   the number starts with an unchecked consent checkbox.
 - First outbound agent/maintenance messages include STOP instructions. Existing body/segment
   limits are unchanged. HELP responses are a **Twilio Messaging Service configuration requirement**,

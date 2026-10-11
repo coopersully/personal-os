@@ -2,6 +2,8 @@ mod coordinator;
 mod desktop;
 mod lifecycle;
 mod native;
+mod pet;
+mod pet_content;
 mod preferences;
 mod ritual;
 mod transport;
@@ -66,9 +68,16 @@ pub fn run() {
             desktop::desktop_take_action,
             desktop::desktop_save_settings,
             desktop::desktop_native_action,
+            desktop::desktop_preview_pet_scale,
+            desktop::desktop_begin_pet_appearance,
+            desktop::desktop_preview_pet_appearance,
+            desktop::desktop_save_pet_appearance,
+            pet::pet_snapshot,
+            pet::pet_action,
             transport::desktop_request,
             transport::desktop_test_connection,
             apply_pinterest_wallpaper,
+            preview_pinterest_wallpaper,
             desktop_preview_environment
         ])
         .build(tauri::generate_context!())
@@ -82,6 +91,14 @@ pub fn run() {
             #[cfg(not(target_os = "macos"))]
             let _ = (app, event);
         });
+}
+
+#[tauri::command]
+async fn preview_pinterest_wallpaper(
+    app: tauri::AppHandle,
+    request: wallpaper::WallpaperRequest,
+) -> Result<String, String> {
+    wallpaper::preview(&app, request).await
 }
 
 #[tauri::command]
@@ -142,11 +159,11 @@ fn is_hex_color(value: &str) -> bool {
 
 #[tauri::command]
 fn desktop_preview_environment(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
-    let primary_monitor = app.primary_monitor().map_err(|error| error.to_string())?;
+    // WallpaperRenderer previews NSScreen.screens.first (the primary display).
+    // Its safe-area overlay must use that same display, wherever Settings is open.
     let monitor = app
-        .get_webview_window("main")
-        .and_then(|window| window.current_monitor().ok().flatten())
-        .or(primary_monitor)
+        .primary_monitor()
+        .map_err(|error| error.to_string())?
         .ok_or_else(|| "No primary display is available.".to_string())?;
     let screen = monitor.size();
     let screen_position = monitor.position();
@@ -180,7 +197,7 @@ fn mac_has_notch() -> bool {
     let script = r#"
 ObjC.import('AppKit');
 try {
-  const screen = $.NSScreen.mainScreen;
+  const screen = $.NSScreen.screens.objectAtIndex(0);
   const left = screen.auxiliaryTopLeftArea;
   const right = screen.auxiliaryTopRightArea;
   console.log(Boolean(left && right && left.size.width > 0 && right.size.width > 0));

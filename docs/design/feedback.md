@@ -8,6 +8,25 @@ Successful background autosaves are silent. Never render a persistent “All cha
 saved” message or idle success checkmark. Temporary saving feedback may disappear
 when complete; validation failures and retry remain visible until resolved.
 
+## Mandatory settings feedback contract
+
+**Sonner is required, not a preference, for every settings error and discrete action message.**
+Notification tests, connection tests, permission requests, wallpaper refreshes, native actions,
+updates, and routine recovery use Sonner for pending, success, and failure feedback. Do not put
+these messages in inline paragraphs, status rows, Alerts, banners, or cards. Adding `role="status"`
+or waiting for an asynchronous OS callback does not make inline action feedback acceptable.
+
+Use one toast per action: loading → confirmed result. Native submission is only acceptance,
+not proof of visible delivery or audible sound. Keep diagnostic next steps in the toast's
+`description` or action. Do not replay a success toast from cached status when opening a page.
+Errors always reach Sonner, including validation, load, autosave, and native failures; deduplicate
+unchanged polling failures. Background autosave success stays silent.
+
+Field correction/retry controls and actual configuration/permission state may remain inline.
+They supplement required Sonner error announcements; they are not an alternative. These settings
+rules override the generic surface defaults below. Tests must verify the Sonner call and verify
+that the same action-result message is absent from the page content.
+
 ## Definitions and selection
 
 **Sonner** is the React component library that renders **toasts**: compact,

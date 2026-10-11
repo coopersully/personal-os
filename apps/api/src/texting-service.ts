@@ -173,6 +173,25 @@ export function createTextingService(options: Options) {
     }
     try {
       await options.db.transaction(async (tx) => {
+        // Atomically claim the still-pending challenge before changing consent.
+        // UPDATE locks the row and rechecks the predicate after concurrent cancellation.
+        const [claimed] = await tx
+          .update(textingVerificationChallenges)
+          .set({ approvedAt: now(), status: "approved" })
+          .where(
+            and(
+              eq(textingVerificationChallenges.id, challenge.id),
+              eq(textingVerificationChallenges.userId, userId),
+              eq(textingVerificationChallenges.status, "pending"),
+              gt(textingVerificationChallenges.expiresAt, now()),
+            ),
+          )
+          .returning({ id: textingVerificationChallenges.id });
+        if (!claimed)
+          throw new AppError(
+            "invalid_request",
+            "The verification challenge is no longer pending. Request a new code.",
+          );
         const blocked = await tx.query.textingConsentEvents.findFirst({
           orderBy: [
             desc(textingConsentEvents.occurredAt),
@@ -242,10 +261,6 @@ export function createTextingService(options: Options) {
           source: "nohmi",
           userId,
         });
-        await tx
-          .update(textingVerificationChallenges)
-          .set({ approvedAt: now(), status: "approved" })
-          .where(eq(textingVerificationChallenges.id, challenge.id));
       });
     } catch (error) {
       if (isUniqueViolation(error))

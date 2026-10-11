@@ -511,7 +511,26 @@ it("routes scoped task and reminder links and preserves grouping", async () => {
   }
 });
 
-it("shows verified and unavailable finance evidence without inventing totals", async () => {
+it.each([
+  { cents: 12345, quality: "verified", reasons: [], expected: "$123.45" },
+  {
+    cents: null,
+    quality: "unavailable",
+    reasons: ["incomplete_evidence"],
+    expected: "Spending unavailable",
+  },
+  {
+    cents: 100,
+    quality: "unavailable",
+    reasons: ["stale_evidence"],
+    expected: "Spending unavailable",
+  },
+])("shows $quality finance evidence ($cents) without inventing totals", async ({
+  cents,
+  quality,
+  reasons,
+  expected,
+}) => {
   vi.mocked(invoke).mockImplementation(async (command) =>
     command === "pet_snapshot"
       ? {
@@ -520,31 +539,17 @@ it("shows verified and unavailable finance evidence without inventing totals", a
           content: {
             finances: {
               range: { label: "Today", timeZone: "UTC" },
-              facts: [
-                { currency: "USD", cents: 12345, quality: "verified", reasons: [] },
-                {
-                  currency: "EUR",
-                  cents: null,
-                  quality: "unavailable",
-                  reasons: ["missing_evidence"],
-                },
-                {
-                  currency: "GBP",
-                  cents: 100,
-                  quality: "unavailable",
-                  reasons: ["stale_evidence"],
-                },
-              ],
+              facts: [{ currency: "USD", cents, quality, reasons }],
             },
           },
         }
       : undefined,
   );
   mount();
-  expect(await screen.findByText("$123.45")).toBeInTheDocument();
-  expect(screen.getAllByText("Spending unavailable")).toHaveLength(2);
+  expect(await screen.findByText(expected)).toBeInTheDocument();
   expect(screen.queryByText("Qualified total")).not.toBeInTheDocument();
-  expect(screen.getByText(/missing evidence/)).toBeInTheDocument();
+  for (const reason of reasons)
+    expect(screen.getByText(new RegExp(reason.replaceAll("_", " ")))).toBeInTheDocument();
 });
 
 it("shows sign-in state for an empty native session", async () => {

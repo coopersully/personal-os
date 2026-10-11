@@ -1,7 +1,7 @@
 # nohmi texting and SMS
 
 - Status: Living target product contract; transport and bounded Finance runtime merged, general inbox and live Finance launch evidence pending
-- Last reconciled: 2026-09-11
+- Last reconciled: 2026-10-11
 
 ## Product role
 
@@ -191,8 +191,10 @@ Review bypass never grants scopes, creates a domain rule, supplies missing facts
 confidence into authority. Every direct action and SMS approval retains actor, channel, source,
 policy, proposal version, conversation revision, effect, delivery, and undo or recovery evidence.
 
-The global execution-policy setting is shared across workspaces. SMS-bound approvals and Finance
-reply routing remain unavailable; notification preferences never grant execution authority.
+The global execution-policy setting is shared across workspaces. The default-off Finance SMS
+slice supports exact question replies and bounded categorization approve/reject under the
+merged-runtime checks below. General request routing and stronger SMS approvals remain unavailable;
+notification preferences never grant execution authority.
 
 ## Global defaults and per-workspace controls
 

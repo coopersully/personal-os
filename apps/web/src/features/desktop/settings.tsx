@@ -995,11 +995,6 @@ function DesktopSettingsContent({
                     )}
                     <QueryFeedback query={mailboxes} title="Couldn’t load mail accounts." />
                     <QueryFeedback query={accounts} title="Couldn’t load connected accounts." />
-                    {query.data?.mailError ? (
-                      <p role="alert">
-                        Mail notifications could not refresh. nohmi will retry while running.
-                      </p>
-                    ) : null}
                     {accounts.data
                       ?.filter((account) => account.syncError)
                       .map((account) => (

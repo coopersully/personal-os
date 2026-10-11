@@ -674,9 +674,16 @@ describe("desktop preferences", () => {
     ]);
     mount({ section: "mail" });
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Mail notifications could not refresh. nohmi will retry while running.",
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Couldn’t refresh mail notifications. Check your connection.",
+        expect.anything(),
+      ),
     );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Mail notifications could not refresh. nohmi will retry while running."),
+    ).not.toBeInTheDocument();
     expect(
       await screen.findByText(
         "cooper@example.com: Sync needs attention. Check Connections to reconnect.",

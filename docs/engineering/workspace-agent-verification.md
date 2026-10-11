@@ -151,3 +151,6 @@ Shipping audit regressions also verify terminal review decisions, host schedule 
 bindings retain the initiating credential in transactional audit records. Pure budget-policy previews
 work with read-only access and bypass disabled. Hosted-bank start replays suppress expired or already
 claimed authorization links and report recovery work instead of presenting unusable consent.
+
+Post-integration review regressions reject unversioned and stale category clearing and verify
+approval provenance through setup status, the setup-plan MCP tool and Finance guided setup.

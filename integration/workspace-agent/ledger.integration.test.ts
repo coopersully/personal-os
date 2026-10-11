@@ -286,9 +286,26 @@ describe("Finance ledger and goal workflows through MCP", () => {
       ...noteInput,
       idempotencyKey: crypto.randomUUID(),
     });
+    const beforeClear = await call("get_finance_transaction", { transactionId });
+    const missingRevision = await client.callTool({
+      name: "update_finance_transaction",
+      arguments: { transactionId, category: null, idempotencyKey: crypto.randomUUID() },
+    });
+    expect(missingRevision.isError, JSON.stringify(missingRevision)).toBe(true);
+    const staleClear = await client.callTool({
+      name: "update_finance_transaction",
+      arguments: {
+        transactionId,
+        category: null,
+        expectedTransactionUpdatedAt: rows[0]!.updatedAt.toISOString(),
+        idempotencyKey: crypto.randomUUID(),
+      },
+    });
+    expect(staleClear.isError, JSON.stringify(staleClear)).toBe(true);
     await call("update_finance_transaction", {
       transactionId,
       category: null,
+      expectedTransactionUpdatedAt: beforeClear.updatedAt,
       idempotencyKey: crypto.randomUUID(),
     });
     await call("classify_finance_transactions", {

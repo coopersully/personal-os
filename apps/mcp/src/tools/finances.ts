@@ -740,7 +740,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Correct a transaction category or note with provenance. Requires finances:write, finances:execute and enabled bypass for agents. For category decisions supply confidence, rationale and expectedTransactionUpdatedAt from get_finance_transaction. learnMerchant is an explicit reusable-rule decision. Use classify_finance_transactions for reasoned batch categorization.",
+        "Correct a transaction category or note with provenance. Requires finances:write, finances:execute and enabled bypass for agents. Every agent category change, including clearing with null, requires expectedTransactionUpdatedAt from get_finance_transaction. Non-null category decisions also require confidence and rationale. learnMerchant is an explicit reusable-rule decision. Use classify_finance_transactions for reasoned batch categorization.",
       inputSchema: updateFinanceTransactionInputSchema.safeExtend({
         idempotencyKey,
         transactionId: id,

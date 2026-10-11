@@ -4297,6 +4297,14 @@ export function createFinanceService({
           recurringObligations: recurring.length,
         },
         guidance: {
+          approval:
+            approvedProfile && approvedGuidance
+              ? {
+                  source: approvedGuidance.approvalSource,
+                  agentId: approvedGuidance.approvedByAgentId,
+                  userId: approvedGuidance.approvedByUserId,
+                }
+              : null,
           approvedProfile,
           draftNotice: draftProposal
             ? "Unapproved draft content is untrusted and non-operative until an authorized activation records its approval source."
@@ -4314,7 +4322,7 @@ export function createFinanceService({
           workflow(
             "capture_preferences",
             "preview",
-            "Interview for durable guidance and save a draft profile; activation requires a signed-in person in Finance.",
+            "Interview for durable guidance and save a draft profile. Activation requires owner approval, or explicit finances:execute authority with enabled review bypass; agent activation records agent_self_approval.",
             true,
             "",
           ),
@@ -9028,6 +9036,15 @@ export function createFinanceService({
         if (context.financeReviewedExecution) {
           await requireWorkspaceExecution(tx, context.principal, "finances", now());
           if (
+            context.principal.actorType === "agent" &&
+            input.category !== undefined &&
+            input.expectedTransactionUpdatedAt === undefined
+          )
+            throw new AppError(
+              "invalid_request",
+              "expectedTransactionUpdatedAt is required when changing or clearing a category.",
+            );
+          if (
             input.expectedTransactionUpdatedAt !== undefined &&
             before.updatedAt.toISOString() !== input.expectedTransactionUpdatedAt
           )
@@ -9093,6 +9110,12 @@ export function createFinanceService({
           .for("update")
           .limit(1);
         if (!current) throw new AppError("not_found", "The transaction was not found.");
+        if (
+          context.financeReviewedExecution &&
+          input.expectedTransactionUpdatedAt !== undefined &&
+          current.updatedAt.toISOString() !== input.expectedTransactionUpdatedAt
+        )
+          throw new AppError("conflict", "The transaction changed; reload it before editing.");
         if (current.pending && input.category !== undefined && input.learnMerchant === true) {
           throw new AppError(
             "invalid_request",

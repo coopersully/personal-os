@@ -8,6 +8,7 @@ import {
   attentionItemImportanceSchema,
   attentionItemKindSchema,
   domainProfileSchema,
+  profileApprovalProvenanceSchema,
 } from "./assistant.js";
 import { idSchema, isoDateTimeSchema } from "./common.js";
 import { connectorSyncRecoverySchema } from "./connection.js";
@@ -1025,6 +1026,7 @@ export const financeGuidedSetupContextSchema = z.object({
     ]),
   ),
   guidance: z.object({
+    approval: profileApprovalProvenanceSchema.nullable().optional(),
     approvedProfile: financeDomainProfileSchema.nullable(),
     draftNotice: z
       .literal(

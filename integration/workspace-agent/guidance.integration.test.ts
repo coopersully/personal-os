@@ -56,5 +56,21 @@ describe("Finance guidance approval provenance", () => {
       arguments: { domain: "finances" },
     });
     expect(read.structuredContent).toMatchObject({ result: { status: "active" } });
+    const approval = { source: "agent_self_approval", agentId: credential.id, userId: null };
+    const status = await api.getAssistantSetupStatus();
+    expect(status.domains.find((domain) => domain.domain === "finances")).toMatchObject({
+      approvedProfileApproval: approval,
+    });
+    const setup = await client.callTool({
+      name: "get_ilo_setup",
+      arguments: { domain: "finances" },
+    });
+    expect(setup.structuredContent).toMatchObject({ result: { profile: { approval } } });
+    expect(JSON.stringify(setup)).not.toContain("Signed-in approval is active");
+    const guided = await client.callTool({ name: "get_finance_guided_setup", arguments: {} });
+    expect(guided.structuredContent).toMatchObject({
+      result: { context: { guidance: { approval } } },
+    });
+    expect(JSON.stringify(guided)).not.toContain("activation requires a signed-in person");
   });
 });

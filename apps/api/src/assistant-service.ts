@@ -180,6 +180,9 @@ export function createAssistantService({
     const profiles = await db
       .select({
         approvedVersion: domainProfileApprovals.profileVersion,
+        approvalSource: domainProfileApprovals.approvalSource,
+        approvedByAgentId: domainProfileApprovals.approvedByAgentId,
+        approvedByUserId: domainProfileApprovals.approvedByUserId,
         domain: domainProfiles.domain,
         status: domainProfiles.status,
         version: domainProfiles.version,
@@ -209,6 +212,14 @@ export function createAssistantService({
             ? "draft"
             : (profile?.status ?? null);
         return {
+          approvedProfileApproval:
+            approvedVersion !== null && profile?.approvalSource
+              ? {
+                  source: profile.approvalSource,
+                  agentId: profile.approvedByAgentId,
+                  userId: profile.approvedByUserId,
+                }
+              : null,
           approvedProfileStatus: approvedVersion === null ? null : ("active" as const),
           approvedProfileVersion: approvedVersion,
           canRead,
@@ -390,7 +401,9 @@ export function createAssistantService({
           completionEvidence: profileActive
             ? [
                 domainStatus.approvedProfileStatus === "active"
-                  ? `Signed-in approval is active at version ${domainStatus.approvedProfileVersion}.`
+                  ? domainStatus.approvedProfileApproval?.source === "agent_self_approval"
+                    ? `Agent self-approval is active at version ${domainStatus.approvedProfileVersion}.`
+                    : `Signed-in approval is active at version ${domainStatus.approvedProfileVersion}.`
                   : `${domain} guidance is active at version ${domainStatus.profileVersion}.`,
               ]
             : profileExists
@@ -399,9 +412,18 @@ export function createAssistantService({
           description:
             "Show what the guidance covers, preview consequential behavior, and preserve the approval boundary.",
           id: "review_guidance",
-          instructions: recipe.review,
+          instructions:
+            domainStatus.approvedProfileApproval?.source === "agent_self_approval"
+              ? [
+                  ...recipe.review,
+                  "This guidance was activated by an execution-authorized agent; retain its recorded approval provenance.",
+                ]
+              : recipe.review,
           order: 3,
-          owner: "person",
+          owner:
+            domainStatus.approvedProfileApproval?.source === "agent_self_approval"
+              ? "agent"
+              : "person",
           requiredTools: [],
           state: profileActive ? "complete" : profileExists ? "current" : "blocked",
           title: "Review the proposed guidance",
@@ -459,6 +481,7 @@ export function createAssistantService({
         domain,
         nextAction,
         profile: {
+          approval: domainStatus.approvedProfileApproval ?? null,
           approvedStatus: domainStatus.approvedProfileStatus,
           approvedVersion: domainStatus.approvedProfileVersion,
           pendingDraftVersion: domainStatus.pendingDraftVersion,

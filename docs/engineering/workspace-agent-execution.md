@@ -9,14 +9,14 @@ Successful execution observed for 232 of 232 normal-discovery tools in the audit
 | Tool | Successful calls in passing workflows | Expected error calls in passing workflows | Evidence suites |
 | --- | ---: | ---: | --- |
 | `activate_mail_rule` | 1 | 2 | mail-stewardship.integration.test.ts |
-| `add_finance_transaction` | 4 | 0 | ledger.integration.test.ts, finance-review.integration.test.ts |
+| `add_finance_transaction` | 4 | 0 | finance-review.integration.test.ts, ledger.integration.test.ts |
 | `answer_finance_contextual_question` | 1 | 0 | finance-review.integration.test.ts |
 | `answer_finance_question` | 1 | 0 | ledger.integration.test.ts |
 | `answer_finance_review` | 1 | 0 | ledger.integration.test.ts |
 | `answer_mail_question` | 1 | 0 | mail-stewardship.integration.test.ts |
 | `apply_finance_categorizations` | 1 | 0 | ledger.integration.test.ts |
 | `approve_finance_action_review` | 1 | 1 | finance-review.integration.test.ts |
-| `approve_finance_budget` | 2 | 1 | finances.integration.test.ts, budget-policy.integration.test.ts |
+| `approve_finance_budget` | 2 | 1 | budget-policy.integration.test.ts, finances.integration.test.ts |
 | `archive_task_list` | 2 | 0 | tasks.integration.test.ts |
 | `archive_task_project` | 2 | 0 | tasks.integration.test.ts |
 | `bind_automation_host_schedule` | 1 | 0 | recovery.integration.test.ts |
@@ -37,15 +37,15 @@ Successful execution observed for 232 of 232 normal-discovery tools in the audit
 | `create_calendar` | 4 | 0 | calendar.integration.test.ts |
 | `create_calendar_attention_item` | 1 | 0 | calendar.integration.test.ts |
 | `create_event` | 2 | 0 | calendar.integration.test.ts |
-| `create_finance_account` | 4 | 0 | authorization.integration.test.ts, finances.integration.test.ts, ledger.integration.test.ts, queries.integration.test.ts |
+| `create_finance_account` | 4 | 0 | authorization.integration.test.ts, queries.integration.test.ts, finances.integration.test.ts, ledger.integration.test.ts |
 | `create_finance_attention_item` | 1 | 0 | finance-review.integration.test.ts |
-| `create_finance_budget` | 2 | 0 | finances.integration.test.ts, budget-policy.integration.test.ts |
+| `create_finance_budget` | 2 | 0 | budget-policy.integration.test.ts, finances.integration.test.ts |
 | `create_finance_budget_policy` | 1 | 0 | budget-policy.integration.test.ts |
 | `create_finance_budget_revision_proposal` | 1 | 0 | budget-policy.integration.test.ts |
 | `create_finance_category` | 4 | 0 | finances.integration.test.ts, ledger.integration.test.ts, planning.integration.test.ts |
 | `create_finance_contextual_question` | 1 | 0 | finance-review.integration.test.ts |
 | `create_mail_attention_item` | 1 | 0 | mail-stewardship.integration.test.ts |
-| `create_mail_draft` | 3 | 0 | mail-send.integration.test.ts, mail.integration.test.ts |
+| `create_mail_draft` | 3 | 0 | mail.integration.test.ts, mail-send.integration.test.ts |
 | `create_mail_obligation` | 1 | 0 | mail-stewardship.integration.test.ts |
 | `create_mail_rule` | 1 | 0 | mail-stewardship.integration.test.ts |
 | `create_mail_stewardship_feedback` | 1 | 0 | mail-stewardship.integration.test.ts |
@@ -67,9 +67,9 @@ Successful execution observed for 232 of 232 normal-discovery tools in the audit
 | `dismiss_finance_action_review` | 2 | 0 | finance-review.integration.test.ts |
 | `download_mail_attachment` | 1 | 1 | mail-send.integration.test.ts |
 | `export_finance_data` | 1 | 0 | queries.integration.test.ts |
-| `get_calendar_review` | 2 | 0 | calendar.integration.test.ts, queries.integration.test.ts |
+| `get_calendar_review` | 2 | 0 | queries.integration.test.ts, calendar.integration.test.ts |
 | `get_calendar_settings` | 3 | 0 | controls.integration.test.ts, queries.integration.test.ts |
-| `get_calendar_status` | 2 | 0 | calendar.integration.test.ts, queries.integration.test.ts |
+| `get_calendar_status` | 2 | 0 | queries.integration.test.ts, calendar.integration.test.ts |
 | `get_domain_profile` | 1 | 0 | guidance.integration.test.ts |
 | `get_event` | 2 | 0 | calendar.integration.test.ts |
 | `get_finance_account_connection` | 3 | 0 | bank-handoff.integration.test.ts |
@@ -87,7 +87,7 @@ Successful execution observed for 232 of 232 normal-discovery tools in the audit
 | `get_finance_connection_capabilities` | 1 | 0 | queries.integration.test.ts |
 | `get_finance_contextual_question` | 1 | 0 | finance-review.integration.test.ts |
 | `get_finance_continuations` | 1 | 0 | recovery.integration.test.ts |
-| `get_finance_guided_setup` | 1 | 0 | queries.integration.test.ts |
+| `get_finance_guided_setup` | 2 | 0 | queries.integration.test.ts, guidance.integration.test.ts |
 | `get_finance_inbox` | 1 | 0 | queries.integration.test.ts |
 | `get_finance_ledger_challenge` | 1 | 0 | maintenance.integration.test.ts |
 | `get_finance_ledger_health` | 1 | 0 | queries.integration.test.ts |
@@ -103,11 +103,11 @@ Successful execution observed for 232 of 232 normal-discovery tools in the audit
 | `get_finance_settings` | 3 | 0 | controls.integration.test.ts, queries.integration.test.ts |
 | `get_finance_snapshot` | 1 | 0 | queries.integration.test.ts |
 | `get_finance_status` | 1 | 0 | queries.integration.test.ts |
-| `get_finance_transaction` | 4 | 0 | ledger.integration.test.ts, finance-review.integration.test.ts |
+| `get_finance_transaction` | 5 | 0 | finance-review.integration.test.ts, ledger.integration.test.ts |
 | `get_finance_wealth_summary` | 1 | 0 | queries.integration.test.ts |
 | `get_financial_profile` | 1 | 0 | queries.integration.test.ts |
 | `get_ilo_context` | 1 | 0 | queries.integration.test.ts |
-| `get_ilo_setup` | 1 | 0 | queries.integration.test.ts |
+| `get_ilo_setup` | 2 | 0 | queries.integration.test.ts, guidance.integration.test.ts |
 | `get_mail_maintenance_run` | 1 | 0 | mail-stewardship.integration.test.ts |
 | `get_mail_question` | 1 | 0 | mail-stewardship.integration.test.ts |
 | `get_mail_review` | 1 | 0 | mail-stewardship.integration.test.ts |
@@ -128,24 +128,24 @@ Successful execution observed for 232 of 232 normal-discovery tools in the audit
 | `list_attention_items` | 4 | 0 | controls.integration.test.ts |
 | `list_automation_host_connections` | 2 | 0 | queries.integration.test.ts, recovery.integration.test.ts |
 | `list_automation_host_schedules` | 2 | 0 | queries.integration.test.ts, recovery.integration.test.ts |
-| `list_calendars` | 1 | 1 | calendar.integration.test.ts, queries.integration.test.ts |
+| `list_calendars` | 1 | 1 | queries.integration.test.ts, calendar.integration.test.ts |
 | `list_events` | 2 | 0 | calendar.integration.test.ts |
 | `list_finance_accounts` | 1 | 0 | queries.integration.test.ts |
 | `list_finance_action_reviews` | 2 | 0 | finances.integration.test.ts, queries.integration.test.ts |
 | `list_finance_answer_continuations` | 1 | 0 | queries.integration.test.ts |
 | `list_finance_budget_buckets` | 3 | 0 | queries.integration.test.ts, planning.integration.test.ts |
 | `list_finance_budget_policies` | 1 | 0 | finances.integration.test.ts |
-| `list_finance_goals` | 2 | 0 | ledger.integration.test.ts, queries.integration.test.ts |
+| `list_finance_goals` | 2 | 0 | queries.integration.test.ts, ledger.integration.test.ts |
 | `list_finance_host_runs` | 1 | 0 | queries.integration.test.ts |
 | `list_finance_merchants` | 1 | 0 | queries.integration.test.ts |
 | `list_finance_questions` | 2 | 0 | finances.integration.test.ts, queries.integration.test.ts |
 | `list_finance_recurring_items` | 1 | 0 | queries.integration.test.ts |
-| `list_finance_reimbursements` | 2 | 0 | ledger.integration.test.ts, queries.integration.test.ts |
+| `list_finance_reimbursements` | 2 | 0 | queries.integration.test.ts, ledger.integration.test.ts |
 | `list_finance_review_history` | 2 | 0 | finances.integration.test.ts, queries.integration.test.ts |
 | `list_finance_rules` | 3 | 0 | queries.integration.test.ts, planning.integration.test.ts |
-| `list_finance_transactions` | 3 | 0 | ledger.integration.test.ts, queries.integration.test.ts |
+| `list_finance_transactions` | 3 | 0 | queries.integration.test.ts, ledger.integration.test.ts |
 | `list_mail` | 3 | 0 | queries.integration.test.ts, mail-stewardship.integration.test.ts |
-| `list_mail_drafts` | 3 | 0 | queries.integration.test.ts, mail.integration.test.ts |
+| `list_mail_drafts` | 3 | 0 | mail.integration.test.ts, queries.integration.test.ts |
 | `list_mail_rules` | 1 | 0 | queries.integration.test.ts |
 | `list_mailboxes` | 1 | 0 | queries.integration.test.ts |
 | `list_reminders` | 1 | 0 | queries.integration.test.ts |
@@ -172,7 +172,7 @@ Successful execution observed for 232 of 232 normal-discovery tools in the audit
 | `preview_task_move` | 2 | 0 | tasks.integration.test.ts |
 | `preview_task_project_move` | 2 | 0 | tasks.integration.test.ts |
 | `propose_finance_categorizations` | 2 | 0 | queries.integration.test.ts, finance-review.integration.test.ts |
-| `read_mail` | 2 | 0 | mail-send.integration.test.ts, mail-stewardship.integration.test.ts |
+| `read_mail` | 2 | 0 | mail-stewardship.integration.test.ts, mail-send.integration.test.ts |
 | `read_text_conversation` | 2 | 0 | queries.integration.test.ts, texting.integration.test.ts |
 | `reconcile_finance_host_delivery` | 1 | 1 | recovery.integration.test.ts |
 | `reconcile_finance_reimbursement` | 2 | 0 | ledger.integration.test.ts |
@@ -226,8 +226,8 @@ Successful execution observed for 232 of 232 normal-discovery tools in the audit
 | `update_finance_profile` | 1 | 0 | planning.integration.test.ts |
 | `update_finance_recurring_obligation` | 1 | 0 | planning.integration.test.ts |
 | `update_finance_settings` | 1 | 1 | controls.integration.test.ts |
-| `update_finance_transaction` | 3 | 1 | ledger.integration.test.ts |
-| `update_financial_profile` | 2 | 0 | finances.integration.test.ts, budget-policy.integration.test.ts |
+| `update_finance_transaction` | 3 | 3 | ledger.integration.test.ts |
+| `update_financial_profile` | 2 | 0 | budget-policy.integration.test.ts, finances.integration.test.ts |
 | `update_mail` | 1 | 0 | mail-send.integration.test.ts |
 | `update_mail_draft` | 1 | 0 | mail.integration.test.ts |
 | `update_mail_obligation` | 1 | 0 | mail-stewardship.integration.test.ts |

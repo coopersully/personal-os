@@ -105,3 +105,8 @@ Pure budget-policy evaluation requires only `finances:read` and is available in 
 bypass off. Persisting a preview or changing policy state remains an execution operation. Review
 approval/dismissal and host schedule/answer binding changes write credential-attributed audit events
 in the same transaction, with safe state/version metadata instead of host secrets or private labels.
+
+Agent category corrections, including clearing a category with `null`, require
+`expectedTransactionUpdatedAt` from the current transaction read. The service checks it again
+after acquiring the row lock. Setup status, setup plans and Finance guided setup expose the
+recorded approval source and actor; agent self-approval is never described as signed-in approval.

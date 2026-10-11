@@ -144,18 +144,20 @@ export async function fetchPinterestBoardPins(
             continue;
           for (const pin of entry.data) {
             if (pin?.type !== "pin") continue;
-            const image =
-              pin.images?.["736x"]?.url ??
-              pin.images?.orig?.url ??
-              pin.images?.["474x"]?.url ??
-              pin.images?.["236x"]?.url;
-            if (typeof image !== "string" || image.length > 2048) continue;
-            if (
-              !/^https:\/\/i\.pinimg\.com\/(?:\d+x|originals)\/[^"\\\s?]+?\.(?:avif|jpe?g|png|webp)$/i.test(
-                image,
-              )
-            )
-              continue;
+            const image = [
+              pin.images?.["736x"]?.url,
+              pin.images?.orig?.url,
+              pin.images?.["474x"]?.url,
+              pin.images?.["236x"]?.url,
+            ].find(
+              (candidate): candidate is string =>
+                typeof candidate === "string" &&
+                candidate.length <= 2048 &&
+                /^https:\/\/i\.pinimg\.com\/(?:\d+x|originals)\/[^"\\\s?]+?\.(?:avif|jpe?g|png|webp)$/i.test(
+                  candidate,
+                ),
+            );
+            if (!image) continue;
             images.add(image.replace(/\/\d+x\//, "/736x/"));
             if (images.size >= 100) break;
           }

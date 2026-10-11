@@ -164,3 +164,33 @@ final class PetSceneTests: XCTestCase {
     XCTAssertEqual(try XCTUnwrap(sprite.layer).frame.width, 36, accuracy: 1)
   }
 }
+
+extension PetSceneTests {
+  func testDisplayMigrationKeepsCurrentPlacementInsteadOfLoadingHistory() throws {
+    _ = NSApplication.shared
+    let screen = try XCTUnwrap(NSScreen.screens.first)
+    let suite = "nohmi.pet.display-migration.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let store = PetPlacementStore(defaults: defaults)
+    let controller = PetController(placements: store)
+    var preferences = settings(enabled: true)
+    preferences.petSleepEnabled = false
+    controller.configure(preferences)
+    controller.restorePosition(on: screen)
+    controller.clampAndSave()
+    let initial = controller.panel.frame
+    let original = try XCTUnwrap(store.load(PetDisplays.id(screen)))
+    store.save(PetSavedPlacement(x: 0, y: 1, anchor: 0, cardX: 0, cardY: 1,
+      cardAnchor: 0, width: 800, height: 800), display: PetDisplays.id(screen))
+    defer { controller.configure(settings(enabled: false)) }
+    controller.migratePosition(to: screen)
+    XCTAssertEqual(controller.panel.frame, initial)
+    let migrated = try XCTUnwrap(store.load(PetDisplays.id(screen)))
+    XCTAssertEqual(migrated.x, original.x, accuracy: 0.001)
+    XCTAssertEqual(migrated.y, original.y, accuracy: 0.001)
+    XCTAssertEqual(migrated.width, original.width)
+    XCTAssertEqual(migrated.height, original.height)
+    XCTAssertNil(migrated.anchor)
+  }
+}

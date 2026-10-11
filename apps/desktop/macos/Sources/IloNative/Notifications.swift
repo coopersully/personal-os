@@ -387,7 +387,14 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
     deliveryQueue.invalidate()
     mailSubmissions = []
     let expected = revision
-    if privacyChanged { center.removeAllDeliveredNotifications() }
+    if privacyChanged {
+      // Privacy cleanup must survive later reconciliation revisions, while leaving
+      // the explicit manual test visible until the user dismisses it.
+      center.getDeliveredNotifications { delivered in
+        self.center.removeDeliveredNotifications(
+          withIdentifiers: NotificationMaintenance.removableIdentifiers(delivered.map(\.request), keeping: { _ in false }))
+      }
+    }
     guard p.enabled else {
       clear(preservingTest: true)
       snapshot = s

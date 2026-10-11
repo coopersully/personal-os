@@ -496,6 +496,10 @@ extension NativeTests {
     XCTAssertEqual(
       NotificationMaintenance.removableIdentifiers([manual, obsolete, current], keeping: { $0.identifier == "current-task" }),
       ["old-task"])
+    // Privacy changes remove even current scheduled alerts, but preserve manual tests.
+    XCTAssertEqual(
+      NotificationMaintenance.removableIdentifiers([manual, obsolete, current], keeping: { _ in false }),
+      ["old-task", "current-task"])
     // Even with scheduled notifications disabled, a user-triggered test stays visible.
     XCTAssertEqual(
       NotificationMaintenance.removableIdentifiers([manual, obsolete], keeping: { _ in false }),

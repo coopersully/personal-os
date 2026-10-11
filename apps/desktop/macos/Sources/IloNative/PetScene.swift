@@ -893,12 +893,33 @@ final class PetController: NSObject {
       }
       card = geometry.card(
         size: savedCardSize, anchor: cardAnchor, near: CGPoint(x: card.midX, y: card.midY))
-    } else {
-      restorePosition()
+    } else if let screen = NSScreen.main ?? NSScreen.screens.first {
+      migratePosition(to: screen)
     }
     updateAttachment()
     render()
     armIdle()
+  }
+  // Display removal migrates the current scene, never a historical placement on the survivor.
+  func migratePosition(to screen: NSScreen) {
+    settling.request(open: false, immediately: true)
+    dragOrigin = nil
+    resizeEdge = nil
+    candidate = nil
+    gesturePending = false
+    activeScreen = screen
+    geometry = PetDisplays.geometry(screen)
+    compactAnchor = nil
+    cardAnchor = nil
+    compact = geometry.fit(compact)
+    card = geometry.fitCard(card)
+    if motion.target == 1 {
+      movedSinceOpening = true
+      cardFollowsCompact = false
+    }
+    updateAttachment()
+    render()
+    save()
   }
   func resetPosition() {
     closeOverlay(immediately: true)

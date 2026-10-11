@@ -230,3 +230,39 @@ it("ignores malformed board/feed entries and uses safe alternate image sizes", a
     "https://i.pinimg.com/736x/small.webp",
   ]);
 });
+
+it.each([
+  "https://evil.test/image.jpg",
+  "broken",
+  "https://i.pinimg.com/736x/" + "a".repeat(2048) + ".jpg",
+  42,
+])("falls back from an invalid preferred Pinterest rendition: %s", async (preferred) => {
+  const resources = {
+    BoardResource: { board: { data: { id: "b", url: "/example/board/" } } },
+    BoardFeedResource: {
+      '[["board_id","b"]]': {
+        data: [
+          {
+            type: "pin",
+            images: {
+              "736x": { url: preferred },
+              orig: { url: "https://i.pinimg.com/originals/valid.jpg" },
+            },
+          },
+        ],
+      },
+    },
+  };
+  const response = new Response(
+    `<script id="__PWS_INITIAL_PROPS__">${JSON.stringify({ initialReduxState: { resources } })}</script>`,
+  );
+  await expect(
+    fetchPinterestBoardPins(board, vi.fn().mockResolvedValue(response)),
+  ).resolves.toEqual([
+    {
+      id: "https://i.pinimg.com/originals/valid.jpg",
+      imageUrl: "https://i.pinimg.com/originals/valid.jpg",
+      title: null,
+    },
+  ]);
+});

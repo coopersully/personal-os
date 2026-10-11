@@ -21,6 +21,8 @@ struct NativeSettings: Codable {
   var petEnabled: Bool
   var petColor: String
   var petScale: Double? = nil
+  var petShooEnabled: Bool? = nil
+  var petShooSensitivity: String? = nil
   var petSleepEnabled: Bool? = nil
   var petSleepAfterSeconds: Double? = nil
   var petWorkspaces: [String]

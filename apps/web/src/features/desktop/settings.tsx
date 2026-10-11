@@ -46,6 +46,7 @@ import {
   ItemGroup,
   ItemTitle,
 } from "../../components/ui/item.js";
+import { NativeSelect, NativeSelectOption } from "../../components/ui/native-select";
 import { Slider } from "../../components/ui/slider.js";
 import { Switch } from "../../components/ui/switch.js";
 import { WorkspaceIcon } from "../../components/workspace-identity.js";
@@ -61,13 +62,13 @@ import {
   hostedServer,
   isDesktop,
   nativeAction,
-  previewPetScale,
   resetDesktopConnection,
   saveDesktopSettings,
   testDesktopServer,
 } from "./bridge.js";
 import { resetDesktopSession } from "./session.js";
 import { DesktopUpdates } from "./updates.js";
+import { usePetAppearance } from "./use-pet-appearance";
 
 function Toggle({
   label,
@@ -176,18 +177,22 @@ function DesktopSettingsContent({
       toast.success("Desktop preferences saved");
     },
   });
-  const scaleFrame = useRef<number | null>(null);
-  const scalePreview = useFeedbackMutation({
-    feedback: { action: "preview pet scale" },
-    mutationFn: previewPetScale,
-  });
-  useEffect(
-    () => () => {
-      if (scaleFrame.current !== null) cancelAnimationFrame(scaleFrame.current);
-    },
-    [],
-  );
   const revision = useRef(0);
+  const appearance = usePetAppearance(
+    query.data ? `${query.data.settings.serverUrl}|${query.data.accountId ?? ""}` : undefined,
+    (value, savedRevision) => {
+      cache.setQueryData(["desktop-settings"], value);
+      if (savedRevision === revision.current)
+        setDraft(
+          (current) =>
+            current && {
+              ...current,
+              petColor: value.settings.petColor,
+              petScale: value.settings.petScale ?? 1,
+            },
+        );
+    },
+  );
   const autosave = useFeedbackMutation({
     scope: { id: "desktop-preferences" },
     feedback: { action: "save desktop preferences", safeToRetry: true },
@@ -212,11 +217,20 @@ function DesktopSettingsContent({
         setDraft((current) => ({
           ...value.settings,
           serverUrl: current?.serverUrl ?? value.settings.serverUrl,
+          petColor: current?.petColor ?? value.settings.petColor,
+          petScale: current?.petScale ?? value.settings.petScale ?? 1,
         }));
     },
     onError: async (_error, input) => {
       const current = await query.refetch();
-      if (input.revision === revision.current && current.data) setDraft(current.data.settings);
+      if (input.revision === revision.current && current.data) {
+        const settings = current.data.settings;
+        setDraft((draft) => ({
+          ...settings,
+          petColor: draft?.petColor ?? settings.petColor,
+          petScale: draft?.petScale ?? settings.petScale ?? 1,
+        }));
+      }
     },
   });
   const test = useFeedbackMutation({
@@ -478,7 +492,16 @@ function DesktopSettingsContent({
                 <FieldLabel htmlFor="pet-color">Pet color</FieldLabel>
                 <ColorPicker
                   value={draft.petColor}
-                  onChange={(petColor) => update({ petColor })}
+                  onChange={(petColor) => {
+                    setDraft((current) => current && { ...current, petColor });
+                    appearance.change({
+                      color: petColor,
+                      scale: draft.petScale ?? 1,
+                      revision: ++revision.current,
+                    });
+                  }}
+                  onPointerUp={() => appearance.commit()}
+                  onBlur={() => appearance.commit()}
                   className="w-full max-w-sm"
                 >
                   <ColorPickerSelection />
@@ -500,19 +523,14 @@ function DesktopSettingsContent({
                   value={[(draft.petScale ?? 1) * 100]}
                   onValueChange={([percent]) => {
                     if (percent === undefined) return;
-                    revision.current += 1;
                     setDraft((current) => current && { ...current, petScale: percent / 100 });
-                    if (scaleFrame.current !== null) cancelAnimationFrame(scaleFrame.current);
-                    scaleFrame.current = requestAnimationFrame(() => {
-                      scaleFrame.current = null;
-                      scalePreview.mutate(percent / 100);
+                    appearance.change({
+                      color: draft.petColor,
+                      scale: percent / 100,
+                      revision: ++revision.current,
                     });
                   }}
-                  onValueCommit={([percent]) => {
-                    if (scaleFrame.current !== null) cancelAnimationFrame(scaleFrame.current);
-                    scaleFrame.current = null;
-                    if (percent !== undefined) update({ petScale: percent / 100 });
-                  }}
+                  onValueCommit={() => appearance.commit()}
                 />
                 <FieldDescription>
                   Preview the size as you drag. Your choice saves when you release.
@@ -589,6 +607,38 @@ function DesktopSettingsContent({
                   At an anchor with the card closed, tuck into the screen edge after this much
                   inactivity. Hover or click to wake.
                 </FieldDescription>
+              </Field>
+            </FieldGroup>
+          </SettingsSection>
+        ) : null}
+        {section === "pet" ? (
+          <SettingsSection title="Shoo">
+            <FieldGroup>
+              <Toggle
+                label="Shake to shoo"
+                value={draft.petShooEnabled ?? false}
+                onChange={(petShooEnabled) => update({ petShooEnabled })}
+              />
+              <FieldDescription>
+                Shake the pointer over the pet to move it to the farthest available anchor. Only
+                works with the card closed.
+              </FieldDescription>
+              <Field>
+                <FieldLabel htmlFor="pet-shoo-sensitivity">Sensitivity</FieldLabel>
+                <NativeSelect
+                  id="pet-shoo-sensitivity"
+                  value={draft.petShooSensitivity ?? "medium"}
+                  disabled={!draft.petShooEnabled}
+                  onChange={(event) =>
+                    update({ petShooSensitivity: event.target.value as "low" | "medium" | "high" })
+                  }
+                >
+                  <NativeSelectOption value="low">Low · deliberate, wide shakes</NativeSelectOption>
+                  <NativeSelectOption value="medium">
+                    Medium · several clear shakes
+                  </NativeSelectOption>
+                  <NativeSelectOption value="high">High · smaller shakes</NativeSelectOption>
+                </NativeSelect>
               </Field>
             </FieldGroup>
           </SettingsSection>

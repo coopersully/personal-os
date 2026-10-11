@@ -21,6 +21,8 @@ export type DesktopSettings = {
   petEnabled: boolean;
   petColor: string;
   petScale?: number;
+  petShooEnabled?: boolean;
+  petShooSensitivity?: "low" | "medium" | "high";
   petSleepEnabled?: boolean;
   petSleepAfterSeconds?: number;
   petWorkspaces: string[];
@@ -28,6 +30,7 @@ export type DesktopSettings = {
   notifications: NotificationSettings;
 };
 export type DesktopStatus = {
+  accountId?: string | null;
   settings: DesktopSettings;
   hostedServer: string;
   wallpaperError?: string | null;
@@ -48,7 +51,7 @@ export type DesktopStatus = {
 };
 export const getDesktopSettings = () => invoke<DesktopStatus>("desktop_settings");
 export const saveDesktopSettings = (settings: DesktopSettings) =>
-  invoke<DesktopStatus>("desktop_save_settings", { settings });
+  invoke<DesktopStatus>("desktop_save_settings", { settings, preservePetAppearance: true });
 export const testDesktopServer = (serverUrl: string) =>
   invoke<{ ok: boolean }>("desktop_test_connection", { serverUrl });
 export const nativeAction = (action: string) => invoke("desktop_native_action", { action });
@@ -103,3 +106,20 @@ export const desktopFetch: typeof fetch = async (input, init) => {
 };
 
 export const previewPetScale = (scale: number) => invoke("desktop_preview_pet_scale", { scale });
+
+export type PetAppearanceSession = {
+  sessionId: string;
+  serverUrl: string;
+  accountId: string | null;
+};
+export type PetAppearanceEdit = PetAppearanceSession & {
+  revision: number;
+  color: string;
+  scale: number;
+};
+export const beginPetAppearance = () =>
+  invoke<PetAppearanceSession>("desktop_begin_pet_appearance");
+export const previewPetAppearance = (edit: PetAppearanceEdit) =>
+  invoke("desktop_preview_pet_appearance", { edit });
+export const savePetAppearance = (edit: PetAppearanceEdit) =>
+  invoke<DesktopStatus>("desktop_save_pet_appearance", { edit });

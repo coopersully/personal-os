@@ -110,6 +110,17 @@ struct PetGeometry: Equatable {
     let compact = PetGeometry(bounds: bounds, obstacles: obstacles)
     return (0..<8).map { compact.card(size: size, anchor: $0, near: .zero) }
   }
+  func farthestAnchor(from pointer: CGPoint, size: CGSize, excluding current: Int?) -> Int? {
+    let frames = anchors(size: size)
+    return frames.indices.filter { index in
+      index != current && frames[index].size == size && inset.contains(frames[index])
+        && !obstacles.contains { $0.insetBy(dx: -8, dy: -8).intersects(frames[index]) }
+    }.sorted { a, b in
+      let da = hypot(frames[a].midX - pointer.x, frames[a].midY - pointer.y)
+      let db = hypot(frames[b].midX - pointer.x, frames[b].midY - pointer.y)
+      return abs(da - db) < 0.001 ? a < b : da > db
+    }.first
+  }
   func snap(cursor: CGPoint, size: CGSize) -> Int? {
     let candidates = anchors(size: size).enumerated().map {
       ($0.offset, hypot($0.element.midX - cursor.x, $0.element.midY - cursor.y))

@@ -356,3 +356,6 @@ The proposed implementation design is recorded in
 with its [implementation plan](../../superpowers/plans/2026-10-09-desktop-pet-reliability.md).
 Both are for review; proposed defaults and engineering approaches do not supersede the accepted
 requirements above until approved. The first implementation milestone is a measured diagnosis.
+
+The pet’s eyes remain horizontally centered on the body in every pose, including sleep, hover,
+rotation, and dragging. Eye spacing does not drift with screen position.

@@ -8,6 +8,17 @@ final class PetPanel: NSPanel {
 }
 final class PetView: NSView {
   var visibleAccessibilityFrame = CGRect.zero
+  var poseAngle: CGFloat = 0 { didSet { if oldValue != poseAngle { needsDisplay = true } } }
+  private var artwork = PetSilhouette.path()
+  private var artworkTransform: CGAffineTransform {
+    CGAffineTransform(translationX: 36, y: 36).rotated(by: poseAngle * .pi / 180)
+      .translatedBy(x: 0, y: -4).scaledBy(x: transitionScale, y: transitionScale)
+      .translatedBy(x: -36, y: -32)
+  }
+  func containsArtwork(_ local: CGPoint) -> Bool {
+    let point = local.applying(artworkTransform.inverted())
+    return bounds.contains(local) && artwork.contains(point) && (!peeking || point.y >= peekOcclusion)
+  }
   override func accessibilityFrame() -> NSRect { visibleAccessibilityFrame }
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
   var contextAction: ((String) -> Void)?
@@ -139,6 +150,12 @@ final class PetView: NSView {
       + 0.0722 * linear(rgb.blueComponent)
     return luminance > 0.179 ? .black : .white
   }
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    guard !isHidden, alphaValue > 0 else { return nil }
+    let local = convert(point, from: superview)
+    guard containsArtwork(local) else { return nil }
+    return self
+  }
   override func mouseDown(with event: NSEvent) {
     origin = NSEvent.mouseLocation
     dragged = false
@@ -160,6 +177,11 @@ final class PetView: NSView {
     dragged = false
     needsDisplay = true
   }
+  static func eyeRects(height: CGFloat, bob: CGFloat) -> [CGRect] {
+    [CGFloat(27), 45].map { center in
+      CGRect(x: center - 2.7, y: 37 + bob - height / 2, width: 5.4, height: height)
+    }
+  }
   override func draw(_ dirtyRect: NSRect) {
     // Original bundled creature artwork drawn into a small native sprite; no web view or network animation.
     let reduced = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -168,21 +190,16 @@ final class PetView: NSView {
     if reduced { hoverAmount = hovering && !peeking ? 1 : 0 }
     NSGraphicsContext.saveGraphicsState()
     defer { NSGraphicsContext.restoreGraphicsState() }
+    let context = NSGraphicsContext.current!.cgContext
+    context.concatenate(artworkTransform)
     if peeking {
       NSBezierPath(
         rect: NSRect(x: 0, y: peekOcclusion, width: 72, height: max(0, 72 - peekOcclusion))
       ).addClip()
     }
-    let transform = NSAffineTransform()
-    transform.translateX(by: 36, yBy: 32)
-    transform.scale(by: transitionScale)
-    transform.translateX(by: -36, yBy: -32)
-    transform.concat()
     let acknowledged = acknowledgedAt.map { max(0, 1 - (time - $0) / 0.45) } ?? 0
     let earLift: CGFloat = reduced ? 0 : CGFloat(sin(acknowledged * .pi)) * 2
-    let body = NSBezierPath(
-      roundedRect: NSRect(x: 13, y: 12 + bob, width: 46, height: 40 + hoverAmount * 2), xRadius: 19,
-      yRadius: 19)
+    artwork = PetSilhouette.path(bob: bob, hover: hoverAmount, earLift: earLift)
     NSGraphicsContext.saveGraphicsState()
     let shadow = NSShadow()
     shadow.shadowColor = NSColor.black.withAlphaComponent(0.18)
@@ -190,27 +207,16 @@ final class PetView: NSView {
     shadow.shadowOffset = NSSize(width: 0, height: -2)
     shadow.set()
     color.setFill()
-    body.fill()
+    context.addPath(artwork)
+    context.fillPath()
     NSGraphicsContext.restoreGraphicsState()
-    color.setFill()
-    NSBezierPath(ovalIn: NSRect(x: 13, y: 39 + bob, width: 14, height: 19 + earLift)).fill()
-    NSBezierPath(ovalIn: NSRect(x: 44, y: 39 + bob, width: 14, height: 19 + earLift)).fill()
     Self.facialColor(for: color).setFill()
     let blinkPhase = time.truncatingRemainder(dividingBy: 5.6)
     let blink = reduced || dragged ? 0 : max(0, 1 - abs(blinkPhase - 0.12) / 0.12)
     let eyeHeight: CGFloat = (8.2 + (dragged ? 1 : 0)) * CGFloat(1 - 0.88 * sin(blink * .pi / 2))
-    for x in [CGFloat(26), 44] {
-      NSBezierPath(
-        ovalIn: NSRect(x: x - 0.7, y: 37 + bob - eyeHeight / 2, width: 5.4, height: eyeHeight)
-      ).fill()
+    for rect in Self.eyeRects(height: eyeHeight, bob: bob) {
+      NSBezierPath(ovalIn: rect).fill()
     }
-    let mouth = NSBezierPath()
-    mouth.move(to: NSPoint(x: 33, y: 27 + bob))
-    mouth.curve(
-      to: NSPoint(x: 40, y: 27 + bob), controlPoint1: NSPoint(x: 34, y: 23 + bob),
-      controlPoint2: NSPoint(x: 39, y: 23 + bob))
-    mouth.lineWidth = 1.5
-    Self.facialColor(for: color).setStroke()
-    mouth.stroke()
+
   }
 }

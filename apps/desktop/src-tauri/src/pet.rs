@@ -21,6 +21,13 @@ pub fn hide(app: &tauri::AppHandle) {
         }
     });
 }
+async fn dismiss_for_navigation(app: &tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    crate::native::call(app, json!({"op":"pet_dismiss_for_navigation"})).await?;
+    #[cfg(not(target_os = "macos"))]
+    close(app).await?;
+    Ok(())
+}
 async fn close(app: &tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
@@ -230,8 +237,7 @@ pub async fn pet_action(
             app.opener()
                 .open_url(raw, None::<&str>)
                 .map_err(|_| "Could not open this meeting link.")?;
-            hide(&app);
-            Ok(())
+            dismiss_for_navigation(&app).await
         }
         "open" | "capture" => {
             let action = value["action"].as_str().unwrap_or("");
@@ -248,8 +254,7 @@ pub async fn pet_action(
                 return Err("Invalid capture type.".into());
             }
             crate::lifecycle::action(app.clone(), value).await;
-            hide(&app);
-            Ok(())
+            dismiss_for_navigation(&app).await
         }
         "complete" => {
             let kind = value["kind"].as_str().unwrap_or("");

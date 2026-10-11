@@ -2,11 +2,9 @@ import AppKit
 import QuartzCore
 
 private final class PetSceneView: NSView {
-  weak var wakeTarget: NSView?
-  var wakeHitFrame = CGRect.null
   override func hitTest(_ point: NSPoint) -> NSView? {
-    if wakeHitFrame.contains(point), let wakeTarget { return wakeTarget }
-    return super.hitTest(point)
+    let target = super.hitTest(point)
+    return target === self ? nil : target
   }
 }
 
@@ -44,6 +42,10 @@ final class PetController: NSObject {
   private weak var owner: NSWindow?
   private var dashboard: NSView?
   private let placements: PetPlacementStore
+  private var shooEnabled = false
+  private var shoo = PetShoo(sensitivity: "medium")
+  private var shooNeedsExit = false, shooTravel = false, menuTracking = false
+  private var shooReadyAt = 0.0
   private var idleEnabled = true
   private var idleDelay: Double = 3
   private var enabled = false, ready = false, sleeping = false
@@ -104,7 +106,6 @@ final class PetController: NSObject {
     panel.contentView = scene
     scene.wantsLayer = true
     scene.addSubview(sprite)
-    scene.wakeTarget = sprite
     anchorPanel.isOpaque = false
     anchorPanel.backgroundColor = .clear
     anchorPanel.hasShadow = false
@@ -121,8 +122,8 @@ final class PetController: NSObject {
       self.wake()
       switch name {
       case "disable": self.action?(["action": "pet_disable"])
-      case "settings": self.closeOverlay(); self.action?(["action": "open", "path": "/settings?section=pet"])
-      default: self.closeOverlay(); self.action?(["action": "open", "path": "/today"])
+      case "settings": self.dismissForNavigation(); self.action?(["action": "open", "path": "/settings?section=pet"])
+      default: self.dismissForNavigation(); self.action?(["action": "open", "path": "/today"])
       }
     }
     sprite.click = { [weak self] in self?.quickAccess() }
@@ -185,6 +186,12 @@ final class PetController: NSObject {
           self?.armIdle()
         })
     }
+    for name in [NSMenu.didBeginTrackingNotification, NSMenu.didEndTrackingNotification] {
+      observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+        self?.menuTracking = note.name == NSMenu.didBeginTrackingNotification
+        self?.shoo.reset()
+      })
+    }
     restorePosition()
     obstacleTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
       self?.refreshObstacles()
@@ -201,14 +208,15 @@ final class PetController: NSObject {
       NSWorkspace.shared.notificationCenter.removeObserver(observer)
     }
   }
-  func configure(_ settings: NativeSettings) {
-    if let rgb = UInt32(
-      settings.petColor.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16)
-    {
-      sprite.color = NSColor(
-        srgbRed: CGFloat((rgb >> 16) & 255) / 255, green: CGFloat((rgb >> 8) & 255) / 255,
-        blue: CGFloat(rgb & 255) / 255, alpha: 1)
+  func configure(_ settings: NativeSettings, preserveAppearance: Bool = false) {
+    let nextShoo = settings.petShooEnabled ?? false
+    let nextSensitivity = settings.petShooSensitivity ?? "medium"
+    if nextShoo != shooEnabled || nextSensitivity != shoo.sensitivity {
+      shoo.reset(); shooEnabled = nextShoo; shoo.sensitivity = nextSensitivity
     }
+    let scaleChanged = !preserveAppearance && compact.width != 72 * min(2, max(0.5, settings.petScale ?? 1))
+    if !preserveAppearance { previewAppearance(color: settings.petColor, scale: settings.petScale ?? 1) }
+
     let nextDelay = min(300, max(1, settings.petSleepAfterSeconds ?? 3))
     let nextIdle = settings.petSleepEnabled ?? true
     if nextDelay != idleDelay || nextIdle != idleEnabled {
@@ -217,9 +225,8 @@ final class PetController: NSObject {
       wake()
       armIdle()
     }
-    let scaleChanged = compact.width != 72 * min(2, max(0.5, settings.petScale ?? 1))
-    previewScale(settings.petScale ?? 1)
     let wasEnabled = enabled
+    if wasEnabled != settings.petEnabled { shoo.reset() }
     enabled = settings.petEnabled
     if wasEnabled && !enabled {
       closeOverlay(immediately: true)
@@ -233,6 +240,16 @@ final class PetController: NSObject {
       render()
       armIdle()
     }
+  }
+  func previewAppearance(color: String, scale: Double) {
+    if let rgb = UInt32(
+      color.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16)
+    {
+      sprite.color = NSColor(
+        srgbRed: CGFloat((rgb >> 16) & 255) / 255, green: CGFloat((rgb >> 8) & 255) / 255,
+        blue: CGFloat(rgb & 255) / 255, alpha: 1)
+    }
+    previewScale(scale)
   }
   func previewScale(_ scale: Double) {
     let size = 72 * min(2, max(0.5, scale))
@@ -251,6 +268,7 @@ final class PetController: NSObject {
   }
   private var sceneActive: Bool { enabled || motion.target == 1 || motion.progress > 0 }
   func quickAccess() {
+    shoo.reset()
     wake()
     if tuck.progress > 0 {
       pendingOpen = true
@@ -321,6 +339,7 @@ final class PetController: NSObject {
     if ready { startClock() }
   }
   func closeOverlay(immediately: Bool = false) {
+    shoo.reset()
     pendingOpen = false
     cancelIdle()
     settling.request(open: false, immediately: true)
@@ -345,6 +364,9 @@ final class PetController: NSObject {
     } else if ready {
       startClock()
     }
+  }
+  func dismissForNavigation() {
+    if !placements.pinned { closeOverlay() }
   }
   func clearOverlay() {
     closeOverlay(immediately: true)
@@ -480,6 +502,7 @@ final class PetController: NSObject {
       let placement = interpolate(settleFrom, settleTo, settling.progress)
       if settleCard { card = placement } else { compact = placement }
       if settling.isSettled {
+        if shooTravel { shooTravel = false; shooReadyAt = now + 2 }
         updateAttachment()
         save()
       }
@@ -540,21 +563,14 @@ final class PetController: NSObject {
       scene.frame = CGRect(origin: .zero, size: panel.frame.size)
     }
     let origin = panel.frame.origin
-    // Keep the exposed face reachable while hover reveals it. Otherwise the sprite
-    // moves away between pointer entry and mouse-down, swallowing the first click.
-    scene.wakeHitFrame =
-      p == 0
-      ? wakeHitFrame.offsetBy(dx: -origin.x, dy: -origin.y) : .null
     let petLayout = petFrame.offsetBy(dx: -origin.x, dy: -origin.y)
     let angle = p > 0 ? interpolatedAngle() * p : tuckEdge.angle * tuck.progress
     if petLayout != spriteLayout || angle != spriteAngle {
       sprite.layer?.transform = CATransform3DIdentity
       sprite.frame = petLayout
       sprite.setBoundsSize(CGSize(width: 72, height: 72))
-      sprite.layer?.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-      sprite.layer?.position = CGPoint(x: petLayout.midX, y: petLayout.midY)
-      sprite.layer?.setAffineTransform(CGAffineTransform(rotationAngle: angle * .pi / 180)
-        .scaledBy(x: petFrame.width / 72, y: petFrame.height / 72))
+      // Rotation belongs to drawing coordinates so AppKit clipping and hit testing agree.
+      sprite.poseAngle = angle
       spriteLayout = petLayout
       spriteAngle = angle
     }
@@ -623,19 +639,13 @@ final class PetController: NSObject {
     }
   }
   func trackPointer(at point: CGPoint = NSEvent.mouseLocation) {
-    let petHit = geometry.compactHitFrame(
-      compact: compact, visible: visiblePet, tucked: tuckFrame,
-      keepWakeArea: motion.progress == 0 && (tuck.progress > 0 || hovering)
-    ).contains(point)
-    let corridor =
-      tuck.progress > 0 || hovering
-      ? compact.union(tuckFrame == .zero ? compact : tuckFrame) : visiblePet
+    let panelPoint = panel.convertPoint(fromScreen: point)
+    let petHit = geometry.bounds.contains(point)
+      && sprite.containsArtwork(sprite.convert(panelPoint, from: scene))
     let wasHovering = hovering
-    hovering = motion.progress == 0 && corridor.intersection(geometry.bounds).contains(point)
-    // The compact panel already hugs its hit area. Keep it receptive without waiting
-    // for an out-of-process mouse monitor to re-enable input on pointer entry.
-    panel.ignoresMouseEvents =
-      motion.progress > 0 && dragOrigin == nil && !petHit && !card.contains(point)
+    hovering = motion.progress == 0 && petHit
+    // Capture an active drag, but leave transparent pixels available to underlying apps.
+    panel.ignoresMouseEvents = dragOrigin == nil && !petHit && !(motion.progress > 0 && card.contains(point))
     if hovering { wake() } else if wasHovering { armIdle() }
   }
   private func observe(_ event: NSEvent) {
@@ -648,7 +658,39 @@ final class PetController: NSObject {
     {
       closeOverlay()
     }
-    if event.type == .mouseMoved { trackPointer() }
+    if event.type == .mouseMoved {
+      trackPointer()
+      observeShoo(at: NSEvent.mouseLocation, time: CACurrentMediaTime(), buttons: NSEvent.pressedMouseButtons)
+    } else { shoo.reset() }
+  }
+  func observeShoo(at point: CGPoint, time: Double, buttons: Int) {
+    let region = visiblePet.insetBy(dx: -12, dy: -12)
+    if !region.contains(point) { shooNeedsExit = false }
+    let eligible = shooEnabled && enabled && !sleeping && !menuTracking && buttons == 0
+      && !shooNeedsExit && !pendingOpen && time >= shooReadyAt && dragOrigin == nil
+      && motion.progress == 0 && motion.target == 0 && motion.isSettled
+      && tuck.progress == 0 && tuck.isSettled && settling.isSettled && edgeMotion.isSettled
+    let hit = sprite.containsArtwork(sprite.convert(panel.convertPoint(fromScreen: point), from: scene))
+    guard shoo.update(point: point, time: time, eligible: eligible, overArtwork: hit, region: region),
+      let anchor = geometry.farthestAnchor(from: point, size: compact.size, excluding: compactAnchor)
+    else { return }
+    cancelIdle()
+    shooNeedsExit = true
+    compactAnchor = anchor; cardAnchor = anchor
+    settleFrom = compact
+    settleTo = geometry.anchors(size: compact.size)[anchor]
+    settleCard = false
+    // A conservative swept rectangle avoids ever moving through the Dock.
+    let blocked = geometry.obstacles.contains { $0.insetBy(dx: -8, dy: -8).intersects(settleFrom.union(settleTo)) }
+    if blocked || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+      compact = settleTo; updateAttachment(); save(); render(); armIdle()
+      shooReadyAt = time + 2
+    } else {
+      shooTravel = true
+      settling.request(open: false, immediately: true)
+      settling.request(open: true)
+      startClock()
+    }
   }
   private func cancelIdle() {
     idleTimer?.invalidate()

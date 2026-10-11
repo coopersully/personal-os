@@ -213,6 +213,10 @@ it("uses compact icon actions without refresh, close, or descriptive header copy
   expect(screen.queryByText("Your day at a glance")).not.toBeInTheDocument();
   const open = screen.getByRole("button", { name: "Open nohmi" });
   expect(open.textContent).toBe("");
+  expect(open.querySelector("img")).toHaveAttribute("src", "/icon.svg");
+  expect(open.closest('[data-slot="card"]')).toBeNull();
+  expect(screen.queryByText("Quick actions")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Add task" })).not.toBeInTheDocument();
   fireEvent.click(open);
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith("pet_action", {

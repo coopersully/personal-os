@@ -105,11 +105,39 @@ beforeEach(() => {
     },
   };
   mocks.invoke.mockImplementation(
-    async (command: string, args?: { settings?: DesktopSettings }) => {
+    async (
+      command: string,
+      args?: {
+        settings?: DesktopSettings;
+        preservePetAppearance?: boolean;
+        edit?: { color: string; scale: number };
+      },
+    ) => {
       if (command === "ritual_local") return { enabled: false };
       if (command === "desktop_settings") return status;
+      if (command === "desktop_begin_pet_appearance")
+        return { sessionId: "test-session", serverUrl: status.settings.serverUrl, accountId: null };
+      if (command === "desktop_save_pet_appearance") {
+        status = {
+          ...status,
+          settings: {
+            ...status.settings,
+            petColor: args!.edit!.color,
+            petScale: args!.edit!.scale,
+          },
+        };
+        return status;
+      }
       if (command === "desktop_save_settings") {
-        status = { ...status, settings: args!.settings! };
+        status = {
+          ...status,
+          settings: {
+            ...args!.settings!,
+            ...(args?.preservePetAppearance
+              ? { petColor: status.settings.petColor, petScale: status.settings.petScale }
+              : {}),
+          },
+        };
         return status;
       }
       return { ok: true };
@@ -283,7 +311,9 @@ describe("desktop preferences", () => {
     expect(mocks.invoke).toHaveBeenCalledWith("desktop_native_action", {
       action: "reset_pet_position",
     });
-    const saved = await save();
+    await save();
+    await waitFor(() => expect(status.settings.petColor).toBe("#123456"));
+    const saved = status.settings;
     expect(saved).toMatchObject({
       petEnabled: true,
       petColor: "#123456",
@@ -291,6 +321,22 @@ describe("desktop preferences", () => {
     });
     expect(saved.widgetWorkspaces).toEqual(settings.widgetWorkspaces);
     expect(saved.notifications).toEqual(settings.notifications);
+  });
+
+  it("previews a burst of colors without replaying each value to disk", async () => {
+    mount({ section: "pet" });
+    const input = await screen.findByLabelText("Pet color");
+    for (let index = 1; index <= 30; index++) {
+      fireEvent.change(input, { target: { value: `#${index.toString(16).padStart(6, "0")}` } });
+    }
+    expect(
+      mocks.invoke.mock.calls.filter(([command]) => command === "desktop_save_pet_appearance"),
+    ).toHaveLength(0);
+    await waitFor(() => expect(status.settings.petColor).toBe("#00001E"));
+    expect(
+      mocks.invoke.mock.calls.filter(([command]) => command === "desktop_save_pet_appearance"),
+    ).toHaveLength(1);
+    expect(screen.getByLabelText("Pet color")).toHaveValue("#00001E");
   });
 
   it("autosaves pet scale with keyboard controls while preserving color", async () => {
@@ -427,23 +473,26 @@ describe("desktop preferences", () => {
     });
   });
 
-  it("rolls back failed automatic saves and lets the next change retry", async () => {
+  it("preserves an unsaved appearance and delivers retry through Sonner only", async () => {
     mount({ section: "pet" });
     await screen.findByLabelText("Pet color");
     const original = mocks.invoke.getMockImplementation()!;
     let fail = true;
     mocks.invoke.mockImplementation(async (command, args) => {
-      if (command === "desktop_save_settings" && fail) throw new Error("Could not write");
+      if (command === "desktop_save_pet_appearance" && fail) throw new Error("Could not write");
       return original(command, args);
     });
     fireEvent.change(screen.getByLabelText("Pet color"), { target: { value: "#123456" } });
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
-    await waitFor(() =>
-      expect(screen.getByLabelText("Pet color")).toHaveValue(settings.petColor.toUpperCase()),
-    );
+    await waitFor(() => expect(screen.getByLabelText("Pet color")).toHaveValue("#123456"));
     expect(mocks.success).not.toHaveBeenCalled();
+    expect(screen.queryByText("Couldn’t save pet appearance.")).not.toBeInTheDocument();
     fail = false;
-    fireEvent.change(screen.getByLabelText("Pet color"), { target: { value: "#123456" } });
+    const options = vi.mocked(toast.error).mock.calls.at(-1)?.[1];
+    if (!options?.action) throw new Error("Expected a Sonner retry action");
+    await act(async () => {
+      (options.action as unknown as { onClick: () => void }).onClick();
+    });
     await waitFor(() => expect(status.settings.petColor).toBe("#123456"));
   });
 
@@ -868,4 +917,16 @@ it("autosaves sleep settings and disables the delay when sleep is off", async ()
   await waitFor(() => expect(status.settings.petSleepEnabled).toBe(true));
   fireEvent.keyDown(screen.getByRole("slider", { name: "Sleep after" }), { key: "ArrowRight" });
   await waitFor(() => expect(status.settings.petSleepAfterSeconds).toBe(4));
+});
+
+it("autosaves closed-card shoo preferences with conservative defaults", async () => {
+  mount({ section: "pet" });
+  const enabled = await screen.findByRole("switch", { name: "Shake to shoo" });
+  expect(enabled).not.toBeChecked();
+  expect(screen.getByLabelText("Sensitivity")).toBeDisabled();
+  await userEvent.click(enabled);
+  await waitFor(() => expect(status.settings.petShooEnabled).toBe(true));
+  await userEvent.selectOptions(screen.getByLabelText("Sensitivity"), "low");
+  await waitFor(() => expect(status.settings.petShooSensitivity).toBe("low"));
+  expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
 });

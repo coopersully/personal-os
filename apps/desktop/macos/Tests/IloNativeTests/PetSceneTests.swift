@@ -37,7 +37,59 @@ final class PetSceneTests: XCTestCase {
     controller.closeOverlay(immediately: true)
     XCTAssertFalse(controller.panel.isVisible, "Closing must not enable the ambient pet")
   }
-  func testCompactPanelRemainsClickableBeforeReceivingPointerMovement() throws {
+  func testNavigationPreservesPinUntilExplicitlyUnpinned() throws {
+    _ = NSApplication.shared
+    let suite = "nohmi.pet.pin.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let controller = PetController(placements: PetPlacementStore(defaults: defaults))
+    let owner = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 400, height: 560),
+      styleMask: .borderless, backing: .buffered, defer: false)
+    owner.isReleasedWhenClosed = false
+    defer { controller.clearOverlay(); owner.close() }
+    let address = UInt64(UInt(bitPattern: Unmanaged.passUnretained(owner).toOpaque()))
+    try controller.prepareOverlay(windowAddress: address)
+    try controller.readyOverlay(windowAddress: address)
+    controller.setPinned(true)
+    controller.dismissForNavigation()
+    XCTAssertEqual(controller.presentationState["visible"] as? Bool, true)
+    controller.closeOverlay(immediately: true)
+    XCTAssertEqual(controller.presentationState["pinned"] as? Bool, true)
+    try controller.readyOverlay(windowAddress: address)
+    XCTAssertEqual(controller.presentationState["pinned"] as? Bool, true)
+    controller.setPinned(false)
+    controller.dismissForNavigation()
+    XCTAssertEqual(controller.presentationState["visible"] as? Bool, false)
+  }
+  func testShooDoesNotRecognizeWhileCardOpenOrMouseHeld() throws {
+    _ = NSApplication.shared
+    let suite = "nohmi.pet.shoo.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let controller = PetController(placements: PetPlacementStore(defaults: defaults))
+    var preferences = settings(enabled: true)
+    preferences.petShooEnabled = true
+    preferences.petSleepEnabled = false
+    controller.configure(preferences)
+    let initial = controller.panel.frame
+    for i in 0...8 {
+      controller.observeShoo(at: CGPoint(x: initial.midX + (i % 2 == 0 ? 0 : 18), y: initial.midY), time: 100 + Double(i) * 0.08, buttons: 1)
+    }
+    XCTAssertEqual(controller.panel.frame, initial)
+    let owner = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 400, height: 560), styleMask: .borderless, backing: .buffered, defer: false)
+    owner.isReleasedWhenClosed = false
+    defer { controller.configure(settings(enabled: false)); controller.clearOverlay(); owner.close() }
+    let address = UInt64(UInt(bitPattern: Unmanaged.passUnretained(owner).toOpaque()))
+    try controller.prepareOverlay(windowAddress: address)
+    try controller.readyOverlay(windowAddress: address)
+    let open = controller.panel.frame
+    for i in 0...8 {
+      controller.observeShoo(at: CGPoint(x: open.midX + (i % 2 == 0 ? 0 : 18), y: open.midY), time: 200 + Double(i) * 0.08, buttons: 0)
+    }
+    XCTAssertEqual(controller.presentationState["visible"] as? Bool, true)
+    XCTAssertEqual(controller.panel.frame, open)
+  }
+  func testCompactPanelRoutesOnlyVisibleArtwork() throws {
     _ = NSApplication.shared
     guard !NSScreen.screens.isEmpty else { throw XCTSkip("Requires an AppKit display") }
     let suite = "nohmi.pet.scene.\(UUID().uuidString)"
@@ -47,7 +99,9 @@ final class PetSceneTests: XCTestCase {
     defer { controller.configure(settings(enabled: false)) }
     controller.configure(settings(enabled: true))
     controller.trackPointer(at: CGPoint(x: -100000, y: -100000))
-    XCTAssertFalse(controller.panel.ignoresMouseEvents)
+    XCTAssertTrue(controller.panel.ignoresMouseEvents, "Outside pixels must pass through")
+    controller.trackPointer(at: CGPoint(x: controller.panel.frame.midX, y: controller.panel.frame.midY))
+    XCTAssertFalse(controller.panel.ignoresMouseEvents, "Visible body must accept input")
     XCTAssertGreaterThan(controller.panel.level.rawValue, Int(CGWindowLevelForKey(.dockWindow)))
   }
   func testClosingSnappedCardAndResetKeepTheCompactAnchor() throws {

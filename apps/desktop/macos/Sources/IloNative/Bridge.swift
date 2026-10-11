@@ -36,6 +36,7 @@ final class NativeCompanion {
   private let pet = PetController()
   private var settings: NativeSettings?
   private var snapshot: NativeSnapshot?
+  private var appearance = PetAppearanceState()
   private var loginError: String?
   private var widgetError: String?
   private let launchedAtLogin =
@@ -92,6 +93,7 @@ final class NativeCompanion {
     return result
   }
   func clear(preservingColdResponses: Bool = false) {
+    appearance.clear()
     pet.clearOverlay()
     RitualBackdrop.shared.hide()
     snapshot = nil
@@ -133,6 +135,33 @@ final class NativeCompanion {
       RitualBackdrop.shared.hide();return ["ok":true,"visible":false]
     case "wallpaper_prepare": return try WallpaperController.prepare(object)
     case "wallpaper_apply": return try WallpaperController.apply(object)
+    case "pet_dismiss_for_navigation":
+      pet.dismissForNavigation()
+      return ["ok": true]
+    case "pet_appearance_session":
+      return ["accepted": appearance.session != nil && appearance.session == object["sessionId"] as? String]
+    case "begin_pet_appearance":
+      guard let settings else { throw NativeError.message("Desktop settings are unavailable") }
+      let session = UUID().uuidString
+      appearance.begin(session)
+      pet.configure(settings)
+      return ["sessionId": session]
+    case "preview_pet_appearance":
+      guard let session = object["sessionId"] as? String,
+        let revision = object["revision"] as? Int, revision > 0,
+        let color = object["color"] as? String, color.range(of: "^#[0-9A-Fa-f]{6}$", options: .regularExpression) != nil,
+        let scale = object["scale"] as? Double, scale.isFinite, (0.5...2).contains(scale)
+      else { throw NativeError.message("Invalid pet appearance") }
+      let accepted = appearance.accept(session: session, revision: revision)
+      if accepted { pet.previewAppearance(color: color, scale: scale) }
+      return ["accepted": accepted, "revision": revision]
+    case "finish_pet_appearance":
+      guard let session = object["sessionId"] as? String, let revision = object["revision"] as? Int else {
+        throw NativeError.message("Invalid appearance session")
+      }
+      appearance.finish(session: session, revision: revision)
+      if !appearance.active, let settings { pet.configure(settings) }
+      return ["ok": true]
     case "configure":
       guard let raw = object["settings"] else { throw NativeError.message("Missing settings") }
       var s = try JSONDecoder().decode(
@@ -162,7 +191,7 @@ final class NativeCompanion {
       var visibleSettings = s
       visibleSettings.petEnabled = petShouldBeVisible(
         enabled: s.petEnabled, hasSnapshot: snapshot != nil)
-      pet.configure(visibleSettings)
+      pet.configure(visibleSettings, preserveAppearance: appearance.active)
       if let snapshot { publish(snapshot) }
       return status()
     case "snapshot":
@@ -183,7 +212,7 @@ final class NativeCompanion {
       }
       UserDefaults.standard.set(identityFingerprint, forKey: "ilo.native.identityFingerprint")
       snapshot = s
-      pet.configure(settings)
+      pet.configure(settings, preserveAppearance: appearance.active)
       publish(s)
       Self.emit(["action": "pet_snapshot_changed"])
       return ["ok": true, "widgetsAvailable": SharedSnapshotStore.container != nil]

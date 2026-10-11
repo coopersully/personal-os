@@ -224,3 +224,19 @@ Color changes currently queue full serialized settings writes and native configu
 picker change; appearance previews have no color equivalent. Open/capture navigation always
 calls `hide`, regardless of pin. These paths are source-confirmed; timing and user-visible
 acceptance remain to be measured. Detailed execution ledger is in the ignored plan workspace.
+
+### Foundation checkpoint — 2026-10-11
+
+Implemented shared artwork/input geometry, drawing-coordinate rotation, mouth removal,
+centered eyes, appearance preview coalescing with account-scoped revisions, pin-preserving
+navigation, the compact header, and closed-card shoo with settings. Cooper reports the
+sleeping diagnostic build looks good; exhaustive pointer/display/scale acceptance is still
+pending. Native tests: 88 passed. Rust library tests: 58 passed. Focused web tests: 60 passed.
+These are checkpoint results, not whole-system acceptance or a performance certification.
+
+The raster-only ear probe passed before the correction; only rotated hit-testing reproduced
+that regression. Do not describe the raster probe as proof of the original clipping cause.
+Shoo thresholds have synthetic-trace coverage but still need real-pointer calibration.
+Tasks 6–8 and full verification remain outstanding. Local HMR briefly failed because a new
+select import referenced an absent primitive; it now uses the existing NativeSelect and the
+app renders again.

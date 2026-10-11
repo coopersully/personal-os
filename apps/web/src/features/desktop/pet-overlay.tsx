@@ -4,7 +4,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { type PointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { api } from "../../api.js";
-import { NohmiBrandMark } from "../../components/brand-marks.js";
 import {
   EventCard,
   EventCardBody,
@@ -17,10 +16,8 @@ import { PinIcon, ResizeIcon } from "../../components/icons.js";
 import { Button } from "../../components/ui/button.js";
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "../../components/ui/card.js";
@@ -62,15 +59,6 @@ export type PetData = {
   };
 };
 const act = (value: Record<string, unknown>) => invoke("pet_action", { value });
-const workspaceNames: Record<string, string> = {
-  tasks: "Tasks",
-  reminders: "Reminders",
-  calendar: "Calendar",
-  mail: "Mail",
-  finances: "Finances",
-  goals: "Goals",
-  motives: "Motives",
-};
 function IconAction({
   label,
   onClick,
@@ -89,7 +77,7 @@ function IconAction({
       <TooltipTrigger asChild>
         <Button
           type="button"
-          variant="ghost"
+          variant={pressed ? "secondary" : "ghost"}
           size="icon"
           aria-label={label}
           aria-pressed={pressed}
@@ -381,56 +369,54 @@ function PetContent() {
       }}
     >
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-xl bg-background p-3">
-        <Card className="shrink-0 gap-0 py-0">
-          <CardHeader
-            className="cursor-grab px-2 py-1"
+        <header className="flex shrink-0 items-center justify-between gap-2">
+          <div
+            className="min-w-0 cursor-grab"
             onPointerDown={(event) => {
               if (!(event.target instanceof Element) || event.target.closest("button, a, input"))
                 return;
               drag(event);
             }}
           >
-            <CardTitle>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    className="-ms-2.5 cursor-grab text-base"
-                    aria-label="Move pet card"
-                    onPointerDown={drag}
-                    onKeyDown={(event) => {
-                      const movement = {
-                        ArrowLeft: [-20, 0],
-                        ArrowRight: [20, 0],
-                        ArrowUp: [0, 20],
-                        ArrowDown: [0, -20],
-                      }[event.key];
-                      if (!movement) return;
-                      event.preventDefault();
-                      action.mutate({ action: "move", dx: movement[0], dy: movement[1] });
-                    }}
-                  >
-                    Today
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Drag to move, or use the arrow keys.</TooltipContent>
-              </Tooltip>
-            </CardTitle>
-            <CardAction className="flex gap-1">
-              <IconAction
-                label={pinned ? "Unpin quick access" : "Pin quick access"}
-                disabled={pin.isPending}
-                pressed={pinned}
-                onClick={() => pin.mutate(!pinned)}
-              >
-                <PinIcon className={pinned ? "text-primary" : undefined} />
-              </IconAction>
-              <IconAction label="Open nohmi" onClick={() => open("/today")}>
-                <NohmiBrandMark symbol />
-              </IconAction>
-            </CardAction>
-          </CardHeader>
-        </Card>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  className="-ms-2.5 cursor-grab text-base"
+                  aria-label="Move pet card"
+                  onPointerDown={drag}
+                  onKeyDown={(event) => {
+                    const movement = {
+                      ArrowLeft: [-20, 0],
+                      ArrowRight: [20, 0],
+                      ArrowUp: [0, 20],
+                      ArrowDown: [0, -20],
+                    }[event.key];
+                    if (!movement) return;
+                    event.preventDefault();
+                    action.mutate({ action: "move", dx: movement[0], dy: movement[1] });
+                  }}
+                >
+                  Today
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Drag to move, or use the arrow keys.</TooltipContent>
+            </Tooltip>
+          </div>
+          <div className="flex shrink-0 gap-1">
+            <IconAction
+              label={pinned ? "Unpin quick access" : "Pin quick access"}
+              disabled={pin.isPending}
+              pressed={pinned}
+              onClick={() => pin.mutate(!pinned)}
+            >
+              <PinIcon />
+            </IconAction>
+            <IconAction label="Open nohmi" onClick={() => open("/today")}>
+              <img src="/icon.svg" alt="" className="size-6 rounded-md" />
+            </IconAction>
+          </div>
+        </header>
         {data.isPending ? (
           <Skeleton className="h-32 w-full" />
         ) : data.isError && !snapshot ? null : !snapshot ? (
@@ -455,29 +441,6 @@ function PetContent() {
                 <CardContent>{snapshot.financeSummary}</CardContent>
               </Card>
             ) : null}
-            <Card className="shrink-0">
-              <CardHeader>
-                <CardTitle>Quick actions</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-wrap gap-2">
-                {["task", "reminder", "event"].map((kind) => (
-                  <Button
-                    key={kind}
-                    variant="outline"
-                    onClick={() => action.mutate({ action: "capture", kind })}
-                  >
-                    Add {kind}
-                  </Button>
-                ))}
-              </CardContent>
-              <CardFooter className="flex flex-wrap gap-2">
-                {data.data?.workspaces.map((workspace) => (
-                  <Button key={workspace} variant="ghost" onClick={() => open(`/${workspace}`)}>
-                    {workspaceNames[workspace] ?? workspace}
-                  </Button>
-                ))}
-              </CardFooter>
-            </Card>
           </>
         )}
       </div>

@@ -51,6 +51,8 @@ pub struct DesktopSettings {
     pub pet_enabled: bool,
     pub pet_color: String,
     pub pet_scale: f64,
+    pub pet_shoo_enabled: bool,
+    pub pet_shoo_sensitivity: String,
     pub pet_sleep_enabled: bool,
     pub pet_sleep_after_seconds: f64,
     pub pet_workspaces: Vec<String>,
@@ -65,6 +67,8 @@ impl Default for DesktopSettings {
             pet_enabled: false,
             pet_color: "#C7D23C".into(),
             pet_scale: 1.0,
+            pet_shoo_enabled: false,
+            pet_shoo_sensitivity: "medium".into(),
             pet_sleep_enabled: true,
             pet_sleep_after_seconds: 3.0,
             pet_workspaces: vec!["tasks".into(), "reminders".into(), "calendar".into()],
@@ -76,6 +80,9 @@ impl Default for DesktopSettings {
 impl DesktopSettings {
     pub fn validate(&mut self) -> Result<(), String> {
         self.server_url = canonical_server(&self.server_url)?;
+        if !["low", "medium", "high"].contains(&self.pet_shoo_sensitivity.as_str()) {
+            return Err("Choose Low, Medium, or High shoo sensitivity.".into());
+        }
         if !self.pet_scale.is_finite() || !(0.5..=2.0).contains(&self.pet_scale) {
             return Err("Choose a pet scale between 50% and 200%.".into());
         }
@@ -261,7 +268,7 @@ pub async fn desktop_settings(app: tauri::AppHandle) -> Result<serde_json::Value
         .await
         .clone();
     Ok(
-        serde_json::json!({"settings":settings,"native":native,"hostedServer":HOSTED_SERVER,"wallpaperError":wallpaper_error}),
+        serde_json::json!({"settings":settings,"native":native,"hostedServer":HOSTED_SERVER,"wallpaperError":wallpaper_error,"accountId":app.state::<DesktopState>().account_id.lock().await.clone()}),
     )
 }
 fn server_switch_cleanup(
@@ -286,24 +293,61 @@ fn server_switch_cleanup(
 pub async fn desktop_save_settings(
     app: tauri::AppHandle,
     settings: DesktopSettings,
+    preserve_pet_appearance: Option<bool>,
 ) -> Result<serde_json::Value, String> {
-    save_settings(app, Some(settings)).await
+    save_settings(
+        app,
+        SettingsChange::Replace(settings, preserve_pet_appearance.unwrap_or(false)),
+    )
+    .await
 }
 pub async fn disable_pet(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
-    save_settings(app, None).await
+    save_settings(app, SettingsChange::DisablePet).await
+}
+enum SettingsChange {
+    Replace(DesktopSettings, bool),
+    DisablePet,
+    Appearance(AppearanceEdit),
 }
 async fn save_settings(
     app: tauri::AppHandle,
-    replacement: Option<DesktopSettings>,
+    replacement: SettingsChange,
 ) -> Result<serde_json::Value, String> {
     // Match mutation lock order: ritual fence, then settings/account state.
     let ritual_runtime = app.state::<crate::ritual::RitualRuntime>();
     let _ritual_guard = ritual_runtime.lock.lock().await;
     let mut settings = match replacement {
-        Some(settings) => settings,
-        None => {
+        SettingsChange::Replace(mut settings, preserve_appearance) => {
+            if preserve_appearance {
+                let current = app.state::<DesktopState>().settings.lock().await.clone();
+                settings.pet_color = current.pet_color;
+                settings.pet_scale = current.pet_scale;
+            }
+            settings
+        }
+        SettingsChange::DisablePet => {
             let mut settings = app.state::<DesktopState>().settings.lock().await.clone();
             settings.pet_enabled = false;
+            settings
+        }
+        SettingsChange::Appearance(edit) => {
+            let state = app.state::<DesktopState>();
+            let mut settings = state.settings.lock().await.clone();
+            if settings.server_url != edit.server_url
+                || *state.account_id.lock().await != edit.account_id
+            {
+                return Err("Your account changed. Reopen pet settings.".into());
+            }
+            let session = crate::native::call(
+                &app,
+                serde_json::json!({"op":"pet_appearance_session","sessionId":edit.session_id}),
+            )
+            .await?;
+            if session["accepted"] != true {
+                return Err("Reopen pet settings to change appearance.".into());
+            }
+            settings.pet_color = edit.color;
+            settings.pet_scale = edit.scale;
             settings
         }
     };
@@ -438,6 +482,45 @@ pub async fn desktop_native_action(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn appearance_edits_validate_revision_and_native_values() {
+        let mut edit = AppearanceEdit {
+            server_url: "https://example.com".into(),
+            account_id: None,
+            session_id: "session".into(),
+            revision: 1,
+            color: "#FFFFFF".into(),
+            scale: 1.0,
+        };
+        assert!(edit.validate().is_ok());
+        for revision in [0, i32::MAX as u64 + 1] {
+            edit.revision = revision;
+            assert!(edit.validate().is_err());
+        }
+        edit.revision = 1;
+        for color in ["red", "#fff", "#GGGGGG"] {
+            edit.color = color.into();
+            assert!(edit.validate().is_err());
+        }
+        edit.color = "#000000".into();
+        edit.scale = f64::NAN;
+        assert!(edit.validate().is_err());
+        edit.scale = 1.0;
+        edit.session_id.clear();
+        assert!(edit.validate().is_err());
+    }
+    #[test]
+    fn shoo_preferences_default_and_validate() {
+        let mut settings: DesktopSettings = serde_json::from_str("{}").unwrap();
+        assert!(!settings.pet_shoo_enabled);
+        assert_eq!(settings.pet_shoo_sensitivity, "medium");
+        settings.pet_shoo_sensitivity = "unknown".into();
+        assert!(settings.validate().is_err());
+        for sensitivity in ["low", "medium", "high"] {
+            settings.pet_shoo_sensitivity = sensitivity.into();
+            assert!(settings.validate().is_ok());
+        }
+    }
     #[test]
     fn sleep_preferences_default_and_validate() {
         let mut settings: DesktopSettings = serde_json::from_str("{}").unwrap();
@@ -584,4 +667,85 @@ pub async fn desktop_preview_pet_scale(app: tauri::AppHandle, scale: f64) -> Res
     )
     .await?;
     Ok(())
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AppearanceEdit {
+    server_url: String,
+    account_id: Option<String>,
+    session_id: String,
+    revision: u64,
+    color: String,
+    scale: f64,
+}
+impl AppearanceEdit {
+    fn validate(&self) -> Result<(), String> {
+        let mut settings = DesktopSettings {
+            pet_color: self.color.clone(),
+            pet_scale: self.scale,
+            ..Default::default()
+        };
+        settings.validate()?;
+        if self.session_id.is_empty()
+            || self.session_id.len() > 64
+            || self.revision == 0
+            || self.revision > i32::MAX as u64
+        {
+            return Err("Invalid appearance session.".into());
+        }
+        Ok(())
+    }
+}
+#[tauri::command]
+pub async fn desktop_begin_pet_appearance(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<serde_json::Value, String> {
+    if window.label() != "main" {
+        return Err("Open pet settings to change appearance.".into());
+    }
+    let runtime = app.state::<crate::ritual::RitualRuntime>();
+    let _guard = runtime.lock.lock().await;
+    let state = app.state::<DesktopState>();
+    let settings = state.settings.lock().await;
+    let account = state.account_id.lock().await;
+    let mut value =
+        crate::native::call(&app, serde_json::json!({"op":"begin_pet_appearance"})).await?;
+    value["serverUrl"] = serde_json::json!(settings.server_url);
+    value["accountId"] = serde_json::json!(*account);
+    Ok(value)
+}
+#[tauri::command]
+pub async fn desktop_preview_pet_appearance(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    edit: AppearanceEdit,
+) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("Open pet settings to change appearance.".into());
+    }
+    edit.validate()?;
+    let state = app.state::<DesktopState>();
+    let settings = state.settings.lock().await;
+    let account = state.account_id.lock().await;
+    if settings.server_url != edit.server_url || *account != edit.account_id {
+        return Err("Your account changed. Reopen pet settings.".into());
+    }
+    crate::native::call(&app, serde_json::json!({"op":"preview_pet_appearance","sessionId":edit.session_id,"revision":edit.revision,"color":edit.color,"scale":edit.scale})).await?;
+    Ok(())
+}
+#[tauri::command]
+pub async fn desktop_save_pet_appearance(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    edit: AppearanceEdit,
+) -> Result<serde_json::Value, String> {
+    if window.label() != "main" {
+        return Err("Open pet settings to change appearance.".into());
+    }
+    edit.validate()?;
+    let result = save_settings(app.clone(), SettingsChange::Appearance(edit.clone())).await?;
+    crate::native::call(&app, serde_json::json!({"op":"finish_pet_appearance","sessionId":edit.session_id,"revision":edit.revision})).await?;
+    Ok(result)
 }

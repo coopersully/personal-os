@@ -26,6 +26,7 @@ import {
   financeProviderItems,
   financeReimbursementMatches,
   financeReimbursements,
+  financeReviewCases,
   financeTransactionAllocations,
   financeTransactions,
   mailCalendarCommitmentIntakes,
@@ -493,7 +494,65 @@ describe("database schema contracts", () => {
       "0098_mail_layout_preferences",
       "0099_mail_conversation_layout",
       "0100_finance_transaction_preferences",
+      "0101_calendar_creation_preferences",
+      "0102_task_capture_preferences",
+      "0103_finance_display_account_preferences",
+      "0104_finance_review_history_index",
+      "0105_finance_review_history_archive",
+      "0109_finance_review_history_archive_upgrade",
+      "0106_finance_review_action_authority",
+      "0107_finance_host_continuation",
+      "0108_finance_sms_completion",
     ]);
+  });
+
+  it("keeps SMS completion evidence bound to its signed claim, context and acknowledgement", async () => {
+    const completion = getTableConfig(requiredTable("financeSmsCompletions"));
+    expect(completion.foreignKeys.map((key) => key.getName())).toEqual(
+      expect.arrayContaining([
+        "finance_sms_completions_claim_fk",
+        "finance_sms_completions_context_fk",
+        "finance_sms_completions_ack_fk",
+      ]),
+    );
+    const claim = completion.foreignKeys.find(
+      (key) => key.getName() === "finance_sms_completions_claim_fk",
+    );
+    expect(claim?.reference().columns.map((column) => column.name)).toEqual([
+      "user_id",
+      "claim_id",
+      "connection_id",
+    ]);
+    expect(claim?.onDelete).toBe("cascade");
+    expect(completion.checks.map((check) => check.name)).toEqual(
+      expect.arrayContaining([
+        "finance_sms_completions_disposition_check",
+        "finance_sms_completions_context_check",
+      ]),
+    );
+    const migration = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0108_finance_sms_completion.sql"),
+      "utf8",
+    );
+    expect(migration).toContain("Finance SMS completion evidence is immutable");
+    expect(migration).toContain("Finance SMS completion evidence remains until owner deletion");
+  });
+
+  it("keeps Finance review history ordering aligned with migration 0104", async () => {
+    const reviews = getTableConfig(financeReviewCases);
+    const historyIndex = reviews.indexes.find(
+      (index) => index.config.name === "finance_review_cases_user_first_seen_id_idx",
+    );
+    expect(
+      historyIndex?.config.columns.map((column) => (column as { name?: string }).name),
+    ).toEqual(["user_id", "first_seen_at", "id"]);
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0104_finance_review_history_index.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain(
+      'CREATE INDEX "finance_review_cases_user_first_seen_id_idx" ON "finance_review_cases" USING btree ("user_id", "first_seen_at" DESC, "id" DESC);',
+    );
   });
 
   it("keeps reimbursement ownership, many-to-many credit matching, and migration 0062 aligned", async () => {

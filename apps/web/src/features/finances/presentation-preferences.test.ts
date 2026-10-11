@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { workspacePreferencesSchema } from "@personal-os/domain";
+import { financesWorkspacePreferencesSchema } from "@personal-os/domain";
 import { describe, expect, it } from "vitest";
 import { financePresentationParams } from "./presentation-preferences";
 
 describe("Finance display defaults", () => {
-  const saved = workspacePreferencesSchema.parse({
+  const saved = financesWorkspacePreferencesSchema.parse({
     financeTransactionView: "cards",
     financeTransactionGroup: "merchant",
   });

@@ -26,8 +26,8 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { parseCalendarDateQuery } from "../calendar/search-date";
+import { useWorkspacePreferences } from "../workspace-settings/preferences";
 import { type SearchAction, type SearchOption, workspaceCatalog } from "./catalog";
-import { useWorkspacePreferences } from "./preferences";
 
 /** Workspace discovery is separate from the current page's URL filters. */
 export function WorkspaceFinder({

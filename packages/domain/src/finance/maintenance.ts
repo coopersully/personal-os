@@ -9,10 +9,18 @@ export const financeMaintenanceInputSchema = z.discriminatedUnion("operation", [
   z
     .object({
       operation: z.literal("start"),
+      automationScheduleId: idSchema.optional(),
       scope: maintenanceScopeSchema.default({ type: "all_outstanding" }),
     })
     .strict(),
   z.object({ operation: z.literal("resume"), runId: idSchema }).strict(),
+  z
+    .object({
+      operation: z.literal("continue"),
+      continuationId: idSchema,
+      automationScheduleId: idSchema,
+    })
+    .strict(),
 ]);
 export type FinanceMaintenanceInput = z.infer<typeof financeMaintenanceInputSchema>;
 

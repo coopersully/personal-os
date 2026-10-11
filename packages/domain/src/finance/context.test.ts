@@ -13,6 +13,19 @@ const create = {
   transactionIds: [],
 };
 describe("zero-link Finance context capture", () => {
+  it.each([
+    "\u200B",
+    "\u200D",
+    "\uFE0F",
+    "visible\u0000",
+    "visible\u202E",
+  ])("rejects invisible or control-bearing context %j", (text) => {
+    expect(captureFinanceContextInputSchema.safeParse({ ...create, text }).success).toBe(false);
+  });
+  it("preserves visible international text and multiline context", () => {
+    const text = "旅行 reimbursement\n€20 paid\t👩\u200D💻";
+    expect(captureFinanceContextInputSchema.parse({ ...create, text })).toMatchObject({ text });
+  });
   it("normalizes labels and absolute instants without inventing money", () => {
     expect(captureFinanceContextInputSchema.parse(create)).toMatchObject({
       text: "Trip reimbursement",

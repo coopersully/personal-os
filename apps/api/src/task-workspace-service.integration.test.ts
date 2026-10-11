@@ -225,6 +225,11 @@ describe.sequential("shared task workspace PostgreSQL projection", () => {
     await insert("Finished project", { kind: "task", taskProjectId: projectId });
     await insert("Deleted reminder", { deletedAt: instant });
     expect((await list()).items.map((item) => item.record.title)).toEqual(["Open task"]);
+    expect(
+      (await list({ status: "open_and_completed", sort: "title" })).items.map(
+        (item) => item.record.title,
+      ),
+    ).toEqual(["Done", "Open task"]);
     const history = await list({ view: "history", sort: "title" });
     expect(history.items.map((item) => [item.record.title, item.readOnly])).toEqual([
       ["Archived", true],

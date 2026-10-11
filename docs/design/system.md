@@ -582,8 +582,8 @@ Keep options in one row; allow horizontal scrolling when constrained rather than
 turning the group into a grid or wrapping it into ambiguous rows. Do not restyle
 individual instances or add parallel segmented-button CSS.
 
-Current consumers: Today commitment filters; Calendar Day/Week/Month; Reviews work
-type; Rituals Morning/Evening/History; Finances budget period; wallpaper layout,
+Current consumers: Today commitment filters; Calendar Day/Week/Month;
+Rituals Morning/Evening/History; Finances budget period; wallpaper layout,
 image-fit and backdrop; agent permission presets. Calendar may hide visible labels
 at narrow widths while keeping accessible names and tooltips.
 
@@ -788,3 +788,11 @@ shadcn Card anatomy and retain honest unavailable states. Dollar amount entry us
 with a canonical decimal value; percentages, counts, and durations remain ordinary numeric inputs.
 
 Four-item KeyMetrics sets use a balanced two- or four-column grid based on container width; they must not leave one metric alone beneath a three-column row. Compact financial KPI values retain the full amount for hover and assistive technology.
+
+### Workspace preference ownership
+
+Persisted workspace defaults resolve in the domain/API contract, with one typed shape per workspace.
+Settings controls and contextual Display menus use the same serialized save path and cache identity.
+Explicit URL choices remain temporary overrides. Device-specific shell geometry remains local.
+Tasks can save a default capture list and whether completed tasks appear in container views; explicit
+placement, lifecycle views, and URL filters take precedence.

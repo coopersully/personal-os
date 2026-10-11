@@ -486,7 +486,10 @@ function AgentAccessSettings({
               },
             ]}
           />
-          <Card className="settings-section agent-access__workspaces">
+          <Card
+            className="settings-section agent-access__workspaces"
+            id={`${selectedDomain}-setup`}
+          >
             <CardHeader>
               <CardTitle>
                 <h2>

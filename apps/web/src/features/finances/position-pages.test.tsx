@@ -31,6 +31,8 @@ vi.stubGlobal(
 
 const api = vi.hoisted(() => ({
   createFinanceAccount: vi.fn(),
+  getFinanceConfiguration: vi.fn(),
+  getWorkspaceSettings: vi.fn(),
   getFinanceLedgerHealth: vi.fn().mockResolvedValue({ balanceOnlyAccounts: 0 }),
   syncFinanceAccount: vi.fn(),
   disconnectFinanceAccount: vi.fn(),
@@ -1161,4 +1163,29 @@ it("reloads the latest account after a conflict before another edit", async () =
   });
   fireEvent.click(screen.getByRole("button", { name: /Reload/ }));
   await waitFor(() => expect(screen.getByLabelText("Account name")).toHaveValue("New server name"));
+});
+
+// Canonical entry remains reachable regardless of financial snapshot readiness.
+it.each([
+  "partial",
+  "failed",
+])("discovers workspace view settings on the actual %s Finance overview", async (state) => {
+  if (state === "failed")
+    api.getFinanceSnapshot.mockRejectedValue(new Error("Snapshot unavailable"));
+  mount(<FinanceOverviewPage />);
+  const entry = screen.getByRole("button", { name: "Workspace view settings" });
+  expect(entry).toBeVisible();
+  fireEvent.click(entry);
+  expect(screen.getByText(/Saved account display selections do not change/)).toBeVisible();
+  expect(screen.getByRole("link", { name: "Open Finance settings" })).toHaveAttribute(
+    "href",
+    "/settings?section=finances",
+  );
+  if (state === "failed") {
+    expect(await screen.findByText("Financial position unavailable")).toBeVisible();
+  } else {
+    const metrics = await screen.findByRole("region", { name: "Finance key metrics" });
+    expect(within(metrics).getAllByText("Unavailable")).toHaveLength(3);
+  }
+  expect(entry).toBeVisible();
 });

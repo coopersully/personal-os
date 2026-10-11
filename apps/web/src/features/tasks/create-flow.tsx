@@ -19,8 +19,10 @@ import {
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
 } from "@/components/responsive-dialog";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { useWorkspacePreferences } from "../workspace-settings/preferences";
+import { taskCaptureList } from "./capture-default";
 import { TaskCreationProgress } from "./creation-progress";
 import { listAllTaskLists, listAllTaskProjects } from "./page";
 import { TaskListDialog } from "./task-list-dialog";
@@ -65,6 +67,7 @@ function CreationFlow({
   onCreateReminder?: (() => void) | undefined;
 }) {
   const [params] = useSearchParams();
+  const preferences = useWorkspacePreferences("tasks");
   const [step, setStep] = useState<
     "choose" | "task" | "project" | "list-editor" | "project-editor"
   >("choose");
@@ -81,11 +84,14 @@ function CreationFlow({
         activeLists.some((list) => list.id === item.listId),
     ) ?? [];
   const selectedProject = activeProjects.find((item) => item.id === projectId);
+  const unscoped = !listId && !projectId && !params.has("list") && !params.has("project");
   const selectedListId =
     selectedProject?.listId ??
     activeLists.find((item) => item.id === listId)?.id ??
-    activeLists.find((item) => item.kind === "inbox")?.id ??
-    activeLists[0]?.id ??
+    taskCaptureList(
+      activeLists,
+      step === "task" && unscoped ? preferences.data?.preferences.defaultCaptureListId : null,
+    )?.id ??
     "";
   if (step === "list-editor")
     return <TaskListDialog close={close} list={undefined} lists={activeLists} />;
@@ -196,6 +202,15 @@ function CreationFlow({
                       </NativeSelectOption>
                     ))}
                   </NativeSelect>
+                  {step === "task" &&
+                  unscoped &&
+                  lists.isSuccess &&
+                  preferences.data?.preferences.defaultCaptureListId &&
+                  selectedListId !== preferences.data.preferences.defaultCaptureListId ? (
+                    <FieldDescription>
+                      Your default list is unavailable. This task will go to Inbox.
+                    </FieldDescription>
+                  ) : null}
                 </Field>
                 {step === "task" ? (
                   <Field>
@@ -228,7 +243,9 @@ function CreationFlow({
             </Button>
             <Button
               disabled={
-                !lists.isSuccess || !selectedListId || (step === "task" && !projects.isSuccess)
+                !lists.isSuccess ||
+                !selectedListId ||
+                (step === "task" && (!projects.isSuccess || (unscoped && preferences.isPending)))
               }
               onClick={() => {
                 if (step === "project") setStep("project-editor");

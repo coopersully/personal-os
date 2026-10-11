@@ -1,7 +1,7 @@
 # nohmi per-workspace settings
 
 - Status: Accepted target product contract
-- Last reconciled: 2026-09-11
+- Last reconciled: 2026-10-08
 
 ## Purpose
 
@@ -182,7 +182,11 @@ reasonably fit, with a hard cap of three. If two or three would make the message
 Texting includes fewer. Every multi-item message includes the unified cross-workspace Reviews link;
 when more work remains, it adds a short overflow summary rather than sending separate messages per
 item or workspace. Multi-item messages number each item and bind those references to the exact
-message and proposal revisions; replies identify every answered number.
+message and proposal revisions; replies identify every answered number. This is the accepted
+Texting target. Its unified cross-workspace destination is not implemented by the current scoped
+Reviews flow, and emitted legacy links fall back to Account; see the
+[Texting implementation gap](texting-operations.md#workspace-maintenance-notifications) and
+[Reviews contract](../design/pages/reviews.md).
 
 A self-contained single question omits the link unless the person needs more context or the
 necessary content is too long for a reasonable text.
@@ -238,13 +242,48 @@ question or blocked result rather than an inferred permission.
 
 ## Current implementation boundary
 
-Current settings are distributed across account settings, connections, workspace access, domain
-profiles, Finance settings, Texting, and feature-specific pages. Review bypass is one revisioned
-global account policy edited beside workspace access. Its current direct-execution registration is
-limited to exact reversible Finance operations; it cannot grant scopes, activate rules, override
-stronger approvals, or authorize another domain. The complete shared per-workspace structure,
-canonical workspace editors, centralized read-only overview, maintenance guidance model, and SMS
-controls above are target behavior and must not be presented as shipped.
+Workspace presentation preferences are account-owned, with one owner-bound row per workspace.
+The shared settings module exposes a workspace-discriminated contract: every read returns only that
+workspace's fields, fully resolved defaults, and its revision. Untouched defaults have revision zero
+and do not initialize storage. PATCH fields never supply read-time defaults; the response matches a
+subsequent read. Writes require the workspace's write scope and an interactive person, reject stale
+revisions, and record an audit event. The app serializes settings and contextual Display changes
+through the same per-workspace save path. Each edit retains the revision observed by its UI; only
+successful queued changes from that client advance it. A concurrent remote change produces a
+conflict rather than silently rebasing captured values onto a newer revision. Explicit URL choices override saved defaults without
+saving the link's choices back to the account.
+
+| Workspace | Persisted preferences |
+| --- | --- |
+| Calendar | View, weekends, follow behavior, Sunday/Monday week start, default new-event duration (60 minutes initially; 5–1440 supported) |
+| Tasks | Sort, grouping, row details, collection sorting, pins, default capture list, completed-item visibility in container views |
+| Mail | Conversation layout, list density, desktop split width |
+| Finances | Transaction view/card grouping and selected spending, cash, and investment accounts |
+| All four | Include completed/archived material in search |
+
+Finance account selections distinguish `null` (all eligible accounts, including newly added accounts)
+from an explicit empty selection. They affect presentation only, never `includeInPlanning` or account
+semantics. Existing browser-session selections are not silently adopted: the old keys contain no
+owner identity. Missing or no-longer-eligible accounts are excluded when resolving a saved view.
+Task capture defaults must reference an owned active list when saved; unavailable defaults fall back
+to Inbox visibly. Explicit list/project destinations and existing tasks retain their destinations.
+Saved completed visibility applies to container views, while explicit lifecycle views and URL
+filters keep their own meaning.
+
+Workspace settings consolidate editing, not data ownership. Mail inbox style, important-email
+handling, and low-priority disposition/retention remain in the versioned domain profile. Calendar
+source destination, buffers, and privacy remain in its versioned profile. Editing those controls
+preserves other profile fields and does not activate action rules. Finance household/income facts,
+financial profile revisions, budgets, and guidance retain their existing canonical stores; its
+configuration endpoint assembles them with independent unavailable states.
+
+The current notification policy supports global defaults and a Finance override. Finance Settings
+shows the effective values and inheritance; a revision-guarded, audited reset removes the Finance
+override without changing global preferences. Recreating an override cannot reuse a previous
+revision. The global disclosure ceiling still applies. Other workspaces' notification overrides and
+the complete shared maintenance/SMS sections above remain target behavior, not shipped controls.
+Review bypass remains one revisioned global account policy and cannot grant scopes, activate rules,
+override stronger approvals, or authorize unregistered domain operations.
 
 ### Desktop distribution
 
@@ -257,3 +296,34 @@ substitutes a guessed installer or stale success for a failed release read.
 
 The accepted [Settings information architecture](../design/pages/settings-architecture.md) defines
 configuration navigation, contextual setup, local history, and workspace-scoped Reviews placement.
+
+### Save and recovery contracts
+
+The three settings stores deliberately retain different semantics:
+
+| Settings | Ownership and serialization | Revision and reset/default behavior |
+| --- | --- | --- |
+| Typed workspace preferences | Interactive owner; per-user/workspace transaction lock; mutation and audit commit together | Missing revision 0; every accepted partial save advances it. Product defaults and typed null sentinels belong to that workspace. Finance account selection null means all eligible accounts; an empty selection means none. |
+| Notification policy | Interactive owner with existing Texting/Finance access; account row lock shared with notification operations; mutation and audit commit together | Missing revision null; first save starts at 1. Finance reset removes only its override, inheriting configured global values or product defaults, subject to the global disclosure ceiling. Reset audit records fence recreation so old revisions stay stale. |
+| Account review policy | Interactive owner; account-wide transaction lock; changed policy and audit commit together | Missing policy is off/version 1. An unchanged exact-version save neither advances the version nor audits. Off remains an explicit account value; there is no workspace inheritance or delete reset. |
+
+Compatible exact-revision comparisons and audit construction can share mechanics; storage,
+authorization, locks, defaults, revision advancement and reset remain domain-owned. Notification
+preference HTTP mutations retain their originating request ID in the audit record.
+
+Settings recovery retains all unresolved field attempts in transient state shared by the current account, session and workspace. Newer failed values for the same field replace older failed values; an unrelated successful save cannot discard another field’s attempt. Matching confirmed saves and explicit acceptance clear only the corresponding intent. Each unresolved field retains its outcome; any uncertain field keeps the recovery explanation uncertain even when another attempt is rejected. A known revision conflict
+explains rejection; an uncertain transport result explains that the change may already be saved.
+Refreshing loads authoritative values without writing and keeps failed reads recoverable. The person
+can explicitly accept the latest settings or reapply the displayed attempt against the exact version
+just reviewed. Explicit replay never advances that revision through another queued write; a later write requires another review. Recovery controls wait for all queued writes in the workspace, including writes from another mounted control. Calendar and Mail expose this recovery at their contextual controls; Finance account selection shows readable account names and keeps a recovery entry after the dialog closes. Task pin failures link to their retained Settings recovery. Signing out or changing accounts clears transient attempts, including account review-policy and Finance notification-reset recovery; session generations fence late reads, mutation completions and callbacks, including switching away and back to the same account. A second conflict requires another review, never a silent retry with a newer version.
+Workspace saves continue to bind intent to the observed revision; only that client's own successful
+queued writes can advance it. Neither preference history nor a universal settings store is introduced.
+
+The global notification editor remains a separate integration surface; these recovery controls cover
+workspace preference settings, account review policy and the Finance notification reset.
+
+The canonical Finance overview exposes Workspace view settings for saved spending, cash, and
+investment account display selections, independently of financial snapshot availability. These
+selections do not change the overview’s financial position totals, account meanings, or planning
+inclusion. Retained failures can be reviewed after closing the selector or navigating to Finance
+Settings; refreshing a recovery view does not save a change.

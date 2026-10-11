@@ -504,7 +504,7 @@ describe.sequential("signed SMS child admission", () => {
           inboundMessageId: f.inbound.id,
           replyBindingId: binding.id,
         }),
-      ).toEqual({ state: "unavailable" });
+      ).toEqual({ state: "unavailable", reasonCode: "permission_denied" });
     });
     const [unchanged] = await database.db
       .select()

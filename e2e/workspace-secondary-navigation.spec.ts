@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import type { WorkspaceSettings } from "../packages/domain/src/workspace-search.js";
+import type { WorkspaceSettings } from "../packages/domain/src/workspace-settings.js";
 
 for (const width of [320, 390, 1100]) {
   test(`shared Tasks workspace remains usable at ${width}px`, async ({ page }) => {
@@ -12,7 +12,7 @@ for (const width of [320, 390, 1100]) {
     const settingsPath = "/v1/workspaces/tasks/settings";
     const originalResponse = await page.request.get(settingsPath);
     expect(originalResponse.ok()).toBe(true);
-    const original = (await originalResponse.json()) as WorkspaceSettings;
+    const original = (await originalResponse.json()) as WorkspaceSettings<"tasks">;
     const savedPreference = () =>
       page.waitForResponse(
         (response) =>
@@ -137,7 +137,7 @@ for (const width of [320, 390, 1100]) {
     } finally {
       const latestResponse = await page.request.get(settingsPath);
       expect(latestResponse.ok()).toBe(true);
-      const latest = (await latestResponse.json()) as WorkspaceSettings;
+      const latest = (await latestResponse.json()) as WorkspaceSettings<"tasks">;
       const restored = await page.request.patch(settingsPath, {
         headers: { origin: new URL(page.url()).origin },
         data: {

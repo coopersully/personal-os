@@ -1,7 +1,7 @@
 # nohmi texting and SMS
 
-- Status: Living target product contract; transport foundation shipped, general inbox pending
-- Last reconciled: 2026-09-11
+- Status: Living target product contract; transport and bounded Finance runtime merged, general inbox and live Finance launch evidence pending
+- Last reconciled: 2026-10-11
 
 ## Product role
 
@@ -74,16 +74,26 @@ workspace.
 A short, self-contained single question does not include a redundant link. The message stays brief
 and directly answerable by text unless evidence or context is needed to decide safely.
 
-The multi-item link opens the existing unified Reviews destination at
-`/settings?section=reviews`, where the person can see all outstanding Review and Attention work
-across available workspaces—including questions, approvals, connector failures, and recovery
-steps—filter it, and follow each item to its owning domain. A single-item context link may still open
-that exact item or owning workspace.
+The accepted multi-item target is one unified Reviews destination where the person can see all
+outstanding Review and Attention work across available workspaces—including questions, approvals,
+connector failures, and recovery steps—and follow each item to its owning domain. A single-item
+context link may open that exact item or owning workspace.
+
+**Current implementation boundary:** at `2d957702`, Finance notifications use
+`/finances?review=open`, with exact Finance links available for contextual questions and cases.
+Texting reply-status responses still emit the former `/settings?section=reviews` destination,
+which falls back to Account; assistant and some MCP approval links also remain incomplete. The merged
+[Reviews flow](../design/pages/reviews.md) is scoped to one workspace and does not implement the
+accepted cross-workspace destination. The old URL is not evidence that multi-item review navigation
+works. The current producer/schema inventory and verification needs are recorded in that contract; the
+accepted cross-workspace requirement remains pending rather than being silently narrowed to one
+workspace. This checkpoint does not select a new route or claim a completed migration.
 
 Opening the link requires normal nohmi authentication. The URL carries no bearer credential,
 approval authority, answer, or sensitive item content; possession of the phone or receipt of the
-SMS is not a web session. If authentication is required, nohmi returns the person to the requested
-review destination after sign-in.
+SMS is not a web session. The accepted behavior is to return the person to the requested review
+destination after sign-in. The current legacy URL instead resumes through the old redirects and
+lands on Account; authentication does not repair the missing review destination.
 
 Example: “Dinner yesterday was unusually large. Are you expecting reimbursement? Reply yes, no, or
 unsure.”
@@ -181,8 +191,10 @@ Review bypass never grants scopes, creates a domain rule, supplies missing facts
 confidence into authority. Every direct action and SMS approval retains actor, channel, source,
 policy, proposal version, conversation revision, effect, delivery, and undo or recovery evidence.
 
-The global execution-policy setting is shared across workspaces. SMS-bound approvals and Finance
-reply routing remain unavailable; notification preferences never grant execution authority.
+The global execution-policy setting is shared across workspaces. The default-off Finance SMS
+slice supports exact question replies and bounded categorization approve/reject under the
+merged-runtime checks below. General request routing and stronger SMS approvals remain unavailable;
+notification preferences never grant execution authority.
 
 ## Global defaults and per-workspace controls
 
@@ -287,16 +299,21 @@ explicit local offset.
 
 ## Current gaps
 
-The shipped implementation provides verification, consent, conversation history, guarded manual
+The merged implementation provides verification, consent, conversation history, guarded manual
 reads and sends, delivery lifecycle, webhook handling, and MCP tools for reading and sending. It
-also has the authenticated Settings-owned Reviews destination, which aggregates available Review
-and Attention work across the four workspaces with filters and domain-owned action links. Current
+has a shared authenticated Reviews flow scoped to one workspace, with domain-owned actions.
+The older cross-workspace queue component remains unrouted; generated legacy links fall back to
+Account. The accepted unified multi-workspace destination is therefore still a gap. Current
 sources include reconnect-required Mail and Calendar accounts, but complete connector-failure and
 recovery coverage remains target work. Texting does not yet provide general-inbox intent
-classification, work-node answers, cross-workspace child
-intents, event-driven agent dispatch, `maintain_texting`, available Finance notification producers, general per-workspace SMS controls, or SMS-bound approvals.
-The T0 foundation below stores notification preferences and delivery lifecycle separately from the
-unavailable producer and routing capabilities.
+classification, work-node answers, cross-workspace child intents, a general event-driven agent
+dispatcher, `maintain_texting`, or general per-workspace SMS controls. The bounded Finance runtime
+does include notification discovery, signed `Finance:` context capture, exact question replies,
+restricted categorization approve/reject, durable acknowledgments and accepted-answer host
+continuations. These do not implement the general inbox or authorize stronger decisions by SMS.
+Finance SMS admission and delivery remain behind the default-off Finance SMS switch as well as
+shared transport consent and enablement. The merged-runtime section below supersedes the original
+T0 producer-availability and reply limitations; the foundation sections retain their historical scope.
 
 Local tests prove validation, persistence, signed-webhook handling, and degraded provider behavior
 with mocks. They do not prove production sender registration, carrier reachability, callback
@@ -368,7 +385,7 @@ receipt reconciliation rather than silently retrying that binding forever.
 An idempotent sweep can change only an expired, unattached open binding to terminal `expired` under
 its row lock. Attached pending, waiting, and uncertain children are never swept without first
 checking the exact Finance receipt. T1 adds no host schedule for the sweep, so bounded retention is
-not claimed until T2 wires invocation and reconciliation.
+not claimed for owners with no inbound claim; T3 below does not add a global expiry sweep.
 
 Texting history cleanup must retain any inbound claim or outbound binding while its child is open,
 pending, waiting, or uncertain. Database foreign keys reject deletion of their source message or
@@ -392,19 +409,49 @@ per-child `accepted`, `waiting`, `uncertain`, `blocked`, and `unavailable` state
 verified success from unresolved siblings. Public reasons are redacted: a terminal non-accepted
 answer with an unrecognized private reason is `answer_not_applied`, while an unknown nonterminal
 reason remains `processing_uncertain`. The response omits answer text, operation and binding UUIDs,
-provider IDs, phone data, and raw Finance outcomes; its only destination is the ordinary
-`/settings?section=reviews` page.
+provider IDs, phone data, and raw Finance outcomes. Its `reviewHref` is still the literal legacy
+`/settings?section=reviews` URL; that URL currently falls back to Account rather than opening
+the requested recovery work. The status read is available, but review navigation remains a gap.
 
 An internal, owner-scoped `runPage` reconciles bounded unfinished claims. For attached children,
 it inspects the exact Finance receipt before same-key execution or result projection; unattached
 claims may first be bound. It preserves accepted siblings independently,
 does not re-execute incomplete Finance receipts, and can invoke the unattached-open-binding expiry
-sweep. Composition does not schedule or call that pass: there is no public recovery POST, agent
+sweep. This T2 foundation did not schedule or call that pass; T3 below adds API invocation. There is
+no public recovery POST, agent
 write trigger or trigger audit, host continuation, provider activation, or general Texting inbox.
 This foundation adds no 0093 recovery marker and does not settle the clarification/resend design
 for permanently missing provider creation time. It is not the complete Finance SMS conversation.
 
+## T3 durable Finance reply recovery invocation
+
+API startup and the existing 60-second API tick now invoke one local Texting recovery pass. A pass
+selects signed inbound claims from the database across owners only when no child is attached or at
+least one child remains pending, waiting, or uncertain. It rechecks the exact owner and claim before
+processing. Accepted-only claims leave the queue. The scan rotates by the composite owner/claim UUID
+after each settled attempt, including an unbound reply that remains eligible and an attempt that
+failed. A later pass wraps to the beginning. Startup and tick calls share one in-process flight;
+other replicas may overlap safely through the existing exact Finance receipt replay and row locks.
+
+Each pass attempts at most 25 claims. This is a work-count bound, not a bound on database rows scanned,
+query time, or wall-clock duration: eligibility uses attached/unfinished child checks, and a stalled
+database call can outlive the normal shutdown grace period. Quiesce stops new passes and stops an
+active pass before its next claim; the current claim remains tracked while shutdown drains. If the
+process is terminated after its grace period, persisted unfinished claims are eligible again on
+restart. An accepted Finance receipt is reconciled
+before any same-key execution, including when Texting is disabled. When no completed receipt exists,
+disabled Texting, STOP, consent, delivery, unbound, and stale-evidence gates still apply.
+
+This invocation does not create a host continuation, send a provider message, or activate general
+Texting routing. Expired open bindings with no inbound claim are outside the T3 scan; the existing
+owner-scoped expiry sweep remains available to its caller, without a new global schedule here.
+
 ## T0 notification implementation boundary
+
+This section records the original T0 foundation. Its absent-producer, non-replyable message and
+legacy-link statements describe that slice, not current composition. The merged Finance runtime
+below registers the real resolver and discovery loop, adds bounded reply/approval bindings, and
+uses the Finance review flow. Its delivery and uncertainty invariants still apply.
 
 The T0 notification slice adds owner-scoped notification preferences, durable work intents, and
 separate delivery-attempt history. It does not enable Finance SMS replies. Production notification status reports `producer_not_registered` until the authoritative Finance
@@ -435,9 +482,10 @@ local wall time at each invocation: both occurrences of a repeated DST hour rema
 hour has no invented offset. The next bounded invocation rechecks eligibility against the current
 zone, preferences, expiry and domain state. No nohmi recurring notification schedule is introduced.
 
-T0 messages summarize up to three safe contextual labels, with an overflow count and an ordinary
-authenticated link to `/settings?section=reviews`. This is a general Reviews destination, not an
-exact-item or approval link. Messages do not advertise reply choices or numeric answer references.
+T0 messages summarize up to three safe contextual labels, with an overflow count and the legacy
+`/settings?section=reviews` link. It currently falls back to Account and does not open the
+requested review work; it carries no exact-item binding or approval authority. Messages do not
+advertise reply choices or numeric answer references.
 A domain disclosure ceiling and the global privacy ceiling constrain workspace preferences; a user
 preference cannot expand the permitted context. Sensitive or oversized content falls back to a
 short review summary. Notification rows contain references and delivery state, not copies of SMS
@@ -479,3 +527,41 @@ reconciliation uses a separate bounded transaction and processes only changed de
 This local order does not establish a shared Finance gate or make any Finance work kind available.
 The configured first-party origin is validated at construction (HTTP or HTTPS, no credentials,
 path, query or fragment); request headers cannot choose the destination.
+
+
+### Merged Finance runtime (2026-10-09; source evidence)
+
+[PR #235 — Complete Finance answers and host continuations](https://github.com/coopersully/personal-os/pull/235)
+merged at `11e57410`. `apps/api/src/app.ts` composes the real Finance resolver with notification
+publication and draining. `finance-notification-runtime.ts` discovers current owner-scoped work
+in bounded pages and repairs interrupted publication without reissuing consumed question authority.
+The ordered context, acknowledgment, host and notification phases attempt independent work even if
+one phase fails, then report the failure. This reconciles durable accepted work; external hosts
+continue to own recurring maintenance schedules.
+
+The Finance producer now issues exact canonical questions, with complete allowlisted question
+wording and at most three numbered reply bindings. Custom or sensitive prompts and oversized
+messages use an authenticated app link without reply authority. One safe reversible categorization
+proposal may carry exact `approve` and `reject` choices when context disclosure is enabled. The
+private admission port rechecks the signed inbound claim, owner, consent epoch, actual outbound
+handoff, binding expiry and current Finance proposal, then commits the existing Finance writer,
+immutable receipt and binding consumption in one transaction. Bare `yes` grants no approval.
+
+Explicit `Finance:` context capture uses signed inbound evidence and records the original note,
+claim and message provenance without inferred financial fields. A separate immutable completion
+ledger preserves routing and links one durable outbound acknowledgment. Provider uncertainty or
+process restart never produces a second acknowledgment. Shared transport consent, quiet hours,
+limits and disablement still apply. The thirty-second bounded scheduler targets prompt receipt
+acknowledgment; delivery delays and external host completion require separate observation.
+
+Accepted answers may wait for a selected host, a live grant or another decision. Acknowledgments
+state that distinction. Only the bound original maintenance grant may continue the case. Claude
+fires dispatch one exact case answer per session; unrelated answers remain pending until its run settles. Uncertain or submitted fires are
+not retried. A human may move an undispatched waiting answer to a different live host.
+
+These are merged source claims. The PR's final verification record covers integrated local tests,
+builds, browser acceptance and review. Real authorized transport plus separate Codex and Claude
+post-session continuation trials, measured latency and usage remain launch evidence requirements.
+Source merge does not establish production activation or provider delivery.
+
+The Finance SMS switch gates pending question admission as well as approvals and delivery. Disabling it leaves previously bound replies retryable without a financial receipt or answer. Terminal admission outcomes retain policy, authority or delivery reason codes; they do not blame a registered Finance producer for a consent or handoff failure.

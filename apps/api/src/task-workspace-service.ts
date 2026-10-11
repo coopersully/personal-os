@@ -122,6 +122,8 @@ export function createTaskWorkspaceService({
           )
             conditions.push(sql`NOT ${unavailable}`);
           if (status === "archived") conditions.push(unavailable);
+          else if (status === "open_and_completed")
+            conditions.push(or(eq(lifecycle, "open"), eq(lifecycle, "completed"))!);
           else if (status !== "all") conditions.push(eq(lifecycle, status));
 
           let relevantAt: SQL<Date | null> = sql`LEAST(${reminders.dueAt}, ${scheduled})`;

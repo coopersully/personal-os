@@ -97,8 +97,11 @@ chain-of-thought. Changed evidence produces a successor; a published review is n
 
 Mail owns all judgments and mutations in its domain/API. Shared Integration changes are limited to
 owner-fenced connector work dispatch, application composition and routing, deterministic QA data,
-and privacy-minimized projection of open Mail questions or a represented blocked run into Today’s
-Reviews destination. Reviews links back to Mail and never duplicates a mutation.
+and privacy-minimized projection of open Mail questions or a represented blocked run into the
+[workspace Reviews flow](reviews.md), opened from Mail’s attention alert, Settings header, or
+workspace search.
+The flow composes Mail-owned APIs and retains their exact question/rule revisions and approval
+bindings; it never duplicates or bypasses domain mutation authority.
 
 MCP exposes only `get_mail_status` and `maintain_mail` for complete-workspace stewardship. It is a
 stateless intent surface: it validates input, makes one authenticated API call, and returns the API
@@ -198,3 +201,8 @@ still prevent retrieval. Demo fixtures contain attachment metadata, not live pro
 exercise downloads with a connected account or explicit mocked file bytes in browser tests.
 
 Provider reference: [Gmail attachment retrieval](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages.attachments/get).
+
+Mail guidance exposes the typed inbox style, important-email handling, low-priority disposition,
+and retention period beside the existing objective and instructions. Saving preserves the profile
+version guard and unrelated preference keys. Changing these preferences does not activate rules;
+existing previews and approval remain required. Review-only disposition clears the retention period.

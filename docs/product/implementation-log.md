@@ -1,5 +1,76 @@
 # nohmi — Implementation Log
 
+## 2026-10-10 — Finance history, continuations, and settings recovery merged
+
+- [PR #229 — Expose Finance review history and exact evidence](https://github.com/coopersully/personal-os/pull/229)
+  merged at `2b45e83f`; [PR #235 — Complete Finance answers and host continuations](https://github.com/coopersully/personal-os/pull/235)
+  merged at `11e57410`; [PR #233 — Recover settings saves and modularize review and Finance services](https://github.com/coopersully/personal-os/pull/233)
+  merged at `2d957702`. This checkpoint supersedes branch-only delivery status in the October 8
+  history and October 9 continuation entries. Their original validation notes remain historical.
+- Finance history exposes bounded, owner-scoped case summaries and exact evidence without changing
+  active work. Transaction/account deletion retains immutable review evidence; user deletion removes
+  the archive. Published migration `0105` remains unchanged and `0109` upgrades deletion snapshots
+  additively. See the [Finance page contract](../design/pages/finances.md).
+- Canonical questions, exact app/SMS answers, notification discovery, signed prospective context,
+  bounded categorization approvals and durable acknowledgments now compose with host setup and
+  accepted-answer continuations. Durable receipts distinguish an accepted answer from completed
+  maintenance, and uncertain provider or host submissions are not blindly repeated. See
+  [Texting](texting-operations.md) and [automation hosts](automation-hosts.md).
+- Finance notification links open its scoped Reviews flow. Assistant, Texting recovery and some
+  MCP generated links still need migration; the accepted cross-workspace destination remains
+  unimplemented. See the [current navigation boundary](../design/pages/reviews.md).
+- [Settings recovery](workspace-settings.md) retains attempted changes after conflict or uncertain
+  delivery, lets a person inspect current values and explicitly reapply against that exact revision,
+  and fences account/session changes. Domain-owned review providers preserve aggregation and scope;
+  Finance merchant extraction retains domain and transaction boundaries.
+- Merge and source checks do not prove production rollout. Finance SMS remains disabled by default;
+  separate real Codex/Claude post-session journeys, latency/usage and authorized SMS delivery remain
+  launch acceptance requirements. Detailed verification belongs to each PR's final evidence record.
+
+## 2026-10-08 — Finance review history read (branch implementation)
+
+- Added owner-scoped, bounded keyset history reads for open, deferred, and resolved Finance Inbox
+  cases, plus an exact evidence read. A foreign or invalid cursor fails without exposing another
+  user's case; missing and foreign exact IDs share the same unavailable result. A new
+  owner/time/ID index supports ordered pages; review-case records and answer semantics are unchanged.
+- The shared Finance Reviews dialog discloses older case status and exact recorded evidence on demand, with
+  bounded continuation and local retry states. Focused PostgreSQL and UI tests cover status,
+  timestamp ordering, ownership, pagination, and exact evidence. Source transaction and account
+  deletion retain immutable owner-scoped review evidence; the first published archive migration is
+  upgraded additively. Full verification on the current base remains pending; this branch does not
+  activate SMS, matching, or reusable User Knowledge.
+
+
+## 2026-10-07 — Workspace layout, Finance configuration, and Mail recovery merge
+
+- [PR #223 — Standardize workspace layouts and Finance configuration](https://github.com/coopersully/personal-os/pull/223)
+  merged into `main` at `99ecac3d`. This is the merged-source checkpoint for the October 3–6
+  branch entries below. Their original verification notes describe those earlier checkpoints,
+  not the final merged verification result.
+- Shared workspace navigation, header slots, bounded search, and saved display preferences keep
+  controls consistent while domains retain record ownership. The
+  [workspace layout contract](../design/workspace-layout-architecture.md) explains intrinsic chrome,
+  pane versus page scrolling, and preserving a single control instance across responsive layouts.
+- Reviews now opens in a workspace-scoped dialog or mobile drawer from the workspace attention
+  alert, workspace Settings header, or workspace search. The underlying page stays in place; domain actions retain
+  their authority and revision checks. This supersedes the October 1 Today-owned `/reviews`
+  placement: `/reviews` falls back to Account, and the old queue component is retained but not
+  routed. Some notification and agent producers still emit legacy links that land on Account;
+  generated-link migration remains incomplete. See the
+  [Reviews contract](../design/pages/reviews.md) for exact links, this limitation, and recovery.
+- [Finance](../design/pages/finances.md) includes editable configuration, partial-read recovery,
+  scalar saves on blur or selection, complete collection-row saves on leaving the row, compact
+  transaction cards, responsive details, category/context editing,
+  and saved display/group preferences. Configuration remains separate from explicit budget
+  preparation and record-checking operations; incomplete evidence is not silently filled in.
+- [Mail](../design/pages/mail.md) includes authenticated attachment preview/download with bounded
+  provider reads and cancellation, maintenance recovery within Reviews, and preservation of
+  unresolved questions across scoped runs.
+- The PR records a full local verification pass at `7c362cf5` (3,371 unit/integration tests and
+  64 desktop/mobile acceptance tests, with two intentional skips) and successful subsequent
+  hosted CI. These establish source verification, not production deployment, installed desktop
+  acceptance, or live provider attachment access.
+
 ## 2026-10-06 — Finance configuration and prerequisites (branch implementation)
 
 - Financial setup loads a read-only, owner-scoped aggregate and shares autosaving fields with
@@ -750,3 +821,85 @@ outstanding. Duplicate navigation entries are removed and legacy review links
 redirect into the flow. The earlier review grid remains in source but is not routed.
 Source repairs that require their original editor keep an explicit source link.
 See [review interaction standards](../design/pages/reviews.md).
+
+## 2026-10-07 — Workspace settings consolidation
+
+- Isolated typed settings contracts and API/web modules from workspace search; resolved defaults
+  consistently without read-time writes and unified preference mutation/cache behavior.
+- Added Calendar week-start and event-duration defaults, Task capture-list and completed visibility,
+  and durable Finance display-account selections with owner validation.
+- Exposed existing Mail and Calendar profile controls without duplicating domain records or
+  bypassing rule approval; added Finance notification inheritance and audited override reset.
+- Preserved account-wide policy, versioned Finance facts/budgets, source semantics, and transient
+  URL/device state boundaries. Validation evidence is recorded with the change, not implied by this
+  entry as a production deployment claim.
+
+
+## Finance answers and host continuation — source implementation (2026-10-09)
+
+The consolidated completion branch adds immutable case-owned maintenance question issuance,
+shared app/SMS answer consumption, exact question and answer retention, and a durable accepted-answer
+continuation outbox. Automatic Finance notification discovery uses bounded owner-scoped pages,
+current-work checks, existing consent/disclosure/quiet-hour policy, and at most three reply bindings.
+Rediscovery repairs publication failures without reissuing consumed question authority.
+
+Finance settings prepares tenant-bound Codex or Claude setup and shows waiting answers, observed
+host health, revoked connections, and unconfirmed delivery. Hosts use the original live maintenance
+grant to read accepted evidence and resume one case-scoped canonical run. Claude routine session
+creation is recorded separately from maintenance completion; uncertain fires are not repeated.
+Migration `0106` owns issuance and answer invariants; `0107` preserves OAuth connection identity and
+adds isolated encrypted host credentials and continuation bindings. Source deletion retains exact
+questions and answers; account deletion is distinct from the user purge that erases their archive.
+
+This entry records the completion implementation and its limits. The pull request records exact
+integrated verification and merge evidence. Production SMS activation and separate real
+Codex/Claude unattended latency, usage, and completion trials are not certified by this source.
+
+
+The same completion branch adds explicit signed `Finance:` prospective context capture,
+receipt-confirmed durable SMS acknowledgments and a narrow reversible categorization approval
+port. Migration `0108` preserves the immutable inbound claim and adds a separate completion ledger
+with owner-scoped message/context provenance. The real existing categorization writer, Finance
+mutation receipt and Texting binding consumption share one transaction. Stronger decisions remain
+in the authenticated app. Source tests cover no inferred financial fields, restart/uncertain-send
+deduplication, exact approve/reject replay and stale or stronger proposal refusal; integrated release
+verification is recorded in the pull request. Host delivery serializes case answers and checks the original
+schedule-bound grant on resumed runs and challenge submission.
+
+
+Independent edge review repaired terminal continuation projection after resume, dispatch
+revalidation during concurrent polling, stale submitting delivery visibility, per-routine credential
+failure isolation, and cursor pagination. Explicit audited human recovery can release an uncertain
+pending delivery or move a nonexecuting waiting run to a live polling Codex host; execution leases and
+original binding/timestamp fences prevent silent adoption. Focused host regression tests exercise
+these transitions. Receipt-confirmed acknowledgments also distinguish accepted replies from stale
+approvals for which no decision was applied.
+
+
+The completion branch also recovers a host-accepted session that never invokes nohmi: after the
+routine's declared maximum latency (at least two minutes), a person who checked the host can
+release each still-pending answer without a maintenance run. Coalesced sibling answers retain
+independent fences; an observed run or unreleased pending sibling prevents a replacement fire.
+Original session identity remains in the audit. Handoff diagnostics record only correlation ID,
+claim count, duration and a safe outcome code; logging failure cannot undo a committed handoff.
+The migration journal contract includes the separate SMS completion ledger, and disabled
+notification publication has an explicit typed unavailable result.
+
+A saved contextual answer's exact app link can reopen its owner-scoped read-only result after it
+leaves outstanding work. Browser acceptance creates a real manual transaction and context question,
+checks answer replay and unchanged ledger values, and checks another owner's access is refused.
+Full integrated verification remains required before release.
+
+
+Final integration repairs isolate the ordered context, acknowledgment, host and notification phases:
+a failed phase does not starve the others, and the pass still reports failure. SMS context scanning
+excludes revoked/old-epoch admissions and processes healthy owners despite transient lock failures;
+invalid admission never produces an acknowledgment. Ending a host schedule erases its encrypted
+trigger credential. Routine fires claim one exact case answer, leave sibling cases pending, and
+allow a new answer to wake only the same original idle waiting case. Moving an existing waiting
+run is limited to a polling Codex schedule; event-only Claude routines need a fresh answer event
+and are not offered as silent recovery targets. Source links preserve the exact case identity.
+
+The consolidated Finance completion branch also gates pending question reply admission with the default-off Finance SMS switch. Verified disabled-rollout app composition leaves contextual and canonical replies pending without receipts, answers or continuations. Terminal admission results preserve policy/authority/delivery reasons, and ordered reconciliation reports fixed stage identifiers and validated failure counts without provider text. Focused regression evidence covers these behaviors; the pull request records the exact-main full verifier.
+
+Final host binding validates the Claude API trigger identity before activation. Successive replyable Finance notifications preserve the existing live reply namespace and direct additional work to app review, preventing duplicate item numbers without retargeting delayed replies. Focused regression verification covers both repairs; integrated full verification is recorded in the pull request.

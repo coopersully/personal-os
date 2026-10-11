@@ -1,3 +1,4 @@
+import { resolveWorkspaceSettings } from "@personal-os/domain";
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
@@ -201,6 +202,7 @@ function querySetup(route: string, cached?: { key: readonly unknown[]; value: un
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  client.setQueryData(["me"], { id: "finance-feedback-owner" });
   if (cached) client.setQueryData(cached.key, cached.value);
   render(
     <QueryClientProvider client={client}>
@@ -212,6 +214,7 @@ function querySetup(route: string, cached?: { key: readonly unknown[]; value: un
   return client;
 }
 function mockFinanceQueries() {
+  vi.spyOn(api, "getWorkspaceSettings").mockResolvedValue(resolveWorkspaceSettings("finances"));
   for (const [method, value] of Object.entries(queryDefaults)) {
     vi.spyOn(api, method as keyof typeof queryDefaults).mockResolvedValue(value as never);
   }
@@ -264,7 +267,13 @@ describe("Finance query recovery", () => {
 
   it("keeps a scoped spending failure visible until its selected-account query recovers", async () => {
     mockFinanceQueries();
-    sessionStorage.setItem("finance-account-scope:spend", JSON.stringify(["selected-account"]));
+    vi.mocked(api.getWorkspaceSettings).mockResolvedValue(
+      resolveWorkspaceSettings("finances", { spendAccountIds: [] }),
+    );
+    vi.mocked(api.getFinanceOverview).mockResolvedValue({
+      ...overview,
+      accounts: [{ id: "selected-account", kind: "cash" }] as never,
+    });
     try {
       vi.mocked(api.getFinanceOverviewForAccounts).mockRejectedValueOnce(
         new Error("scoped spending unavailable"),
@@ -281,7 +290,7 @@ describe("Finance query recovery", () => {
       );
       expect(api.getFinanceOverviewForAccounts).toHaveBeenCalledTimes(2);
     } finally {
-      sessionStorage.removeItem("finance-account-scope:spend");
+      vi.mocked(api.getWorkspaceSettings).mockReset();
     }
   });
 

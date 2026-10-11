@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import type { AgentAccessDomain } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { loadReviewSession, ReviewFlowHost } from "./flow.js";
@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   listAttentionItems: vi.fn(),
   updateAttentionItem: vi.fn(),
   getMailStatus: vi.fn(),
+  getFinanceContextualQuestion: vi.fn(),
 }));
 vi.mock("../../api.js", () => ({
   api: mocks,
@@ -103,6 +104,60 @@ it("does not substitute another decision for an unavailable deep link", async ()
     await screen.findByText("This review is no longer available. It may already be resolved."),
   ).toBeVisible();
   expect(screen.queryByText("Protect travel time")).not.toBeInTheDocument();
+});
+
+it("reopens an answered Finance context link read-only after it leaves outstanding work", async () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  mocks.getFinanceContextualQuestion.mockResolvedValue({
+    state: "available",
+    question: {
+      id,
+      transactionId: id,
+      reviewCaseId: id,
+      status: "answered",
+      work: { revision: "1" },
+      transaction: {
+        merchant: "Saved purchase",
+        date: "2026-09-21",
+        amountCents: 1200,
+        currencyCode: "USD",
+      },
+    },
+  });
+  setup(`/finances?review=finance-contextual:${id}`, "finances");
+  expect(
+    await screen.findByText("Context saved. The financial review remains open."),
+  ).toBeVisible();
+  expect(mocks.getFinanceContextualQuestion).toHaveBeenCalledWith(id);
+  expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  expect(screen.queryByText("Protect travel time")).not.toBeInTheDocument();
+});
+
+it("keeps an unavailable Finance context deep link owner scoped", async () => {
+  mocks.getFinanceContextualQuestion.mockResolvedValue({ state: "unavailable" });
+  setup("/finances?review=finance-contextual:missing", "finances");
+  expect(await screen.findByText("This context question is unavailable.")).toBeVisible();
+  expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+});
+
+it("keeps Finance history in its settled location as current work loads", async () => {
+  let resolveWork: ((value: unknown) => void) | undefined;
+  mocks.listAgentAccessWorkItems.mockImplementation(
+    () => new Promise((resolve) => (resolveWork = resolve)),
+  );
+  setup("/finances?review=open", "finances");
+  expect(await screen.findByText("Loading your decisions…")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Finance review history" })).not.toBeInTheDocument();
+  await act(async () => {
+    resolveWork?.({
+      items: [],
+      nextCursor: null,
+      unavailableDomains: [],
+      summary: { byDomain: { finances: 0 } },
+    });
+  });
+  expect(await screen.findByText("You’re caught up")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Finance review history" })).toBeVisible();
 });
 
 it("does not count a submitted action when the source status is unavailable", async () => {

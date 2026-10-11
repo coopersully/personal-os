@@ -1,20 +1,24 @@
-import type { WorkspacePreferences } from "@personal-os/domain";
-import { useQueryClient } from "@tanstack/react-query";
+import {
+  type FinancesWorkspacePreferences,
+  getDefaultWorkspacePreferences,
+} from "@personal-os/domain";
 import { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api } from "@/api";
-import { useFeedbackMutation } from "@/lib/use-feedback-mutation";
-import { useWorkspacePreferences } from "../workspace-search/preferences";
+import {
+  useSaveWorkspacePreferences,
+  useWorkspacePreferences,
+} from "../workspace-settings/preferences";
 
 /** Explicit links override saved defaults without changing the account's preferences. */
 export function financePresentationParams(
   params: URLSearchParams,
-  preferences?: WorkspacePreferences,
+  preferences?: FinancesWorkspacePreferences,
 ) {
   const next = new URLSearchParams(params);
+  const values = { ...getDefaultWorkspacePreferences("finances"), ...preferences };
   const defaults = {
-    view: preferences?.financeTransactionView ?? "table",
-    group: preferences?.financeTransactionGroup ?? "none",
+    view: values.financeTransactionView,
+    group: values.financeTransactionGroup,
   };
   for (const [key, value] of Object.entries(defaults)) {
     if (!next.has(key)) next.set(key, value);
@@ -32,27 +36,5 @@ export function useFinancePresentationParams() {
 }
 
 export function useSaveFinancePresentation() {
-  const cache = useQueryClient();
-  return useFeedbackMutation({
-    scope: { id: "finances-presentation-preferences" },
-    feedback: { action: "save your Finance display preferences", safeToRetry: false },
-    mutationFn: async (
-      preferences: Partial<
-        Pick<WorkspacePreferences, "financeTransactionView" | "financeTransactionGroup">
-      >,
-    ) => {
-      // Read the revision when this queued write starts, not when the menu rendered.
-      const current = await api.getWorkspaceSettings("finances");
-      return api.updateWorkspaceSettings("finances", {
-        expectedRevision: current.revision,
-        preferences,
-      });
-    },
-    onSuccess: (data) => {
-      cache.setQueryData(["workspace-settings", "finances"], data);
-    },
-    onError: () => {
-      void cache.invalidateQueries({ queryKey: ["workspace-settings", "finances"] });
-    },
-  });
+  return useSaveWorkspacePreferences("finances");
 }

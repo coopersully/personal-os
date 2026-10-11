@@ -74,6 +74,9 @@ import type {
   FinanceReimbursementQuestionAnswer,
   FinanceReviewCase,
   FinanceReviewDecisionInput,
+  FinanceReviewHistoryItem,
+  FinanceReviewHistoryPage,
+  FinanceReviewHistoryQuery,
   FinanceRule,
   FinanceScenarioInput,
   FinanceScenarioResult,
@@ -700,6 +703,18 @@ export function createFinanceApi(request: FinanceRequest) {
     },
     async getFinanceInbox(): Promise<FinanceToolResult<FinanceInboxCase[]>> {
       return request("/v1/finances/inbox");
+    },
+    async listFinanceReviewHistory(
+      query: Partial<FinanceReviewHistoryQuery> = {},
+    ): Promise<FinanceReviewHistoryPage> {
+      const search = new URLSearchParams();
+      if (query.limit !== undefined) search.set("limit", String(query.limit));
+      if (query.cursor !== undefined) search.set("cursor", query.cursor);
+      const suffix = search.size ? `?${search.toString()}` : "";
+      return request(`/v1/finances/inbox/history${suffix}`);
+    },
+    async getFinanceReviewHistoryItem(id: string): Promise<FinanceReviewHistoryItem> {
+      return request(`/v1/finances/inbox/history/${encodeURIComponent(id)}`);
     },
     async answerFinanceReview(
       id: string,

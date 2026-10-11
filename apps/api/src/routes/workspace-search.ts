@@ -1,16 +1,12 @@
 import type { Database } from "@personal-os/database";
-import {
-  searchableWorkspaceSchema,
-  updateWorkspaceSettingsSchema,
-  workspaceSearchQuerySchema,
-} from "@personal-os/domain";
+import { searchableWorkspaceSchema, workspaceSearchQuerySchema } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
 import type { createAgentAccessWorkItemService } from "../agent-access-work-items.js";
 import { workspaceSearchBudget } from "../read-budget.js";
 import type { AppEnv, Principal } from "../types.js";
 import { createWorkspaceSearchService } from "../workspace-search/service.js";
-import { createWorkspaceSettingsService } from "../workspace-search/settings.js";
-import { parseBody, requireFeatureAccess, requireHuman, requireScope } from "./support.js";
+import { requireFeatureAccess, requireScope } from "./support.js";
+import { registerWorkspaceSettingsRoutes } from "./workspace-settings.js";
 
 export function registerWorkspaceSearchRoutes({
   app,
@@ -24,8 +20,8 @@ export function registerWorkspaceSearchRoutes({
   mutationContext: (context: Context<AppEnv>) => { principal: Principal; requestId: string };
 }) {
   const search = createWorkspaceSearchService(db);
-  const settings = createWorkspaceSettingsService(db);
-  app.use("/v1/workspaces/:workspace/*", async (context, next) => {
+  registerWorkspaceSettingsRoutes({ app, db, mutationContext });
+  app.use("/v1/workspaces/:workspace/search", async (context, next) => {
     const workspace = searchableWorkspaceSchema.parse(context.req.param("workspace"));
     return requireFeatureAccess(workspace)(context, next);
   });
@@ -58,21 +54,4 @@ export function registerWorkspaceSearchRoutes({
       context.req.raw.signal,
     );
   });
-  app.get("/v1/workspaces/:workspace/settings", async (context) =>
-    context.json(
-      await settings.get(
-        context.get("principal").userId,
-        searchableWorkspaceSchema.parse(context.req.param("workspace")),
-      ),
-    ),
-  );
-  app.patch("/v1/workspaces/:workspace/settings", requireHuman, async (context) =>
-    context.json(
-      await settings.update(
-        searchableWorkspaceSchema.parse(context.req.param("workspace")),
-        await parseBody(context, updateWorkspaceSettingsSchema),
-        mutationContext(context),
-      ),
-    ),
-  );
 }

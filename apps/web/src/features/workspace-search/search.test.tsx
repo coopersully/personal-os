@@ -1,3 +1,4 @@
+import { resolveWorkspaceSettings } from "@personal-os/domain";
 // @vitest-environment jsdom
 
 import type { WorkspaceSearchPage } from "@personal-os/domain";
@@ -35,20 +36,9 @@ function renderSearch(
   return onAction;
 }
 beforeEach(() => {
-  vi.spyOn(api, "getWorkspaceSettings").mockImplementation(async (workspace) => ({
-    workspace,
-    revision: 0,
-    preferences: {
-      pinnedListIds: [],
-      pinnedProjectIds: [],
-      includeArchivedInSearch: true,
-      calendarView: "auto",
-      showWeekends: true,
-      autoFollowToday: true,
-      snapToFollow: true,
-      followSnapSensitivity: "balanced",
-    },
-  }));
+  vi.spyOn(api, "getWorkspaceSettings").mockImplementation(async (workspace) =>
+    resolveWorkspaceSettings(workspace),
+  );
   vi.spyOn(api, "searchWorkspace").mockResolvedValue({
     items: [],
     nextOffset: null,

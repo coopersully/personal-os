@@ -3,7 +3,12 @@ import { toast } from "sonner";
 import "@testing-library/jest-dom/vitest";
 import { readFileSync } from "node:fs";
 import { ApiClientError } from "@personal-os/api-client";
-import type { CalendarStatus, UpdateAccountSetupInput, User } from "@personal-os/domain";
+import {
+  type CalendarStatus,
+  getDefaultWorkspacePreferences,
+  type UpdateAccountSetupInput,
+  type User,
+} from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
@@ -529,6 +534,8 @@ const mocks = vi.hoisted(() => ({
   getFinanceBudget: vi.fn(),
   getCanonicalFinanceBudgetStatus: vi.fn(),
   getFinanceInbox: vi.fn(),
+  listFinanceReviewHistory: vi.fn(),
+  getFinanceReviewHistoryItem: vi.fn(),
   answerFinanceReview: vi.fn(),
   getFinanceTransaction: vi.fn(),
   listFinanceAccounts: vi.fn(),
@@ -709,14 +716,8 @@ function defaults() {
     workspace,
     revision: 0,
     preferences: {
-      pinnedListIds: [secondId],
-      pinnedProjectIds: [thirdId],
-      calendarView: "auto",
-      showWeekends: true,
-      autoFollowToday: true,
-      snapToFollow: true,
-      followSnapSensitivity: "balanced",
-      includeArchivedInSearch: true,
+      ...getDefaultWorkspacePreferences(workspace),
+      ...(workspace === "tasks" ? { pinnedListIds: [secondId], pinnedProjectIds: [thirdId] } : {}),
     },
   }));
   mocks.updateWorkspaceSettings.mockImplementation(async (workspace, input) => ({
@@ -1717,6 +1718,8 @@ beforeEach(() => {
     unavailableDomains: [],
     summary: { byDomain: {} },
   });
+  mocks.listFinanceReviewHistory.mockResolvedValue({ items: [], nextCursor: null });
+  mocks.getFinanceReviewHistoryItem.mockResolvedValue(null);
   const NativeDate = Date;
   class TestDate extends NativeDate {
     constructor(value?: string | number | Date) {
@@ -4710,6 +4713,9 @@ describe("ilo web app", () => {
 
     mocks.listTasks.mockResolvedValue({ items: [], nextCursor: null });
     const empty = setup("/tasks?view=scheduled");
+    await waitFor(() =>
+      expect(empty.location.value).toBe("/tasks?view=all&reserved=scheduled&sort=reserved"),
+    );
     expect(await screen.findByText("No matching items")).toBeInTheDocument();
     expect(screen.getByText("Try another filter or search.")).toBeInTheDocument();
     expect(empty.location.value).toBe("/tasks?view=all&reserved=scheduled&sort=reserved");
@@ -5218,6 +5224,76 @@ describe("ilo web app", () => {
       "href",
       "/finances/plan",
     );
+    view.unmount();
+  });
+
+  it("opens exact Finance review history from the routed shared flow without pending work", async () => {
+    const historyId = secondId;
+    const summary = {
+      id: historyId,
+      prompt: "What was this purchase?",
+      firstSeenAt: now,
+      reason: "category_ambiguity",
+      resolvedAt: now,
+      status: "resolved",
+      context: {
+        accountId: id,
+        accountName: "Checking",
+        institution: "Example Bank",
+        merchant: "Cafe Example",
+        date: "2026-07-12",
+        amount: 42,
+        currencyCode: "USD",
+        direction: "expense",
+        pending: false,
+      },
+    };
+    mocks.listFinanceReviewHistory.mockResolvedValue({ items: [summary], nextCursor: null });
+    mocks.getFinanceReviewHistoryItem.mockResolvedValue({
+      ...summary,
+      archived: true,
+      transactionId: id,
+      resolution: { type: "dismiss", answer: "Personal meal" },
+      evidence: { receipt: "Cafe Example" },
+      retainedQuestions: [],
+      retainedAnswers: [{ id, text: "Personal meal" }],
+    });
+    const browser = userEvent.setup();
+    const view = setup("/finances/review");
+    expect(await screen.findByText("You’re caught up")).toBeInTheDocument();
+    expect(view.location.value).toBe("/finances?review=open");
+    await browser.click(screen.getByRole("button", { name: "Finance review history" }));
+    expect(await screen.findByRole("heading", { name: "Review history" })).toBeInTheDocument();
+    expect(mocks.listFinanceReviewHistory).toHaveBeenCalledWith({ limit: 20 });
+    await browser.click(screen.getByRole("button", { name: "View evidence for Cafe Example" }));
+    expect(mocks.getFinanceReviewHistoryItem).toHaveBeenCalledWith(historyId);
+    expect(await screen.findAllByText("Recorded answer: Personal meal")).toHaveLength(2);
+    expect(screen.getByText(/Source removed. This review is retained/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open transaction" })).not.toBeInTheDocument();
+    view.unmount();
+  });
+
+  it("keeps Finance review history available when current work cannot load", async () => {
+    mocks.listAgentAccessWorkItems.mockRejectedValue(new Error("Current reviews unavailable"));
+    mocks.listFinanceReviewHistory.mockResolvedValue({
+      items: [
+        {
+          id: secondId,
+          firstSeenAt: now,
+          reason: "category_ambiguity",
+          resolvedAt: now,
+          status: "resolved",
+          context: { merchant: "Cafe Example" },
+        },
+      ],
+      nextCursor: null,
+    });
+    const browser = userEvent.setup();
+    const view = setup("/finances/review");
+    expect(await screen.findByText("Couldn’t load your review session.")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Finance review history" }));
+    expect(await screen.findByText("Cafe Example")).toBeInTheDocument();
+    expect(mocks.listFinanceReviewHistory).toHaveBeenCalledWith({ limit: 20 });
     view.unmount();
   });
 
@@ -7253,6 +7329,29 @@ describe("ilo web app", () => {
     expect(screen.getByRole("textbox", { name: "Ends minute" })).toHaveValue("15");
   });
 
+  it("honors a full-day default duration for keyboard event creation", async () => {
+    mocks.listEvents.mockResolvedValue([]);
+    mocks.getWorkspaceSettings.mockResolvedValue({
+      workspace: "calendar",
+      revision: 1,
+      preferences: {
+        ...getDefaultWorkspacePreferences("calendar"),
+        defaultEventDurationMinutes: 1440,
+      },
+    });
+    setup("/calendar?date=2026-07-13&view=week");
+    const tuesday = await screen.findByRole("region", { name: "Tuesday timeline" });
+    const target = within(tuesday).getByRole("button", {
+      name: "Create an event range on Tuesday with the keyboard",
+    });
+    fireEvent.keyDown(target, { key: "Enter" });
+    fireEvent.keyDown(target, { key: "Enter" });
+    expect(await screen.findByRole("button", { name: "Starts date, Jul 14" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ends date, Jul 15" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Starts hour" })).toHaveValue("9");
+    expect(screen.getByRole("textbox", { name: "Ends hour" })).toHaveValue("9");
+  });
+
   it("cancels pointer range creation with Escape and creates a keyboard-selected range", async () => {
     mocks.listEvents.mockResolvedValue([]);
     setup("/calendar?date=2026-07-13&view=week");
@@ -7312,7 +7411,11 @@ describe("ilo web app", () => {
   it("labels a range ending at midnight as 12 AM", async () => {
     mocks.listEvents.mockResolvedValue([]);
     setup("/calendar?date=2026-07-13&view=week");
-    const tuesday = await screen.findByRole("region", { name: "Tuesday timeline" });
+    const tuesday = await screen.findByRole(
+      "region",
+      { name: "Tuesday timeline" },
+      { timeout: 5000 },
+    );
     Object.defineProperty(tuesday, "getBoundingClientRect", {
       configurable: true,
       value: () => ({ bottom: 1152, height: 1152, left: 0, right: 200, top: 0, width: 200 }),
@@ -7465,8 +7568,14 @@ describe("ilo web app", () => {
     fireEvent.dragStart(readonly, { dataTransfer: readonlyTransfer });
     dropCalendarEvent(monday, readonlyTransfer, 675);
     expect(mocks.updateEvent).toHaveBeenCalledTimes(callsBeforeReadonlyDrop);
+    // Keep the read-only hold independent of Radix's touch context-menu timer.
+    const mousePointerDown = () => {
+      const pointer = createEvent.pointerDown(readonly);
+      Object.defineProperty(pointer, "pointerType", { value: "mouse" });
+      fireEvent(readonly, pointer);
+    };
     fireEvent.pointerCancel(readonly);
-    fireEvent.pointerDown(readonly);
+    mousePointerDown();
     expect(
       await screen.findByRole("tooltip", {
         name: "Readonly Google is read-only, so this event can’t be moved.",
@@ -7475,11 +7584,11 @@ describe("ilo web app", () => {
     expect(readonly).toHaveClass("is-move-blocked");
     fireEvent.click(readonly);
     expect(screen.queryByText(/write through to Google Calendar/)).not.toBeInTheDocument();
-    fireEvent.pointerDown(readonly);
+    mousePointerDown();
     await new Promise((resolve) => window.setTimeout(resolve, 400));
     fireEvent.click(readonly);
     expect(screen.queryByText(/write through to Google Calendar/)).not.toBeInTheDocument();
-    fireEvent.pointerDown(readonly);
+    mousePointerDown();
     fireEvent.click(readonly);
     expect(await screen.findByText(/write through to Google Calendar/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit Event" })).toBeDisabled();
@@ -7742,7 +7851,7 @@ describe("ilo web app", () => {
     view.unmount();
   });
 
-  it("navigates calendar, reminders, activity, and settings workflows", async () => {
+  it("navigates calendar views, follow state, event controls, and dates", async () => {
     const view = setup("/calendar");
     const browser = userEvent.setup();
     expect(await screen.findByRole("button", { name: "Calendar view: week" })).toBeInTheDocument();
@@ -7864,7 +7973,12 @@ describe("ilo web app", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     await browser.click(screen.getByRole("button", { name: "View Monday, July 13, 2026" }));
     expect(await screen.findByRole("button", { name: "Calendar view: day" })).toBeInTheDocument();
+  }, 30_000);
 
+  it("navigates Calendar through Tasks and Today to Settings activity", async () => {
+    const view = setup("/calendar");
+    const browser = userEvent.setup();
+    expect(await screen.findByRole("button", { name: "Calendar view: week" })).toBeInTheDocument();
     await browser.click(
       within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
         name: "Tasks",
@@ -7930,7 +8044,14 @@ describe("ilo web app", () => {
     await browser.type(activitySearch, "no matching audit material");
     expect(await screen.findByText("No matching activity")).toBeInTheDocument();
     await browser.clear(activitySearch);
+  });
 
+  it("manages calendars and connector accounts from Settings", async () => {
+    setup("/settings?section=activity");
+    const browser = userEvent.setup();
+    const accountSidebar = await screen.findByRole("complementary", {
+      name: "Account utility navigation",
+    });
     await browser.click(within(accountSidebar).getByRole("link", { name: "Profile" }));
     expect(await screen.findByRole("heading", { name: "Profile" })).toBeInTheDocument();
     const settingsSidebar = screen.getByRole("complementary", {
@@ -7967,8 +8088,12 @@ describe("ilo web app", () => {
     await waitFor(() =>
       expect(mocks.deleteConnector).toHaveBeenCalledWith(secondId, expect.anything()),
     );
+  });
 
-    await browser.click(screen.getByRole("link", { name: "Open Connected agents" }));
+  it("creates and revokes a connected-agent token", async () => {
+    setup("/settings?section=connections");
+    const browser = userEvent.setup();
+    await browser.click(await screen.findByRole("link", { name: "Open Connected agents" }));
     expect(await screen.findByDisplayValue("https://mcp.example.com/mcp")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Set up a local token" }));
     await browser.clear(screen.getByLabelText("Token name"));
@@ -7996,6 +8121,16 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: "Revoke access" }));
     await waitFor(() =>
       expect(mocks.deleteAccessToken).toHaveBeenCalledWith(id, expect.anything()),
+    );
+  });
+
+  it("updates profile, appearance, security, authorization, and logout", async () => {
+    setup("/settings?section=agent-connections");
+    const browser = userEvent.setup();
+    const settingsNavigation = within(
+      await screen.findByRole("complementary", {
+        name: "Account utility navigation",
+      }),
     );
     await browser.click(settingsNavigation.getByRole("link", { name: "Profile" }));
     await browser.clear(screen.getByLabelText("First name"));
@@ -8048,7 +8183,7 @@ describe("ilo web app", () => {
     expect(screen.getByRole("button", { name: "Logging out…" })).toBeDisabled();
     resolveLogout?.();
     await waitFor(() => expect(screen.getByRole("button", { name: "Log out" })).toBeEnabled());
-  }, 30_000);
+  });
 
   it("defaults to a compact calendar view on small screens and preserves view navigation", async () => {
     const originalMatchMedia = window.matchMedia;
@@ -8922,13 +9057,16 @@ describe("ilo web app", () => {
 
     Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
     const desktopView = setup("/unknown");
-    expect(await screen.findByRole("heading", { name: "To take care of" })).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Keep window on top" }));
-    await waitFor(() => expect(mocks.setAlwaysOnTop).toHaveBeenCalledWith(true));
-    await browser.click(screen.getByRole("button", { name: "Keep window on top" }));
-    await waitFor(() => expect(mocks.setAlwaysOnTop).toHaveBeenCalledWith(false));
-    desktopView.unmount();
-    Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+    try {
+      expect(await screen.findByRole("heading", { name: "To take care of" })).toBeInTheDocument();
+      await browser.click(screen.getByRole("button", { name: "Keep window on top" }));
+      await waitFor(() => expect(mocks.setAlwaysOnTop).toHaveBeenCalledWith(true));
+      await browser.click(screen.getByRole("button", { name: "Keep window on top" }));
+      await waitFor(() => expect(mocks.setAlwaysOnTop).toHaveBeenCalledWith(false));
+    } finally {
+      desktopView.unmount();
+      Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+    }
 
     mocks.listEvents.mockRejectedValueOnce(new Error("week unavailable"));
     const calendarView = setup("/calendar");
@@ -9552,8 +9690,9 @@ describe("ilo web app", () => {
     mocks.deleteXBookmarkAccount.mockRejectedValueOnce(new Error("Disconnect failed"));
     const browser = userEvent.setup();
     const connected = setup("/settings?section=connections");
-    await screen.findByRole("option", { name: "Reading" });
-    await browser.selectOptions(screen.getByLabelText("X bookmark folder"), "folder-2");
+    const folder = await screen.findByLabelText("X bookmark folder");
+    await within(folder).findByRole("option", { name: "Reading" });
+    await browser.selectOptions(folder, "folder-2");
     expect(
       await screen.findAllByText("Couldn’t select this bookmark folder. Try again."),
     ).not.toHaveLength(0);

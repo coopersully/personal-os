@@ -25,19 +25,20 @@ import {
   type AccessScope,
   agentAccessWorkItemSchema,
   featureAccessPolicies,
+  getDefaultWorkspacePreferences,
   type SearchableWorkspace,
   updateWorkspaceSettingsSchema,
   workspaceSearchQuerySchema,
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { createAgentAccessWorkItemService } from "../agent-access-work-items.js";
 import { errorResponse } from "../errors.js";
 import { registerWorkspaceSearchRoutes } from "../routes/workspace-search.js";
 import type { AppEnv, Principal } from "../types.js";
+import { createWorkspaceSettingsService } from "../workspace-settings/service.js";
 import { createWorkspaceSearchService } from "./service.js";
-import { createWorkspaceSettingsService } from "./settings.js";
 
 const instant = new Date("2026-10-03T12:00:00Z");
 describe.sequential("workspace discovery and account preferences", () => {
@@ -49,6 +50,73 @@ describe.sequential("workspace discovery and account preferences", () => {
   let app: Hono<AppEnv>;
   let search: ReturnType<typeof createWorkspaceSearchService>;
   let settings: ReturnType<typeof createWorkspaceSettingsService>;
+  it("returns resolved defaults and identical first-save/read representations", async () => {
+    const [fresh] = await database.db
+      .insert(users)
+      .values({
+        email: "settings-defaults@example.com",
+        displayName: "Defaults",
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!fresh) throw new Error("Missing settings user");
+    const context = { principal: { ...principal, userId: fresh.id }, requestId: "default-parity" };
+    for (const workspace of ["calendar", "tasks", "mail", "finances"] as const) {
+      expect(await settings.get(fresh.id, workspace)).toEqual({
+        workspace,
+        revision: 0,
+        preferences: getDefaultWorkspacePreferences(workspace),
+      });
+      const saved = await settings.update(
+        workspace,
+        { expectedRevision: 0, preferences: { includeArchivedInSearch: false } },
+        context,
+      );
+      expect(saved).toEqual(await settings.get(fresh.id, workspace));
+      expect(saved.preferences).toEqual({
+        ...getDefaultWorkspacePreferences(workspace),
+        includeArchivedInSearch: false,
+      });
+    }
+  });
+  it("accepts one concurrent exact-revision winner and audits only that owner-bound write", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({ email: "settings-race@example.com", displayName: "Race", passwordHash: "unused" })
+      .returning();
+    if (!owner) throw new Error("Missing race owner");
+    const context = { principal: { ...principal, userId: owner.id }, requestId: "settings-race" };
+    const results = await Promise.allSettled([
+      settings.update(
+        "tasks",
+        { expectedRevision: 0, preferences: { taskSort: "title" } },
+        context,
+      ),
+      settings.update(
+        "tasks",
+        { expectedRevision: 0, preferences: { taskSort: "priority" } },
+        context,
+      ),
+    ]);
+    const winners = results.filter((result) => result.status === "fulfilled");
+    const losers = results.filter((result) => result.status === "rejected");
+    expect(winners).toHaveLength(1);
+    expect(losers).toHaveLength(1);
+    expect(losers[0]?.reason).toMatchObject({ code: "conflict" });
+    expect(await settings.get(owner.id, "tasks")).toEqual(winners[0]?.value);
+    expect((await settings.get(otherId, "tasks")).revision).toBe(0);
+    const events = await database.db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.userId, owner.id));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      action: "workspace.preferences_updated",
+      requestId: "settings-race",
+      before: null,
+      after: expect.objectContaining({ revision: 1, userId: owner.id }),
+    });
+  });
   it("deduplicates repeated search terms and rejects excessive unique terms", async () => {
     const repeated = await search.search(
       userId,
@@ -380,7 +448,12 @@ describe.sequential("workspace discovery and account preferences", () => {
     const audits = await database.db
       .select()
       .from(auditEvents)
-      .where(eq(auditEvents.entityType, `${workspace}_workspace_settings`));
+      .where(
+        and(
+          eq(auditEvents.entityType, `${workspace}_workspace_settings`),
+          eq(auditEvents.entityId, userId),
+        ),
+      );
     expect(audits).toHaveLength(1);
     const table = {
       calendar: calendarWorkspaceSettings,
@@ -459,7 +532,7 @@ describe.sequential("workspace discovery and account preferences", () => {
       taskRowDetails: [],
       taskContainerSort: "name",
     });
-    expect((await settings.get(otherId, "tasks")).preferences.taskSort).toBeUndefined();
+    expect((await settings.get(otherId, "tasks")).preferences.taskSort).toBe("default");
     await expect(
       settings.update("mail", { expectedRevision: 0, preferences: { taskSort: "title" } }, context),
     ).rejects.toMatchObject({ code: "invalid_request" });
@@ -501,7 +574,7 @@ describe.sequential("workspace discovery and account preferences", () => {
       mailListWidth: 42,
       mailConversationLayout: "single",
     });
-    expect((await settings.get(otherId, "mail")).preferences.mailListWidth).toBeUndefined();
+    expect((await settings.get(otherId, "mail")).preferences.mailListWidth).toBe(34);
     await expect(
       settings.update(
         "tasks",
@@ -544,8 +617,8 @@ describe.sequential("workspace discovery and account preferences", () => {
       { principal, requestId: "calendar" },
     );
     expect(result.preferences).toEqual({
-      pinnedListIds: [],
-      pinnedProjectIds: [],
+      weekStartsOn: "sunday",
+      defaultEventDurationMinutes: 60,
       includeArchivedInSearch: true,
       calendarView: "month",
       showWeekends: false,
@@ -602,7 +675,7 @@ describe.sequential("workspace discovery and account preferences", () => {
         { expectedRevision: 1, preferences: { pinnedListIds: [list.id] } },
         context,
       ),
-    ).rejects.toThrow(/belong to Tasks/);
+    ).rejects.toThrow(/belong to this workspace/);
     const unpinned = await settings.update(
       "tasks",
       { expectedRevision: saved.revision, preferences: { pinnedListIds: [] } },
@@ -613,6 +686,187 @@ describe.sequential("workspace discovery and account preferences", () => {
     expect(unpinned.preferences.includeArchivedInSearch).toBe(
       before.preferences.includeArchivedInSearch,
     );
+  });
+  it("validates Finance account ownership and kind while preserving null and empty selections", async () => {
+    const [cash, investment, debt, foreignCash, foreignInvestment] = await database.db
+      .insert(financeAccounts)
+      .values([
+        { userId, provider: "manual", institution: "Example", name: "Owned cash", kind: "cash" },
+        {
+          userId,
+          provider: "manual",
+          institution: "Example",
+          name: "Owned investment",
+          kind: "investment",
+        },
+        { userId, provider: "manual", institution: "Example", name: "Owned debt", kind: "debt" },
+        {
+          userId: otherId,
+          provider: "manual",
+          institution: "Example",
+          name: "Foreign cash",
+          kind: "cash",
+        },
+        {
+          userId: otherId,
+          provider: "manual",
+          institution: "Example",
+          name: "Foreign investment",
+          kind: "investment",
+        },
+      ])
+      .returning();
+    if (!cash || !investment || !debt || !foreignCash || !foreignInvestment)
+      throw new Error("Missing Finance fixtures");
+    const context = { principal, requestId: "finance-account-selection" };
+    const before = await settings.get(userId, "finances");
+    const isolated = await settings.get(otherId, "finances");
+    const saved = await settings.update(
+      "finances",
+      {
+        expectedRevision: before.revision,
+        preferences: {
+          spendAccountIds: [cash.id, investment.id, debt.id],
+          cashAccountIds: [cash.id],
+          investmentAccountIds: [investment.id],
+        },
+      },
+      context,
+    );
+    expect(saved).toEqual(await settings.get(userId, "finances"));
+    expect(saved.preferences).toMatchObject({
+      spendAccountIds: [cash.id, investment.id, debt.id],
+      cashAccountIds: [cash.id],
+      investmentAccountIds: [investment.id],
+    });
+    for (const preferences of [
+      { spendAccountIds: [cash.id, foreignCash.id] },
+      { cashAccountIds: [foreignCash.id] },
+      { investmentAccountIds: [foreignInvestment.id] },
+      { cashAccountIds: [investment.id] },
+      { investmentAccountIds: [cash.id] },
+    ]) {
+      await expect(
+        settings.update("finances", { expectedRevision: saved.revision, preferences }, context),
+      ).rejects.toMatchObject({ code: "invalid_request" });
+      expect(await settings.get(userId, "finances")).toEqual(saved);
+    }
+    const empty = await settings.update(
+      "finances",
+      {
+        expectedRevision: saved.revision,
+        preferences: { spendAccountIds: [], cashAccountIds: [], investmentAccountIds: [] },
+      },
+      context,
+    );
+    expect(empty).toEqual(await settings.get(userId, "finances"));
+    expect(empty.preferences).toMatchObject({
+      spendAccountIds: [],
+      cashAccountIds: [],
+      investmentAccountIds: [],
+    });
+    await expect(
+      settings.update(
+        "finances",
+        {
+          expectedRevision: saved.revision,
+          preferences: { spendAccountIds: null, cashAccountIds: null, investmentAccountIds: null },
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(await settings.get(userId, "finances")).toEqual(empty);
+    const automatic = await settings.update(
+      "finances",
+      {
+        expectedRevision: empty.revision,
+        preferences: { spendAccountIds: null, cashAccountIds: null, investmentAccountIds: null },
+      },
+      context,
+    );
+    expect(automatic).toEqual(await settings.get(userId, "finances"));
+    expect(automatic.preferences).toMatchObject({
+      spendAccountIds: null,
+      cashAccountIds: null,
+      investmentAccountIds: null,
+    });
+    expect(automatic.preferences.financeTransactionView).toBe(
+      before.preferences.financeTransactionView,
+    );
+    expect(await settings.get(otherId, "finances")).toEqual(isolated);
+  });
+  it("accepts only owned active capture lists and keeps failed or stale writes isolated", async () => {
+    const [active, foreign, archived, deleted] = await database.db
+      .insert(taskLists)
+      .values([
+        { userId, name: "Default capture", normalizedName: "default capture" },
+        { userId: otherId, name: "Private capture", normalizedName: "private capture" },
+        {
+          userId,
+          name: "Archived capture",
+          normalizedName: "archived capture",
+          availability: "archived",
+          archivedAt: instant,
+        },
+        { userId, name: "Deleted capture", normalizedName: "deleted capture", deletedAt: instant },
+      ])
+      .returning();
+    if (!active || !foreign || !archived || !deleted) throw new Error("Missing capture lists");
+    const context = { principal, requestId: "default-capture" };
+    const before = await settings.get(userId, "tasks");
+    const isolated = await settings.get(otherId, "tasks");
+    const saved = await settings.update(
+      "tasks",
+      {
+        expectedRevision: before.revision,
+        preferences: { defaultCaptureListId: active.id, showCompletedTasks: true },
+      },
+      context,
+    );
+    expect(saved).toEqual(await settings.get(userId, "tasks"));
+    expect(saved.preferences).toMatchObject({
+      defaultCaptureListId: active.id,
+      showCompletedTasks: true,
+    });
+    for (const invalid of [foreign, archived, deleted]) {
+      await expect(
+        settings.update(
+          "tasks",
+          {
+            expectedRevision: saved.revision,
+            preferences: { defaultCaptureListId: invalid.id },
+          },
+          context,
+        ),
+      ).rejects.toMatchObject({ code: "invalid_request" });
+      expect(await settings.get(userId, "tasks")).toEqual(saved);
+    }
+    await expect(
+      settings.update(
+        "tasks",
+        {
+          expectedRevision: before.revision,
+          preferences: { defaultCaptureListId: null },
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(await settings.get(userId, "tasks")).toEqual(saved);
+    const inbox = await settings.update(
+      "tasks",
+      {
+        expectedRevision: saved.revision,
+        preferences: { defaultCaptureListId: null },
+      },
+      context,
+    );
+    expect(inbox).toEqual(await settings.get(userId, "tasks"));
+    expect(inbox.preferences).toMatchObject({
+      defaultCaptureListId: null,
+      showCompletedTasks: true,
+    });
+    expect(inbox.preferences.pinnedListIds).toEqual(before.preferences.pinnedListIds);
+    expect(await settings.get(otherId, "tasks")).toEqual(isolated);
   });
   it("requires workspace scopes, including reminders for mixed Tasks search", async () => {
     const original = principal;

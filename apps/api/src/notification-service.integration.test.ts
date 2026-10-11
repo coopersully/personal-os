@@ -10,6 +10,7 @@ import {
   textingConnections,
   textingConsentEvents,
   textMessages,
+  textReplyBindings,
   users,
 } from "@personal-os/database";
 import {
@@ -33,6 +34,10 @@ const ref: FinanceHumanWorkRef = {
   kind: "question",
   revision: "r1",
   actionRevision: "a1",
+};
+const secondRef: FinanceHumanWorkRef = {
+  ...ref,
+  id: "44444444-4444-4444-8444-444444444444",
 };
 const principal: Principal = {
   userId: owner,
@@ -68,12 +73,19 @@ describe.sequential("durable notifications", () => {
     await database.db.execute(
       sql`CREATE TABLE notification_test_work (id uuid PRIMARY KEY, user_id uuid NOT NULL, value jsonb NOT NULL)`,
     );
-    resolver = async (userId, work, tx) => {
-      const result = await tx.execute(
-        sql`SELECT value FROM notification_test_work WHERE id=${work.id} AND user_id=${userId} FOR UPDATE`,
-      );
-      const value = result.rows[0]?.value as NotificationWork | undefined;
-      return value ? { state: "current", value } : { state: "unavailable" };
+    resolver = async (userId, works, tx) => {
+      const values = new Map<string, NotificationWork>();
+      for (const work of [...works].sort((a, b) => a.id.localeCompare(b.id))) {
+        const result = await tx.execute(
+          sql`SELECT value FROM notification_test_work WHERE id=${work.id} AND user_id=${userId} FOR UPDATE NOWAIT`,
+        );
+        const value = result.rows[0]?.value as NotificationWork | undefined;
+        if (value) values.set(work.id, value);
+      }
+      return works.map((work) => {
+        const value = values.get(work.id);
+        return value ? { state: "current", value } : { state: "unavailable" };
+      });
     };
   }, 120_000);
   afterAll(async () => {
@@ -123,7 +135,7 @@ describe.sequential("durable notifications", () => {
       disclosure: "context",
       context: "Dinner",
       occurredAt: "2026-03-07T23:00:00Z",
-      destination: "/settings?section=reviews",
+      destination: "/finances?review=open",
       ...extra,
     };
     await database.db.execute(sql`INSERT INTO notification_test_work VALUES (${work.id}, ${owner}, ${JSON.stringify(value)}::jsonb)
@@ -133,6 +145,28 @@ describe.sequential("durable notifications", () => {
     const result = await service.claim(principal);
     if (result.state !== "claimed") throw new Error(`Expected claim, got ${result.state}`);
     return result;
+  }
+  async function withLockedWork(work: FinanceHumanWorkRef, action: () => Promise<void>) {
+    let release: () => void = () => {};
+    let entered: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const ready = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const locking = database.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT id FROM notification_test_work WHERE id=${work.id} FOR UPDATE`);
+      entered();
+      await held;
+    });
+    await ready;
+    try {
+      await action();
+    } finally {
+      release();
+      await locking;
+    }
   }
   it("keeps absent producers unavailable and rejects missing caller authority", async () => {
     const unavailable = createNotificationService({
@@ -153,6 +187,132 @@ describe.sequential("durable notifications", () => {
     await expect(
       service.publish({ ...principal, scopes: new Set(["texting:read"]) }, { work: [ref] }),
     ).rejects.toThrow("requires");
+    expect(send).not.toHaveBeenCalled();
+  });
+  it("passes one positional batch per publish, claim, and delivery transaction", async () => {
+    await putWork(secondRef, { context: "Lunch" });
+    const batched = vi.fn(resolver);
+    const notifications = makeService(batched);
+    await notifications.publish(principal, { work: [secondRef, ref] });
+    expect(batched).toHaveBeenCalledTimes(1);
+    expect(batched.mock.calls[0]?.[1]).toEqual([secondRef, ref]);
+    const claim = await notifications.claim(principal);
+    if (claim.state !== "claimed") throw new Error("Expected claim");
+    expect(batched).toHaveBeenCalledTimes(2);
+    expect(batched.mock.calls[1]?.[1]).toEqual([ref, secondRef]);
+    send.mockImplementationOnce(async () => {
+      // Both Finance fixture locks must have ended at the queued-message commit.
+      await putWork(secondRef, { active: false });
+      return { sid: "SMbatch", status: "queued" };
+    });
+    await notifications.deliver(principal, claim);
+    expect(batched).toHaveBeenCalledTimes(3);
+    expect(batched.mock.calls[2]?.[1]).toEqual([ref, secondRef]);
+    expect(await database.db.select().from(notificationAttemptItems)).toHaveLength(2);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+  it("rejects short, malformed and positionally wrong resolver batches before publication", async () => {
+    await putWork(secondRef);
+    const valid = await database.db.transaction((tx) => resolver(owner, [ref, secondRef], tx));
+    for (const response of [
+      valid.slice(0, 1),
+      [{ state: "current" }, valid[1]],
+      [valid[1], valid[0]],
+      new Array(2),
+    ]) {
+      const broken = makeService(
+        async () => response as Awaited<ReturnType<NotificationWorkResolver>>,
+      );
+      await expect(broken.publish(principal, { work: [ref, secondRef] })).rejects.toThrow();
+      expect(await database.db.select().from(notificationIntents)).toEqual([]);
+    }
+    expect(send).not.toHaveBeenCalled();
+  });
+  it("rejects case-variant duplicate work IDs before invoking Finance", async () => {
+    const batched = vi.fn(resolver);
+    await expect(
+      makeService(batched).publish(principal, {
+        work: [ref, { ...ref, id: ref.id.toUpperCase() }],
+      }),
+    ).rejects.toThrow("once");
+    expect(batched).not.toHaveBeenCalled();
+    expect(await database.db.select().from(notificationIntents)).toEqual([]);
+  });
+  it("keeps mixed invalid publish batches atomic and claims eligible siblings independently", async () => {
+    await putWork(secondRef, { active: false });
+    await expect(service.publish(principal, { work: [ref, secondRef] })).rejects.toThrow();
+    expect(await database.db.select().from(notificationIntents)).toEqual([]);
+    await putWork(secondRef);
+    await service.publish(principal, { work: [ref, secondRef] });
+    await putWork(secondRef, { active: false });
+    const batched = vi.fn(resolver);
+    const notifications = makeService(batched);
+    const claim = await notifications.claim(principal);
+    expect(claim.state).toBe("claimed");
+    expect(batched).toHaveBeenCalledTimes(1);
+    expect(batched.mock.calls[0]?.[1]).toEqual([ref, secondRef]);
+    const items = await database.db.select().from(notificationAttemptItems);
+    expect(items.map((item) => item.work.id)).toEqual([ref.id]);
+    expect(send).not.toHaveBeenCalled();
+  });
+  it("suppresses an unsent multi-item attempt and queues nothing when one work changes", async () => {
+    await putWork(secondRef);
+    await service.publish(principal, { work: [ref, secondRef] });
+    const claim = await claimed();
+    await putWork(secondRef, { active: false });
+    const batched = vi.fn(resolver);
+    await makeService(batched).deliver(principal, claim);
+    expect(batched).toHaveBeenCalledTimes(1);
+    expect(batched.mock.calls[0]?.[1]).toEqual([ref, secondRef]);
+    expect((await service.status(principal)).attempts[0]?.state).toBe("suppressed");
+    expect(await database.db.select().from(textMessages)).toEqual([]);
+    expect(send).not.toHaveBeenCalled();
+  });
+  it("rolls back contended publish and claim batches without partial intents or attempts", async () => {
+    await putWork(secondRef);
+    await withLockedWork(secondRef, async () => {
+      await expect(service.publish(principal, { work: [ref, secondRef] })).rejects.toThrow();
+    });
+    expect(await database.db.select().from(notificationIntents)).toEqual([]);
+    await service.publish(principal, { work: [ref, secondRef] });
+    await withLockedWork(secondRef, async () => {
+      await expect(service.claim(principal)).rejects.toThrow();
+    });
+    expect(await database.db.select().from(notificationDeliveryAttempts)).toEqual([]);
+    expect(await database.db.select().from(notificationAttemptItems)).toEqual([]);
+    expect(
+      (await database.db.select().from(notificationIntents)).every(
+        (item) => item.state === "pending",
+      ),
+    ).toBe(true);
+    expect(send).not.toHaveBeenCalled();
+  });
+  it("rolls back a claim when the resolver omits a positional result", async () => {
+    await putWork(secondRef);
+    await service.publish(principal, { work: [ref, secondRef] });
+    await expect(makeService(async () => []).claim(principal)).rejects.toThrow();
+    expect(await database.db.select().from(notificationDeliveryAttempts)).toEqual([]);
+    expect(await database.db.select().from(notificationAttemptItems)).toEqual([]);
+    expect(
+      (await database.db.select().from(notificationIntents)).every(
+        (item) => item.state === "pending",
+      ),
+    ).toBe(true);
+  });
+  it("queues nothing and never calls the provider when delivery batch resolution fails", async () => {
+    await putWork(secondRef);
+    await service.publish(principal, { work: [ref, secondRef] });
+    const claim = await claimed();
+    await withLockedWork(secondRef, async () => {
+      await service.deliver(principal, claim);
+    });
+    expect(await database.db.select().from(textMessages)).toEqual([]);
+    expect(send).not.toHaveBeenCalled();
+    await makeService(async () => [{ state: "current" }] as never).deliver(principal, claim);
+    await makeService(async (userId, works, tx) =>
+      (await resolver(userId, works, tx)).reverse(),
+    ).deliver(principal, claim);
+    expect(await database.db.select().from(textMessages)).toEqual([]);
     expect(send).not.toHaveBeenCalled();
   });
   it("persists human preferences with revision fencing, audit and inherited disclosure ceiling", async () => {
@@ -184,6 +344,125 @@ describe.sequential("durable notifications", () => {
     const audits = await database.db.query.auditEvents.findMany();
     expect(audits).toHaveLength(3);
     expect((await service.status({ ...principal, userId: other })).preferences).toEqual([]);
+  });
+  it("resets only the owned Finance override with revision fencing and audit, without reusing deleted revisions", async () => {
+    const global = { ...defaultNotificationPreferences, enabled: false };
+    await service.savePreferences(principal, "global", {
+      expectedRevision: null,
+      preferences: global,
+    });
+    await service.savePreferences(principal, "finances", {
+      expectedRevision: null,
+      preferences: defaultNotificationPreferences,
+    });
+    await expect(
+      service.resetFinancePreferences(
+        { ...principal, actorType: "agent" },
+        { expectedRevision: 1 },
+      ),
+    ).rejects.toThrow("Only the person");
+    await expect(
+      service.resetFinancePreferences(
+        { ...principal, scopes: new Set(["texting:read", "finances:read"]) },
+        { expectedRevision: 1 },
+      ),
+    ).rejects.toThrow("requires");
+    await expect(
+      service.resetFinancePreferences({ ...principal, userId: other }, { expectedRevision: 1 }),
+    ).rejects.toThrow("changed");
+    await expect(
+      service.resetFinancePreferences(principal, { expectedRevision: 2 }),
+    ).rejects.toThrow("changed");
+    expect(
+      await service.resetFinancePreferences(
+        principal,
+        { expectedRevision: 1 },
+        "finance-reset-request",
+      ),
+    ).toEqual({
+      scope: "finances",
+      inherited: true,
+    });
+    const inherited = await service.status(principal);
+    expect(inherited.preferences).toEqual([{ scope: "global", revision: 1, preferences: global }]);
+    expect(inherited.effective).toEqual(global);
+    const audits = await database.db.query.auditEvents.findMany();
+    expect(audits.filter((event) => event.action === "notifications.preferences.reset")).toEqual([
+      expect.objectContaining({
+        before: { scope: "finances", revision: 1, preferences: defaultNotificationPreferences },
+        after: { scope: "finances", inherited: true },
+        requestId: "finance-reset-request",
+        actorId: owner,
+        actorType: "user",
+      }),
+    ]);
+    expect(
+      (
+        await service.savePreferences(principal, "finances", {
+          expectedRevision: null,
+          preferences: defaultNotificationPreferences,
+        })
+      ).revision,
+    ).toBe(2);
+    await expect(
+      service.resetFinancePreferences(principal, { expectedRevision: 1 }),
+    ).rejects.toThrow("changed");
+    await expect(
+      service.savePreferences(principal, "finances", {
+        expectedRevision: 1,
+        preferences: global,
+      }),
+    ).rejects.toThrow("changed");
+    expect((await service.status(principal)).preferences).toEqual([
+      expect.objectContaining({ scope: "global", revision: 1, preferences: global }),
+      expect.objectContaining({
+        scope: "finances",
+        revision: 2,
+        preferences: defaultNotificationPreferences,
+      }),
+    ]);
+    expect(await database.db.query.auditEvents.findMany()).toHaveLength(audits.length + 1);
+    expect(send).not.toHaveBeenCalled();
+  });
+  it.each([
+    "question",
+    "approval",
+  ] as const)("expires delayed %s replies with their Finance work and releases the namespace", async (kind) => {
+    const work = { ...ref, kind };
+    const expiry = new Date(current.getTime() + 60_000);
+    await putWork(work, {
+      expiresAt: expiry.toISOString(),
+      questionPrompt: kind === "question" ? "What was this purchase for?" : undefined,
+    });
+    await service.publish(principal, { work: [work] });
+    await service.drain(principal);
+    const original = await database.db.select().from(textReplyBindings);
+    expect(original).toHaveLength(1);
+    expect(original[0]?.expiresAt).toEqual(expiry);
+    current = new Date(expiry.getTime() + 1000);
+    await putWork(secondRef, { questionPrompt: "What was the next purchase for?" });
+    await service.publish(principal, { work: [secondRef] });
+    await service.drain(principal);
+    expect(send.mock.calls[1]?.[0].body).toContain("Reply with the item number and answer");
+    expect(await database.db.select().from(textReplyBindings)).toHaveLength(2);
+  });
+  it("keeps successive question notifications in one reply namespace", async () => {
+    await putWork(ref, { questionPrompt: "What was this purchase for?" });
+    await service.publish(principal, { work: [ref] });
+    await service.drain(principal);
+    const original = await database.db.select().from(textReplyBindings);
+    expect(original).toHaveLength(1);
+    expect(send.mock.calls[0]?.[0].body).toContain("Reply with the item number and answer");
+    current = new Date(current.getTime() + 60_000);
+    await putWork(secondRef, { questionPrompt: "What was the next purchase for?" });
+    await service.publish(principal, { work: [secondRef] });
+    await service.drain(principal);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[1]?.[0].body).toContain("/finances?review=open");
+    expect(send.mock.calls[1]?.[0].body).not.toContain("Reply with the item number and answer");
+    const remaining = await database.db.select().from(textReplyBindings);
+    expect(remaining).toEqual(original);
+    expect(remaining[0]?.workId).toBe(ref.id);
   });
   it("deduplicates wording and evidence refreshes while keeping semantic attempt history", async () => {
     await service.publish(principal, { work: [ref] });
@@ -338,8 +617,8 @@ describe.sequential("durable notifications", () => {
     const locked = new Promise<void>((resolve) => {
       entered = resolve;
     });
-    const waitingResolver: NotificationWorkResolver = async (userId, work, tx) => {
-      const result = await resolver(userId, work, tx);
+    const waitingResolver: NotificationWorkResolver = async (userId, works, tx) => {
+      const result = await resolver(userId, works, tx);
       entered();
       await blocked;
       return result;
@@ -414,8 +693,8 @@ describe.sequential("durable notifications", () => {
     const started = new Promise<void>((r) => {
       entered = r;
     });
-    const writing = makeService(async (userId, work, tx) => {
-      const result = await resolver(userId, work, tx);
+    const writing = makeService(async (userId, works, tx) => {
+      const result = await resolver(userId, works, tx);
       entered();
       await wait;
       return result;
@@ -478,8 +757,8 @@ describe.sequential("durable notifications", () => {
     });
     const next = await claimed();
     await putWork(ref, { expiresAt: new Date(current.getTime() + 1000).toISOString() });
-    const advancing: NotificationWorkResolver = async (userId, work, tx) => {
-      const result = await resolver(userId, work, tx);
+    const advancing: NotificationWorkResolver = async (userId, works, tx) => {
+      const result = await resolver(userId, works, tx);
       current = new Date(current.getTime() + 1001);
       return result;
     };

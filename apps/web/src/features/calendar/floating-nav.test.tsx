@@ -8,6 +8,13 @@ import { MemoryRouter } from "react-router-dom";
 import { MotionProvider } from "@/components/motion-provider.js";
 import { CalendarFloatingNav } from "./floating-nav.js";
 
+vi.mock("../../api.js", () => ({
+  api: {
+    getWorkspaceSettings: vi.fn().mockResolvedValue({ revision: 0, preferences: {} }),
+    getDomainProfile: vi.fn().mockResolvedValue(null),
+  },
+}));
+
 const user = { id: "user-1" } as User;
 const calendar = {
   accountId: null,

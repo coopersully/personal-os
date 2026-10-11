@@ -318,7 +318,7 @@ describe.sequential("ilo API", () => {
       capability: "unavailable",
       intents: [],
       preferences: [],
-      reason: "producer_not_registered",
+      reason: "delivery_not_enabled",
     });
     const unregisteredPublication = await agentRequest(
       fullAgent,

@@ -17,7 +17,7 @@ import {
   taskViewFromParams,
 } from "./task-navigation";
 
-vi.mock("../workspace-search/preferences", () => ({
+vi.mock("../workspace-settings/preferences", () => ({
   useWorkspacePreferences: () => ({
     isSuccess: true,
     data: { preferences: { pinnedListIds: ["work"], pinnedProjectIds: ["launch"] } },

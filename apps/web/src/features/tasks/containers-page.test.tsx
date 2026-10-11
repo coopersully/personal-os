@@ -129,10 +129,10 @@ beforeEach(() => {
   api.updateWorkspaceSettings.mockResolvedValue({ revision: 3, preferences: {} });
 });
 function renderCollection(kind: "lists" | "projects" | "archive", query = "") {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["me"], { id: "owner" });
   render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+    <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[`/tasks?view=${kind}&${query}`]}>
         <TaskContainerControls kind={kind} />
         <TaskContainersPage kind={kind} />

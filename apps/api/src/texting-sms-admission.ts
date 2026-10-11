@@ -8,6 +8,7 @@ import {
 import {
   type FinanceDomainOutcome,
   type FinanceHumanWorkRef,
+  type FinanceOutcomeReasonCode,
   financeHumanWorkRefSchema,
   idSchema,
 } from "@personal-os/domain";
@@ -25,7 +26,7 @@ export type SmsAnswerCommand = {
   replyBindingId: string;
 };
 export type SmsAdmission =
-  | { state: "unavailable" }
+  | { state: "unavailable"; reasonCode: FinanceOutcomeReasonCode }
   | {
       state: "verified";
       consume: (accepted: FinanceDomainOutcome & { state: "accepted" }) => Promise<void>;
@@ -92,11 +93,17 @@ export function createSmsAdmission(policy: { enabled: () => boolean }) {
     admitSmsAnswer(tx, expected, policy.enabled);
 }
 
+export function createSmsApprovalAdmission(policy: { enabled: () => boolean }) {
+  return (tx: TextingTransaction, expected: SmsAnswerCommand & { userId: string }) =>
+    admitSmsAnswer(tx, expected, policy.enabled, new Date(), "approval");
+}
+
 async function admitSmsAnswer(
   tx: TextingTransaction,
   expected: SmsAnswerCommand & { userId: string },
   enabled: () => boolean,
   current: Date = new Date(),
+  kind: "question" | "approval" = "question",
 ): Promise<SmsAdmission> {
   requireEnabled(enabled);
   idSchema.parse(expected.userId);
@@ -104,15 +111,21 @@ async function admitSmsAnswer(
   idSchema.parse(expected.inboundMessageId);
   idSchema.parse(expected.replyBindingId);
   const work = financeHumanWorkRefSchema.parse(expected.work);
-  if (work.kind !== "question" || !expected.text || expected.text !== expected.text.trim())
-    return { state: "unavailable" };
+  if (
+    work.kind !== kind ||
+    (kind === "approval" && !["approve", "reject"].includes(expected.text)) ||
+    !expected.text ||
+    expected.text !== expected.text.trim()
+  )
+    return { state: "unavailable", reasonCode: "permission_denied" };
   const [connection] = await tx
     .select()
     .from(textingConnections)
     .where(eq(textingConnections.userId, expected.userId))
     .for("share", { noWait: true })
     .limit(1);
-  if (connection?.state !== "active") return { state: "unavailable" };
+  if (connection?.state !== "active")
+    return { state: "unavailable", reasonCode: "blocked_by_policy" };
   const [inbound] = await tx
     .select()
     .from(textMessages)
@@ -122,7 +135,7 @@ async function admitSmsAnswer(
     .for("share", { noWait: true })
     .limit(1);
   if (inbound?.direction !== "inbound" || inbound.connectionId !== connection.id)
-    return { state: "unavailable" };
+    return { state: "unavailable", reasonCode: "permission_denied" };
   const [preview] = await tx
     .select({ outboundMessageId: textReplyBindings.outboundMessageId })
     .from(textReplyBindings)
@@ -133,7 +146,7 @@ async function admitSmsAnswer(
       ),
     )
     .limit(1);
-  if (!preview) return { state: "unavailable" };
+  if (!preview) return { state: "unavailable", reasonCode: "permission_denied" };
   const [outbound] = await tx
     .select()
     .from(textMessages)
@@ -143,7 +156,7 @@ async function admitSmsAnswer(
     .for("share", { noWait: true })
     .limit(1);
   if (outbound?.direction !== "outbound" || outbound.connectionId !== connection.id)
-    return { state: "unavailable" };
+    return { state: "unavailable", reasonCode: "permission_denied" };
   const [binding] = await tx
     .select()
     .from(textReplyBindings)
@@ -155,7 +168,7 @@ async function admitSmsAnswer(
     )
     .for("update", { noWait: true })
     .limit(1);
-  if (!binding) return { state: "unavailable" };
+  if (!binding) return { state: "unavailable", reasonCode: "permission_denied" };
   const [claim] = await tx
     .select()
     .from(textInboundClaims)
@@ -166,6 +179,12 @@ async function admitSmsAnswer(
       ),
     )
     .limit(1);
+  if (
+    claim &&
+    (claim.consentEpoch !== connection.consentEpoch ||
+      binding.consentEpoch !== connection.consentEpoch)
+  )
+    return { state: "unavailable", reasonCode: "blocked_by_policy" };
   if (
     !claim ||
     claim.messageId !== inbound.id ||
@@ -180,15 +199,20 @@ async function admitSmsAnswer(
     binding.canonicalAnswer !== expected.text ||
     binding.workId !== work.id ||
     binding.workKind !== work.kind ||
+    (kind === "approval" &&
+      (binding.answerMode !== "choices" ||
+        JSON.stringify(binding.answerVocabulary) !== JSON.stringify(["approve", "reject"]))) ||
     binding.workRevision !== work.revision ||
     binding.actionRevision !== work.actionRevision
   )
-    return { state: "unavailable" };
+    return { state: "unavailable", reasonCode: "permission_denied" };
   const delivery = replyDeliveryState(outbound);
-  if (delivery === "terminal") return { state: "unavailable" };
+  if (delivery === "terminal")
+    return { state: "unavailable", reasonCode: "dependency_unavailable" };
   if (delivery === "waiting") throw new TextingSmsRetryableError("delivery_unconfirmed");
   if (!outbound.providerSubmittedAt) throw new TextingSmsRetryableError("delivery_unconfirmed");
-  if (outbound.providerSubmittedAt >= inbound.occurredAt) return { state: "unavailable" };
+  if (outbound.providerSubmittedAt >= inbound.occurredAt)
+    return { state: "unavailable", reasonCode: "permission_denied" };
   requireEnabled(enabled);
   let invoked = false;
   return {

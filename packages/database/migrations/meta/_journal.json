@@ -757,6 +757,69 @@
       "when": 1791310000000,
       "tag": "0100_finance_transaction_preferences",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1791311000000,
+      "tag": "0101_calendar_creation_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1791312000000,
+      "tag": "0102_task_capture_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "7",
+      "when": 1791313000000,
+      "tag": "0103_finance_display_account_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "7",
+      "when": 1791314000000,
+      "tag": "0104_finance_review_history_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "7",
+      "when": 1791315000000,
+      "tag": "0105_finance_review_history_archive",
+      "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1791319000000,
+      "tag": "0109_finance_review_history_archive_upgrade",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1791320000000,
+      "tag": "0106_finance_review_action_authority",
+      "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "7",
+      "when": 1791558000000,
+      "tag": "0107_finance_host_continuation",
+      "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "7",
+      "when": 1791562000000,
+      "tag": "0108_finance_sms_completion",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import { defaultNotificationPreferences } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -101,6 +102,11 @@ const savedFinanceProfile = {
 
 const mocks = vi.hoisted(() => ({
   getFinanceConfiguration: vi.fn(),
+  getNotificationStatus: vi.fn(),
+  listAutomationHostConnections: vi.fn().mockResolvedValue([]),
+  listAutomationHostSchedules: vi.fn().mockResolvedValue([]),
+  listFinanceAnswerContinuations: vi.fn().mockResolvedValue([]),
+  listFinanceHostRuns: vi.fn().mockResolvedValue([]),
   listFinanceGoals: vi.fn(),
   listFinanceAccounts: vi.fn(),
   getDomainProfile: vi.fn(),
@@ -134,6 +140,15 @@ function renderSettings() {
 describe("Finance settings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getNotificationStatus.mockResolvedValue({
+      capability: "available",
+      reason: null,
+      timeZone: "UTC",
+      preferences: [],
+      effective: defaultNotificationPreferences,
+      intents: [],
+      attempts: [],
+    });
     mocks.getFinanceConfiguration.mockResolvedValue({
       profile: { state: "loaded", value: null },
       income: { state: "loaded", value: null },

@@ -35,6 +35,7 @@ import {
   connectorAuthorizationOutcomeSchema,
 } from "@personal-os/domain";
 import { createAssistantApiClient } from "./features/assistant.js";
+import { createAutomationHostApi } from "./features/automation-hosts.js";
 import { createCalendarApiClient } from "./features/calendar.js";
 import { createDesktopReleaseApiClient } from "./features/desktop-release.js";
 import { createFinanceApi } from "./features/finances.js";
@@ -206,6 +207,7 @@ export function createApiClient(options: ClientOptions) {
       );
     },
     ...createFinanceApi(request),
+    ...createAutomationHostApi(request),
     ...createCalendarApiClient(request),
     ...createGoalsApiClient(request),
     ...createRitualsApiClient(request),
@@ -417,13 +419,15 @@ export function createApiClient(options: ClientOptions) {
         ...(signal ? { signal } : {}),
       });
     },
-    async getWorkspaceSettings(workspace: SearchableWorkspace): Promise<WorkspaceSettings> {
+    async getWorkspaceSettings<W extends SearchableWorkspace>(
+      workspace: W,
+    ): Promise<WorkspaceSettings<W>> {
       return request(`/v1/workspaces/${workspace}/settings`);
     },
-    async updateWorkspaceSettings(
-      workspace: SearchableWorkspace,
-      input: UpdateWorkspaceSettings,
-    ): Promise<WorkspaceSettings> {
+    async updateWorkspaceSettings<W extends SearchableWorkspace>(
+      workspace: W,
+      input: UpdateWorkspaceSettings<NoInfer<W>>,
+    ): Promise<WorkspaceSettings<W>> {
       return request(`/v1/workspaces/${workspace}/settings`, {
         method: "PATCH",
         body: JSON.stringify(input),

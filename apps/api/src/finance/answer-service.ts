@@ -1,11 +1,13 @@
 import {
   auditEvents,
+  financeAnswerContinuations,
   financeContextualAnswers,
   financeContextualQuestions,
 } from "@personal-os/database";
 import {
   type FinanceAnswer,
   type FinanceDomainOutcome,
+  type FinanceOutcomeReasonCode,
   type FinanceSmsAnswerCommand,
   financeAnswerSchema,
   financeDomainOutcomeSchema,
@@ -40,6 +42,7 @@ function outcome(
   operationId: string,
   state: "unavailable" | "blocked" | "accepted",
   resultRevision: string | null = null,
+  unavailableReason: FinanceOutcomeReasonCode = "producer_not_registered",
 ): FinanceDomainOutcome {
   return financeDomainOutcomeSchema.parse({
     operationId,
@@ -47,11 +50,7 @@ function outcome(
     work: [],
     resultRevision,
     reasonCode:
-      state === "unavailable"
-        ? "producer_not_registered"
-        : state === "blocked"
-          ? "stale_revision"
-          : null,
+      state === "unavailable" ? unavailableReason : state === "blocked" ? "stale_revision" : null,
   });
 }
 /** A narrow dispatcher; unsupported public kinds/sources never enter receipt admission. */
@@ -123,7 +122,10 @@ async function answerCore(
             userId: context.principal.userId,
           });
           if (admitted.state !== "verified")
-            return { state: "unavailable", result: outcome(input.operationId, "unavailable") };
+            return {
+              state: "unavailable",
+              result: outcome(input.operationId, "unavailable", null, admitted.reasonCode),
+            };
           consume = admitted.consume;
         }
         // Stored subtype is checked only here, after an exact completed receipt can replay.
@@ -186,6 +188,15 @@ async function answerCore(
           })
           .returning({ id: financeContextualAnswers.id });
         if (!answer) throw new AppError("internal_error", "The context answer was not recorded.");
+        await writeTx.insert(financeAnswerContinuations).values({
+          userId: context.principal.userId,
+          operationId: input.operationId,
+          reviewCaseId: question.reviewCaseId,
+          transactionId: question.transactionId,
+          resultingWorkRevision: revision,
+          sourceKind: "manual_question",
+          contextualQuestionId: question.id,
+        });
         await writeTx.insert(auditEvents).values(
           auditValues({
             ...context,

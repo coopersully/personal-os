@@ -26,7 +26,8 @@ well as pages, including secondary destinations; platform and invitation permiss
 ## Work versus configuration
 
 Reviews now opens as a shared dialog/drawer from the action beside each workspace Settings title
-or its workspace attention alert. Today and Account overview do not offer additional review entry
+or its workspace attention alert; workspace search also offers **Items needing review**.
+Today and Account overview do not offer additional review entry
 points. The former queue layout is retained but hidden; see [Reviews](reviews.md).
 
 The account Activity log is an audit of recorded changes and actors. It is not a universal record

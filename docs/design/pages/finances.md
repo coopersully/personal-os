@@ -181,8 +181,9 @@ Review.
 
 - The overview distinguishes current balances and posted activity from
   forecasts or pending transactions.
-- Review work is visible in both the primary overview block and Finance
-  navigation.
+- Review work opens in the [shared workspace Reviews flow](reviews.md) from the Finance
+  attention alert, Finance Settings header, or workspace search. The flow retains Finance-owned decisions and
+  authorization; Finance Views and Today do not advertise separate review pages.
 - Canonical Review leads with its current bounded question. Older maintenance
   approvals disclose their individual prepared changes inside the labelled
   compatibility queue.
@@ -219,6 +220,20 @@ Review.
 - An agent-authored compatibility domain-guidance profile remains a draft. The
   signed-in activation control appears only for a draft and stays disabled until the draft contains at
   least one owned account source; activation submits the exact profile version.
+
+## Finance review history
+
+Finance review history is a read-only disclosure in the shared Finance Reviews flow, including
+when no Inbox work remains or an exact decision link is unavailable. It loads owned
+open, deferred, and resolved cases in bounded pages ordered by first-seen time and stable ID.
+Opening one row retrieves that exact case and shows its status, source evidence, and recorded
+outcome, including the action, answer, rationale, classification or relationship details, and
+transaction destinations when present. Automated consolidation and maintenance dismissal have a
+rationale without a human answer; their reason remains visible. An unavailable exact case stays
+unavailable; the UI does not substitute another review or imply that a saved note completed
+bookkeeping.
+History loading and exact-read failures retain a retry action beside the affected material.
+Failure to load current review work does not hide independently available history.
 
 ## Responsive and accessibility contract
 
@@ -347,3 +362,12 @@ KPI amounts use compact currency notation (for example, $23.6k), with exact valu
 Transaction cards place the large signed amount at the inline end, with matching status and category badges inline beside the small date below the merchant. A compact merchant icon spans the title and metadata rows. The Tasks-standard Display menu offers grouping by date, category, merchant, direction, or posting state in card view only; group/view choices preserve filters in the URL and save to Finance workspace settings using revision-checked writes, as in Tasks. Opening Transactions without explicit URL choices restores these defaults; explicit links override them without resaving. Table view retains the saved card grouping without applying it. Grouping applies to the loaded page and is explicitly labelled when pagination is present.
 
 Transaction cards and table rows open details in the shared responsive dialog/drawer on activation; they never expand inline or include a Details button. Right-click/long-press exposes Split purchase, Add/Edit context, and Categorize/Recategorize. The same commands remain in details for touch and keyboard access. Context notes preserve the observed transaction version when saved and retain drafts after failures. Table view ignores retained card-group parameters and uses a dedicated posted/pending icon column with accessible labels and explanatory tooltips.
+
+### Saved account selections
+
+Spending, cash, and investment account selections persist as account-owned workspace preferences.
+The account selector distinguishes selecting no accounts from following all eligible accounts;
+“Use all eligible accounts” restores the latter. Save errors remain visible and do not claim a
+persisted change. These view preferences never modify planning inclusion or account meanings.
+Finance notification settings show inherited/effective policy and support resetting an existing
+workspace override to global preferences using its current revision.

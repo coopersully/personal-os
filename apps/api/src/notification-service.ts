@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   auditEvents,
   type Database,
@@ -7,6 +8,7 @@ import {
   notificationPreferences,
   textingConnections,
   textMessages,
+  textReplyBindings,
   users,
 } from "@personal-os/database";
 import {
@@ -15,19 +17,25 @@ import {
   type FinanceHumanWorkRef,
   type NotificationAttemptHistory,
   type NotificationPreferences,
+  type NotificationResolution,
   type NotificationStatus,
   type NotificationWork,
   notificationEligibility,
   notificationPreferencesSchema,
+  notificationResolutionSchema,
   publishNotificationInputSchema,
+  resetFinanceNotificationPreferencesSchema,
   validateNotificationResolution,
 } from "@personal-os/domain";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import type {
   NotificationTransaction,
   NotificationWorkResolver,
 } from "./notification-work-resolver.js";
+import { assertSettingsRevision } from "./settings-save.js";
+import { createTextReplyBindings } from "./texting-reply-binding.js";
 import type { createTextingService } from "./texting-service.js";
 import type { Principal } from "./types.js";
 
@@ -39,6 +47,8 @@ type Options = {
   origin: string;
   transport: Pick<ReturnType<typeof createTextingService>, "sendNotification">;
   resolveWork?: NotificationWorkResolver;
+  /** Runtime activation is separate from resolver registration; production must opt in. */
+  deliveryEnabled?: () => boolean;
   now?: () => Date;
 };
 
@@ -93,6 +103,7 @@ export function createNotificationService(options: Options) {
       expectedRevision: number | null;
       preferences: NotificationPreferences;
     },
+    requestId: string = crypto.randomUUID(),
   ) {
     authorize(principal);
     if (principal.actorType !== "user")
@@ -109,9 +120,27 @@ export function createNotificationService(options: Options) {
             eq(notificationPreferences.scope, scope),
           ),
         );
-      if ((previous?.revision ?? null) !== input.expectedRevision)
-        throw new AppError("conflict", "Notification preferences changed. Reload before saving.");
-      const revision = (previous?.revision ?? 0) + 1;
+      assertSettingsRevision(
+        previous?.revision ?? null,
+        input.expectedRevision,
+        "Notification preferences changed. Reload before saving.",
+      );
+      // A deleted override must not reuse an old revision when it is recreated.
+      const [history] = previous
+        ? []
+        : await tx
+            .select({
+              revision: sql<number>`coalesce(max((${auditEvents.before}->>'revision')::integer), 0)`,
+            })
+            .from(auditEvents)
+            .where(
+              and(
+                eq(auditEvents.userId, principal.userId),
+                eq(auditEvents.action, "notifications.preferences.reset"),
+                sql`${auditEvents.before}->>'scope' = ${scope}`,
+              ),
+            );
+      const revision = (previous?.revision ?? Number(history?.revision ?? 0)) + 1;
       await tx
         .insert(notificationPreferences)
         .values({ userId: principal.userId, scope, revision, preferences: value })
@@ -119,41 +148,130 @@ export function createNotificationService(options: Options) {
           target: [notificationPreferences.userId, notificationPreferences.scope],
           set: { revision, preferences: value, updatedAt: now() },
         });
-      await tx.insert(auditEvents).values({
-        userId: principal.userId,
-        actorId: principal.actorId,
-        actorType: principal.actorType,
-        requestId: crypto.randomUUID(),
-        action: "notifications.preferences.updated",
-        entityType: "notification_preferences",
-        entityId: principal.userId,
-        before: previous
-          ? { scope, revision: previous.revision, preferences: previous.preferences }
-          : null,
-        after: { scope, revision, preferences: value },
-      });
+      await tx.insert(auditEvents).values(
+        auditValues({
+          principal,
+          requestId,
+          action: "notifications.preferences.updated",
+          entityType: "notification_preferences",
+          entityId: principal.userId,
+          before: previous
+            ? { scope, revision: previous.revision, preferences: previous.preferences }
+            : null,
+          after: { scope, revision, preferences: value },
+        }),
+      );
       return { scope, revision, preferences: value };
     });
   }
-  async function resolve(tx: NotificationTransaction, userId: string, ref: FinanceHumanWorkRef) {
-    if (!options.resolveWork) return { state: "unavailable" } as const;
-    return validateNotificationResolution(ref, await options.resolveWork(userId, ref, tx));
+  async function resetFinancePreferences(
+    principal: Principal,
+    input: { expectedRevision: number },
+    requestId: string = crypto.randomUUID(),
+  ) {
+    authorize(principal);
+    if (principal.actorType !== "user")
+      throw new AppError("forbidden", "Only the person can change notification preferences.");
+    const { expectedRevision } = resetFinanceNotificationPreferencesSchema.parse(input);
+    return options.db.transaction(async (tx) => {
+      await lockUser(tx, principal.userId);
+      const [previous] = await tx
+        .select()
+        .from(notificationPreferences)
+        .where(
+          and(
+            eq(notificationPreferences.userId, principal.userId),
+            eq(notificationPreferences.scope, "finances"),
+          ),
+        );
+      if (!previous)
+        throw new AppError(
+          "conflict",
+          "Notification preferences changed. Reload before resetting.",
+        );
+      assertSettingsRevision(
+        previous.revision,
+        expectedRevision,
+        "Notification preferences changed. Reload before resetting.",
+      );
+      await tx
+        .delete(notificationPreferences)
+        .where(
+          and(
+            eq(notificationPreferences.userId, principal.userId),
+            eq(notificationPreferences.scope, "finances"),
+          ),
+        );
+      await tx.insert(auditEvents).values(
+        auditValues({
+          principal,
+          requestId,
+          action: "notifications.preferences.reset",
+          entityType: "notification_preferences",
+          entityId: principal.userId,
+          before: {
+            scope: "finances",
+            revision: previous.revision,
+            preferences: previous.preferences,
+          },
+          after: { scope: "finances", inherited: true },
+        }),
+      );
+      return { scope: "finances", inherited: true } as const;
+    });
+  }
+  async function resolveBatch(
+    tx: NotificationTransaction,
+    userId: string,
+    refs: FinanceHumanWorkRef[],
+  ) {
+    if (refs.length < 1 || refs.length > 100)
+      throw new AppError("internal_error", "Notification batch size is invalid.");
+    if (new Set(refs.map((ref) => ref.id.toLowerCase())).size !== refs.length)
+      throw new AppError("invalid_request", "Each work item may appear once.");
+    if (!options.resolveWork)
+      throw new AppError("internal_error", "Notification producer is absent.");
+    const results: unknown = await options.resolveWork(userId, refs, tx);
+    if (!Array.isArray(results) || results.length !== refs.length)
+      throw new AppError("internal_error", "Notification resolver returned an invalid batch.");
+    const resolved: NotificationResolution[] = [];
+    for (let index = 0; index < refs.length; index++) {
+      if (!Object.hasOwn(results, index))
+        throw new AppError("internal_error", "Notification resolver returned an incomplete batch.");
+      const result = results[index];
+      const parsed = notificationResolutionSchema.safeParse(result);
+      if (!parsed.success)
+        throw new AppError("internal_error", "Notification resolver returned invalid work.");
+      const reference = refs[index];
+      if (!reference)
+        throw new AppError("internal_error", "Notification batch position is invalid.");
+      const current = parsed.data.state === "current" ? parsed.data.value : null;
+      if (
+        current &&
+        (["id", "domain", "kind", "revision", "actionRevision"] as const).some(
+          (key) => current.work[key] !== reference[key],
+        )
+      )
+        throw new AppError("internal_error", "Notification resolver returned wrong work.");
+      resolved.push(validateNotificationResolution(reference, parsed.data));
+    }
+    return resolved;
   }
   async function publish(principal: Principal, input: { work: FinanceHumanWorkRef[] }) {
     authorize(principal);
     const refs = publishNotificationInputSchema.parse(input).work;
     if (!options.resolveWork) return unavailable;
-    if (new Set(refs.map((r) => r.id)).size !== refs.length)
+    if (options.deliveryEnabled?.() === false)
+      return { state: "unavailable", reason: "delivery_not_enabled" } as const;
+    if (new Set(refs.map((r) => r.id.toLowerCase())).size !== refs.length)
       throw new AppError("invalid_request", "Each work item may appear once.");
     return options.db.transaction(async (tx) => {
       await lockUser(tx, principal.userId);
+      const results = await resolveBatch(tx, principal.userId, refs);
+      if (results.some((result) => result.state !== "current"))
+        throw new AppError("conflict", "Current notification evidence is unavailable.");
       const ids: string[] = [];
-      for (const ref of [...refs].sort((a, b) => a.id.localeCompare(b.id))) {
-        const result = await resolve(tx, principal.userId, ref);
-        if (result.state !== "current")
-          throw new AppError("conflict", "Current notification evidence is unavailable.");
-      }
-      for (const ref of [...refs].sort((a, b) => a.id.localeCompare(b.id))) {
+      for (const ref of refs) {
         const [intent] = await tx
           .insert(notificationIntents)
           .values({
@@ -275,6 +393,8 @@ export function createNotificationService(options: Options) {
   async function claim(principal: Principal) {
     authorize(principal);
     if (!options.resolveWork) return unavailable;
+    if (options.deliveryEnabled?.() === false)
+      return { state: "unavailable", reason: "delivery_not_enabled" } as const;
     await options.db.transaction(async (tx) => {
       await lockUser(tx, principal.userId);
       await reconcile(tx, principal.userId);
@@ -327,8 +447,18 @@ export function createNotificationService(options: Options) {
         .limit(100);
       const eligible: typeof intents = [];
       const decisions: { intent: (typeof intents)[number]; reason: string }[] = [];
-      for (const intent of intents.sort((a, b) => a.workId.localeCompare(b.workId))) {
-        const result = await resolve(tx, user.id, intent.work);
+      const orderedIntents = intents.sort((a, b) => a.workId.localeCompare(b.workId));
+      const results = orderedIntents.length
+        ? await resolveBatch(
+            tx,
+            user.id,
+            orderedIntents.map((intent) => intent.work),
+          )
+        : [];
+      for (const [index, intent] of orderedIntents.entries()) {
+        const result = results[index];
+        if (!result)
+          throw new AppError("internal_error", "Notification batch position is invalid.");
         const reason =
           result.state !== "current"
             ? result.state
@@ -387,6 +517,8 @@ export function createNotificationService(options: Options) {
   async function deliver(principal: Principal, claim: { id: string; claimId: string }) {
     authorize(principal);
     if (!options.resolveWork) return unavailable;
+    if (options.deliveryEnabled?.() === false)
+      return { state: "unavailable", reason: "delivery_not_enabled" } as const;
     // No transaction or domain lock crosses the provider call. A committed submitting attempt
     // is never retried; status reconciliation preserves uncertainty after process loss.
     try {
@@ -427,9 +559,17 @@ export function createNotificationService(options: Options) {
               eq(notificationAttemptItems.attemptId, claim.id),
             ),
           );
+        const orderedItems = items.sort((a, b) => a.work.id.localeCompare(b.work.id));
+        const results = await resolveBatch(
+          tx,
+          user.id,
+          orderedItems.map((item) => item.work),
+        );
         const works: NotificationWork[] = [];
-        for (const item of items.sort((a, b) => a.work.id.localeCompare(b.work.id))) {
-          const result = await resolve(tx, user.id, item.work);
+        for (const [index, item] of orderedItems.entries()) {
+          const result = results[index];
+          if (!result)
+            throw new AppError("internal_error", "Notification batch position is invalid.");
           const reason =
             result.state !== "current"
               ? result.state
@@ -474,19 +614,80 @@ export function createNotificationService(options: Options) {
             .where(eq(notificationDeliveryAttempts.id, attempt.id));
           return null;
         }
+        let questions =
+          works.length <= 3 &&
+          works.every((work) => work.work.kind === "question" && work.questionPrompt)
+            ? works
+            : works.length === 1 &&
+                works[0]?.work.kind === "approval" &&
+                effective.detail === "context" &&
+                works[0].disclosure === "context" &&
+                works[0].context &&
+                !/(?:\d[ .()-]*){5}|@|https?:|[\r\n]/iu.test(works[0].context)
+              ? works
+              : [];
+        // Keep the existing reply namespace intact: a delayed reply must never target a
+        // newer message that restarts numbering at one. Additional work stays answerable in-app.
+        if (questions.length) {
+          const [openBinding] = await tx
+            .select({ id: textReplyBindings.id })
+            .from(textReplyBindings)
+            .where(
+              and(
+                eq(textReplyBindings.userId, user.id),
+                eq(textReplyBindings.connectionId, connection.id),
+                eq(textReplyBindings.consentEpoch, connection.consentEpoch),
+                eq(textReplyBindings.state, "open"),
+                gt(textReplyBindings.expiresAt, now()),
+              ),
+            )
+            .limit(1);
+          if (openBinding) questions = [];
+        }
         let body = composeNotification({
           works,
           now: now(),
           timeZone: user.planningTimezone,
           detail: effective.detail,
           origin,
+          replyable: questions.length > 0,
         });
-        // SMS Unicode can multiply segments; fall back to a short review summary, never truncate facts.
-        if (body.length > 250 || /[^\x20-\x7E]/u.test(body))
-          body = `nohmi: ${works.length} Finance item${works.length === 1 ? "" : "s"} need review. ${origin}/settings?section=reviews`;
+        // Provider segment limits preserve facts by reducing disclosure, never truncating them.
+        if (body.length > 250 || /[^\x20-\x7E]/u.test(body)) {
+          questions = [];
+          body = `nohmi: ${works.length} Finance item${works.length === 1 ? "" : "s"} need review. ${origin}/finances?review=open`;
+        }
         return {
           body,
           queued: async (messageId: string) => {
+            if (questions.length)
+              await createTextReplyBindings(
+                tx,
+                user.id,
+                connection,
+                messageId,
+                questions.map((question, index) => ({
+                  outboundMessageId: messageId,
+                  itemNumber: index + 1,
+                  work: question.work,
+                  answerMode:
+                    question.work.kind === "approval"
+                      ? ("choices" as const)
+                      : ("free_text" as const),
+                  answerVocabulary:
+                    question.work.kind === "approval" ? ["approve", "reject"] : null,
+                  expiresAt: new Date(
+                    Math.min(
+                      now().getTime() + 24 * 60 * 60_000,
+                      question.expiresAt
+                        ? new Date(question.expiresAt).getTime()
+                        : Number.POSITIVE_INFINITY,
+                    ),
+                  ).toISOString(),
+                  operationId: randomUUID(),
+                })),
+                now(),
+              );
             await tx
               .update(notificationDeliveryAttempts)
               .set({
@@ -549,8 +750,15 @@ export function createNotificationService(options: Options) {
         .orderBy(desc(notificationIntents.updatedAt))
         .limit(100);
       return {
-        capability: options.resolveWork ? ("available" as const) : ("unavailable" as const),
-        reason: options.resolveWork ? null : "producer_not_registered",
+        capability:
+          options.resolveWork && options.deliveryEnabled?.() !== false
+            ? ("available" as const)
+            : ("unavailable" as const),
+        reason: !options.resolveWork
+          ? "producer_not_registered"
+          : options.deliveryEnabled?.() === false
+            ? "delivery_not_enabled"
+            : null,
         timeZone: user.planningTimezone,
         preferences: rows.map((r) => ({
           scope: r.scope,
@@ -580,5 +788,5 @@ export function createNotificationService(options: Options) {
     const claimed = await claim(principal);
     return claimed.state === "claimed" ? deliver(principal, claimed) : claimed;
   }
-  return { savePreferences, publish, claim, deliver, drain, status };
+  return { savePreferences, resetFinancePreferences, publish, claim, deliver, drain, status };
 }

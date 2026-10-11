@@ -98,6 +98,47 @@ Internal queues, leases, retries, delayed authorized effects, and recovery timer
 that nohmi already accepted. They are execution infrastructure, not maintenance schedulers, and
 must never originate a new recurring maintenance invocation.
 
+## Finance answer continuation setup
+
+Finance settings may prepare a connection-bound local declaration and provide the prompt needed
+for a person to create a Codex desktop automation or Claude Code routine in its owning host. The
+person binds that host's identifier after setup; unfinished setup may be cancelled and active access
+may be revoked. Local declaration changes never create, edit, or pause the external automation.
+
+Accepted app and SMS answers create durable pending continuations. When an original invocation
+has a bound schedule, the answer inherits that destination. Otherwise the app asks the person to
+choose an active host. A bound destination cannot silently move to another connection. The original
+host reads the current schedule version, answer evidence, and continuation run handle through
+`get_finance_continuations`; `maintain_finances` with operation `continue` creates or resumes only
+that review case's canonical run. Acceptance, host-session creation, and verified financial
+completion remain distinct states.
+
+Human host settings and host continuation reads use owner-bound cursor pages; host reads also bind
+each cursor to its schedule. Settings loads every answer page. Routine dispatch selects eligible
+same-case wake-ups before limiting schedules, so an older unrelated answer cannot block a waiting
+case. Resuming an existing run requires its exact original connection and schedule; only explicit
+human recovery may change that binding. Terminal run evidence settles the
+continuation regardless of whether the final operation was `continue`, `resume` or background
+verification. Stale submitting claims become uncertain without another provider call. Invalid
+credentials disable only the affected routine delivery.
+
+After inspecting the owning host, the person may explicitly release an uncertain pending delivery
+for another attempt. This preserves the original answer and records an audit event; it cannot move
+a submitted run. Separately, a person who has stopped the original host may move an idle waiting
+run to another currently authorized polling Codex schedule. Recovery fences the original schedule, connection,
+run timestamp and absence of an execution lease, preserves the run's checkpoint and financial
+questions/approvals, and rejects active execution. The new host resumes that saved run; the old
+connection loses authority for it. Host state is checked by the person, never inferred from a
+missing response.
+
+
+The setup prompt targets a five-minute Codex check interval and a five-minute Claude continuation
+budget. These are declarations, not measured delivery proof. Codex requires its machine and app to
+be available; Claude requires a configured routine, live connector permissions, and a valid trigger.
+Unconfirmed routine delivery directs the person to inspect the owning host without automatic
+re-firing. A host may resume the saved answer through its normal polling path. Finance SMS release
+remains subject to the separate host trials and measured acceptance budget in the Finance MVP.
+
 ## Platform references
 
 - [ChatGPT scheduled tasks](https://learn.chatgpt.com/docs/automations)
@@ -140,7 +181,7 @@ The domain contract currently recognizes only `codex_desktop` with a recurring t
 tenant authorization-connection ID and requested scopes. That ID must resolve to durable tenant
 authorization state; it is not an OAuth access-token row, refreshed credential record, or external
 `mcp_client_*` identifier. The schema checks only the shape of the ID and request. Before any record
-is stored, the future application boundary must authenticate the caller, resolve tenant ownership,
+is stored, the application boundary must authenticate the caller, resolve tenant ownership,
 and derive `effectiveScopes` as the permitted subset of the current connection or principal. A
 caller-supplied `finances:maintain` request is never proof of authority.
 
@@ -160,15 +201,16 @@ can become active. Active, paused, and revoked declarations therefore always ret
 target, while setup-pending and cancelled declarations remain unbound. Recurring declarations also
 persist their timezone-aware recurrence basis and the host's next expected schedule slot. Health is
 evaluated against that slot, including before the first observed invocation, rather than shifting
-the schedule from a late observation. Advancing a slot remains a future persistence concern and
-must use host schedule evidence so local-time behavior remains honest across daylight-saving
-changes.
+the schedule from a late observation. Advancing a slot uses verified host schedule evidence so
+local-time behavior remains honest across daylight-saving changes.
 
-Persistence, authorization-connection ownership resolution, API/client/MCP registration, setup
-UI, maintenance-input schedule identity, Texting's accepted-reply event, encrypted trigger
-credentials, dispatch/outbox behavior, schedule-slot advancement, and production proof are not
-implemented by this contract. Until those dependencies land, runtime dispatch remains disabled and
-health metadata must never originate, pause, repair, or reschedule host work.
+The source implementation persists tenant-bound schedules, resolves current authorization-connection
+ownership, registers API/client/MCP operations and setup UI, and binds maintenance runs to their
+original schedule. Accepted answers commit a durable continuation before host dispatch; Claude
+trigger credentials remain encrypted. Verified host observations advance recurring schedule slots.
+Health metadata describes observed state and never originates, pauses, repairs or reschedules host
+work by itself. Real Codex and Claude unattended execution, measured latency and offline recovery
+still require separate launch evidence. Production Finance SMS remains disabled by default.
 
 ## Finance host repair after the maintenance cutover
 
@@ -178,3 +220,19 @@ access remain separate grants; neither migration nor reconnect grants permission
 Resume persisted work with `maintain_finances` using `operation: resume` and the run ID.
 Follow typed challenge next actions and inspect any blocked legacy recovery before starting a
 new scope. Required action approval and final verification remain part of the same durable run.
+
+
+A host-accepted session with no observed nohmi maintenance run remains pending. After the
+registered routine's expected maximum latency (at least two minutes), explicit human reconciliation
+may release that answer only after the person checks no session is running. A coalesced delivery
+requires separately reconciling every still-pending sibling; a sibling attached to a run stays fenced.
+This does not imply the provider failed to create its original session. Original session evidence
+is preserved in the audit. Safe handoff diagnostics distinguish accepted, uncertain and unavailable
+transport outcomes without recording credentials, routine IDs, answers or provider response bodies.
+
+
+Routine dispatch claims one exact answer per host session. Other cases remain pending while a
+session is unobserved or its case run remains open. A new answer for the same original waiting
+case can wake its bound routine; it cannot adopt an unrelated open run. Human movement of an
+existing run is offered only for a polling Codex schedule, since an event-only Claude routine
+would otherwise receive no wakeup. Ending a schedule clears its stored encrypted trigger token.

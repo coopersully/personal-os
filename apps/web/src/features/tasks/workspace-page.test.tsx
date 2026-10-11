@@ -86,13 +86,17 @@ beforeEach(() => {
   mocks.listTaskProjects.mockResolvedValue({ items: [], nextCursor: null });
   mocks.listTasks.mockResolvedValue({ items: [], nextCursor: null });
 });
+function authenticatedClient() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["me"], { id: "owner" });
+  return client;
+}
+
 function setup(path = "/tasks?view=all") {
   const onEdit = vi.fn();
   const onEditReminder = vi.fn();
   render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+    <QueryClientProvider client={authenticatedClient()}>
       <MemoryRouter initialEntries={[path]}>
         <TasksAppBarControls search={null} timeZone="America/New_York" />
         <TasksWorkspacePage
@@ -109,9 +113,7 @@ function setup(path = "/tasks?view=all") {
 function setupLegacy(path: string) {
   const onEdit = vi.fn();
   render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+    <QueryClientProvider client={authenticatedClient()}>
       <MemoryRouter initialEntries={[path]}>
         <TasksPage onEdit={onEdit} timeZone="America/New_York" />
       </MemoryRouter>
@@ -121,9 +123,7 @@ function setupLegacy(path: string) {
 }
 function setupSidebar() {
   render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+    <QueryClientProvider client={authenticatedClient()}>
       <MemoryRouter>
         <TooltipProvider>
           <SidebarProvider>
@@ -151,9 +151,7 @@ it("creates tasks with placement and opens reminders from the shared plus", asyn
   const onCreate = vi.fn();
   const onCreateReminder = vi.fn();
   render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+    <QueryClientProvider client={authenticatedClient()}>
       <MemoryRouter>
         <TasksCreateButton onCreate={onCreate} onCreateReminder={onCreateReminder} />
       </MemoryRouter>

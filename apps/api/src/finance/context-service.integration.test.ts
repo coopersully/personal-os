@@ -3,11 +3,13 @@ import { resolve } from "node:path";
 import {
   createDatabaseClient,
   type DatabaseClient,
+  financeContextRevisions,
+  financeContexts,
   migrateDatabase,
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { createFinanceContextService } from "./context-service.js";
 
 const content = {
@@ -54,6 +56,43 @@ describe.sequential("capture-only Finance contexts", () => {
   afterAll(async () => {
     await database?.close();
     await container?.stop();
+  });
+  it.each([
+    "valid\u202Etext",
+    "\u200B",
+  ])("reads and revises legacy context %j while rejecting new invalid capture", async (text) => {
+    const api = service();
+    const first = await api.captureContext({
+      ...content,
+      type: "create",
+      operationId: randomUUID(),
+    });
+    const [snapshot] = await database.db
+      .select()
+      .from(financeContextRevisions)
+      .where(eq(financeContextRevisions.contextId, first.id));
+    if (!snapshot) throw new Error("snapshot");
+    const id = randomUUID();
+    await database.db.transaction(async (tx) => {
+      await tx.insert(financeContexts).values({ id, userId, currentRevision: 1n });
+      await tx
+        .insert(financeContextRevisions)
+        .values({ ...snapshot, id: randomUUID(), contextId: id, operationId: randomUUID(), text });
+    });
+    expect(await api.getCurrentContext(userId, id)).toMatchObject({ id, text, revision: "1" });
+    await expect(
+      api.captureContext({ ...content, text, type: "create", operationId: randomUUID() }),
+    ).rejects.toThrow();
+    expect(
+      await api.captureContext({
+        ...content,
+        text: "Corrected visible note",
+        type: "revise",
+        id,
+        expectedRevision: "1",
+        operationId: randomUUID(),
+      }),
+    ).toMatchObject({ id, text: "Corrected visible note", revision: "2" });
   });
   it("captures, replaces and cancels immutable snapshots with exact historical replay", async () => {
     const api = service();

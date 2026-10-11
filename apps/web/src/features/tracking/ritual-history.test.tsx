@@ -2,6 +2,8 @@
 import type { RitualOccurrence } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { toast } from "sonner";
+import { SettingsFeedbackContext } from "../../lib/settings-feedback.js";
 import { RitualHistory } from "./ritual-history.js";
 import { RitualLocal } from "./ritual-local.js";
 
@@ -20,6 +22,7 @@ vi.mock("../../api.js", () => ({
   errorMessage: (e: Error) => e.message,
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), dismiss: vi.fn() } }));
 const occurrence = {
   id: "one",
   status: "completed",
@@ -155,7 +158,11 @@ it("exports pending native evidence and only discards after explicit confirmatio
     queue: [{ value: "Unsynced draft" }],
     localHistory: [],
   });
-  mount(<RitualLocal />);
+  mount(
+    <SettingsFeedbackContext.Provider value={true}>
+      <RitualLocal />
+    </SettingsFeedbackContext.Provider>,
+  );
   expect(await screen.findByRole("status")).toHaveTextContent("1 ritual changes");
   expect(screen.getByText(/Automatic rituals on this Mac: on/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Export pending changes" }));
@@ -166,7 +173,13 @@ it("exports pending native evidence and only discards after explicit confirmatio
   fireEvent.click(screen.getByRole("button", { name: "Discard pending changes" }));
   mocks.invoke.mockRejectedValueOnce(new Error("Storage locked"));
   fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
-  expect(await screen.findByText(/update automatic rituals/)).toBeInTheDocument();
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining("update automatic rituals"),
+      expect.anything(),
+    ),
+  );
+  expect(screen.queryByText(/update automatic rituals/)).not.toBeInTheDocument();
   mocks.invoke.mockResolvedValue({ enabled: false, queue: [], localHistory: [] });
   fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
   await waitFor(() =>

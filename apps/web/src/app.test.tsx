@@ -9967,6 +9967,7 @@ describe("ilo web app", () => {
   }, 10_000);
 
   it("blocks wallpaper application when native preview decoding fails and allows retry", async () => {
+    const errorToast = vi.spyOn(toast, "error");
     mocks.isTauri.mockReturnValue(true);
     mocks.listPinterestPins.mockResolvedValue([
       { id: "one", imageUrl: "https://i.pinimg.com/736x/one.jpg", title: null },
@@ -9979,7 +9980,12 @@ describe("ilo web app", () => {
       return originalInvoke?.(command);
     });
     setup("/settings?section=wallpaper");
-    expect(await screen.findByText("Couldn’t render wallpaper.")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(errorToast).toHaveBeenCalledWith("Couldn’t render wallpaper.", expect.anything()),
+    );
+    const preview = screen.getByRole("region", { name: "Wallpaper preview" });
+    expect(within(preview).queryByText("Couldn’t render wallpaper.")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Preview unavailable/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeDisabled();
     expect(
       screen.queryByRole("img", { name: "Wallpaper rendered for your display" }),

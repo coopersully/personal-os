@@ -302,6 +302,7 @@ import {
   SidebarMenuItem as ShadcnSidebarMenuItem,
   SidebarProvider as ShadcnSidebarProvider,
 } from "@/components/ui/sidebar";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Slider as ShadcnSlider } from "@/components/ui/slider";
 import { Toaster } from "@/components/ui/sonner";
 import { Switch as ShadcnSwitch } from "@/components/ui/switch";
@@ -7584,31 +7585,26 @@ function PinterestWallpaperPreview({
   return (
     <section aria-label="Wallpaper preview" className="pinterest-wallpaper-preview">
       <QueryFeedback query={{ ...rendered, data: undefined }} title="Couldn’t render wallpaper." />
-      <div className="pinterest-wallpaper-preview__canvas">
+      <div className="pinterest-wallpaper-preview__canvas" aria-busy={rendered.isFetching}>
         {visibleImage ? (
           <img
             alt="Wallpaper rendered for your display"
             src={visibleImage}
             className="block h-auto w-full"
           />
+        ) : error ? (
+          <div className="aspect-video bg-muted" aria-hidden="true" />
+        ) : pins.length ? (
+          <Skeleton className="aspect-video w-full" />
         ) : (
-          <p className="p-4 text-sm text-muted-foreground" role="status">
-            {error
-              ? "Preview unavailable. Your wallpaper has not changed."
-              : pins.length
-                ? "Rendering wallpaper…"
-                : "Save a public Pinterest board to preview its images."}
+          <p className="p-4 text-sm text-muted-foreground">
+            Save a public Pinterest board to preview its images.
           </p>
         )}
         {visibleImage && showDesktopOverlay && desktopEnvironment ? (
           <DesktopSafeAreaOverlay environment={desktopEnvironment} />
         ) : null}
       </div>
-      {visibleImage && !ready ? (
-        <p role="status" className="text-sm text-muted-foreground">
-          Updating preview…
-        </p>
-      ) : null}
     </section>
   );
 }

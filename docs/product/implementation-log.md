@@ -92,6 +92,47 @@
   hosted CI. These establish source verification, not production deployment, installed desktop
   acceptance, or live provider attachment access.
 
+## 2026-10-07 — Public landing and authentication routes (branch implementation)
+
+- The browser root is now a public nohmi product landing page with workspace introductions,
+  user-control explanations, sign-up/login links, and all seven public documents in its footer.
+- Login, sign-up, and password recovery have dedicated `/login`, `/signup`, and `/forgot-password`
+  URLs. Protected deep links preserve safe local return paths; normal login opens `/today`.
+  Existing email verification/reset URLs remain supported, including when already signed in.
+- The installed PWA starts at `/today`; native desktop keeps its application entry point.
+- Landing, guide, and policy pages share a shadcn navigation/header and subtle-tone footer.
+  Shared gutters and section spacing align the workspace cards and document reading layout.
+  The header dissolves at the top and becomes a translucent sticky pill on scroll, with Guide
+  and Login links. The footer shows current-year Cooper Sullivan copyright and a decorative
+  nohmi wordmark; operator/contact details stay in policy and support content, not the footer.
+  Reviewed document content is pre-rendered through the same components to retain no-JavaScript access.
+- All 24 desktop/mobile public-documentation and authentication-route browser checks passed,
+  including direct sign-up, refresh/back navigation, and protected-page return after login.
+- Shared-layout verification also passed 24 focused unit/UI tests, web type checking, and the web
+  production build. Final full verification passed lint/infrastructure and workspace type checks,
+  then encountered unrelated UI and migration timeouts. UI reruns passed (two used the existing
+  CI timeout); the broad run was stopped after migration timeouts and is not a passing gate.
+
+## 2026-10-07 — Public documentation and SMS disclosures (branch implementation)
+
+- Added static, unauthenticated About/mission, product guide, Privacy policy, Terms of use,
+  data/agent access, SMS enrollment/terms, and Support pages. Public operator/contact details were
+  confirmed by the user. Sign-in and SMS enrollment link to those same documents.
+- Public documents render without JavaScript; Vite directory handling and the PWA navigation
+  fallback preserve document access. Desktop and mobile public-page browser checks passed.
+- SMS consent now discloses message types, frequency, rates, STOP/HELP, optional enrollment,
+  and policy links. Number changes reset the checkbox. Verification completion preserves the
+  version accepted when the code was requested, including across deployments.
+- All 25 focused texting UI/domain/database tests and 18 desktop/mobile public-page checks passed;
+  sign-in checks also passed on rerun with visual inspection. Web build and type checks passed.
+  `pnpm verify` completed lint/type checks but stopped at coverage tests: 3,370 tests passed and
+  the existing Tasks lifecycle/Trash/restore test failed at its cancelled-task lookup. That test
+  passed in isolation; the full verification gate is not green.
+- Production publication, deployed enrollment
+  screenshots, live HELP/STOP/START evidence, and Twilio approval are separate outstanding gates
+  in the [submission guide](../engineering/public-documentation.md). No deployment or provider
+  configuration was changed by this branch implementation.
+
 ## 2026-10-06 — Finance configuration and prerequisites (branch implementation)
 
 - Financial setup loads a read-only, owner-scoped aggregate and shares autosaving fields with

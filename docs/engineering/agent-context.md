@@ -17,6 +17,7 @@ Read the root `AGENTS.md`, then use this map. Read the relevant sections, not th
 | Shared personal context, learning, and consent | [User Knowledge](../product/user-knowledge.md) |
 | Actual delivered capabilities | [Implementation log](../product/implementation-log.md), current code, migrations, tests, and live evidence |
 | Packages, domain seams, and shared integration work | [System shape](../architecture/0001-system-shape.md), [feature ownership](feature-ownership.md) |
+| Public product/legal pages and SMS submission evidence | [Public documentation](public-documentation.md) |
 | UI and interaction decisions | [Design foundations](../design/foundations.md), [system](../design/system.md), [governance](../design/governance.md) |
 | External systems and recovery | [External boundary reliability](external-boundary-reliability.md), [connector reliability](connector-reliability.md) |
 | Delivery identity and verification | [Work context](work-context.md), [PR rubric](pr-rubric.md) |

@@ -1,3 +1,4 @@
+import { textingConsentVersion } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
@@ -40,7 +41,13 @@ export function TextingSettings({ profile = false }: { profile?: boolean }) {
   const [code, setCode] = useState("");
   const start = useFeedbackMutation({
     feedback: { action: "send a verification code", safeToRetry: false, form: true },
-    mutationFn: () => api.startTextingVerification({ consentAccepted: true, country, phoneNumber }),
+    mutationFn: () =>
+      api.startTextingVerification({
+        consentAccepted: true,
+        consentVersion: textingConsentVersion,
+        country,
+        phoneNumber,
+      }),
     onSuccess: (challenge) => setChallengeId(challenge.id),
   });
   const verify = useFeedbackMutation({
@@ -51,6 +58,7 @@ export function TextingSettings({ profile = false }: { profile?: boolean }) {
     },
     onSuccess: async () => {
       setEditing(false);
+      setConsentAccepted(false);
       setChallengeId(null);
       setCode("");
       await queryClient.invalidateQueries({ queryKey: ["texting-connection"] });
@@ -88,6 +96,7 @@ export function TextingSettings({ profile = false }: { profile?: boolean }) {
             type="button"
             variant="ghost"
             className="self-start"
+            disabled={start.isPending || verify.isPending}
             onClick={() => {
               setEditing(false);
               setChallengeId(null);
@@ -112,7 +121,10 @@ export function TextingSettings({ profile = false }: { profile?: boolean }) {
               variant="secondary"
               className="self-start"
               disabled={!connection.isSuccess}
-              onClick={() => setEditing(true)}
+              onClick={() => {
+                setConsentAccepted(false);
+                setEditing(true);
+              }}
             >
               Add phone number
             </Button>
@@ -144,6 +156,7 @@ export function TextingSettings({ profile = false }: { profile?: boolean }) {
                 variant="secondary"
                 onClick={() => {
                   setEditing(true);
+                  setConsentAccepted(false);
                   setCountry(current.country ?? "US");
                   setPhoneNumber("");
                 }}
@@ -204,6 +217,7 @@ export function TextingSettings({ profile = false }: { profile?: boolean }) {
                   <NativeSelect
                     className="w-full"
                     id="texting-country"
+                    disabled={start.isPending}
                     onChange={(event) => setCountry(event.target.value as "US" | "CA")}
                     value={country}
                   >
@@ -216,6 +230,7 @@ export function TextingSettings({ profile = false }: { profile?: boolean }) {
                   <Input
                     autoComplete="tel"
                     id="texting-phone"
+                    disabled={start.isPending}
                     name="phoneNumber"
                     required
                     onChange={(event) => setPhoneNumber(event.target.value)}
@@ -230,14 +245,31 @@ export function TextingSettings({ profile = false }: { profile?: boolean }) {
                   aria-describedby="texting-consent-description"
                   checked={consentAccepted}
                   id="texting-consent"
+                  disabled={start.isPending}
                   onCheckedChange={(value) => setConsentAccepted(value === true)}
                 />
                 <FieldContent>
                   <FieldLabel htmlFor="texting-consent">Allow agent text messages</FieldLabel>
                   <FieldDescription id="texting-consent-description">
-                    I agree to receive conversational texts from nohmi and understand message/data
-                    rates may apply. Consent is recorded with my account; I can reply STOP at any
-                    time.
+                    I agree to receive verification codes and conversational agent texts, reminders,
+                    workspace updates, and questions from nohmi at the number I provide. Message
+                    frequency varies. Message and data rates may apply. Reply STOP to unsubscribe or
+                    HELP for help. Consent is optional and is not a condition of purchase or of
+                    using nohmi.
+                  </FieldDescription>
+                  <FieldDescription>
+                    <a href="/privacy/" target="_blank" rel="noreferrer">
+                      Privacy policy
+                    </a>
+                    {" · "}
+                    <a href="/terms/" target="_blank" rel="noreferrer">
+                      Terms of use
+                    </a>
+                    {" · "}
+                    <a href="/sms/" target="_blank" rel="noreferrer">
+                      SMS terms
+                    </a>
+                    {" (opens in a new tab)."}
                   </FieldDescription>
                 </FieldContent>
               </Field>

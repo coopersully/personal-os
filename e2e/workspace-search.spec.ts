@@ -42,7 +42,7 @@ test("each workspace discovers records and Calendar settings without changing li
   isMobile,
 }) => {
   test.setTimeout(90_000);
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
@@ -89,7 +89,7 @@ test("each workspace discovers records and Calendar settings without changing li
 
 test("Calendar remembers its view and opening and snap preferences", async ({ page }) => {
   test.setTimeout(90_000);
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
@@ -161,7 +161,7 @@ test("Calendar remembers its view and opening and snap preferences", async ({ pa
 });
 
 test("Tasks keeps view switching and utilities in one responsive header", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
@@ -265,7 +265,7 @@ test("Tasks plus guides creation into the existing responsive editors", async ({
   page,
   isMobile,
 }) => {
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
@@ -317,7 +317,7 @@ test("Tasks plus guides creation into the existing responsive editors", async ({
 test("Tasks collections support browsing, searching, and sorting lists and projects", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
@@ -393,7 +393,7 @@ test("Tasks collections support browsing, searching, and sorting lists and proje
 });
 
 test("Tasks restores saved display preferences on a fresh workspace entry", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
@@ -459,7 +459,7 @@ test("workspace settings edit Tasks display and Mail layout preferences", async 
   isMobile,
 }) => {
   test.setTimeout(90_000);
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
@@ -551,7 +551,7 @@ test("workspace settings edit Tasks display and Mail layout preferences", async 
 test("Mail opens at its latest message and retains scrollable conversation history", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
@@ -596,7 +596,7 @@ test("Mail opens at its latest message and retains scrollable conversation histo
 test("Mail single-message reader keeps the title at the top and uses the full card width", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
@@ -633,7 +633,7 @@ test("Mail saves full-width conversation layout and supports returning to the li
   page,
   isMobile,
 }) => {
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
@@ -706,7 +706,7 @@ test("Collapsed workspace sidebar keeps reviews centered and exposes the count i
   isMobile,
 }) => {
   test.skip(isMobile, "Mobile uses the header review control.");
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
@@ -733,7 +733,7 @@ test("Collapsed workspace sidebar keeps reviews centered and exposes the count i
 });
 
 test("Mail attachments download, retry failures, and preview safely", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
@@ -792,7 +792,7 @@ test("Finance consolidates contextual controls and preserves responsive creation
   isMobile,
 }) => {
   test.setTimeout(90_000);
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
@@ -952,7 +952,7 @@ test("Financial profile opens shared fields and preserves edits across sections 
     setupRequests++;
     await route.continue();
   });
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();

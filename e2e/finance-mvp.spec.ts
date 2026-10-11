@@ -13,7 +13,7 @@ if (!owner || !other) throw new Error("Finance acceptance requires the demo and 
 test("saved manual context survives reload without changing the ledger and stays owner-only", async ({
   page,
 }, testInfo) => {
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill(owner.email);
   await page.getByLabel("Password", { exact: true }).fill(owner.password);
   const login = page.waitForResponse(

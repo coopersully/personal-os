@@ -606,10 +606,14 @@ Messaging Service inbound webhook to
 `https://api.<domain>/v1/webhooks/twilio/inbound`; status callbacks are supplied
 per message. Configure the five `TWILIO_*` values and enable
 `TEXTING_ENABLED` only after toll-free verification is ready. Keep Twilio's
-provider opt-out filtering enabled. ilo mirrors STOP/START locally, accepts
+provider opt-out filtering enabled. nohmi mirrors STOP/START locally, accepts
 Twilio Advanced Opt-Out classifications when configured, and treats provider
 error 21610 as authoritative. Follow the production-evidence checklist in
-[`texting-operations.md`](product/texting-operations.md) before rollout.
+[`texting-operations.md`](product/texting-operations.md) before rollout. Publish and verify the
+[public documentation and Twilio submission evidence](engineering/public-documentation.md),
+including policy URLs, authenticated opt-in screenshots, and configured HELP/confirmation responses,
+before submission. Toll-free verification and A2P 10DLC campaign registration are distinct; choose
+based on the actual sender type.
 
 ## Backups and rollback
 

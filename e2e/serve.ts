@@ -1,5 +1,6 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { resolve } from "node:path";
+import { promisify } from "node:util";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { loadQaFixtures } from "../apps/api/src/qa-fixtures.js";
 import { createDatabaseClient } from "../packages/database/src/index.js";
@@ -86,6 +87,10 @@ try {
   } finally {
     await fixtureDatabase.close();
   }
+  // Browser CI starts from a clean checkout without generated public HTML.
+  await promisify(execFile)("pnpm", ["--filter", "@personal-os/web", "public:generate"], {
+    cwd: root,
+  });
   web = start(
     "pnpm",
     [

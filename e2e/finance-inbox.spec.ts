@@ -8,7 +8,7 @@ test("Finance outstanding items open with context and retain notes for maintenan
   page,
   isMobile,
 }, testInfo) => {
-  await page.goto("/");
+  await page.goto("/login");
   await page.getByLabel("Email").fill(demoAccount.email);
   await page.getByLabel("Password", { exact: true }).fill(demoAccount.password);
   await page.getByRole("button", { name: "Log in" }).click();

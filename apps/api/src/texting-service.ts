@@ -78,6 +78,12 @@ export function createTextingService(options: Options) {
   }
 
   async function startVerification(userId: string, input: StartTextingVerificationInput) {
+    if (input.consentVersion !== textingConsentVersion) {
+      throw new AppError(
+        "invalid_request",
+        "Refresh nohmi and review the current SMS consent before requesting a code.",
+      );
+    }
     const twilio = requireProvider();
     const phone = normalizeTextingPhoneNumber(input);
     const expiresAt = new Date(now().getTime() + 10 * 60_000);
@@ -94,7 +100,7 @@ export function createTextingService(options: Options) {
       return tx
         .insert(textingVerificationChallenges)
         .values({
-          consentVersion: textingConsentVersion,
+          consentVersion: input.consentVersion,
           country: phone.country,
           encryptedPhoneNumber: encryptJson({ e164: phone.e164 }, options.encryptionKey),
           expiresAt,
@@ -170,6 +176,25 @@ export function createTextingService(options: Options) {
     }
     try {
       await options.db.transaction(async (tx) => {
+        // Atomically claim the still-pending challenge before changing consent.
+        // UPDATE locks the row and rechecks the predicate after concurrent cancellation.
+        const [claimed] = await tx
+          .update(textingVerificationChallenges)
+          .set({ approvedAt: now(), status: "approved" })
+          .where(
+            and(
+              eq(textingVerificationChallenges.id, challenge.id),
+              eq(textingVerificationChallenges.userId, userId),
+              eq(textingVerificationChallenges.status, "pending"),
+              gt(textingVerificationChallenges.expiresAt, now()),
+            ),
+          )
+          .returning({ id: textingVerificationChallenges.id });
+        if (!claimed)
+          throw new AppError(
+            "invalid_request",
+            "The verification challenge is no longer pending. Request a new code.",
+          );
         const blocked = await tx.query.textingConsentEvents.findFirst({
           orderBy: [
             desc(textingConsentEvents.occurredAt),
@@ -202,7 +227,7 @@ export function createTextingService(options: Options) {
             .update(textingConnections)
             .set({
               consentEpoch: existing.consentEpoch + 1,
-              consentVersion: textingConsentVersion,
+              consentVersion: challenge.consentVersion,
               country: challenge.country,
               disconnectedAt: null,
               encryptedPhoneNumber: challenge.encryptedPhoneNumber,
@@ -218,7 +243,7 @@ export function createTextingService(options: Options) {
           const [createdConnection] = await tx
             .insert(textingConnections)
             .values({
-              consentVersion: textingConsentVersion,
+              consentVersion: challenge.consentVersion,
               country: challenge.country,
               encryptedPhoneNumber: challenge.encryptedPhoneNumber,
               phoneFingerprint: challenge.phoneFingerprint,
@@ -239,10 +264,6 @@ export function createTextingService(options: Options) {
           source: "nohmi",
           userId,
         });
-        await tx
-          .update(textingVerificationChallenges)
-          .set({ approvedAt: now(), status: "approved" })
-          .where(eq(textingVerificationChallenges.id, challenge.id));
       });
     } catch (error) {
       if (isUniqueViolation(error))

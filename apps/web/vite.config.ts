@@ -117,12 +117,14 @@ export default defineConfig(({ mode }) => {
           name: "nohmi",
           orientation: "any",
           short_name: "nohmi",
-          start_url: "/",
+          start_url: "/today",
           theme_color: "#18181b",
         },
         registerType: "autoUpdate",
         workbox: {
           navigateFallback: "/index.html",
+          // Public policies must remain real HTML pages, including for installed PWAs.
+          navigateFallbackDenylist: [/^\/(about|docs|privacy|terms|data-use|sms|support)(?:\/|$)/],
           runtimeCaching: [
             {
               handler: "NetworkOnly",
@@ -132,6 +134,60 @@ export default defineConfig(({ mode }) => {
         },
       }),
       agentSkillSitePlugin(),
+      {
+        name: "public-documentation-directory-indexes",
+        enforce: "post",
+        transformIndexHtml: {
+          order: "pre",
+          async handler(html, context) {
+            const request = new URL(context.originalUrl ?? context.path, "http://localhost");
+            if (
+              context.server &&
+              (!["/", "/index.html"].includes(request.pathname) ||
+                request.searchParams.get("verifyEmail") ||
+                request.searchParams.get("resetPassword"))
+            ) {
+              return html;
+            }
+            const landing = await readFile(resolve(".public-site", "landing.fragment"), "utf8");
+            return html.replace('<div id="root"></div>', `<div id="root">${landing}</div>`);
+          },
+        },
+        async generateBundle(_options, bundle) {
+          const index = bundle["index.html"];
+          if (index?.type !== "asset") throw new Error("Missing web HTML for public styles.");
+          const stylesheet = String(index.source).match(/<link[^>]+href="([^"]+\.css)"/);
+          if (!stylesheet?.[1]) throw new Error("Missing compiled public stylesheet.");
+          for (const slug of ["about", "docs", "privacy", "terms", "data-use", "sms", "support"]) {
+            const document = await readFile(resolve("public", slug, "index.html"), "utf8");
+            this.emitFile({
+              type: "asset",
+              fileName: `${slug}/index.html`,
+              source: document.replace("/src/styles.css?direct", stylesheet[1]),
+            });
+          }
+        },
+        configureServer(server) {
+          // nginx resolves directory indexes in production; Vite's public middleware does not.
+          server.middlewares.use(async (request, response, next) => {
+            const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+            if (!/^\/(about|docs|privacy|terms|data-use|sms|support)\/?$/.test(pathname)) {
+              next();
+              return;
+            }
+            try {
+              const body = await readFile(
+                resolve(server.config.publicDir, pathname.slice(1), "index.html"),
+              );
+              response.setHeader("Content-Type", "text/html; charset=utf-8");
+              response.setHeader("Cache-Control", "no-cache");
+              response.end(body);
+            } catch (error) {
+              next(error);
+            }
+          });
+        },
+      },
     ],
     resolve: {
       alias: {

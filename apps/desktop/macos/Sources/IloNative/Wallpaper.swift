@@ -295,6 +295,8 @@ enum WallpaperController {
       canCleanup = false
     }
     guard failures.isEmpty else {
+      // Terminal partial jobs remain protected by active display paths until replaced.
+      try? Data().write(to: output.appendingPathComponent(".partial"), options: .atomic)
       throw NativeError.message(
         "Wallpaper applied to \(applied) of \(screens.count) displays. "
           + failures.joined(separator: "; "))
@@ -320,6 +322,7 @@ enum WallpaperController {
     {
       guard !retained.contains(entry.standardizedFileURL.path),
         FileManager.default.fileExists(atPath: entry.appendingPathComponent(".success").path)
+          || FileManager.default.fileExists(atPath: entry.appendingPathComponent(".partial").path)
       else { continue }
       try? FileManager.default.removeItem(at: entry)
     }

@@ -5,7 +5,7 @@ import UserNotifications
 
 /// UserNotifications looks in Library/Sounds, not Tauri's Resources/sounds folder.
 enum NotificationSound {
-  static let filename = "notification-soft-click.wav"
+  static let filename = "nohmi-notification-soft-click.wav"
   static var softClick: UNNotificationSound {
     UNNotificationSound(named: UNNotificationSoundName(rawValue: filename))
   }

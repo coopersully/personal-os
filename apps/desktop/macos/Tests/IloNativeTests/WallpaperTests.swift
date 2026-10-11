@@ -132,6 +132,24 @@ final class WallpaperTests: XCTestCase {
       XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(name).path))
     }
   }
+  func testCleanupCollectsTerminalPartialJobsOnlyAfterTheirDisplaysAreReplaced() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    for name in ["job-partial", "job-started", "job-current"] {
+      let directory = root.appendingPathComponent(name)
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      try Data().write(to: directory.appendingPathComponent(".apply-started"))
+    }
+    let partial = root.appendingPathComponent("job-partial")
+    try Data().write(to: partial.appendingPathComponent(".partial"))
+    let current = root.appendingPathComponent("job-current")
+    WallpaperController.cleanup(root: root, current: current, activeURLs: [partial.appendingPathComponent("display-1.png")])
+    XCTAssertTrue(FileManager.default.fileExists(atPath: partial.path))
+    WallpaperController.cleanup(root: root, current: current, activeURLs: [current.appendingPathComponent("display-1.png")])
+    XCTAssertFalse(FileManager.default.fileExists(atPath: partial.path))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("job-started").path))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: current.path))
+  }
   func testDailyPaletteUsesTheSameGregorianLocalDateAsThePreview() {
     let ny = TimeZone(identifier: "America/New_York")!
     let utc = TimeZone(secondsFromGMT: 0)!

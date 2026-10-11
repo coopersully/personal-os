@@ -1,3 +1,4 @@
+import { textingConsentVersion } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
@@ -40,7 +41,13 @@ export function TextingSettings({ profile = false }: { profile?: boolean }) {
   const [code, setCode] = useState("");
   const start = useFeedbackMutation({
     feedback: { action: "send a verification code", safeToRetry: false, form: true },
-    mutationFn: () => api.startTextingVerification({ consentAccepted: true, country, phoneNumber }),
+    mutationFn: () =>
+      api.startTextingVerification({
+        consentAccepted: true,
+        consentVersion: textingConsentVersion,
+        country,
+        phoneNumber,
+      }),
     onSuccess: (challenge) => setChallengeId(challenge.id),
   });
   const verify = useFeedbackMutation({

@@ -10,6 +10,7 @@ import {
   textMessages,
   users,
 } from "@personal-os/database";
+import { type StartTextingVerificationInput, textingConsentVersion } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
 import { AppError } from "./errors.js";
@@ -69,6 +70,32 @@ describe.sequential("texting service", () => {
     await container.stop();
   });
 
+  it.each([
+    undefined,
+    "2026-09-12",
+  ])("rejects stale consent %s before persistence or provider handoff", async (consentVersion) => {
+    const service = createTextingService({
+      apiBaseUrl: "https://api.example.com",
+      db: database.db,
+      enabled: true,
+      encryptionKey,
+      senderPhoneNumber: "+18885550100",
+      twilio,
+    });
+    const before = await database.db.select().from(textingVerificationChallenges);
+    const providerCalls = vi.mocked(twilio.startVerification).mock.calls.length;
+    await expect(
+      service.startVerification(userId, {
+        consentAccepted: true,
+        consentVersion,
+        country: "US",
+        phoneNumber: "+12125550123",
+      } as unknown as StartTextingVerificationInput),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    expect(vi.mocked(twilio.startVerification).mock.calls.length).toBe(providerCalls);
+    expect(await database.db.select().from(textingVerificationChallenges)).toEqual(before);
+  });
+
   it("persists verification before and after the provider handoff", async () => {
     const service = createTextingService({
       apiBaseUrl: "https://api.example.com",
@@ -93,6 +120,7 @@ describe.sequential("texting service", () => {
     );
     const request = service.startVerification("22222222-2222-4222-8222-222222222222", {
       consentAccepted: true,
+      consentVersion: textingConsentVersion,
       country: "US",
       phoneNumber: "+12025550124",
     });
@@ -105,6 +133,7 @@ describe.sequential("texting service", () => {
     await expect(
       service.startVerification("22222222-2222-4222-8222-222222222222", {
         consentAccepted: true,
+        consentVersion: textingConsentVersion,
         country: "US",
         phoneNumber: "+12025550124",
       }),
@@ -121,6 +150,7 @@ describe.sequential("texting service", () => {
     await expect(
       service.startVerification("22222222-2222-4222-8222-222222222222", {
         consentAccepted: true,
+        consentVersion: textingConsentVersion,
         country: "US",
         phoneNumber: "+12025550124",
       }),
@@ -147,6 +177,7 @@ describe.sequential("texting service", () => {
     expect(await service.getConnection(userId)).toMatchObject({ id: null, providerReady: true });
     const challenge = await service.startVerification(userId, {
       consentAccepted: true,
+      consentVersion: textingConsentVersion,
       country: "US",
       phoneNumber: "+1 212 555 0123",
     });
@@ -156,6 +187,7 @@ describe.sequential("texting service", () => {
     ).rejects.toMatchObject({ code: "not_found" });
     const failedChallenge = await service.startVerification(userId, {
       consentAccepted: true,
+      consentVersion: textingConsentVersion,
       country: "US",
       phoneNumber: "+12125550123",
     });
@@ -167,6 +199,7 @@ describe.sequential("texting service", () => {
     });
     const approvedChallenge = await service.startVerification(userId, {
       consentAccepted: true,
+      consentVersion: textingConsentVersion,
       country: "US",
       phoneNumber: "+12125550123",
     });
@@ -364,6 +397,7 @@ describe.sequential("texting service", () => {
     expect((await service.getConnection(userId)).state).toBe("disconnected");
     const reconnect = await service.startVerification(userId, {
       consentAccepted: true,
+      consentVersion: textingConsentVersion,
       country: "US",
       phoneNumber: "+12125550123",
     });
@@ -401,6 +435,7 @@ describe.sequential("texting service", () => {
     await expect(
       disabled.startVerification(userId, {
         consentAccepted: true,
+        consentVersion: textingConsentVersion,
         country: "US",
         phoneNumber: "+12125550123",
       }),
@@ -540,6 +575,7 @@ describe.sequential("texting service", () => {
     await service.disconnect(userId);
     const blockedReconnect = await service.startVerification(userId, {
       consentAccepted: true,
+      consentVersion: textingConsentVersion,
       country: "US",
       phoneNumber: "+12125550123",
     });
@@ -551,6 +587,7 @@ describe.sequential("texting service", () => {
     await service.disconnect(userId);
     const activeReconnect = await service.startVerification(userId, {
       consentAccepted: true,
+      consentVersion: textingConsentVersion,
       country: "US",
       phoneNumber: "+12125550123",
     });
@@ -609,6 +646,7 @@ describe.sequential("texting service", () => {
     ).toMatchObject({ status: "sent" });
     const expired = await service.startVerification(userId, {
       consentAccepted: true,
+      consentVersion: textingConsentVersion,
       country: "US",
       phoneNumber: "+12125550123",
     });
@@ -633,6 +671,7 @@ describe.sequential("texting service", () => {
     });
     const conflict = await service.startVerification("22222222-2222-4222-8222-222222222222", {
       consentAccepted: true,
+      consentVersion: textingConsentVersion,
       country: "US",
       phoneNumber: "+12125550123",
     });
@@ -666,6 +705,7 @@ describe.sequential("texting service", () => {
     await service.disconnect(userId);
     const reassigned = await service.startVerification("22222222-2222-4222-8222-222222222222", {
       consentAccepted: true,
+      consentVersion: textingConsentVersion,
       country: "US",
       phoneNumber: "+12125550123",
     });

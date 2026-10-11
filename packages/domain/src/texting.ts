@@ -181,6 +181,9 @@ export function parseTextReply(
 
 export const startTextingVerificationInputSchema = z.object({
   consentAccepted: z.literal(true),
+  consentVersion: z.literal(textingConsentVersion, {
+    error: "Refresh nohmi and review the current SMS consent before requesting a code.",
+  }),
   country: textingCountrySchema,
   phoneNumber: z.string().trim().min(7).max(32),
 });

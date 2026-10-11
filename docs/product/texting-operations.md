@@ -577,3 +577,8 @@ consent cannot be sold, shared, or transferred to third parties or affiliates, a
 is not shared for their marketing. Twilio and carriers process the information necessary to provide
 messaging. Follow the [submission evidence guide](../engineering/public-documentation.md) for the
 distinction between implemented pages, actual deployment, and provider approval.
+
+New enrollment must submit the version of the consent shown by the client. The API rejects
+missing or stale versions before persisting a challenge or contacting Twilio, so cached older
+clients must refresh and review the current text. Existing enrollment history and already-created
+challenges retain their original accepted version; completing a challenge does not upgrade it.

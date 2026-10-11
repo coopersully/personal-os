@@ -75,6 +75,12 @@ export function createTextingService(options: Options) {
   }
 
   async function startVerification(userId: string, input: StartTextingVerificationInput) {
+    if (input.consentVersion !== textingConsentVersion) {
+      throw new AppError(
+        "invalid_request",
+        "Refresh nohmi and review the current SMS consent before requesting a code.",
+      );
+    }
     const twilio = requireProvider();
     const phone = normalizeTextingPhoneNumber(input);
     const expiresAt = new Date(now().getTime() + 10 * 60_000);
@@ -91,7 +97,7 @@ export function createTextingService(options: Options) {
       return tx
         .insert(textingVerificationChallenges)
         .values({
-          consentVersion: textingConsentVersion,
+          consentVersion: input.consentVersion,
           country: phone.country,
           encryptedPhoneNumber: encryptJson({ e164: phone.e164 }, options.encryptionKey),
           expiresAt,

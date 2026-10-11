@@ -1,4 +1,6 @@
+import { textingConsentVersion } from "@personal-os/domain";
 import { Hono } from "hono";
+import { errorResponse } from "../errors.js";
 import type { createTextingService } from "../texting-service.js";
 import type { AppEnv } from "../types.js";
 import { registerTextingRoutes } from "./texting.js";
@@ -16,6 +18,7 @@ describe("texting routes", () => {
       updateStatus: vi.fn(async () => undefined),
     } as unknown as ReturnType<typeof createTextingService>;
     const app = new Hono<AppEnv>();
+    app.onError(errorResponse);
     app.use("*", async (context, next) => {
       context.set("requestId", "request");
       context.set("principal", {
@@ -35,6 +38,7 @@ describe("texting routes", () => {
         await app.request("/v1/texting/verification", {
           body: JSON.stringify({
             consentAccepted: true,
+            consentVersion: textingConsentVersion,
             country: "US",
             phoneNumber: "+12125550123",
           }),
@@ -43,6 +47,28 @@ describe("texting routes", () => {
         })
       ).status,
     ).toBe(201);
+    for (const consentVersion of [undefined, "2026-09-12"]) {
+      const response = await app.request("/v1/texting/verification", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          consentAccepted: true,
+          consentVersion,
+          country: "US",
+          phoneNumber: "+12125550123",
+        }),
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "invalid_request",
+          details: [
+            { path: ["consentVersion"], message: expect.stringContaining("Refresh nohmi") },
+          ],
+        },
+      });
+    }
+    expect(texting.startVerification).toHaveBeenCalledOnce();
     expect(
       (
         await app.request("/v1/texting/verification/11111111-1111-4111-8111-111111111111/check", {

@@ -58,7 +58,10 @@ terms as a complete legal program; no jurisdiction, arbitration scheme, or legal
 - `apps/web/src/features/texting/page.tsx` has the unchecked, optional enrollment checkbox in Agent
   Texting and profile number enrollment. It sends a Verify code only after consent, then activates
   the connection after verification. `packages/domain/src/texting.ts` versions the consent text;
-  October 7 disclosures use `2026-10-07-v2`. Existing consent rows are not rewritten or treated as
+  October 7 disclosures use `2026-10-07-v2`. Enrollment submits that explicit version;
+  stale or missing versions are rejected before writing a challenge or contacting Twilio. This
+  makes a cached older app refresh and show current consent instead of recording a newer version
+  that the visitor never saw. Existing consent rows are not rewritten or treated as
   having accepted this new version. Enrollment fields and cancellation stay disabled while a
   verification request is pending, so a late result cannot reopen a canceled number change. Verification completion copies the challenge's recorded
   version, so a deployment between the two steps cannot relabel an older acceptance. Changing

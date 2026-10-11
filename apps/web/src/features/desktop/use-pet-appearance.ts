@@ -18,26 +18,34 @@ export function usePetAppearance(
   const runtime = useRef<ReturnType<typeof create> | null>(null);
   function create() {
     let disposed = false;
-    const session = beginPetAppearance().then((value) => {
-      if (`${value.serverUrl}|${value.accountId ?? ""}` !== scope)
-        throw new Error("Your account changed. Reopen pet settings.");
-      return value;
-    });
-    // The promise is observed by each operation; avoid an unhandled rejection before the first frame.
-    void session.catch(() => undefined);
+    let session: ReturnType<typeof beginPetAppearance> | undefined;
+    const getSession = () => {
+      session ??= beginPetAppearance()
+        .then((value) => {
+          if (`${value.serverUrl}|${value.accountId ?? ""}` !== scope)
+            throw new Error("Your account changed. Reopen pet settings.");
+          return value;
+        })
+        .catch((error) => {
+          // Keep the queued latest edit, but never reuse a rejected native session.
+          session = undefined;
+          throw error;
+        });
+      return session;
+    };
     let latest: Value | undefined;
     let submittedRevision = 0;
     let frame: number | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const preview = new LatestAppearanceQueue<Value>(
-      async (value) => previewPetAppearance({ ...(await session), ...value }),
+      async (value) => previewPetAppearance({ ...(await getSession()), ...value }),
       () => {
         toast.error("Couldn’t preview pet appearance.", { id: "pet-appearance-preview" });
       },
     );
     const persist = new LatestAppearanceQueue<Value>(
       async (value) => {
-        const status = await savePetAppearance({ ...(await session), ...value });
+        const status = await savePetAppearance({ ...(await getSession()), ...value });
         if (!disposed) saved.current(status, value.revision);
       },
       () => {

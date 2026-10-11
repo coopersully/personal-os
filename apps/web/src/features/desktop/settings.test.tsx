@@ -308,6 +308,41 @@ describe("desktop preferences", () => {
     expect(mocks.assign).not.toHaveBeenCalled();
   });
 
+  it("reconciles native pet disable after query invalidation", async () => {
+    settings.petEnabled = true;
+    const { cache } = mount({ section: "pet" });
+    const toggle = await screen.findByRole("switch", { name: "Show desktop pet" });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    status = { ...status, settings: { ...status.settings, petEnabled: false } };
+    await act(async () => {
+      await cache.invalidateQueries({ queryKey: ["desktop-settings"] });
+    });
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
+  });
+
+  it("keeps an optimistic pet toggle while its save is pending", async () => {
+    const pending = deferred<DesktopStatus>();
+    const invoke = mocks.invoke.getMockImplementation()!;
+    mocks.invoke.mockImplementation((command, args) =>
+      command === "desktop_save_settings" ? pending.promise : invoke(command, args),
+    );
+    const { cache } = mount({ section: "pet" });
+    const toggle = await screen.findByRole("switch", { name: "Show desktop pet" });
+    await userEvent.click(toggle);
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith("desktop_save_settings", expect.anything()),
+    );
+    await act(async () => {
+      await cache.invalidateQueries({ queryKey: ["desktop-settings"] });
+    });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    await act(async () => {
+      status = { ...status, settings: { ...status.settings, petEnabled: true } };
+      pending.resolve(status);
+    });
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
+  });
+
   it("saves pet appearance and workspace visibility while preserving widget privacy", async () => {
     mount({ section: "pet" });
     await screen.findByRole("switch", { name: "Show desktop pet" });

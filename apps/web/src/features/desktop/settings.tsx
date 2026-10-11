@@ -150,10 +150,6 @@ function DesktopSettingsContent({
   const [draft, setDraft] = useState<DesktopSettings | null>(null);
   const [advancedServerOpen, setAdvancedServerOpen] = useState(false);
   useEffect(() => {
-    if (query.data && query.isFetchedAfterMount)
-      setDraft((current) => current ?? query.data.settings);
-  }, [query.data, query.isFetchedAfterMount]);
-  useEffect(() => {
     if (query.data && query.data.settings.serverUrl !== hostedServer) setAdvancedServerOpen(true);
   }, [query.data]);
   const save = useFeedbackMutation({
@@ -242,6 +238,16 @@ function DesktopSettingsContent({
       }
     },
   });
+  useEffect(() => {
+    if (query.data && query.isFetchedAfterMount)
+      setDraft((current) => {
+        if (!current) return query.data.settings;
+        // Native context-menu changes must reach the switch without replacing local drafts.
+        if (autosave.isPending || current.petEnabled === query.data.settings.petEnabled)
+          return current;
+        return { ...current, petEnabled: query.data.settings.petEnabled };
+      });
+  }, [query.data, query.isFetchedAfterMount, autosave.isPending]);
   const test = useFeedbackMutation({
     feedback: {
       action: "test the desktop connection",

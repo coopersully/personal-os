@@ -165,6 +165,20 @@ async fn finance(
     }
     Ok(json!({"range":range,"facts":[fact],"asOf":value["position"]["asOf"]}))
 }
+async fn bounded_section(
+    enabled: bool,
+    budget: std::time::Duration,
+    load: impl std::future::Future<Output = Result<Value, String>>,
+) -> Option<Result<Value, String>> {
+    if !enabled {
+        return None;
+    }
+    Some(
+        tokio::time::timeout(budget, load)
+            .await
+            .unwrap_or_else(|_| Err("Quick-access section timed out.".into())),
+    )
+}
 pub async fn load(
     app: &tauri::AppHandle,
     server: &str,
@@ -172,28 +186,55 @@ pub async fn load(
     settings: &DesktopSettings,
     ranges: &Value,
 ) -> Result<Value, String> {
+    let enabled = |kind| settings.pet_workspaces.iter().any(|w| w == kind);
+    // One slow source must not consume a fresh timeout before each healthy sibling starts.
+    let budget = std::time::Duration::from_secs(10);
+    let (tasks, reminders, finances, ritual_cards) = tokio::join!(
+        bounded_section(
+            enabled("tasks"),
+            budget,
+            work(
+                app,
+                server,
+                account,
+                "tasks",
+                &ranges["tasks"],
+                settings.pet_tasks_include_overdue
+            )
+        ),
+        bounded_section(
+            enabled("reminders"),
+            budget,
+            work(
+                app,
+                server,
+                account,
+                "reminders",
+                &ranges["reminders"],
+                settings.pet_reminders_include_overdue
+            )
+        ),
+        bounded_section(
+            enabled("finances"),
+            budget,
+            finance(app, server, account, settings, &ranges["finances"])
+        ),
+        bounded_section(
+            settings.pet_show_rituals,
+            budget,
+            rituals(app, server, account)
+        ),
+    );
     let mut result = json!({});
-    for (kind, overdue) in [
-        ("tasks", settings.pet_tasks_include_overdue),
-        ("reminders", settings.pet_reminders_include_overdue),
+    for (kind, value) in [
+        ("tasks", tasks),
+        ("reminders", reminders),
+        ("finances", finances),
+        ("rituals", ritual_cards),
     ] {
-        if settings.pet_workspaces.iter().any(|w| w == kind) {
-            section(
-                &mut result,
-                kind,
-                work(app, server, account, kind, &ranges[kind], overdue).await,
-            );
+        if let Some(value) = value {
+            section(&mut result, kind, value);
         }
-    }
-    if settings.pet_workspaces.iter().any(|w| w == "finances") {
-        section(
-            &mut result,
-            "finances",
-            finance(app, server, account, settings, &ranges["finances"]).await,
-        );
-    }
-    if settings.pet_show_rituals {
-        section(&mut result, "rituals", rituals(app, server, account).await);
     }
     Ok(result)
 }
@@ -267,7 +308,16 @@ fn ritual_cards(
     json!(cards)
 }
 async fn rituals(app: &tauri::AppHandle, server: &str, account: &str) -> Result<Value, String> {
-    let state = crate::ritual::pet_state(app, server, account).await?;
+    // Sync owns durable queued writes and its runtime lock. A UI deadline may stop observing it,
+    // but must not release that lock while a native persistence operation is still finishing.
+    let sync_app = app.clone();
+    let sync_server = server.to_owned();
+    let sync_account = account.to_owned();
+    let state = tauri::async_runtime::spawn(async move {
+        crate::ritual::pet_state(&sync_app, &sync_server, &sync_account).await
+    })
+    .await
+    .map_err(|_| "Could not refresh ritual state.".to_owned())??;
     let dates = crate::native::call(
         app,
         json!({"op":"pet_ritual_dates","definitions":state["definitions"]}),
@@ -311,6 +361,27 @@ async fn rituals(app: &tauri::AppHandle, server: &str, account: &str) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn stalled_section_has_a_deadline_while_healthy_siblings_start() {
+        let (started, healthy_started) = tokio::sync::oneshot::channel();
+        let budget = std::time::Duration::from_millis(25);
+        let (stalled, healthy, disabled) = tokio::join!(
+            bounded_section(true, budget, async {
+                healthy_started.await.unwrap();
+                std::future::pending().await
+            }),
+            bounded_section(true, budget, async {
+                started.send(()).unwrap();
+                Ok(json!({"items":[{"id":"healthy"}]}))
+            }),
+            bounded_section(false, budget, async {
+                panic!("Disabled sources must not run")
+            }),
+        );
+        assert!(stalled.unwrap().is_err());
+        assert_eq!(healthy.unwrap().unwrap()["items"][0]["id"], "healthy");
+        assert!(disabled.is_none());
+    }
     #[test]
     fn section_failures_preserve_successes_without_cached_fallbacks() {
         let mut content = json!({});

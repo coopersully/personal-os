@@ -209,7 +209,10 @@ pet. Keep expressions restrained and preserve the same controls under Reduced Mo
 The accepted architecture uses one native window containing the native pet view and web dashboard.
 Window movement moves both together. Separate window, placement, animation, and dashboard owners
 keep geometry and motion independent of data refresh. Show valid cached content while refreshing;
-account changes invalidate it immediately. Transparent animation space must pass unrelated desktop
+account changes invalidate it immediately. Load quick-access sections concurrently with a ten-second
+observation budget; a failed or timed-out section uses Sonner without hiding healthy siblings.
+A ritual sync already handling durable queued writes retains its lock through persistence even if
+the quick-access observation times out. Transparent animation space must pass unrelated desktop
 input through. Native click-through and Dock observation remain validation requirements.
 
 Save position and size silently after release, keeping compact-pet position, card placement, and

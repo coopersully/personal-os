@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -10,6 +10,8 @@ const execute = promisify(execFile);
 
 test("production nginx keeps public directory redirects on the visitor's HTTPS origin", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "nohmi-public-nginx-"));
+  // The production nginx worker runs as an unprivileged container user.
+  chmodSync(directory, 0o755);
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const paths = ["about", "docs", "privacy", "terms", "data-use", "sms", "support"];
   writeFileSync(join(directory, "index.html"), "<h1>Product landing</h1>");

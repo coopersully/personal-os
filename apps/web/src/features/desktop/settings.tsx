@@ -57,10 +57,13 @@ import { RitualLocal } from "../tracking/ritual-local.js";
 import { BackgroundSetup } from "./background-setup.js";
 import {
   type DesktopSettings,
+  type DesktopSettingsIdentity,
+  desktopSettingsIdentity,
   getDesktopSettings,
   hostedServer,
   isDesktop,
   nativeAction,
+  requireDesktopSettingsIdentity,
   resetDesktopConnection,
   saveDesktopSettings,
   testDesktopServer,
@@ -151,12 +154,21 @@ function DesktopSettingsContent({
   useEffect(() => {
     if (query.data && query.data.settings.serverUrl !== hostedServer) setAdvancedServerOpen(true);
   }, [query.data]);
+  const settingsIdentity = query.data ? desktopSettingsIdentity(query.data) : null;
   const save = useFeedbackMutation({
     feedback: { action: "save desktop preferences", safeToRetry: true, form: true },
     scope: { id: "desktop-preferences" },
-    mutationFn: async (settings: DesktopSettings) => {
+    mutationFn: async ({
+      settings,
+      identity,
+    }: {
+      settings: DesktopSettings;
+      identity: DesktopSettingsIdentity | null;
+    }) => {
+      if (!identity) throw new Error("Desktop settings are still loading.");
       const current = await getDesktopSettings();
-      return saveDesktopSettings({ ...current.settings, serverUrl: settings.serverUrl });
+      requireDesktopSettingsIdentity(current, identity);
+      return saveDesktopSettings({ ...current.settings, serverUrl: settings.serverUrl }, identity);
     },
     onSuccess: async (value) => {
       const switched = query.data?.settings.serverUrl !== value.settings.serverUrl;
@@ -198,7 +210,17 @@ function DesktopSettingsContent({
   const autosave = useFeedbackMutation({
     scope: { id: "desktop-preferences" },
     feedback: { action: "save desktop preferences", safeToRetry: true },
-    mutationFn: async ({ patch }: { patch: SettingsPatch; revision: number }) => {
+    mutationFn: async ({
+      patch,
+      identity,
+    }: {
+      patch: SettingsPatch;
+      revision: number;
+      identity: DesktopSettingsIdentity | null;
+    }) => {
+      if (!identity) throw new Error("Desktop settings are still loading.");
+      const current = await getDesktopSettings();
+      requireDesktopSettingsIdentity(current, identity);
       // Scoped writes run serially. Carry failed fields into the next write so an
       // unrelated queued edit cannot silently discard the earlier desired value.
       pendingSettings.current = {
@@ -206,15 +228,17 @@ function DesktopSettingsContent({
         ...patch,
         notifications: { ...pendingSettings.current.notifications, ...patch.notifications },
       };
-      const current = await getDesktopSettings();
-      return saveDesktopSettings({
-        ...current.settings,
-        ...pendingSettings.current,
-        notifications: {
-          ...current.settings.notifications,
-          ...pendingSettings.current.notifications,
+      return saveDesktopSettings(
+        {
+          ...current.settings,
+          ...pendingSettings.current,
+          notifications: {
+            ...current.settings.notifications,
+            ...pendingSettings.current.notifications,
+          },
         },
-      });
+        identity,
+      );
     },
     onSuccess: (value, input) => {
       pendingSettings.current = {};
@@ -329,12 +353,17 @@ function DesktopSettingsContent({
   if (!draft) return null;
   const update = (value: Partial<DesktopSettings>) => {
     setDraft({ ...draft, ...value });
-    if (!("serverUrl" in value)) autosave.mutate({ patch: value, revision: ++revision.current });
+    if (!("serverUrl" in value))
+      autosave.mutate({ identity: settingsIdentity, patch: value, revision: ++revision.current });
   };
   const usesHostedServer = draft.serverUrl === hostedServer;
   const notification = (value: Partial<DesktopSettings["notifications"]>) => {
     setDraft({ ...draft, notifications: { ...draft.notifications, ...value } });
-    autosave.mutate({ patch: { notifications: value }, revision: ++revision.current });
+    autosave.mutate({
+      identity: settingsIdentity,
+      patch: { notifications: value },
+      revision: ++revision.current,
+    });
   };
 
   const quietHours = (
@@ -345,6 +374,7 @@ function DesktopSettingsContent({
     const nextRevision = ++revision.current;
     if ((next.quietStart === null) === (next.quietEnd === null))
       autosave.mutate({
+        identity: settingsIdentity,
         patch: { notifications: { quietStart: next.quietStart, quietEnd: next.quietEnd } },
         revision: nextRevision,
       });
@@ -376,7 +406,7 @@ function DesktopSettingsContent({
             !startupPending &&
             draft.serverUrl !== query.data?.settings.serverUrl
           )
-            save.mutate(draft);
+            save.mutate({ settings: draft, identity: settingsIdentity });
         }}
       >
         {section === "desktop" ? (

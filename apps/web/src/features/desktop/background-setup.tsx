@@ -14,9 +14,12 @@ import { ItemGroup } from "../../components/ui/item.js";
 import { useSettingsError } from "../../lib/settings-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import {
+  type DesktopSettingsIdentity,
   type DesktopStatus,
+  desktopSettingsIdentity,
   getDesktopSettings,
   nativeAction,
+  requireDesktopSettingsIdentity,
   saveDesktopSettings,
 } from "./bridge.js";
 
@@ -54,9 +57,13 @@ export function BackgroundSetup({
     mutationKey: ["desktop-startup"],
     scope: { id: "desktop-preferences" },
     feedback: { action: "enable launch at login", safeToRetry: true, form: false },
-    mutationFn: async () => {
+    mutationFn: async (identity: DesktopSettingsIdentity) => {
       const current = await getDesktopSettings();
-      const value = await saveDesktopSettings({ ...current.settings, launchAtLogin: true });
+      requireDesktopSettingsIdentity(current, identity);
+      const value = await saveDesktopSettings(
+        { ...current.settings, launchAtLogin: true },
+        identity,
+      );
       cache.setQueryData(["desktop-settings"], value);
       onStartupEnabled();
       if (
@@ -121,7 +128,7 @@ export function BackgroundSetup({
             size="sm"
             variant="outline"
             disabled={startup.isPending || saving || !login}
-            onClick={() => startup.mutate()}
+            onClick={() => startup.mutate(desktopSettingsIdentity(status))}
           >
             Enable launch at login
           </Button>

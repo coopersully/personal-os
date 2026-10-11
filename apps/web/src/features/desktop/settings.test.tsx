@@ -110,6 +110,7 @@ beforeEach(() => {
       args?: {
         settings?: DesktopSettings;
         preservePetAppearance?: boolean;
+        expectedIdentity?: { serverUrl: string; accountId: string | null };
         edit?: { color: string; scale: number };
       },
     ) => {
@@ -129,6 +130,11 @@ beforeEach(() => {
         return status;
       }
       if (command === "desktop_save_settings") {
+        if (
+          args?.expectedIdentity?.serverUrl !== status.settings.serverUrl ||
+          args?.expectedIdentity?.accountId !== (status.accountId ?? null)
+        )
+          throw new Error("Your account changed. Reopen desktop settings.");
         const n = args!.settings!.notifications;
         if ((n.quietStart === null) !== (n.quietEnd === null))
           throw new Error("Set both quiet-hours times.");
@@ -606,6 +612,43 @@ describe("desktop preferences", () => {
     );
     expect(screen.queryByText("Connection verified")).not.toBeInTheDocument();
     expect(mocks.invoke).not.toHaveBeenCalledWith("desktop_save_settings", expect.anything());
+  });
+
+  it.each([
+    "read",
+    "write",
+  ])("rejects an old account's autosave when identity changes during %s", async (boundary) => {
+    status = { ...status, accountId: "account-a" };
+    mount({ section: "notifications" });
+    await screen.findByRole("switch", { name: "Enable notifications" });
+    const original = mocks.invoke.getMockImplementation()!;
+    let switched = false;
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (
+        !switched &&
+        command === (boundary === "read" ? "desktop_settings" : "desktop_save_settings")
+      ) {
+        switched = true;
+        status = { ...status, accountId: "account-b" };
+      }
+      return original(command, args);
+    });
+    await userEvent.click(screen.getByRole("switch", { name: "Enable notifications" }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(status.accountId).toBe("account-b");
+    expect(status.settings.notifications.enabled).toBe(false);
+    expect(
+      screen.queryByText("Your account changed. Reopen desktop settings."),
+    ).not.toBeInTheDocument();
+    if (boundary === "read")
+      expect(mocks.invoke).not.toHaveBeenCalledWith("desktop_save_settings", expect.anything());
+    else
+      expect(mocks.invoke).toHaveBeenCalledWith(
+        "desktop_save_settings",
+        expect.objectContaining({
+          expectedIdentity: { serverUrl: hostedServer, accountId: "account-a" },
+        }),
+      );
   });
 
   it("serializes rapid changes without overwriting newer preferences", async () => {

@@ -56,8 +56,30 @@ export type DesktopStatus = {
   };
 };
 export const getDesktopSettings = () => invoke<DesktopStatus>("desktop_settings");
-export const saveDesktopSettings = (settings: DesktopSettings) =>
-  invoke<DesktopStatus>("desktop_save_settings", { settings, preservePetAppearance: true });
+export type DesktopSettingsIdentity = { serverUrl: string; accountId: string | null };
+export const desktopSettingsIdentity = (status: DesktopStatus): DesktopSettingsIdentity => ({
+  serverUrl: status.settings.serverUrl,
+  accountId: status.accountId ?? null,
+});
+export function requireDesktopSettingsIdentity(
+  status: DesktopStatus,
+  expected: DesktopSettingsIdentity,
+) {
+  if (
+    status.settings.serverUrl !== expected.serverUrl ||
+    (status.accountId ?? null) !== expected.accountId
+  )
+    throw new Error("Your account changed. Reopen desktop settings.");
+}
+export const saveDesktopSettings = (
+  settings: DesktopSettings,
+  expectedIdentity: DesktopSettingsIdentity,
+) =>
+  invoke<DesktopStatus>("desktop_save_settings", {
+    settings,
+    expectedIdentity,
+    preservePetAppearance: true,
+  });
 export const testDesktopServer = (serverUrl: string) =>
   invoke<{ ok: boolean }>("desktop_test_connection", { serverUrl });
 export const nativeAction = (action: string) => invoke("desktop_native_action", { action });

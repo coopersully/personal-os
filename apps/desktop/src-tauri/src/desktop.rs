@@ -312,15 +312,36 @@ fn server_switch_cleanup(
     operations
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsIdentity {
+    server_url: String,
+    account_id: Option<String>,
+}
+impl SettingsIdentity {
+    fn validate(&self, server: &str, account: Option<&str>) -> Result<(), String> {
+        if self.server_url != server || self.account_id.as_deref() != account {
+            Err("Your account changed. Reopen desktop settings.".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn desktop_save_settings(
     app: tauri::AppHandle,
     settings: DesktopSettings,
     preserve_pet_appearance: Option<bool>,
+    expected_identity: SettingsIdentity,
 ) -> Result<serde_json::Value, String> {
     save_settings(
         app,
-        SettingsChange::Replace(settings, preserve_pet_appearance.unwrap_or(false)),
+        SettingsChange::Replace(
+            settings,
+            preserve_pet_appearance.unwrap_or(false),
+            expected_identity,
+        ),
     )
     .await
 }
@@ -328,7 +349,7 @@ pub async fn disable_pet(app: tauri::AppHandle) -> Result<serde_json::Value, Str
     save_settings(app, SettingsChange::DisablePet).await
 }
 enum SettingsChange {
-    Replace(DesktopSettings, bool),
+    Replace(DesktopSettings, bool, SettingsIdentity),
     DisablePet,
     Appearance(AppearanceEdit),
 }
@@ -339,8 +360,12 @@ async fn save_settings(
     // Match mutation lock order: ritual fence, then settings/account state.
     let ritual_runtime = app.state::<crate::ritual::RitualRuntime>();
     let _ritual_guard = ritual_runtime.lock.lock().await;
+    let expected_identity = match &replacement {
+        SettingsChange::Replace(_, _, identity) => Some(identity.clone()),
+        _ => None,
+    };
     let mut settings = match replacement {
-        SettingsChange::Replace(mut settings, preserve_appearance) => {
+        SettingsChange::Replace(mut settings, preserve_appearance, _) => {
             if preserve_appearance {
                 let current = app.state::<DesktopState>().settings.lock().await.clone();
                 settings.pet_color = current.pet_color;
@@ -382,6 +407,12 @@ async fn save_settings(
     }
     let state = app.state::<DesktopState>();
     let mut current = state.settings.lock().await;
+    if let Some(identity) = expected_identity {
+        identity.validate(
+            &current.server_url,
+            state.account_id.lock().await.as_deref(),
+        )?;
+    }
     let switched = current.server_url != settings.server_url;
     let old_origin = current.server_url.clone();
     let old_account = match state.account_id.lock().await.clone() {
@@ -505,6 +536,30 @@ pub async fn desktop_native_action(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn settings_writes_require_the_original_server_and_account() {
+        let identity: SettingsIdentity =
+            serde_json::from_str(r#"{"serverUrl":"https://example.com","accountId":"account-a"}"#)
+                .unwrap();
+        assert!(identity
+            .validate("https://example.com", Some("account-a"))
+            .is_ok());
+        assert!(identity
+            .validate("https://other.example.com", Some("account-a"))
+            .is_err());
+        assert!(identity
+            .validate("https://example.com", Some("account-b"))
+            .is_err());
+        assert!(identity.validate("https://example.com", None).is_err());
+        let signed_out = SettingsIdentity {
+            server_url: identity.server_url,
+            account_id: None,
+        };
+        assert!(signed_out.validate("https://example.com", None).is_ok());
+        assert!(signed_out
+            .validate("https://example.com", Some("account-a"))
+            .is_err());
+    }
     #[test]
     fn appearance_edits_validate_revision_and_native_values() {
         let mut edit = AppearanceEdit {

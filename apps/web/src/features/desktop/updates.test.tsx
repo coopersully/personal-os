@@ -171,7 +171,8 @@ it("supports retrying an unreadable settings status", async () => {
   expect(screen.queryByText(/Could not read update status/)).not.toBeInTheDocument();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   const retry = vi.mocked(toast.error).mock.calls.at(-1)?.[1]?.action;
-  if (!retry || !("onClick" in retry)) throw new Error("Expected toast retry action");
+  if (!retry || typeof retry !== "object" || !("onClick" in retry))
+    throw new Error("Expected toast retry action");
   retry.onClick({} as React.MouseEvent<HTMLButtonElement>);
   expect(await screen.findByText("Installed version 0.1.0")).toBeInTheDocument();
 });

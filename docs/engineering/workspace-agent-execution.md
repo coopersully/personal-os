@@ -2,7 +2,7 @@
 
 Generated from actual Vitest results joined to MCP calls made inside passing real API/PostgreSQL fixture tests. A call in a failing test is not passing evidence. This reports tool-level execution, not exhaustive input-variant coverage or real-provider verification.
 
-Tests: 77 passed; 0 failed.
+Tests: 79 passed; 0 failed.
 
 Successful execution observed for 232 of 232 normal-discovery tools in the audited domains. Unexecuted rows remain explicit verification gaps; adapter registration or service-only tests are not counted here.
 
@@ -16,7 +16,7 @@ Successful execution observed for 232 of 232 normal-discovery tools in the audit
 | `answer_mail_question` | 1 | 0 | mail-stewardship.integration.test.ts |
 | `apply_finance_categorizations` | 1 | 0 | ledger.integration.test.ts |
 | `approve_finance_action_review` | 1 | 1 | finance-review.integration.test.ts |
-| `approve_finance_budget` | 2 | 1 | budget-policy.integration.test.ts, finances.integration.test.ts |
+| `approve_finance_budget` | 2 | 1 | finances.integration.test.ts, budget-policy.integration.test.ts |
 | `archive_task_list` | 2 | 0 | tasks.integration.test.ts |
 | `archive_task_project` | 2 | 0 | tasks.integration.test.ts |
 | `bind_automation_host_schedule` | 1 | 0 | recovery.integration.test.ts |
@@ -28,7 +28,7 @@ Successful execution observed for 232 of 232 normal-discovery tools in the audit
 | `cancel_task_project` | 2 | 0 | tasks.integration.test.ts |
 | `classify_finance_transactions` | 1 | 0 | ledger.integration.test.ts |
 | `compare_finance_scenarios` | 1 | 0 | planning.integration.test.ts |
-| `complete_finance_account_connection` | 5 | 5 | bank-handoff.integration.test.ts |
+| `complete_finance_account_connection` | 7 | 7 | bank-handoff.integration.test.ts |
 | `complete_reminder` | 4 | 0 | tasks.integration.test.ts |
 | `complete_task` | 2 | 0 | tasks.integration.test.ts |
 | `complete_task_project` | 2 | 0 | tasks.integration.test.ts |
@@ -37,9 +37,9 @@ Successful execution observed for 232 of 232 normal-discovery tools in the audit
 | `create_calendar` | 4 | 0 | calendar.integration.test.ts |
 | `create_calendar_attention_item` | 1 | 0 | calendar.integration.test.ts |
 | `create_event` | 2 | 0 | calendar.integration.test.ts |
-| `create_finance_account` | 4 | 0 | authorization.integration.test.ts, queries.integration.test.ts, finances.integration.test.ts, ledger.integration.test.ts |
+| `create_finance_account` | 4 | 0 | finances.integration.test.ts, authorization.integration.test.ts, queries.integration.test.ts, ledger.integration.test.ts |
 | `create_finance_attention_item` | 1 | 0 | finance-review.integration.test.ts |
-| `create_finance_budget` | 2 | 0 | budget-policy.integration.test.ts, finances.integration.test.ts |
+| `create_finance_budget` | 2 | 0 | finances.integration.test.ts, budget-policy.integration.test.ts |
 | `create_finance_budget_policy` | 1 | 0 | budget-policy.integration.test.ts |
 | `create_finance_budget_revision_proposal` | 1 | 0 | budget-policy.integration.test.ts |
 | `create_finance_category` | 4 | 0 | finances.integration.test.ts, ledger.integration.test.ts, planning.integration.test.ts |
@@ -72,7 +72,7 @@ Successful execution observed for 232 of 232 normal-discovery tools in the audit
 | `get_calendar_status` | 2 | 0 | queries.integration.test.ts, calendar.integration.test.ts |
 | `get_domain_profile` | 1 | 0 | guidance.integration.test.ts |
 | `get_event` | 2 | 0 | calendar.integration.test.ts |
-| `get_finance_account_connection` | 3 | 0 | bank-handoff.integration.test.ts |
+| `get_finance_account_connection` | 4 | 0 | bank-handoff.integration.test.ts |
 | `get_finance_automation_settings` | 1 | 0 | queries.integration.test.ts |
 | `get_finance_budget` | 1 | 0 | queries.integration.test.ts |
 | `get_finance_budget_pace` | 1 | 0 | finances.integration.test.ts |
@@ -145,7 +145,7 @@ Successful execution observed for 232 of 232 normal-discovery tools in the audit
 | `list_finance_rules` | 3 | 0 | queries.integration.test.ts, planning.integration.test.ts |
 | `list_finance_transactions` | 3 | 0 | queries.integration.test.ts, ledger.integration.test.ts |
 | `list_mail` | 3 | 0 | queries.integration.test.ts, mail-stewardship.integration.test.ts |
-| `list_mail_drafts` | 3 | 0 | mail.integration.test.ts, queries.integration.test.ts |
+| `list_mail_drafts` | 3 | 0 | queries.integration.test.ts, mail.integration.test.ts |
 | `list_mail_rules` | 1 | 0 | queries.integration.test.ts |
 | `list_mailboxes` | 1 | 0 | queries.integration.test.ts |
 | `list_reminders` | 1 | 0 | queries.integration.test.ts |
@@ -193,7 +193,7 @@ Successful execution observed for 232 of 232 normal-discovery tools in the audit
 | `revise_finance_budget` | 1 | 0 | finances.integration.test.ts |
 | `revise_finance_budget_policy` | 1 | 0 | budget-policy.integration.test.ts |
 | `revoke_automation_host_schedule` | 1 | 0 | recovery.integration.test.ts |
-| `save_domain_profile` | 2 | 1 | mail-stewardship.integration.test.ts, guidance.integration.test.ts |
+| `save_domain_profile` | 2 | 1 | guidance.integration.test.ts, mail-stewardship.integration.test.ts |
 | `save_finance_budget_policy_preview` | 1 | 0 | budget-policy.integration.test.ts |
 | `search_calendar` | 1 | 0 | controls.integration.test.ts |
 | `search_finance` | 1 | 0 | controls.integration.test.ts |
@@ -209,7 +209,7 @@ Successful execution observed for 232 of 232 normal-discovery tools in the audit
 | `setup_finances` | 2 | 0 | planning.integration.test.ts |
 | `snooze_mail` | 1 | 0 | mail-stewardship.integration.test.ts |
 | `split_finance_transaction` | 1 | 1 | ledger.integration.test.ts |
-| `start_finance_account_connection` | 16 | 1 | bank-handoff.integration.test.ts |
+| `start_finance_account_connection` | 18 | 1 | bank-handoff.integration.test.ts |
 | `submit_finance_ledger_challenge` | 2 | 1 | maintenance.integration.test.ts |
 | `sync_finance_accounts` | 4 | 0 | finance-sync.integration.test.ts |
 | `sync_workspace_source` | 1 | 2 | sources.integration.test.ts |
@@ -227,7 +227,7 @@ Successful execution observed for 232 of 232 normal-discovery tools in the audit
 | `update_finance_recurring_obligation` | 1 | 0 | planning.integration.test.ts |
 | `update_finance_settings` | 1 | 1 | controls.integration.test.ts |
 | `update_finance_transaction` | 3 | 3 | ledger.integration.test.ts |
-| `update_financial_profile` | 2 | 0 | budget-policy.integration.test.ts, finances.integration.test.ts |
+| `update_financial_profile` | 2 | 0 | finances.integration.test.ts, budget-policy.integration.test.ts |
 | `update_mail` | 1 | 0 | mail-send.integration.test.ts |
 | `update_mail_draft` | 1 | 0 | mail.integration.test.ts |
 | `update_mail_obligation` | 1 | 0 | mail-stewardship.integration.test.ts |

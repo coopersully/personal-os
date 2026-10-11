@@ -296,23 +296,9 @@ export function createFinanceConnectionHandoffService(options: {
             "This connection is already being completed. Reload its status.",
           );
         row = claimed;
+        let exchanged: { accessToken: string; itemId: string };
         try {
-          const exchanged = await plaid.exchangePublicToken(publicToken);
-          state = {
-            phase: "exchanged",
-            ...exchanged,
-            ...(result.institutions?.[publicToken]
-              ? { institution: result.institutions[publicToken] }
-              : {}),
-          };
-          await db
-            .update(financeAccountConnections)
-            .set({
-              encryptedHandoffState: encryptJson(state, key),
-              lastError: null,
-              updatedAt: now(),
-            })
-            .where(eq(financeAccountConnections.id, id));
+          exchanged = await plaid.exchangePublicToken(publicToken);
         } catch (error) {
           await db
             .update(financeAccountConnections)
@@ -328,6 +314,73 @@ export function createFinanceConnectionHandoffService(options: {
             })
             .where(eq(financeAccountConnections.id, id));
           throw error;
+        }
+        state = {
+          phase: "exchanged",
+          ...exchanged,
+          ...(result.institutions?.[publicToken]
+            ? { institution: result.institutions[publicToken] }
+            : {}),
+        };
+        const encryptedState = encryptJson(state, key);
+        const persistenceStartedAt = Date.now();
+        // Reuse the known result; the single-use provider exchange must never be repeated.
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          try {
+            const [persisted] = await db
+              .update(financeAccountConnections)
+              .set({ encryptedHandoffState: encryptedState, lastError: null, updatedAt: now() })
+              .where(
+                and(
+                  eq(financeAccountConnections.id, id),
+                  eq(financeAccountConnections.userId, context.userId),
+                  eq(financeAccountConnections.version, claimed.version),
+                  eq(financeAccountConnections.status, "pending"),
+                ),
+              )
+              .returning({ id: financeAccountConnections.id });
+            if (!persisted)
+              throw new AppError(
+                "conflict",
+                "The bank connection changed while saving its exchange.",
+              );
+            break;
+          } catch {
+            if (attempt < 2) continue;
+            options.log?.({
+              event: "connector_handoff_failed",
+              code: "exchange_persistence_failed",
+              provider: "plaid",
+              category: "unexpected",
+              durationMs: Date.now() - persistenceStartedAt,
+              method: "POST",
+              path: "/v1/finances/account-connections/:id/complete",
+              requestId: context.requestId,
+              status: 503,
+            });
+            await db
+              .update(financeAccountConnections)
+              .set({
+                status: "needs_reauth",
+                lastError: {
+                  code: "exchange_persistence_failed",
+                  message:
+                    "Provider authorization completed, but its credentials could not be saved after bounded retries. This attempt needs recovery; do not repeat its consumed token.",
+                  retryable: false,
+                },
+                updatedAt: now(),
+              })
+              .where(
+                and(
+                  eq(financeAccountConnections.id, id),
+                  eq(financeAccountConnections.version, claimed.version),
+                ),
+              );
+            throw new AppError(
+              "service_unavailable",
+              "Provider authorization completed, but its credentials could not be retained. Inspect connection recovery before reconnecting.",
+            );
+          }
         }
       }
       if (state.phase === "exchanging")

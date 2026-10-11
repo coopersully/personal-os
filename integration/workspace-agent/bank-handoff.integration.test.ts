@@ -348,6 +348,118 @@ describe("bank authorization handoff", () => {
     expect((await completing).isError).toBe(true);
     expect(exchange.mock.calls.length).toBe(calls);
   });
+  it("retains one successful exchange across a transient credential-storage failure", async () => {
+    await f.setBypass(true);
+    const agent = await f.connectAgent(["finances:read", "finances:write", "finances:execute"]);
+    const started = await agent.client.callTool({
+      name: "start_finance_account_connection",
+      arguments: { provider: "plaid", idempotencyKey: crypto.randomUUID() },
+    });
+    const { connectionId } = (started.structuredContent as { data: { connectionId: string } }).data;
+    await f.db.execute(sql`create sequence exchange_storage_attempt`);
+    await f.db.execute(sql`create function fail_exchange_storage_once() returns trigger language plpgsql as $$
+      begin
+        if OLD.last_error->>'code' = 'exchange_in_progress' and NEW.last_error is null
+          and nextval('exchange_storage_attempt') = 1 then
+          raise exception 'fixture transient exchange storage failure';
+        end if;
+        return NEW;
+      end $$`);
+    await f.db.execute(
+      sql`create trigger fail_exchange_storage_once before update on finance_account_connections for each row execute function fail_exchange_storage_once()`,
+    );
+    const calls = exchange.mock.calls.length;
+    consent = true;
+    accountSuffix = "-storage-retry";
+    try {
+      const completed = await agent.client.callTool({
+        name: "complete_finance_account_connection",
+        arguments: { connectionId, idempotencyKey: crypto.randomUUID() },
+      });
+      expect(completed.isError, JSON.stringify(completed)).not.toBe(true);
+      expect(completed.structuredContent).toMatchObject({
+        outcome: "completed",
+        data: { status: "connected" },
+      });
+      expect(exchange.mock.calls.length).toBe(calls + 1);
+      expect(JSON.stringify(completed)).not.toContain("private-access");
+      const replay = await agent.client.callTool({
+        name: "complete_finance_account_connection",
+        arguments: { connectionId, idempotencyKey: crypto.randomUUID() },
+      });
+      expect(replay.isError, JSON.stringify(replay)).not.toBe(true);
+      expect(exchange.mock.calls.length).toBe(calls + 1);
+    } finally {
+      consent = false;
+      accountSuffix = "";
+      await f.db.execute(
+        sql`drop trigger fail_exchange_storage_once on finance_account_connections`,
+      );
+      await f.db.execute(sql`drop function fail_exchange_storage_once()`);
+      await f.db.execute(sql`drop sequence exchange_storage_attempt`);
+    }
+  });
+  it("bounds failed credential retention and never re-exchanges after storage stays unavailable", async () => {
+    await f.setBypass(true);
+    const agent = await f.connectAgent(["finances:read", "finances:write", "finances:execute"]);
+    const started = await agent.client.callTool({
+      name: "start_finance_account_connection",
+      arguments: { provider: "plaid", idempotencyKey: crypto.randomUUID() },
+    });
+    const { connectionId } = (started.structuredContent as { data: { connectionId: string } }).data;
+    await f.db.execute(sql`create sequence failed_exchange_storage_attempt`);
+    await f.db.execute(sql`create function fail_exchange_storage_always() returns trigger language plpgsql as $$
+      begin
+        if OLD.last_error->>'code' = 'exchange_in_progress' and NEW.last_error is null then
+          perform nextval('failed_exchange_storage_attempt');
+          raise exception 'fixture persistent exchange storage failure';
+        end if;
+        return NEW;
+      end $$`);
+    await f.db.execute(
+      sql`create trigger fail_exchange_storage_always before update on finance_account_connections for each row execute function fail_exchange_storage_always()`,
+    );
+    const calls = exchange.mock.calls.length;
+    consent = true;
+    try {
+      const completed = await agent.client.callTool({
+        name: "complete_finance_account_connection",
+        arguments: { connectionId, idempotencyKey: crypto.randomUUID() },
+      });
+      expect(completed.isError).toBe(true);
+      const attempts = await f.db.execute(
+        sql`select last_value from failed_exchange_storage_attempt`,
+      );
+      expect(Number(attempts.rows[0]?.last_value)).toBe(3);
+      const status = await agent.client.callTool({
+        name: "get_finance_account_connection",
+        arguments: { connectionId },
+      });
+      expect(status.structuredContent).toMatchObject({
+        data: { status: "needs_reauth", lastError: { code: "exchange_persistence_failed" } },
+      });
+      const replay = await agent.client.callTool({
+        name: "complete_finance_account_connection",
+        arguments: { connectionId, idempotencyKey: crypto.randomUUID() },
+      });
+      expect(replay.isError).toBe(true);
+      expect(exchange.mock.calls.length).toBe(calls + 1);
+      expect(logs).toContainEqual(
+        expect.objectContaining({
+          event: "connector_handoff_failed",
+          code: "exchange_persistence_failed",
+        }),
+      );
+      expect(JSON.stringify(logs)).not.toContain("private-access");
+    } finally {
+      consent = false;
+      await f.db.execute(
+        sql`drop trigger fail_exchange_storage_always on finance_account_connections`,
+      );
+      await f.db.execute(sql`drop function fail_exchange_storage_always()`);
+      await f.db.execute(sql`drop sequence failed_exchange_storage_attempt`);
+    }
+  });
   it("expires pending consent without exchanging and keeps failures safe to inspect", async () => {
     consent = false;
     const agent = await f.connectAgent(["finances:read", "finances:write", "finances:execute"]);

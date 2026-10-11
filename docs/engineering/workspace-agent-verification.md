@@ -79,7 +79,7 @@ provider login/MFA, sends, invitations and money movement were not performed. Pr
 provisioning and consent remain unverified. Existing domain/API suites cover further pagination,
 provider, revision and lifecycle branches; they are not automatically MCP transport evidence.
 
-The current shipping-review MCP suite passed **77 tests across 22 files**, with successful calls to **232/232**
+The current shipping-review MCP suite passed **79 tests across 22 files**, with successful calls to **232/232**
 normal-discovery tools in the audited domains. The [execution report](workspace-agent-execution.md)
 joins protocol traces to passing assertions and includes per-workspace totals. Some successful
 operations intentionally return needs_input or blocked; tests assert those dispositions and absence
@@ -154,3 +154,9 @@ claimed authorization links and report recovery work instead of presenting unusa
 
 Post-integration review regressions reject unversioned and stale category clearing and verify
 approval provenance through setup status, the setup-plan MCP tool and Finance guided setup.
+
+A forced transient failure while saving a successful provider exchange recovers by reusing the
+returned encrypted credentials. Persistent failure is bounded to three storage attempts, records
+`exchange_persistence_failed`, and never repeats the consumed provider token. A process crash or
+persistent database outage can still prevent retention; that boundary requires provider/operator
+reconciliation rather than blind exchange replay.

@@ -49,3 +49,6 @@ apps/web/public/terms/
 apps/web/public/data-use/
 apps/web/public/sms/
 apps/web/public/support/
+
+# Shared static landing render consumed by Vite.
+apps/web/.public-site/

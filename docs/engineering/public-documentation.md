@@ -33,6 +33,12 @@ for these documents; nginx serves directory indexes before the app
 fallback. The PWA navigation fallback excludes these paths. Full document links intentionally use
 anchors, not client-side routing. The sign-in footer and SMS enrollment link to the same documents.
 
+The root product page is also rendered from `ProductLanding` during `public:generate`. Vite
+embeds that shared markup in the root HTML before loading the client app, so the product page and
+its policy links remain readable without JavaScript. The generated fragment is ignored; edit the
+React component rather than maintaining a second copy of the landing text. Browser acceptance
+covers the root and all seven documents with JavaScript disabled on desktop and mobile.
+
 The product mission follows `docs/product/master-design.md`; public copy must distinguish intent
 from deployed capability. Do not promise universal autonomous execution, immediate erasure, a fixed
 retention deadline, certifications, or every external AI provider's training practices without

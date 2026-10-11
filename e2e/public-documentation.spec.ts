@@ -13,6 +13,26 @@ const pages = [
 test.describe("public documentation without JavaScript or a session", () => {
   test.use({ javaScriptEnabled: false });
 
+  test("the product landing page is readable and navigable", async ({ page }) => {
+    const response = await page.goto("/");
+    expect(response?.status()).toBe(200);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "Mail, tasks, calendar, and money.",
+    );
+    await expect(page.getByRole("link", { name: "Sign up", exact: true }).first()).toHaveAttribute(
+      "href",
+      "/signup",
+    );
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await page
+      .getByRole("navigation", { name: "Public documentation" })
+      .getByRole("link", { name: "Privacy policy" })
+      .click();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Privacy policy");
+  });
+
   for (const [path, title] of pages) {
     test(`${path} is readable and navigable`, async ({ page }) => {
       const response = await page.goto(`/${path}/`);

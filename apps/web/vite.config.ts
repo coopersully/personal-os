@@ -137,6 +137,22 @@ export default defineConfig(({ mode }) => {
       {
         name: "public-documentation-directory-indexes",
         enforce: "post",
+        transformIndexHtml: {
+          order: "pre",
+          async handler(html, context) {
+            const request = new URL(context.originalUrl ?? context.path, "http://localhost");
+            if (
+              context.server &&
+              (!["/", "/index.html"].includes(request.pathname) ||
+                request.searchParams.has("verifyEmail") ||
+                request.searchParams.has("resetPassword"))
+            ) {
+              return html;
+            }
+            const landing = await readFile(resolve(".public-site", "landing.html"), "utf8");
+            return html.replace('<div id="root"></div>', `<div id="root">${landing}</div>`);
+          },
+        },
         async generateBundle(_options, bundle) {
           const index = bundle["index.html"];
           if (index?.type !== "asset") throw new Error("Missing web HTML for public styles.");

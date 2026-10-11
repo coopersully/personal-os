@@ -36,6 +36,7 @@ final class NativeCompanion {
   private let pet = PetController()
   private var settings: NativeSettings?
   private var snapshot: NativeSnapshot?
+  private var appearance = PetAppearanceState()
   private var loginError: String?
   private var widgetError: String?
   private let launchedAtLogin =
@@ -44,7 +45,7 @@ final class NativeCompanion {
   private var wakeObservers: [NSObjectProtocol] = []
   init() {
     notifications.onAction = Self.emit
-    pet.model.action = Self.emit
+    pet.action = Self.emit
     for name in [NSWorkspace.didWakeNotification, NSWorkspace.sessionDidBecomeActiveNotification] {
       wakeObservers.append(
         NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main)
@@ -72,7 +73,15 @@ final class NativeCompanion {
     @unknown default: state = "unknown"
     }
     var result: [String: Any] = [
-      "ok": true, "notificationPermission": notifications.permission,
+      "ok": true, "accessibilityPermission": PetDock.authorized,
+      "dockGeometryAvailable": PetDock.shared.frame().map { rect in
+        NSScreen.screens.contains {
+          PetDock.resolve(rect, screen: $0.frame, desktopTop: NSScreen.screens.first?.frame.maxY ?? 0) != nil
+        }
+      } ?? false,
+      "notificationPermission": notifications.permission,
+      "notificationPermissionPending": notifications.permissionPending,
+      "testNotificationStatus": notifications.testNotificationStatus,
       "notificationAlertsAvailable": notifications.alertAvailable,
       "notificationSoundsAvailable": notifications.soundAvailable,
       "launchAtLogin": registration == .enabled, "loginStatus": state,
@@ -84,9 +93,11 @@ final class NativeCompanion {
     return result
   }
   func clear(preservingColdResponses: Bool = false) {
+    appearance.clear()
+    pet.clearOverlay()
     RitualBackdrop.shared.hide()
     snapshot = nil
-    pet.model.update(nil)
+    Self.emit(["action": "pet_clear"])
     notifications.clear(preservingColdResponses: preservingColdResponses)
     SharedSnapshotStore.clear()
     UserDefaults.standard.removeObject(forKey: "ilo.native.identityFingerprint")
@@ -124,6 +135,33 @@ final class NativeCompanion {
       RitualBackdrop.shared.hide();return ["ok":true,"visible":false]
     case "wallpaper_prepare": return try WallpaperController.prepare(object)
     case "wallpaper_apply": return try WallpaperController.apply(object)
+    case "pet_dismiss_for_navigation":
+      pet.dismissForNavigation()
+      return ["ok": true]
+    case "pet_appearance_session":
+      return ["accepted": appearance.session != nil && appearance.session == object["sessionId"] as? String]
+    case "begin_pet_appearance":
+      guard let settings else { throw NativeError.message("Desktop settings are unavailable") }
+      let session = UUID().uuidString
+      appearance.begin(session)
+      pet.configure(settings)
+      return ["sessionId": session]
+    case "preview_pet_appearance":
+      guard let session = object["sessionId"] as? String,
+        let revision = object["revision"] as? Int, revision > 0,
+        let color = object["color"] as? String, color.range(of: "^#[0-9A-Fa-f]{6}$", options: .regularExpression) != nil,
+        let scale = object["scale"] as? Double, scale.isFinite, (0.5...2).contains(scale)
+      else { throw NativeError.message("Invalid pet appearance") }
+      let accepted = appearance.accept(session: session, revision: revision)
+      if accepted { pet.previewAppearance(color: color, scale: scale) }
+      return ["accepted": accepted, "revision": revision]
+    case "finish_pet_appearance":
+      guard let session = object["sessionId"] as? String, let revision = object["revision"] as? Int else {
+        throw NativeError.message("Invalid appearance session")
+      }
+      appearance.finish(session: session, revision: revision)
+      if !appearance.active, let settings { pet.configure(settings) }
+      return ["ok": true]
     case "configure":
       guard let raw = object["settings"] else { throw NativeError.message("Missing settings") }
       var s = try JSONDecoder().decode(
@@ -134,11 +172,16 @@ final class NativeCompanion {
         clear(preservingColdResponses: settings == nil && snapshot == nil)
       }
       UserDefaults.standard.set(serverFingerprint, forKey: "ilo.native.serverFingerprint")
+      let enablingNotifications = s.notifications.enabled && settings?.notifications.enabled == false
       settings = s
+      if enablingNotifications { notifications.requestPermission() }
       let actual = SMAppService.mainApp.status
       do {
         if s.launchAtLogin, actual != .enabled && actual != .requiresApproval {
           try SMAppService.mainApp.register()
+          if SMAppService.mainApp.status == .requiresApproval {
+            SMAppService.openSystemSettingsLoginItems()
+          }
         }
         if !s.launchAtLogin, actual == .enabled || actual == .requiresApproval {
           try SMAppService.mainApp.unregister()
@@ -148,7 +191,7 @@ final class NativeCompanion {
       var visibleSettings = s
       visibleSettings.petEnabled = petShouldBeVisible(
         enabled: s.petEnabled, hasSnapshot: snapshot != nil)
-      pet.configure(visibleSettings)
+      pet.configure(visibleSettings, preserveAppearance: appearance.active)
       if let snapshot { publish(snapshot) }
       return status()
     case "snapshot":
@@ -169,24 +212,97 @@ final class NativeCompanion {
       }
       UserDefaults.standard.set(identityFingerprint, forKey: "ilo.native.identityFingerprint")
       snapshot = s
-      pet.configure(settings)
+      pet.configure(settings, preserveAppearance: appearance.active)
       publish(s)
+      Self.emit(["action": "pet_snapshot_changed"])
       return ["ok": true, "widgetsAvailable": SharedSnapshotStore.container != nil]
     case "clear":
       clear()
       return ["ok": true]
     case "status": return status()
+    case "request_accessibility_permission":
+      try PetDock.requestAccess()
+      return ["ok": true]
     case "request_notification_permission":
       notifications.requestPermission()
       return ["ok": true, "requestPending": true]
     case "test_notification":
       try notifications.test()
       return ["ok": true, "scheduled": true]
+    case "preview_pet_scale":
+      guard let scale = object["scale"] as? Double, scale.isFinite, (0.5...2).contains(scale)
+      else { throw NativeError.message("Choose a pet scale between 50% and 200%.") }
+      pet.previewScale(scale)
+      return ["ok": true]
     case "reset_pet_position":
       pet.resetPosition()
       return ["ok": true]
+    case "pet_prepare_overlay", "pet_ready_overlay", "pet_toggle_overlay":
+      guard let address = (object["windowAddress"] as? NSNumber)?.uint64Value else { throw NativeError.message("Missing quick-access window") }
+      if op == "pet_prepare_overlay" { try pet.prepareOverlay(windowAddress: address) }
+      else if op == "pet_ready_overlay" { try pet.readyOverlay(windowAddress: address) }
+      else { try pet.toggleOverlay(windowAddress: address) }
+      return ["ok": true]
+    case "pet_close_overlay":
+      pet.closeOverlay(immediately: object["immediately"] as? Bool == true)
+      return ["ok": true]
+    case "pet_prepare_drag":
+      pet.prepareDrag()
+      return ["ok": true]
+    case "pet_presentation":
+      return pet.presentationState
+    case "pet_acknowledge":
+      pet.acknowledgeCompletion()
+      return ["ok": true]
+    case "pet_pin":
+      guard let pinned = object["pinned"] as? Bool else { throw NativeError.message("Invalid pin state") }
+      pet.setPinned(pinned)
+      return pet.presentationState
+    case "pet_resize":
+      if let edge = object["edge"] as? String {
+        pet.prepareResize(edge: edge)
+      } else {
+        guard let dw = object["dw"] as? Double, let dh = object["dh"] as? Double,
+          dw.isFinite, dh.isFinite, abs(dw) <= 100, abs(dh) <= 100 else { throw NativeError.message("Invalid resize") }
+        pet.resizeOverlay(dw: dw, dh: dh)
+      }
+      return ["ok": true]
+    case "pet_move_overlay":
+      guard let dx = object["dx"] as? Double, let dy = object["dy"] as? Double,
+            dx.isFinite, dy.isFinite, abs(dx) <= 100, abs(dy) <= 100 else {
+        throw NativeError.message("Invalid quick-access movement")
+      }
+      pet.moveOverlay(dx: dx, dy: dy)
+      return ["ok": true]
+    case "pet_ritual_dates":
+      guard let definitions = object["definitions"] as? [[String: Any]], definitions.count <= 20 else { throw NativeError.message("Invalid ritual definitions") }
+      var dates: [String: String] = [:]
+      for definition in definitions {
+        guard let id = definition["id"] as? String, let zone = definition["timeZone"] as? String else { throw NativeError.message("Invalid ritual timezone") }
+        dates[id] = try PetContentWindow.make("today", timeZone: zone, now: Date()).json["throughDate"] as? String
+      }
+      return dates
+    case "pet_content_ranges":
+      guard let snapshot, let settings else { throw NativeError.message("Quick access is waiting for your account") }
+      let now = Date()
+      return ["tasks": try PetContentWindow.make(settings.petTaskWindow ?? "today", timeZone: snapshot.timeZone, now: now).json,
+        "reminders": try PetContentWindow.make(settings.petReminderWindow ?? "today", timeZone: snapshot.timeZone, now: now).json,
+        "finances": try PetContentWindow.make(settings.petFinanceWindow ?? "month", timeZone: snapshot.timeZone, now: now).json]
+    case "pet_snapshot":
+      guard let snapshot, let settings else { return ["ok": true, "snapshot": NSNull(), "workspaces": []] }
+      let filtered = snapshot.filtered(workspaces: settings.petWorkspaces)
+      guard var value = try JSONSerialization.jsonObject(with: JSONEncoder().encode(filtered)) as? [String: Any] else {
+        throw NativeError.message("Could not read quick access.")
+      }
+      value["tasks"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(filtered.dueToday(filtered.tasks, now: Date()) + filtered.overdue(filtered.tasks, now: Date())))
+      value["reminders"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(filtered.dueToday(filtered.reminders, now: Date()) + filtered.overdue(filtered.reminders, now: Date())))
+      value["events"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(filtered.todayEvents(now: Date())))
+      return ["ok": true, "snapshot": value, "workspaces": settings.petWorkspaces]
     case "quick_access":
       pet.quickAccess()
+      return ["ok": true]
+    case "open_login_settings":
+      SMAppService.openSystemSettingsLoginItems()
       return ["ok": true]
     case "open_notification_settings":
       guard
@@ -220,7 +336,6 @@ final class NativeCompanion {
   }
   private func publish(_ s: NativeSnapshot) {
     guard let settings else { return }
-    pet.model.update(s.filtered(workspaces: settings.petWorkspaces))
     notifications.reconcile(s, preferences: settings.notifications)
     do {
       try SharedSnapshotStore.write(

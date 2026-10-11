@@ -1,15 +1,20 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { toast } from "sonner";
+import { SettingsFeedbackContext } from "../../lib/settings-feedback";
 import { RitualLocal } from "./ritual-local.js";
 
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), dismiss: vi.fn() } }));
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 function mount() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <RitualLocal />
+      <SettingsFeedbackContext.Provider value={true}>
+        <RitualLocal />
+      </SettingsFeedbackContext.Provider>
     </QueryClientProvider>,
   );
   return client;
@@ -122,4 +127,23 @@ it("shows quarantined-storage recovery while signed out even with an empty queue
     expect(screen.queryByText("Saved ritual data needs recovery")).not.toBeInTheDocument(),
   );
   expect(invoke).toHaveBeenCalledWith("ritual_local", { discard: true });
+});
+
+it("reports a discard failure only through Sonner and retains the recovery controls", async () => {
+  invoke.mockImplementation(async (_command, args) => {
+    if (args.discard) throw new Error("private failure");
+    return { enabled: true, queue: [{}], localHistory: [] };
+  });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Discard pending changes" }));
+  fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining("automatic rituals"),
+      expect.anything(),
+    ),
+  );
+  expect(screen.queryByText(/Couldn’t update automatic rituals/)).not.toBeInTheDocument();
+  expect(screen.queryByText("private failure")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Keep changes" })).toBeEnabled();
 });

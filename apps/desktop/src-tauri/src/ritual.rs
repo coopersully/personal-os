@@ -592,6 +592,49 @@ pub async fn ritual_ready(
     *runtime.ready.lock().await = Some(occurrence_id);
     Ok(())
 }
+// Pet transport authorizes its window before calling these account-fenced adapters.
+pub async fn pet_state(
+    app: &tauri::AppHandle,
+    server: &str,
+    account: &str,
+) -> Result<Value, String> {
+    let runtime = app.state::<RitualRuntime>();
+    let _lock = runtime.lock.lock().await;
+    let (current_server, current_account, generation) = identity(app).await?;
+    if current_server != server || current_account != account {
+        return Err("Your account changed. Reopen quick access.".into());
+    }
+    let mut data = read(app, &identity_key(server, account)).await?;
+    sync(app, server, account, generation, &mut data).await?;
+    if data["state"].is_null() {
+        return Err("Ritual status is unavailable.".into());
+    }
+    Ok(data["state"].clone())
+}
+pub async fn pet_open(
+    app: &tauri::AppHandle,
+    server: &str,
+    account: &str,
+    occurrence: &str,
+) -> Result<(), String> {
+    if crate::updates::startup_blocking(app) {
+        return Err("Open nohmi before starting a ritual".into());
+    }
+    let runtime = app.state::<RitualRuntime>();
+    let _lock = runtime.lock.lock().await;
+    let (current_server, current_account, generation) = identity(app).await?;
+    if current_server != server || current_account != account {
+        return Err("Your account changed. Reopen quick access.".into());
+    }
+    let mut data = read(app, &identity_key(server, account)).await?;
+    sync(app, server, account, generation, &mut data).await?;
+    if data["state"]["current"]["id"].as_str() != Some(occurrence)
+        || !can_open_current(&data["state"], &current_time())
+    {
+        return Err("This ritual is no longer available. Refresh quick access.".into());
+    }
+    present(app, &data, true).await
+}
 #[tauri::command]
 pub async fn ritual_state(app: tauri::AppHandle) -> Result<Value, String> {
     let runtime = app.state::<RitualRuntime>();

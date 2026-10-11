@@ -885,7 +885,13 @@ test("feedback keeps corrections in context and action failures in toasts", asyn
   await page.getByLabel("Day end").blur();
   await expect(end).toHaveAttribute("aria-invalid", "true");
   await expect(page.getByText("Day end must be after day start.")).toBeVisible();
-  await expect(page.locator("[data-sonner-toast]")).toHaveCount(0);
+  const validation = page.locator("[data-sonner-toast]").filter({
+    hasText: "Check the highlighted settings fields.",
+  });
+  await expect(validation).toBeVisible();
+  await expect(
+    page.getByText("Check the highlighted settings fields.", { exact: true }),
+  ).toHaveCount(1);
   await page.screenshot({ path: testInfo.outputPath("feedback-validation.png") });
   const profileSaved = page.waitForResponse(
     (response) =>
@@ -895,6 +901,7 @@ test("feedback keeps corrections in context and action failures in toasts", asyn
   await expect(end).not.toHaveAttribute("aria-invalid", "true");
   await page.getByLabel("Day end").blur();
   await profileSaved;
+  await expect(validation).toHaveCount(0);
   await expect(page.getByText("All changes saved", { exact: true })).toHaveCount(0);
 
   await page.goto("/settings?section=appearance");

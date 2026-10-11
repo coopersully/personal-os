@@ -18,6 +18,7 @@ const CACHE_TTL: Duration = Duration::from_secs(7 * 86400);
 static JOBS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 static NEXT_JOB: AtomicU64 = AtomicU64::new(0);
 static SETTINGS_REVISION: AtomicU64 = AtomicU64::new(0);
+static PREVIEW_REVISION: AtomicU64 = AtomicU64::new(0);
 
 pub fn settings_revision() -> u64 {
     SETTINGS_REVISION.load(Ordering::SeqCst)
@@ -33,6 +34,22 @@ fn revision_current(actual: u64, expected: u64) -> Result<(), String> {
         Err("Wallpaper settings changed. Retry with the current preferences.".into())
     }
 }
+async fn observe_current<T>(
+    work: impl std::future::Future<Output = Result<T, String>>,
+    current: impl Fn() -> Result<(), String>,
+) -> Result<T, String> {
+    current()?;
+    tokio::select! {
+        result = work => result,
+        _ = async {
+            loop {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                if current().is_err() { break; }
+            }
+        } => Err("Wallpaper job cancelled.".into()),
+    }
+}
+
 static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
 // A cancelled coordinator future must abort downloads before releasing the job lock.
@@ -80,8 +97,8 @@ fn validate_url(raw: &str) -> Result<url::Url, String> {
 }
 impl WallpaperRequest {
     fn validate(&self) -> Result<(), String> {
-        if !(4..=20).contains(&self.image_urls.len()) {
-            return Err("Choose between 4 and 20 Pinterest images.".into());
+        if !(1..=20).contains(&self.image_urls.len()) {
+            return Err("Choose between 1 and 20 Pinterest images.".into());
         }
         for url in &self.image_urls {
             validate_url(url)?;
@@ -121,8 +138,10 @@ impl WallpaperRequest {
         Ok(())
     }
 }
-fn current(app: &AppHandle, generation: u64, revision: u64) -> Result<(), String> {
-    revision_current(settings_revision(), revision)?;
+fn current(app: &AppHandle, generation: u64, revision: Option<u64>) -> Result<(), String> {
+    if let Some(revision) = revision {
+        revision_current(settings_revision(), revision)?;
+    }
     if app
         .state::<crate::desktop::DesktopState>()
         .generation
@@ -269,13 +288,42 @@ pub async fn apply_for_revision(
     generation: u64,
     revision: u64,
 ) -> Result<String, String> {
+    render_for_revision(app, request, generation, revision, false).await
+}
+
+pub async fn preview(app: &AppHandle, request: WallpaperRequest) -> Result<String, String> {
+    let generation = app
+        .state::<crate::desktop::DesktopState>()
+        .generation
+        .load(Ordering::SeqCst);
+    render_for_revision(app, request, generation, settings_revision(), true).await
+}
+
+async fn render_for_revision(
+    app: &AppHandle,
+    request: WallpaperRequest,
+    generation: u64,
+    revision: u64,
+    preview: bool,
+) -> Result<String, String> {
+    let revision = if preview { None } else { Some(revision) };
     request.validate()?;
-    current(app, generation, revision)?;
+    // Preview edits are independent of persisted-settings revisions, but newer
+    // previews must invalidate both queued renders and active downloads.
+    let preview_revision = preview.then(|| PREVIEW_REVISION.fetch_add(1, Ordering::SeqCst) + 1);
+    let current_job = || {
+        current(app, generation, revision)?;
+        if let Some(expected) = preview_revision {
+            revision_current(PREVIEW_REVISION.load(Ordering::SeqCst), expected)?;
+        }
+        Ok::<_, String>(())
+    };
+    current_job()?;
     if !cfg!(target_os = "macos") {
         return Err("Native wallpaper application is currently available on macOS.".into());
     }
     let _job = JOBS.lock().await;
-    current(app, generation, revision)?;
+    current_job()?;
     let root = app
         .path()
         .app_data_dir()
@@ -318,17 +366,19 @@ pub async fn apply_for_revision(
         // Dropping join handles does not abort tasks; abort every outstanding task on cancellation/error.
         let outcome = async {
             for job in &mut jobs.0 {
-                let result = tokio::select! {
-                    result = job => result.map_err(|e| e.to_string())?,
-                    _ = async { loop { tokio::time::sleep(Duration::from_millis(100)).await; if current(app, generation, revision).is_err() { break; } } } => return Err("Wallpaper job cancelled.".into()),
-                }?;
+                let result = observe_current(
+                    async { job.await.map_err(|e| e.to_string())? },
+                    &current_job,
+                )
+                .await?;
                 images.insert(result.0, result.1);
             }
-            Ok::<_,String>(())
-        }.await;
+            Ok::<_, String>(())
+        }
+        .await;
         drop(jobs);
         outcome?;
-        current(app, generation, revision)?;
+        current_job()?;
     }
     let id = format!(
         "job-{}-{}-{}",
@@ -360,15 +410,18 @@ pub async fn apply_for_revision(
     .await
     .map_err(|e| e.to_string())??;
     let prepared = async {
-        current(app,generation,revision)?;
-        crate::native::call(app, serde_json::json!({"op":"wallpaper_prepare", "request":request, "imagePaths": paths, "outputDirectory":output})).await?;
-        current(app,generation,revision)?;
-        Ok::<_,String>(())
+        current_job()?;
+        let rendered = crate::native::call(app, serde_json::json!({"op":"wallpaper_prepare", "request":request, "imagePaths": paths, "outputDirectory":output, "preview":preview})).await?;
+        current_job()?;
+        Ok::<_,String>(rendered)
     }.await;
-    if let Err(error) = prepared {
-        let _ = std::fs::remove_dir_all(&output);
-        return Err(error);
-    }
+    let prepared = match prepared {
+        Ok(value) => value,
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&output);
+            return Err(error);
+        }
+    };
     // All images decoded successfully; only now promote sources to the persistent cache.
     tauri::async_runtime::spawn_blocking(move || {
         for (url, bytes) in images {
@@ -377,7 +430,15 @@ pub async fn apply_for_revision(
     })
     .await
     .map_err(|e| e.to_string())?;
-    if let Err(error) = current(app, generation, revision) {
+    if preview {
+        let _ = std::fs::remove_dir_all(&output);
+        current_job()?;
+        return prepared["image"]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| "macOS did not return a wallpaper preview.".into());
+    }
+    if let Err(error) = current_job() {
         let _ = std::fs::remove_dir_all(&output);
         return Err(error);
     }
@@ -385,7 +446,7 @@ pub async fn apply_for_revision(
     // Pinterest PATCH cannot race the generation/revision check and OS application.
     let state = app.state::<crate::desktop::DesktopState>();
     let transition = state.settings.lock().await;
-    let result = match current(app, generation, revision) {
+    let result = match current_job() {
         Ok(()) => {
             crate::native::call(
                 app,
@@ -555,6 +616,28 @@ mod tests {
             .unwrap()
             .is_err());
     }
+    #[tokio::test]
+    async fn superseding_a_preview_interrupts_a_stalled_download() {
+        let revision = AtomicU64::new(1);
+        let stalled = observe_current(std::future::pending::<Result<(), String>>(), || {
+            revision_current(revision.load(Ordering::SeqCst), 1)
+        });
+        let supersede = async {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            revision.store(2, Ordering::SeqCst);
+        };
+        let (result, ()) = tokio::time::timeout(Duration::from_secs(1), async {
+            tokio::join!(stalled, supersede)
+        })
+        .await
+        .unwrap();
+        assert!(result.unwrap_err().contains("cancelled"));
+        assert!(observe_current(async { Ok(42) }, || Ok(())).await.is_ok());
+        assert!(observe_current(async { Ok(42) }, || revision_current(2, 1))
+            .await
+            .is_err());
+    }
+
     #[test]
     fn preference_revision_cancels_obsolete_work_without_an_account_change() {
         assert!(revision_current(4, 4).is_ok());

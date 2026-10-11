@@ -2,15 +2,15 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
-import { ProductLanding } from "../src/features/public-site/landing.js";
 import { PublicDocument } from "../src/features/public-site/document.js";
+import { ProductLanding } from "../src/features/public-site/landing.js";
 import { publicDocuments } from "../src/features/public-site/layout.js";
 
 const root = new URL("../", import.meta.url);
 const landingDirectory = new URL(".public-site/", root);
 await mkdir(landingDirectory, { recursive: true });
 await writeFile(
-  new URL("landing.html", landingDirectory),
+  new URL("landing.fragment", landingDirectory),
   renderToStaticMarkup(
     <MemoryRouter initialEntries={["/"]}>
       <ProductLanding />

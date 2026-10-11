@@ -149,7 +149,7 @@ export default defineConfig(({ mode }) => {
             ) {
               return html;
             }
-            const landing = await readFile(resolve(".public-site", "landing.html"), "utf8");
+            const landing = await readFile(resolve(".public-site", "landing.fragment"), "utf8");
             return html.replace('<div id="root"></div>', `<div id="root">${landing}</div>`);
           },
         },

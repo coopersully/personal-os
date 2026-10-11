@@ -125,6 +125,46 @@ async fn work(
     }
     project(items, range, overdue, partial)
 }
+// Keep failures scoped to their source. No cached fallback may masquerade as a fresh section.
+fn section(result: &mut Value, kind: &str, value: Result<Value, String>) {
+    match value {
+        Ok(value) => result[kind] = value,
+        Err(_) => result["errors"][kind] = json!(true),
+    }
+}
+async fn finance(
+    app: &tauri::AppHandle,
+    server: &str,
+    account: &str,
+    settings: &DesktopSettings,
+    range: &Value,
+) -> Result<Value, String> {
+    if settings.pet_finance_window == "next30" {
+        return Ok(
+            json!({"range":range,"unavailable":"Scheduled outflows are not available for quick access."}),
+        );
+    }
+    let path = {
+        let mut query = url::form_urlencoded::Serializer::new(String::new());
+        query.append_pair(
+            "from",
+            range["fromDate"].as_str().ok_or("Invalid finance range")?,
+        );
+        query.append_pair(
+            "through",
+            range["throughDate"]
+                .as_str()
+                .ok_or("Invalid finance range")?,
+        );
+        format!("/v1/finances/position?{}", query.finish())
+    };
+    let value = get(app, server, account, path).await?;
+    let fact = &value["position"]["postedSpend"];
+    if fact["quality"].as_str().is_none() {
+        return Err("Invalid finance evidence.".into());
+    }
+    Ok(json!({"range":range,"facts":[fact],"asOf":value["position"]["asOf"]}))
+}
 pub async fn load(
     app: &tauri::AppHandle,
     server: &str,
@@ -138,39 +178,22 @@ pub async fn load(
         ("reminders", settings.pet_reminders_include_overdue),
     ] {
         if settings.pet_workspaces.iter().any(|w| w == kind) {
-            result[kind] = work(app, server, account, kind, &ranges[kind], overdue).await?;
+            section(
+                &mut result,
+                kind,
+                work(app, server, account, kind, &ranges[kind], overdue).await,
+            );
         }
     }
     if settings.pet_workspaces.iter().any(|w| w == "finances") {
-        let range = &ranges["finances"];
-        if settings.pet_finance_window == "next30" {
-            result["finances"] = json!({"range":range,"unavailable":"Scheduled outflows are not available for quick access."});
-        } else {
-            let path = {
-                let mut query = url::form_urlencoded::Serializer::new(String::new());
-                query.append_pair(
-                    "from",
-                    range["fromDate"].as_str().ok_or("Invalid finance range")?,
-                );
-                query.append_pair(
-                    "through",
-                    range["throughDate"]
-                        .as_str()
-                        .ok_or("Invalid finance range")?,
-                );
-                format!("/v1/finances/position?{}", query.finish())
-            };
-            let value = get(app, server, account, path).await?;
-            let fact = &value["position"]["postedSpend"];
-            if fact["quality"].as_str().is_none() {
-                return Err("Invalid finance evidence.".into());
-            }
-            result["finances"] =
-                json!({"range":range,"facts":[fact],"asOf":value["position"]["asOf"]});
-        }
+        section(
+            &mut result,
+            "finances",
+            finance(app, server, account, settings, &ranges["finances"]).await,
+        );
     }
     if settings.pet_show_rituals {
-        result["rituals"] = rituals(app, server, account).await?;
+        section(&mut result, "rituals", rituals(app, server, account).await);
     }
     Ok(result)
 }
@@ -288,6 +311,18 @@ async fn rituals(app: &tauri::AppHandle, server: &str, account: &str) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn section_failures_preserve_successes_without_cached_fallbacks() {
+        let mut content = json!({});
+        section(&mut content, "tasks", Ok(json!({"items":[{"id":"task"}]})));
+        for kind in ["reminders", "finances", "rituals"] {
+            section(&mut content, kind, Err("provider unavailable".into()));
+            assert_eq!(content["errors"][kind], true);
+            assert!(content[kind].is_null());
+        }
+        assert_eq!(content["tasks"]["items"][0]["id"], "task");
+        assert!(content["errors"]["tasks"].is_null());
+    }
     #[test]
     fn rituals_preserve_logical_occurrence_and_disabled_configuration() {
         let state = json!({"serverNow":"2026-10-12T02:00:00Z","syncStatus":"saved",

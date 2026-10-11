@@ -425,3 +425,44 @@ it("delivers content refresh errors through Sonner without showing empty date wi
   expect(screen.queryByText("Nothing in this date window.")).not.toBeInTheDocument();
   expect(screen.queryByText("Couldn’t refresh quick-access content.")).not.toBeInTheDocument();
 });
+
+it.each([
+  "tasks",
+  "reminders",
+  "finances",
+  "rituals",
+] as const)("isolates a %s failure while keeping other pet content usable", async (failed) => {
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "pet_snapshot"
+      ? {
+          ...fixture,
+          workspaces: ["tasks", "reminders", "finances"],
+          snapshot: {
+            ...fixture.snapshot,
+            reminders: [{ id: "reminder", title: "Take a break" }],
+            financeSummary: "Old summary",
+          },
+          content: { errors: { [failed]: true } },
+        }
+      : undefined,
+  );
+  mount();
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      `Couldn’t refresh pet ${failed}. They will retry automatically.`,
+      expect.anything(),
+    ),
+  );
+  expect(screen.queryByText(/Couldn’t refresh pet/)).not.toBeInTheDocument();
+  if (failed === "tasks")
+    expect(
+      screen.queryByRole("checkbox", { name: "Complete Review the draft" }),
+    ).not.toBeInTheDocument();
+  else expect(screen.getByRole("checkbox", { name: "Complete Review the draft" })).toBeEnabled();
+  if (failed === "reminders")
+    expect(
+      screen.queryByRole("checkbox", { name: "Complete Take a break" }),
+    ).not.toBeInTheDocument();
+  else expect(screen.getByRole("checkbox", { name: "Complete Take a break" })).toBeEnabled();
+  if (failed === "finances") expect(screen.queryByText("Old summary")).not.toBeInTheDocument();
+});

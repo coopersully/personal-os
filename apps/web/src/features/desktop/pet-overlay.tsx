@@ -70,6 +70,7 @@ export type PetData = {
   contentError?: string;
   content?: {
     unavailable?: boolean;
+    errors?: Partial<Record<"tasks" | "reminders" | "finances" | "rituals", boolean>>;
     rituals?: RitualCard[];
     tasks?: WorkContent;
     reminders?: WorkContent;
@@ -246,6 +247,23 @@ function PetContent() {
   useSettingsError(
     data.data?.contentError,
     "Couldn’t refresh quick-access content. It will retry automatically.",
+  );
+  const sectionErrors = data.data?.content?.errors;
+  useSettingsError(
+    sectionErrors?.tasks,
+    "Couldn’t refresh pet tasks. They will retry automatically.",
+  );
+  useSettingsError(
+    sectionErrors?.reminders,
+    "Couldn’t refresh pet reminders. They will retry automatically.",
+  );
+  useSettingsError(
+    sectionErrors?.finances,
+    "Couldn’t refresh pet finances. They will retry automatically.",
+  );
+  useSettingsError(
+    sectionErrors?.rituals,
+    "Couldn’t refresh pet rituals. They will retry automatically.",
   );
   useSettingsError(data.error, "Couldn’t load quick access. It will retry automatically.");
   useSettingsError(me.error, "Couldn’t refresh your account. Open nohmi to reconnect.");
@@ -540,13 +558,19 @@ function PetContent() {
             {rituals(true)}
             {calendar}
             {rituals(false)}
-            {!data.data?.content?.unavailable && data.data?.workspaces.includes("tasks")
+            {!data.data?.content?.unavailable &&
+            !sectionErrors?.tasks &&
+            data.data?.workspaces.includes("tasks")
               ? work(snapshot.tasks, "task", "Tasks", data.data?.content?.tasks)
               : null}
-            {!data.data?.content?.unavailable && data.data?.workspaces.includes("reminders")
+            {!data.data?.content?.unavailable &&
+            !sectionErrors?.reminders &&
+            data.data?.workspaces.includes("reminders")
               ? work(snapshot.reminders, "reminder", "Reminders", data.data?.content?.reminders)
               : null}
-            {data.data?.workspaces.includes("finances") && (finance || snapshot.financeSummary) ? (
+            {!sectionErrors?.finances &&
+            data.data?.workspaces.includes("finances") &&
+            (finance || snapshot.financeSummary) ? (
               <Card className="shrink-0">
                 <CardHeader>
                   <CardTitle>Finances</CardTitle>

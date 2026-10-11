@@ -114,8 +114,9 @@ banners or sounds disabled, and Focus can suppress presentation.
 
 Launch at login uses SMAppService registration. If it returns `requiresApproval`, open Login
 Items for user approval and continue showing the actual registration state. Closing a window
-is distinct from quitting the process. Pet overlays and wallpaper do not require Accessibility
-or Screen Recording access; do not request unrelated permissions.
+is distinct from quitting the process. Accessibility is optional and used only to measure Dock geometry for pet placement.
+Wallpaper does not require Accessibility, and neither feature requires Screen Recording; do not
+request unrelated permissions.
 
 Every notification type uses Sound CN’s CC0 Kenney soft click when sound is enabled. The
 bundled PCM WAV is installed atomically in the user’s Library/Sounds for UserNotifications.
@@ -146,7 +147,7 @@ Clicking the pet opens a floating app webview beside it, using the app theme, sh
 buttons, and Sonner. Tray Quick access remains available when the ambient pet is disabled;
 closing that dashboard does not enable the pet. Do not use SwiftUI/AppKit menus or popovers
 for quick-access content.
-Escape, the close action, or focus moving outside the overlay dismisses it. Workspace choices
+Escape dismisses the overlay. Outside clicks or focus changes dismiss it only when unpinned. Workspace choices
 filter the cached snapshot. Completion and meeting actions verify the current server/account;
 account clearing destroys the overlay so stale account content cannot reappear. The native
 layer owns the sprite, window placement, and authenticated transport only.

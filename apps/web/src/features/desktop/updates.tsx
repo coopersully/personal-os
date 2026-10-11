@@ -139,7 +139,7 @@ export function DesktopUpdates() {
     onSettled: refresh,
     feedback: { action: "restart to update" },
   });
-  useSettingsError(status.error, "Couldn’t read desktop update status.");
+  useSettingsError(status.error, "Couldn’t read desktop update status.", () => status.refetch());
   useSettingsError(
     status.data?.error,
     "Couldn’t complete the desktop update. Try checking again or download the latest release.",
@@ -164,16 +164,6 @@ export function DesktopUpdates() {
           <p className="text-sm text-muted-foreground">
             Last checked {new Date(status.data.checkedAt).toLocaleString()}
           </p>
-        ) : null}
-        {status.error ? (
-          <Alert>
-            <AlertDescription>
-              Could not read update status{" "}
-              <Button variant="ghost" onClick={() => void status.refetch()}>
-                Retry
-              </Button>
-            </AlertDescription>
-          </Alert>
         ) : null}
       </CardContent>
       <CardFooter className="flex flex-wrap gap-2">

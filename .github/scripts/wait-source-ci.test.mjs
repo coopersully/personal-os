@@ -4,7 +4,7 @@ import test from "node:test";
 import { sourceDecision } from "./wait-source-ci.mjs";
 
 const run = {
-  pull_requests: [{ base: { sha: "base" } }],
+  pull_requests: [{ number: 42, base: { sha: "base" } }],
   id: 1,
   run_attempt: 1,
   head_sha: "candidate",
@@ -13,30 +13,35 @@ const run = {
   conclusion: "success",
 };
 test("metadata cannot substitute for missing, pending, failed, or foreign source verification", () => {
-  assert.equal(sourceDecision([], "candidate", "base"), "wait");
-  assert.equal(sourceDecision([run], "candidate", "base"), "success");
-  assert.equal(sourceDecision([run], "other", "base"), "wait");
-  assert.equal(sourceDecision([{ ...run, event: "push" }], "candidate", "base"), "wait");
+  assert.equal(sourceDecision([], "candidate", "base", 42), "wait");
+  assert.equal(sourceDecision([run], "candidate", "base", 42), "success");
+  assert.equal(sourceDecision([run], "other", "base", 42), "wait");
+  assert.equal(sourceDecision([{ ...run, event: "push" }], "candidate", "base", 42), "wait");
   assert.equal(
-    sourceDecision([run, { ...run, id: 2, status: "in_progress" }], "candidate", "base"),
+    sourceDecision([run, { ...run, id: 2, status: "in_progress" }], "candidate", "base", 42),
     "wait",
   );
   assert.equal(
-    sourceDecision([run, { ...run, run_attempt: 2, conclusion: "failure" }], "candidate", "base"),
+    sourceDecision(
+      [run, { ...run, run_attempt: 2, conclusion: "failure" }],
+      "candidate",
+      "base",
+      42,
+    ),
     "failure",
   );
   assert.equal(
-    sourceDecision([{ ...run, conclusion: "cancelled" }], "candidate", "base"),
+    sourceDecision([{ ...run, conclusion: "cancelled" }], "candidate", "base", 42),
     "failure",
   );
 });
 test("different integration base cannot reuse source evidence", () => {
-  assert.equal(sourceDecision([run], "candidate", "new-base"), "failure");
+  assert.equal(sourceDecision([run], "candidate", "new-base", 42), "failure");
 });
 test("metadata changes cannot cancel source CI, and protected gate requires both", () => {
   const source = readFileSync(new URL("../workflows/ci.yml", import.meta.url), "utf8");
   const metadata = readFileSync(new URL("../workflows/pr-metadata.yml", import.meta.url), "utf8");
-  assert.match(source, /types: \[opened, ready_for_review, reopened, synchronize\]/);
+  assert.match(source, /types: \[opened, reopened, synchronize\]/);
   assert.doesNotMatch(source, /name: CI required/);
   assert.match(source, /name: Source verification/);
   assert.match(metadata, /types: \[edited, opened, ready_for_review, reopened, synchronize\]/);
@@ -44,4 +49,19 @@ test("metadata changes cannot cancel source CI, and protected gate requires both
   assert.match(metadata, /name: CI required/);
   assert.match(metadata, /check-pr-body.sh/);
   assert.match(metadata, /wait-source-ci.mjs/);
+});
+
+test("another PR sharing the head cannot replace this PR's source evidence", () => {
+  for (const conclusion of ["success", "failure", "cancelled"]) {
+    const foreign = {
+      ...run,
+      id: 2,
+      conclusion,
+      pull_requests: [{ number: 99, base: { sha: "base" } }],
+    };
+    assert.equal(sourceDecision([foreign], "candidate", "base", 42), "wait");
+    assert.equal(sourceDecision([run, foreign], "candidate", "base", 42), "success");
+  }
+  const changedBase = { ...run, id: 2, pull_requests: [{ number: 42, base: { sha: "new-base" } }] };
+  assert.equal(sourceDecision([run, changedBase], "candidate", "base", 42), "failure");
 });

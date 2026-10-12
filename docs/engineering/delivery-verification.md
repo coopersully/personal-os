@@ -21,7 +21,7 @@ Compare the workflow against the candidate's verifier inputs; check names alone 
 | `pnpm test:e2e` | Browser acceptance |
 
 Every row must be represented and successful for hosted full equivalence, even if scoped CI omitted
-an unaffected stage. Omission is not evidence. Run missing/local-only checks locally, or use the
+an unaffected stage. Omission is not evidence: if any core hosted stage is missing, use the
 complete local verifier. Native/platform, live-provider, and issue-specific acceptance remain
 additional requirements when relevant. Preserve all coverage floors, assertions, and required checks.
 
@@ -65,10 +65,10 @@ runner while code is edited beneath it; stop only the owned run before edits.
 
 ## CI metadata isolation
 
-`ci.yml` runs source checks on opened, ready-for-review, reopened, synchronize, and supported pushes.
-Its aggregate is `Source verification`. `pr-metadata.yml` runs on those PR events plus edits and owns
+`ci.yml` runs source checks on opened, reopened, synchronize, and supported pushes.
+Its aggregate is `Source verification`. `pr-metadata.yml` runs on those PR events plus edits and ready-for-review and owns
 `CI required`, preserving the existing protection name/provider. It validates the event's Work map
-and waits for the latest applicable successful source workflow on that exact head. Missing, pending,
+and waits for the latest applicable successful source workflow for that PR on its exact head and base. Missing, pending,
 failed, or canceled source runs cannot pass the gate. Each workflow has a separate concurrency group;
 editing a description cancels only a superseded metadata gate, never source tests.
 

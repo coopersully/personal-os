@@ -794,6 +794,9 @@ it("uses calendar colors for shared timed and all-day cards in one scroll area",
   expect(screen.getByRole("button", { name: /All day Planning day/ })).toHaveStyle({
     "--occasion-color": "#4285f4",
   });
+  expect(
+    screen.getByRole("button", { name: /All day Planning day/ }).closest("li"),
+  ).toBeInTheDocument();
   expect(container.querySelectorAll('[data-slot="scroll-area-viewport"]')).toHaveLength(1);
   expect(container.querySelector(".today-timeline")?.parentElement).not.toHaveClass(
     "overflow-y-auto",

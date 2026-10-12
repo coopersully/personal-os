@@ -44,7 +44,9 @@ function LocationMapInstance({
   const onFailure = useCallback(() => setFailed(true), []);
   const apiKey = import.meta.env.VITE_CARTO_API_KEY as string | undefined;
   const fallback = (
-    <div className="flex size-full items-center justify-center bg-muted text-sm text-muted-foreground">
+    <div
+      className={`flex size-full items-center justify-center text-sm text-muted-foreground ${mode === "background" ? "bg-background" : "bg-muted"}`}
+    >
       {mode === "preview" ? (
         <div>
           Map unavailable.{" "}
@@ -74,7 +76,7 @@ function LocationMapInstance({
               <div
                 role="img"
                 aria-busy="true"
-                className="size-full bg-muted"
+                className={`size-full ${mode === "background" ? "bg-background" : "bg-muted"}`}
                 aria-label="Loading map"
               />
             }

@@ -34,6 +34,11 @@ test("Today keeps independent cards, saves personalization and uses weekly filte
       .poll(async () => (await (await page.request.get(path)).json()).preferences.commitmentFilter)
       .toBe("tasks");
     await expect(queue.getByRole("radio", { name: /^Tasks / })).toBeChecked();
+    expect(
+      await queue
+        .getByRole("radiogroup", { name: "Commitment filters" })
+        .evaluate((element) => element.scrollWidth <= element.clientWidth),
+    ).toBeTruthy();
     await expect(page.getByRole("radiogroup", { name: "Spending period" })).toBeVisible();
     await expect(page.getByText("Your desktop pet", { exact: true })).toHaveCount(0);
     expect(

@@ -1,5 +1,19 @@
 export const financeCapabilityManifest = [
   {
+    apiOperation: "getFinanceContinuations",
+    capability: "workflow.answer_continuations",
+    mcpTool: "get_finance_continuations",
+    mode: "read",
+    requiredScope: "finances:maintain",
+  },
+  {
+    apiOperation: "observeAutomationHostSchedule",
+    capability: "workflow.host_observation",
+    mcpTool: "observe_finance_host_schedule",
+    mode: "write",
+    requiredScope: "finances:maintain",
+  },
+  {
     apiOperation: "getFinancePlaybook",
     capability: "policy.playbook",
     mcpTool: "get_finance_playbook",
@@ -124,6 +138,13 @@ export const financeCapabilityManifest = [
     mcpTool: "start_finance_account_connection",
     mode: "external",
     requiredScope: "finances:write",
+  },
+  {
+    apiOperation: "completeFinanceAccountConnection",
+    capability: "account.connection_complete",
+    mcpTool: "complete_finance_account_connection",
+    mode: "external",
+    requiredScope: "finances:execute",
   },
   {
     apiOperation: "getFinanceAccountConnection",
@@ -319,7 +340,7 @@ export const financeCapabilityManifest = [
   capability: string;
   mcpTool: string;
   mode: "external" | "read" | "write";
-  requiredScope: "finances:read" | "finances:write" | "finances:maintain";
+  requiredScope: "finances:read" | "finances:write" | "finances:maintain" | "finances:execute";
 }>;
 
 export type FinanceCapability = (typeof financeCapabilityManifest)[number]["capability"];

@@ -4,7 +4,13 @@ import {
   financeToolResultSchema,
   idSchema,
   maintenanceRunStatusSchema,
+  resetFinanceNotificationPreferencesSchema,
+  ritualActionInputSchema,
+  ritualDefinitionInputSchema,
+  ritualResponseInputSchema,
   taskWorkspacePageSchema,
+  updateWorkspaceSettingsSchema,
+  workspaceSettingsSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
 
@@ -47,6 +53,9 @@ export function createOpenApiDocument(apiBaseUrl: string) {
   return {
     components: {
       schemas: {
+        RitualDefinitionInput: z.toJSONSchema(ritualDefinitionInputSchema, { io: "input" }),
+        RitualResponseInput: z.toJSONSchema(ritualResponseInputSchema, { io: "input" }),
+        RitualActionInput: z.toJSONSchema(ritualActionInputSchema, { io: "input" }),
         TaskWorkspacePage: z.toJSONSchema(taskWorkspacePageSchema, { io: "input" }),
         FinanceMaintenanceHistoryPage: {
           properties: {
@@ -257,8 +266,145 @@ export function createOpenApiDocument(apiBaseUrl: string) {
     },
     openapi: "3.1.0",
     paths: {
+      "/v1/workspaces/{workspace}/search": {
+        get: {
+          security,
+          summary: "Search all available synced workspace content, independent of view filters",
+          parameters: [
+            {
+              name: "workspace",
+              in: "path",
+              required: true,
+              schema: { type: "string", enum: ["calendar", "tasks", "mail", "finances"] },
+            },
+            {
+              name: "q",
+              in: "query",
+              required: true,
+              schema: { type: "string", minLength: 1, maxLength: 200 },
+            },
+            {
+              name: "offset",
+              in: "query",
+              schema: { type: "integer", minimum: 0, maximum: 10000 },
+            },
+            {
+              name: "limit",
+              in: "query",
+              schema: { type: "integer", minimum: 1, maximum: 50, default: 20 },
+            },
+            { name: "includeArchived", in: "query", schema: { type: "boolean", default: true } },
+            {
+              name: "kind",
+              in: "query",
+              schema: { type: "string", enum: ["all", "content", "reviews"], default: "all" },
+            },
+          ],
+          responses: {
+            200: {
+              description:
+                "Ranked items with bounded previews, internal destinations, nextOffset, synced coverage and any unavailable review source",
+            },
+            400: { description: "Invalid search" },
+            401: { description: "Authentication required" },
+            403: { description: "Workspace read scope required" },
+          },
+        },
+      },
+      "/v1/texting/notifications/preferences/finances": {
+        delete: {
+          security,
+          summary: "Reset Finance notification overrides to global preferences; human session only",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: z.toJSONSchema(resetFinanceNotificationPreferencesSchema),
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Finance now inherits global notification preferences",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: { scope: { const: "finances" }, inherited: { const: true } },
+                    required: ["scope", "inherited"],
+                  },
+                },
+              },
+            },
+            403: { description: "Interactive Texting write and Finance read access required" },
+            409: { description: "Override missing or revision changed" },
+          },
+        },
+      },
+      "/v1/workspaces/{workspace}/settings": {
+        parameters: [
+          {
+            name: "workspace",
+            in: "path",
+            required: true,
+            schema: { type: "string", enum: ["calendar", "tasks", "mail", "finances"] },
+          },
+        ],
+        get: {
+          security,
+          summary: "Read account-owned workspace preferences",
+          responses: {
+            200: {
+              description:
+                "Resolved workspace-specific preferences and revision; revision zero denotes untouched defaults",
+              content: { "application/json": { schema: z.toJSONSchema(workspaceSettingsSchema) } },
+            },
+          },
+        },
+        patch: {
+          security,
+          summary: "Update preferences with optimistic concurrency; human session only",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: z.toJSONSchema(updateWorkspaceSettingsSchema, { io: "input" }),
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Saved preferences and incremented revision",
+              content: { "application/json": { schema: z.toJSONSchema(workspaceSettingsSchema) } },
+            },
+            403: { description: "Interactive workspace write access required" },
+            409: { description: "Preferences changed; reload before retrying" },
+          },
+        },
+      },
+      "/v1/desktop-release": {
+        get: {
+          summary: "Published official desktop installers and release notes",
+          security: [],
+          responses: {
+            200: {
+              description:
+                "Available, not_published, unavailable or disabled for self-hosted deployments; only available includes release metadata",
+            },
+          },
+        },
+      },
       "/health/live": { get: { responses: { 200: { description: "Process is alive" } } } },
-      "/health/ready": { get: { responses: { 200: { description: "Dependencies are ready" } } } },
+      "/health/ready": {
+        get: {
+          responses: {
+            200: {
+              description:
+                "Dependencies are ready; archived production builds include their public source revision",
+            },
+          },
+        },
+      },
       "/v1/auth/register": { post: { responses: { 201: { description: "Account created" } } } },
       "/v1/auth/invitations/validate": {
         post: { responses: { 200: { description: "Invitation validity checked" } } },
@@ -661,7 +807,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
             }),
             queryParameter("status", {
               type: "string",
-              enum: ["all", "open", "completed", "cancelled", "archived"],
+              enum: ["all", "open", "open_and_completed", "completed", "cancelled", "archived"],
             }),
             queryParameter("listId", { format: "uuid", type: "string" }),
             queryParameter("projectId", { format: "uuid", type: "string" }),
@@ -1023,6 +1169,83 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       },
       "/v1/assistant/attention/{domain}/{id}": {
         patch: { security, responses: { 200: { description: "Attention item updated" } } },
+      },
+      "/v1/rituals": {
+        get: {
+          security,
+          parameters: [],
+          "x-required-scopes": ["tracking:read"],
+          responses: { 200: { description: "Ritual definitions" } },
+        },
+      },
+      "/v1/rituals/current": {
+        get: {
+          security,
+          parameters: [],
+          "x-required-scopes": ["tracking:read"],
+          responses: { 200: { description: "Current reconciled ritual" } },
+        },
+      },
+      "/v1/rituals/history": {
+        get: {
+          security,
+          parameters: [
+            ...paginationParameters,
+            queryParameter("kind", { type: "string", enum: ["morning", "night"] }),
+            queryParameter("dateFrom", { type: "string", format: "date" }),
+            queryParameter("dateTo", { type: "string", format: "date" }),
+          ],
+          "x-required-scopes": ["tracking:read"],
+          responses: { 200: { description: "Paginated ritual history" } },
+        },
+      },
+      "/v1/rituals/export": {
+        get: {
+          security,
+          parameters: [],
+          "x-required-scopes": ["tracking:read"],
+          responses: { 200: { description: "Private ritual export; interactive user only" } },
+        },
+      },
+      "/v1/rituals/{kind}": {
+        put: {
+          security,
+          requestBody: jsonRequest("RitualDefinitionInput"),
+          parameters: [{ in: "path", name: "kind", required: true, schema: { type: "string" } }],
+          "x-required-scopes": ["tracking:read", "tracking:write"],
+          responses: { 200: { description: "Revision-bound ritual configuration" } },
+        },
+      },
+      "/v1/rituals/occurrences/{id}/responses/{stepId}": {
+        put: {
+          security,
+          requestBody: jsonRequest("RitualResponseInput"),
+          parameters: [
+            { in: "path", name: "id", required: true, schema: { type: "string" } },
+            { in: "path", name: "stepId", required: true, schema: { type: "string" } },
+          ],
+          "x-required-scopes": ["tracking:read", "tracking:write"],
+          responses: { 200: { description: "Save draft or submitted ritual response" } },
+        },
+      },
+      "/v1/rituals/occurrences/{id}/actions": {
+        post: {
+          security,
+          requestBody: jsonRequest("RitualActionInput"),
+          parameters: [{ in: "path", name: "id", required: true, schema: { type: "string" } }],
+          "x-required-scopes": ["tracking:read", "tracking:write"],
+          responses: { 200: { description: "Record snooze/skip press, confirm or cancel" } },
+        },
+      },
+      "/v1/rituals/{kind}/data": {
+        delete: {
+          security,
+          parameters: [{ in: "path", name: "kind", required: true, schema: { type: "string" } }],
+          "x-required-scopes": ["tracking:read", "tracking:write"],
+          responses: {
+            204: { description: "Delete ritual and its history; interactive user only" },
+          },
+        },
       },
       "/v1/audit": { get: { security, responses: { 200: { description: "Activity history" } } } },
     },

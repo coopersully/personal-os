@@ -4,8 +4,9 @@ import {
   type FinanceScenarioResult,
   financeScenarioInputSchema,
 } from "@personal-os/domain";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { CurrencyInput } from "@/components/currency-input";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,7 +30,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { formatMoney } from "./format.js";
 
 const moneyFields = [
@@ -117,12 +120,13 @@ function ScenarioFields({
   onChange: (draft: ScenarioDraft) => void;
   onRemove: () => void;
 }) {
+  const [validated, setValidated] = useState<Set<string>>(() => new Set());
   const prefix = index === 0 ? "Baseline" : `Alternative ${index}`;
   return (
-    <FieldSet className="rounded-lg bg-muted/40 p-4">
+    <FieldSet className="min-w-0 rounded-lg bg-secondary p-4">
       <FieldLegend>{prefix}</FieldLegend>
       <FieldGroup>
-        <Field>
+        <Field className="min-w-0">
           <FieldLabel htmlFor={`${draft.id}-label`}>{prefix} name</FieldLabel>
           <Input
             id={`${draft.id}-label`}
@@ -132,12 +136,13 @@ function ScenarioFields({
             onChange={(event) => onChange({ ...draft, label: event.target.value })}
           />
         </Field>
-        <FieldGroup className="sm:grid sm:grid-cols-2 lg:grid-cols-4">
+        <FieldGroup className="grid grid-cols-1 md:grid-cols-2">
           {moneyFields.map((field) => (
             <Field
               key={field.key}
               data-invalid={Boolean(
-                draft.money[field.key] &&
+                validated.has(field.key) &&
+                  draft.money[field.key] &&
                   amount(draft.money[field.key], field.key === "startingCash") === undefined,
               )}
             >
@@ -145,17 +150,21 @@ function ScenarioFields({
                 {prefix} {field.label.toLowerCase()}
                 {field.required ? "" : " (optional)"}
               </FieldLabel>
-              <Input
+              <CurrencyInput
                 id={`${draft.id}-${field.key}`}
+                name={`${draft.id}-${field.key}`}
+                min={field.key === "startingCash" ? Number.NEGATIVE_INFINITY : 0}
+                onBlur={() => setValidated((current) => new Set([...current, field.key]))}
                 inputMode="decimal"
                 required={field.required}
                 aria-invalid={Boolean(
-                  draft.money[field.key] &&
+                  validated.has(field.key) &&
+                    draft.money[field.key] &&
                     amount(draft.money[field.key], field.key === "startingCash") === undefined,
                 )}
                 value={draft.money[field.key]}
-                onChange={(event) =>
-                  onChange({ ...draft, money: { ...draft.money, [field.key]: event.target.value } })
+                onValueChange={(value) =>
+                  onChange({ ...draft, money: { ...draft.money, [field.key]: value } })
                 }
               />
             </Field>
@@ -167,8 +176,8 @@ function ScenarioFields({
             Category amounts are in addition to housing, debt payments, and reserve contributions.
           </FieldDescription>
           {draft.allocations.map((row, rowIndex) => (
-            <FieldGroup className="sm:grid sm:grid-cols-[1fr_1fr_auto]" key={row.id}>
-              <Field>
+            <FieldGroup className="grid grid-cols-1 md:grid-cols-2" key={row.id}>
+              <Field className="min-w-0">
                 <FieldLabel htmlFor={`${row.id}-category`}>
                   {prefix} spending {rowIndex + 1} category
                 </FieldLabel>
@@ -194,20 +203,20 @@ function ScenarioFields({
                   ))}
                 </NativeSelect>
               </Field>
-              <Field>
+              <Field className="min-w-0">
                 <FieldLabel htmlFor={`${row.id}-limit`}>
                   {prefix} spending {rowIndex + 1} amount
                 </FieldLabel>
-                <Input
+                <CurrencyInput
                   id={`${row.id}-limit`}
                   required
                   inputMode="decimal"
                   value={row.limit}
-                  onChange={(event) =>
+                  onValueChange={(value) =>
                     onChange({
                       ...draft,
                       allocations: draft.allocations.map((item) =>
-                        item.id === row.id ? { ...item, limit: event.target.value } : item,
+                        item.id === row.id ? { ...item, limit: value } : item,
                       ),
                     })
                   }
@@ -261,7 +270,7 @@ function ScenarioFields({
             Add {prefix.toLowerCase()} spending
           </Button>
         </FieldSet>
-        <Field>
+        <Field className="min-w-0">
           <FieldLabel htmlFor={`${draft.id}-assumptions`}>{prefix} assumptions</FieldLabel>
           <Textarea
             id={`${draft.id}-assumptions`}
@@ -396,7 +405,8 @@ export function FinanceScenarioComparison() {
     queryKey: ["finance-categories"],
     queryFn: () => api.getFinanceCategories(),
   });
-  const mutation = useMutation({
+  const mutation = useFeedbackMutation({
+    feedback: { action: "compare these scenarios", safeToRetry: true, form: true },
     mutationFn: (input: FinanceScenarioInput) => api.compareFinanceScenarios(input),
   });
   const signature = JSON.stringify({ drafts, asOf, horizon });
@@ -431,12 +441,13 @@ export function FinanceScenarioComparison() {
         Compare fixed monthly assumptions before changing your plan. Enter every required amount,
         including an explicit 0 when a cost does not apply.
       </p>
-      <form className="grid gap-5" onSubmit={compare}>
+      <FeedbackForm feedback={mutation.feedback} className="grid gap-5" onSubmit={compare}>
         <FieldSet disabled={mutation.isPending}>
           <FieldGroup className="sm:grid sm:grid-cols-2">
-            <Field>
+            <Field className="min-w-0">
               <FieldLabel htmlFor="scenario-date">As of</FieldLabel>
               <Input
+                name="scenarioDate"
                 id="scenario-date"
                 type="date"
                 required
@@ -444,9 +455,10 @@ export function FinanceScenarioComparison() {
                 onChange={(event) => setAsOf(event.target.value)}
               />
             </Field>
-            <Field>
+            <Field className="min-w-0">
               <FieldLabel htmlFor="scenario-horizon">Horizon in months</FieldLabel>
               <Input
+                name="scenarioHorizon"
                 id="scenario-horizon"
                 type="number"
                 min={1}
@@ -461,7 +473,7 @@ export function FinanceScenarioComparison() {
             <Alert variant="destructive">
               <AlertTitle>Spending categories unavailable</AlertTitle>
               <AlertDescription>
-                {errorMessage(categories.error)}
+                {"Couldn’t refresh this information. Try again."}
                 <Button type="button" variant="outline" onClick={() => void categories.refetch()}>
                   Retry categories
                 </Button>
@@ -499,18 +511,11 @@ export function FinanceScenarioComparison() {
             <AlertDescription>{validation}</AlertDescription>
           </Alert>
         ) : null}
-        {mutation.error ? (
-          <Alert variant="destructive">
-            <AlertTitle>Comparison failed</AlertTitle>
-            <AlertDescription>
-              {errorMessage(mutation.error)} Your assumptions are still here.
-            </AlertDescription>
-          </Alert>
-        ) : null}
+
         <Button type="submit" disabled={!ready || mutation.isPending}>
           {mutation.isPending ? "Comparing…" : "Compare scenarios"}
         </Button>
-      </form>
+      </FeedbackForm>
       {mutation.data && mutation.variables ? (
         <ScenarioResult
           result={mutation.data}

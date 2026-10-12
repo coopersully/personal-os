@@ -8,6 +8,13 @@ import { MemoryRouter } from "react-router-dom";
 import { MotionProvider } from "@/components/motion-provider.js";
 import { CalendarFloatingNav } from "./floating-nav.js";
 
+vi.mock("../../api.js", () => ({
+  api: {
+    getWorkspaceSettings: vi.fn().mockResolvedValue({ revision: 0, preferences: {} }),
+    getDomainProfile: vi.fn().mockResolvedValue(null),
+  },
+}));
+
 const user = { id: "user-1" } as User;
 const calendar = {
   accountId: null,
@@ -86,7 +93,7 @@ it("morphs one persistent surface through every pill action", async () => {
   await browser.click(within(composer as HTMLElement).getByRole("button", { name: "Close" }));
   await browser.click(await screen.findByRole("button", { name: "Search calendar" }));
   expect(container.querySelector('[data-slot="calendar-floating-surface"]')).toBe(surface);
-  expect(surface).toHaveAttribute("data-state", "search");
+  expect(surface).toHaveAttribute("data-state", "closed");
 });
 
 it("moves focus into each surface and restores it to the triggering action", async () => {

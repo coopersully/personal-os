@@ -1012,6 +1012,20 @@ describe.sequential("finance action service", () => {
         requestId: "settlement-human-repeat",
       }),
     ).resolves.toMatchObject({ status: "applied" });
+    expect(
+      await database.db.query.auditEvents.findMany({
+        where: eq(auditEvents.entityId, queued.review.id),
+      }),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "finance.action_review_approved",
+          actorType: "user",
+          actorId: fixture.ownerId,
+          requestId: "settlement-human-approve",
+        }),
+      ]),
+    );
     await expect(
       fixture.actions.settleFinanceMaintenanceCandidate(
         fixture.candidate.id,
@@ -7245,13 +7259,19 @@ describe.sequential("finance action service", () => {
       userId,
     });
 
-    const contentionDatabase = createStatementTimedDatabase(container.getConnectionUri());
+    const waiterObservationTimeoutMs = 15_000;
+    const writerStatementTimeoutMs = 30_000;
+    const contentionDatabase = createStatementTimedDatabase(
+      container.getConnectionUri(),
+      writerStatementTimeoutMs,
+    );
     const actions = createFinanceActionService({
       db: contentionDatabase.db,
       finances: createFinanceService({ db: contentionDatabase.db, now: () => now }),
       now: () => now,
     });
     const blocker = await database.pool.connect();
+    let operationSettlement: Promise<PromiseSettledResult<unknown>[]> | undefined;
     try {
       await blocker.query("BEGIN");
       await blocker.query("SET LOCAL statement_timeout = '5s'");
@@ -7271,31 +7291,39 @@ describe.sequential("finance action service", () => {
         }),
         { principal: agent(userId, "maintenance-answerer"), requestId: "question-order-answer" },
       );
-      const competingRequest = actions.performDirect(
-        "reimbursement",
-        {
-          allocationId: allocation.id,
-          dueDate: "2026-08-24",
-          evidence: {
-            sourceRefs: [
-              {
-                accountId: null,
-                provider: "local",
-                remoteId: "question-order-receipt",
-                revision: null,
-                sourceType: "local",
-              },
-            ],
-            summary: "Question-order receipt",
+      // Delay the second writer beyond the old five-second statement ceiling:
+      // both must remain blocked until the real PostgreSQL barrier is observed.
+      const competingRequest = new Promise<void>((resolvePromise) =>
+        setTimeout(resolvePromise, 6_000),
+      ).then(() =>
+        actions.performDirect(
+          "reimbursement",
+          {
+            allocationId: allocation.id,
+            dueDate: "2026-08-24",
+            evidence: {
+              sourceRefs: [
+                {
+                  accountId: null,
+                  provider: "local",
+                  remoteId: "question-order-receipt",
+                  revision: null,
+                  sourceType: "local",
+                },
+              ],
+              summary: "Question-order receipt",
+            },
+            expectedAmount: 180,
+            operation: "create",
+            payer: "Alex",
+            rationale: "Alex owes the smaller shared portion.",
           },
-          expectedAmount: 180,
-          operation: "create",
-          payer: "Alex",
-          rationale: "Alex owes the smaller shared portion.",
-        },
-        { principal: agent(userId, "competing-agent"), requestId: "question-order-competing" },
+          { principal: agent(userId, "competing-agent"), requestId: "question-order-competing" },
+        ),
       );
-      await waitForAdvisoryLockWaiters(database.pool, 2);
+      const operations = [answer, competingRequest];
+      operationSettlement = Promise.allSettled(operations);
+      await waitForAdvisoryLockWaiters(database.pool, 2, waiterObservationTimeoutMs);
       await blocker.query("COMMIT");
       const outcomes = await settleWithoutDeadlock([answer, competingRequest]);
       expect(
@@ -7307,6 +7335,7 @@ describe.sequential("finance action service", () => {
       ).toBe(true);
     } finally {
       await blocker.query("ROLLBACK").catch(() => undefined);
+      await operationSettlement;
       blocker.release();
       await contentionDatabase.close();
     }
@@ -7572,11 +7601,11 @@ describe.sequential("finance action service", () => {
     const agentContext = { principal: agent(userId), requestId: "agent-review-boundaries" };
 
     await expect(service.approve(missingId, agentContext)).rejects.toThrow(
-      "Only an interactive user",
+      "explicit finances:execute access",
     );
     await expect(service.approve(missingId, userContext)).rejects.toThrow("review was not found");
     await expect(service.dismiss(missingId, agentContext)).rejects.toThrow(
-      "Only an interactive user",
+      "explicit finances:execute access",
     );
     await expect(service.dismiss(missingId, userContext)).rejects.toThrow("review was not found");
     await expect(service.answerQuestion(missingId, "", userContext)).rejects.toThrow(

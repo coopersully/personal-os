@@ -22,6 +22,14 @@ export function createTextingApiClient(request: Request, toQuery: (query: object
     async getNotificationStatus(): Promise<NotificationStatus> {
       return request("/v1/texting/notifications");
     },
+    async resetFinanceNotificationPreferences(input: {
+      expectedRevision: number;
+    }): Promise<{ scope: "finances"; inherited: true }> {
+      return request("/v1/texting/notifications/preferences/finances", {
+        method: "DELETE",
+        body: JSON.stringify(input),
+      });
+    },
     async saveNotificationPreferences(
       scope: "global" | "finances",
       input: {

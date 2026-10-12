@@ -10,7 +10,9 @@ export const taskWorkspaceQuerySchema = paginationSchema
     view: z.enum(["all", "today", "upcoming", "history", "trash"]).default("all"),
     kind: z.enum(["all", "task", "reminder"]).default("all"),
     // Omission means open in active views, all in History/Trash.
-    status: z.enum(["all", "open", "completed", "cancelled", "archived"]).optional(),
+    status: z
+      .enum(["all", "open", "open_and_completed", "completed", "cancelled", "archived"])
+      .optional(),
     listId: idSchema.optional(),
     projectId: idSchema.optional(),
     query: z.string().trim().min(1).max(200).optional(),

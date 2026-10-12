@@ -113,7 +113,11 @@ function plaidFetch(): typeof globalThis.fetch {
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     if (path === "/link/token/create") {
       expect(body.link_customization_name).toBe("default");
-      return Response.json({ link_token: "link-token" });
+      return Response.json({
+        link_token: "link-token",
+        hosted_link_url: "https://secure.plaid.com/hl/fixture",
+        expiration: "2026-07-19T12:30:00.000Z",
+      });
     }
     if (path === "/item/public_token/exchange") {
       expect(body.public_token).toBe("public-token");
@@ -930,12 +934,7 @@ describe.sequential("finance service", () => {
       executionPolicy.update({ expectedVersion: 1, reviewBypassEnabled: false }, context),
     ).rejects.toMatchObject({ code: "conflict" });
     await expect(service.getGuidedSetupContext(userId)).resolves.toMatchObject({
-      humanOnlyActions: [
-        "connect_or_disconnect_source",
-        "import_transactions",
-        "manage_accounts",
-        "refresh_provider_data",
-      ],
+      humanOnlyActions: ["provider_authorization"],
     });
     await expect(
       database.db
@@ -2123,6 +2122,47 @@ describe.sequential("finance service", () => {
       (await service.listTransactions(userId, { search: "100%_matched", limit: 50, review: "all" }))
         .items,
     ).toEqual([]);
+  });
+
+  it("creates reusable categories without transactions and isolates owners", async () => {
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(userId), requestId: "category-create" };
+    const first = await service.createCategory({ name: "Custom hobby supplies" }, context);
+    const repeated = await service.createCategory({ name: "custom hobby supplies" }, context);
+    expect(repeated.id).toBe(first.id);
+    expect(await service.listCategories(userId)).toContainEqual(first);
+    expect(await service.listCategories("00000000-0000-4000-8000-000000000000")).not.toContainEqual(
+      first,
+    );
+  });
+
+  it("keeps colliding and non-ASCII category names distinct without renaming", async () => {
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(userId), requestId: "category-collision" };
+    const names = ["R&D", "R and D", "食費", "交通"];
+    const created = await Promise.all(
+      names.map((name) => service.createCategory({ name }, context)),
+    );
+    expect(new Set(created.map((category) => category.id)).size).toBe(names.length);
+    const stored = await service.listCategories(userId);
+    for (const category of created) expect(stored).toContainEqual(category);
+    const original = created[0];
+    if (!original) throw new Error("Missing category");
+    await database.db
+      .update(financeCategories)
+      .set({ name: "Renamed research" })
+      .where(eq(financeCategories.id, original.id));
+    const recreated = await service.createCategory({ name: "R&D" }, context);
+    expect(recreated.id).not.toBe(original.id);
+    expect(recreated.name).toBe("R&D");
+    expect(await service.listCategories(userId)).toContainEqual(
+      expect.objectContaining({ id: original.id, name: "Renamed research" }),
+    );
+    const repeated = await Promise.all([
+      service.createCategory({ name: "Concurrent custom" }, context),
+      service.createCategory({ name: "Concurrent custom" }, context),
+    ]);
+    expect(repeated[0]?.id).toBe(repeated[1]?.id);
   });
 
   it("manages manual finances, review decisions, budgets, and safe unavailable Plaid state", async () => {
@@ -5866,7 +5906,7 @@ describe.sequential("finance service", () => {
       data: {
         connectionId: expect.any(String),
         externalHandoff: {
-          artifact: "link-token",
+          artifact: "https://secure.plaid.com/hl/fixture",
           expiresAt: "2026-07-19T12:30:00.000Z",
         },
         status: "pending",
@@ -5878,7 +5918,7 @@ describe.sequential("finance service", () => {
       .from(financeAccountConnections)
       .where(eq(financeAccountConnections.id, connectionResult.data.connectionId));
     expect(persistedConnection).toMatchObject({
-      externalHandoffUrl: "link-token",
+      externalHandoffUrl: "https://secure.plaid.com/hl/fixture",
       status: "pending",
     });
     const accounts = await service.exchangePlaidToken(

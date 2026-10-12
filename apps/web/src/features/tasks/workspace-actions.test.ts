@@ -107,7 +107,11 @@ it("preserves per-record revisions and reports partial failure explicitly", asyn
   expect(applied).toEqual(["t:3"]);
   expect(result.succeeded).toEqual(["task:t"]);
   expect(result.failed).toEqual([
-    { key: "reminder:r", title: "Reminder", message: "Changed elsewhere" },
+    {
+      key: "reminder:r",
+      title: "Reminder",
+      message: expect.stringContaining("Couldn’t confirm whether we could complete this item"),
+    },
   ]);
 });
 

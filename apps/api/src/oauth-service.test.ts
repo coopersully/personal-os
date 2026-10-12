@@ -169,7 +169,7 @@ describe("OAuth authorized clients", () => {
     const set = vi.fn(() => ({ where }));
     const update = vi.fn(() => ({ set }));
     const transaction = vi.fn(async (run: (value: { update: typeof update }) => Promise<void>) =>
-      run({ update }),
+      run({ update, execute: vi.fn().mockResolvedValue(undefined) } as { update: typeof update }),
     );
     const db = { transaction } as unknown as Database;
     const now = new Date("2026-07-21T12:00:00.000Z");
@@ -355,8 +355,8 @@ describe("OAuth authorized clients", () => {
       refreshToken: "refresh",
       resource: serviceOptions.resource,
     };
-    const createDb = (selectResults: unknown[][], replaced: unknown[]) =>
-      ({
+    const createDb = (selectResults: unknown[][], replaced: unknown[]) => {
+      const executor = {
         select: () => ({
           from: () => ({
             where: () => ({
@@ -371,7 +371,13 @@ describe("OAuth authorized clients", () => {
             }),
           }),
         }),
-      }) as unknown as Database;
+      };
+      return {
+        ...executor,
+        transaction: async (run: (tx: unknown) => unknown) =>
+          run({ ...executor, execute: vi.fn().mockResolvedValue(undefined) }),
+      } as unknown as Database;
+    };
 
     await expect(
       createOAuthService({ db: createDb([[]], []), ...serviceOptions }).refresh(input),

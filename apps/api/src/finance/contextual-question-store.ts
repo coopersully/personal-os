@@ -165,6 +165,93 @@ export async function lockContextualQuestion(
 export type LockedContextualQuestion = NonNullable<
   Awaited<ReturnType<typeof lockContextualQuestion>>
 >;
+
+/** Lock a set of questions by table and ID, independent of caller order. The caller must not
+ * already hold Finance or notification outbox locks when entering this batch. */
+export async function lockContextualQuestions(
+  tx: FinanceTransaction,
+  userId: string,
+  ids: string[],
+): Promise<Map<string, LockedContextualQuestion>> {
+  const previews = new Map<string, QuestionRow>();
+  for (const id of [...ids].sort()) {
+    const [question] = await tx
+      .select()
+      .from(financeContextualQuestions)
+      .where(
+        and(eq(financeContextualQuestions.userId, userId), eq(financeContextualQuestions.id, id)),
+      );
+    if (question?.subtype === contextualSubtype) previews.set(id, question);
+  }
+  const accounts = new Map<string, typeof financeAccounts.$inferSelect>();
+  const transactions = new Map<string, typeof financeTransactions.$inferSelect>();
+  const reviews = new Map<string, typeof financeReviewCases.$inferSelect>();
+  const questions = new Map<string, QuestionRow>();
+  const accountIds = [...new Set([...previews.values()].map((q) => q.accountId))].sort();
+  const transactionIds = [...new Set([...previews.values()].map((q) => q.transactionId))].sort();
+  const reviewIds = [...new Set([...previews.values()].map((q) => q.reviewCaseId))].sort();
+  for (const id of accountIds) {
+    const [row] = await tx
+      .select()
+      .from(financeAccounts)
+      .where(and(eq(financeAccounts.userId, userId), eq(financeAccounts.id, id)))
+      .for("share", { noWait: true });
+    if (!row) throw contextualRetry();
+    accounts.set(id, row);
+  }
+  for (const id of transactionIds) {
+    const [row] = await tx
+      .select()
+      .from(financeTransactions)
+      .where(and(eq(financeTransactions.userId, userId), eq(financeTransactions.id, id)))
+      .for("share", { noWait: true });
+    if (!row) throw contextualRetry();
+    transactions.set(id, row);
+  }
+  for (const id of reviewIds) {
+    const [row] = await tx
+      .select()
+      .from(financeReviewCases)
+      .where(and(eq(financeReviewCases.userId, userId), eq(financeReviewCases.id, id)))
+      .for("share", { noWait: true });
+    if (!row) throw contextualRetry();
+    reviews.set(id, row);
+  }
+  for (const id of [...previews.keys()].sort()) {
+    const [row] = await tx
+      .select()
+      .from(financeContextualQuestions)
+      .where(
+        and(eq(financeContextualQuestions.userId, userId), eq(financeContextualQuestions.id, id)),
+      )
+      .for("share", { noWait: true });
+    if (!row) throw contextualRetry();
+    questions.set(id, row);
+  }
+  const locked = new Map<string, LockedContextualQuestion>();
+  for (const [id, preview] of previews) {
+    const account = accounts.get(preview.accountId);
+    const transaction = transactions.get(preview.transactionId);
+    const review = reviews.get(preview.reviewCaseId);
+    const question = questions.get(id);
+    if (
+      !account ||
+      !transaction ||
+      !review ||
+      !question ||
+      question.subtype !== contextualSubtype ||
+      question.accountId !== preview.accountId ||
+      question.transactionId !== preview.transactionId ||
+      question.reviewCaseId !== preview.reviewCaseId ||
+      transaction.accountId !== account.id ||
+      review.transactionId !== transaction.id
+    )
+      throw contextualRetry();
+    locked.set(id, { account, transaction, review, question });
+  }
+  return locked;
+}
+
 export function currentContextualParents(locked: LockedContextualQuestion) {
   const { question, account, transaction, review } = locked;
   return (

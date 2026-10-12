@@ -68,6 +68,22 @@ data. A physical host reboot remains untested. The active Wi-Fi address is DHCP;
 a router reservation is not yet verified. The outbound tunnel does not require a
 static LAN or public IP.
 
+## Public API build provenance
+
+Archived production builds include an optional `revision` in `/health/ready`, alongside the
+existing ready status after the database check. Git's `export-subst` stamps only
+`apps/api/src/release-revision.ts` with the exact archived commit. The installed controller's
+existing `git archive` build path supplies this without a controller/configuration upgrade or a
+new credential. Normal development checkouts omit revision; arbitrary environment values cannot
+claim production provenance. Responses use `Cache-Control: no-store` and expose only a public
+40-character Git SHA, never configuration, controller state or credentials.
+
+The desktop release workflow waits for this ready API revision to match its CI-verified source,
+and for that source to remain current main. This proves the API is serving that source and its
+database check passes; it does not attest to the controller's final transaction state, unrelated
+MCP operations, or provider connectivity. The private controller status remains the authoritative
+operational ledger. The historical AWS workflows/statuses are not release gates.
+
 ## Required configuration
 
 | Variable | Purpose |
@@ -132,8 +148,8 @@ Apply the infrastructure only with a reviewed plan and set
 command requires this acknowledgement on every invocation:
 
 ```bash
-ILO_PRODUCTION_SOURCE_PROFILE=<named-ilo-operator-profile> \
-ILO_PRODUCTION_RUNTIME=I_UNDERSTAND_THIS_IS_PRODUCTION \
+PERSONAL_OS_PRODUCTION_SOURCE_PROFILE=<named-personal-os-operator-profile> \
+PERSONAL_OS_PRODUCTION_RUNTIME=I_UNDERSTAND_THIS_IS_PRODUCTION \
 pnpm env:prod:start
 ```
 
@@ -213,7 +229,7 @@ skill override aligned with the deployed environment so Settings never teaches
 a host to use a staging, local, or changing endpoint.
 
 The checked release identity lives in
-`packages/domain/src/ilo-setup-release.json`. Runtime defaults read that
+`packages/domain/src/personal-os-setup-release.json`. Runtime defaults read that
 manifest, and `pnpm lint` fails if `.env.example` or Compose advertises a
 different tuple. Change the manifest and both deployment projections together
 for every release.
@@ -590,10 +606,14 @@ Messaging Service inbound webhook to
 `https://api.<domain>/v1/webhooks/twilio/inbound`; status callbacks are supplied
 per message. Configure the five `TWILIO_*` values and enable
 `TEXTING_ENABLED` only after toll-free verification is ready. Keep Twilio's
-provider opt-out filtering enabled. ilo mirrors STOP/START locally, accepts
+provider opt-out filtering enabled. nohmi mirrors STOP/START locally, accepts
 Twilio Advanced Opt-Out classifications when configured, and treats provider
 error 21610 as authoritative. Follow the production-evidence checklist in
-[`texting-operations.md`](product/texting-operations.md) before rollout.
+[`texting-operations.md`](product/texting-operations.md) before rollout. Publish and verify the
+[public documentation and Twilio submission evidence](engineering/public-documentation.md),
+including policy URLs, authenticated opt-in screenshots, and configured HELP/confirmation responses,
+before submission. Toll-free verification and A2P 10DLC campaign registration are distinct; choose
+based on the actual sender type.
 
 ## Backups and rollback
 

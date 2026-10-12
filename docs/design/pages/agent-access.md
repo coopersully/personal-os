@@ -2,26 +2,34 @@
 
 Agent work has three distinct user questions. nohmi gives each one a dedicated destination.
 
-## Reviews in Settings
+## Reviews within each workspace
 
-`/settings?section=reviews` answers **What needs my judgment now?** It is an account utility and
-appears in Settings navigation on desktop and in the Settings action sheet on narrow screens.
+Reviews answers **What needs my judgment now?** One shared, workspace-scoped dialog or mobile
+drawer opens from the workspace attention alert or the action beside its Settings title. Today
+and centralized account summaries do not add a separate queue link.
 
-- The shared Settings app bar owns the visible page title. The feature body begins with filters and
-  queue material rather than repeating a title, eyebrow, or description.
+- The `review` URL parameter opens the flow in the owning workspace, optionally selecting an exact
+  work item. Closing removes that parameter while preserving other page state.
 - It contains only `review` and `attention` work. Setup state is never queue work.
-- Kind and workspace filters are stored in the URL as `kind` and `workspace`.
-- Results use cursor pagination with Previous and Next controls and an honest displayed range.
-- Each row names its workspace, work type, title, explanation, and one direct action.
+- Present one decision at a time with progress, remaining work, and the option to leave it for later.
+  Only a confirmed refresh showing that the item no longer needs review advances completion.
+- Each item names its work type, title, explanation, and direct action within its domain context.
+- Preview the decision before acting: rule matching conditions and proposed actions, Finance
+  transaction/reason/rationale, or the actual question and choices. Use labeled, wrapping display
+  fields from owner-scoped records; never serialize arbitrary evidence JSON. These richer previews
+  belong to signed-in people; agent feed redaction remains unchanged. Missing evidence stays absent.
+- Attention summaries describe the concrete situation and required judgment, not merely say
+  “needs attention.” Fixture data follows the same standard.
 - Partial source failure stays visible; nohmi never converts unavailable work into a successful zero.
-- An empty state says the available work is clear when some workspaces could not be checked.
+- Review actions retain the owning workspace's authorization. Mail maintenance reviews include
+  status, effects, questions, and the existing one-shot recovery action.
 
-Review actions route to the surface that owns the decision. Finance reviews stay in Finances. Mail
-rule activation opens Mail settings with the exact proposed rule selected.
+The removed `/reviews` page and legacy Settings Reviews entry resolve to account Profile; they
+are not a second review queue. New links use the owning workspace's shared review flow.
 
 ## Connected agents in Settings
 
-Settings → Connected agents answers **Who can act in nohmi?**
+Settings → Connections → Connected agents answers **Who can act in nohmi?**
 
 - Show the current MCP URL once, with a copy action.
 - List OAuth hosts and local/manual credentials separately.
@@ -36,7 +44,7 @@ different host.
 
 ## Workspace access overview in Settings
 
-Settings → Workspace access answers **Where can agents act, and where does configuration need attention?**
+Settings → Security & access → Workspace access answers **Where can agents act, and where does configuration need attention?**
 
 The selected workspace is stored in the URL. Mail, Calendar, Tasks, and Finances each summarize:
 
@@ -50,7 +58,7 @@ The selected workspace is stored in the URL. Mail, Calendar, Tasks, and Finances
 This centralized surface is a read-only cross-workspace overview. Every workspace-owned access,
 source, maintenance, override, rule, learning, recovery, and data control is edited inside the
 owning workspace; centralized Settings must not render a duplicate form. Connected-agent
-credentials and scopes remain global and editable in Settings → Connected agents.
+credentials and scopes remain global and editable in Settings → Connections → Connected agents.
 
 Do not imply per-source credential scope when the credential model is workspace-wide. State that
 limitation explicitly. Readiness is evidence, not a progress percentage. Use the stable phases

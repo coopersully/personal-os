@@ -100,7 +100,8 @@ import {
   auditSnapshot,
   domainProfileChangedFields,
 } from "./serialization.js";
-import type { RequestLog } from "./types.js";
+import type { Principal, RequestLog } from "./types.js";
+import { requireWorkspaceSourceExecution } from "./workspace-execution.js";
 
 const CONNECTOR_SYNC_LEASE_MS = 30 * 60_000;
 const CONNECTOR_SYNC_INTERRUPTED_ERROR =
@@ -208,6 +209,13 @@ export type ConnectedEventGateway = {
 };
 
 export type ConnectedMailGateway = {
+  downloadAttachment?: (
+    userId: string,
+    accountId: string,
+    messageId: string,
+    attachment: import("@personal-os/domain").MailAttachment,
+    signal?: AbortSignal,
+  ) => Promise<Uint8Array>;
   sendCapability?: (
     userId: string,
     accountId: string,
@@ -639,6 +647,92 @@ export function createConnectorService({
   };
 
   const mailGateway: ConnectedMailGateway = {
+    async downloadAttachment(userId, accountId, messageId, attachment, signal) {
+      signal?.throwIfAborted();
+      const account = await getAccount(userId, accountId);
+      if (!account.mailEnabled)
+        throw new AppError(
+          "forbidden",
+          "Mail is disabled for this account. Enable Mail in Connections.",
+        );
+      signal?.throwIfAborted();
+      const timeout = AbortSignal.timeout(20_000);
+      const operation = {
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        deadlineMs: Date.now() + 20_000,
+      };
+      try {
+        if (account.provider === "google" && google.downloadMailAttachment) {
+          const result = await google.downloadMailAttachment(
+            credentials<GoogleCredentials>(account),
+            messageId,
+            attachment,
+            operation,
+          );
+          await saveGoogleCredentials(account.id, result.credentials, true).catch(() => {
+            throw new AppError(
+              "service_unavailable",
+              "The attachment was retrieved, but refreshed connection credentials could not be saved. Try again shortly.",
+            );
+          });
+          return result.value;
+        }
+        if (account.provider === "icloud" && icloud.downloadMailAttachment)
+          return await icloud.downloadMailAttachment(
+            credentials<ICloudCredentials>(account),
+            messageId,
+            attachment,
+            operation,
+          );
+      } catch (error) {
+        if (error instanceof AppError) throw error;
+        const failure = classifyConnectorSyncFailure(
+          error,
+          account.provider === "icloud" ? "icloud" : "google",
+        );
+        const code =
+          failure.category === "not_found"
+            ? "not_found"
+            : failure.category === "rate_limited"
+              ? "rate_limited"
+              : failure.recovery === "reconnect"
+                ? "forbidden"
+                : "service_unavailable";
+        log?.({
+          event: "mail_attachment_download_failed",
+          accountId,
+          category: failure.category,
+          disposition: failure.recovery,
+          durationMs: 0,
+          method: "CONNECTOR",
+          path: "/internal/connectors/mail/attachment",
+          provider: account.provider === "icloud" ? "icloud" : "google",
+          requestId: randomUUID(),
+          status:
+            code === "not_found"
+              ? 404
+              : code === "rate_limited"
+                ? 429
+                : code === "forbidden"
+                  ? 403
+                  : 503,
+        });
+        throw new AppError(
+          code,
+          code === "not_found"
+            ? "This attachment is no longer available."
+            : code === "rate_limited"
+              ? "The mail provider is busy. Try again shortly."
+              : code === "forbidden"
+                ? "Reconnect this mail account in Connections to download attachments."
+                : "Couldn’t retrieve this attachment. Try again shortly.",
+        );
+      }
+      throw new AppError(
+        "service_unavailable",
+        "Attachment downloads are unavailable for this connection.",
+      );
+    },
     async sendCapability(userId, accountId) {
       try {
         const account = await getAccount(userId, accountId);
@@ -742,35 +836,59 @@ export function createConnectorService({
   async function syncAccount(
     userId: string,
     accountId: string,
-    options: { skipMail?: boolean } = {},
+    options: { skipMail?: boolean; context?: { principal: Principal; requestId: string } } = {},
   ): Promise<{ changed: number }> {
     throwIfQuiescing();
     const startedAt = Date.now();
     const staleBefore = new Date(now().getTime() - CONNECTOR_SYNC_LEASE_MS);
     const syncClaimId = randomUUID();
     const attemptedAt = now();
-    const [claimedAccount] = await db
-      .update(calendarAccounts)
-      .set({
-        syncClaimId,
-        syncGeneration: sql`${calendarAccounts.syncGeneration} + 1`,
-        lastSyncAttemptAt: attemptedAt,
-        nextSyncAt: null,
-        syncStatus: "syncing",
-        updatedAt: attemptedAt,
-      })
-      .where(
-        and(
-          eq(calendarAccounts.id, accountId),
-          eq(calendarAccounts.userId, userId),
-          ne(calendarAccounts.provider, "local"),
-          or(
-            ne(calendarAccounts.syncStatus, "syncing"),
-            lt(calendarAccounts.updatedAt, staleBefore),
+    const claimedAccount = await db.transaction(async (tx) => {
+      if (options.context) {
+        if (options.context.principal.userId !== userId)
+          throw new AppError("forbidden", "The sync owner does not match its initiator.");
+        await tx
+          .select({ id: calendarAccounts.id })
+          .from(calendarAccounts)
+          .where(and(eq(calendarAccounts.id, accountId), eq(calendarAccounts.userId, userId)))
+          .for("update");
+        await requireWorkspaceSourceExecution(tx, options.context.principal, now());
+      }
+      const [claimed] = await tx
+        .update(calendarAccounts)
+        .set({
+          syncClaimId,
+          syncGeneration: sql`${calendarAccounts.syncGeneration} + 1`,
+          lastSyncAttemptAt: attemptedAt,
+          nextSyncAt: null,
+          syncStatus: "syncing",
+          updatedAt: attemptedAt,
+        })
+        .where(
+          and(
+            eq(calendarAccounts.id, accountId),
+            eq(calendarAccounts.userId, userId),
+            ne(calendarAccounts.provider, "local"),
+            or(
+              ne(calendarAccounts.syncStatus, "syncing"),
+              lt(calendarAccounts.updatedAt, staleBefore),
+            ),
           ),
-        ),
-      )
-      .returning();
+        )
+        .returning();
+      if (claimed && options.context)
+        await tx.insert(auditEvents).values({
+          userId,
+          actorId: options.context.principal.actorId,
+          actorType: options.context.principal.actorType,
+          requestId: options.context.requestId,
+          action: "connector.sync_requested",
+          entityType: "calendar_account",
+          entityId: accountId,
+          after: { syncClaimId, generation: claimed.syncGeneration, provider: claimed.provider },
+        });
+      return claimed;
+    });
     if (!claimedAccount) {
       const [current] = await db
         .select({ id: calendarAccounts.id, syncStatus: calendarAccounts.syncStatus })
@@ -1205,7 +1323,7 @@ export function createConnectorService({
     rule: typeof mailRules.$inferSelect,
     reason: string,
     reasonCode: string,
-    principal: { actorId: string; actorType: "connector" | "user"; userId: string },
+    principal: { actorId: string; actorType: "connector" | "user" | "agent"; userId: string },
     requestId: string,
   ): Promise<void> {
     const [paused] = await transaction
@@ -1302,6 +1420,7 @@ export function createConnectorService({
     reason: string,
     reasonCode: "account_disconnected" | "mail_capability_disabled",
     requestId: string,
+    actingPrincipal?: Principal,
   ): Promise<void> {
     const [unresolvedProviderEffect] = await transaction
       .select({
@@ -1333,7 +1452,7 @@ export function createConnectorService({
             : "Legacy unresolved Mail provider-effect evidence requires support review before this connection can be changed.";
       throw new AppError("conflict", message);
     }
-    const principal = {
+    const principal = actingPrincipal ?? {
       actorId: account.userId,
       actorType: "user" as const,
       userId: account.userId,
@@ -3551,8 +3670,18 @@ export function createConnectorService({
       userId: string,
       accountId: string,
       requestId: string = randomUUID(),
+      actingPrincipal?: Principal,
     ): Promise<void> {
+      const principal: Principal = actingPrincipal ?? {
+        actorId: userId,
+        actorType: "user",
+        userId,
+        scopes: new Set(),
+      };
+      if (principal.userId !== userId)
+        throw new AppError("forbidden", "The source belongs to another owner.");
       await db.transaction(async (transaction) => {
+        await requireWorkspaceSourceExecution(transaction, principal, now());
         const [account] = await transaction
           .select()
           .from(calendarAccounts)
@@ -3572,6 +3701,7 @@ export function createConnectorService({
           "The connected Mail account is no longer available.",
           "account_disconnected",
           requestId,
+          principal,
         );
         const accountCalendars = await transaction
           .select({ id: calendars.id })
@@ -3581,11 +3711,7 @@ export function createConnectorService({
           .for("update");
         await invalidateCalendarProfileSources(transaction, {
           context: {
-            principal: {
-              actorId: account.userId,
-              actorType: "user",
-              userId: account.userId,
-            },
+            principal,
             requestId,
           },
           now: now(),
@@ -3599,6 +3725,17 @@ export function createConnectorService({
           )
           .returning({ id: calendarAccounts.id });
         if (!record) throw new AppError("not_found", "The connected account was not found.");
+        await transaction.insert(auditEvents).values(
+          auditValues({
+            action: "connector.disconnected",
+            before: { id: account.id, provider: account.provider },
+            after: null,
+            entityId: account.id,
+            entityType: "connector",
+            principal,
+            requestId,
+          }),
+        );
       });
     },
 

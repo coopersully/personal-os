@@ -1,15 +1,14 @@
 import type { AccountSetupStep, AccountSetupWorkspace, User } from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { isTauri } from "@tauri-apps/api/core";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { BRAND_NAME } from "@/brand";
 import { CheckboxCardGroup } from "@/components/checkbox-card-group";
 import {
   CalendarIcon,
   CheckIcon,
   CircleCheckIcon,
-  CloudIcon,
   ExternalLinkIcon,
   MailIcon,
   ShieldCheckIcon,
@@ -38,41 +37,19 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
-import { type WorkspaceId, workspaceIdentities } from "@/components/workspace-identity";
-import { api, errorMessage } from "../../api.js";
+import { workspaceIdentities } from "@/components/workspace-identity";
+import { api } from "../../api.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { ConnectionAuthorizationOutcome } from "../connections/authorization-outcome.js";
 import { PlaidConnectButton } from "../finances/plaid-connect.js";
 import { ConnectionList } from "./connection-list.js";
 import { ProviderConnectionStep } from "./provider-connection-step.js";
+import { readSetupReplay, writeSetupReplay } from "./replay-state.js";
 import { SetupFrame } from "./setup-frame.js";
+import { workspaceOptions } from "./workspace-options.js";
 import { WorkspaceSetupGrid } from "./workspace-setup-grid.js";
-
-const workspaceOptions: Array<{
-  description: string;
-  label: string;
-  value: WorkspaceId & AccountSetupWorkspace;
-}> = [
-  {
-    description: "See commitments across every calendar.",
-    label: workspaceIdentities.calendar.label,
-    value: "calendar",
-  },
-  {
-    description: "Capture and plan locally from the start.",
-    label: workspaceIdentities.tasks.label,
-    value: "tasks",
-  },
-  {
-    description: "Bring the conversations that need attention together.",
-    label: workspaceIdentities.mail.label,
-    value: "mail",
-  },
-  {
-    description: "Track accounts, spending, and decisions.",
-    label: workspaceIdentities.finances.label,
-    value: "finances",
-  },
-];
 
 function setupSteps(
   workspaces: AccountSetupWorkspace[],
@@ -103,6 +80,29 @@ function adjacentStep(
 
 export function SetupPage({ user }: { user: User }) {
   const queryClient = useQueryClient();
+  const [params, setParams] = useSearchParams();
+  const [replaying] = useState(
+    () =>
+      (params.get("replay") === "1" || readSetupReplay(user.id) !== null) &&
+      (user.setup.status === "complete" || user.setup.status === "dismissed"),
+  );
+  const [replayStep, setReplayStep] = useState<AccountSetupStep>(() => {
+    const saved = readSetupReplay(user.id);
+    return params.get("replay") !== "1" &&
+      setupSteps(user.setup.selectedWorkspaces, false).includes(saved as AccountSetupStep)
+      ? (saved as AccountSetupStep)
+      : "welcome";
+  });
+  useEffect(() => {
+    if (!replaying) return;
+    writeSetupReplay(user.id, replayStep);
+    if (params.get("replay") === "1") {
+      const next = new URLSearchParams(params);
+      next.delete("replay");
+      setParams(next, { replace: true });
+    }
+  }, [user.id, replayStep, replaying, params, setParams]);
+  const savedStep = replaying ? replayStep : user.setup.currentStep;
   const stageRef = useRef<HTMLDivElement>(null);
   const providerContinueRef = useRef<() => void>(() => undefined);
   const [completionSucceeded, setCompletionSucceeded] = useState(false);
@@ -113,13 +113,12 @@ export function SetupPage({ user }: { user: User }) {
   const providerSetupSelected =
     selectedWorkspaces.includes("calendar") || selectedWorkspaces.includes("mail");
   const currentStep = user.emailVerified
-    ? user.setup.currentStep === "verify_email"
+    ? savedStep === "verify_email"
       ? "google"
-      : user.setup.currentStep
-    : providerSetupSelected &&
-        (user.setup.currentStep === "google" || user.setup.currentStep === "icloud")
+      : savedStep
+    : providerSetupSelected && (savedStep === "google" || savedStep === "icloud")
       ? "verify_email"
-      : user.setup.currentStep;
+      : savedStep;
   const connectors = useQuery({
     enabled: providerSetupSelected && ["google", "icloud", "ready"].includes(currentStep),
     queryFn: api.listConnectors,
@@ -130,7 +129,8 @@ export function SetupPage({ user }: { user: User }) {
     queryFn: api.getFinanceOverview,
     queryKey: ["finance-overview", "setup"],
   });
-  const save = useMutation({
+  const save = useFeedbackMutation({
+    feedback: { action: "save setup progress", safeToRetry: true, form: false },
     mutationFn: api.updateAccountSetup,
     onSuccess: (nextUser, mutation) => {
       if (mutation.action !== "progress") setCompletionSucceeded(true);
@@ -141,13 +141,24 @@ export function SetupPage({ user }: { user: User }) {
   const progress = (
     nextStep: AccountSetupStep,
     nextWorkspaces: AccountSetupWorkspace[] = selectedWorkspaces,
-  ) =>
-    save.mutate({
-      action: "progress",
-      currentStep: nextStep,
-      selectedWorkspaces: nextWorkspaces,
-    });
-  const checkVerification = useMutation({
+  ) => {
+    if (replaying) {
+      save.mutate(
+        { action: "preferences", selectedWorkspaces: nextWorkspaces },
+        {
+          onSuccess: () => setReplayStep(nextStep),
+        },
+      );
+    } else {
+      save.mutate({
+        action: "progress",
+        currentStep: nextStep,
+        selectedWorkspaces: nextWorkspaces,
+      });
+    }
+  };
+  const checkVerification = useFeedbackMutation({
+    feedback: { action: "check email verification", safeToRetry: true, form: false },
     mutationFn: api.getMe,
     onSuccess: (nextUser) => {
       if (nextUser.emailVerified) {
@@ -157,18 +168,26 @@ export function SetupPage({ user }: { user: User }) {
       }
     },
   });
-  const resendVerification = useMutation({ mutationFn: api.resendEmailVerification });
+  const resendVerification = useFeedbackMutation({
+    feedback: { action: "send a confirmation email", safeToRetry: false, form: false },
+    mutationFn: api.resendEmailVerification,
+  });
   const steps = setupSteps(selectedWorkspaces, user.emailVerified);
   const stepIndex = Math.max(0, steps.indexOf(currentStep));
   const exitSetup = () => {
     setCompletionSucceeded(false);
-    setPendingDestination("/today");
-    save.mutate({ action: "dismiss" });
+    setPendingDestination(replaying ? "/settings?section=setup" : "/today");
+    if (replaying) setCompletionSucceeded(true);
+    else save.mutate({ action: "dismiss" });
   };
   const completeSetup = (redirectDestination = "/today") => {
     setCompletionSucceeded(false);
-    setPendingDestination(redirectDestination);
-    save.mutate({ action: "complete" });
+    setPendingDestination(
+      replaying && redirectDestination === "/today"
+        ? "/settings?section=setup"
+        : redirectDestination,
+    );
+    save.mutate(replaying ? { action: "preferences", selectedWorkspaces } : { action: "complete" });
   };
   const registerProviderContinue = useCallback((handler: () => void) => {
     providerContinueRef.current = handler;
@@ -211,6 +230,7 @@ export function SetupPage({ user }: { user: User }) {
     completionSucceeded &&
     (user.setup.status === "complete" || user.setup.status === "dismissed")
   ) {
+    if (replaying) writeSetupReplay(user.id, null);
     return <Navigate replace to={pendingDestination} />;
   }
 
@@ -231,7 +251,6 @@ export function SetupPage({ user }: { user: User }) {
         ) : null}
         {currentStep === "verify_email" ? (
           <VerifyEmailStep
-            checkError={checkVerification.error}
             checkFailed={
               checkVerification.isSuccess && checkVerification.data.emailVerified === false
             }
@@ -276,13 +295,9 @@ export function SetupPage({ user }: { user: User }) {
             selectedWorkspaces={selectedWorkspaces}
           />
         ) : null}
-        {save.isError ? (
-          <Alert variant="destructive">
-            <ShieldCheckIcon />
-            <AlertTitle>Setup progress was not saved</AlertTitle>
-            <AlertDescription>{errorMessage(save.error)}</AlertDescription>
-          </Alert>
-        ) : null}
+        <MutationFeedback feedback={save.feedback} />
+        <MutationFeedback feedback={checkVerification.feedback} />
+        <MutationFeedback feedback={resendVerification.feedback} />
       </div>
     </SetupFrame>
   );
@@ -347,14 +362,12 @@ function WorkspacesStep({
 }
 
 function VerifyEmailStep({
-  checkError,
   checkFailed,
   email,
   resend,
   resendPending,
   resendSucceeded,
 }: {
-  checkError: Error | null;
   checkFailed: boolean;
   email: string;
   resend: () => void;
@@ -392,13 +405,6 @@ function VerifyEmailStep({
           <AlertDescription>Open the link in your inbox, then check again.</AlertDescription>
         </Alert>
       ) : null}
-      {checkError ? (
-        <Alert variant="destructive">
-          <ShieldCheckIcon />
-          <AlertTitle>Verification could not be checked</AlertTitle>
-          <AlertDescription>{errorMessage(checkError)}</AlertDescription>
-        </Alert>
-      ) : null}
     </div>
   );
 }
@@ -425,7 +431,8 @@ function GoogleStep({
   const [calendar, setCalendar] = useState(selectedWorkspaces.includes("calendar"));
   const [mail, setMail] = useState(selectedWorkspaces.includes("mail"));
   const [addOpen, setAddOpen] = useState(false);
-  const connect = useMutation({
+  const connect = useFeedbackMutation({
+    feedback: { action: "connect this account", safeToRetry: false, form: true },
     mutationFn: async () => {
       const url = await api.getGoogleAuthorizationUrl({
         returnTo: "/setup",
@@ -493,13 +500,7 @@ function GoogleStep({
                 setCalendar={setCalendar}
                 setMail={setMail}
               />
-              {connect.isError ? (
-                <Alert variant="destructive">
-                  <CloudIcon />
-                  <AlertTitle>Google did not open</AlertTitle>
-                  <AlertDescription>{errorMessage(connect.error)}</AlertDescription>
-                </Alert>
-              ) : null}
+              <MutationFeedback feedback={connect.feedback} />
             </ResponsiveDialogBody>
             <ResponsiveDialogFooter>
               <ResponsiveDialogActions>
@@ -542,7 +543,8 @@ function ICloudStep({
   const [mail, setMail] = useState(selectedWorkspaces.includes("mail"));
   const [addOpen, setAddOpen] = useState(false);
   const queryClient = useQueryClient();
-  const connect = useMutation({
+  const connect = useFeedbackMutation({
+    feedback: { action: "connect this account", safeToRetry: false, form: true },
     mutationFn: (form: FormData) =>
       api.connectICloud({
         appSpecificPassword: String(form.get("appSpecificPassword")),
@@ -599,7 +601,12 @@ function ICloudStep({
               </ResponsiveDialogDescription>
             </ResponsiveDialogHeader>
             <ResponsiveDialogBody>
-              <form id="setup-icloud-form" onSubmit={submit}>
+              <FeedbackForm
+                fieldNames={{ email: "appleAccountEmail" }}
+                feedback={connect.feedback}
+                id="setup-icloud-form"
+                onSubmit={submit}
+              >
                 <FieldGroup>
                   <Field>
                     <FieldLabel htmlFor="setup-icloud-email">Apple Account email</FieldLabel>
@@ -642,14 +649,7 @@ function ICloudStep({
                     setMail={setMail}
                   />
                 </FieldGroup>
-              </form>
-              {connect.isError ? (
-                <Alert variant="destructive">
-                  <CloudIcon />
-                  <AlertTitle>Apple did not connect</AlertTitle>
-                  <AlertDescription>{errorMessage(connect.error)}</AlertDescription>
-                </Alert>
-              ) : null}
+              </FeedbackForm>
             </ResponsiveDialogBody>
             <ResponsiveDialogFooter>
               <ResponsiveDialogActions>

@@ -4,11 +4,24 @@ import type {
   FinanceAccountOwnershipType,
   UpdateFinanceAccountInput,
 } from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { ActionButton as Button } from "@/components/action-button";
+import { CurrencyInput } from "@/components/currency-input";
+import { HistoryIcon } from "@/components/icons";
+import { MutationFeedback } from "@/components/mutation-feedback";
+import {
+  ResponsiveDialog,
+  ResponsiveDialogBody,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@/components/responsive-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -23,93 +36,139 @@ import { Field, FieldDescription, FieldGroup, FieldLabel, FieldSet } from "@/com
 import { Input } from "@/components/ui/input";
 import { ItemGroup } from "@/components/ui/item";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import {
-  WorkspaceSecondaryAppBar,
-  WorkspaceSecondaryAppBarActions,
-} from "@/components/workspace-secondary-app-bar";
-import { api, errorMessage } from "../../api.js";
+import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
+import { api } from "../../api.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+import { financeAccountNeedsConnectionAttention } from "./attention";
 import {
   isConfirmedFinanceMutationFailure,
   requireFinanceMutationResult,
 } from "./mutation-retry.js";
-import { PlaidConnectButton } from "./plaid-connect.js";
+import { PlaidConnectButton } from "./plaid-connect";
 import {
   FinanceAccountRecord,
   FinanceSourceState,
   refreshFinancePosition,
 } from "./position-material.js";
+import { FinanceCreateButton } from "./workspace-header";
 
 export function FinanceAccountsPage() {
   const client = useQueryClient();
+  const health = useQuery({
+    queryKey: ["finance-ledger-health"],
+    queryFn: () => api.getFinanceLedgerHealth(),
+  });
+  const sync = useFeedbackMutation({
+    feedback: { action: "sync this account", safeToRetry: true },
+    mutationFn: (id: string) => api.syncFinanceAccount(id),
+    onSuccess: () => refreshFinancePosition(client),
+  });
   const accounts = useQuery({
     queryKey: ["finance-accounts"],
     queryFn: () => api.listFinanceAccounts(),
   });
   const [editing, setEditing] = useState<FinanceAccount | null>(null);
-  const [creating, setCreating] = useState(false);
-  const refresh = () => refreshFinancePosition(client);
   return (
     <div className="flex flex-col gap-5">
-      <WorkspaceSecondaryAppBar aria-label="Account controls">
-        <WorkspaceSecondaryAppBarActions>
-          <PlaidConnectButton onConnected={refresh} />
-          <Button onClick={() => setCreating(true)} size="sm" variant="outline">
-            Track account manually
-          </Button>
-          <Button asChild size="sm" variant="ghost">
-            <Link to="/finances/imports">Import records</Link>
-          </Button>
-          <Button asChild size="sm" variant="ghost">
-            <Link to="/finances/health">Evidence health</Link>
-          </Button>
-        </WorkspaceSecondaryAppBarActions>
-      </WorkspaceSecondaryAppBar>
-      <FinanceSourceState label="Accounts" query={accounts} />
-      {accounts.data ? (
-        <>
-          {!accounts.data.accountSemantics.trustworthy ? (
-            <Alert>
-              <AlertTitle>Account interpretation needs attention</AlertTitle>
-              <AlertDescription>
-                Check missing balances and source freshness, and confirm ownership and possible
-                duplicates before relying on your personal position. Excluding an account removes it
-                from planning.
-              </AlertDescription>
-            </Alert>
+      <WorkspaceHeaderControls label="Account controls">
+        <Button
+          asChild
+          size="icon"
+          variant="ghost"
+          aria-label="Import records"
+          title="Import records"
+        >
+          <Link to="/finances/imports">
+            <HistoryIcon />
+          </Link>
+        </Button>
+      </WorkspaceHeaderControls>
+      <Card>
+        <CardHeader>
+          <CardTitle>Accounts</CardTitle>
+          <CardAction>
+            <FinanceCreateButton kind="account" />
+          </CardAction>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <FinanceSourceState label="Accounts" query={accounts} />
+          {accounts.data ? (
+            <>
+              <MutationFeedback feedback={sync.feedback} />
+              {health.isError ? (
+                <Alert variant="warning">
+                  <AlertTitle>Account coverage could not load</AlertTitle>
+                  <AlertDescription>
+                    <Button variant="outline" onClick={() => void health.refetch()}>
+                      Retry account coverage
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+              {health.data ? (
+                <p className="text-sm text-muted-foreground">
+                  {health.data.balanceOnlyAccounts} balance-only{" "}
+                  {health.data.balanceOnlyAccounts === 1 ? "account" : "accounts"} · Balances are
+                  tracked without transaction history.
+                </p>
+              ) : null}
+              {accounts.data.accounts.length ? (
+                <ItemGroup aria-label="Financial accounts" className="finance-account-grid">
+                  {accounts.data.accounts.map((account) => {
+                    const duplicateIds = new Set(
+                      accounts.data.accountSemantics.possibleDuplicateGroups
+                        .filter((group) => group.accountIds.includes(account.id))
+                        .flatMap((group) => group.accountIds),
+                    );
+                    const duplicateNames = accounts.data.accounts
+                      .filter((other) => other.id !== account.id && duplicateIds.has(other.id))
+                      .map((other) => other.name);
+                    return (
+                      <div key={account.id} className="grid min-w-0 gap-3">
+                        <FinanceAccountRecord
+                          account={account}
+                          duplicateNames={duplicateNames}
+                          key={account.id}
+                          onEdit={() => setEditing(account)}
+                          attentionAction={
+                            financeAccountNeedsConnectionAttention(account) ? (
+                              account.status === "needs_reauth" ? (
+                                <PlaidConnectButton
+                                  label="Reconnect bank"
+                                  onConnected={() => refreshFinancePosition(client)}
+                                />
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={sync.isPending}
+                                  onClick={() => sync.mutate(account.id)}
+                                >
+                                  Sync account
+                                </Button>
+                              )
+                            ) : undefined
+                          }
+                        />
+                      </div>
+                    );
+                  })}
+                </ItemGroup>
+              ) : (
+                <Empty>
+                  <EmptyHeader>
+                    <EmptyTitle>No accounts tracked</EmptyTitle>
+                    <EmptyDescription>
+                      Connect a bank, import records, or track an account manually.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              )}
+            </>
           ) : null}
-          {accounts.data.accounts.length ? (
-            <ItemGroup aria-label="Financial accounts">
-              {accounts.data.accounts.map((account) => {
-                const duplicateIds = new Set(
-                  accounts.data.accountSemantics.possibleDuplicateGroups
-                    .filter((group) => group.accountIds.includes(account.id))
-                    .flatMap((group) => group.accountIds),
-                );
-                const duplicateNames = accounts.data.accounts
-                  .filter((other) => other.id !== account.id && duplicateIds.has(other.id))
-                  .map((other) => other.name);
-                return (
-                  <FinanceAccountRecord
-                    account={account}
-                    duplicateNames={duplicateNames}
-                    key={account.id}
-                    onEdit={() => setEditing(account)}
-                  />
-                );
-              })}
-            </ItemGroup>
-          ) : (
-            <Empty>
-              <EmptyHeader>
-                <EmptyTitle>No accounts tracked</EmptyTitle>
-                <EmptyDescription>
-                  Connect a bank, import records, or track an account manually.
-                </EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          )}
-        </>
-      ) : null}
+        </CardContent>
+      </Card>
       {editing ? (
         <AccountEditor
           account={editing}
@@ -122,7 +181,6 @@ export function FinanceAccountsPage() {
           }}
         />
       ) : null}
-      {creating ? <ManualAccountEditor onClose={() => setCreating(false)} /> : null}
     </div>
   );
 }
@@ -138,6 +196,7 @@ function AccountKindField({
     <Field>
       <FieldLabel htmlFor="account-kind">Account kind</FieldLabel>
       <NativeSelect
+        name="kind"
         id="account-kind"
         onChange={(event) => onChange(event.target.value as FinanceAccountKind)}
         value={value}
@@ -190,7 +249,8 @@ function AccountEditor({
       : {}),
   };
   const hasChanges = Object.keys(changes).length > 1;
-  const save = useMutation({
+  const save = useFeedbackMutation({
+    feedback: { action: "save this account", safeToRetry: false, form: true },
     mutationFn: async () => {
       const payload = JSON.stringify(changes);
       if (lastAttempt.current?.payload !== payload)
@@ -210,7 +270,8 @@ function AccountEditor({
       onClose();
     },
   });
-  const disconnect = useMutation({
+  const disconnect = useFeedbackMutation({
+    feedback: { action: "disconnect this account", safeToRetry: false, form: false },
     mutationFn: async () => {
       disconnectKey.current ??= crypto.randomUUID();
       return requireFinanceMutationResult(
@@ -252,7 +313,8 @@ function AccountEditor({
             Correct how {account.name} contributes to your financial position.
           </DialogDescription>
         </DialogHeader>
-        <form
+        <FeedbackForm
+          feedback={save.feedback}
           className="flex flex-col gap-5"
           onSubmit={(event) => {
             event.preventDefault();
@@ -264,6 +326,7 @@ function AccountEditor({
               <Field>
                 <FieldLabel htmlFor="account-name">Account name</FieldLabel>
                 <Input
+                  name="name"
                   id="account-name"
                   maxLength={160}
                   onChange={(event) => setName(event.target.value)}
@@ -274,6 +337,7 @@ function AccountEditor({
               <Field>
                 <FieldLabel htmlFor="account-institution">Institution</FieldLabel>
                 <Input
+                  name="institution"
                   id="account-institution"
                   maxLength={160}
                   onChange={(event) => setInstitution(event.target.value)}
@@ -285,6 +349,7 @@ function AccountEditor({
               <Field>
                 <FieldLabel htmlFor="account-ownership">Ownership</FieldLabel>
                 <NativeSelect
+                  name="ownershipType"
                   id="account-ownership"
                   onChange={(event) =>
                     setOwnership(event.target.value as FinanceAccountOwnershipType)
@@ -297,10 +362,10 @@ function AccountEditor({
                 </NativeSelect>
               </Field>
               {ownership === "joint" ? (
-                <Field data-invalid={!validShare}>
+                <Field>
                   <FieldLabel htmlFor="account-share">Your ownership share (%)</FieldLabel>
                   <Input
-                    aria-invalid={!validShare}
+                    name="ownershipShare"
                     id="account-share"
                     min="0.01"
                     max="100"
@@ -326,28 +391,24 @@ function AccountEditor({
               {account.provider === "manual" ? (
                 <Field>
                   <FieldLabel htmlFor="account-balance">Balance</FieldLabel>
-                  <Input
+                  <CurrencyInput
+                    name="balance"
                     id="account-balance"
-                    type="number"
-                    step="0.01"
+                    currencyCode={account.currencyCode}
+                    min={Number.NEGATIVE_INFINITY}
                     value={balance}
-                    onChange={(event) => setBalance(event.target.value)}
+                    onValueChange={setBalance}
                   />
                   <FieldDescription>Leave blank when the balance is unavailable.</FieldDescription>
                 </Field>
               ) : null}
             </FieldGroup>
           </FieldSet>
-          {save.isError ? (
-            <Alert variant="destructive">
-              <AlertTitle>Account was not saved</AlertTitle>
-              <AlertDescription>
-                <p>{errorMessage(save.error)}</p>
-                <Button onClick={() => void onReload()} size="sm" type="button" variant="outline">
-                  Reload account
-                </Button>
-              </AlertDescription>
-            </Alert>
+
+          {save.feedback?.kind === "conflict" ? (
+            <Button onClick={() => void onReload()} size="sm" type="button" variant="outline">
+              Reload account
+            </Button>
           ) : null}
           <DialogFooter>
             {canDisconnect ? (
@@ -368,16 +429,11 @@ function AccountEditor({
             >
               Cancel
             </Button>
-            <Button
-              disabled={
-                save.isPending || !hasChanges || !validShare || !name.trim() || !institution.trim()
-              }
-              type="submit"
-            >
+            <Button disabled={save.isPending || !hasChanges} type="submit">
               {save.isPending ? "Saving account…" : "Save account"}
             </Button>
           </DialogFooter>
-        </form>
+        </FeedbackForm>
         <Dialog
           open={confirmingDisconnect}
           onOpenChange={(open) => {
@@ -397,7 +453,7 @@ function AccountEditor({
             {disconnect.isError ? (
               <Alert variant="destructive">
                 <AlertTitle>Account is still tracked</AlertTitle>
-                <AlertDescription>{errorMessage(disconnect.error)}</AlertDescription>
+                <AlertDescription>{disconnect.feedback?.message}</AlertDescription>
               </Alert>
             ) : null}
             <DialogFooter>
@@ -425,13 +481,14 @@ function AccountEditor({
   );
 }
 
-function ManualAccountEditor({ onClose }: { onClose: () => void }) {
+export function ManualAccountEditor({ onClose }: { onClose: () => void }) {
   const client = useQueryClient();
   const [name, setName] = useState("");
   const [institution, setInstitution] = useState("");
   const [kind, setKind] = useState<FinanceAccountKind>("cash");
   const [balance, setBalance] = useState("");
-  const create = useMutation({
+  const create = useFeedbackMutation({
+    feedback: { action: "create this account", safeToRetry: false, form: true },
     mutationFn: () =>
       api.createFinanceAccount({
         balance: balance.trim() === "" ? null : Number(balance),
@@ -446,79 +503,78 @@ function ManualAccountEditor({ onClose }: { onClose: () => void }) {
     },
   });
   return (
-    <Dialog
+    <ResponsiveDialog
       open
       onOpenChange={(open) => {
         if (!open && !create.isPending) onClose();
       }}
     >
-      <DialogContent className="max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Track account manually</DialogTitle>
-          <DialogDescription>Record a balance you maintain yourself.</DialogDescription>
-        </DialogHeader>
-        <form
-          className="flex flex-col gap-5"
+      <ResponsiveDialogContent>
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>Track account manually</ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
+            Record a balance you maintain yourself.
+          </ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
+        <FeedbackForm
+          feedback={create.feedback}
+          className="flex min-h-0 flex-col gap-5 overflow-hidden"
           onSubmit={(event) => {
             event.preventDefault();
             create.mutate();
           }}
         >
-          <FieldSet disabled={create.isPending}>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="new-account-name">Account name</FieldLabel>
-                <Input
-                  id="new-account-name"
-                  maxLength={160}
-                  onChange={(event) => setName(event.target.value)}
-                  required
-                  value={name}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="new-account-institution">Institution</FieldLabel>
-                <Input
-                  id="new-account-institution"
-                  maxLength={160}
-                  onChange={(event) => setInstitution(event.target.value)}
-                  required
-                  value={institution}
-                />
-              </Field>
-              <AccountKindField value={kind} onChange={setKind} />
-              <Field>
-                <FieldLabel htmlFor="new-account-balance">Balance</FieldLabel>
-                <Input
-                  id="new-account-balance"
-                  type="number"
-                  step="0.01"
-                  value={balance}
-                  onChange={(event) => setBalance(event.target.value)}
-                />
-                <FieldDescription>Leave blank when the balance is unavailable.</FieldDescription>
-              </Field>
-            </FieldGroup>
-          </FieldSet>
-          {create.isError ? (
-            <Alert variant="destructive">
-              <AlertTitle>Account was not added</AlertTitle>
-              <AlertDescription>{errorMessage(create.error)}</AlertDescription>
-            </Alert>
-          ) : null}
-          <DialogFooter>
+          <ResponsiveDialogBody>
+            <FieldSet disabled={create.isPending}>
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="new-account-name">Account name</FieldLabel>
+                  <Input
+                    name="name"
+                    id="new-account-name"
+                    maxLength={160}
+                    onChange={(event) => setName(event.target.value)}
+                    required
+                    value={name}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="new-account-institution">Institution</FieldLabel>
+                  <Input
+                    name="institution"
+                    id="new-account-institution"
+                    maxLength={160}
+                    onChange={(event) => setInstitution(event.target.value)}
+                    required
+                    value={institution}
+                  />
+                </Field>
+                <AccountKindField value={kind} onChange={setKind} />
+                <Field>
+                  <FieldLabel htmlFor="new-account-balance">Balance</FieldLabel>
+                  <CurrencyInput
+                    name="balance"
+                    id="new-account-balance"
+                    min={Number.NEGATIVE_INFINITY}
+                    value={balance}
+                    onValueChange={setBalance}
+                  />
+                  <FieldDescription>Leave blank when the balance is unavailable.</FieldDescription>
+                </Field>
+              </FieldGroup>
+            </FieldSet>
+          </ResponsiveDialogBody>
+
+          <ResponsiveDialogFooter className="flex-row justify-end">
             <Button disabled={create.isPending} onClick={onClose} type="button" variant="outline">
               Cancel
             </Button>
-            <Button
-              disabled={create.isPending || !name.trim() || !institution.trim()}
-              type="submit"
-            >
+            <Button disabled={create.isPending} type="submit">
               {create.isPending ? "Adding account…" : "Add account"}
             </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+          </ResponsiveDialogFooter>
+        </FeedbackForm>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   );
 }

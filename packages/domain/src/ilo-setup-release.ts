@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { semanticVersionSchema } from "./common.js";
-import releaseManifest from "./ilo-setup-release.json" with { type: "json" };
+import releaseManifest from "./personal-os-setup-release.json" with { type: "json" };
 
 const iloSetupReleaseSchema = z.object({
   legacySourcePaths: z.array(z.string().startsWith("/")).min(1),

@@ -1,6 +1,6 @@
 import type { FinanceActionReview, FinanceQuestion } from "@personal-os/domain";
 import { EmptyState, Spinner } from "@personal-os/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { CircleCheckIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +17,9 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { api } from "../../api.js";
-import { InlineError } from "../../components/async-state.js";
+import { QueryFeedback } from "../../components/async-state.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 
 function label(kind: string) {
   return kind === "maintenance_turn"
@@ -28,7 +30,9 @@ function label(kind: string) {
 export function FinanceAgentReviewQueue({
   questionId,
   approvalId,
+  onChanged,
 }: {
+  onChanged?: () => Promise<void>;
   questionId?: string | undefined;
   approvalId?: string | undefined;
 } = {}) {
@@ -45,6 +49,7 @@ export function FinanceAgentReviewQueue({
   });
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const refresh = async () => {
+    await onChanged?.();
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["finance-questions"] }),
       queryClient.invalidateQueries({ queryKey: ["finance-action-reviews"] }),
@@ -52,13 +57,22 @@ export function FinanceAgentReviewQueue({
       queryClient.invalidateQueries({ queryKey: ["agent-access-work-items"] }),
     ]);
   };
-  const answer = useMutation({
+  const answer = useFeedbackMutation({
+    feedback: { action: "save this answer", safeToRetry: true, form: true },
     mutationFn: ({ id, value }: { id: string; value: string }) =>
       api.answerFinanceQuestion(id, value),
     onSuccess: refresh,
   });
-  const approve = useMutation({ mutationFn: api.approveFinanceActionReview, onSuccess: refresh });
-  const dismiss = useMutation({ mutationFn: api.dismissFinanceActionReview, onSuccess: refresh });
+  const approve = useFeedbackMutation({
+    feedback: { action: "approve this financial change", safeToRetry: false, form: false },
+    mutationFn: api.approveFinanceActionReview,
+    onSuccess: refresh,
+  });
+  const dismiss = useFeedbackMutation({
+    feedback: { action: "dismiss this financial review", safeToRetry: false, form: false },
+    mutationFn: api.dismissFinanceActionReview,
+    onSuccess: refresh,
+  });
   const pendingQuestions =
     approvalId === undefined
       ? (questions.data ?? []).filter((item) => questionId === undefined || item.id === questionId)
@@ -72,17 +86,14 @@ export function FinanceAgentReviewQueue({
       : [];
   const loading = questions.isLoading || reviews.isLoading;
   const targeted = questionId !== undefined || approvalId !== undefined;
-  const error = questions.error ?? reviews.error ?? answer.error ?? approve.error ?? dismiss.error;
 
   return (
     <section aria-label="Agent review work" className="grid gap-4">
-      <div>
-        <h2 className="text-lg font-semibold">Review</h2>
-        <p className="text-sm text-muted-foreground">
-          Questions need your judgment. Approvals already contain a complete proposed change.
-        </p>
-      </div>
-      {error ? <InlineError error={error} /> : null}
+      <QueryFeedback query={questions} title="Couldn’t load finance questions." />
+      <QueryFeedback query={reviews} title="Couldn’t load finance approvals." />
+      <MutationFeedback feedback={answer.feedback} />
+      <MutationFeedback feedback={approve.feedback} />
+      <MutationFeedback feedback={dismiss.feedback} />
       {loading ? <Spinner label="Loading Finance review work" /> : null}
       {pendingQuestions.map((question) => (
         <QuestionCard
@@ -103,7 +114,10 @@ export function FinanceAgentReviewQueue({
           review={review}
         />
       ))}
-      {!loading && !error && pendingQuestions.length + pendingReviews.length === 0 ? (
+      {!loading &&
+      !questions.isError &&
+      !reviews.isError &&
+      pendingQuestions.length + pendingReviews.length === 0 ? (
         <EmptyState
           icon={<CircleCheckIcon />}
           title={targeted ? "Requested review unavailable" : "Nothing needs review"}

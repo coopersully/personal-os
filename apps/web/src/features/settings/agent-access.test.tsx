@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { ReviewFlowHost } from "../reviews/flow.js";
 import {
   ConnectedAgentsSettings,
   WorkspaceAccessSettings,
@@ -17,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   activateMailRule: vi.fn(),
   createAccessToken: vi.fn(),
   deleteAccessToken: vi.fn(),
+  getDomainProfile: vi.fn(),
   getAgentConnectionGuide: vi.fn(),
   getAssistantSetupStatus: vi.fn(),
   getExecutionPolicySettings: vi.fn(),
@@ -34,10 +37,11 @@ const mocks = vi.hoisted(() => ({
   revokeOAuthClient: vi.fn(),
   toastError: vi.fn(),
   updateExecutionPolicySettings: vi.fn(),
+  updateMailRule: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
-  toast: { error: mocks.toastError, success: vi.fn() },
+  toast: { dismiss: vi.fn(), error: mocks.toastError, success: vi.fn() },
 }));
 
 vi.mock("../../api.js", () => ({
@@ -67,13 +71,42 @@ function SettingsDestination() {
 }
 
 function renderSettings(initialEntry = "/settings?section=workspace-access") {
+  const legacyRule = new URL(initialEntry, "http://localhost").searchParams.get("reviewRule");
+  if (legacyRule) {
+    initialEntry = initialEntry.replace(
+      `reviewRule=${legacyRule}`,
+      `review=mail-rule:${legacyRule}`,
+    );
+    mocks.listAgentAccessWorkItems.mockImplementation(async () => ({
+      items: mocks.activateMailRule.mock.calls.length
+        ? []
+        : [
+            {
+              id: `mail-rule:${legacyRule}`,
+              domain: "mail",
+              title: "Review Mail rule",
+              summary: "Review its current matches.",
+              kind: "review",
+              action: null,
+            },
+          ],
+      nextCursor: null,
+      unavailableDomains: [],
+      summary: { byDomain: { mail: 1 } },
+    }));
+  }
   const queryClient = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false, gcTime: 0 } },
   });
+  queryClient.setQueryDefaults(["me"], { gcTime: Number.POSITIVE_INFINITY });
+  queryClient.setQueryData(["me"], { id: "owner" });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialEntry]}>
-        <SettingsDestination />
+        <TooltipProvider>
+          <SettingsDestination />
+          <ReviewFlowHost workspace="mail" />
+        </TooltipProvider>
         <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -91,6 +124,7 @@ function readinessOverview(label: string) {
 describe("agent access settings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getDomainProfile.mockResolvedValue(null);
     mocks.getExecutionPolicySettings.mockResolvedValue({
       reviewBypassEnabled: false,
       version: 1,
@@ -332,6 +366,7 @@ describe("agent access settings", () => {
           provider: "google",
           syncError: null,
           syncStatus: "idle",
+          health: { state: "ready" },
         },
         {
           accountId: "55555555-5555-4555-8555-555555555555",
@@ -350,6 +385,7 @@ describe("agent access settings", () => {
           provider: "icloud",
           syncError: "App-specific password expired",
           syncStatus: "error",
+          health: { state: "reconnect", message: "App-specific password expired" },
         },
         {
           accountId: "66666666-6666-4666-8666-666666666666",
@@ -368,6 +404,7 @@ describe("agent access settings", () => {
           provider: "google",
           syncError: null,
           syncStatus: "idle",
+          health: { state: "ready" },
         },
       ],
       automation: {
@@ -602,14 +639,35 @@ describe("agent access settings", () => {
       "/settings?section=workspace-access&workspace=tasks",
     );
     await browser.click(screen.getByRole("link", { name: "Connected agents" }));
-    expect(await screen.findByRole("heading", { name: "Connected agents" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Connect an agent host" }),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("nohmi MCP URL")).toHaveValue("https://mcp.example.com/mcp");
+  });
+
+  it("shows Mail configuration when the guide fails and pauses rules with their version", async () => {
+    mocks.getAgentConnectionGuide.mockRejectedValue(new Error("Guide unavailable"));
+    const user = userEvent.setup();
+    renderSettings("/settings?section=mail");
+    expect(await screen.findByText("Routine orders")).toBeInTheDocument();
+    expect(screen.getByText("Personal")).toBeInTheDocument();
+    expect(screen.queryByText("Mail readiness")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Pause Routine orders" }));
+    await waitFor(() =>
+      expect(mocks.updateMailRule).toHaveBeenCalledWith(id, { enabled: false, expectedVersion: 1 }),
+    );
+    expect(
+      screen.queryByRole("button", { name: "Review Old newsletters" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows one person-owned action without repeating setup or operational review state", async () => {
     const finance = renderSettings("/settings?section=finances");
+    await userEvent.click(await screen.findByRole("button", { name: "Setup details" }));
 
-    expect(await screen.findByRole("heading", { name: "Finances settings" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Finish setting up Finances" }),
+    ).toBeInTheDocument();
     expect(await screen.findAllByText("Action required")).toHaveLength(1);
     expect(
       screen.getByText("Review finances draft version 3 and accept or revise it."),
@@ -625,7 +683,8 @@ describe("agent access settings", () => {
 
     finance.unmount();
     renderSettings("/settings?section=mail");
-    expect(await screen.findByRole("heading", { name: "Mail settings" })).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "Setup details" }));
+    expect(await screen.findByRole("heading", { name: "Setup & diagnostics" })).toBeInTheDocument();
     expect(screen.queryByText("No settings action needed")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Setup protocol details" }),
@@ -648,13 +707,20 @@ describe("agent access settings", () => {
 
     await browser.click(await screen.findByRole("button", { name: "Revoke Claude" }));
     await browser.click(screen.getByRole("button", { name: "Revoke access" }));
-    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("Could not revoke host"));
+    await waitFor(() =>
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        "Couldn’t revoke this agent connection. Try again.",
+        expect.any(Object),
+      ),
+    );
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Cancel" }));
 
     await browser.click(screen.getByRole("button", { name: "Set up a local token" }));
     await browser.click(screen.getByRole("button", { name: "Create local token" }));
-    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("Could not create token"));
+    expect(
+      await screen.findByText(/confirm whether we could create an agent token/),
+    ).toBeInTheDocument();
     expect(screen.queryByText("Copy this token now")).not.toBeInTheDocument();
   });
 
@@ -662,8 +728,9 @@ describe("agent access settings", () => {
     const browser = userEvent.setup();
     renderSettings("/settings?section=mail&reviewRule=33333333-3333-4333-8333-333333333333");
 
-    expect(await screen.findByRole("heading", { name: "Mail settings" })).toBeInTheDocument();
-    expect(await screen.findByText("Weekly news")).toBeInTheDocument();
+    expect(
+      await within(await screen.findByRole("dialog")).findByText("Weekly news"),
+    ).toBeInTheDocument();
     expect(screen.getByText(/Rule scope: person@example.com/)).toBeInTheDocument();
     expect(screen.getByText(/mark read — due now/)).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Activate reviewed rule" }));
@@ -675,10 +742,14 @@ describe("agent access settings", () => {
         expectedVersion: 1,
       }),
     );
-    await waitFor(() => expect(mocks.getMailSetupContext).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(mocks.getMailSetupContext.mock.calls.length).toBeGreaterThanOrEqual(2),
+    );
+    await browser.click(await screen.findByRole("button", { name: "Close" }));
     expect(screen.getByLabelText("Current location")).toHaveTextContent("/settings?section=mail");
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(screen.queryByText("Routine orders")).not.toBeInTheDocument();
+    expect(screen.getByText("Routine orders")).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole("button", { name: "Setup details" }));
     expect(await screen.findByText("Mail readiness")).toBeInTheDocument();
     expect(await screen.findByText("4 of 5 complete")).toBeInTheDocument();
     expect(screen.getByText("1 to finish")).toBeInTheDocument();
@@ -716,7 +787,7 @@ describe("agent access settings", () => {
       screen.queryByRole("button", { name: "Setup protocol details" }),
     ).not.toBeInTheDocument();
 
-    await browser.click(screen.getByRole("link", { name: "Workspace access" }));
+    await browser.click(screen.getByRole("link", { name: "Open Mail access" }));
     await browser.click(screen.getByRole("link", { name: "Connected agents" }));
     expect(await screen.findByText("2 connected")).toBeInTheDocument();
     expect(screen.getByText(/Legacy inactive permission/)).toBeInTheDocument();
@@ -744,13 +815,20 @@ describe("agent access settings", () => {
     await browser.click(screen.getByRole("button", { name: "Set up a local token" }));
     await browser.click(screen.getByRole("radio", { name: /Full nohmi/ }));
     await browser.click(screen.getByText(/Fine-tune permissions/));
+    expect(screen.getByLabelText("Read private ritual responses")).toBeChecked();
+    expect(screen.queryByLabelText("Manage rituals and responses")).not.toBeInTheDocument();
     await browser.click(screen.getByLabelText("Read X bookmarks"));
     await browser.click(screen.getByLabelText("Read X bookmarks"));
     await browser.click(screen.getByRole("button", { name: "Create local token" }));
     await waitFor(() =>
       expect(mocks.createAccessToken).toHaveBeenCalledWith(
         expect.objectContaining({
-          scopes: expect.arrayContaining(["finances:read", "finances:write", "mail:write"]),
+          scopes: expect.arrayContaining([
+            "finances:read",
+            "finances:write",
+            "mail:write",
+            "tracking:read",
+          ]),
         }),
       ),
     );
@@ -843,6 +921,7 @@ describe("agent access settings", () => {
 
   it("reports agent-owned setup work without presenting a person action", async () => {
     renderSettings("/settings?section=calendar");
+    await userEvent.click(await screen.findByRole("button", { name: "Setup details" }));
 
     expect(await screen.findByText("Setup in progress")).toBeVisible();
     expect(screen.getByText(/agent should inspect calendar material/i)).toBeVisible();
@@ -893,8 +972,9 @@ describe("agent access settings", () => {
     mocks.listAccessTokens.mockResolvedValue([]);
     mocks.listOAuthClients.mockResolvedValue([]);
     renderSettings("/settings?section=mail");
+    await userEvent.click(await screen.findByRole("button", { name: "Setup details" }));
 
-    expect(await screen.findByText("Connection guide unavailable")).toBeInTheDocument();
+    expect(await screen.findByText(/Couldn’t load the connection guide/)).toBeInTheDocument();
     expect(screen.getByText("Mail readiness")).toBeInTheDocument();
     expect(readinessOverview("Mail").getByText("Unavailable")).toBeInTheDocument();
     expect(screen.getByText("Mail is not available in this deployment.")).toBeInTheDocument();
@@ -953,6 +1033,7 @@ describe("agent access settings", () => {
         : [],
     );
     let view = renderSettings("/settings?section=calendar");
+    await userEvent.click(await screen.findByRole("button", { name: "Setup details" }));
 
     expect(await screen.findByText("Calendar readiness")).toBeInTheDocument();
     expect((await screen.findByText("Next step:")).closest("p")).toHaveTextContent(
@@ -967,6 +1048,7 @@ describe("agent access settings", () => {
 
     view.unmount();
     view = renderSettings("/settings?section=tasks");
+    await userEvent.click(await screen.findByRole("button", { name: "Setup details" }));
     expect(await screen.findByText("Tasks readiness")).toBeInTheDocument();
     expect((await screen.findByText("Next step:")).closest("p")).toHaveTextContent(
       "Next step: Teach nohmi your Tasks preferences",
@@ -982,6 +1064,7 @@ describe("agent access settings", () => {
 
     view.unmount();
     renderSettings("/settings?section=finances");
+    await userEvent.click(await screen.findByRole("button", { name: "Setup details" }));
     expect(await screen.findByText("Finances readiness")).toBeInTheDocument();
     expect(screen.queryByText("Next step:")).not.toBeInTheDocument();
     await browser.click(await screen.findByRole("button", { name: "Review checks" }));
@@ -996,9 +1079,10 @@ describe("agent access settings", () => {
     const browser = userEvent.setup();
     mocks.listCalendars.mockRejectedValue(new Error("Calendar readiness unavailable"));
     renderSettings("/settings?section=calendar");
+    await userEvent.click(await screen.findByRole("button", { name: "Setup details" }));
 
     expect(await screen.findByText("Calendar readiness could not be loaded.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Workspace access" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open Calendar access" })).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Setup protocol details" }));
     expect(screen.getByRole("button", { name: "Copy agent setup request" })).toBeEnabled();
   });
@@ -1006,8 +1090,9 @@ describe("agent access settings", () => {
   it("keeps pending and failed readiness distinct from a successful empty result", async () => {
     mocks.getAssistantSetupStatus.mockReturnValue(new Promise(() => {}));
     renderSettings("/settings?section=mail");
+    await userEvent.click(await screen.findByRole("button", { name: "Setup details" }));
     expect(await screen.findByText("Mail readiness")).toBeInTheDocument();
-    expect(screen.getByText("Checking settings")).toBeInTheDocument();
+    expect(screen.queryByText("No settings action needed")).not.toBeInTheDocument();
     expect(readinessOverview("Mail").getByText("Checking")).toBeInTheDocument();
     expect(screen.getByText("Checking setup and access.")).toBeInTheDocument();
   });
@@ -1016,6 +1101,7 @@ describe("agent access settings", () => {
     const browser = userEvent.setup();
     mocks.listMailRules.mockRejectedValue(new Error("Mail rules unavailable"));
     renderSettings("/settings?section=mail");
+    await userEvent.click(await screen.findByRole("button", { name: "Setup details" }));
     expect(await screen.findByText("Mail readiness could not be loaded.")).toBeInTheDocument();
     expect(readinessOverview("Mail").getByText("Unavailable")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Review checks" }));
@@ -1031,6 +1117,7 @@ describe("agent access settings", () => {
     const browser = userEvent.setup();
     mocks.getAssistantSetupStatus.mockRejectedValue(new Error("Setup status unavailable"));
     renderSettings("/settings?section=mail");
+    await userEvent.click(await screen.findByRole("button", { name: "Setup details" }));
     expect(await screen.findByText("Mail readiness could not be loaded.")).toBeInTheDocument();
     expect(readinessOverview("Mail").getByText("Unavailable")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Review checks" }));

@@ -2,8 +2,12 @@ mod coordinator;
 mod desktop;
 mod lifecycle;
 mod native;
+mod pet;
+mod pet_content;
 mod preferences;
+mod ritual;
 mod transport;
+mod updates;
 mod wallpaper;
 mod wallpaper_schedule;
 use tauri::Manager;
@@ -12,15 +16,34 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            updates::schedule(app);
             lifecycle::show(app)
         }))
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             app.manage(desktop::DesktopState::load(app.handle()).map_err(std::io::Error::other)?);
+            app.manage(ritual::RitualRuntime::default());
+            updates::setup(app.handle());
+            #[cfg(target_os = "macos")]
+            {
+                let ritual_app = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    updates::wait_for_startup(&ritual_app).await;
+                    ritual::run(ritual_app).await;
+                });
+            }
             lifecycle::setup(app.handle())?;
+            // Capture cold-start URLs before update installation can claim startup.
+            updates::schedule(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() == "ritual" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                }
+            }
             if window.label() == "main" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
@@ -30,13 +53,31 @@ pub fn run() {
         })
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            updates::desktop_update_status,
+            updates::desktop_update_open,
+            updates::desktop_update_check,
+            updates::desktop_update_restart,
+            ritual::ritual_state,
+            ritual::ritual_ready,
+            ritual::ritual_preferences,
+            ritual::ritual_open,
+            ritual::ritual_preview,
+            ritual::ritual_mutate,
+            ritual::ritual_local,
             desktop::desktop_settings,
             desktop::desktop_take_action,
             desktop::desktop_save_settings,
             desktop::desktop_native_action,
+            desktop::desktop_preview_pet_scale,
+            desktop::desktop_begin_pet_appearance,
+            desktop::desktop_preview_pet_appearance,
+            desktop::desktop_save_pet_appearance,
+            pet::pet_snapshot,
+            pet::pet_action,
             transport::desktop_request,
             transport::desktop_test_connection,
             apply_pinterest_wallpaper,
+            preview_pinterest_wallpaper,
             desktop_preview_environment
         ])
         .build(tauri::generate_context!())
@@ -44,11 +85,20 @@ pub fn run() {
         .run(|app, event| {
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = event {
+                updates::schedule(app);
                 lifecycle::show(app);
             }
             #[cfg(not(target_os = "macos"))]
             let _ = (app, event);
         });
+}
+
+#[tauri::command]
+async fn preview_pinterest_wallpaper(
+    app: tauri::AppHandle,
+    request: wallpaper::WallpaperRequest,
+) -> Result<String, String> {
+    wallpaper::preview(&app, request).await
 }
 
 #[tauri::command]
@@ -109,11 +159,11 @@ fn is_hex_color(value: &str) -> bool {
 
 #[tauri::command]
 fn desktop_preview_environment(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
-    let primary_monitor = app.primary_monitor().map_err(|error| error.to_string())?;
+    // WallpaperRenderer previews NSScreen.screens.first (the primary display).
+    // Its safe-area overlay must use that same display, wherever Settings is open.
     let monitor = app
-        .get_webview_window("main")
-        .and_then(|window| window.current_monitor().ok().flatten())
-        .or(primary_monitor)
+        .primary_monitor()
+        .map_err(|error| error.to_string())?
         .ok_or_else(|| "No primary display is available.".to_string())?;
     let screen = monitor.size();
     let screen_position = monitor.position();
@@ -147,7 +197,7 @@ fn mac_has_notch() -> bool {
     let script = r#"
 ObjC.import('AppKit');
 try {
-  const screen = $.NSScreen.mainScreen;
+  const screen = $.NSScreen.screens.objectAtIndex(0);
   const left = screen.auxiliaryTopLeftArea;
   const right = screen.auxiliaryTopRightArea;
   console.log(Boolean(left && right && left.size.width > 0 && right.size.width > 0));

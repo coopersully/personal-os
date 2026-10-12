@@ -1,10 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
 import {
+  bulkUpdateMailInputSchema,
   createMailRuleInputSchema,
   idSchema,
   isoDateTimeSchema,
+  mailboxRoleSchema,
   mailRuleSchema,
+  updateMailThreadInputSchema,
   upsertMailAttentionItemInputSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
@@ -71,7 +74,10 @@ export function registerMailTools(server: McpServer, api: PersonalOsApiClient) {
         accountIds: z.array(id).optional(),
         limit: z.number().int().min(1).max(200).default(100),
         mailboxId: id.optional(),
-        query: z.string().max(200).optional(),
+        mailboxRole: mailboxRoleSchema.optional(),
+        starred: z.boolean().optional(),
+        snoozed: z.boolean().optional(),
+        query: z.string().trim().min(1).max(200).optional(),
         unread: z.boolean().optional(),
       }),
       title: "List mail",
@@ -111,14 +117,12 @@ export function registerMailTools(server: McpServer, api: PersonalOsApiClient) {
         readOnlyHint: false,
       },
       description:
-        "Update a mail conversation's read or starred state using the updatedAt revision returned by list_mail or read_mail. A stale revision is rejected; re-read before deciding whether to retry. Requires mail:write.",
-      inputSchema: z.object({
+        "Update a mail conversation's read/starred state or mailbox membership using the updatedAt revision returned by list_mail or read_mail. mailboxIds is the complete desired selection from list_mailboxes for this account; an empty array removes known mailbox memberships. A stale revision is rejected; re-read before deciding whether to retry. Requires mail:write.",
+      inputSchema: updateMailThreadInputSchema.safeExtend({
         expectedUpdatedAt: isoDateTimeSchema.describe(
           "Exact updatedAt revision from the conversation that was reviewed",
         ),
         id,
-        starred: z.boolean().optional(),
-        unread: z.boolean().optional(),
       }),
       title: "Update mail",
     },
@@ -135,21 +139,7 @@ export function registerMailTools(server: McpServer, api: PersonalOsApiClient) {
       },
       description:
         "Apply the same read or starred state to at most six conversations. Each item must include the updatedAt revision returned by list_mail or read_mail; stale items fail without overwriting newer state. Provider writes can partly succeed, so inspect every structured item failure and repair action.",
-      inputSchema: z.object({
-        items: z
-          .array(
-            z.object({
-              expectedUpdatedAt: isoDateTimeSchema.describe(
-                "Exact updatedAt revision from the conversation that was reviewed",
-              ),
-              id,
-            }),
-          )
-          .min(1)
-          .max(6),
-        starred: z.boolean().optional(),
-        unread: z.boolean().optional(),
-      }),
+      inputSchema: bulkUpdateMailInputSchema,
       title: "Bulk update mail",
     },
     async (input) => apiResult(() => api.bulkUpdateMail(input)),
@@ -240,7 +230,7 @@ export function registerMailTools(server: McpServer, api: PersonalOsApiClient) {
         readOnlyHint: true,
       },
       description:
-        "Re-preview one saved Mail rule against the current bounded recent window. Returns the rule ID/version, exact thread IDs, due states, dates, truncation, and a fingerprint; it never changes mail or rule state. Activation is an interactive review action in nohmi Settings.",
+        "Re-preview one saved Mail rule against the current bounded recent window. Returns the rule ID/version, exact thread IDs, due states, dates, truncation, and a fingerprint; it never changes mail or rule state. Use activate_mail_rule with these exact preview fields; agents require mail:execute and enabled bypass.",
       inputSchema: z.object({ id }),
       title: "Review saved Mail rule",
     },
@@ -272,7 +262,7 @@ export function registerMailTools(server: McpServer, api: PersonalOsApiClient) {
         readOnlyHint: false,
       },
       description:
-        "Revise or pause a Mail rule using optimistic version matching. Agent activation is intentionally unavailable: the person reviews and activates the saved rule in nohmi Settings. Pause an active rule before changing matching behavior.",
+        "Revise or pause a Mail rule using optimistic version matching. Activation is a separate activate_mail_rule operation with exact preview binding and explicit execution authority. Pause an active rule before changing matching behavior.",
       inputSchema: z.object({
         actions: mailRuleFields.actions.optional(),
         condition: mailRuleFields.condition.optional(),

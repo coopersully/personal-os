@@ -135,7 +135,7 @@ describe("exact-thread Mail stewardship", () => {
     renderThread();
     await user.click(await screen.findByRole("button", { name: "Save disposition" }));
     expect(
-      await screen.findByText("Evidence changed or the operation could not apply"),
+      await screen.findByText(/Couldn’t confirm whether we could save the disposition/),
     ).toBeVisible();
     await waitFor(() =>
       expect(mocks.getMailThreadStewardship.mock.calls.length).toBeGreaterThan(1),
@@ -232,7 +232,7 @@ describe("exact-thread Mail stewardship", () => {
     await user.click(screen.getByRole("button", { name: "Record feedback" }));
 
     expect(
-      await screen.findByText("Evidence changed or the operation could not apply"),
+      await screen.findByText(/Couldn’t confirm whether we could record the feedback/),
     ).toBeVisible();
     await waitFor(() =>
       expect(mocks.getMailThreadStewardship.mock.calls.length).toBeGreaterThan(1),
@@ -242,6 +242,24 @@ describe("exact-thread Mail stewardship", () => {
   it("shows a safe error when thread stewardship cannot load", async () => {
     mocks.getMailThreadStewardship.mockRejectedValueOnce(new Error("Thread unavailable"));
     renderThread();
-    expect(await screen.findByText("Thread unavailable")).toBeVisible();
+    expect(await screen.findByText("Couldn’t load thread stewardship.")).toBeVisible();
+  });
+  it("explains a missing obligation rationale and focuses the field before creating", async () => {
+    const user = userEvent.setup();
+    renderThread();
+    await user.click(await screen.findByRole("button", { name: "Record obligation" }));
+    const rationale = screen.getByLabelText("Why this is explicit");
+    expect(rationale).toHaveAttribute("aria-invalid", "true");
+    expect(rationale).toHaveFocus();
+    expect(screen.getByText("Enter a value for this field.")).toBeVisible();
+    expect(mocks.createMailObligation).not.toHaveBeenCalled();
+    await user.type(rationale, "A reply was requested.");
+    await user.click(screen.getByRole("button", { name: "Record obligation" }));
+    await waitFor(() =>
+      expect(mocks.createMailObligation).toHaveBeenCalledWith(
+        threadId,
+        expect.objectContaining({ rationale: "A reply was requested." }),
+      ),
+    );
   });
 });

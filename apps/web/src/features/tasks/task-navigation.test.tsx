@@ -5,7 +5,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { vi } from "vitest";
 import { SidebarProvider } from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { getTaskListIcon } from "./task-list-icons";
 import {
   archiveScopeFromParams,
@@ -15,17 +17,27 @@ import {
   taskViewFromParams,
 } from "./task-navigation";
 
-it("exposes every destination and nested project without opening menus", () => {
+vi.mock("../workspace-settings/preferences", () => ({
+  useWorkspacePreferences: () => ({
+    isSuccess: true,
+    data: { preferences: { pinnedListIds: ["work"], pinnedProjectIds: ["launch"] } },
+  }),
+}));
+
+it("exposes collection views and explicitly pinned containers", () => {
   const lists = [
     { id: "inbox", icon: "list", name: "Inbox", kind: "inbox" },
     { id: "work", icon: "star", name: "Work", kind: "standard" },
+    { id: "other", icon: "list", name: "Not pinned", kind: "standard" },
   ] as TaskList[];
   const projects = [{ id: "launch", listId: "work", name: "Launch" }] as TaskProject[];
   render(
     <MemoryRouter initialEntries={["/tasks?view=today"]}>
-      <SidebarProvider>
-        <TaskNavigation lists={lists} projects={projects} onNavigate={() => {}} />
-      </SidebarProvider>
+      <TooltipProvider>
+        <SidebarProvider>
+          <TaskNavigation lists={lists} projects={projects} onNavigate={() => {}} />
+        </SidebarProvider>
+      </TooltipProvider>
     </MemoryRouter>,
   );
   for (const name of ["Inbox", "Today", "Upcoming", "All", "Work", "Launch", "History", "Trash"]) {
@@ -36,7 +48,9 @@ it("exposes every destination and nested project without opening menus", () => {
   ).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Today" })).toHaveAttribute("aria-current", "page");
   expect(screen.getByRole("link", { name: "All" })).toHaveAttribute("href", "/tasks?view=all");
-  expect(screen.getByText("My lists")).toBeVisible();
+  expect(screen.getByText("Pinned")).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Not pinned" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Inbox options" })).not.toBeInTheDocument();
   const work = screen.getByRole("link", { name: "Work" });
   expect(work).toHaveAttribute("data-user-created", "true");
   expect(work.querySelector('[data-list-icon="star"]')).toBeInTheDocument();
@@ -72,9 +86,11 @@ it("opens the contextual list and project management surfaces", async () => {
   const { unmount } = render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <SidebarProvider>
-          <TaskContainerActions list={list} lists={[list]} projects={[project]} />
-        </SidebarProvider>
+        <TooltipProvider>
+          <SidebarProvider>
+            <TaskContainerActions list={list} lists={[list]} projects={[project]} />
+          </SidebarProvider>
+        </TooltipProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -86,14 +102,20 @@ it("opens the contextual list and project management surfaces", async () => {
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <SidebarProvider>
-          <TaskContainerActions list={list} project={project} lists={[list]} projects={[project]} />
-        </SidebarProvider>
+        <TooltipProvider>
+          <SidebarProvider>
+            <TaskContainerActions
+              list={list}
+              project={project}
+              lists={[list]}
+              projects={[project]}
+            />
+          </SidebarProvider>
+        </TooltipProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  await user.click(screen.getByRole("button", { name: "Launch options" }));
-  await user.click(screen.getByRole("menuitem", { name: "Manage project" }));
+  await user.click(screen.getByRole("button", { name: "Edit Launch" }));
   expect(screen.getByRole("heading", { name: "Manage Launch" })).toBeVisible();
 });
 
@@ -108,16 +130,18 @@ it("normalizes reminder, history, scheduled, archive, and project destinations",
     ["/reminders", "All"],
     ["/tasks?view=scheduled", "All"],
     ["/tasks?view=cancelled", "History"],
-    ["/tasks?archive=all", "History"],
+    ["/tasks?archive=all", "Archive"],
     ["/tasks?list=work&project=launch", "Launch"],
   ] as const;
 
   for (const [entry, selected] of cases) {
     const { unmount } = render(
       <MemoryRouter initialEntries={[entry]}>
-        <SidebarProvider>
-          <TaskNavigation lists={lists} projects={projects} onNavigate={() => {}} />
-        </SidebarProvider>
+        <TooltipProvider>
+          <SidebarProvider>
+            <TaskNavigation lists={lists} projects={projects} onNavigate={() => {}} />
+          </SidebarProvider>
+        </TooltipProvider>
       </MemoryRouter>,
     );
     expect(screen.getByRole("link", { name: selected })).toHaveAttribute("aria-current", "page");
@@ -125,23 +149,24 @@ it("normalizes reminder, history, scheduled, archive, and project destinations",
   }
 });
 
-it("opens the create-list surface from the sidebar action", async () => {
-  const user = userEvent.setup();
+it("keeps creation in the primary flow instead of the pinned group", () => {
   render(
     <QueryClientProvider client={new QueryClient()}>
       <MemoryRouter initialEntries={["/tasks"]}>
-        <SidebarProvider>
-          <TaskNavigation
-            lists={[]}
-            projects={[]}
-            status={<span>Loading lists</span>}
-            onNavigate={() => {}}
-          />
-        </SidebarProvider>
+        <TooltipProvider>
+          <SidebarProvider>
+            <TaskNavigation
+              lists={[]}
+              projects={[]}
+              status={<span>Loading lists</span>}
+              onNavigate={() => {}}
+            />
+          </SidebarProvider>
+        </TooltipProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
   expect(screen.getByText("Loading lists")).toBeVisible();
-  await user.click(screen.getByRole("button", { name: "New List" }));
-  expect(screen.getByRole("heading", { name: "Create a List" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "New List" })).not.toBeInTheDocument();
+  expect(screen.queryByText("My lists")).not.toBeInTheDocument();
 });

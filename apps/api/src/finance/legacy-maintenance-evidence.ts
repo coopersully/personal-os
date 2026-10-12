@@ -13,6 +13,7 @@ import {
 import type { MaintenanceScope } from "@personal-os/domain";
 import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
+import { readProjectionRows } from "./search-projection-bounds.js";
 
 type ReadExecutor = Pick<Database, "select">;
 export type LegacyFinanceEffect = {
@@ -50,21 +51,28 @@ export async function findUnverifiedLegacyFinanceEffects(
   executor: ReadExecutor,
   userId: string,
   scope: MaintenanceScope,
+  searchLimit?: number,
 ): Promise<LegacyFinanceEffect[]> {
   let targetTransactionId: string | undefined;
   if (scope.type === "target") {
     if (scope.entityType === "finance_review_case") {
-      const [review] = await executor
-        .select({ transactionId: financeReviewCases.transactionId })
-        .from(financeReviewCases)
-        .where(and(eq(financeReviewCases.userId, userId), eq(financeReviewCases.id, scope.id)));
+      const [review] = await readProjectionRows(
+        executor
+          .select({ transactionId: financeReviewCases.transactionId })
+          .from(financeReviewCases)
+          .where(and(eq(financeReviewCases.userId, userId), eq(financeReviewCases.id, scope.id))),
+        searchLimit,
+      );
       if (!review) throw new AppError("not_found", "The Finance target was not found.");
       targetTransactionId = review.transactionId;
     } else if (scope.entityType === "finance_account") {
-      const [account] = await executor
-        .select({ id: financeAccounts.id })
-        .from(financeAccounts)
-        .where(and(eq(financeAccounts.userId, userId), eq(financeAccounts.id, scope.id)));
+      const [account] = await readProjectionRows(
+        executor
+          .select({ id: financeAccounts.id })
+          .from(financeAccounts)
+          .where(and(eq(financeAccounts.userId, userId), eq(financeAccounts.id, scope.id))),
+        searchLimit,
+      );
       if (!account) throw new AppError("not_found", "The Finance target was not found.");
     } else if (scope.entityType === "finance_transaction") {
       targetTransactionId = scope.id;
@@ -72,37 +80,146 @@ export async function findUnverifiedLegacyFinanceEffects(
       throw new AppError("invalid_request", "The Finance target type is not supported.");
     }
   }
-  const transactions = await executor
-    .select({ id: financeTransactions.id })
-    .from(financeTransactions)
-    .where(
-      and(
-        eq(financeTransactions.userId, userId),
-        targetTransactionId ? eq(financeTransactions.id, targetTransactionId) : undefined,
-        scope.type === "target" && scope.entityType === "finance_account"
-          ? eq(financeTransactions.accountId, scope.id)
-          : undefined,
-        scope.type === "window" ? gte(financeTransactions.transactionDate, scope.start) : undefined,
-        scope.type === "window" ? lte(financeTransactions.transactionDate, scope.end) : undefined,
+  const transactions = await readProjectionRows(
+    executor
+      .select({ id: financeTransactions.id })
+      .from(financeTransactions)
+      .where(
+        and(
+          eq(financeTransactions.userId, userId),
+          searchLimit === undefined
+            ? undefined
+            : sql`(
+            EXISTS (
+              SELECT 1 FROM finance_transaction_revisions candidate_revision
+              WHERE candidate_revision.user_id = ${userId}
+                AND candidate_revision.transaction_id = ${financeTransactions.id}
+                AND jsonb_typeof(candidate_revision.provenance -> 'maintenanceRunId') = 'string'
+                AND candidate_revision.provenance ->> 'maintenanceRunId' <> ''
+                AND NOT EXISTS (
+                  SELECT 1 FROM workspace_maintenance_runs canonical_run
+                  WHERE canonical_run.user_id = ${userId} AND canonical_run.domain = 'finances'
+                    AND canonical_run.id::text = candidate_revision.provenance ->> 'maintenanceRunId'
+                )
+            ) OR EXISTS (
+              SELECT 1 FROM finance_transaction_relationships candidate_relationship
+              WHERE candidate_relationship.user_id = ${userId}
+                AND candidate_relationship.transaction_ids ? ${financeTransactions.id}::text
+                AND jsonb_typeof(candidate_relationship.provenance -> 'maintenanceRunId') = 'string'
+                AND candidate_relationship.provenance ->> 'maintenanceRunId' <> ''
+                AND NOT EXISTS (
+                  SELECT 1 FROM workspace_maintenance_runs canonical_run
+                  WHERE canonical_run.user_id = ${userId} AND canonical_run.domain = 'finances'
+                    AND canonical_run.id::text = candidate_relationship.provenance ->> 'maintenanceRunId'
+                )
+            )
+          )`,
+          targetTransactionId ? eq(financeTransactions.id, targetTransactionId) : undefined,
+          scope.type === "target" && scope.entityType === "finance_account"
+            ? eq(financeTransactions.accountId, scope.id)
+            : undefined,
+          scope.type === "window"
+            ? gte(financeTransactions.transactionDate, scope.start)
+            : undefined,
+          scope.type === "window" ? lte(financeTransactions.transactionDate, scope.end) : undefined,
+        ),
       ),
-    );
+    searchLimit,
+  );
   if (targetTransactionId && transactions.length === 0)
     throw new AppError("not_found", "The Finance target was not found.");
   if (transactions.length === 0) return [];
   const transactionIds = transactions.map((transaction) => transaction.id);
-  const legacyRuns = await executor
-    .select({ id: financeMaintenanceRuns.id })
-    .from(financeMaintenanceRuns)
-    .where(eq(financeMaintenanceRuns.userId, userId));
-  const canonicalRuns = await executor
-    .select({ id: workspaceMaintenanceRuns.id })
-    .from(workspaceMaintenanceRuns)
-    .where(
-      and(
-        eq(workspaceMaintenanceRuns.userId, userId),
-        eq(workspaceMaintenanceRuns.domain, "finances"),
+  const revisions = await readProjectionRows(
+    executor
+      .select()
+      .from(financeTransactionRevisions)
+      .where(
+        and(
+          eq(financeTransactionRevisions.userId, userId),
+          inArray(financeTransactionRevisions.transactionId, transactionIds),
+        ),
+      )
+      .orderBy(asc(financeTransactionRevisions.version)),
+    searchLimit,
+  );
+  const decisions = await readProjectionRows(
+    executor
+      .select()
+      .from(financeClassificationDecisions)
+      .where(
+        and(
+          eq(financeClassificationDecisions.userId, userId),
+          eq(financeClassificationDecisions.source, "user"),
+          inArray(financeClassificationDecisions.transactionId, transactionIds),
+        ),
       ),
-    );
+    searchLimit,
+  );
+  const relationshipRows = await readProjectionRows(
+    executor
+      .select({
+        relationship: financeTransactionRelationships,
+        eventUserId: financeEconomicEvents.userId,
+      })
+      .from(financeTransactionRelationships)
+      .leftJoin(
+        financeEconomicEvents,
+        eq(financeEconomicEvents.id, financeTransactionRelationships.economicEventId),
+      )
+      .where(
+        and(
+          eq(financeTransactionRelationships.userId, userId),
+          sql`${financeTransactionRelationships.transactionIds} ?| ARRAY[${sql.join(
+            transactionIds.map((id) => sql`${id}`),
+            sql`, `,
+          )}]::text[]`,
+        ),
+      )
+      .orderBy(asc(financeTransactionRelationships.createdAt)),
+    searchLimit,
+  );
+  const relationships = relationshipRows.map(({ relationship, eventUserId }) => ({
+    ...relationship,
+    eventUserId,
+  }));
+  const referencedRunIds = [
+    ...new Set(
+      [...revisions, ...relationships].flatMap((row) => {
+        const id = maintenanceRunId(row.provenance);
+        return id ? [id] : [];
+      }),
+    ),
+  ];
+  const legacyRuns = await readProjectionRows(
+    executor
+      .select({ id: financeMaintenanceRuns.id })
+      .from(financeMaintenanceRuns)
+      .where(
+        and(
+          eq(financeMaintenanceRuns.userId, userId),
+          searchLimit === undefined
+            ? undefined
+            : inArray(sql`${financeMaintenanceRuns.id}::text`, referencedRunIds),
+        ),
+      ),
+    searchLimit,
+  );
+  const canonicalRuns = await readProjectionRows(
+    executor
+      .select({ id: workspaceMaintenanceRuns.id })
+      .from(workspaceMaintenanceRuns)
+      .where(
+        and(
+          eq(workspaceMaintenanceRuns.userId, userId),
+          eq(workspaceMaintenanceRuns.domain, "finances"),
+          searchLimit === undefined
+            ? undefined
+            : inArray(sql`${workspaceMaintenanceRuns.id}::text`, referencedRunIds),
+        ),
+      ),
+    searchLimit,
+  );
   const legacyIds = new Set(legacyRuns.map((run) => run.id));
   const canonicalIds = new Set(canonicalRuns.map((run) => run.id));
   const unverifiedProvenance = (
@@ -115,26 +232,6 @@ export async function findUnverifiedLegacyFinanceEffects(
       : { code: "finance_maintenance_evidence_missing", legacyRunId: null };
   };
 
-  const revisions = await executor
-    .select()
-    .from(financeTransactionRevisions)
-    .where(
-      and(
-        eq(financeTransactionRevisions.userId, userId),
-        inArray(financeTransactionRevisions.transactionId, transactionIds),
-      ),
-    )
-    .orderBy(asc(financeTransactionRevisions.version));
-  const decisions = await executor
-    .select()
-    .from(financeClassificationDecisions)
-    .where(
-      and(
-        eq(financeClassificationDecisions.userId, userId),
-        eq(financeClassificationDecisions.source, "user"),
-        inArray(financeClassificationDecisions.transactionId, transactionIds),
-      ),
-    );
   const effects: LegacyFinanceEffect[] = [];
   for (const revision of revisions) {
     const provenance = unverifiedProvenance(revision.provenance);
@@ -179,34 +276,22 @@ export async function findUnverifiedLegacyFinanceEffects(
       },
     });
   }
-  const relationshipRows = await executor
-    .select({
-      relationship: financeTransactionRelationships,
-      eventUserId: financeEconomicEvents.userId,
-    })
-    .from(financeTransactionRelationships)
-    .leftJoin(
-      financeEconomicEvents,
-      eq(financeEconomicEvents.id, financeTransactionRelationships.economicEventId),
-    )
-    .where(
-      and(
-        eq(financeTransactionRelationships.userId, userId),
-        sql`${financeTransactionRelationships.transactionIds} ?| ARRAY[${sql.join(
-          transactionIds.map((id) => sql`${id}`),
-          sql`, `,
-        )}]::text[]`,
+  const ownedTransactions = await readProjectionRows(
+    executor
+      .select({ id: financeTransactions.id })
+      .from(financeTransactions)
+      .where(
+        and(
+          eq(financeTransactions.userId, userId),
+          searchLimit === undefined
+            ? undefined
+            : inArray(financeTransactions.id, [
+                ...new Set(relationships.flatMap((row) => row.transactionIds)),
+              ]),
+        ),
       ),
-    )
-    .orderBy(asc(financeTransactionRelationships.createdAt));
-  const relationships = relationshipRows.map(({ relationship, eventUserId }) => ({
-    ...relationship,
-    eventUserId,
-  }));
-  const ownedTransactions = await executor
-    .select({ id: financeTransactions.id })
-    .from(financeTransactions)
-    .where(eq(financeTransactions.userId, userId));
+    searchLimit,
+  );
   const ownedIds = new Set(ownedTransactions.map((transaction) => transaction.id));
   const scopedIds = new Set(transactionIds);
   for (const relationship of relationships) {

@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "dev": "vite --host 0.0.0.0",
+    "build": "pnpm public:generate && vite build",
+    "dev": "pnpm public:generate && vite --host 0.0.0.0",
     "dev:container": "pnpm dev",
     "preview": "vite preview --host 0.0.0.0",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "public:generate": "tsx --tsconfig tsconfig.json scripts/generate-public-documents.tsx"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -23,7 +24,9 @@
     "@tauri-apps/plugin-opener": "^2.5.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "color": "^5.0.3",
     "date-fns": "^4.4.0",
+    "embla-carousel-react": "^8.6.0",
     "hono": "^4.13.7",
     "input-otp": "^1.4.2",
     "motion": "^13.1.1",
@@ -50,6 +53,7 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.2",
+    "@types/color": "^4.2.1",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",

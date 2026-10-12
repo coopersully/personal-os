@@ -1,6 +1,8 @@
+export * from "./desktop-release.js";
 export * from "./failures.js";
 export * from "./google.js";
 export * from "./http.js";
+export { providerFetch } from "./http.js";
 export * from "./icloud.js";
 export * from "./pinterest.js";
 export * from "./plaid.js";

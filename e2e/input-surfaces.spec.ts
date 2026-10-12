@@ -5,7 +5,7 @@ for (const width of [390, 1100]) {
     page,
   }) => {
     await page.setViewportSize({ width, height: 588 });
-    await page.goto("/");
+    await page.goto("/login");
     await expect(page.getByRole("heading", { name: "Login", exact: true })).toBeVisible();
     const formBox = await page.locator(".auth-form").boundingBox();
     if (!formBox) throw new Error("Missing auth form");
@@ -106,7 +106,7 @@ for (const width of [390, 1100]) {
 
 for (const theme of ["light", "dark"]) {
   test(`autofilled login inputs retain their tonal surface in ${theme} mode`, async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/login");
     const email = page.getByRole("textbox", { name: "Email", exact: true });
     await expect(email).toBeVisible();
     await page.evaluate((mode) => {

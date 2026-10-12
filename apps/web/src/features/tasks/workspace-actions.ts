@@ -1,5 +1,6 @@
 import type { TaskWorkspaceItem } from "@personal-os/domain";
-import { api, errorMessage } from "../../api";
+import { api } from "../../api";
+import { classifyMutationError } from "../../lib/feedback.js";
 
 export type WorkspaceAction = "complete" | "reopen" | "trash" | "restore";
 export const workspaceActionLabels: Record<WorkspaceAction, string> = {
@@ -61,7 +62,14 @@ export async function runWorkspaceBatch(
       }
       succeeded.push(itemKey(item));
     } catch (error) {
-      failed.push({ key: itemKey(item), title: item.record.title, message: errorMessage(error) });
+      failed.push({
+        key: itemKey(item),
+        title: item.record.title,
+        message: classifyMutationError(error, {
+          action: `${workspaceActionLabels[action].toLowerCase()} this item`,
+          safeToRetry: false,
+        }).message,
+      });
     }
   }
   return { succeeded, failed };

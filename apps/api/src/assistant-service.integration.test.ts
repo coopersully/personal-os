@@ -413,6 +413,7 @@ describe.sequential("assistant setup service", () => {
     await expect(service.getSetupStatus(context().principal)).resolves.toMatchObject({
       domains: expect.arrayContaining([
         {
+          approvedProfileApproval: null,
           approvedProfileStatus: null,
           approvedProfileVersion: null,
           canRead: true,
@@ -423,6 +424,7 @@ describe.sequential("assistant setup service", () => {
           profileVersion: 4,
         },
         {
+          approvedProfileApproval: null,
           approvedProfileStatus: null,
           approvedProfileVersion: null,
           canRead: true,
@@ -433,6 +435,7 @@ describe.sequential("assistant setup service", () => {
           profileVersion: null,
         },
         {
+          approvedProfileApproval: null,
           approvedProfileStatus: null,
           approvedProfileVersion: null,
           canRead: false,
@@ -630,6 +633,7 @@ describe.sequential("assistant setup service", () => {
     ).resolves.toMatchObject({
       domains: expect.arrayContaining([
         expect.objectContaining({
+          approvedProfileApproval: null,
           approvedProfileStatus: null,
           domain: "finances",
           profileStatus: "draft",
@@ -797,6 +801,11 @@ describe.sequential("assistant setup service", () => {
     await expect(service.getSetupStatus(financeContext.principal)).resolves.toMatchObject({
       domains: expect.arrayContaining([
         {
+          approvedProfileApproval: {
+            agentId: null,
+            source: "user_instruction",
+            userId: financeUser.id,
+          },
           approvedProfileStatus: "active",
           approvedProfileVersion: 2,
           canRead: true,
@@ -1077,6 +1086,37 @@ describe.sequential("assistant setup service", () => {
     await expect(
       service.listAttentionItems(userId, { domain: "mail", limit: 50, status: "open" }),
     ).resolves.toEqual([expect.objectContaining({ id: item.id, kind: "follow_up" })]);
+    await database.db.insert(attentionItems).values(
+      Array.from({ length: 101 }, (_, index) => ({
+        userId,
+        domain: "mail" as const,
+        kind: "follow_up" as const,
+        importance: "normal" as const,
+        title: `Newer item ${index}`,
+        summary: "Another item.",
+        createdAt: new Date("2099-01-01"),
+      })),
+    );
+    await expect(
+      service.listAttentionItems(userId, { domain: "mail", id: item.id, limit: 1, status: "open" }),
+    ).resolves.toEqual([expect.objectContaining({ id: item.id })]);
+    await expect(
+      service.listAttentionItems(crypto.randomUUID(), {
+        domain: "mail",
+        id: item.id,
+        limit: 1,
+        status: "open",
+      }),
+    ).resolves.toEqual([]);
+    await database.db
+      .delete(attentionItems)
+      .where(
+        and(
+          eq(attentionItems.userId, userId),
+          eq(attentionItems.createdAt, new Date("2099-01-01")),
+        ),
+      );
+
     await expect(
       service.updateAttentionItem(
         "mail",

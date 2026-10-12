@@ -183,7 +183,7 @@ describe.sequential("Finance context migration integrity", () => {
         expected_cents: "9007199254740992",
         request_id: "",
         actor_id: "x".repeat(241),
-        source_kind: "sms",
+        source_kind: "unsupported",
         actor_type: "system",
         status: "matched",
         operation_id: null,

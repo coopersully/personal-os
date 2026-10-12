@@ -1,5 +1,6 @@
 import {
   type ApplyFinanceCategorizationsInput,
+  type FinanceBudgetEvaluationCheckpoint,
   type FinanceCategorizationApplyResult,
   type FinanceCategorizationProposalPage,
   type FinanceMaintenanceCandidateItemDraft,
@@ -8,6 +9,7 @@ import {
   type FinancePositionEvidenceCheckpoint,
   type FinancePositionReadScope,
   type FinanceStatus,
+  financeBudgetEvaluationCheckpointSchema,
   financePositionEvidenceCheckpointSchema,
   financePositionFactNames,
   type MaintenanceScope,
@@ -199,6 +201,12 @@ type Options = {
       expectedRevision: string,
       context: { principal: Principal; requestId: string },
     ) => Promise<unknown>;
+  };
+  budget: {
+    evaluateMaintenance: (
+      userId: string,
+      position: FinancePositionEvidence,
+    ) => Promise<FinanceBudgetEvaluationCheckpoint>;
   };
   challenge: {
     prepare: (userId: string, runId: string, candidateId: string) => Promise<{ id: string }>;
@@ -456,6 +464,18 @@ function positionCheckpointFromRecords(
   return parsed.data;
 }
 
+function budgetCheckpointFromRecords(
+  records: Awaited<ReturnType<WorkspaceMaintenanceService["listStepRecords"]>>,
+): FinanceBudgetEvaluationCheckpoint {
+  const projection = records.find(
+    (record) => record.step === "budget_and_health_projection" && record.status === "completed",
+  )?.result as { budget?: unknown } | undefined;
+  const parsed = financeBudgetEvaluationCheckpointSchema.safeParse(projection?.budget);
+  if (!parsed.success)
+    throw new AppError("conflict", "Canonical Finance budget evaluation is missing.");
+  return parsed.data;
+}
+
 function positionReplayBlock(
   records: Awaited<ReturnType<WorkspaceMaintenanceService["listStepRecords"]>>,
 ): { code: string; position?: unknown } | null {
@@ -463,9 +483,13 @@ function positionReplayBlock(
     (record) => record.step === "budget_and_health_projection" && record.status === "completed",
   );
   if (!projectionRecord) return null;
-  const projection = projectionRecord.result as { position?: unknown } | null;
+  const projection = projectionRecord.result as { budget?: unknown; position?: unknown } | null;
   const parsed = financePositionEvidenceCheckpointSchema.safeParse(projection?.position);
   if (parsed.success) {
+    const budget = financeBudgetEvaluationCheckpointSchema.safeParse(projection?.budget);
+    if (!budget.success) return { code: "finance_budget_evaluation_missing" };
+    if (budget.data.state === "unavailable")
+      return { code: "finance_budget_evaluation_unavailable", position: parsed.data };
     return financePositionFactNames.some(
       (name) => parsed.data.facts[name].quality === "unavailable",
     )
@@ -483,6 +507,7 @@ function positionReplayBlock(
 
 export function createFinanceMaintenanceService({
   actions,
+  budget,
   challenge,
   finances,
   maintenance,
@@ -594,6 +619,7 @@ export function createFinanceMaintenanceService({
         actions?.settleFinanceMaintenanceCandidate,
         periodReviews?.createForRun,
         position?.readPosition,
+        budget?.evaluateMaintenance,
       ];
       if (requiredCapabilities.some((capability) => typeof capability !== "function")) {
         throw new AppError(
@@ -682,9 +708,12 @@ export function createFinanceMaintenanceService({
         }
         if (!completed.has("verify")) {
           const positionCheckpoint = positionCheckpointFromRecords(records);
-          const currentPosition = checkpointForPosition(
-            await position.readPosition(run.userId, positionCheckpoint.scope),
+          const budgetCheckpoint = budgetCheckpointFromRecords(records);
+          const currentPositionEvidence = await position.readPosition(
+            run.userId,
+            positionCheckpoint.scope,
           );
+          const currentPosition = checkpointForPosition(currentPositionEvidence);
           if (positionFactsUnavailable(currentPosition)) {
             return maintenance.settle({
               claimId,
@@ -707,10 +736,32 @@ export function createFinanceMaintenanceService({
               status: "blocked",
             });
           }
+          const currentBudget = await budget.evaluateMaintenance(
+            run.userId,
+            currentPositionEvidence,
+          );
+          if (currentBudget.state === "unavailable")
+            return maintenance.settle({
+              claimId,
+              result: { code: "finance_budget_evaluation_unavailable", budget: currentBudget },
+              runId,
+              status: "blocked",
+            });
+          if (JSON.stringify(currentBudget) !== JSON.stringify(budgetCheckpoint))
+            return maintenance.settle({
+              claimId,
+              result: { code: "finance_budget_evaluation_changed", budget: currentBudget },
+              runId,
+              status: "blocked",
+            });
           await maintenance.completeStep({
             claimId,
             idempotencyKey: `finances:${run.rulebookVersion}:verify`,
-            result: { position: positionCheckpoint, state: observed.state },
+            result: {
+              budget: budgetCheckpoint,
+              position: positionCheckpoint,
+              state: observed.state,
+            },
             runId,
             step: "verify",
           });
@@ -719,6 +770,32 @@ export function createFinanceMaintenanceService({
         if (!completed.has("period_review")) {
           currentStep = "period_review";
           const positionCheckpoint = positionCheckpointFromRecords(records);
+          const budgetCheckpoint = budgetCheckpointFromRecords(records);
+          const currentPositionEvidence = await position.readPosition(
+            run.userId,
+            positionCheckpoint.scope,
+          );
+          const currentPosition = checkpointForPosition(currentPositionEvidence);
+          const currentBudget = await budget.evaluateMaintenance(
+            run.userId,
+            currentPositionEvidence,
+          );
+          if (
+            positionFactsUnavailable(currentPosition) ||
+            !samePositionIdentity(positionCheckpoint, currentPosition) ||
+            currentBudget.state === "unavailable" ||
+            JSON.stringify(currentBudget) !== JSON.stringify(budgetCheckpoint)
+          )
+            return maintenance.settle({
+              claimId,
+              result: {
+                code: "finance_canonical_evidence_changed",
+                budget: currentBudget,
+                position: currentPosition,
+              },
+              runId,
+              status: "blocked",
+            });
           const periodReview = await periodReviews.createForRun(
             run.userId,
             runId,
@@ -941,10 +1018,11 @@ export function createFinanceMaintenanceService({
           }
           const evidence = await position.readPosition(run.userId, readScope);
           const positionCheckpoint = checkpointForPosition(evidence);
+          const budgetCheckpoint = await budget.evaluateMaintenance(run.userId, evidence);
           await maintenance.completeStep({
             claimId,
             idempotencyKey,
-            result: { position: positionCheckpoint },
+            result: { budget: budgetCheckpoint, position: positionCheckpoint },
             runId,
             step,
           });
@@ -954,6 +1032,17 @@ export function createFinanceMaintenanceService({
               result: {
                 code: "finance_position_evidence_unavailable",
                 position: positionCheckpoint,
+              },
+              runId,
+              status: "blocked",
+            });
+          }
+          if (budgetCheckpoint.state === "unavailable") {
+            return maintenance.settle({
+              claimId,
+              result: {
+                budget: budgetCheckpoint,
+                code: "finance_budget_evaluation_unavailable",
               },
               runId,
               status: "blocked",
@@ -1123,7 +1212,11 @@ export function createFinanceMaintenanceService({
         if (
           settledCode === "finance_position_evidence_unavailable" ||
           settledCode === "finance_position_evidence_missing" ||
-          settledCode === "finance_position_evidence_changed"
+          settledCode === "finance_position_evidence_changed" ||
+          settledCode === "finance_budget_evaluation_unavailable" ||
+          settledCode === "finance_budget_evaluation_missing" ||
+          settledCode === "finance_budget_evaluation_changed" ||
+          settledCode === "finance_canonical_evidence_changed"
         ) {
           return maintenance.restartBlocked({
             expectedRulebookVersion: run.rulebookVersion,

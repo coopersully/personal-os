@@ -141,3 +141,9 @@ describe("contextual question client", () => {
     });
   });
 });
+
+it("reads Finance configuration without a mutation or tenant parameter", async () => {
+  const request = vi.fn().mockResolvedValue({ profile: { state: "loaded", value: null } });
+  await createFinanceApi(request as FinanceRequest).getFinanceConfiguration();
+  expect(request).toHaveBeenCalledExactlyOnceWith("/v1/finances/configuration");
+});

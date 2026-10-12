@@ -4,6 +4,10 @@ import {
   type Database,
   financeContextRevisions,
   financeContexts,
+  textInboundClaims,
+  textingConnections,
+  textMessages,
+  textReplyBindings,
   users,
 } from "@personal-os/database";
 import {
@@ -51,6 +55,8 @@ export function createFinanceContextService(options: {
   principal: Principal;
   requestId: string;
   now?: () => Date;
+  /** Internal signed-inbound adapter only; never accepted as an HTTP/MCP input. */
+  smsEvidence?: { claimId: string; inboundMessageId: string; enabled: () => boolean };
 }) {
   const { db, principal, requestId } = options;
   const now = options.now ?? (() => new Date());
@@ -129,8 +135,77 @@ export function createFinanceContextService(options: {
     async captureContext(raw: unknown, executor?: FinanceTransaction): Promise<FinanceContext> {
       authorize("finances:write");
       const input = captureFinanceContextInputSchema.parse(raw);
+      if (options.smsEvidence) {
+        if (
+          !options.smsEvidence.enabled() ||
+          !executor ||
+          input.type !== "create" ||
+          input.operationId !== options.smsEvidence.claimId ||
+          principal.actorType !== "user" ||
+          principal.actorId !== principal.userId
+        )
+          throw new AppError("forbidden", "SMS context requires exact inbound admission.");
+        const [connection] = await executor
+          .select()
+          .from(textingConnections)
+          .where(eq(textingConnections.userId, principal.userId))
+          .for("share", { noWait: true });
+        const [message] = await executor
+          .select()
+          .from(textMessages)
+          .where(
+            and(
+              eq(textMessages.userId, principal.userId),
+              eq(textMessages.id, options.smsEvidence.inboundMessageId),
+            ),
+          )
+          .for("share", { noWait: true });
+        const [claim] = await executor
+          .select()
+          .from(textInboundClaims)
+          .where(
+            and(
+              eq(textInboundClaims.userId, principal.userId),
+              eq(textInboundClaims.id, options.smsEvidence.claimId),
+            ),
+          )
+          .for("update", { noWait: true });
+        const [bound] = await executor
+          .select({ id: textReplyBindings.id })
+          .from(textReplyBindings)
+          .where(
+            and(
+              eq(textReplyBindings.userId, principal.userId),
+              eq(textReplyBindings.inboundClaimId, options.smsEvidence.claimId),
+            ),
+          )
+          .limit(1);
+        if (
+          connection?.state !== "active" ||
+          !claim ||
+          !message ||
+          message.direction !== "inbound" ||
+          claim.messageId !== message.id ||
+          claim.connectionId !== connection.id ||
+          message.connectionId !== connection.id ||
+          claim.consentEpoch !== connection.consentEpoch ||
+          bound ||
+          !/^Finance(?: context)?:\s*\S/iu.test(message.body) ||
+          message.body.replace(/^Finance(?: context)?:\s*/iu, "").trim() !== input.text ||
+          input.validFrom !== null ||
+          input.validThrough !== null ||
+          input.participants.length ||
+          input.paymentChannel !== null ||
+          input.expectedCents !== null
+        )
+          throw new AppError("forbidden", "SMS context evidence changed or is unavailable.");
+      }
       const context = await loadFinanceAuthorization({ db: executor ?? db, principal, requestId });
-      const sourceKind = principal.actorType === "user" ? "app" : "agent";
+      const sourceKind = options.smsEvidence
+        ? "sms"
+        : principal.actorType === "user"
+          ? "app"
+          : "agent";
       return executeFinanceIdempotently(
         db,
         context,
@@ -209,6 +284,8 @@ export function createFinanceContextService(options: {
               createdAt: decisionNow,
               updatedAt: decisionNow,
             });
+          if (options.smsEvidence && !options.smsEvidence.enabled())
+            throw new AppError("conflict", "SMS capture is currently disabled.");
           return append(tx, row, previous);
         },
         executor,

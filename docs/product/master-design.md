@@ -119,7 +119,7 @@ App
 Settings
 ├── Back to app
 ├── Account: Profile settings, password, log out
-├── Personal: User Knowledge, Goals, Priorities, Motives, Reviews
+├── Personal: User Knowledge, Goals, Priorities, Motives
 ├── Experience: Appearance, wallpaper where supported, locale & time
 ├── History & access: Activity, sessions, invitations, account recovery, privacy, exports
 ├── Communications: Shared notification policy, channel connections/defaults, widgets
@@ -369,20 +369,34 @@ while retaining domain-owned conditions, actions, validation, and execution.
 **Token/scopes:** new credentials use domain read/write scopes plus audit and bookmark reads. `automations:read` remains a compatibility label for reading the daily brief. `automations:write` is inactive and unavailable on new tokens. Workspace permissions currently apply at the workspace level except where a provider-selected destination is explicitly enforced; the UI must not invent per-source credential controls.
 Planned Tracking adds `tracking:read` and `tracking:write` with selected Tracker sources; those scopes are not shipped yet.
 
-**Reviews:** `/settings?section=reviews` is the account-wide action queue for work that explicitly
-requires the person: questions, approvals, connector failures, recovery steps, and other Review or
-Attention items. Kind and workspace filters are URL-owned, results are cursor-paginated, and every
-action routes to the domain that owns the decision. Informational state, routine success, and work
-nohmi can recover automatically do not enter the queue; setup and access configuration never appear
-as queue work merely because they exist.
+**Reviews:** the [workspace Reviews contract](../design/pages/reviews.md) owns the current
+presentation: a workspace-scoped dialog or mobile drawer opened from its attention alert,
+workspace Settings header, or the **Items needing review** workspace search result. It collects work that explicitly requires the person: questions,
+approvals, connector failures, recovery steps, and other Review or Attention items. Results are
+cursor-paginated and every action retains domain-owned authority. Informational state, routine
+success, and work nohmi can recover automatically do not enter the flow; setup and access
+configuration never appear as review work merely because they exist. This supersedes the earlier
+Today-owned account-wide `/reviews` queue while keeping the underlying workspace in place.
+Legacy workspace decision links enter the scoped flow; `/reviews` and
+`/settings?section=reviews` currently fall back to Account. Some notification and agent link
+producers still emit those old destinations; the Reviews contract records this unresolved
+implementation gap. Do not claim those generated links preserve their requested review target.
+The accepted multi-workspace Texting requirement below still needs a unified destination: the
+shipped single-workspace flow does not fulfill that target, and this reconciliation does not
+replace it with a newly selected routing design.
 
 Centralized Settings is the canonical editor for account-wide identity, security, privacy ceilings,
 review bypass, shared notification policy, channel connections/defaults, connected-agent
 credentials/scopes, and User Knowledge controls. Workspace-owned sources, maintenance behavior,
 notification overrides, rules, learning, recovery, data controls, and domain access posture are
-edited only inside Mail, Tasks, Calendar, or Finances. The centralized cross-workspace overview may
+edited in domain-owned settings, reached through the Settings Workspaces group or workspace links.
+Each setting has one canonical editor. The centralized cross-workspace overview may
 show their effective state, health, override badges, and review counts, but only links to the owning
-workspace for changes.
+workspace settings for changes. The accepted [settings architecture](../design/pages/settings-architecture.md)
+groups Profile, Connections, Security & access, and Activity log under Account, with Personal,
+Workspaces, and App as the other primary groups. Setup, connected agents, signed-in devices, and
+workspace access are searchable secondary destinations beneath their relevant parent. Local
+feature history remains with the feature; Activity log records audited changes.
 
 Fine-grained per-agent controls over which workspace records or User Knowledge categories may enter
 an external model host's context are planned but deferred. Credential scopes, purpose-limited API
@@ -426,12 +440,14 @@ internal reasoning agent when an external caller is unavailable.
   `yesterday`, or `tomorrow` immediately before sending.
 - SMS is formal, short, and concise. It may include as many directly answerable questions or exact
   reviews as reasonably fit, with a hard cap of three. If even two would make the text difficult to
-  scan, include only one. Every multi-item message includes the unified Settings-owned Reviews link;
+  scan, include only one. The accepted target is one unified Reviews link for every multi-item message;
   when more items remain, it summarizes the overflow. Texting does not send separate proactive
   messages per item or workspace.
 - A self-contained single question omits the link. Texting adds an exact-item or workspace link when
   that question needs more context or is too long for a reasonable SMS; every multi-item message
-  uses the unified Reviews link.
+  uses the unified Reviews link. This cross-workspace destination remains unimplemented after
+  the workspace flow cutover; the [Texting contract](texting-operations.md) distinguishes the
+  accepted requirement from the current legacy-link fallback.
 - Quiet hours default to 10:00 PM–8:00 AM in the person's current time zone. Proactive maintenance
   texts wait until the window ends unless the person selects `any time`; direct replies to the
   person's messages are exempt from quiet-hour deferral once submitted by an authorized caller.
@@ -445,7 +461,8 @@ internal reasoning agent when an external caller is unavailable.
   wording, evidence, confidence, rediscovery, or internal progress alone do not qualify; quiet
   hours and send-time revalidation still apply.
 - SMS links require normal nohmi authentication and contain no bearer credential or action
-  authority. After sign-in, the app returns the person to the requested review destination.
+  authority. The accepted behavior is to return the person to the requested review destination
+  after sign-in; the current legacy-link fallback to Account does not satisfy that requirement.
 - A global review-bypass setting applies to every channel. When enabled, policy-authorized
   reversible work may execute directly; when disabled, it enters exact review, which may be
   approved by a bound, unexpired SMS response.
@@ -469,6 +486,15 @@ ship general routing, maintenance dispatch, global bypass, or SMS-bound reviews.
 
 ### 6.10 Desktop overlay, widgets, notifications, and mobile
 
+Closing the main desktop window keeps enabled pet, routine presentation, and notification
+refresh active in the menu-bar process. Explicit **Quit nohmi** stops that process until the next
+launch; it does not create a separate companion that survives Quit. Already scheduled operating
+system notifications may still arrive. Setup guides the person through launch at login and
+notification permission, reports actual OS approval separately from saved preferences, and
+links to recovery when permission or routine delivery is unavailable. Login startup restores
+background operation after the person signs in. Sleeping or powered-off computers do not run
+interactive routines; wake recovery respects the existing catch-up window.
+
 - Tauri desktop shell for macOS/Windows supports compact, pinned, always-on-top, click-through-disabled interactive modes, global shortcut, docked sprite/pet, and full-app deep links.
 - The sprite has idle, open, unread/pending, error, and reduced-motion states; click opens a compact nohmi panel and click/shortcut closes it. It communicates urgency through a count/quiet animation, never through inaccessible motion alone.
 - Widgets on desktop and mobile show selectable blocks: Now/Next, due tasks, unread triage count, finance reviews, habit prompts, and compact calendar. Widgets show private-safe summaries unless the user opts into detail. Apple widgets use a native WidgetKit extension, shared container, and timeline/push update model; Windows widgets use a Windows widget provider/PWA-specific Adaptive Card adapter. Widgets are glanceable deep-link surfaces, not a second full application, a source of high-sensitivity content, or a real-time alert guarantee; notifications carry time-critical delivery.
@@ -487,7 +513,12 @@ ship general routing, maintenance dispatch, global bypass, or SMS-bound reviews.
 - **Blocked:** neither human shortcut nor agent token may perform it through that route.
 
 Global review bypass is a settlement preference, not another policy tier. It allows an otherwise
-policy-authorized reversible action to execute instead of entering review; it cannot alter scopes,
+policy-authorized reversible action to execute instead of entering review. Separately registered
+operations (such as exact-draft Mail sending, rule activation, guidance and budget activation,
+and workspace settings) may use explicit owner-granted `<workspace>:execute` authority together
+with enabled bypass. Sending remains irreversible. Existing write grants do not acquire these
+execution grants automatically, and unregistered irreversible effects keep their existing denial
+or approval requirements. Bypass cannot alter scopes,
 source selection, provider capability, reversibility, evidence requirements, or a stronger
 approval boundary.
 
@@ -584,3 +615,13 @@ Before each high-impact domain release, test 5–8 representative users on the h
 ## 13. Source references
 
 The research basis is recorded in the 2026-07-18 product analysis. Key experience references include [Shortwave automation](https://www.shortwave.com/docs/guides/customize-your-shortwave-settings/), [Spark Smart Inbox](https://sparkmailapp.com/help/manage-your-inbox/customize-your-inbox), [Notion Calendar availability](https://www.notion.com/en-us/help/availability-blocking-and-time-zones?nxtPslug=availability-blocking-and-time-zones), [Fantastical MCP permissions](https://flexibits.com/fantastical/help/fantastical-connector-mcp-for-claude), [Reclaim planning](https://help.reclaim.ai/en/articles/6210740-features-in-reclaim), [Plaid Transactions](https://plaid.com/docs/transactions/), and [n8n execution history](https://docs.n8n.io/workflows/executions/all-executions/).
+
+### Contextual review flow
+
+Reviews open from a workspace attention alert, the actions beside its Settings title, or the
+**Items needing review** workspace search result. A shared
+responsive dialog/drawer presents one decision at a time, using domain-owned controls and evidence.
+Progress shows completed, remaining, and total items. Advance only after the server confirms a
+resolution; Later never counts as completion. Reconnection and source repair remain explicit source
+operations. The earlier bento queue is retained in code but hidden from navigation. See
+[Reviews](../design/pages/reviews.md) for the interaction and compatibility contract.

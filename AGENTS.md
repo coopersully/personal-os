@@ -78,6 +78,19 @@ pnpm verify
 
 This includes repository mirror checks, lint, type checking, coverage enforcement (95% statements/functions/lines and 94% branches), production builds, and desktop/mobile E2E acceptance tests.
 
+## Frontend Feedback: Sonner Required
+
+- All settings errors and discrete action feedback MUST use Sonner. This includes notification
+  tests, connection tests, permission requests, refreshes, native actions, and autosave failures.
+- Never add an inline paragraph, status row, Alert, banner, or card for an action's pending,
+  success, or failure message. `role="status"` and asynchronous native completion do not exempt it.
+- For an asynchronous action, update one Sonner toast from loading to the confirmed outcome.
+  OS acceptance is not proof that a notification banner appeared; say exactly what is confirmed.
+- Successful background autosaves stay silent. Actual permission/configuration state and field
+  correction/retry controls may remain beside settings; they do not replace Sonner error feedback.
+- Regression tests must assert Sonner delivery AND the absence of inline action-result copy.
+  Follow `docs/design/feedback.md`; this rule takes precedence over generic inline-alert guidance.
+
 ## Frontend Icons
 
 - reicon is the only permitted icon pack. Import every glyph from
@@ -103,3 +116,11 @@ This includes repository mirror checks, lint, type checking, coverage enforcemen
   and failure states. Record what could still fail in production despite green tests.
 - Connector changes also follow `docs/engineering/connector-reliability.md` and keep provider
   timeouts and required ports aligned with the checked production network contract.
+
+## Shipping verification policy
+
+For an authorized ship-it run, follow `docs/engineering/delivery-verification.md`: converge review
+with focused checks, freeze/commit the candidate, then obtain complete local or equivalent hosted
+verification. This replaces duplicate full-suite invocations in the steps above; it does not waive
+any required check, unexplained failure, or issue-specific acceptance. Local `pnpm verify` uses the
+shared host runner. Metadata-only changes refresh metadata gates, not unchanged source verification.

@@ -2,9 +2,11 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
 import {
   calendarBlockRevisionMapSchema,
+  createEventInputSchema,
   idSchema,
   isoDateTimeSchema,
   previewCalendarCommitmentInputSchema,
+  updateEventInputSchema,
   upsertCalendarAttentionItemInputSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
@@ -12,8 +14,6 @@ import { apiResult } from "../tool-result.js";
 
 const id = idSchema.describe("nohmi object identifier");
 const isoDateTime = isoDateTimeSchema.describe("ISO 8601 date-time with offset");
-const timeZone = z.string().min(1).describe("IANA time zone, for example America/New_York");
-const visibility = z.enum(["default", "private", "public"]);
 
 /** Register the calendar discovery tool in the shell's established tool order. */
 export function registerCalendarListTools(server: McpServer, api: PersonalOsApiClient) {
@@ -84,20 +84,8 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
         readOnlyHint: false,
       },
       description:
-        "Create one event only from the user's direct instruction on a writable destination. This can write to an external provider; it never authorizes inference from mail or other sourced material. For ticket, booking, registration, or accepted-commitment evidence, use preview_calendar_commitment and leave creation to an interactive user action.",
-      inputSchema: z.object({
-        allDay: z.boolean().default(false),
-        calendarId: id,
-        endsAt: isoDateTime,
-        location: z.string().max(1_000).nullable().default(null),
-        notes: z.string().max(50_000).nullable().default(null),
-        startsAt: isoDateTime,
-        timezone: timeZone,
-        title: z.string().min(1).max(500),
-        visibility: visibility
-          .default("default")
-          .describe("Event visibility at the destination calendar."),
-      }),
+        "Create an exact event on a writable destination under the owner's granted authority. This can write to an external provider. Inspect ticket, booking, registration or accepted-commitment evidence with preview_calendar_commitment before deciding on creation; caller-supplied evidence does not itself grant authority.",
+      inputSchema: createEventInputSchema,
       title: "Create calendar event",
     },
     async (input) => apiResult(() => api.createEvent(input)),
@@ -112,25 +100,13 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
         readOnlyHint: false,
       },
       description:
-        "Update an event after the user has specified the exact change. Connected writes can update an external provider and may notify existing attendees under provider semantics. Never silently move or resize a hard/non-flexible commitment.",
-      inputSchema: z.object({
-        allDay: z.boolean().optional(),
-        endsAt: isoDateTime.optional(),
-        expectedBlockUpdatedAtById: calendarBlockRevisionMapSchema.describe(
-          "Exact eventId-to-updatedAt map for every linked block returned by get_event; pass an empty object only when the event has no blocks.",
-        ),
-        expectedUpdatedAt: isoDateTime.describe(
-          "The source event updatedAt returned by get_event. This is the local mutation CAS; source.revision is provider provenance.",
-        ),
+        "Update an exact event using its current revisions under the owner's granted authority. Connected writes can update an external provider and may notify existing attendees under provider semantics. Never silently move or resize a hard/non-flexible commitment.",
+      inputSchema: updateEventInputSchema.safeExtend({
         id,
-        location: z.string().max(1_000).nullable().optional(),
-        notes: z.string().max(50_000).nullable().optional(),
-        startsAt: isoDateTime.optional(),
-        timezone: timeZone.optional(),
-        title: z.string().min(1).max(500).optional(),
-        visibility: visibility
-          .optional()
-          .describe("Replacement visibility; this can change disclosure to calendar viewers."),
+        expectedUpdatedAt: isoDateTime.describe("Current event updatedAt from get_event"),
+        expectedBlockUpdatedAtById: calendarBlockRevisionMapSchema.describe(
+          "Exact revision map from get_event; empty only when there are no blocks",
+        ),
       }),
       title: "Update calendar event",
     },

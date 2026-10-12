@@ -39,3 +39,52 @@ delete `.env.codex.local` and Start again; the kernel will select another port. 
 
 External OAuth providers must contain the exact callback URL printed for the worktree. Local
 container health cannot prove that an external provider dashboard has been configured correctly.
+
+## Environment setup
+
+The Codex environment is named `personal-os`. Setup fetches `origin/main` with an explicit
+refspec and advances the checkout to the fetched commit before reloading the lifecycle script
+and installing frozen-lockfile dependencies. Detached worktrees stay detached; a checked-out
+branch keeps its name and advances only by fast-forward. Setup never resets, stashes, or rebases
+work. Tracked changes, untracked files, active Git operations, and commits outside `origin/main`
+stop setup with recovery guidance. For an existing feature branch that must retain its commits,
+use `bash .codex/scripts/environment.sh setup-dependencies` to install its current revision.
+Start and Restart continue to run the current source without fetching or switching revisions.
+
+Fetching requires the configured `origin` and existing Git credentials, using that remote's
+HTTPS or OpenSSH transport. Git/askpass prompting is disabled; SSH batch mode and a 15-second
+connection timeout are appended to the configured SSH command, along with 15-second keepalives
+and a limit of three unanswered probes. Setup rejects commands containing BatchMode, ConnectTimeout,
+ServerAliveInterval, or ServerAliveCountMax overrides, because OpenSSH uses the first repeated option. Configured
+wrappers must accept OpenSSH options and must not override batch mode. HTTP fetches abort after 60 seconds below one
+byte per second. SSH keepalives detect an unresponsive peer; they do not impose an overall deadline
+on a responsive server doing slow work. Network/authentication failure stops setup before dependency installation; repair
+access and rerun setup. The logged revision
+is the commit observed by the successful fetch; remote changes after that fetch require another
+setup. Local-remote integration tests prove revision and work-preservation behavior, not hosted
+Git access or credential validity.
+
+## Runtime-name cutover
+
+New runtimes use `personal-os-<runtime-id>` projects, `app.personal-os.runtime.*` labels, and
+`PERSONAL_OS_*` generated identity variables. The runtime hash is unchanged. Old `ilo-<runtime-id>`
+containers and volumes are deliberately not adopted or deleted automatically. Actions stop if
+either survives for this worktree, even if the overlay was removed. This prevents silently
+switching to an empty database. Garbage collection only manages the new namespace.
+
+Before cutting over a worktree with an existing database:
+
+1. Identify its old project and PostgreSQL container using Docker's Compose project/service labels.
+2. Export its database with `pg_dump` and verify the backup. Keep the backup outside the repository.
+3. Stop and remove that old project's containers and network. Remove its database volume only
+   after verifying the backup and explicitly deciding to retire the old runtime.
+4. Run Start to generate the new overlay and create the `personal-os` runtime. Restore the backup
+   into its PostgreSQL service, then check the restored data before resuming work.
+
+For disposable fixture databases, explicitly retire the old project and volume, then Start and
+Load QA Fixtures. The new Purge action cannot remove resources under the retired namespace.
+Do not delete other worktrees' projects. A retained backup is also the rollback path.
+
+Production helper overrides and the production acknowledgement now use `PERSONAL_OS_PRODUCTION_*`.
+Update any shell exports from the retired prefix before invoking production actions; there are
+no compatibility aliases. This changes local tooling configuration, not deployed AWS resources.

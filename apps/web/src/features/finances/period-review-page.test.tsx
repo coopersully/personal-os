@@ -161,9 +161,7 @@ describe("Saved Finance period review", () => {
       new Error("Historical review is temporarily unavailable"),
     );
     mount();
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Historical review is temporarily unavailable",
-    );
+    expect(await screen.findByText("Couldn’t load this material.")).toBeVisible();
     expect(screen.queryByText("2026-08-01 – 2026-08-31")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("2026-08-01 – 2026-08-31")).toBeVisible();
@@ -171,4 +169,35 @@ describe("Saved Finance period review", () => {
     expect(api.getFinancePeriodReview.mock.calls).toEqual([[reviewId], [reviewId]]);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
+});
+
+it("retains a saved review during failed refresh and discloses missing recommendation evidence", async () => {
+  const saved = {
+    ...review,
+    recommendations: [
+      { ...review.recommendations[0], evidence: [], assumptions: [], tradeoffs: [] },
+    ],
+  };
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["finance-period-review", reviewId], saved);
+  api.getFinancePeriodReview
+    .mockRejectedValueOnce(new Error("private refresh failure"))
+    .mockResolvedValue(saved);
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <FinancePeriodReviewPage id={reviewId} />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByText(/Showing the last available update/)).toBeVisible();
+  expect(screen.getByText("2026-08-01 – 2026-08-31")).toBeVisible();
+  expect(screen.getByText("Evidence: No evidence recorded.")).toBeVisible();
+  expect(screen.getByText("Assumptions: None recorded.")).toBeVisible();
+  expect(screen.getByText("Tradeoffs: None recorded.")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() =>
+    expect(screen.queryByText(/Showing the last available update/)).not.toBeInTheDocument(),
+  );
+  expect(api.getFinancePeriodReview).toHaveBeenCalledTimes(2);
 });

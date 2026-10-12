@@ -1,10 +1,13 @@
 import type { FinanceGoal, ManageFinanceGoalInput } from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { ActionButton as Button } from "@/components/action-button";
+import { CurrencyInput } from "@/components/currency-input";
+import { BankIcon, DollarIcon, PlusIcon, TargetIcon, WalletIcon } from "@/components/icons";
+import { KeyMetric, KeyMetrics } from "@/components/key-metrics";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -25,17 +28,15 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import {
-  WorkspaceSecondaryAppBar,
-  WorkspaceSecondaryAppBarActions,
-} from "@/components/workspace-secondary-app-bar";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+import { formatCompactMoney } from "./format";
 import {
   isConfirmedFinanceMutationFailure,
   requireFinanceMutationResult,
 } from "./mutation-retry.js";
 import {
-  FinanceAccountRecord,
   FinancePositionMaterial,
   FinanceSourceState,
   financeAmount,
@@ -51,10 +52,6 @@ export function FinanceWealthPage() {
     queryKey: ["finance-snapshot"],
     queryFn: async () => requireFinanceResult(await api.getFinanceSnapshot()),
   });
-  const accounts = useQuery({
-    queryKey: ["finance-accounts"],
-    queryFn: () => api.listFinanceAccounts(),
-  });
   const goals = useQuery({
     queryKey: ["finance-goals"],
     queryFn: async () => requireFinanceResult(await api.listFinanceGoals()),
@@ -65,7 +62,8 @@ export function FinanceWealthPage() {
     operation: "complete" | "remove";
   } | null>(null);
   const lastAction = useRef<{ payload: string; key: string } | null>(null);
-  const changeGoal = useMutation({
+  const changeGoal = useFeedbackMutation({
+    feedback: { action: "update this goal", safeToRetry: false, form: false },
     mutationFn: async ({ goal, operation }: { goal: FinanceGoal; operation: GoalOperation }) => {
       const changes = { goalId: goal.id, expectedVersion: goal.version, operation };
       const payload = JSON.stringify(changes);
@@ -87,143 +85,145 @@ export function FinanceWealthPage() {
   const visibleGoals = goals.data?.data.filter((goal) => goal.status !== "removed");
   return (
     <div className="flex flex-col gap-6">
-      <WorkspaceSecondaryAppBar aria-label="Wealth controls">
-        <WorkspaceSecondaryAppBarActions>
-          <Button onClick={() => setEditor("new")} size="sm">
-            Create goal
-          </Button>
-          <Button asChild size="sm" variant="outline">
-            <Link to="/finances/accounts">Manage accounts</Link>
-          </Button>
-        </WorkspaceSecondaryAppBarActions>
-      </WorkspaceSecondaryAppBar>
       <FinanceSourceState label="Wealth snapshot" query={snapshot} />
-      {snapshot.data ? <FinancePositionMaterial result={snapshot.data} wealth /> : null}
-      <section aria-label="Financial goals" className="flex flex-col gap-3">
-        <h2 className="text-base font-medium">Financial goals</h2>
-        <FinanceSourceState label="Financial goals" query={goals} />
-        {changeGoal.isError && !confirm ? (
-          <Alert variant="destructive">
-            <AlertTitle>Goal was not changed</AlertTitle>
-            <AlertDescription>{errorMessage(changeGoal.error)}</AlertDescription>
-          </Alert>
-        ) : null}
-        {visibleGoals?.length ? (
-          <ItemGroup>
-            {visibleGoals.map((goal) => (
-              <Item key={goal.id} id={`goal-${goal.id}`}>
-                <ItemContent className="min-w-0">
-                  <ItemTitle>
-                    {goal.name}
-                    <Badge variant="secondary">
-                      {goal.status === "active"
-                        ? "Active"
-                        : goal.status === "paused"
-                          ? "Paused"
-                          : "Completed"}
-                    </Badge>
-                  </ItemTitle>
-                  <ItemDescription>
-                    {financeAmount(goal.currentAmount)} recorded toward{" "}
-                    {financeAmount(goal.targetAmount)} ·{" "}
-                    {goal.priority === "high"
-                      ? "High"
-                      : goal.priority === "medium"
-                        ? "Medium"
-                        : "Low"}{" "}
-                    priority{goal.deadline ? ` · Due ${goal.deadline}` : " · No deadline"}
-                  </ItemDescription>
-                  <p className="text-muted-foreground text-xs">
-                    Recorded goal progress · Version {goal.version}
-                  </p>
-                </ItemContent>
-                <ItemActions className="flex-wrap">
-                  <Button
-                    aria-label={`Edit ${goal.name}`}
-                    disabled={changeGoal.isPending}
-                    onClick={() => setEditor(goal)}
-                    size="sm"
-                    variant="outline"
-                  >
-                    Edit
-                  </Button>
-                  {goal.status === "active" || goal.status === "paused" ? (
+      {snapshot.data ? (
+        <>
+          <KeyMetrics label="Wealth key metrics">
+            {[
+              { label: "Net worth", value: snapshot.data.data.netWorth, icon: WalletIcon },
+              { label: "Cash", value: snapshot.data.data.cash, icon: BankIcon },
+              { label: "Investments", value: snapshot.data.data.investments, icon: TargetIcon },
+              { label: "Debt", value: snapshot.data.data.debt, icon: DollarIcon },
+            ].map(({ label, value, icon }) => (
+              <KeyMetric
+                key={label}
+                label={label}
+                value={value === null ? "Unavailable" : formatCompactMoney(value)}
+                exactValue={financeAmount(value)}
+                icon={icon}
+                description="Current balance"
+              />
+            ))}
+          </KeyMetrics>
+          <FinancePositionMaterial result={snapshot.data} wealth hideMetrics />
+        </>
+      ) : null}
+      <Card aria-label="Financial goals">
+        <CardHeader>
+          <CardTitle>Financial goals</CardTitle>
+          <CardAction>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label="Create goal"
+              onClick={() => setEditor("new")}
+            >
+              <PlusIcon />
+            </Button>
+          </CardAction>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <FinanceSourceState label="Financial goals" query={goals} />
+          {changeGoal.isError && !confirm ? (
+            <Alert variant="destructive">
+              <AlertTitle>Goal was not changed</AlertTitle>
+              <AlertDescription>{changeGoal.feedback?.message}</AlertDescription>
+            </Alert>
+          ) : null}
+          {visibleGoals?.length ? (
+            <ItemGroup className="finance-bento finance-goal-grid">
+              {visibleGoals.map((goal) => (
+                <Item key={goal.id} id={`goal-${goal.id}`}>
+                  <ItemContent className="min-w-0">
+                    <ItemTitle>
+                      {goal.name}
+                      <Badge variant="secondary">
+                        {goal.status === "active"
+                          ? "Active"
+                          : goal.status === "paused"
+                            ? "Paused"
+                            : "Completed"}
+                      </Badge>
+                    </ItemTitle>
+                    <ItemDescription>
+                      {financeAmount(goal.currentAmount)} recorded toward{" "}
+                      {financeAmount(goal.targetAmount)} ·{" "}
+                      {goal.priority === "high"
+                        ? "High"
+                        : goal.priority === "medium"
+                          ? "Medium"
+                          : "Low"}{" "}
+                      priority{goal.deadline ? ` · Due ${goal.deadline}` : " · No deadline"}
+                    </ItemDescription>
+                    <p className="text-muted-foreground text-xs">
+                      Recorded goal progress · Version {goal.version}
+                    </p>
+                  </ItemContent>
+                  <ItemActions className="flex-wrap">
                     <Button
-                      aria-label={`${goal.status === "paused" ? "Resume" : "Pause"} ${goal.name}`}
+                      aria-label={`Edit ${goal.name}`}
                       disabled={changeGoal.isPending}
-                      onClick={() =>
-                        changeGoal.mutate({
-                          goal,
-                          operation: goal.status === "paused" ? "resume" : "pause",
-                        })
-                      }
+                      onClick={() => setEditor(goal)}
+                      size="sm"
+                      variant="outline"
+                    >
+                      Edit
+                    </Button>
+                    {goal.status === "active" || goal.status === "paused" ? (
+                      <Button
+                        aria-label={`${goal.status === "paused" ? "Resume" : "Pause"} ${goal.name}`}
+                        disabled={changeGoal.isPending}
+                        onClick={() =>
+                          changeGoal.mutate({
+                            goal,
+                            operation: goal.status === "paused" ? "resume" : "pause",
+                          })
+                        }
+                        size="sm"
+                        variant="ghost"
+                      >
+                        {goal.status === "paused" ? "Resume" : "Pause"}
+                      </Button>
+                    ) : null}
+                    {goal.status !== "completed" ? (
+                      <Button
+                        aria-label={`Complete ${goal.name}`}
+                        disabled={changeGoal.isPending}
+                        onClick={() => setConfirm({ goal, operation: "complete" })}
+                        size="sm"
+                        variant="ghost"
+                      >
+                        Complete
+                      </Button>
+                    ) : null}
+                    <Button
+                      aria-label={`Remove ${goal.name}`}
+                      disabled={changeGoal.isPending}
+                      onClick={() => setConfirm({ goal, operation: "remove" })}
                       size="sm"
                       variant="ghost"
                     >
-                      {goal.status === "paused" ? "Resume" : "Pause"}
+                      Remove
                     </Button>
-                  ) : null}
-                  {goal.status !== "completed" ? (
-                    <Button
-                      aria-label={`Complete ${goal.name}`}
-                      disabled={changeGoal.isPending}
-                      onClick={() => setConfirm({ goal, operation: "complete" })}
-                      size="sm"
-                      variant="ghost"
-                    >
-                      Complete
-                    </Button>
-                  ) : null}
-                  <Button
-                    aria-label={`Remove ${goal.name}`}
-                    disabled={changeGoal.isPending}
-                    onClick={() => setConfirm({ goal, operation: "remove" })}
-                    size="sm"
-                    variant="ghost"
-                  >
-                    Remove
-                  </Button>
-                </ItemActions>
-              </Item>
-            ))}
-          </ItemGroup>
-        ) : goals.isSuccess ? (
-          <Empty>
-            <EmptyHeader>
-              <EmptyTitle>No financial goals yet</EmptyTitle>
-              <EmptyDescription>
-                Give a reserve, debt milestone, or future expense a target.
-              </EmptyDescription>
-            </EmptyHeader>
-            <Button onClick={() => setEditor("new")} size="sm">
-              Create your first goal
-            </Button>
-          </Empty>
-        ) : null}
-      </section>
-      <section aria-label="Accounts behind your position" className="flex flex-col gap-3">
-        <h2 className="text-base font-medium">Accounts behind your position</h2>
-        <FinanceSourceState label="Wealth accounts" query={accounts} />
-        {accounts.data?.accounts.length ? (
-          <ItemGroup>
-            {accounts.data.accounts.map((account) => (
-              <FinanceAccountRecord key={account.id} account={account} />
-            ))}
-          </ItemGroup>
-        ) : accounts.isSuccess ? (
-          <Empty>
-            <EmptyHeader>
-              <EmptyTitle>No account evidence yet</EmptyTitle>
-              <EmptyDescription>
-                Your position becomes available when account evidence is established.
-              </EmptyDescription>
-            </EmptyHeader>
-            <Button asChild size="sm" variant="outline">
-              <Link to="/finances/accounts">Add accounts</Link>
-            </Button>
-          </Empty>
-        ) : null}
-      </section>
+                  </ItemActions>
+                </Item>
+              ))}
+            </ItemGroup>
+          ) : goals.isSuccess ? (
+            <Empty>
+              <EmptyHeader>
+                <EmptyTitle>No financial goals yet</EmptyTitle>
+                <EmptyDescription>
+                  Give a reserve, debt milestone, or future expense a target.
+                </EmptyDescription>
+              </EmptyHeader>
+              <Button onClick={() => setEditor("new")} size="sm">
+                Create your first goal
+              </Button>
+            </Empty>
+          ) : null}
+        </CardContent>
+      </Card>
       {editor ? (
         <GoalEditor
           key={editor === "new" ? "new" : `${editor.id}:${editor.version}`}
@@ -252,7 +252,7 @@ export function FinanceWealthPage() {
             {changeGoal.isError ? (
               <Alert variant="destructive">
                 <AlertTitle>Goal was not changed</AlertTitle>
-                <AlertDescription>{errorMessage(changeGoal.error)}</AlertDescription>
+                <AlertDescription>{changeGoal.feedback?.message}</AlertDescription>
               </Alert>
             ) : null}
             <DialogFooter>
@@ -289,7 +289,8 @@ function GoalEditor({ goal, onClose }: { goal: FinanceGoal | null; onClose: () =
   const [deadline, setDeadline] = useState(goal?.deadline ?? "");
   const [priority, setPriority] = useState<FinanceGoal["priority"]>(goal?.priority ?? "medium");
   const lastAttempt = useRef<{ payload: string; key: string } | null>(null);
-  const save = useMutation({
+  const save = useFeedbackMutation({
+    feedback: { action: "save this goal", safeToRetry: false, form: true },
     mutationFn: async () => {
       const changes = {
         deadline: deadline || null,
@@ -341,7 +342,15 @@ function GoalEditor({ goal, onClose }: { goal: FinanceGoal | null; onClose: () =
               : "Set a target and priority for your financial plan."}
           </DialogDescription>
         </DialogHeader>
-        <form
+        <FeedbackForm
+          feedback={save.feedback}
+          fieldNames={{
+            targetAmount: "target",
+            "changes.targetAmount": "target",
+            "changes.name": "name",
+            "changes.deadline": "deadline",
+            "changes.priority": "priority",
+          }}
           className="flex flex-col gap-5"
           onSubmit={(event) => {
             event.preventDefault();
@@ -353,6 +362,7 @@ function GoalEditor({ goal, onClose }: { goal: FinanceGoal | null; onClose: () =
               <Field>
                 <FieldLabel htmlFor="goal-name">Goal name</FieldLabel>
                 <Input
+                  name="name"
                   id="goal-name"
                   maxLength={240}
                   required
@@ -362,20 +372,20 @@ function GoalEditor({ goal, onClose }: { goal: FinanceGoal | null; onClose: () =
               </Field>
               <Field>
                 <FieldLabel htmlFor="goal-target">Target amount (USD)</FieldLabel>
-                <Input
+                <CurrencyInput
+                  name="target"
                   id="goal-target"
-                  type="number"
-                  min="0"
-                  max="100000000"
-                  step="0.01"
+                  min={0}
+                  max={100000000}
                   required
                   value={target}
-                  onChange={(event) => setTarget(event.target.value)}
+                  onValueChange={setTarget}
                 />
               </Field>
               <Field>
                 <FieldLabel htmlFor="goal-deadline">Deadline</FieldLabel>
                 <Input
+                  name="deadline"
                   id="goal-deadline"
                   type="date"
                   value={deadline}
@@ -385,6 +395,7 @@ function GoalEditor({ goal, onClose }: { goal: FinanceGoal | null; onClose: () =
               <Field>
                 <FieldLabel htmlFor="goal-priority">Priority</FieldLabel>
                 <NativeSelect
+                  name="priority"
                   id="goal-priority"
                   value={priority}
                   onChange={(event) => setPriority(event.target.value as FinanceGoal["priority"])}
@@ -396,24 +407,16 @@ function GoalEditor({ goal, onClose }: { goal: FinanceGoal | null; onClose: () =
               </Field>
             </FieldGroup>
           </FieldSet>
-          {save.isError ? (
-            <Alert variant="destructive">
-              <AlertTitle>Goal was not saved</AlertTitle>
-              <AlertDescription>
-                {errorMessage(save.error)}
-                {goal ? " Close and reopen the goal to load its latest version." : ""}
-              </AlertDescription>
-            </Alert>
-          ) : null}
+
           <DialogFooter>
             <Button disabled={save.isPending} onClick={onClose} type="button" variant="outline">
               Cancel
             </Button>
-            <Button disabled={save.isPending || !validTarget || !name.trim()} type="submit">
+            <Button disabled={save.isPending} type="submit">
               {save.isPending ? "Saving goal…" : goal ? "Save goal" : "Create goal"}
             </Button>
           </DialogFooter>
-        </form>
+        </FeedbackForm>
       </DialogContent>
     </Dialog>
   );

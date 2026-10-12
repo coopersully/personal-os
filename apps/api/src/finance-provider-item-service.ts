@@ -11,6 +11,7 @@ import { and, asc, eq, inArray, isNotNull, isNull, notExists, or, sql } from "dr
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import { financeAccountKindFromProviderType } from "./finance/account-semantics.js";
+import type { FinanceTransaction } from "./finance/context.js";
 import { decryptJson, encryptJson } from "./security.js";
 import type { Principal } from "./types.js";
 
@@ -136,7 +137,10 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
   }
 
   return {
-    async upsertConnection(input: UpsertConnectionInput): Promise<FinanceAccount[]> {
+    async upsertConnection(
+      input: UpsertConnectionInput,
+      executor?: FinanceTransaction,
+    ): Promise<FinanceAccount[]> {
       if (input.accounts.length === 0) {
         throw new AppError(
           "service_unavailable",
@@ -148,7 +152,7 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
         { accessToken: input.accessToken },
         getEncryptionKey(),
       );
-      const rows = await db.transaction(async (tx) => {
+      const write = async (tx: FinanceTransaction) => {
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`finance-provider-topology:${input.context.principal.userId}`}, 0))`,
         );
@@ -459,7 +463,8 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
           );
         }
         return saved;
-      });
+      };
+      const rows = await (executor ? write(executor) : db.transaction(write));
       return rows.map(serializeAccount);
     },
 

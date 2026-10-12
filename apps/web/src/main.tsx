@@ -1,15 +1,20 @@
 import { registerSW } from "virtual:pwa-register";
-import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
+import { PetOverlay } from "./features/desktop/pet-overlay.js";
+import { RitualOverlay } from "./features/tracking/ritual-overlay.js";
 import "@fontsource-variable/geist";
 import { App } from "./app.js";
 import { MotionProvider } from "./components/motion-provider.js";
-import { notifyError } from "./lib/error-notification.js";
+import { queryWindowFocusPolicy } from "./features/desktop/query-policy.js";
+import { DesktopStartupGate } from "./features/desktop/updates.js";
+import { createAppQueryClient } from "./lib/query-client.js";
 import "./styles.css";
 
-document.documentElement.classList.toggle("desktop", "__TAURI_INTERNALS__" in window);
+const desktop = "__TAURI_INTERNALS__" in window;
+document.documentElement.classList.toggle("desktop", desktop);
 const systemTheme = window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 document.documentElement.classList.toggle("dark", systemTheme === "dark");
 document.documentElement.style.colorScheme = systemTheme;
@@ -32,27 +37,37 @@ async function clearDevelopmentPwaState() {
   }
 }
 
-const queryClient = new QueryClient({
-  mutationCache: new MutationCache({
-    onError: (error, _variables, _context, mutation) => {
-      if (!mutation.options.onError) notifyError(error);
-    },
-  }),
-  queryCache: new QueryCache({ onError: notifyError }),
-  defaultOptions: {
-    queries: { refetchOnWindowFocus: true, retry: false, staleTime: 15_000 },
+const queryClient = createAppQueryClient({
+  queries: {
+    refetchOnWindowFocus: queryWindowFocusPolicy(desktop, window.location.hash),
+    retry: false,
+    staleTime: 15_000,
   },
 });
 
 const root = document.getElementById("root");
 if (!root) throw new Error("The application root is missing.");
 
+if (desktop && window.location.hash === "#ritual")
+  document.documentElement.classList.add("ritual-window");
+
+if (desktop && window.location.hash === "#pet")
+  document.documentElement.classList.add("pet-window");
+
 createRoot(root).render(
   <StrictMode>
     <MotionProvider>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          <App />
+          {desktop && window.location.hash === "#pet" ? (
+            <PetOverlay />
+          ) : desktop && window.location.hash === "#ritual" ? (
+            <RitualOverlay />
+          ) : (
+            <DesktopStartupGate>
+              <App />
+            </DesktopStartupGate>
+          )}
         </BrowserRouter>
       </QueryClientProvider>
     </MotionProvider>

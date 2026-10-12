@@ -69,6 +69,7 @@ const configSchema = z
     REGISTRATION_MODE: z.enum(["invite", "open"]).default("invite"),
     SESSION_COOKIE_NAME: z.string().min(1).default("personal_os_session"),
     SESSION_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+    FINANCE_SMS_ENABLED: z.enum(["true", "false"]).default("false"),
     TEXTING_ENABLED: z.enum(["true", "false"]).default("false"),
     TRUST_PROXY: z.enum(["true", "false"]).default("false"),
     TWILIO_ACCOUNT_SID: z.string().default(""),
@@ -268,6 +269,7 @@ export type AppConfig = {
     accountSid: string;
     authToken: string;
     enabled: boolean;
+    financeSmsEnabled?: boolean;
     messagingServiceSid: string;
     senderPhoneNumber: string;
     verifyServiceSid: string;
@@ -333,6 +335,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
       accountSid: value.TWILIO_ACCOUNT_SID,
       authToken: value.TWILIO_AUTH_TOKEN,
       enabled: value.TEXTING_ENABLED === "true",
+      financeSmsEnabled: value.FINANCE_SMS_ENABLED === "true",
       messagingServiceSid: value.TWILIO_MESSAGING_SERVICE_SID,
       senderPhoneNumber: value.TWILIO_PHONE_NUMBER,
       verifyServiceSid: value.TWILIO_VERIFY_SERVICE_SID,

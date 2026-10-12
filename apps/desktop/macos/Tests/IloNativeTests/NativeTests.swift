@@ -135,6 +135,10 @@ final class NativeTests: XCTestCase {
         NSPoint(x: 2000, y: -30), to: frame, size: NSSize(width: 72, height: 72)),
       NSPoint(x: -72, y: 0))
   }
+  func testEnabledPetDoesNotRequireAnAuthenticatedSnapshot() {
+    XCTAssertTrue(petShouldBeVisible(enabled: true, hasSnapshot: false))
+    XCTAssertFalse(petShouldBeVisible(enabled: false, hasSnapshot: true))
+  }
   func testEventDeduplicationAcrossGroups() {
     var s = snapshot()
     let e = CalendarItem(
@@ -481,5 +485,24 @@ extension NativeTests {
     p.quietEnd = "14:00"
     XCTAssertNil(
       PendingNotificationPolicy.refreshed(request, snapshot: s, preferences: p, now: now))
+  }
+}
+
+extension NativeTests {
+  func testMaintenanceKeepsManualTestsWithoutPreservingObsoleteAlerts() {
+    let manual = request("Test", id: NotificationMaintenance.testIdentifier)
+    let obsolete = request("Old task", id: "old-task")
+    let current = request("Current task", id: "current-task")
+    XCTAssertEqual(
+      NotificationMaintenance.removableIdentifiers([manual, obsolete, current], keeping: { $0.identifier == "current-task" }),
+      ["old-task"])
+    // Privacy changes remove even current scheduled alerts, but preserve manual tests.
+    XCTAssertEqual(
+      NotificationMaintenance.removableIdentifiers([manual, obsolete, current], keeping: { _ in false }),
+      ["old-task", "current-task"])
+    // Even with scheduled notifications disabled, a user-triggered test stays visible.
+    XCTAssertEqual(
+      NotificationMaintenance.removableIdentifiers([manual, obsolete], keeping: { _ in false }),
+      ["old-task"])
   }
 }

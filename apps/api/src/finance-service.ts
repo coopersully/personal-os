@@ -7,7 +7,6 @@ import {
   domainProfileApprovals,
   domainProfiles,
   executionPolicySettings,
-  financeAccountConnections,
   financeAccounts,
   financeAgentActionReviews,
   financeAlerts,
@@ -23,7 +22,6 @@ import {
   financeIncomeStreams,
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
-  financeMerchantAliases,
   financeMerchants,
   financeProfiles,
   financeProviderItems,
@@ -43,6 +41,7 @@ import type {
   AttentionItem,
   CreateFinanceAccountInput,
   CreateFinanceBudgetInput,
+  CreateFinanceCategoryInput,
   CreateFinanceTransactionInput,
   ExchangePlaidTokenInput,
   FinanceAccount,
@@ -62,7 +61,6 @@ import type {
   FinanceIncomeStream,
   FinanceLedgerHealth,
   FinanceMaintenanceCandidateItemDraft,
-  FinanceMerchant,
   FinanceOverview,
   FinanceProfile,
   FinanceReceiptReview,
@@ -99,6 +97,7 @@ import {
   financeReviewReasonSchema,
   idSchema,
   localDateAt,
+  localDateToIso,
   toCents,
 } from "@personal-os/domain";
 import {
@@ -126,12 +125,21 @@ import {
   serializeFinanceAccountRows,
 } from "./finance/account-service.js";
 import { createFinanceBudgetBucketService } from "./finance/budget-bucket-service.js";
-import { executeFinanceIdempotently, type FinanceMutationContext } from "./finance/context.js";
+import { readFinanceConfiguration } from "./finance/configuration-service.js";
+import { createFinanceConnectionHandoffService } from "./finance/connection-handoff-service.js";
+import {
+  executeFinanceIdempotently,
+  type FinanceMutationContext,
+  requireFinanceExecution,
+} from "./finance/context.js";
 import { createInboxService } from "./finance/inbox-service.js";
 import { createFinanceLedgerService } from "./finance/ledger-service.js";
 import { supersedeFinanceMaintenanceLineage } from "./finance/maintenance-rebuild.js";
+import { normalizedMerchant, titleCaseMerchant } from "./finance/merchant-identity.js";
+import { createFinanceMerchantService } from "./finance/merchant-service.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import { appendFinanceProfile } from "./finance/profile-writer.js";
+import { issueMaintenanceReviewQuestion } from "./finance/review-action-service.js";
 import { createSetupService } from "./finance/setup-service.js";
 import {
   financeCandidateActionFingerprint,
@@ -164,6 +172,10 @@ import { lockReimbursementTopology } from "./finance-reimbursement-locks.js";
 import { createFinanceReimbursementService } from "./finance-reimbursement-service.js";
 import { auditAttentionItemMetadata, serializeAttentionItem } from "./serialization.js";
 import type { Principal, RequestLog } from "./types.js";
+import { requireWorkspaceExecution } from "./workspace-execution.js";
+import { createWorkspaceSettingsService } from "./workspace-settings/service.js";
+
+export { normalizedMerchant, titleCaseMerchant } from "./finance/merchant-identity.js";
 
 type MaintenanceMutationAttribution = {
   idempotencyKey: string;
@@ -174,6 +186,8 @@ type MaintenanceMutationAttribution = {
 type MutationContext = {
   /** Internal action-service capability; never derived from a token or MCP input. */
   financePreparedAction?: boolean;
+  /** Canonical intent already admitted with explicit execution authority. */
+  financeReviewedExecution?: boolean;
   maintenance?: MaintenanceMutationAttribution;
   maintenanceClaim?: { claimId: string; runId: string };
   principal: Principal;
@@ -198,7 +212,7 @@ type CandidatePreparedPayload = Extract<
   FinanceMaintenanceCandidateItemDraft,
   { disposition: "prepared" }
 >["privatePayload"];
-type FinanceProfileSourceExecutor = Pick<Database, "select">;
+type FinanceProfileSourceExecutor = Pick<Database, "select" | "query">;
 type FinanceReadExecutor = Pick<Database, "select">;
 type FinanceReviewExecutor = Pick<Database, "insert" | "select" | "update">;
 type FinanceWriteExecutor = Pick<Database, "insert" | "select" | "update">;
@@ -301,7 +315,12 @@ function defaultCategoryId(userId: string, slug: string) {
 function approvedProfileFrom(
   approval: typeof domainProfileApprovals.$inferSelect | null | undefined,
 ): FinanceGuidedSetupContext["guidance"]["approvedProfile"] {
-  if (approval?.domain !== "finances" || approval.approvedByUserId !== approval.userId) {
+  if (
+    approval?.domain !== "finances" ||
+    (approval.approvalSource === "agent_self_approval"
+      ? !approval.approvedByAgentId || approval.approvedByUserId !== null
+      : approval.approvedByUserId !== approval.userId)
+  ) {
     return null;
   }
   const parsed = financeDomainProfileSchema.safeParse(approval.profile);
@@ -313,21 +332,6 @@ function approvedProfileFrom(
     : null;
 }
 
-export function titleCaseMerchant(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/\b\w/g, (letter) => letter.toUpperCase())
-    .replace(/\b(Usa|Llc|Inc|Ny|Ca)\b/g, (word) => word.toUpperCase());
-}
-
-export function normalizedMerchant(merchant: string) {
-  return merchant
-    .toLowerCase()
-    .replace(/[*#]\d+\b/g, " ")
-    .replace(/\b\d{4,}\b/g, " ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
 export function formatCurrency(cents: number) {
   return new Intl.NumberFormat("en-US", { currency: "USD", style: "currency" }).format(cents / 100);
 }
@@ -697,18 +701,6 @@ function budget(row: typeof financeBudgets.$inferSelect): FinanceBudget {
     updatedAt: row.updatedAt.toISOString(),
   };
 }
-function merchant(
-  row: typeof financeMerchants.$inferSelect,
-  aliases: string[] = [],
-): FinanceMerchant {
-  return {
-    aliases,
-    behavior: row.behavior,
-    displayName: row.displayName,
-    id: row.id,
-    isUserConfirmed: row.isUserConfirmed,
-  };
-}
 function accountAuditSnapshot(value: FinanceAccount) {
   return {
     id: value.id,
@@ -746,13 +738,6 @@ function maintenanceAuditAttribution(
 ) {
   return context.maintenance ? { maintenance: context.maintenance, source } : {};
 }
-function merchantAuditSnapshot(value: FinanceMerchant) {
-  return {
-    id: value.id,
-    isUserConfirmed: value.isUserConfirmed,
-  };
-}
-
 export function createFinanceService({
   db,
   encryptionKey,
@@ -764,6 +749,7 @@ export function createFinanceService({
   searchReceiptCandidates,
 }: Options) {
   const canonicalAccounts = createFinanceAccountService({ db, now });
+  const merchants = createFinanceMerchantService({ db, now });
   const budgetBuckets = createFinanceBudgetBucketService({ db, now });
   const inbox = createInboxService({ db, now });
   const canonicalLedger = createFinanceLedgerService({ db, now });
@@ -771,7 +757,7 @@ export function createFinanceService({
   const setup = createSetupService({ db, now, planning });
   function legacyMutationContext(context: FinanceMutationContext): MutationContext {
     return {
-      principal: {
+      principal: context.executionPrincipal ?? {
         actorId: context.actorId,
         actorType: context.actorType,
         scopes: new Set(["finances:read", "finances:write"]),
@@ -788,6 +774,35 @@ export function createFinanceService({
       ...(encryptionKey ? { encryptionKey } : {}),
       now,
     });
+  const accountHandoff = createFinanceConnectionHandoffService({
+    db,
+    ...(log ? { log } : {}),
+    now,
+    accounts: canonicalAccounts,
+    ...(encryptionKey ? { encryptionKey } : {}),
+    ...(plaid ? { plaid } : {}),
+    preparePersistence: async (item, context) => {
+      const accounts = await getPlaid().getAccounts(item.accessToken);
+      await requireFinanceExecution(db, context, now());
+      return (executor) =>
+        providerItems.upsertConnection(
+          {
+            ...item,
+            accounts,
+            context: {
+              ...legacyMutationContext(context),
+              ...(context.executionPrincipal ? { principal: context.executionPrincipal } : {}),
+            },
+            institution: item.institution ?? "Plaid",
+            prepareTransaction: async (transaction) => {
+              await ensureCategories(context.userId, transaction);
+              await requireFinanceExecution(transaction, context, now());
+            },
+          },
+          executor,
+        );
+    },
+  });
   async function assertMaintenanceClaim(
     executor: FinanceWriteExecutor,
     context?: MutationContext,
@@ -1577,16 +1592,24 @@ export function createFinanceService({
     const categories = await ensureCategories(userId, executor);
     const existing = categories.find((item) => item.name.toLowerCase() === name.toLowerCase());
     if (existing) return existing;
-    const slug = categorySlug(name);
-    const [created] = await executor
-      .insert(financeCategories)
-      .values({ group: "Custom", isSystem: false, name, slug, userId })
-      .onConflictDoUpdate({
-        set: { name, updatedAt: now() },
-        target: [financeCategories.userId, financeCategories.slug],
-      })
-      .returning();
-    return requireDatabaseRecord(created, "The finance category could not be saved.");
+    // Custom names can share a readable slug (including entirely non-ASCII names).
+    // Keep their identity distinct and never rename an existing category on creation.
+    for (let retry = 0; retry < 32; retry += 1) {
+      const slug = legacyCategorySlug(userId, name, retry);
+      const [created] = await executor
+        .insert(financeCategories)
+        .values({ group: "Custom", isSystem: false, name, slug, userId })
+        .onConflictDoNothing({ target: [financeCategories.userId, financeCategories.slug] })
+        .returning();
+      if (created) return created;
+      const [concurrent] = await executor
+        .select()
+        .from(financeCategories)
+        .where(and(eq(financeCategories.userId, userId), eq(financeCategories.slug, slug)))
+        .limit(1);
+      if (concurrent?.name.toLowerCase() === name.toLowerCase()) return concurrent;
+    }
+    throw new AppError("conflict", "Category identifiers are occupied. Try a different name.");
   }
 
   async function categoryForProposalName(
@@ -1617,53 +1640,7 @@ export function createFinanceService({
     };
   }
 
-  async function merchantFor(
-    userId: string,
-    rawMerchant: string,
-    source: "agent" | "provider" | "user",
-    executor: FinanceWriteExecutor = db,
-  ) {
-    const normalizedName = normalizedMerchant(rawMerchant);
-    const [alias] = await executor
-      .select({ merchant: financeMerchants })
-      .from(financeMerchantAliases)
-      .innerJoin(financeMerchants, eq(financeMerchantAliases.merchantId, financeMerchants.id))
-      .where(
-        and(
-          eq(financeMerchantAliases.userId, userId),
-          eq(financeMerchantAliases.normalizedName, normalizedName),
-        ),
-      )
-      .limit(1);
-    if (alias) return alias.merchant;
-    const [merchant] = await executor
-      .insert(financeMerchants)
-      .values({
-        displayName: titleCaseMerchant(normalizedName || rawMerchant),
-        normalizedName,
-        userId,
-      })
-      .onConflictDoUpdate({
-        set: { updatedAt: now() },
-        target: [financeMerchants.userId, financeMerchants.normalizedName],
-      })
-      .returning();
-    const resolved = requireDatabaseRecord(merchant, "The merchant could not be saved.");
-    await executor
-      .insert(financeMerchantAliases)
-      .values({
-        confidence: 10_000,
-        merchantId: resolved.id,
-        normalizedName,
-        rawName: rawMerchant,
-        source,
-        userId,
-      })
-      .onConflictDoNothing({
-        target: [financeMerchantAliases.userId, financeMerchantAliases.normalizedName],
-      });
-    return resolved;
-  }
+  const merchantFor = merchants.merchantFor;
 
   async function merchantConfidenceThreshold(
     userId: string,
@@ -2392,15 +2369,6 @@ export function createFinanceService({
       sourceType: "finance_recurring_obligation",
     };
   }
-  async function ownedMerchant(userId: string, id: string, executor: FinanceReadExecutor = db) {
-    const [row] = await executor
-      .select()
-      .from(financeMerchants)
-      .where(and(eq(financeMerchants.id, id), eq(financeMerchants.userId, userId)))
-      .limit(1);
-    if (!row) throw new AppError("not_found", "The finance merchant was not found.");
-    return row;
-  }
   async function enrichTransaction(
     row: typeof financeTransactions.$inferSelect,
     executor: FinanceReadExecutor = db,
@@ -2737,10 +2705,16 @@ export function createFinanceService({
       direction?: "expense" | "income" | "transfer";
       reconciliationStatus?: "confirmed" | "not_applicable";
       requiredReviewId?: string;
+      reviewedExecution?: boolean;
     } = {},
     executor?: FinanceActionWriteExecutor,
   ) {
     const readExecutor = executor ?? db;
+    // Direct ledger editing has its own prepared-action contract. Resolving a
+    // categorization review must still match current server-owned evidence.
+    const directLedgerExecution = options.reviewedExecution === true && !options.requiredReviewId;
+    if (options.reviewedExecution)
+      await requireWorkspaceExecution(readExecutor, context.principal, "finances", now());
     const before = await ownedTransaction(
       context.principal.userId,
       decision.transactionId,
@@ -2769,7 +2743,7 @@ export function createFinanceService({
     );
     let confidence = decision.confidence;
     let agentProposal: FinanceCategorizationProposal | null = null;
-    if (source === "agent" || source === "rule") {
+    if (!directLedgerExecution && (source === "agent" || source === "rule")) {
       const proposal = await categorizationProposal(
         context.principal.userId,
         beforeValue,
@@ -2791,7 +2765,8 @@ export function createFinanceService({
       threshold = proposal.threshold;
       if (source === "agent") agentProposal = proposal;
     }
-    const canApply = source !== "agent" || agentProposal?.meetsPolicyThreshold === true;
+    const canApply =
+      directLedgerExecution || source !== "agent" || agentProposal?.meetsPolicyThreshold === true;
     if (!canApply) {
       const defer = async (tx: FinanceActionWriteExecutor) => {
         await assertMaintenanceClaim(tx, context);
@@ -2985,6 +2960,8 @@ export function createFinanceService({
       return { applied: false, replayed, threshold, transaction: beforeValue };
     }
     const apply = async (tx: FinanceActionWriteExecutor) => {
+      if (options.reviewedExecution)
+        await requireWorkspaceExecution(tx, context.principal, "finances", now());
       await lockReimbursementTopology(tx, context.principal.userId);
       await assertMaintenanceClaim(tx, context);
       const [current] = await tx
@@ -3026,7 +3003,7 @@ export function createFinanceService({
         .where(eq(financeCategories.userId, context.principal.userId))
         .orderBy(financeCategories.id)
         .for("update");
-      if (source === "agent" || source === "rule") {
+      if (!directLedgerExecution && (source === "agent" || source === "rule")) {
         const currentProposal = await categorizationProposal(
           context.principal.userId,
           transaction(current),
@@ -3048,7 +3025,8 @@ export function createFinanceService({
         confidence = currentProposal.confidence;
         threshold = currentProposal.threshold;
       }
-      const mustProtectAmbiguousTransfer = source === "rule" || source === "agent";
+      const mustProtectAmbiguousTransfer =
+        !directLedgerExecution && (source === "rule" || source === "agent");
       const [protectedReview] = mustProtectAmbiguousTransfer
         ? await tx
             .select({ id: financeReviewCases.id })
@@ -3295,6 +3273,16 @@ export function createFinanceService({
         "This account has reimbursement cases or matched credits. Cancel or adjust the reimbursement before deleting the account.",
       );
     }
+  }
+
+  async function planningDate(userId: string, executor: FinanceReadExecutor = db) {
+    const [user] = await executor
+      .select({ planningTimezone: users.planningTimezone })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!user) throw new AppError("not_found", "The user was not found.");
+    return localDateToIso(localDateAt(now(), user.planningTimezone));
   }
 
   const profileValue = (row: typeof financeProfiles.$inferSelect): FinanceProfile => ({
@@ -3948,6 +3936,72 @@ export function createFinanceService({
     ...inbox,
     ...planning,
     ...setup,
+    async getFinanceConfiguration(userId: string, requestId: string = randomUUID()) {
+      const boundedRead = <T>(read: (executor: Database) => Promise<T>) =>
+        db.transaction(async (tx) => {
+          // Cancel SQL on the server; a caller-side race would leave blocked work running.
+          // These deadlines begin after pool acquisition, whose policy belongs to the pool.
+          await tx.execute(sql`SET LOCAL statement_timeout = '2000ms'`);
+          await tx.execute(sql`SET LOCAL transaction_timeout = '2500ms'`);
+          return read(tx as unknown as Database);
+        });
+      return readFinanceConfiguration(
+        {
+          execution: () =>
+            boundedRead(async (executor) => {
+              const run = await executor.query.workspaceMaintenanceRuns.findFirst({
+                where: and(
+                  eq(workspaceMaintenanceRuns.userId, userId),
+                  eq(workspaceMaintenanceRuns.domain, "finances"),
+                ),
+                orderBy: [desc(workspaceMaintenanceRuns.createdAt)],
+              });
+              return run ? { id: run.id, status: run.status } : null;
+            }),
+          profile: () =>
+            boundedRead(
+              async (executor) =>
+                (
+                  await createProfileBudgetService({ db: executor, now }).getFinancialProfile(
+                    userId,
+                  )
+                ).data,
+            ),
+          preferences: () =>
+            boundedRead((executor) =>
+              createWorkspaceSettingsService(executor).get(userId, "finances"),
+            ),
+          income: () => boundedRead((executor) => this.getProfile(userId, undefined, executor)),
+          budget: () =>
+            boundedRead(
+              async (executor) =>
+                (await createProfileBudgetService({ db: executor, now }).getFinanceBudget(userId))
+                  .data,
+            ),
+          accounts: () =>
+            boundedRead((executor) =>
+              createFinanceAccountService({ db: executor, now }).list(userId, {
+                includeExcluded: true,
+              }),
+            ),
+          guidance: () =>
+            boundedRead((executor) =>
+              createFinanceService({ db: executor, now }).getGuidedSetupContext(userId),
+            ),
+        },
+        (section, failure) =>
+          log?.({
+            event: "finance_configuration_section_failed",
+            section,
+            durationMs: failure.durationMs,
+            category: failure.category,
+            method: "GET",
+            path: "/v1/finances/configuration",
+            requestId,
+            status: 503,
+          }),
+      );
+    },
     async listReimbursements(userId: string) {
       return reimbursements.list(userId);
     },
@@ -4072,12 +4126,15 @@ export function createFinanceService({
       sourceIds: string[],
       status: "active" | "draft",
       actorType: Principal["actorType"],
+      principal?: Principal,
     ) {
       if (status === "active" && actorType !== "user") {
-        throw new AppError(
-          "forbidden",
-          "Activating a Finance profile requires an interactive user session.",
-        );
+        if (!principal || principal.userId !== userId || principal.actorType !== actorType)
+          throw new AppError(
+            "forbidden",
+            "Finance guidance activation requires authenticated execution authority.",
+          );
+        await requireWorkspaceExecution(transaction, principal, "finances", now());
       }
       const uniqueSourceIds = [...new Set(sourceIds)];
       if (uniqueSourceIds.length !== sourceIds.length) {
@@ -4169,7 +4226,10 @@ export function createFinanceService({
               eq(domainProfileApprovals.profileId, domainProfiles.id),
               eq(domainProfileApprovals.userId, domainProfiles.userId),
               eq(domainProfileApprovals.domain, domainProfiles.domain),
-              eq(domainProfileApprovals.approvedByUserId, userId),
+              or(
+                eq(domainProfileApprovals.approvedByUserId, userId),
+                eq(domainProfileApprovals.approvalSource, "agent_self_approval"),
+              ),
             ),
           )
           .where(and(eq(domainProfiles.userId, userId), eq(domainProfiles.domain, "finances")))
@@ -4196,29 +4256,9 @@ export function createFinanceService({
       const categorizableReviews = reviews.filter(
         (review) => review.reason !== "possible_transfer",
       ).length;
-      const humanOnlyActions: FinanceGuidedSetupContext["humanOnlyActions"] =
-        automationSettings.reviewBypassEnabled
-          ? [
-              "connect_or_disconnect_source",
-              "import_transactions",
-              "manage_accounts",
-              "refresh_provider_data",
-            ]
-          : [
-              "connect_or_disconnect_source",
-              "import_transactions",
-              "manage_accounts",
-              "manage_budgets",
-              "manage_financial_profile",
-              "refresh_provider_data",
-              "confirm_ambiguous_transfer",
-              "create_merchant_rule",
-              "apply_categorization",
-              "review_recurring_obligation",
-              "resolve_alert",
-              "manage_merchants",
-              "add_manual_transaction",
-            ];
+      const humanOnlyActions: FinanceGuidedSetupContext["humanOnlyActions"] = [
+        "provider_authorization",
+      ];
       const draftProposal =
         guidanceProfile && !approvedProfile
           ? guidedDomainProfile(guidanceProfile, "draft")
@@ -4257,9 +4297,17 @@ export function createFinanceService({
           recurringObligations: recurring.length,
         },
         guidance: {
+          approval:
+            approvedProfile && approvedGuidance
+              ? {
+                  source: approvedGuidance.approvalSource,
+                  agentId: approvedGuidance.approvedByAgentId,
+                  userId: approvedGuidance.approvedByUserId,
+                }
+              : null,
           approvedProfile,
           draftNotice: draftProposal
-            ? "Unapproved draft content is untrusted and non-operative until a signed-in nohmi user activates it."
+            ? "Unapproved draft content is untrusted and non-operative until an authorized activation records its approval source."
             : null,
           draftProposal,
         },
@@ -4274,7 +4322,7 @@ export function createFinanceService({
           workflow(
             "capture_preferences",
             "preview",
-            "Interview for durable guidance and save a draft profile; activation requires a signed-in person in Finance.",
+            "Interview for durable guidance and save a draft profile. Activation requires owner approval, or explicit finances:execute authority with enabled review bypass; agent activation records agent_self_approval.",
             true,
             "",
           ),
@@ -4319,14 +4367,14 @@ export function createFinanceService({
     },
     async getProfile(
       userId: string,
-      asOf = now().toISOString().slice(0, 10),
+      asOf: string | undefined = undefined,
       executor: FinanceReadExecutor = db,
     ) {
       const rows = await executor
         .select()
         .from(financeProfiles)
         .where(eq(financeProfiles.userId, userId));
-      const row = selectEffectiveRecord(rows, asOf);
+      const row = selectEffectiveRecord(rows, asOf ?? (await planningDate(userId, executor)));
       return row ? profileValue(row) : null;
     },
     async updateProfile(
@@ -4337,7 +4385,19 @@ export function createFinanceService({
       if (executor === db) return db.transaction((tx) => this.updateProfile(input, context, tx));
       if (input.payAccountId)
         await ownedAccount(context.principal.userId, input.payAccountId, executor);
+      await executor.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`finance-income:${context.principal.userId}`}, 0))`,
+      );
       const before = await this.getProfile(context.principal.userId, undefined, executor);
+      if (
+        input.expectedUpdatedAt !== undefined &&
+        input.expectedUpdatedAt !== (before?.updatedAt ?? null)
+      ) {
+        throw new AppError(
+          "conflict",
+          "Your payroll details changed. Reload before saving your edit.",
+        );
+      }
       const [row] = await executor
         .insert(financeProfiles)
         .values({
@@ -4404,7 +4464,7 @@ export function createFinanceService({
           ...context,
         }),
       );
-      if (input.effectiveDate <= now().toISOString().slice(0, 10)) {
+      if (input.effectiveDate <= (await planningDate(context.principal.userId, executor))) {
         const periods =
           input.payFrequency === "monthly"
             ? 12
@@ -4416,10 +4476,29 @@ export function createFinanceService({
                   ? 52
                   : null;
         const changes: UpdateFinancialProfileInput["changes"] = {};
-        if (input.householdSize !== undefined) changes.householdSize = input.householdSize;
-        if (input.dependents !== undefined) changes.dependents = input.dependents;
-        if (input.expectedNetPay === null) changes.expectedMonthlyTakeHome = null;
-        else if (input.expectedNetPay !== undefined && periods !== null)
+        if (
+          input.householdSize !== undefined &&
+          (input.expectedUpdatedAt === undefined || input.householdSize !== before?.householdSize)
+        )
+          changes.householdSize = input.householdSize;
+        if (
+          input.dependents !== undefined &&
+          (input.expectedUpdatedAt === undefined || input.dependents !== before?.dependents)
+        )
+          changes.dependents = input.dependents;
+        // Guarded field edits must not clear unrelated canonical income. Legacy full
+        // profile submissions still retain their explicit-null clearing contract.
+        if (
+          input.expectedNetPay === null &&
+          (input.expectedUpdatedAt === undefined || before?.expectedNetPay != null)
+        )
+          changes.expectedMonthlyTakeHome = null;
+        else if (
+          input.expectedNetPay != null &&
+          periods !== null &&
+          (input.expectedNetPay !== before?.expectedNetPay ||
+            input.payFrequency !== before?.payFrequency)
+        )
           changes.expectedMonthlyTakeHome =
             Math.round((input.expectedNetPay * 100 * periods) / 12) / 100;
         if (Object.keys(changes).length > 0) {
@@ -4707,67 +4786,8 @@ export function createFinanceService({
         userId,
       });
     },
-    async startFinanceAccountConnection(
-      input: { idempotencyKey: string; provider: "plaid" },
-      context: FinanceMutationContext,
-    ) {
-      return executeFinanceIdempotently(
-        db,
-        context,
-        {
-          idempotencyKey: input.idempotencyKey,
-          operation: "finance.account_connection.start",
-          payload: input,
-        },
-        async () => {
-          const [connection] = await db
-            .insert(financeAccountConnections)
-            .values({ provider: input.provider, status: "pending", userId: context.userId })
-            .returning();
-          if (!connection)
-            throw new AppError("internal_error", "The account connection was not started.");
-          let linkToken: string;
-          try {
-            linkToken = await this.createPlaidLinkToken(context.userId);
-          } catch (error) {
-            await db
-              .update(financeAccountConnections)
-              .set({
-                lastError: {
-                  code: "provider_handoff_failed",
-                  message: error instanceof Error ? error.message : "The provider handoff failed.",
-                  retryable: true,
-                },
-                status: "failed",
-                updatedAt: now(),
-              })
-              .where(eq(financeAccountConnections.id, connection.id));
-            throw error;
-          }
-          const externalHandoffExpiresAt = new Date(now().getTime() + 30 * 60 * 1_000);
-          await db
-            .update(financeAccountConnections)
-            .set({ externalHandoffExpiresAt, externalHandoffUrl: linkToken, updatedAt: now() })
-            .where(eq(financeAccountConnections.id, connection.id));
-          return {
-            ...canonicalResult(
-              {
-                connectionId: connection.id,
-                externalHandoff: {
-                  artifact: linkToken,
-                  expiresAt: externalHandoffExpiresAt.toISOString(),
-                  provider: input.provider,
-                },
-                status: connection.status,
-              },
-              "The secure bank authorization handoff is ready.",
-            ),
-            outcome: "external_action_required" as const,
-            remainingWork: { categories: ["provider_authorization"], count: 1 },
-          };
-        },
-      );
-    },
+    startFinanceAccountConnection: accountHandoff.start,
+    completeFinanceAccountConnection: accountHandoff.complete,
     async exchangePlaidToken(
       input: ExchangePlaidTokenInput,
       context: MutationContext,
@@ -5296,6 +5316,23 @@ export function createFinanceService({
         };
       });
     },
+    async createCategory(input: CreateFinanceCategoryInput, context: MutationContext) {
+      return db.transaction(async (tx) => {
+        await requireWorkspaceExecution(tx, context.principal, "finances", now());
+        const category = await categoryForName(context.principal.userId, input.name, tx);
+        await tx.insert(auditEvents).values(
+          auditValues({
+            action: "finance.category_saved",
+            after: { saved: true },
+            before: null,
+            entityId: category.id,
+            entityType: "finance_category",
+            ...context,
+          }),
+        );
+        return categoryValue(category);
+      });
+    },
     async listCategories(userId: string) {
       const existing = await existingCategories(userId);
       const bySlug = new Map(existing.map((item) => [item.slug, item]));
@@ -5531,29 +5568,7 @@ export function createFinanceService({
       );
     },
     async listMerchants(userId: string, limit = 50) {
-      const merchants = await db
-        .select()
-        .from(financeMerchants)
-        .where(eq(financeMerchants.userId, userId))
-        .orderBy(desc(financeMerchants.updatedAt), financeMerchants.displayName)
-        .limit(limit);
-      if (merchants.length === 0) return [];
-      const aliases = await db
-        .select()
-        .from(financeMerchantAliases)
-        .where(
-          inArray(
-            financeMerchantAliases.merchantId,
-            merchants.map((item) => item.id),
-          ),
-        )
-        .orderBy(financeMerchantAliases.rawName);
-      return merchants.map((item) =>
-        merchant(
-          item,
-          aliases.filter((alias) => alias.merchantId === item.id).map((alias) => alias.rawName),
-        ),
-      );
+      return merchants.listMerchants(userId, limit);
     },
     async updateMerchant(
       id: string,
@@ -5561,89 +5576,14 @@ export function createFinanceService({
       context: MutationContext,
       executor: FinanceWriteExecutor = db,
     ) {
-      const before = await ownedMerchant(context.principal.userId, id, executor);
-      const updated = requireDatabaseRecord(
-        (
-          await executor
-            .update(financeMerchants)
-            .set({
-              displayName: input.displayName,
-              isUserConfirmed:
-                context.principal.actorType === "user" ? true : before.isUserConfirmed,
-              updatedAt: now(),
-            })
-            .where(eq(financeMerchants.id, before.id))
-            .returning()
-        )[0],
-        "The finance merchant could not be updated.",
-      );
-      await executor.insert(auditEvents).values(
-        auditValues({
-          action: "finance.merchant_renamed",
-          after: {
-            ...merchantAuditSnapshot(merchant(updated)),
-            changedFields: ["displayName"],
-          },
-          before: merchantAuditSnapshot(merchant(before)),
-          entityId: updated.id,
-          entityType: "finance_merchant",
-          ...context,
-        }),
-      );
-      return merchant(updated);
+      return merchants.updateMerchant(id, input, context, executor);
     },
     async mergeMerchants(
       input: MergeFinanceMerchantsInput,
       context: MutationContext,
       executor?: FinanceActionWriteExecutor,
     ) {
-      const merge = async (tx: FinanceActionWriteExecutor) => {
-        const locked = await tx
-          .select()
-          .from(financeMerchants)
-          .where(
-            and(
-              eq(financeMerchants.userId, context.principal.userId),
-              inArray(financeMerchants.id, [input.sourceMerchantId, input.targetMerchantId]),
-            ),
-          )
-          .orderBy(financeMerchants.id)
-          .for("update");
-        const source = locked.find((item) => item.id === input.sourceMerchantId);
-        const target = locked.find((item) => item.id === input.targetMerchantId);
-        if (!source || !target) {
-          throw new AppError("not_found", "One of the finance merchants was not found.");
-        }
-        await tx
-          .update(financeMerchantAliases)
-          .set({ merchantId: target.id, updatedAt: now() })
-          .where(eq(financeMerchantAliases.merchantId, source.id));
-        await tx
-          .update(financeTransactions)
-          .set({ merchantId: target.id, updatedAt: now() })
-          .where(eq(financeTransactions.merchantId, source.id));
-        await tx
-          .update(financeClassificationDecisions)
-          .set({ merchantId: target.id })
-          .where(eq(financeClassificationDecisions.merchantId, source.id));
-        await tx.delete(financeMerchants).where(eq(financeMerchants.id, source.id));
-        await tx.insert(auditEvents).values(
-          auditValues({
-            action: "finance.merchants_merged",
-            after: {
-              rationaleProvided: true,
-              sourceMerchantId: source.id,
-              targetMerchantId: target.id,
-            },
-            before: merchantAuditSnapshot(merchant(source)),
-            entityId: target.id,
-            entityType: "finance_merchant",
-            ...context,
-          }),
-        );
-        return merchant(target);
-      };
-      return executor ? merge(executor) : db.transaction(merge);
+      return merchants.mergeMerchants(input, context, executor);
     },
     async getBudgetStatus(userId: string, month = now().toISOString().slice(0, 7)) {
       const [budgets, allocations, transactions] = await Promise.all([
@@ -6196,6 +6136,7 @@ export function createFinanceService({
             },
             tx,
           );
+          await issueMaintenanceReviewQuestion(tx, input.userId, projectedReview.id);
           activeReviewIds.add(projectedReview.id);
         }
         return { created: items.length, total: activeReviewIds.size };
@@ -7305,6 +7246,10 @@ export function createFinanceService({
       };
     },
     async resolveReview(id: string, input: FinanceReviewDecisionInput, context: MutationContext) {
+      const reviewedExecution =
+        context.principal.actorType === "agent" && context.principal.scopes.has("finances:execute");
+      if (reviewedExecution)
+        await requireWorkspaceExecution(db, context.principal, "finances", now());
       const [review] = await db
         .select()
         .from(financeReviewCases)
@@ -7317,13 +7262,21 @@ export function createFinanceService({
         )
         .limit(1);
       if (!review) throw new AppError("not_found", "The finance review case was not found.");
-      if (context.principal.actorType === "agent" && input.learnMerchant === "always") {
+      if (
+        !reviewedExecution &&
+        context.principal.actorType === "agent" &&
+        input.learnMerchant === "always"
+      ) {
         throw new AppError(
           "forbidden",
           "Permanent merchant rules require review in an interactive user session.",
         );
       }
-      if (context.principal.actorType === "agent" && input.action === "confirm_transfer") {
+      if (
+        !reviewedExecution &&
+        context.principal.actorType === "agent" &&
+        input.action === "confirm_transfer"
+      ) {
         throw new AppError(
           "forbidden",
           "Confirming an ambiguous transfer requires an interactive user session.",
@@ -7354,6 +7307,8 @@ export function createFinanceService({
       if (input.action === "defer") {
         if (review.status === "deferred") return { deferred: true };
         await db.transaction(async (tx) => {
+          if (reviewedExecution)
+            await requireWorkspaceExecution(tx, context.principal, "finances", now());
           const [updated] = await tx
             .update(financeReviewCases)
             .set({ status: "deferred", updatedAt: now() })
@@ -7439,14 +7394,16 @@ export function createFinanceService({
               direction: "transfer",
               reconciliationStatus: "confirmed",
               requiredReviewId: review.id,
+              reviewedExecution,
             }
           : review.reason === "possible_transfer"
             ? {
                 direction: nonTransferDirection as "expense" | "income",
                 reconciliationStatus: "not_applicable",
                 requiredReviewId: review.id,
+                reviewedExecution,
               }
-            : { requiredReviewId: review.id },
+            : { requiredReviewId: review.id, reviewedExecution },
       );
       return result;
     },
@@ -7494,6 +7451,7 @@ export function createFinanceService({
     async createAccount(input: CreateFinanceAccountInput, context: MutationContext) {
       const row = await db.transaction(async (tx) => {
         await ensureCategories(context.principal.userId, tx);
+        await requireWorkspaceExecution(tx, context.principal, "finances", now());
         const created = requireDatabaseRecord(
           (
             await tx
@@ -8069,6 +8027,7 @@ export function createFinanceService({
           )
           .for("update")
           .limit(1);
+        await requireWorkspaceExecution(tx, context.principal, "finances", now());
         const approvedProfile = approvedProfileFrom(approval);
         if (approval && !approvedProfile) {
           throw new AppError(
@@ -9000,10 +8959,11 @@ export function createFinanceService({
         },
         async (tx) => {
           const { idempotencyKey: _idempotencyKey, ...legacyInput } = input;
+          await requireFinanceExecution(tx, context, now());
           const data = await this.updateTransaction(
             id,
             legacyInput,
-            legacyMutationContext(context),
+            { ...legacyMutationContext(context), financeReviewedExecution: true },
             tx,
           );
           return canonicalResult(data, "Transaction updated.");
@@ -9060,7 +9020,11 @@ export function createFinanceService({
       context: MutationContext,
       executor?: FinanceActionWriteExecutor,
     ) {
-      if (context.principal.actorType === "agent" && context.financePreparedAction !== true) {
+      if (
+        context.principal.actorType === "agent" &&
+        context.financePreparedAction !== true &&
+        context.financeReviewedExecution !== true
+      ) {
         throw new AppError(
           "forbidden",
           "Finance transaction edits require an interactive user session.",
@@ -9069,9 +9033,30 @@ export function createFinanceService({
       const write = async (tx: FinanceActionWriteExecutor) => {
         await lockReimbursementTopology(tx, context.principal.userId);
         const before = await ownedTransaction(context.principal.userId, id, tx);
-        if (context.principal.actorType === "agent" && input.category !== undefined) {
+        if (context.financeReviewedExecution) {
+          await requireWorkspaceExecution(tx, context.principal, "finances", now());
           if (
-            context.financePreparedAction !== true ||
+            context.principal.actorType === "agent" &&
+            input.category !== undefined &&
+            input.expectedTransactionUpdatedAt === undefined
+          )
+            throw new AppError(
+              "invalid_request",
+              "expectedTransactionUpdatedAt is required when changing or clearing a category.",
+            );
+          if (
+            input.expectedTransactionUpdatedAt !== undefined &&
+            before.updatedAt.toISOString() !== input.expectedTransactionUpdatedAt
+          )
+            throw new AppError("conflict", "The transaction changed; reload it before editing.");
+        }
+        if (
+          context.principal.actorType === "agent" &&
+          input.category !== undefined &&
+          !(context.financeReviewedExecution && input.category === null)
+        ) {
+          if (
+            (context.financePreparedAction !== true && context.financeReviewedExecution !== true) ||
             input.category === null ||
             input.confidence === undefined ||
             input.expectedTransactionUpdatedAt === undefined ||
@@ -9096,7 +9081,7 @@ export function createFinanceService({
             context,
             input.suggestionBasis === "merchant_rule" ? "rule" : "agent",
             "confirmed",
-            {},
+            { reviewedExecution: context.financeReviewedExecution === true },
             tx,
           );
           if (input.notes === undefined) return categorized;
@@ -9125,6 +9110,12 @@ export function createFinanceService({
           .for("update")
           .limit(1);
         if (!current) throw new AppError("not_found", "The transaction was not found.");
+        if (
+          context.financeReviewedExecution &&
+          input.expectedTransactionUpdatedAt !== undefined &&
+          current.updatedAt.toISOString() !== input.expectedTransactionUpdatedAt
+        )
+          throw new AppError("conflict", "The transaction changed; reload it before editing.");
         if (current.pending && input.category !== undefined && input.learnMerchant === true) {
           throw new AppError(
             "invalid_request",
@@ -9167,7 +9158,12 @@ export function createFinanceService({
                     : input.category === null
                       ? null
                       : "Categorized directly by the user.",
-                categorySource: input.category === undefined ? undefined : "user",
+                categorySource:
+                  input.category === undefined
+                    ? undefined
+                    : context.principal.actorType === "agent"
+                      ? "agent"
+                      : "user",
                 needsReview: input.category === undefined ? undefined : input.category === null,
                 updatedAt: now(),
               })

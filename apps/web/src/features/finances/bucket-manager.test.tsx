@@ -83,7 +83,7 @@ describe("Finance budget bucket manager", () => {
 
     mocks.listFinanceBudgetBuckets.mockRejectedValueOnce(new Error("Buckets unavailable"));
     renderManager();
-    expect(await screen.findByText("Buckets unavailable")).toBeInTheDocument();
+    expect(await screen.findByText("Couldn’t load this material.")).toBeInTheDocument();
   });
 
   it("loads the selected bucket description when switching buckets", async () => {
@@ -129,4 +129,60 @@ describe("Finance budget bucket manager", () => {
     await user.tab();
     expect(mocks.updateFinanceBudgetBucket).toHaveBeenCalledOnce();
   });
+});
+
+it("validates a new bucket on submit and keeps the draft after an uncertain save", async () => {
+  mocks.listFinanceBudgetBuckets.mockResolvedValue({ taxonomy: { buckets: [] } });
+  mocks.createFinanceBudgetBucket.mockRejectedValue(new Error("private database details"));
+  const user = userEvent.setup();
+  renderManager();
+  const name = await screen.findByLabelText("New bucket name");
+  expect(name).not.toHaveAttribute("aria-invalid");
+  await user.click(screen.getByRole("button", { name: "Add bucket" }));
+  expect(name).toHaveAttribute("aria-invalid", "true");
+  expect(name).toHaveFocus();
+  await user.type(name, "Emergency fund");
+  expect(name).not.toHaveAttribute("aria-invalid");
+  await user.click(screen.getByRole("button", { name: "Add bucket" }));
+  expect(
+    await screen.findByText(/Couldn’t confirm whether we could create this budget bucket/),
+  ).toBeVisible();
+  expect(name).toHaveValue("Emergency fund");
+  expect(screen.queryByText("private database details")).not.toBeInTheDocument();
+});
+
+it("clears a bucket description and removes a category without losing the selected bucket", async () => {
+  mocks.updateFinanceBudgetBucket.mockReset().mockResolvedValue({});
+  mocks.listFinanceBudgetBuckets.mockResolvedValue({
+    taxonomy: {
+      buckets: [
+        {
+          categories: ["cat-1"],
+          description: "Old description",
+          id: "bucket-1",
+          name: "Care",
+          version: 2,
+        },
+      ],
+    },
+  });
+  renderManager();
+  await userEvent.click(await screen.findByRole("button", { name: "Care" }));
+  const description = screen.getByLabelText("Selected bucket description");
+  fireEvent.change(description, { target: { value: "  " } });
+  fireEvent.blur(description);
+  await waitFor(() =>
+    expect(mocks.updateFinanceBudgetBucket).toHaveBeenCalledWith(
+      "bucket-1",
+      expect.objectContaining({ description: null, categoryIds: ["cat-1"] }),
+    ),
+  );
+  await waitFor(() => expect(screen.getByRole("checkbox", { name: "Therapy" })).toBeEnabled());
+  await userEvent.click(screen.getByRole("checkbox", { name: "Therapy" }));
+  await waitFor(() =>
+    expect(mocks.updateFinanceBudgetBucket).toHaveBeenLastCalledWith(
+      "bucket-1",
+      expect.objectContaining({ categoryIds: [] }),
+    ),
+  );
 });

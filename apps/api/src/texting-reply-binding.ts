@@ -1,5 +1,6 @@
 import {
   type Database,
+  financeSmsCompletions,
   textInboundClaims,
   textingConnections,
   textMessages,
@@ -60,7 +61,12 @@ export async function createTextReplyBindings(
       (item) =>
         item.outboundMessageId !== outboundMessageId ||
         new Date(item.expiresAt).getTime() <= now.getTime() ||
-        item.work.kind !== "question" ||
+        (item.work.kind !== "question" &&
+          !(
+            item.work.kind === "approval" &&
+            item.answerMode === "choices" &&
+            JSON.stringify(item.answerVocabulary) === JSON.stringify(["approve", "reject"])
+          )) ||
         (item.answerVocabulary !== null &&
           new Set(item.answerVocabulary.map((word) => word.toLowerCase())).size !==
             item.answerVocabulary.length),
@@ -140,6 +146,21 @@ export async function bindInboundReply(
       claim.consentEpoch !== connection.consentEpoch
     )
       return { state: "unavailable", reason: "missing" };
+    if (
+      (
+        await tx
+          .select({ id: financeSmsCompletions.claimId })
+          .from(financeSmsCompletions)
+          .where(
+            and(
+              eq(financeSmsCompletions.userId, userId),
+              eq(financeSmsCompletions.claimId, claim.id),
+            ),
+          )
+          .limit(1)
+      ).length
+    )
+      return { state: "unavailable", reason: "unsupported" };
     const attached = await tx
       .select()
       .from(textReplyBindings)
@@ -158,6 +179,8 @@ export async function bindInboundReply(
         })),
       };
     }
+    if (/^Finance(?: context)?:\s*/iu.test(message.body))
+      return { state: "unavailable", reason: "unsupported" };
     const candidates = await tx
       .select()
       .from(textReplyBindings)

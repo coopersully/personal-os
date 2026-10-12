@@ -1,12 +1,20 @@
 import { isDeepStrictEqual } from "node:util";
 import {
+  accessTokens,
+  automationHostSchedules,
   type Database,
   financeAccounts,
+  financeAnswerContinuations,
+  financeContextualAnswers,
+  financeContextualQuestions,
   financeLedgerChallenges,
   financeMaintenanceCandidates,
   financeMaintenanceRuns,
   financePeriodReviews,
+  financeReviewAnswers,
+  financeReviewCases,
   financeSetupSessions,
+  financeTransactions,
   users,
   workspaceMaintenanceRuns,
   workspaceMaintenanceSteps,
@@ -29,6 +37,7 @@ import {
   desc,
   eq,
   getTableColumns,
+  gt,
   inArray,
   isNotNull,
   isNull,
@@ -41,6 +50,8 @@ import type { FinanceMaintenanceService } from "../finance-maintenance-service.j
 import type { FinanceStatusService } from "../finance-status-service.js";
 import type { Principal } from "../types.js";
 import { createWorkspaceMaintenanceService } from "../workspace-maintenance-service.js";
+import { reconcileFinanceContinuations } from "./continuation-reconciliation.js";
+import { requireHostRunAuthority } from "./host-run-authority.js";
 import {
   createLegacyFinanceMaintenanceService,
   legacyMaintenanceScope,
@@ -334,9 +345,200 @@ export function createFinanceMaintenanceIntentService({
     if (!resumed) throw new AppError("conflict", "The Finance run changed during recovery.");
     return resumed;
   }
-  async function resolveRun(input: FinanceMaintenanceInput, userId: string) {
+  async function resolveRun(input: FinanceMaintenanceInput, principal: Principal) {
+    const userId = principal.userId;
     return db.transaction(async (tx) => {
       await lock(tx, userId);
+      let scheduleId: string | null = null;
+      if (
+        (input.operation === "start" && input.automationScheduleId) ||
+        input.operation === "continue"
+      ) {
+        scheduleId = input.automationScheduleId ?? null;
+        if (!scheduleId) throw new AppError("invalid_request", "Choose a host schedule.");
+        const [schedule] = await tx
+          .select()
+          .from(automationHostSchedules)
+          .where(
+            and(
+              eq(automationHostSchedules.userId, userId),
+              eq(automationHostSchedules.id, scheduleId),
+            ),
+          )
+          .for("share");
+        const [token] = await tx
+          .select()
+          .from(accessTokens)
+          .where(
+            and(
+              eq(accessTokens.id, principal.actorId),
+              eq(accessTokens.userId, userId),
+              isNull(accessTokens.revokedAt),
+              or(isNull(accessTokens.expiresAt), gt(accessTokens.expiresAt, now())),
+            ),
+          )
+          .for("share");
+        if (
+          principal.actorType !== "agent" ||
+          !schedule ||
+          !token ||
+          !token.scopes.includes("finances:maintain") ||
+          schedule.schedule.state !== "active" ||
+          token.authorizationConnectionId !== schedule.authorizationConnectionId ||
+          principal.authorizationConnectionId !== schedule.authorizationConnectionId
+        )
+          throw new AppError("forbidden", "Continue through the original active host connection.");
+      }
+      const [previousRun] = await tx
+        .select()
+        .from(workspaceMaintenanceRuns)
+        .where(
+          and(
+            eq(workspaceMaintenanceRuns.userId, userId),
+            eq(workspaceMaintenanceRuns.domain, "finances"),
+            inArray(workspaceMaintenanceRuns.status, [...activeStatuses]),
+          ),
+        )
+        .for("update");
+      if (input.operation === "continue") {
+        const [continuation] = await tx
+          .select()
+          .from(financeAnswerContinuations)
+          .where(
+            and(
+              eq(financeAnswerContinuations.userId, userId),
+              eq(financeAnswerContinuations.id, input.continuationId),
+            ),
+          )
+          .for("update");
+        if (!continuation || continuation.automationScheduleId !== scheduleId)
+          throw new AppError(
+            "not_found",
+            "This continuation does not belong to this host schedule.",
+          );
+        if (continuation.state === "unavailable")
+          throw new AppError("conflict", "The answer's source is no longer current.");
+        if (continuation.maintenanceRunId) {
+          const existing = await ownedRun(tx, userId, continuation.maintenanceRunId);
+          if (!existing)
+            throw new AppError("conflict", "The saved continuation run is unavailable.");
+          return { run: runValue(existing), recovery: null };
+        }
+        const [transaction] = await tx
+          .select()
+          .from(financeTransactions)
+          .where(
+            and(
+              eq(financeTransactions.userId, userId),
+              eq(financeTransactions.id, continuation.transactionId),
+            ),
+          )
+          .for("share");
+        const [review] = await tx
+          .select()
+          .from(financeReviewCases)
+          .where(
+            and(
+              eq(financeReviewCases.userId, userId),
+              eq(financeReviewCases.id, continuation.reviewCaseId),
+            ),
+          )
+          .for("share");
+        if (!transaction || !review || review.transactionId !== transaction.id)
+          throw new AppError(
+            "conflict",
+            "The answered source was removed. Review its retained history.",
+          );
+        if (continuation.sourceKind === "manual_question") {
+          const [question] = continuation.contextualQuestionId
+            ? await tx
+                .select()
+                .from(financeContextualQuestions)
+                .where(
+                  and(
+                    eq(financeContextualQuestions.userId, userId),
+                    eq(financeContextualQuestions.id, continuation.contextualQuestionId),
+                  ),
+                )
+                .for("share")
+            : [];
+          const [answer] = await tx
+            .select()
+            .from(financeContextualAnswers)
+            .where(
+              and(
+                eq(financeContextualAnswers.userId, userId),
+                eq(financeContextualAnswers.operationId, continuation.operationId),
+              ),
+            )
+            .for("share");
+          if (
+            !question ||
+            !answer ||
+            question.state !== "answered" ||
+            question.workRevision !== continuation.resultingWorkRevision ||
+            answer.resultingWorkRevision !== continuation.resultingWorkRevision ||
+            answer.questionId !== question.id ||
+            question.reviewCaseId !== review.id ||
+            question.transactionId !== transaction.id
+          )
+            throw new AppError("conflict", "The accepted contextual answer is no longer current.");
+        } else {
+          const [answer] = await tx
+            .select()
+            .from(financeReviewAnswers)
+            .where(
+              and(
+                eq(financeReviewAnswers.userId, userId),
+                eq(financeReviewAnswers.operationId, continuation.operationId),
+              ),
+            )
+            .for("share");
+          if (
+            !answer ||
+            answer.reviewCaseId !== review.id ||
+            answer.resultingWorkRevision !== continuation.resultingWorkRevision ||
+            review.contextualRevision !== continuation.resultingWorkRevision ||
+            review.humanAction.state !== "consumed" ||
+            review.humanAction.terminal.operationId !== continuation.operationId
+          )
+            throw new AppError(
+              "conflict",
+              "The accepted answer is no longer current. Review its history.",
+            );
+        }
+        const scope = { type: "target" as const, entityType: "finance_review_case", id: review.id };
+        const observed = await status.getFinanceStatus(userId, scope, tx);
+        const run = await createWorkspaceMaintenanceService({
+          db: tx as unknown as Database,
+          now,
+        }).createOrResume(userId, "finances", scope, observed.details.rulebookVersion);
+        if (previousRun) {
+          await requireHostRunAuthority(tx, previousRun, principal, now());
+          if (
+            previousRun.authorizationConnectionId !== principal.authorizationConnectionId ||
+            previousRun.automationScheduleId !== scheduleId
+          )
+            throw new AppError(
+              "conflict",
+              "Recover the existing run through its original host before continuing.",
+            );
+        } else {
+          await tx
+            .update(workspaceMaintenanceRuns)
+            .set({
+              authorizationConnectionId: principal.authorizationConnectionId,
+              automationScheduleId: scheduleId,
+              updatedAt: now(),
+            })
+            .where(eq(workspaceMaintenanceRuns.id, run.id));
+        }
+        await tx
+          .update(financeAnswerContinuations)
+          .set({ state: "accepted", maintenanceRunId: run.id, updatedAt: now() })
+          .where(eq(financeAnswerContinuations.id, continuation.id));
+        return { run, recovery: null };
+      }
       if (input.operation === "start") {
         const observed = await status.getFinanceStatus(userId, input.scope, tx);
         const run = await createWorkspaceMaintenanceService({
@@ -345,12 +547,29 @@ export function createFinanceMaintenanceIntentService({
         }).createOrResume(userId, "finances", input.scope, observed.details.rulebookVersion);
         const row = await ownedRun(tx, userId, run.id);
         if (!row) throw new AppError("conflict", "The Finance run changed during start.");
+        await requireHostRunAuthority(tx, row, principal, now());
+        if (scheduleId) {
+          if (
+            previousRun &&
+            (row.automationScheduleId !== scheduleId ||
+              row.authorizationConnectionId !== principal.authorizationConnectionId)
+          )
+            throw new AppError("conflict", "The current run belongs to a different host schedule.");
+          await tx
+            .update(workspaceMaintenanceRuns)
+            .set({
+              authorizationConnectionId: principal.authorizationConnectionId,
+              automationScheduleId: scheduleId,
+            })
+            .where(eq(workspaceMaintenanceRuns.id, row.id));
+        }
         const resumed = await resumeBlocked(tx, row);
         await reconcileSetup(tx, resumed, true);
         return { run: runValue(resumed), recovery: null };
       }
       const current = await ownedRun(tx, userId, input.runId);
       if (current) {
+        await requireHostRunAuthority(tx, current, principal, now());
         const resumed = await resumeBlocked(tx, current);
         await reconcileSetup(tx, resumed, true);
         return { run: runValue(resumed), recovery: null };
@@ -376,6 +595,7 @@ export function createFinanceMaintenanceIntentService({
             "The adopted Finance run is unavailable; inspect the saved lineage.",
           );
         if (adopted) {
+          await requireHostRunAuthority(tx, adopted, principal, now());
           adopted = await resumeBlocked(tx, adopted);
           await reconcileSetup(tx, adopted, true);
         }
@@ -469,10 +689,33 @@ export function createFinanceMaintenanceIntentService({
           "forbidden",
           "Reconnect and explicitly authorize finances:maintain to run Finance maintenance.",
         );
-      const resolved = await resolveRun(
-        financeMaintenanceInputSchema.parse(input),
-        principal.userId,
-      );
+      const parsed = financeMaintenanceInputSchema.parse(input);
+      const resolved = await resolveRun(parsed, principal).catch(async (error: unknown) => {
+        if (
+          parsed.operation === "continue" &&
+          error instanceof AppError &&
+          error.code === "conflict" &&
+          [
+            "The answered source was removed. Review its retained history.",
+            "The accepted contextual answer is no longer current.",
+            "The accepted answer is no longer current. Review its history.",
+          ].includes(error.message)
+        ) {
+          await db
+            .update(financeAnswerContinuations)
+            .set({ state: "unavailable", updatedAt: now() })
+            .where(
+              and(
+                eq(financeAnswerContinuations.userId, principal.userId),
+                eq(financeAnswerContinuations.id, parsed.continuationId),
+                eq(financeAnswerContinuations.automationScheduleId, parsed.automationScheduleId),
+                eq(financeAnswerContinuations.state, "pending"),
+                isNull(financeAnswerContinuations.maintenanceRunId),
+              ),
+            );
+        }
+        throw error;
+      });
       if (!resolved.run) return result(await payload(principal.userId, null, resolved.recovery));
       const runId = resolved.run.id;
       await recoverHandoff(principal.userId, runId);
@@ -484,6 +727,7 @@ export function createFinanceMaintenanceIntentService({
         await reconcileSetup(tx, row, false);
         return runValue(row);
       });
+      await reconcileFinanceContinuations(db, now(), principal.userId);
       return result(await payload(principal.userId, run, resolved.recovery));
     },
     async getRun(userId: string, id: string) {

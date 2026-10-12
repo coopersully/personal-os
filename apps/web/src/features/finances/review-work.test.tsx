@@ -127,7 +127,7 @@ it("makes empty and failed review work explicit", async () => {
   listFinanceQuestions.mockRejectedValue(new Error("Questions are unavailable"));
   listFinanceActionReviews.mockResolvedValue([]);
   renderWithQueryClient(<FinanceAgentReviewQueue />);
-  expect(await screen.findByText("Questions are unavailable")).toBeInTheDocument();
+  expect(await screen.findByText("Couldn’t load finance questions.")).toBeInTheDocument();
 
   listFinanceQuestions.mockResolvedValue([]);
   listFinanceActionReviews.mockResolvedValue([]);
@@ -231,5 +231,5 @@ it("presents reimbursement states, amounts, and empty or failed results", async 
 
   listFinanceReimbursements.mockRejectedValue(new Error("Reimbursements are unavailable"));
   renderWithQueryClient(<FinanceReimbursementList />);
-  expect(await screen.findByText("Reimbursements are unavailable")).toBeInTheDocument();
+  expect(await screen.findByText("Couldn’t load this material.")).toBeInTheDocument();
 });

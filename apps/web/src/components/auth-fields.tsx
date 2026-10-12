@@ -46,13 +46,14 @@ export function TextField({ error, id, label, type = "text", ...props }: TextFie
       <Input
         {...props}
         aria-invalid={Boolean(error)}
+        aria-describedby={error ? `${fieldId}-error` : undefined}
         autoCapitalize="none"
         autoCorrect="off"
         className="h-11"
         id={fieldId}
         type={type}
       />
-      {error ? <FieldError>{error}</FieldError> : null}
+      {error ? <FieldError id={`${fieldId}-error`}>{error}</FieldError> : null}
     </Field>
   );
 }
@@ -101,6 +102,7 @@ export function InviteCodeField({
       <FieldLabel htmlFor={fieldId}>Invite code</FieldLabel>
       <InputOTP
         aria-invalid={Boolean(error)}
+        aria-describedby={error ? `${fieldId}-error` : undefined}
         autoComplete="one-time-code"
         containerClassName="w-full"
         id={fieldId}
@@ -133,7 +135,7 @@ export function InviteCodeField({
           Invitation accepted.
         </FieldDescription>
       ) : null}
-      {error ? <FieldError>{error}</FieldError> : null}
+      {error ? <FieldError id={`${fieldId}-error`}>{error}</FieldError> : null}
     </Field>
   );
 }
@@ -232,6 +234,7 @@ export function PasswordFields({
         <InputGroup className="h-11">
           <InputGroupInput
             aria-invalid={Boolean(error)}
+            aria-describedby={error ? `${passwordId}-error` : undefined}
             autoComplete={autoComplete}
             disabled={disabled}
             id={passwordId}
@@ -250,7 +253,7 @@ export function PasswordFields({
           {renderVisibilityToggle()}
         </InputGroup>
         {showRequirements ? <PasswordRequirementList password={value} /> : null}
-        {error ? <FieldError>{error}</FieldError> : null}
+        {error ? <FieldError id={`${passwordId}-error`}>{error}</FieldError> : null}
       </Field>
       {hasConfirmation ? (
         <Field data-invalid={Boolean(error)}>
@@ -258,6 +261,7 @@ export function PasswordFields({
           <InputGroup className="h-11">
             <InputGroupInput
               aria-invalid={Boolean(error)}
+              aria-describedby={error ? `${passwordId}-error` : undefined}
               autoComplete="new-password"
               disabled={disabled}
               id={confirmationId}

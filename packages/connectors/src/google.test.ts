@@ -1211,3 +1211,112 @@ describe("Google Calendar connector", () => {
     });
   });
 });
+
+describe("Mail attachment retrieval", () => {
+  const attachment = {
+    id: "a/1",
+    providerAttachmentId: "a/1",
+    providerPartId: "1",
+    filename: "notes.txt",
+    contentType: "text/plain",
+    size: 5,
+  };
+  it("downloads Gmail bytes with encoded provider IDs", async () => {
+    const fetch = queued(response({ data: Buffer.from("hello").toString("base64url"), size: 5 }));
+    const result = await connector(fetch).downloadMailAttachment?.(fresh, "message/1", attachment);
+    expect(Buffer.from(result!.value).toString()).toBe("hello");
+    expect(String(fetch.mock.calls[0]?.[0])).toContain("message%2F1/attachments/a%2F1");
+  });
+  it("downloads older metadata that stores the provider ID only as id", async () => {
+    const fetch = queued(response({ data: "aGVsbG8" }));
+    const result = await connector(fetch).downloadMailAttachment?.(fresh, "message", {
+      id: "old-id",
+      filename: "notes.txt",
+      contentType: "text/plain",
+      size: 5,
+    });
+    expect(Buffer.from(result?.value ?? []).toString()).toBe("hello");
+    expect(String(fetch.mock.calls[0]?.[0])).toContain("/attachments/old-id");
+  });
+  it("reads inline MIME attachments without a separate attachment ID", async () => {
+    const fetch = queued(
+      response({ payload: { partId: "0", parts: [{ partId: "1", body: { data: "aGVsbG8" } }] } }),
+    );
+    const result = await connector(fetch).downloadMailAttachment?.(fresh, "message", {
+      ...attachment,
+      providerAttachmentId: null,
+    });
+    expect(Buffer.from(result!.value).toString()).toBe("hello");
+  });
+  it.each([
+    "",
+    undefined,
+  ])("retrieves root inline attachment %s using its projected locator", async (partId) => {
+    const result = await connector(
+      queued(response({ payload: { partId, body: { data: "aGVsbG8" } } })),
+    ).downloadMailAttachment?.(fresh, "message", {
+      ...attachment,
+      id: "part:root",
+      providerAttachmentId: null,
+      providerPartId: "root",
+    });
+    expect(Buffer.from(result?.value ?? []).toString()).toBe("hello");
+  });
+  it("classifies missing inline locators and missing MIME parts", async () => {
+    for (const providerPartId of [null, "absent"]) {
+      await expect(
+        connector(queued(response({ payload: {} }))).downloadMailAttachment?.(fresh, "message", {
+          ...attachment,
+          providerAttachmentId: null,
+          providerPartId,
+        }),
+      ).rejects.toMatchObject({ category: "not_found", status: 404 });
+    }
+    await expect(
+      connector(queued(new Response("bad json"))).downloadMailAttachment?.(
+        fresh,
+        "message",
+        attachment,
+      ),
+    ).rejects.toMatchObject({ category: "invalid_response", status: 502 });
+  });
+  it("uses legacy inline part locators and skips malformed MIME children", async () => {
+    const result = await connector(
+      queued(
+        response({ payload: { parts: [null, 2, { partId: "1", body: { data: "aGVsbG8" } }] } }),
+      ),
+    ).downloadMailAttachment?.(fresh, "message", {
+      ...attachment,
+      id: "part:1",
+      providerAttachmentId: null,
+      providerPartId: null,
+    });
+    expect(Buffer.from(result?.value ?? []).toString()).toBe("hello");
+  });
+  it("rejects empty transport and decoded payloads beyond the byte limit", async () => {
+    for (const payload of [
+      new Response(null),
+      response({ data: Buffer.alloc(10 * 1024 * 1024 + 1).toString("base64url") }),
+    ]) {
+      await expect(
+        connector(queued(payload)).downloadMailAttachment?.(fresh, "message", attachment),
+      ).rejects.toMatchObject({ category: "invalid_response" });
+    }
+  });
+  it("rejects missing, malformed, and oversized bodies", async () => {
+    for (const body of [
+      null,
+      {},
+      { data: "a" },
+      { data: "not base64!" },
+      { data: "a".repeat(15 * 1024 * 1024) },
+    ]) {
+      await expect(
+        connector(queued(response(body))).downloadMailAttachment?.(fresh, "message", attachment),
+      ).rejects.toMatchObject({ category: "invalid_response", status: 502 });
+    }
+    await expect(
+      connector(queued(response({}, 404))).downloadMailAttachment?.(fresh, "message", attachment),
+    ).rejects.toThrow();
+  });
+});

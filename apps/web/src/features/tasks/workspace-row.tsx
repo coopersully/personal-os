@@ -1,5 +1,12 @@
 import type { TaskList, TaskProject, TaskWorkspaceItem } from "@personal-os/domain";
-import { MoreHorizontalIcon } from "@/components/icons";
+import {
+  CheckSquareIcon,
+  CircleCheckIcon,
+  EyeIcon,
+  MoreHorizontalIcon,
+  RefreshIcon,
+  TrashIcon,
+} from "@/components/icons";
 import { ReminderItem, ReminderItemCompletion } from "@/components/reminder-item";
 import {
   TaskItem,
@@ -17,6 +24,7 @@ import {
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { formatRelativeMaterialDateTime } from "../../lib/date-format";
@@ -129,33 +137,62 @@ export function WorkspaceRow({
           ) : null}
         </TaskItemContent>
       </TaskItemPrimaryAction>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            disabled={disabled}
-            aria-label={`${record.title} options`}
-          >
-            <MoreHorizontalIcon aria-hidden="true" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuGroup>
-            <DropdownMenuItem onSelect={onOpen}>Open {item.kind}</DropdownMenuItem>
-            {!item.readOnly ? (
-              <DropdownMenuItem onSelect={onSelect}>
-                {selected ? "Deselect" : "Select"}
+      {item.readOnly && actions.length === 0 ? (
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          disabled={disabled}
+          aria-label={`Open ${record.title} details`}
+          title="Open details"
+          onClick={onOpen}
+        >
+          <EyeIcon aria-hidden="true" />
+        </Button>
+      ) : (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              disabled={disabled}
+              aria-label={`${record.title} options`}
+            >
+              <MoreHorizontalIcon aria-hidden="true" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuGroup>
+              <DropdownMenuItem onSelect={onOpen}>
+                <EyeIcon />
+                Open {item.kind}
               </DropdownMenuItem>
-            ) : null}
-            {actions.map((action) => (
-              <DropdownMenuItem key={action} onSelect={() => onAction(action)}>
-                {workspaceActionLabels[action]}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
+              {!item.readOnly ? (
+                <DropdownMenuItem onSelect={onSelect}>
+                  <CheckSquareIcon />
+                  {selected ? "Deselect" : "Select"}
+                </DropdownMenuItem>
+              ) : null}
+              {actions
+                .filter((action) => action !== "trash")
+                .map((action) => (
+                  <DropdownMenuItem key={action} onSelect={() => onAction(action)}>
+                    {action === "complete" ? <CircleCheckIcon /> : <RefreshIcon />}
+                    {workspaceActionLabels[action]}
+                  </DropdownMenuItem>
+                ))}
+              {actions.includes("trash") ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onSelect={() => onAction("trash")}>
+                    <TrashIcon />
+                    Move to Trash
+                  </DropdownMenuItem>
+                </>
+              ) : null}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
     </Row>
   );
 }

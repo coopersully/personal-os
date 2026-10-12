@@ -9,6 +9,7 @@ import {
   type FinanceGoal,
 } from "@personal-os/domain";
 import { useRef, useState } from "react";
+import { CurrencyInput } from "@/components/currency-input";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,7 +24,7 @@ import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/componen
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
-import { errorMessage } from "../../api.js";
+import { classifyMutationError } from "../../lib/feedback.js";
 import { formatMoney } from "./format.js";
 import { isConfirmedFinanceMutationFailure } from "./mutation-retry.js";
 import {
@@ -120,6 +121,7 @@ export function FinancePlanEditor({
       }),
     ),
   );
+  const [validatedAmounts, setValidatedAmounts] = useState<Set<string>>(() => new Set());
   const attempt = useRef<{ payload: string; key: string } | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
   const resourceCents = resources.map((row) => planAmountCents(row.amount));
@@ -282,22 +284,33 @@ export function FinancePlanEditor({
                         ))}
                       </NativeSelect>
                     </Field>
-                    <Field data-invalid={row.amount !== "" && planAmountCents(row.amount) === null}>
+                    <Field
+                      data-invalid={
+                        validatedAmounts.has(row.rowId) &&
+                        row.amount !== "" &&
+                        planAmountCents(row.amount) === null
+                      }
+                    >
                       <FieldLabel htmlFor={`resource-amount-${row.rowId}`}>
                         Resource {index + 1} amount
                       </FieldLabel>
-                      <Input
+                      <CurrencyInput
                         id={`resource-amount-${row.rowId}`}
                         inputMode="decimal"
                         required
-                        aria-invalid={row.amount !== "" && planAmountCents(row.amount) === null}
+                        aria-invalid={
+                          validatedAmounts.has(row.rowId) &&
+                          row.amount !== "" &&
+                          planAmountCents(row.amount) === null
+                        }
+                        onBlur={() =>
+                          setValidatedAmounts((current) => new Set([...current, row.rowId]))
+                        }
                         value={row.amount}
-                        onChange={(event) =>
+                        onValueChange={(value) =>
                           setResources((rows) =>
                             rows.map((item) =>
-                              item.rowId === row.rowId
-                                ? { ...item, amount: event.target.value }
-                                : item,
+                              item.rowId === row.rowId ? { ...item, amount: value } : item,
                             ),
                           )
                         }
@@ -402,22 +415,33 @@ export function FinancePlanEditor({
                         ))}
                       </NativeSelect>
                     </Field>
-                    <Field data-invalid={row.amount !== "" && planAmountCents(row.amount) === null}>
+                    <Field
+                      data-invalid={
+                        validatedAmounts.has(row.rowId) &&
+                        row.amount !== "" &&
+                        planAmountCents(row.amount) === null
+                      }
+                    >
                       <FieldLabel htmlFor={`allocation-amount-${row.rowId}`}>
                         Allocation {index + 1} amount
                       </FieldLabel>
-                      <Input
+                      <CurrencyInput
                         id={`allocation-amount-${row.rowId}`}
                         inputMode="decimal"
                         required
-                        aria-invalid={row.amount !== "" && planAmountCents(row.amount) === null}
+                        aria-invalid={
+                          validatedAmounts.has(row.rowId) &&
+                          row.amount !== "" &&
+                          planAmountCents(row.amount) === null
+                        }
+                        onBlur={() =>
+                          setValidatedAmounts((current) => new Set([...current, row.rowId]))
+                        }
                         value={row.amount}
-                        onChange={(event) =>
+                        onValueChange={(value) =>
                           setAllocations((rows) =>
                             rows.map((item) =>
-                              item.rowId === row.rowId
-                                ? { ...item, amount: event.target.value }
-                                : item,
+                              item.rowId === row.rowId ? { ...item, amount: value } : item,
                             ),
                           )
                         }
@@ -607,7 +631,14 @@ export function FinancePlanEditor({
                   : "Proposal could not be saved"}
               </AlertTitle>
               <AlertDescription>
-                {errorMessage(error)} Your edits are still here.
+                {
+                  classifyMutationError(error, {
+                    action: "save this financial plan",
+                    form: true,
+                    safeToRetry: false,
+                  }).message
+                }{" "}
+                Your edits are still here.
                 {isFinancePlanConflict(error) ? (
                   <Button type="button" variant="outline" onClick={onReload}>
                     Close editor and reload latest

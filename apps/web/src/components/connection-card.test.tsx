@@ -15,13 +15,13 @@ describe("ConnectionCard", () => {
     title: "Example",
   };
 
-  it("omits the footer when no capability or action slots are provided", () => {
+  it("renders connection identity and health without optional slots", () => {
     const { container } = render(<ConnectionCard {...requiredProps} />);
     expect(screen.getByRole("article")).toHaveAttribute("data-state", "ready");
     expect(container.querySelector(".connection-card__footer")).toBeNull();
   });
 
-  it("renders both optional footer slots", () => {
+  it("renders capabilities and header actions", () => {
     render(
       <ConnectionCard
         {...requiredProps}

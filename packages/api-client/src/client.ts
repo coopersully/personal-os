@@ -14,15 +14,19 @@ import type {
   RegisterInput,
   RequestPasswordResetInput,
   ResetPasswordInput,
+  SearchableWorkspace,
   StartGoogleAuthorizationInput,
   UpdateAccountSetupInput,
   UpdatePinterestWallpaperSettingsInput,
   UpdateUserInput,
+  UpdateWorkspaceSettings,
   User,
   ValidateInvitationInput,
   WeatherCoordinates,
   WeatherLocationOption,
   WeatherSnapshot,
+  WorkspaceSearchPage,
+  WorkspaceSettings,
 } from "@personal-os/domain";
 import {
   type ConnectedAccountHealth,
@@ -31,12 +35,15 @@ import {
   connectorAuthorizationOutcomeSchema,
 } from "@personal-os/domain";
 import { createAssistantApiClient } from "./features/assistant.js";
+import { createAutomationHostApi } from "./features/automation-hosts.js";
 import { createCalendarApiClient } from "./features/calendar.js";
+import { createDesktopReleaseApiClient } from "./features/desktop-release.js";
 import { createFinanceApi } from "./features/finances.js";
 import { createGoalsApiClient } from "./features/goals.js";
 import { createMailApiClient } from "./features/mail.js";
 import { createMailStewardshipApiClient } from "./features/mail-stewardship.js";
 import { createReminderApiClient } from "./features/reminders.js";
+import { createRitualsApiClient } from "./features/rituals.js";
 import { createTaskWorkspaceApiClient } from "./features/task-workspace.js";
 import { createTaskApiClient } from "./features/tasks.js";
 import { createTextingApiClient } from "./features/texting.js";
@@ -200,8 +207,11 @@ export function createApiClient(options: ClientOptions) {
       );
     },
     ...createFinanceApi(request),
+    ...createAutomationHostApi(request),
     ...createCalendarApiClient(request),
     ...createGoalsApiClient(request),
+    ...createRitualsApiClient(request),
+    ...createDesktopReleaseApiClient(request),
     ...createMailApiClient(request, toQuery),
     ...createMailStewardshipApiClient(request),
     ...createReminderApiClient(request, toQuery),
@@ -392,6 +402,36 @@ export function createApiClient(options: ClientOptions) {
 
     async recordPinterestWallpaperApplied(): Promise<void> {
       await request<void>("/v1/pinterest/applied", { method: "POST" });
+    },
+
+    async searchWorkspace(
+      workspace: SearchableWorkspace,
+      query: {
+        q: string;
+        offset?: number | undefined;
+        limit?: number | undefined;
+        includeArchived?: boolean | undefined;
+        kind?: "all" | "content" | "reviews" | undefined;
+      },
+      signal?: AbortSignal,
+    ): Promise<WorkspaceSearchPage> {
+      return request(`/v1/workspaces/${workspace}/search?${toQuery(query)}`, {
+        ...(signal ? { signal } : {}),
+      });
+    },
+    async getWorkspaceSettings<W extends SearchableWorkspace>(
+      workspace: W,
+    ): Promise<WorkspaceSettings<W>> {
+      return request(`/v1/workspaces/${workspace}/settings`);
+    },
+    async updateWorkspaceSettings<W extends SearchableWorkspace>(
+      workspace: W,
+      input: UpdateWorkspaceSettings<NoInfer<W>>,
+    ): Promise<WorkspaceSettings<W>> {
+      return request(`/v1/workspaces/${workspace}/settings`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      });
     },
 
     async listSessions(): Promise<Session[]> {

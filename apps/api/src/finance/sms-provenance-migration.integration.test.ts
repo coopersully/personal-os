@@ -11,8 +11,6 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { migrationsWithout } from "../test-migrations.js";
-import type { Principal } from "../types.js";
-import { createFinanceContextualQuestionService } from "./contextual-question-service.js";
 
 describe("Finance SMS provenance migration", () => {
   let container: StartedPostgreSqlContainer;
@@ -45,12 +43,6 @@ describe("Finance SMS provenance migration", () => {
       .values({ userId, provider: "manual", institution: "Cash", name: "Cash" })
       .returning();
     if (!account) throw new Error("account");
-    const principal: Principal = {
-      userId,
-      actorId: userId,
-      actorType: "user",
-      scopes: new Set(["finances:write", "finances:read"]),
-    };
     for (const source of ["app", "agent"]) {
       const [transaction] = await database.db
         .insert(financeTransactions)
@@ -64,19 +56,23 @@ describe("Finance SMS provenance migration", () => {
         })
         .returning();
       if (!transaction) throw new Error("transaction");
-      const result = await createFinanceContextualQuestionService({
-        db: database.db,
-      }).createQuestion(
-        transaction.id,
-        { operationId: randomUUID() },
-        { principal, requestId: "legacy" },
+      // Seed the published pre-0092 schema directly. Today's service also writes
+      // action-authority columns introduced by later migrations.
+      const reviewId = randomUUID();
+      const questionId = randomUUID();
+      await database.pool.query(
+        "INSERT INTO finance_review_cases(id,user_id,transaction_id,stable_key,reason,reason_code,rationale) VALUES($1,$2,$3,$4,'unknown_merchant','missing_provenance','Context requested by the person.')",
+        [reviewId, userId, transaction.id, `contextual-purpose:${transaction.id}`],
       );
-      if (result.state !== "available") throw new Error("question");
+      await database.pool.query(
+        "INSERT INTO finance_contextual_questions(id,user_id,subtype,review_case_id,transaction_id,account_id,account_revision,transaction_revision,review_revision,prompt,merchant,transaction_date,amount_cents) VALUES($1,$2,'manual_transaction_purpose_v1',$3,$4,$5,1,1,1,'What was this transaction for?','Legacy','2026-09-23',500)",
+        [questionId, userId, reviewId, transaction.id, account.id],
+      );
       await database.pool.query(
         "INSERT INTO finance_contextual_answers(user_id,question_id,operation_id,answered_work_revision,answered_action_revision,resulting_work_revision,text,source_kind,source_message_id,actor_type,actor_id,request_id,recorded_at) VALUES($1,$2,$3,1,1,2,'Legacy answer',$4,NULL,$5,$6,'legacy',now())",
         [
           userId,
-          result.question.id,
+          questionId,
           randomUUID(),
           source,
           source === "app" ? "user" : "agent",

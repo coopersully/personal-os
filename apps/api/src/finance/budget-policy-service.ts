@@ -7,6 +7,7 @@ import {
   financeBudgetPolicyVersions,
   financeBudgetRevisionProposals,
   financeBudgetVersions,
+  financeProfileVersions,
 } from "@personal-os/database";
 import {
   createFinanceBudgetPolicySchema,
@@ -15,6 +16,8 @@ import {
   type FinanceBudgetPolicyPlanSnapshot,
   type FinanceBudgetPolicyRevisionTuple,
   type FinanceBudgetPolicyTerms,
+  type FinancePositionEvidence,
+  financeBudgetEvaluationCheckpointSchema,
   financeBudgetPeriodBaselineRecordSchema,
   financeBudgetPolicyEvaluationSchema,
   financeBudgetPolicyLifecycleSchema,
@@ -26,7 +29,7 @@ import {
   reviseFinanceBudgetPolicySchema,
   saveFinanceBudgetPolicyPreviewSchema,
 } from "@personal-os/domain";
-import { and, desc, eq, inArray, lt } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
 import { evaluateFinanceBudgetPolicy } from "./budget-policy-evaluator.js";
@@ -49,6 +52,7 @@ import {
   executeFinanceIdempotently,
   type FinanceMutationContext,
   type FinanceTransaction,
+  requireFinanceExecution,
 } from "./context.js";
 
 const capability = {
@@ -67,10 +71,13 @@ function conflict(
   if (condition) throw new AppError("conflict", message);
 }
 function requirePerson(context: FinanceMutationContext) {
-  if (context.actorType !== "user" || !context.canMutate)
+  if (
+    !context.canMutate ||
+    (context.actorType !== "user" && (!context.canSelfApprove || !context.bypassEnabled))
+  )
     throw new AppError(
       "forbidden",
-      "Budget policy management requires a person with finances:write.",
+      "Budget policy management requires finances:write and explicit execution authority for agents.",
     );
 }
 
@@ -108,7 +115,10 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
         requireUserAdmission: true,
         lockIdentities: [`finance-profile:${context.userId}`],
       },
-      fn,
+      async (tx) => {
+        await requireFinanceExecution(tx, context, now());
+        return fn(tx);
+      },
     );
   };
   async function audit(
@@ -198,7 +208,7 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
     );
     conflict(
       !(await policyBaseline(tx, userId, planId, terms)),
-      "Confirm the exact human-approved period baseline first.",
+      "Confirm the exact approved period baseline first.",
     );
     conflict(now().getTime() >= new Date(terms.expiresAt).getTime(), "Policy terms have expired.");
   }
@@ -246,6 +256,8 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
     expected: FinanceBudgetPolicyRevisionTuple,
     candidate: FinanceBudgetPolicyPlanSnapshot,
     lockDependencies = false,
+    position: FinancePositionEvidence | null = null,
+    observedVersion: Version = version,
   ) {
     const terms = await policyTerms(tx, version);
     const plan = await policyPlan(tx, userId, policy.planId);
@@ -262,13 +274,13 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
     const observed: FinanceBudgetPolicyRevisionTuple = {
       userId,
       planId: policy.planId,
-      policy: { id: version.id, revision: String(version.version) },
+      policy: { id: observedVersion.id, revision: String(observedVersion.version) },
       policyLifecycleRevision: policy.lifecycleRevision,
       profile: policyRef(current.profile),
       baseline: terms.baseline,
       activeBudget: policyRef(current.active),
       latestBudget: policyRef(current.latest),
-      positionRevision: null,
+      positionRevision: position?.revision ?? null,
       usageRevision: null,
     };
     return evaluateFinanceBudgetPolicy({
@@ -280,7 +292,7 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
       baseline: await policySnapshot(tx, baseline ?? undefined),
       current: await policySnapshot(tx, current.active),
       candidate,
-      position: unavailable,
+      position: position ? { state: "available", userId, evidence: position } : unavailable,
       usage: unavailable,
     });
   }
@@ -354,6 +366,126 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
     });
   }
   return {
+    async evaluateMaintenance(userId: string, position: FinancePositionEvidence) {
+      return read(async (tx) => {
+        const proposals = await tx
+          .select()
+          .from(financeBudgetRevisionProposals)
+          .where(
+            and(
+              eq(financeBudgetRevisionProposals.userId, userId),
+              eq(financeBudgetRevisionProposals.state, "inactive"),
+            ),
+          )
+          .orderBy(asc(financeBudgetRevisionProposals.id))
+          .limit(101);
+        if (proposals.length > 100)
+          return financeBudgetEvaluationCheckpointSchema.parse({
+            positionRevision: position.revision,
+            state: "unavailable",
+            reasonCode: "proposal_limit_exceeded",
+            evaluations: [],
+          });
+        if (proposals.length === 0)
+          return financeBudgetEvaluationCheckpointSchema.parse({
+            positionRevision: position.revision,
+            state: "not_applicable",
+            reasonCode: null,
+            evaluations: [],
+          });
+        const evaluations = [];
+        for (const proposal of proposals) {
+          if (!(await policyDependenciesAvailable(tx, userId, proposal.candidateSnapshot)))
+            return financeBudgetEvaluationCheckpointSchema.parse({
+              positionRevision: position.revision,
+              state: "unavailable",
+              reasonCode: "dependency_unavailable",
+              evaluations: [],
+            });
+          const { row: policy, version: latestVersion } = await policyRoot(
+            tx,
+            userId,
+            proposal.policyId,
+          );
+          const exactVersion = await tx.query.financeBudgetPolicyVersions.findFirst({
+            where: and(
+              eq(financeBudgetPolicyVersions.userId, userId),
+              eq(financeBudgetPolicyVersions.id, proposal.policyVersionId),
+            ),
+          });
+          const profile = proposal.profileVersionId
+            ? await tx.query.financeProfileVersions.findFirst({
+                where: and(
+                  eq(financeProfileVersions.userId, userId),
+                  eq(financeProfileVersions.id, proposal.profileVersionId),
+                ),
+              })
+            : undefined;
+          const budgetIds = [
+            proposal.baselineBudgetVersionId,
+            proposal.activeBudgetVersionId,
+            proposal.latestBudgetVersionId,
+          ].filter((id): id is string => id !== null);
+          const budgets = await tx.query.financeBudgetVersions.findMany({
+            where: and(
+              eq(financeBudgetVersions.userId, userId),
+              inArray(financeBudgetVersions.id, budgetIds),
+            ),
+          });
+          const byId = new Map(budgets.map((budget) => [budget.id, budget]));
+          const baseline = byId.get(proposal.baselineBudgetVersionId);
+          if (!exactVersion || !baseline || (proposal.profileVersionId && !profile))
+            return financeBudgetEvaluationCheckpointSchema.parse({
+              positionRevision: position.revision,
+              state: "unavailable",
+              reasonCode: "dependency_unavailable",
+              evaluations: [],
+            });
+          const expected: FinanceBudgetPolicyRevisionTuple = {
+            userId,
+            planId: proposal.planId,
+            policy: { id: exactVersion.id, revision: String(exactVersion.version) },
+            policyLifecycleRevision: policy.lifecycleRevision,
+            profile: policyRef(profile),
+            baseline: { id: baseline.id, revision: String(baseline.version) },
+            activeBudget: policyRef(
+              proposal.activeBudgetVersionId ? byId.get(proposal.activeBudgetVersionId) : undefined,
+            ),
+            latestBudget: policyRef(
+              proposal.latestBudgetVersionId ? byId.get(proposal.latestBudgetVersionId) : undefined,
+            ),
+            positionRevision: position.revision,
+            usageRevision: null,
+          };
+          const result = await evaluation(
+            tx,
+            userId,
+            policy,
+            exactVersion,
+            expected,
+            proposal.candidateSnapshot,
+            false,
+            position,
+            latestVersion,
+          );
+          evaluations.push({
+            proposal: { id: proposal.id, revision: String(proposal.lifecycleRevision) },
+            policy: policyRef(exactVersion),
+            plan: proposal.candidateSnapshot.revision,
+            outcome: result.kind,
+            reasons: [...result.reasons],
+            executionAvailable: false as const,
+            executionUnavailableReasons: [...result.executionUnavailableReasons],
+          });
+        }
+        return financeBudgetEvaluationCheckpointSchema.parse({
+          positionRevision: position.revision,
+          state: "evaluated",
+          reasonCode: null,
+          evaluations,
+        });
+      });
+    },
     async listPolicies(userId: string, value: unknown) {
       const input = financeBudgetPolicyListSchema.parse(value);
       return read(async (tx) => {
@@ -539,7 +671,7 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
             budget.planId !== input.planId ||
             budget.effectiveFrom !== input.period.from.slice(0, 7) ||
             !budget.approvedAt ||
-            budget.approvedByActorType !== "user" ||
+            (budget.approvedByActorType !== "user" && budget.approvedByActorType !== "agent") ||
             !budget.approvedByActorId ||
             !["active", "retired"].includes(budget.status) ||
             budget.balanceDelta !== 0 ||
@@ -549,7 +681,7 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
             snapshot.resources.reduce((n, r) => n + r.amountCents, 0) !==
               budget.expectedResources ||
             snapshot.allocations.reduce((n, a) => n + a.amountCents, 0) !== budget.allocatedTotal,
-          "Baseline must be an exact, complete, human-approved budget for this plan and period.",
+          "Baseline must be an exact, complete, approved budget for this plan and period.",
         );
         const existing = await tx.query.financeBudgetPeriodBaselines.findFirst({
           where: and(

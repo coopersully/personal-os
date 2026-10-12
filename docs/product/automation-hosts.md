@@ -86,11 +86,55 @@ requirements and required host declarations, schedule identity, runtime dispatch
 Cooper superseded those requirements on September 28. They must not block the toolkit or be revived
 as an implied requirement by an old handoff prompt. Original source evidence remains in Git history.
 
-The inspected source still contains a host-continuation domain schema with vendor-specific types;
-this documentation does not remove it or assert that a generic replacement has shipped. Future
-implementation inventories live callers and persisted state before any contract cutover. Preserve
-accepted work and current permissions; do not delete data or modify external schedules to reconcile
-the target architecture.
+## Current implementation after the October 12 main merge
+
+The current source now implements vendor-specific schedules, setup UI, encrypted trigger
+credentials, accepted-answer continuations, dispatch and recovery. Preserve this delivered behavior
+and its safety checks. These are optional existing integrations, not prerequisites of the agreed
+toolkit target. Generic discovery and authorized cross-connection resumption remain completion work;
+the current host-specific path must not be described as satisfying them.
+
+### Existing Finance answer continuation setup
+
+Finance settings may prepare a connection-bound local declaration and provide the prompt needed
+for a person to create a Codex desktop automation or Claude Code routine in its owning host. The
+person binds that host's identifier after setup; unfinished setup may be cancelled and active access
+may be revoked. Local declaration changes never create, edit, or pause the external automation.
+
+Accepted app and SMS answers create durable pending continuations. When an original invocation
+has a bound schedule, the answer inherits that destination. Otherwise the app asks the person to
+choose an active host. A bound destination cannot silently move to another connection. The original
+host reads the current schedule version, answer evidence, and continuation run handle through
+`get_finance_continuations`; `maintain_finances` with operation `continue` creates or resumes only
+that review case's canonical run. Acceptance, host-session creation, and verified financial
+completion remain distinct states.
+
+Human host settings and host continuation reads use owner-bound cursor pages; host reads also bind
+each cursor to its schedule. Settings loads every answer page. Routine dispatch selects eligible
+same-case wake-ups before limiting schedules, so an older unrelated answer cannot block a waiting
+case. Resuming an existing run requires its exact original connection and schedule; only explicit
+human recovery may change that binding. Terminal run evidence settles the
+continuation regardless of whether the final operation was `continue`, `resume` or background
+verification. Stale submitting claims become uncertain without another provider call. Invalid
+credentials disable only the affected routine delivery.
+
+After inspecting the owning host, the person may explicitly release an uncertain pending delivery
+for another attempt. This preserves the original answer and records an audit event; it cannot move
+a submitted run. Separately, a person who has stopped the original host may move an idle waiting
+run to another currently authorized polling Codex schedule. Recovery fences the original schedule, connection,
+run timestamp and absence of an execution lease, preserves the run's checkpoint and financial
+questions/approvals, and rejects active execution. The new host resumes that saved run; the old
+connection loses authority for it. Host state is checked by the person, never inferred from a
+missing response.
+
+
+The setup prompt targets a five-minute Codex check interval and a five-minute Claude continuation
+budget. These are declarations, not measured delivery proof. Codex requires its machine and app to
+be available; Claude requires a configured routine, live connector permissions, and a valid trigger.
+Unconfirmed routine delivery directs the person to inspect the owning host without automatic
+re-firing. A host may resume the saved answer through its normal polling path. These built-in setup defaults are existing implementation details, not toolkit release requirements.
+Optional vendor integrations still require real evidence before advertising their own capability;
+nohmi does not guarantee external-agent execution or response time.
 
 ## Finance host repair after the maintenance cutover
 
@@ -100,3 +144,19 @@ access remain separate grants; neither migration nor reconnect grants permission
 Resume persisted work with `maintain_finances` using `operation: resume` and the run ID.
 Follow typed challenge next actions and inspect any blocked legacy recovery before starting a
 new scope. Required action approval and final verification remain part of the same durable run.
+
+
+A host-accepted session with no observed nohmi maintenance run remains pending. After the
+registered routine's expected maximum latency (at least two minutes), explicit human reconciliation
+may release that answer only after the person checks no session is running. A coalesced delivery
+requires separately reconciling every still-pending sibling; a sibling attached to a run stays fenced.
+This does not imply the provider failed to create its original session. Original session evidence
+is preserved in the audit. Safe handoff diagnostics distinguish accepted, uncertain and unavailable
+transport outcomes without recording credentials, routine IDs, answers or provider response bodies.
+
+
+Routine dispatch claims one exact answer per host session. Other cases remain pending while a
+session is unobserved or its case run remains open. A new answer for the same original waiting
+case can wake its bound routine; it cannot adopt an unrelated open run. Human movement of an
+existing run is offered only for a polling Codex schedule, since an event-only Claude routine
+would otherwise receive no wakeup. Ending a schedule clears its stored encrypted trigger token.

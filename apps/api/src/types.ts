@@ -9,6 +9,7 @@ import type { Database } from "@personal-os/database";
 import type {
   AccessScope,
   ActorType,
+  AgentAccessDomain,
   CalendarProvider,
   ConnectorFailureCategory,
   ConnectorSubscriptionKind,
@@ -20,6 +21,7 @@ import type { EmailDelivery } from "./email-delivery.js";
 import type { RuntimeLifecycle } from "./runtime-lifecycle.js";
 
 export type Principal = {
+  authorizationConnectionId?: string;
   actorId: string;
   actorType: Extract<ActorType, "agent" | "user">;
   scopes: ReadonlySet<AccessScope>;
@@ -52,14 +54,19 @@ export type RequestLog = {
   accountId?: string;
   ageMs?: number | undefined;
   calendarProviderReconciliation?: CalendarProviderReconciliationLog;
-  category?: ConnectorFailureCategory;
+  category?: ConnectorFailureCategory | "timeout" | "overflow" | "unexpected";
+  workspace?: AgentAccessDomain;
+  source?: string;
   code?: string | undefined;
   disposition?: ConnectorSyncRecovery;
   durationMs: number;
+  claimCount?: number;
+  hostOutcome?: "accepted" | "uncertain" | "unavailable";
   eligibleAccountCount?: number;
   event:
     | "calendar_provider_reconciliation"
     | "connector_authorization_callback_failed"
+    | "connector_handoff_failed"
     | "connector_notification_received"
     | "connector_subscription_expired"
     | "connector_subscription_failed"
@@ -70,10 +77,16 @@ export type RequestLog = {
     | "connector_sync_recovered"
     | "connector_trigger_dispatched"
     | "connector_recovery_failed"
+    | "desktop_release_unavailable"
     | "finance_sync_health_initialized"
+    | "finance_host_handoff"
     | "finance_receipt_mail_search_failed"
     | "mail_rule_work_dispatch_failed"
+    | "finance_configuration_section_failed"
+    | "workspace_review_search_source_failed"
+    | "mail_attachment_download_failed"
     | "request";
+  section?: "profile" | "preferences" | "income" | "budget" | "accounts" | "guidance" | "execution";
   failureCount?: number;
   freshnessAgeMs?: number;
   initializationComplete?: boolean;

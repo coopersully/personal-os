@@ -1,7 +1,9 @@
 import { resolve } from "node:path";
 import {
+  accessTokens,
   createDatabaseClient,
   type DatabaseClient,
+  executionPolicySettings,
   financeAccountConnections,
   financeAccounts,
   financeCategories,
@@ -35,10 +37,21 @@ describe.sequential("canonical Finance account and ledger mutations", () => {
       .returning();
     if (!user) throw new Error("Fixture user was not created.");
     userId = user.id;
+    const [grant] = await database.db
+      .insert(accessTokens)
+      .values({
+        userId,
+        name: "Ledger execution fixture",
+        tokenHash: "ledger-execution-fixture",
+        scopes: ["finances:write", "finances:execute"],
+      })
+      .returning();
+    if (!grant) throw new Error("Fixture execution grant was not created.");
+    await database.db.insert(executionPolicySettings).values({ userId, reviewBypassEnabled: true });
     const principal: Principal = {
-      actorId: "finance-agent",
+      actorId: grant.id,
       actorType: "agent",
-      scopes: new Set(["finances:write"]),
+      scopes: new Set(["finances:write", "finances:execute"]),
       userId,
     };
     context = await loadFinanceAuthorization({ db: database.db, principal, requestId: "ledger" });
@@ -95,7 +108,7 @@ describe.sequential("canonical Finance account and ledger mutations", () => {
     await expect(service.getConnection(userId, connection.id)).resolves.toMatchObject({
       data: {
         accountIds: [account.id],
-        externalHandoff: { artifact: "https://provider.example/connect" },
+        externalHandoff: null,
         lastError: { code: "expired", retryable: true },
         status: "connected",
       },

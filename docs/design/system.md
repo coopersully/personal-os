@@ -84,13 +84,17 @@ properties inform the finished form. See [Ryo Lu’s Compile 2026 session](https
 
 ### Page frame
 
+See the [workspace layout architecture](workspace-layout-architecture.md) for
+the ownership hierarchy, intrinsic frame sizing, responsive slots, and scroll
+contract. Domain content keeps its own spatial or collection layout.
+
 Every product page has these layers, in order:
 
 | Layer | Question answered | Rule |
 | --- | --- | --- |
 | Orientation | Where am I and what time/context applies? | Keep the page title and current context visible in the app frame. |
 | Primary material | What deserves attention now? | Give one primary block the strongest visual weight. |
-| Working sequence | What comes before or after it? | Use a linear list, timeline, or queue—not a second dashboard. |
+| Working sequence | What comes before or after it? | Use a linear list, timeline, or queue for ordered work. Independent summaries may use a responsive bento grid while keeping the primary material prominent. |
 | Detail | What do I need to inspect or change? | Open an inspector, sheet, popover, or a labelled disclosure from the affected item. |
 | History | What happened before? | Collapse by default unless it changes the immediate decision. |
 
@@ -98,7 +102,12 @@ The shell owns one responsive inline page inset. Standard app-bar content and
 ordinary route bodies use that same inset so their leading and trailing edges
 align across navigation and material. Spatial workspaces that intentionally run
 edge to edge, such as Calendar and Mail, may opt out at their workspace frame;
-individual pages must not recreate the shell inset with local padding.
+individual pages must not recreate the shell inset with local padding. Settings
+uses a centered reading surface with its own page introduction, without a workspace
+app bar; see the [Settings layout contract](pages/settings.md).
+
+Primary and secondary top navigation use `--background`, matching the default
+page canvas in both themes. Sidebars retain their independent sidebar tone.
 
 `WorkspaceLayout` owns an optional secondary-navigation slot directly below
 the primary app bar. Features compose `WorkspaceSecondaryAppBar` with its
@@ -107,8 +116,21 @@ controls owned by the feature while placing them in the shared frame. Omit the
 bar or set `enabled={false}` to leave no empty row. Its default layout placement
 stays pinned below the primary bar and shares the body inset. Spatial Calendar
 headers may use `placement="inline"` to retain their own scroll/column alignment.
-Controls that govern multiple workspace panes, such as Mail count, density, and
-reader actions, use the default shared full-width slot.
+Compact page-wide actions and view selection should first use the route-owned
+primary-header controls slot below. A secondary row is reserved for controls or spatial
+headers that need their own width; record-specific actions stay with their records.
+
+### Route-owned primary-header controls
+
+`WorkspaceHeaderControls` lets a route supply a labelled group of contextual controls to
+`WorkspaceHeaderControlsSlot` inside its primary app bar. `WorkspaceLayout` owns the slot
+context; controls keep their page-owned state, mutations, and dialogs. Unmounting a route
+removes its controls. Standalone feature previews render the same group inline.
+
+Prefer this slot for compact page-wide actions and view selection before adding secondary
+navigation. Do not duplicate creation in the shell and page body. Keep spatial calendar axes,
+large filter forms, and record-specific actions in their appropriate existing surfaces.
+Use content-driven wrapping at narrow widths and zoom instead of clipping interactive controls.
 
 ### Blocks
 
@@ -195,6 +217,16 @@ mobile safe-area spacing remain stable. A feature may adjust layout through
 slot `className` values, but must not replace the responsive presentation,
 overlay behavior, or semantic anatomy.
 
+### Mandatory settings action feedback
+
+Settings errors and discrete action feedback MUST use Sonner. Never render notification-test
+results, connection-test results, refresh results, or native-action progress/results as inline
+paragraphs, status rows, Alerts, banners, or cards. Update one loading toast to its actual outcome;
+keep diagnostic next steps in its description. Cached status must not replay action results.
+Actual permission/configuration state and field correction/retry controls may remain inline,
+but never substitute for a Sonner error. Silent autosave success remains silent.
+This requirement overrides the generic contextual-alert guidance below. See [feedback.md](feedback.md).
+
 ### Honest capability and feedback states
 
 - Do not surface a navigation item or settings surface to a person who cannot
@@ -204,8 +236,11 @@ overlay behavior, or semantic anatomy.
   it does not expose controls that cannot take effect there.
 - Persistent blockers use a semantic inline `Alert` with clear visual severity
   and an action only when that action works in the current environment.
-- Transient results—saved, refreshed, copied, or failed mutations—use Sonner.
-  They do not remain as stacked inline messages after their moment has passed.
+- Transient results—saved, refreshed, copied, or safely retryable failed
+  actions—prefer Sonner. Field validation stays beside the input; unresolved
+  blockers and essential recovery stay visible beside the affected work.
+  Follow the [feedback and validation rubric](feedback.md) to classify the
+  cause, choose the surface, and check timing and accessibility.
 
 ### Reference surfaces
 
@@ -243,8 +278,12 @@ geometry so focus, invalid, increased-contrast, or functional data boundaries
 can become visible without layout shift. A legacy `outline` variant names an
 interaction hierarchy, not a requirement to draw an outline.
 
-Raised overlays and bounded floating work use `surface-raised`, never the
-surface directly behind them. Contextual app-bar controls retain a quiet opaque
+Portalled contextual overlays (menus, popovers, hover cards, and comboboxes) use
+`popover` / `popover-foreground`, backed by the dedicated opaque `surface-overlay`
+tone. Do not override these with canvas, card, sidebar, or a feature-local border.
+Modal dialogs, drawers, and sheets instead use `background` / `foreground`, matching the page canvas. Their headers, bodies, and footers share one continuous surface; do not tint header or footer bands. The scrim supplies separation, and internal cards may use the normal card tone.
+
+`surface-raised` is an in-flow supporting tone, not the overlay token. Contextual app-bar controls retain a quiet opaque
 resting fill, and interactive highlights use `control-hover-background` so an
 open or hovered control cannot collapse into its parent surface. Avatar
 fallbacks use nested neutral tones so the identity boundary remains legible on
@@ -269,9 +308,12 @@ Copy earns its space by changing a decision. Apply these rules mechanically:
 - The app-frame title is orientation, not a hero. It stays compact; the block
   that owns the immediate task carries the strongest page-level emphasis.
 - Workspace-switcher triggers show the workspace glyph without its frame,
-  including the mobile dock. Keep framed workspace icons inside the picker;
-  preserve the same glyph and workspace color in both contexts.
-- Desktop account-management actions live in Settings, reached from the workspace picker. A
+  including the compact mobile header trigger. Picker items use unframed outline glyphs; the
+  current workspace uses a filled glyph and its colored selected surface.
+  in the desktop rail, inactive destinations use neutral outline glyphs and only
+  the selected destination uses a filled glyph on its colored control surface, without an icon frame. Preserve the same glyph
+  across states; color is reserved for the selected rail destination.
+- Desktop account-management actions live in Settings, reached from the bottom of the workspace rail. A
   workspace may use compact account avatars in its app bar only as a source-visibility filter; that
   filter must surface health and link to Settings for repair rather than duplicating management.
 - App-bar source filters use the shared `AccountSelectionTrigger`: show compact provider identities,
@@ -285,10 +327,14 @@ Copy earns its space by changing a decision. Apply these rules mechanically:
 - Connection management uses the shared `ConnectionCard` slots for identity, status, health
   summary, capabilities, and actions. Keep account identity separate from operational status; state
   the user impact and whether action is required in the summary; keep capabilities grouped; and use
-  explicit text labels for sync, reconnect, and removal actions instead of unexplained icon buttons.
+  title-aligned icon actions with accessible labels and hover/focus tooltips for sync, reconnect,
+  and removal. ConnectionCard composes the same SettingsRecordContent anatomy as other Settings records.
 - Device-local density controls change presentation only. Keep the comfortable view as the
   information-rich default, preserve essential identity and time in compact views, and do not let a
   density choice change query scope or stored domain data.
+- Settings uses task-sized Card tiles in the shared `SettingsBento` or `settings-stack`
+  layout. Records inside those cards use `Item variant="secondary"` with paired
+  secondary surface/text tokens. See [Settings](pages/settings.md) for the full layout contract.
 - Settings forms compose shared `FieldGroup`, `Field`, and `FieldLabel`
   primitives. Consent uses a horizontal checkbox field with a separate label
   and description; availability and errors use shared alerts.
@@ -417,8 +463,9 @@ A page change is not ready when any applicable answer is “no.”
   without opening a detail view?
 - Are controls that cannot work absent or plainly explained at the affected
   material, rather than enabled and failing later?
-- Is every persistent warning semantic and actionable? Is every transient result
-  a toast rather than a permanent inline message?
+- Does feedback follow the [feedback and validation rubric](feedback.md)? Are
+  transient results handled with Sonner, field corrections beside their inputs,
+  and ongoing blockers or essential recovery persistently discoverable?
 - Does disclosure keep the result/status visible and hide only configuration,
   raw detail, or history?
 - Can a keyboard user reach, operate, and dismiss every interactive element?
@@ -432,3 +479,320 @@ state. Treat implementation as a prototype: inspect it, identify a concrete
 friction, make the smallest change that expresses the intended rule, and verify
 the changed state plus its empty/error counterpart. This keeps design close to
 the material while preventing local fixes from becoming undocumented patterns.
+
+### Neutral surface and shape contract
+
+The shared theme owns these invariants in both light and dark mode. Canvas/card
+separation has a measured contrast floor of 1.16:1; this is a visual hierarchy
+budget, not a WCAG text threshold. Overlay/card, overlay/canvas, and overlay/sidebar
+separation must each reach 1.10:1. Rail/sidebar tones can stay close. Foreground
+text must still meet 4.5:1 on its actual surface, including highlighted results.
+Opaque overlay tone, rather than a local border or shadow, provides separation.
+Modal dialogs, drawers, and sheets use the shared inverse `overlay` scrim; it
+dims the page in both themes instead of becoming a white wash in dark mode.
+
+Primary actions pair `primary` with `primary-foreground`. Quiet hover, focus, and
+selection pair `selection` with `selection-foreground`; Tailwind's `accent` pair
+maps to this same quiet treatment, including raw CSS `--accent`. Legacy primary
+action consumers use `primary` explicitly. Browser text selection also uses the
+quiet pair.
+
+Radius is a length in rem, not a percentage of an element. With the 0.75rem base,
+small details use 4px (`sm`), compact controls/menu items 6px (`md`), regular
+controls 8px (`lg`), floating menus 12px (base), and cards/dialogs 16px (`xl`).
+All scale from the same base; intentionally circular avatars, radio controls,
+switches, and floating dock shapes remain round. A small button should not become
+a capsule merely because it shares a panel's radius. Page CSS must use these same
+named radius tokens for legacy inputs, badges, segmented controls, events, panels,
+and sheets. Do not add fixed pixel corners or local radius arithmetic; `999px`
+and `50%` are reserved for intentional circular marks, progress tracks, and docks.
+
+The frontend theme owns this contract. Verify Settings search hover/keyboard
+focus, cards, and Mail/Calendar account popovers in both themes when changing it.
+
+### Neutral palette direction
+
+Use a neutral grayscale inspired by [Radix Gray](https://www.radix-ui.com/colors/docs/palette-composition/composing-a-palette),
+with semantic roles following its [scale guidance](https://www.radix-ui.com/colors/docs/palette-composition/understanding-the-scale).
+This keeps chrome from competing with the four workspace colors. The selected
+nohmi values are calibrated to our borderless surface and text contrast budgets;
+they are not an unmodified Radix theme or a claim of automatic accessibility.
+
+Light mode uses a soft gray canvas (`#e8e8e8`), off-white cards (`#f9f9f9`),
+and charcoal text (`#202020`). Dark mode uses charcoal canvas (`#202020`),
+neutral raised cards (`#2d2d2d`), and soft light text (`#eeeeee`). Navigation and
+overlays follow the same achromatic scale. Never use pure white or pure black
+for app-owned theme surfaces, text, or controls. The theme contract validator
+rejects those endpoints. Provider artwork and user-authored material are content,
+not sources for theme tokens.
+
+### Floating workspace actions
+
+Calendar's bottom-center action group and Mail's bottom-right compose action share
+`FloatingActions` and `FloatingActionButton` (`components/floating-actions.tsx`).
+On mobile, Calendar’s closed action group stays bottom-center; other closed action groups
+align to the bottom end, with a shared safe-area
+inset and 52px surface height. Page navigation uses the same floating action
+primitives beside creation actions. The compact workspace switcher always lives
+in the top header, never in the bottom dock. Workspace review alerts also live
+in the mobile header as a glyph and compact count, keeping the full accessible label.
+Unknown counts show an ellipsis and unavailable counts show an exclamation mark, never zero.
+Contextual search and filters can occupy a second row. Mobile page sheets contain
+page navigation only: account, password, and sign-out controls belong in Settings.
+Rows preserve leading icons, truncated labels, and end-aligned metadata with 44px
+touch targets.
+Desktop placement remains workspace-specific.
+
+The feature owns positioning, safe-area/mobile-dock clearance, and the opened
+workflow; the shared block owns appearance and targets. Do not move either action
+location merely to standardize its styling.
+
+- Use a 44px square button target, 16px glyph, 4px surface padding, and 2px group
+  gap. Both closed surfaces are 52px tall. A single action is circular; multiple
+  actions form a capsule. Expanded content uses the shared panel radius token.
+- Closed actions use the `primary` / `primary-foreground` pair in both themes,
+  without workspace-specific hues or resting borders. Hover and keyboard focus
+  use the same foreground-tinted fill; focus also has an inset outline.
+- Every icon has an action-oriented accessible name and a delayed tooltip shown
+  above the control. Tooltips supplement labels; they are not required to operate
+  the action. Preserve normal Tab order, Escape dismissal, and return focus.
+- Group styling does not imply ARIA `toolbar`: that role requires the toolbar
+  keyboard contract, including arrow navigation. These small action groups retain
+  their existing labeled navigation and ordinary button tab stops.
+- Calendar retains its date/create/search surfaces; Mail retains its responsive
+  compose dialog and draft-preservation behavior. Shared chrome must not absorb
+  domain data, submission, validation, or dismissal logic.
+
+The 44px target adopts [WCAG's enhanced target-size recommendation](https://www.w3.org/WAI/WCAG22/Understanding/target-size-enhanced.html)
+(a deliberate usability target, not a claim of whole-app AAA conformance).
+Semantics follow the [WAI toolbar pattern](https://www.w3.org/WAI/ARIA/apg/patterns/toolbar/),
+and tooltips compose the installed [shadcn Tooltip](https://ui.shadcn.com/docs/components/radix/tooltip).
+Verify target geometry, surface/foreground pairing, focus return, and constrained
+viewport clearance in both features when changing this block.
+
+### Segmented selection controls
+
+Use `SegmentedControl` / `SegmentedControlItem` from `components/segmented-control.tsx`
+for compact, mutually exclusive view/filter/setting choices. This is one shared
+composition of the installed shadcn Radix ToggleGroup, not a custom radio implementation.
+It owns small control sizing, a quiet secondary track, selection/foreground pairing,
+radius, spacing, horizontal layout, and rejection of empty deselection. Feature code
+supplies a controlled value, accessible group label, options, and change handler.
+Keep options in one row; allow horizontal scrolling when constrained rather than
+turning the group into a grid or wrapping it into ambiguous rows. Do not restyle
+individual instances or add parallel segmented-button CSS.
+
+Current consumers: Today commitment filters; Calendar Day/Week/Month;
+Rituals Morning/Evening/History; Finances budget period; wallpaper layout,
+image-fit and backdrop; agent permission presets. Calendar may hide visible labels
+at narrow widths while keeping accessible names and tooltips.
+
+Distinct semantics remain distinct: Cash Flow uses shadcn Tabs for associated
+panels; ordinary form questions use RadioGroup; menu choices use DropdownMenuRadioGroup;
+agent workspace cards retain their richer ToggleGroup composition; bucket and calendar
+pickers select domain records rather than fixed view modes. Do not replace these solely
+because they also allow one selection.
+
+References: [shadcn Toggle Group](https://ui.shadcn.com/docs/components/radix/toggle-group),
+[Radix single selection and keyboard contract](https://www.radix-ui.com/primitives/docs/components/toggle-group),
+and [WAI Tabs semantics](https://www.w3.org/WAI/ARIA/apg/patterns/tabs/).
+
+### Sidebar attention and counts
+
+Compose `SidebarItemMeta` beside the standard shadcn SidebarMenuButton and reserve
+its trailing space with `sidebar-item-with-meta`. Use its inline mode in the mobile
+section sheet. Attention and count are independent: a semantic attention dot,
+plus optional muted, normal-weight tabular count. Keep destination labels readable
+and truncate them before metadata. Display compact counts from 1,000 upward (1.2k,
+1.2m); retain the full comma-grouped value in the accessible description. Show no
+count for unknown data, and do not infer urgency from an unread count. Mail,
+Finances, and Settings share this composition. This follows the
+[shadcn Sidebar badge slot](https://ui.shadcn.com/docs/components/radix/sidebar).
+
+Shared form compositions live in `components/date-input.tsx` and
+`components/currency-input.tsx`; Settings owns their value/formatting contract in
+[its page specification](pages/settings.md). The date popover follows
+[shadcn Date Picker](https://ui.shadcn.com/docs/components/radix/date-picker), and
+currency uses [Input Group](https://ui.shadcn.com/docs/components/radix/input-group).
+
+### Searchable entity selection
+
+Use `SearchableSelect` for choosing one existing value from a long list, including Finance categories. It composes the shared shadcn Combobox and accepts value/label options; callers own fetching and entity permissions. The control is an inline editable text field, not a button opening a separate search box. Focusing it opens suggestions beneath the field; filtering highlights the first match, arrows change the highlight, and Enter or forward Tab commits it. Tab moves to the next available control; Shift+Tab leaves without committing, Escape cancels, and unmatched text never creates a value. Mount the popup inside its containing modal focus scope. Keep contextual popup colors distinct from the surrounding page-colored dialog.
+
+### Workspace discovery
+
+Every primary workspace header uses `WorkspaceFinder`: `Search Calendar`, `Search Tasks`,
+`Search Mail`, or `Search Finances`. Search spans the workspace, independently of the current
+view's filters, selected mailbox/list, visible calendars, and displayed date range. Desktop
+uses an icon button that opens an anchored popover with an autofocus search field; mobile uses
+the same icon button and the shared responsive drawer
+with inline results. Do not nest a second floating search popup above the mobile drawer.
+
+Group content, dates, settings, navigation, actions, and reviews. Show a useful preview and explicit
+archived/completed/hidden context. Support keyboard selection, result-type filtering, bounded
+pagination, honest loading/errors, and cancellation. Settings matches reuse `settingsFields` and
+focus the field at their destination. Commands only open existing editors or review flows; typing
+or selecting a search action never submits a mutation. Search covers synced records without
+contacting providers. Keep search text separate from page-list filters and out of telemetry.
+
+Workspace preferences live in four account-owned, revisioned tables. They hold UI preferences,
+not duplicate domain records: Calendar default view/weekends and each workspace's archive-search
+preference. Account time zone and day hours remain shared; calendars, mail rules, finance policy,
+and connection settings remain with their owning domains. Add controls and their searchable field
+metadata together. See [workspace search contract](plans/workspace-search.md).
+
+Calendar keeps its view selector collapsed at every width. Calendar and Mail account triggers
+show one avatar, a visible/total count, and an overlaid attention or synced marker. Calendar counts
+calendars; Mail counts accounts. Use a green circular check when every enabled account is connected and ready or syncing;
+use an X when attention is needed or health is unknown. Counts use secondary text. Full identities and recovery actions live in the popover.
+
+Header utility actions align to the inline end with shared icon-button sizing. Calendar keeps Reviews
+with its title; view and accounts precede Today, Previous, and Next at the far end. The view menu
+contains Day, Week, and Month. At 600px or less, a separate command group in that menu also
+provides Today, Previous, and Next while the period buttons yield to the compact header.
+The existing floating date control remains available for date navigation.
+
+Calendar week columns flex above an 80px readable minimum, with the time gutter accounted for;
+only narrower viewports scroll horizontally. Week tiles use a very subtle alternating tone; Day keeps the page background and Month
+reserves muted fill for dates outside the current month. Shared grid rules carry day boundaries
+and a solid-hour/dotted-subdivision hierarchy; fills must not overpower those rules or events.
+The current-day highlight remains distinct. ScrollArea and native scroll owners share the scrollbar
+thumb tokens, thin geometry, transparent tracks, and rounded thumbs. Keep native scroll ownership
+where Calendar follow, sticky axes, and drag geometry depend on it; do not wrap those in a second
+scroll viewport merely to change scrollbar appearance.
+
+Calendar headers stay borderless; day boundaries begin in the timed grid. Follow today exposes
+its active state with `aria-pressed` and the Today highlight token. In Day/Week, a user scroll
+that settles near the reachable follow position for 180ms snaps there and resumes Follow when
+Snap back to Follow is enabled. Capture ranges are Precise (6px), Balanced (24px), and Generous
+(96px); release is at least 96px and always at least 48px beyond the capture range. Use clamped targets on both axes, ignore programmatic
+scrolls, and never resume for a displayed period that excludes Today.
+
+Calendar remembers explicit Day/Week/Month selections in account-owned workspace preferences.
+Normal entry uses that view and today; automatic Follow defaults on. When disabled, normal entry
+starts at midnight without following. Explicit date/view/follow links preserve their navigation
+intent. Settings exposes Preferred view, Automatically follow today, Snap back to Follow, and
+Follow snap sensitivity; these fields are also searchable. Defaults preserve existing behavior.
+
+Review navigation entry points (workspace headers, sidebar footers, and settings actions) are omitted when the successfully loaded review count is zero. Unavailable counts retain an honest recovery entry. A one-action overflow should be a directly labeled icon button; use an overflow menu only when there is a choice of actions.
+
+### Tasks menus and retained work
+
+Tasks History, Trash, and Archive share the workspace header and content gutters.
+Archive uses the collection grid, search, status filter, and recent-update sorting;
+scoped retained tasks retain their existing lifecycle actions. History uses a history
+arrow icon, Archive a storage box, and Trash a bin.
+
+### Menus and selection controls (all workspaces)
+
+This is an established frontend standard across workspace headers, sidebars, item
+menus, settings, and responsive layouts. The shared shadcn DropdownMenu primitives
+own layout and selection indicators; features own labels, grouping, and behavior.
+
+| Row intent | Component | Trailing affordance |
+| --- | --- | --- |
+| Perform an action or navigate to a destination | `DropdownMenuItem` | No selection control |
+| Choose exactly one value, such as grouping, sorting, or current view | `DropdownMenuRadioGroup` + `DropdownMenuRadioItem` | Always-visible circular radio; filled dot when selected |
+| Toggle an independent option, such as visible row details | `DropdownMenuCheckboxItem` | Always-visible square checkbox; check when selected, dash for mixed state |
+
+Do not implement selectable options as action rows with a manually appended check
+icon. Both selected and unselected options show their control shape so the choice
+model is understandable before interaction. Use the same semantic control tokens
+as shadcn form radios and checkboxes. The menu row remains the sole focusable control
+with its native `menuitemradio`/`menuitemcheckbox` and `aria-checked` semantics; never
+nest a second interactive input inside it. Independent toggles should keep the menu
+open for repeated adjustments; a single choice can close it after selection.
+
+Menus size to their contents within the viewport, scroll vertically when necessary,
+and reserve a separate, non-shrinking trailing indicator slot. Leading icons, text,
+shortcuts, and selection indicators must not overlap or shift when selected. Long
+labels wrap within the available space. Preserve arrow-key navigation, Space/Enter
+activation, disabled states, Escape dismissal, and focus return to the trigger.
+
+Use semantic icons for actions and entity choices where they improve recognition.
+Separate destructive actions into their own final group with a menu separator and
+the destructive variant; do not rely on color alone. Use concise labels without
+incidental ellipses, such as “Archive list”; confirmation belongs in the ensuing
+dialog. A single action uses a directly labeled icon button with an accessible name
+and tooltip rather than an overflow menu. Keep ordinary actions free of radios and
+checkboxes.
+
+When changing menus, verify selected, unselected, mixed, disabled, long-label, and
+narrow-viewport states, plus keyboard operation. Regression checks belong at shared
+composition boundaries so each workspace inherits the same behavior.
+
+Tasks stores explicit sort, grouping, row-detail visibility, and collection-sort choices in the
+account-owned `tasks_workspace_settings` table. Returning to Tasks restores these defaults;
+explicit URL options take precedence without silently overwriting saved preferences. Save only
+user changes, serialize rapid preference writes, preserve unrelated fields, and expose save
+failures through shared mutation feedback. An empty row-details selection is a persisted choice.
+
+Tasks Settings exposes the same sort, group, row-details, and collection-sort preferences
+as its workspace menus. Mail Settings exposes conversation density and desktop list width.
+Both settings catalogs index these controls. Mail stores these layout values in
+`mail_workspace_settings`, not device storage; resize events persist the desktop split
+without applying it to the mobile single-pane layout. Conversation lists use the page
+background and selected rows use the lighter `card` surface token.
+
+Mail conversation readers open at the newest message, with chronological history above.
+Use proximity scroll snapping at message starts; allow uninterrupted scrolling inside long
+messages and respect the reader's position during background refreshes. Identify outgoing
+mail by the user's connected account addresses and label it “You · Sent”; do not infer
+ownership from a display name. Incoming/outgoing surfaces use semantic tokens and textual
+labels, not color alone. Shared message attachment tiles remain inside their owning message
+and show filename, file type, size, and authenticated download actions. Supported safe file
+types can be previewed through the shared responsive dialog; see the Mail page specification.
+
+Mail message cards use the `card` surface for both incoming and outgoing mail; direction
+remains explicit through sender labels. Message bodies use the full card content width.
+The sticky title occupies the same top position for single-message and multi-message threads. A sticky upper-right older-message
+control counts messages above the current position and moves to the nearest earlier message.
+Hide the control at the beginning of the conversation and respect reduced-motion preferences.
+
+Mail defaults to a resizable split view on desktop and a full-width list/reader flow on
+mobile. The saved conversation-layout preference can select the full-width flow on desktop
+as well, with Back to conversations returning to the same mailbox and filters. Expose it
+in the Mail layout menu and searchable Mail settings. Message cards retain the shared card
+radius; small theme-rounded tails align with the sender header on the incoming/start or
+outgoing/end edge.
+
+Mail inbox rows adapt to their pane width: wide panes place sender, subject with preview,
+message metadata, and date on one scan line; narrow panes stack these for legibility.
+Keep compact/comfortable/expanded density preferences and suppress empty metadata rows.
+
+Collapsed sidebar review entries follow the shared icon-only menu-button geometry: hide
+both text and inline count, center the review icon, preserve its attention surface, and
+expose the complete review count/status through the shared tooltip and accessible label.
+
+### Icon action tooltips and workspace creation
+
+Every icon-only button must expose an action-oriented accessible name and a shadcn tooltip
+on hover and keyboard focus; a native `title` alone is insufficient. Use the shared
+`ActionButton` for icon-sized buttons, including buttons composed with menu/popover triggers
+or links. Existing explicit Tooltip compositions may remain; do not nest duplicate tooltips.
+Audit desktop and mobile top-navigation controls whenever adding a workspace action.
+
+The Finances plus action offers Transaction or Account. Account creation then offers bank
+connection or manual tracking, without duplicate creation buttons in the Accounts header.
+Transaction filters use the same responsive dialog/drawer pattern as Tasks, with compact
+header filter and sort buttons. Sort choices are radio menu items; clearing filters preserves
+unrelated URL state. Workspace-wide search remains the shared workspace finder.
+
+Top-navigation filter triggers show the number of active filters in a bottom-end badge. The shared ActionButton owns badge geometry; each domain counts applied filters, excluding sort/display preferences. Zero active filters render no badge. Keep the full accessible filter label and tooltip.
+
+### Key metrics and monetary entry
+
+Use the shared `KeyMetrics` layout with `KeyMetric` cards for a set of scalar summaries. Prefer
+fitting or wrapping cards so all values remain visible over forcing a carousel. Compose the shared
+shadcn Card anatomy and retain honest unavailable states. Dollar amount entry uses `CurrencyInput`
+with a canonical decimal value; percentages, counts, and durations remain ordinary numeric inputs.
+
+Four-item KeyMetrics sets use a balanced two- or four-column grid based on container width; they must not leave one metric alone beneath a three-column row. Compact financial KPI values retain the full amount for hover and assistive technology.
+
+### Workspace preference ownership
+
+Persisted workspace defaults resolve in the domain/API contract, with one typed shape per workspace.
+Settings controls and contextual Display menus use the same serialized save path and cache identity.
+Explicit URL choices remain temporary overrides. Device-specific shell geometry remains local.
+Tasks can save a default capture list and whether completed tasks appear in container views; explicit
+placement, lifecycle views, and URL filters take precedence.

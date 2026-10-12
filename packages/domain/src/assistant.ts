@@ -130,6 +130,7 @@ export const createAttentionItemInputSchema = attentionItemSchema
 export type CreateAttentionItemInput = z.infer<typeof createAttentionItemInputSchema>;
 
 export const attentionItemQuerySchema = z.object({
+  id: idSchema.optional(),
   domain: assistantDomainSchema,
   limit: z.coerce.number().int().min(1).max(100).default(50),
   status: attentionItemStatusSchema.default("open"),
@@ -162,6 +163,15 @@ export const agentAccessWorkItemQuerySchema = z.object({
 export type AgentAccessWorkItemQuery = z.infer<typeof agentAccessWorkItemQuerySchema>;
 
 export const agentAccessWorkItemSchema = z.object({
+  preview: z
+    .array(
+      z.object({
+        label: z.string().trim().min(1).max(80),
+        value: z.string().trim().min(1).max(600),
+      }),
+    )
+    .max(4)
+    .optional(),
   action: z
     .object({
       label: z.string().trim().min(1).max(120),
@@ -234,12 +244,19 @@ export const configuredRuleBaseSchema = z.object({
 });
 export type ConfiguredRuleBase = z.infer<typeof configuredRuleBaseSchema>;
 
+export const profileApprovalProvenanceSchema = z.object({
+  source: z.enum(["user_instruction", "agent_self_approval"]),
+  agentId: idSchema.nullable(),
+  userId: idSchema.nullable(),
+});
+
 export const assistantSetupStatusSchema = z.object({
   domains: z.array(
     z.object({
       canRead: z.boolean(),
       canWrite: z.boolean(),
       domain: assistantDomainSchema,
+      approvedProfileApproval: profileApprovalProvenanceSchema.nullable().optional(),
       approvedProfileStatus: z.literal("active").nullable(),
       approvedProfileVersion: z.int().positive().nullable(),
       pendingDraftVersion: z.int().positive().nullable(),
@@ -317,6 +334,7 @@ export const assistantSetupPlanSchema = z.object({
   domain: assistantDomainSchema,
   nextAction: z.string().min(1),
   profile: z.object({
+    approval: profileApprovalProvenanceSchema.nullable().optional(),
     approvedStatus: z.literal("active").nullable(),
     approvedVersion: z.int().positive().nullable(),
     pendingDraftVersion: z.int().positive().nullable(),

@@ -1,12 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   composeNotification,
   defaultNotificationPreferences,
   notificationEligibility,
   notificationPreferencesSchema,
   notificationWorkSchema,
+  type PublishNotificationResult,
   validateNotificationResolution,
 } from "./notification-policy.js";
+
+it("includes disabled delivery in the public notification result contract", () => {
+  expectTypeOf<{
+    state: "unavailable";
+    reason: "delivery_not_enabled";
+  }>().toExtend<PublishNotificationResult>();
+});
 
 const work = {
   work: {
@@ -21,7 +29,7 @@ const work = {
   disclosure: "context" as const,
   context: "Dinner",
   occurredAt: "2026-03-07T23:00:00.000Z",
-  destination: "/settings?section=reviews" as const,
+  destination: "/finances?review=open" as const,
 };
 const now = new Date("2026-03-08T12:00:00.000Z");
 const preferences = defaultNotificationPreferences;
@@ -141,7 +149,7 @@ describe("notification policy", () => {
         works: Array.from({ length: 4 }, (_, i) => ({ ...work, context: `Item ${i}` })),
       }),
     ).not.toContain("Item 3");
-    expect(composeNotification(input)).toContain("https://nohmi.test/settings?section=reviews");
+    expect(composeNotification(input)).toContain("https://nohmi.test/finances?review=open");
     expect(composeNotification(input)).not.toContain("Reply");
   });
 });

@@ -76,7 +76,10 @@ provider internals.
   consent, semantic setup steps, observed completion evidence, core-domain
   readiness, explicit per-workspace authority boundaries, an optional immutable skill reference,
   revocation, and advanced personal-token fallback.
-- A Settings-owned Reviews destination for paginated, filterable review and attention work.
+- A [workspace Reviews flow](../design/pages/reviews.md) for paginated review and attention work,
+  retaining domain-owned decisions. It opens from workspace alerts, Settings headers, or workspace
+  search. The old central queue is unrouted; a unified cross-workspace Texting destination remains
+  outside the currently implemented scope.
 - Unified agenda and calendar views.
 - Current conditions in Today, preferring transient device location after the
   browser grants permission and falling back to an account-saved place selected

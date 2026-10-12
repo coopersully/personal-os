@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import type { FinanceInboxCase, FinanceToolResult } from "@personal-os/domain";
+import type {
+  FinanceInboxCase,
+  FinanceReviewHistoryItem,
+  FinanceReviewHistorySummary,
+  FinanceToolResult,
+} from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -10,6 +15,8 @@ import { FinanceReviewPage } from "./review-page.js";
 
 const api = vi.hoisted(() => ({
   getFinanceInbox: vi.fn(),
+  listFinanceReviewHistory: vi.fn(),
+  getFinanceReviewHistoryItem: vi.fn(),
   answerFinanceReview: vi.fn(),
   getFinanceCategories: vi.fn(),
   getFinanceTransaction: vi.fn(),
@@ -80,6 +87,8 @@ function mount(path = "/finances/review") {
 beforeEach(() => {
   vi.resetAllMocks();
   api.getFinanceInbox.mockResolvedValue(response([review(), review(nextId)]));
+  api.listFinanceReviewHistory.mockResolvedValue({ items: [], nextCursor: null });
+  api.getFinanceReviewHistoryItem.mockResolvedValue(null);
   api.getFinanceCategories.mockResolvedValue([{ id: categoryId, name: "Dining" }]);
   api.getFinanceTransaction.mockResolvedValue({
     data: {
@@ -97,6 +106,153 @@ beforeEach(() => {
   api.listFinanceQuestions.mockResolvedValue([]);
   api.listFinanceActionReviews.mockResolvedValue([]);
 });
+
+it("opens the exact case linked by a continuation instead of the next question", async () => {
+  api.getFinanceInbox.mockResolvedValue(
+    response([
+      review(),
+      { ...review(nextId), evidence: { merchant: "Linked source", transactionId } },
+    ]),
+  );
+  mount(`/finances/review?case=${nextId}`);
+  expect(await screen.findByText("Linked source")).toBeVisible();
+  expect(screen.queryByText("Cafe Example")).not.toBeInTheDocument();
+});
+
+it("loads bounded review history and exact evidence without changing the active question", async () => {
+  const user = userEvent.setup();
+  const first: FinanceReviewHistorySummary = {
+    id: reviewId,
+    transactionId,
+    firstSeenAt: now,
+    reason: "category_ambiguity",
+    resolvedAt: null,
+    status: "open",
+    context: {
+      accountId: categoryId,
+      accountName: "Checking",
+      institution: "Bank",
+      merchant: "Cafe Example",
+      date: "2026-09-02",
+      amount: 42,
+      currencyCode: "USD",
+      direction: "expense",
+      pending: false,
+    },
+  };
+  const resolved: FinanceReviewHistorySummary = {
+    ...first,
+    id: nextId,
+    status: "resolved",
+    resolvedAt: now,
+  };
+  const detail: FinanceReviewHistoryItem = {
+    ...review(nextId),
+    ...resolved,
+    resolution: { answer: "Dinner with a friend", type: "dismiss" },
+    resolutionProvenance: { actorType: "user" },
+    evidence: { note: "Receipt checked", source: "manual" },
+  };
+  api.listFinanceReviewHistory.mockImplementation(async ({ cursor }: { cursor?: string }) =>
+    cursor ? { items: [resolved], nextCursor: null } : { items: [first], nextCursor: reviewId },
+  );
+  api.getFinanceReviewHistoryItem.mockResolvedValue(detail);
+  mount();
+  expect(
+    await screen.findByRole("heading", { name: "Was this groceries or a meal?" }),
+  ).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "Older questions and approvals" }));
+  expect(await screen.findByRole("heading", { name: "Review history" })).toBeVisible();
+  expect(api.listFinanceReviewHistory).toHaveBeenCalledWith({ limit: 20 });
+  await user.click(await screen.findByRole("button", { name: "Load more history" }));
+  await waitFor(() =>
+    expect(api.listFinanceReviewHistory).toHaveBeenCalledWith({ limit: 20, cursor: reviewId }),
+  );
+  expect(screen.getByText("resolved")).toBeVisible();
+  const evidenceButtons = screen.getAllByRole("button", { name: /View evidence for Cafe Example/ });
+  const secondButton = evidenceButtons[1];
+  if (!secondButton) throw new Error("The second history item was not rendered.");
+  await user.click(secondButton);
+  expect(api.getFinanceReviewHistoryItem).toHaveBeenCalledWith(nextId);
+  expect(await screen.findByText("Recorded answer: Dinner with a friend")).toBeVisible();
+  expect(screen.getByText(/Receipt checked/)).toBeVisible();
+  expect(screen.getByRole("link", { name: "Open transaction" })).toHaveAttribute(
+    "href",
+    `/finances/transactions?transactionId=${transactionId}`,
+  );
+  await user.click(screen.getByRole("button", { name: "Close" }));
+  expect(screen.getByRole("heading", { name: "Was this groceries or a meal?" })).toBeVisible();
+});
+
+it.each([
+  {
+    name: "a consolidation reason",
+    resolution: {
+      type: "dismiss",
+      rationale: "Consolidated into the canonical Finance Inbox case.",
+    },
+    expected: "Reason: Consolidated into the canonical Finance Inbox case.",
+  },
+  {
+    name: "classification details",
+    resolution: { type: "classify_transaction", categoryId, meaning: "Prepared meals" },
+    expected: `Category reference: ${categoryId}`,
+  },
+  {
+    name: "a linked transaction",
+    resolution: {
+      type: "link_transactions",
+      relationship: "reimbursement",
+      relatedTransactionId: nextId,
+    },
+    expected: "Relationship: reimbursement",
+  },
+])("shows $name when a review has no answer text", async ({ resolution, expected }) => {
+  const user = userEvent.setup();
+  const summary: FinanceReviewHistorySummary = {
+    id: reviewId,
+    transactionId,
+    firstSeenAt: now,
+    reason: "category_ambiguity",
+    resolvedAt: now,
+    status: "resolved",
+    context: {
+      accountId: categoryId,
+      accountName: "Checking",
+      institution: "Bank",
+      merchant: "Cafe Example",
+      date: "2026-09-02",
+      amount: 42,
+      currencyCode: "USD",
+      direction: "expense",
+      pending: false,
+    },
+  };
+  const detail: FinanceReviewHistoryItem = {
+    ...review(),
+    ...summary,
+    resolution,
+    relatedTransactionAvailable: true,
+    resolutionProvenance: null,
+  };
+  api.listFinanceReviewHistory.mockResolvedValue({ items: [summary], nextCursor: null });
+  api.getFinanceReviewHistoryItem.mockResolvedValue(detail);
+  mount();
+  await user.click(screen.getByRole("button", { name: "Older questions and approvals" }));
+  await user.click(await screen.findByRole("button", { name: "View evidence for Cafe Example" }));
+  expect(await screen.findByText(expected)).toBeVisible();
+  expect(screen.queryByText("Resolution recorded")).not.toBeInTheDocument();
+  if (resolution.type === "link_transactions") {
+    expect(screen.getByRole("link", { name: "Open related transaction" })).toHaveAttribute(
+      "href",
+      `/finances/transactions?transactionId=${nextId}`,
+    );
+  }
+  if (resolution.type === "classify_transaction") {
+    expect(screen.getByText("Meaning: Prepared meals")).toBeVisible();
+  }
+});
+
 it("shows the requested question and exact transaction evidence, then advances only after a typed answer returns", async () => {
   const user = userEvent.setup();
   let resolve: ((value: FinanceToolResult<FinanceInboxCase[]>) => void) | undefined;
@@ -117,7 +273,8 @@ it("shows the requested question and exact transaction evidence, then advances o
   expect(api.getFinanceTransaction).toHaveBeenCalledWith(transactionId);
   expect(screen.getAllByLabelText("Your answer")).toHaveLength(1);
   await user.selectOptions(screen.getByLabelText("Resolution"), "classify_transaction");
-  await user.selectOptions(screen.getByLabelText("Category"), categoryId);
+  await user.type(screen.getByRole("combobox", { name: "Category" }), "Dining");
+  await user.keyboard("{Enter}");
   await user.type(screen.getByLabelText("Your answer"), "Dinner with a friend");
   await user.click(screen.getByRole("button", { name: "Save answer" }));
   expect(api.answerFinanceReview).toHaveBeenCalledWith(reviewId, {
@@ -142,7 +299,9 @@ it("preserves failed answers and reuses the mutation key for an unchanged retry"
   mount();
   await user.type(await screen.findByLabelText("Your answer"), "Bought a gift");
   await user.click(screen.getByRole("button", { name: "Save answer" }));
-  expect(await screen.findByText("Connection interrupted")).toBeInTheDocument();
+  expect(
+    await screen.findByText(/Couldn’t confirm whether we could save this review/),
+  ).toBeInTheDocument();
   expect(screen.getByLabelText("Your answer")).toHaveValue("Bought a gift");
   const input = api.answerFinanceReview.mock.calls[0]?.[1];
   expect(input.resolution).toEqual({ type: "clarify", clarification: "Bought a gift" });
@@ -310,14 +469,14 @@ it("uses source references, proposal defaults, and paged related evidence conser
     });
   mount();
   expect(await screen.findByText("Proposed category: Dining")).toBeVisible();
-  expect(await screen.findByText("Primary evidence offline")).toBeVisible();
+  expect(await screen.findByText("Couldn’t load this material.")).toBeVisible();
   expect(screen.getByText(/currency unavailable.*Pending.*Other/)).toBeVisible();
   await user.selectOptions(screen.getByLabelText("Resolution"), "link_transactions");
   expect(
     await screen.findByRole("option", { name: /Older item.*currency unavailable/ }),
   ).toBeVisible();
   await user.click(screen.getByRole("button", { name: "Earlier transactions" }));
-  expect(await screen.findByText("Older evidence unavailable")).toBeVisible();
+  expect(await screen.findAllByText("Couldn’t load this material.")).toHaveLength(2);
   await user.click(screen.getByRole("button", { name: "Latest transactions" }));
   expect(await screen.findByRole("option", { name: /Older item/ })).toBeVisible();
 });
@@ -330,13 +489,15 @@ it("reloads failed inbox and category sources and renews a confirmed failed answ
     .mockRejectedValueOnce(new Error("previously failed; use a new idempotency key"))
     .mockResolvedValueOnce(response([]));
   mount();
-  expect(await screen.findByText("Inbox unavailable")).toBeVisible();
+  expect(await screen.findByText("Couldn’t load this material.")).toBeVisible();
   await user.click(screen.getByRole("button", { name: "Reload review" }));
   expect(await screen.findByLabelText("Your answer")).toBeVisible();
-  expect(await screen.findByText("Categories unavailable")).toBeVisible();
+  expect(await screen.findByText("Couldn’t load this material.")).toBeVisible();
   await user.type(screen.getByLabelText("Your answer"), "Confirmed purchase");
   await user.click(screen.getByRole("button", { name: "Save answer" }));
-  expect(await screen.findByText(/previously failed/)).toBeVisible();
+  expect(
+    await screen.findByText(/Couldn’t confirm whether we could save this review/),
+  ).toBeVisible();
   const first = api.answerFinanceReview.mock.calls[0]?.[1].idempotencyKey;
   await user.click(screen.getByRole("button", { name: "Save answer" }));
   expect(api.answerFinanceReview.mock.calls[1]?.[1].idempotencyKey).not.toBe(first);
@@ -438,4 +599,106 @@ it("shows an unavailable exact approval without offering another pending approva
   expect(api.listFinanceActionReviews).toHaveBeenCalledWith(50, nextId);
   expect(api.listFinanceQuestions).not.toHaveBeenCalled();
   expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+});
+
+it("requires shortening a long clarification when switching to a category resolution", async () => {
+  const user = userEvent.setup();
+  mount();
+  const answer = await screen.findByLabelText("Your answer");
+  await user.click(answer);
+  await user.paste("A".repeat(600));
+  expect(screen.getByRole("button", { name: "Save answer" })).toBeEnabled();
+  await user.selectOptions(screen.getByLabelText("Resolution"), "classify_transaction");
+  expect(screen.getByText("Use 500 characters or fewer for this resolution.")).toBeVisible();
+  expect(screen.getByRole("button", { name: "Save answer" })).toBeDisabled();
+  await user.clear(answer);
+  await user.type(screen.getByRole("combobox", { name: "Category" }), "Dining");
+  await user.keyboard("{Enter}");
+  api.answerFinanceReview.mockResolvedValue(response([]));
+  await user.click(screen.getByRole("button", { name: "Save answer" }));
+  expect(api.answerFinanceReview).toHaveBeenCalledWith(
+    reviewId,
+    expect.objectContaining({
+      answer: "Categorized as Dining.",
+      resolution: { type: "classify_transaction", categoryId, meaning: "Categorized as Dining." },
+    }),
+  );
+  expect(await screen.findByText("No open Inbox questions")).toBeVisible();
+});
+
+it("shows a selected transaction's evidence even when it is absent from the related page", async () => {
+  const item = {
+    ...review(),
+    proposedResolution: {
+      type: "link_transactions",
+      relationship: "refund",
+      relatedTransactionId: nextId,
+    },
+  };
+  api.getFinanceInbox.mockResolvedValue(response([item]));
+  api.getFinanceTransaction.mockImplementation(async (id: string) => ({
+    data: {
+      id,
+      merchant: id === nextId ? "Prior refund" : "Original debit",
+      amount: 42,
+      currencyCode: "USD",
+      date: "2026-09-02",
+      direction: id === nextId ? "income" : "expense",
+      pending: false,
+      category: null,
+    },
+  }));
+  mount();
+  await userEvent.selectOptions(await screen.findByLabelText("Resolution"), "link_transactions");
+  expect(await screen.findByRole("link", { name: "Prior refund" })).toHaveAttribute(
+    "href",
+    `/finances/transactions?transactionId=${nextId}`,
+  );
+  expect(screen.getByRole("option", { name: "Selected transaction (see evidence)" })).toBeVisible();
+  expect(screen.getByLabelText("Related transaction")).toHaveValue(nextId);
+});
+
+it("shows retained context and answers without linking a deleted related source", async () => {
+  const user = userEvent.setup();
+  const detail: FinanceReviewHistoryItem = {
+    ...review(),
+    economicEventId: null,
+    archived: true,
+    context: {
+      accountId: categoryId,
+      accountName: "Removed account",
+      institution: "Bank",
+      merchant: "Retained merchant",
+      date: "2026-09-02",
+      amount: 42,
+      currencyCode: "USD",
+      direction: "expense",
+      pending: false,
+    },
+    resolution: { type: "link_transactions", relatedTransactionId: nextId },
+    relatedTransactionAvailable: false,
+    resolutionProvenance: null,
+    retainedQuestions: [{ id: nextId, prompt: "Purpose?", state: "answered" }],
+    retainedAnswers: [
+      { id: categoryId, text: "For groceries", sourceKind: "app", recordedAt: now },
+    ],
+  };
+  api.listFinanceReviewHistory.mockResolvedValue({
+    items: [{ ...detail, transactionId }],
+    nextCursor: null,
+  });
+  api.getFinanceReviewHistoryItem.mockResolvedValue(detail);
+  mount();
+  await user.click(screen.getByRole("button", { name: "Older questions and approvals" }));
+  await user.click(
+    await screen.findByRole("button", { name: "View evidence for Retained merchant" }),
+  );
+  expect(await screen.findByText("Question: Purpose?")).toBeVisible();
+  expect(screen.getByText("Recorded answer: For groceries")).toBeVisible();
+  expect(screen.getByText("Removed account · Bank")).toBeVisible();
+  expect(
+    screen.getByText(`Related transaction reference: ${nextId} (source unavailable)`),
+  ).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Open related transaction" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Open transaction" })).not.toBeInTheDocument();
 });

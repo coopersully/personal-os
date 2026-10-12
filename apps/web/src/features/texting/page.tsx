@@ -1,6 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { textingConsentVersion } from "@personal-os/domain";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api, errorMessage } from "../../api.js";
+import { Link } from "react-router-dom";
+import { api } from "../../api.js";
+import { QueryFeedback } from "../../components/async-state.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { Alert, AlertDescription } from "../../components/ui/alert.js";
 import { Button } from "../../components/ui/button.js";
 import {
@@ -20,8 +25,10 @@ import {
 } from "../../components/ui/field.js";
 import { Input } from "../../components/ui/input.js";
 import { NativeSelect, NativeSelectOption } from "../../components/ui/native-select.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 
-export function TextingSettings() {
+export function TextingSettings({ profile = false }: { profile?: boolean }) {
+  const [editing, setEditing] = useState(false);
   const queryClient = useQueryClient();
   const connection = useQuery({
     queryFn: api.getTextingConnection,
@@ -32,45 +39,97 @@ export function TextingSettings() {
   const [consentAccepted, setConsentAccepted] = useState(false);
   const [challengeId, setChallengeId] = useState<string | null>(null);
   const [code, setCode] = useState("");
-  const start = useMutation({
-    mutationFn: () => api.startTextingVerification({ consentAccepted: true, country, phoneNumber }),
+  const start = useFeedbackMutation({
+    feedback: { action: "send a verification code", safeToRetry: false, form: true },
+    mutationFn: () =>
+      api.startTextingVerification({
+        consentAccepted: true,
+        consentVersion: textingConsentVersion,
+        country,
+        phoneNumber,
+      }),
     onSuccess: (challenge) => setChallengeId(challenge.id),
   });
-  const verify = useMutation({
+  const verify = useFeedbackMutation({
+    feedback: { action: "verify this phone number", safeToRetry: false, form: true },
     mutationFn: () => {
       if (!challengeId) throw new Error("Request a verification code first.");
       return api.checkTextingVerification(challengeId, { code });
     },
     onSuccess: async () => {
+      setEditing(false);
+      setConsentAccepted(false);
       setChallengeId(null);
       setCode("");
       await queryClient.invalidateQueries({ queryKey: ["texting-connection"] });
     },
   });
-  const disconnect = useMutation({
+  const disconnect = useFeedbackMutation({
+    feedback: { action: "disconnect this phone number", safeToRetry: false, form: false },
     mutationFn: api.disconnectTexting,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["texting-connection"] }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["texting-connection"] }),
   });
   const current = connection.data;
-  const error = connection.error ?? start.error ?? verify.error ?? disconnect.error;
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle aria-level={1} role="heading">
-          Agent texting
+        <CardTitle aria-level={2} role="heading">
+          {profile ? "Phone number" : "Agent texting"}
         </CardTitle>
         <CardDescription>
-          Let authorized agents text you through nohmi’s shared number.
+          {profile
+            ? "Your verified number for agent text messages."
+            : "Let authorized agents text you through nohmi’s shared number."}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
-        {error ? (
-          <Alert variant="destructive">
-            <AlertDescription>{errorMessage(error)}</AlertDescription>
-          </Alert>
+        <QueryFeedback query={connection} title="Couldn’t load your texting connection." />
+        <MutationFeedback feedback={disconnect.feedback} />
+        {profile ? (
+          <Button asChild variant="ghost" className="self-start">
+            <Link to="/settings?section=texting">Go to Agent Texting</Link>
+          </Button>
         ) : null}
-        {current?.id && current.state !== "disconnected" ? (
+        {editing ? (
+          <Button
+            type="button"
+            variant="ghost"
+            className="self-start"
+            disabled={start.isPending || verify.isPending}
+            onClick={() => {
+              setEditing(false);
+              setChallengeId(null);
+              setCode("");
+            }}
+          >
+            Cancel number change
+          </Button>
+        ) : null}
+
+        {profile && !editing && !(current?.id && current.state !== "disconnected") ? (
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-muted-foreground">
+              {connection.isPending
+                ? "Checking your phone number…"
+                : connection.isError
+                  ? "Phone status unavailable"
+                  : "No verified phone number"}
+            </p>
+            <Button
+              type="button"
+              variant="secondary"
+              className="self-start"
+              disabled={!connection.isSuccess}
+              onClick={() => {
+                setConsentAccepted(false);
+                setEditing(true);
+              }}
+            >
+              Add phone number
+            </Button>
+          </div>
+        ) : current?.id && current.state !== "disconnected" && !editing ? (
           <FieldGroup>
             <p>
               <strong>{current.maskedPhoneNumber}</strong> ·{" "}
@@ -80,11 +139,30 @@ export function TextingSettings() {
                   ? "Blocked by Twilio opt-out"
                   : current.state}
             </p>
+            <p className="text-sm text-muted-foreground">
+              {current.country === "US"
+                ? "United States"
+                : current.country === "CA"
+                  ? "Canada"
+                  : "Country unavailable"}
+            </p>
             <FieldDescription>
               Messages come from {current.senderPhoneNumber ?? "nohmi’s shared number"}. Reply STOP
               to block texts. Only a later START reply can restore delivery after a Twilio opt-out.
             </FieldDescription>
             <Field orientation="horizontal">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setEditing(true);
+                  setConsentAccepted(false);
+                  setCountry(current.country ?? "US");
+                  setPhoneNumber("");
+                }}
+              >
+                Change number
+              </Button>
               <Button
                 disabled={disconnect.isPending}
                 onClick={() => disconnect.mutate()}
@@ -96,7 +174,8 @@ export function TextingSettings() {
             </Field>
           </FieldGroup>
         ) : challengeId ? (
-          <form
+          <FeedbackForm
+            feedback={verify.feedback}
             onSubmit={(event) => {
               event.preventDefault();
               verify.mutate();
@@ -108,20 +187,24 @@ export function TextingSettings() {
                 <Input
                   autoComplete="one-time-code"
                   id="texting-code"
+                  name="code"
+                  required
+                  minLength={4}
                   inputMode="numeric"
                   onChange={(event) => setCode(event.target.value)}
                   value={code}
                 />
               </Field>
               <Field orientation="horizontal">
-                <Button disabled={verify.isPending || code.length < 4} type="submit">
+                <Button disabled={verify.isPending} type="submit">
                   Verify and connect
                 </Button>
               </Field>
             </FieldGroup>
-          </form>
+          </FeedbackForm>
         ) : (
-          <form
+          <FeedbackForm
+            feedback={start.feedback}
             onSubmit={(event) => {
               event.preventDefault();
               if (consentAccepted) start.mutate();
@@ -134,6 +217,7 @@ export function TextingSettings() {
                   <NativeSelect
                     className="w-full"
                     id="texting-country"
+                    disabled={start.isPending}
                     onChange={(event) => setCountry(event.target.value as "US" | "CA")}
                     value={country}
                   >
@@ -146,6 +230,9 @@ export function TextingSettings() {
                   <Input
                     autoComplete="tel"
                     id="texting-phone"
+                    disabled={start.isPending}
+                    name="phoneNumber"
+                    required
                     onChange={(event) => setPhoneNumber(event.target.value)}
                     placeholder="(555) 555-0123"
                     type="tel"
@@ -158,14 +245,31 @@ export function TextingSettings() {
                   aria-describedby="texting-consent-description"
                   checked={consentAccepted}
                   id="texting-consent"
+                  disabled={start.isPending}
                   onCheckedChange={(value) => setConsentAccepted(value === true)}
                 />
                 <FieldContent>
                   <FieldLabel htmlFor="texting-consent">Allow agent text messages</FieldLabel>
                   <FieldDescription id="texting-consent-description">
-                    I agree to receive conversational texts from nohmi and understand message/data
-                    rates may apply. Consent is recorded with my account; I can reply STOP at any
-                    time.
+                    I agree to receive verification codes and conversational agent texts, reminders,
+                    workspace updates, and questions from nohmi at the number I provide. Message
+                    frequency varies. Message and data rates may apply. Reply STOP to unsubscribe or
+                    HELP for help. Consent is optional and is not a condition of purchase or of
+                    using nohmi.
+                  </FieldDescription>
+                  <FieldDescription>
+                    <a href="/privacy/" target="_blank" rel="noreferrer">
+                      Privacy policy
+                    </a>
+                    {" · "}
+                    <a href="/terms/" target="_blank" rel="noreferrer">
+                      Terms of use
+                    </a>
+                    {" · "}
+                    <a href="/sms/" target="_blank" rel="noreferrer">
+                      SMS terms
+                    </a>
+                    {" (opens in a new tab)."}
                   </FieldDescription>
                 </FieldContent>
               </Field>
@@ -176,21 +280,20 @@ export function TextingSettings() {
                   </AlertDescription>
                 </Alert>
               ) : null}
+              {!consentAccepted ? (
+                <p id="consent-required">Allow agent text messages before requesting a code.</p>
+              ) : null}
               <Field orientation="horizontal">
                 <Button
-                  disabled={
-                    !consentAccepted ||
-                    !phoneNumber ||
-                    start.isPending ||
-                    current?.providerReady === false
-                  }
+                  aria-describedby={!consentAccepted ? "consent-required" : undefined}
+                  disabled={!consentAccepted || start.isPending || current?.providerReady === false}
                   type="submit"
                 >
                   Send verification code
                 </Button>
               </Field>
             </FieldGroup>
-          </form>
+          </FeedbackForm>
         )}
       </CardContent>
     </Card>

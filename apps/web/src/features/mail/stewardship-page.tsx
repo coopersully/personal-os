@@ -1,5 +1,5 @@
 import type { MailReview, MailStatus, MailStewardshipQuestion } from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { AlertTriangleIcon, ArrowLeftIcon, CircleCheckIcon, RefreshIcon } from "@/components/icons";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -14,7 +14,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
+import { QueryFeedback } from "../../components/async-state.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 
 export const mailStewardshipQueryKeys = {
   review: (id: string) => ["mail-stewardship-review", id] as const,
@@ -41,7 +44,13 @@ const stateCopy: Record<MailStatus["state"], { label: string; description: strin
   },
 };
 
-export function MailStewardshipPage() {
+export function MailStewardshipPage({
+  embedded = false,
+  onChanged,
+}: {
+  embedded?: boolean;
+  onChanged?: () => Promise<void>;
+}) {
   const queryClient = useQueryClient();
   const [params] = useSearchParams();
   const focusedQuestion = params.get("question");
@@ -49,13 +58,15 @@ export function MailStewardshipPage() {
     queryFn: api.getMailStatus,
     queryKey: mailStewardshipQueryKeys.status,
   });
-  const maintain = useMutation({
+  const maintain = useFeedbackMutation({
+    feedback: { action: "maintain the mail workspace" },
     mutationFn: () => api.maintainMail({ scope: { type: "all_outstanding" } }),
     onSuccess: async (result) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: mailStewardshipQueryKeys.status }),
         queryClient.invalidateQueries({ queryKey: ["mail-maintenance-run", result.run.id] }),
       ]);
+      await onChanged?.();
     },
   });
   const review = useQuery({
@@ -63,7 +74,8 @@ export function MailStewardshipPage() {
     queryFn: () => api.getMailReview(status.data?.details.latestReview?.id as string),
     queryKey: mailStewardshipQueryKeys.review(status.data?.details.latestReview?.id ?? "none"),
   });
-  const answer = useMutation({
+  const answer = useFeedbackMutation({
+    feedback: { action: "save the answer", form: true },
     mutationFn: ({ question, value }: { question: MailStewardshipQuestion; value: string }) =>
       api.answerMailQuestion(question.id, {
         answer: value,
@@ -72,21 +84,13 @@ export function MailStewardshipPage() {
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: mailStewardshipQueryKeys.status });
+      await onChanged?.();
     },
   });
 
-  if (status.isPending) return <MailStewardshipSkeleton />;
-  if (status.isError) {
-    return (
-      <div className="mx-auto w-full max-w-3xl px-4 py-6 md:px-6">
-        <Alert variant="destructive">
-          <AlertTriangleIcon aria-hidden="true" />
-          <AlertTitle>Mail stewardship is unavailable</AlertTitle>
-          <AlertDescription>{errorMessage(status.error)}</AlertDescription>
-        </Alert>
-      </div>
-    );
-  }
+  if (status.isPending) return <MailStewardshipSkeleton embedded={embedded} />;
+  if (status.isError && !status.data)
+    return <QueryFeedback query={status} title="Couldn’t load mail stewardship." />;
 
   const value = status.data;
   const copy = stateCopy[value.state];
@@ -94,39 +98,42 @@ export function MailStewardshipPage() {
     left.id === focusedQuestion ? -1 : right.id === focusedQuestion ? 1 : 0,
   );
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 md:px-6">
+    <div
+      className={
+        embedded
+          ? "flex min-w-0 flex-col gap-6"
+          : "mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 md:px-6"
+      }
+    >
       <header className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div className="flex min-w-0 flex-col items-start gap-2">
-          <Button asChild size="sm" variant="ghost">
-            <Link to="/mail">
-              <ArrowLeftIcon aria-hidden="true" data-icon="inline-start" />
-              Back to inbox
-            </Link>
-          </Button>
-          <div>
-            <p className="text-sm font-medium text-muted-foreground">Evidence and authority</p>
-            <h1 className="font-heading text-2xl font-medium tracking-tight">
-              Workspace stewardship
-            </h1>
-            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-              Evidence-bound maintenance of obligations, decisions, rules, questions, and reviews.
-              Agents and automation never send email.
-            </p>
+        {!embedded ? (
+          <div className="flex min-w-0 flex-col items-start gap-2">
+            <Button asChild size="sm" variant="ghost">
+              <Link to="/mail">
+                <ArrowLeftIcon aria-hidden="true" data-icon="inline-start" />
+                Back to inbox
+              </Link>
+            </Button>
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">Evidence and authority</p>
+              <h1 className="font-heading text-2xl font-medium tracking-tight">
+                Workspace stewardship
+              </h1>
+              <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+                Evidence-bound maintenance of obligations, decisions, rules, questions, and reviews.
+                Agents and automation never send email.
+              </p>
+            </div>
           </div>
-        </div>
+        ) : null}
         <Button disabled={maintain.isPending} onClick={() => maintain.mutate()}>
           <RefreshIcon aria-hidden="true" data-icon="inline-start" />
           {maintain.isPending ? "Maintaining…" : "Maintain Mail"}
         </Button>
       </header>
 
-      {maintain.isError ? (
-        <Alert variant="destructive">
-          <AlertTriangleIcon aria-hidden="true" />
-          <AlertTitle>Maintenance could not settle</AlertTitle>
-          <AlertDescription>{errorMessage(maintain.error)}</AlertDescription>
-        </Alert>
-      ) : null}
+      <MutationFeedback feedback={maintain.feedback} />
+      <QueryFeedback query={status} title="Couldn’t refresh workspace status." staleOnly />
       {maintain.data ? (
         <Alert>
           <CircleCheckIcon aria-hidden="true" />
@@ -259,6 +266,8 @@ export function MailStewardshipPage() {
       </section>
 
       <HealthPanel status={value} />
+      <MutationFeedback feedback={answer.feedback} />
+      <QueryFeedback query={review} title="Couldn’t load the mail review." />
       <ReviewPanel review={review.data ?? null} pending={review.isLoading} />
       <AuthorityPanel status={value} />
     </div>
@@ -384,12 +393,16 @@ function AuthorityPanel({ status }: { status: MailStatus }) {
   );
 }
 
-function MailStewardshipSkeleton() {
+function MailStewardshipSkeleton({ embedded }: { embedded: boolean }) {
   return (
     <div
       aria-busy="true"
       aria-label="Loading Mail stewardship"
-      className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 md:px-6"
+      className={
+        embedded
+          ? "flex min-w-0 flex-col gap-6"
+          : "mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 md:px-6"
+      }
       role="status"
     >
       <Skeleton className="h-16 w-full max-w-xl" />

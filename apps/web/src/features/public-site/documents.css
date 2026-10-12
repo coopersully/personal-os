@@ -1,0 +1,129 @@
+/* One scroll-responsive public header; static documents need no client script. */
+.public-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding-block: 1rem;
+}
+.public-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  max-width: 56rem;
+  margin-inline: auto;
+  padding: 0.75rem 1.25rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--card) 88%, transparent);
+  backdrop-filter: blur(16px);
+}
+@supports (animation-timeline: scroll()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .public-nav {
+      animation: public-nav-dock linear both;
+      animation-timeline: scroll(root block);
+      animation-range: 0px 96px;
+    }
+  }
+}
+@keyframes public-nav-dock {
+  from {
+    max-width: 72rem;
+    background: transparent;
+    backdrop-filter: blur(0px);
+  }
+  to {
+    max-width: 56rem;
+    background: color-mix(in srgb, var(--card) 88%, transparent);
+    backdrop-filter: blur(16px);
+  }
+}
+.public-footer {
+  background: var(--surface-subtle);
+}
+.public-footer-copyright {
+  margin: 0;
+  padding: 0;
+}
+.public-footer-wordmark {
+  position: absolute;
+  /* Offset the font’s sidebearing and baseline space so the ink reaches both edges. */
+  left: -0.065em;
+  bottom: -0.17em;
+  pointer-events: none;
+  user-select: none;
+  font-size: clamp(6rem, 27vw, 26rem);
+  font-weight: 650;
+  letter-spacing: -0.075em;
+  line-height: 1;
+  opacity: 0.025;
+}
+.public-site main {
+  scroll-margin-top: 7rem;
+}
+/* Keep the shared wordmark paired with the contrasting footer surface. */
+.public-site footer .brand-wordmark {
+  color: inherit;
+}
+/* Reading rhythm shared by every pre-rendered guide and policy. */
+.public-prose {
+  font-size: 1rem;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.public-prose h2 {
+  margin: 2rem 0 0.75rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.025em;
+}
+.public-prose h2:first-child {
+  margin-top: 0;
+}
+.public-prose p,
+.public-prose ul,
+.public-prose ol {
+  margin: 0 0 1rem;
+}
+.public-prose ul,
+.public-prose ol {
+  padding-left: 1.5rem;
+  list-style-type: disc;
+}
+.public-prose ol {
+  list-style-type: decimal;
+}
+.public-prose li {
+  margin: 0.5rem 0;
+}
+.public-prose a {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.public-prose a:hover,
+.public-prose a:focus-visible {
+  background: var(--accent);
+}
+.public-prose blockquote {
+  margin: 1.5rem 0;
+  padding: 1.5rem;
+  border-radius: var(--radius);
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+}
+@media print {
+  .public-site > header,
+  .public-site > footer,
+  .public-site aside,
+  .public-site .skip-link {
+    display: none;
+  }
+  .public-site [data-slot="card"] {
+    break-inside: auto;
+  }
+  .public-prose h2 {
+    break-after: avoid;
+  }
+}

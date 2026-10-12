@@ -45,8 +45,12 @@ export function registerTextingRoutes(options: {
       ),
     }),
   );
-  app.delete("/v1/texting", requireHuman, async (context) => {
-    await texting.disconnect(context.get("principal").userId);
+  app.delete("/v1/texting", async (context) => {
+    await texting.disconnect(
+      context.get("principal").userId,
+      context.get("principal"),
+      context.get("requestId"),
+    );
     return context.body(null, 204);
   });
   app.get("/v1/texting/conversation", async (context) =>

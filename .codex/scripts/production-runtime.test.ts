@@ -13,12 +13,12 @@ import {
 describe("local production runtime", () => {
   it("requires the exact production acknowledgement", () => {
     expect(() => assertProductionAcknowledgement({})).toThrow("I_UNDERSTAND_THIS_IS_PRODUCTION");
-    expect(() => assertProductionAcknowledgement({ ILO_PRODUCTION_RUNTIME: "yes" })).toThrow(
-      "I_UNDERSTAND_THIS_IS_PRODUCTION",
-    );
+    expect(() =>
+      assertProductionAcknowledgement({ PERSONAL_OS_PRODUCTION_RUNTIME: "yes" }),
+    ).toThrow("I_UNDERSTAND_THIS_IS_PRODUCTION");
     expect(() =>
       assertProductionAcknowledgement({
-        ILO_PRODUCTION_RUNTIME: "I_UNDERSTAND_THIS_IS_PRODUCTION",
+        PERSONAL_OS_PRODUCTION_RUNTIME: "I_UNDERSTAND_THIS_IS_PRODUCTION",
       }),
     ).not.toThrow();
   });
@@ -76,7 +76,7 @@ describe("local production runtime", () => {
   it("rewrites only database transport details and preserves TLS verification", () => {
     const rewritten = new URL(
       rewriteDatabaseUrl(
-        "postgresql://app:secret@prod.internal:5432/personal_os?sslmode=verify-full&application_name=ilo",
+        "postgresql://app:secret@prod.internal:5432/personal_os?sslmode=verify-full&application_name=personal-os",
         55438,
         "/tmp/aws-rds-global-bundle.pem",
       ),
@@ -88,7 +88,7 @@ describe("local production runtime", () => {
     expect(rewritten.pathname).toBe("/personal_os");
     expect(rewritten.searchParams.get("sslmode")).toBe("verify-ca");
     expect(rewritten.searchParams.get("sslrootcert")).toBe("/tmp/aws-rds-global-bundle.pem");
-    expect(rewritten.searchParams.get("application_name")).toBe("ilo");
+    expect(rewritten.searchParams.get("application_name")).toBe("personal-os");
   });
 
   it("projects deployed production configuration into localhost without dropping secrets", () => {

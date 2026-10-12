@@ -1,3 +1,7 @@
+import { getDefaultWorkspacePreferences } from "@personal-os/domain";
+
+export { calendarSearchResults, parseCalendarDateQuery } from "./search-date";
+
 import type {
   Calendar,
   CalendarEvent,
@@ -5,13 +9,8 @@ import type {
   User,
   WeatherLocationOption,
 } from "@personal-os/domain";
-import {
-  localDateAt,
-  localDateRange,
-  localDateTimeToUtc,
-  parseLocalDate,
-} from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { localDateAt, localDateTimeToUtc, parseLocalDate } from "@personal-os/domain";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, useIsPresent, usePresenceData } from "motion/react";
 import * as m from "motion/react-m";
 import {
@@ -28,6 +27,11 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
+import {
+  FloatingActionButton,
+  FloatingActionRegion,
+  FloatingActions,
+} from "@/components/floating-actions";
 import {
   CalendarIcon,
   CheckIcon,
@@ -68,10 +72,16 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 
-type FloatingMode = "closed" | "create" | "date" | "search";
+import { useWorkspacePreferences } from "../workspace-settings/preferences.js";
+
+import { useDefaultCalendarId } from "./preferences.js";
+
+type FloatingMode = "closed" | "create" | "date";
 type FloatingSurfaceState = FloatingMode | "details";
 type ConferenceChoice = "google_meet" | "link" | "none";
 
@@ -92,7 +102,6 @@ export function CalendarFloatingNav({
   calendars,
   draft,
   eventDetails,
-  events = [],
   onDraftDismiss,
   onNavigate,
   timeZone,
@@ -124,7 +133,6 @@ export function CalendarFloatingNav({
     const trigger = {
       create: createTrigger,
       date: dateTrigger,
-      search: searchTrigger,
     }[restoreFocusMode.current];
     restoreFocusMode.current = null;
     window.requestAnimationFrame(() => trigger.current?.focus());
@@ -133,44 +141,23 @@ export function CalendarFloatingNav({
   const content = eventDetails ? (
     eventDetails
   ) : mode === "closed" ? (
-    <nav aria-label="Calendar actions" className="calendar-floating-nav__pill">
-      <Button
-        aria-label="Choose date"
-        onClick={() => open("date")}
-        ref={dateTrigger}
-        size="icon"
-        variant="ghost"
-      >
+    <FloatingActions aria-label="Calendar actions" className="calendar-floating-nav__pill">
+      <FloatingActionButton label="Choose date" onClick={() => open("date")} ref={dateTrigger}>
         <CalendarIcon aria-hidden="true" />
-      </Button>
-      <Button
-        aria-label="Create event"
-        onClick={() => open("create")}
-        ref={createTrigger}
-        size="icon"
-        variant="ghost"
-      >
+      </FloatingActionButton>
+      <FloatingActionButton label="Create event" onClick={() => open("create")} ref={createTrigger}>
         <PlusIcon aria-hidden="true" />
-      </Button>
-      <Button
-        aria-label="Search calendar"
-        onClick={() => open("search")}
+      </FloatingActionButton>
+      <FloatingActionButton
+        label="Search calendar"
+        onClick={() => window.dispatchEvent(new Event("nohmi:workspace-search"))}
         ref={searchTrigger}
-        size="icon"
-        variant="ghost"
       >
         <SearchIcon aria-hidden="true" />
-      </Button>
-    </nav>
+      </FloatingActionButton>
+    </FloatingActions>
   ) : mode === "date" ? (
     <DateJumpCard anchor={anchor} close={close} onNavigate={onNavigate} timeZone={timeZone} />
-  ) : mode === "search" ? (
-    <CalendarSearchCard
-      close={close}
-      onNavigate={onNavigate}
-      timeZone={timeZone}
-      visibleEvents={events}
-    />
   ) : (
     <InlineEventComposer
       calendars={calendars}
@@ -183,9 +170,8 @@ export function CalendarFloatingNav({
   );
 
   return (
-    <div className="calendar-floating-nav" data-mode={surfaceState}>
+    <FloatingActionRegion align="center" className="calendar-floating-nav" data-mode={surfaceState}>
       <m.div
-        animate={{ borderRadius: surfaceState === "closed" ? 999 : 12 }}
         className="calendar-floating-nav__surface"
         data-slot="calendar-floating-surface"
         data-state={surfaceState}
@@ -201,7 +187,6 @@ export function CalendarFloatingNav({
         }}
         style={{ overflow: "hidden", position: "relative" }}
         transition={{
-          borderRadius: { duration: 0.18, ease: [0.22, 1, 0.36, 1] },
           layout: { bounce: 0.12, duration: 0.38, type: "spring" },
         }}
       >
@@ -213,7 +198,7 @@ export function CalendarFloatingNav({
           </FloatingNavTransitionContent>
         </AnimatePresence>
       </m.div>
-    </div>
+    </FloatingActionRegion>
   );
 }
 
@@ -262,6 +247,7 @@ function DateJumpCard({
   onNavigate: (date: LocalDate) => void;
   timeZone: string;
 }) {
+  const preferences = useWorkspacePreferences("calendar");
   const selected = calendarDate(anchor);
   return (
     <Card aria-label="Jump to date" className="calendar-floating-nav__card" size="sm">
@@ -273,6 +259,7 @@ function DateJumpCard({
         <section aria-label="Calendar date picker">
           <DatePicker
             autoFocus
+            weekStartsOn={preferences.data?.preferences.weekStartsOn === "monday" ? 1 : 0}
             captionLayout="dropdown"
             endMonth={new Date(Date.UTC(anchor.year + 25, 11, 1, 12))}
             mode="single"
@@ -291,199 +278,6 @@ function DateJumpCard({
       </CardContent>
     </Card>
   );
-}
-
-function CalendarSearchCard({
-  close,
-  onNavigate,
-  timeZone,
-  visibleEvents,
-}: {
-  close: () => void;
-  onNavigate: (date: LocalDate) => void;
-  timeZone: string;
-  visibleEvents: CalendarEvent[];
-}) {
-  const [query, setQuery] = useState("");
-  const deferredQuery = useDeferredValue(query);
-  const input = useRef<HTMLInputElement>(null);
-  const searchYear = localDateAt(new Date(), timeZone).year;
-  const searchRange = useMemo(
-    () =>
-      localDateRange(
-        { day: 1, month: 1, year: searchYear - 1 },
-        { day: 1, month: 1, year: searchYear + 2 },
-        timeZone,
-      ),
-    [searchYear, timeZone],
-  );
-  const events = useQuery({
-    queryFn: () => api.listEvents(searchRange),
-    queryKey: ["events", "calendar-search", searchRange.from, searchRange.to],
-    staleTime: 60_000,
-  });
-  const searchableEvents = useMemo(
-    () =>
-      Array.from(
-        new Map(
-          [...visibleEvents, ...(events.data ?? [])].map((event) => [event.id, event] as const),
-        ).values(),
-      ),
-    [events.data, visibleEvents],
-  );
-  const results = useMemo(
-    () => calendarSearchResults(deferredQuery, searchableEvents, timeZone),
-    [deferredQuery, searchableEvents, timeZone],
-  );
-
-  useEffect(() => input.current?.focus(), []);
-
-  const selectDate = (date: LocalDate) => {
-    onNavigate(date);
-    close();
-  };
-
-  return (
-    <Card aria-label="Search calendar" className="calendar-floating-nav__search" size="sm">
-      <CardContent>
-        <InputGroup>
-          <InputGroupAddon>
-            <SearchIcon aria-hidden="true" />
-          </InputGroupAddon>
-          <InputGroupInput
-            aria-label="Search events and dates"
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search events or try “last Christmas”"
-            ref={input}
-            value={query}
-          />
-          <InputGroupAddon align="inline-end">
-            <Button aria-label="Close search" onClick={close} size="icon-xs" variant="ghost">
-              <XIcon aria-hidden="true" />
-            </Button>
-          </InputGroupAddon>
-        </InputGroup>
-        {query.trim() ? (
-          <ul aria-label="Calendar search results" className="calendar-search-results">
-            {results.length === 0 ? (
-              <li>{events.isPending ? "Searching…" : "No matching events or dates."}</li>
-            ) : (
-              results.map((result) => (
-                <li key={result.key}>
-                  <button onClick={() => selectDate(result.date)} type="button">
-                    <span>{result.label}</span>
-                    <small>{result.detail}</small>
-                  </button>
-                </li>
-              ))
-            )}
-          </ul>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
-}
-
-type SearchResult = { date: LocalDate; detail: string; key: string; label: string };
-
-export function calendarSearchResults(
-  query: string,
-  events: CalendarEvent[],
-  timeZone: string,
-  now = new Date(),
-): SearchResult[] {
-  const normalized = query.trim().toLocaleLowerCase();
-  if (!normalized) return [];
-  const dateResult = parseCalendarDateQuery(normalized, timeZone, now);
-  const matchingEvents = events
-    .filter((event) =>
-      [event.title, event.location, event.notes]
-        .filter(Boolean)
-        .some((value) => value?.toLocaleLowerCase().includes(normalized)),
-    )
-    .slice(0, 7)
-    .map((event) => ({
-      date: localDateAt(new Date(event.startsAt), timeZone),
-      detail: new Intl.DateTimeFormat("en", {
-        day: "numeric",
-        hour: event.allDay ? undefined : "numeric",
-        minute: event.allDay ? undefined : "2-digit",
-        month: "short",
-        timeZone,
-        year: "numeric",
-      }).format(new Date(event.startsAt)),
-      key: `event:${event.id}`,
-      label: event.title,
-    }));
-  return dateResult ? [dateResult, ...matchingEvents] : matchingEvents;
-}
-
-export function parseCalendarDateQuery(
-  query: string,
-  timeZone: string,
-  now = new Date(),
-): SearchResult | undefined {
-  query = query.trim().toLocaleLowerCase();
-  const today = localDateAt(now, timeZone);
-  const relativeDays: Record<string, number> = { today: 0, tomorrow: 1, yesterday: -1 };
-  if (query in relativeDays) {
-    const date = addDays(today, relativeDays[query] as number);
-    return dateSearchResult(query, date);
-  }
-  const christmas = /^(last|next) christmas$/.exec(query);
-  if (christmas) {
-    const candidate = { day: 25, month: 12, year: today.year };
-    const direction = christmas[1];
-    const date =
-      direction === "last"
-        ? {
-            ...candidate,
-            year: compareLocalDates(candidate, today) < 0 ? today.year : today.year - 1,
-          }
-        : {
-            ...candidate,
-            year: compareLocalDates(candidate, today) > 0 ? today.year : today.year + 1,
-          };
-    return dateSearchResult(`${direction} Christmas`, date);
-  }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(query)) {
-    const date = parseLocalDate(query);
-    if (
-      date.month >= 1 &&
-      date.month <= 12 &&
-      date.day >= 1 &&
-      date.day <= daysInCalendarMonth(date.month, date.year)
-    ) {
-      return dateSearchResult(query, date);
-    }
-    return undefined;
-  }
-  const namedDate =
-    /^(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:,?\s+(\d{4}))?$/.exec(
-      query,
-    );
-  const numericDate = /^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{4}))?$/.exec(query);
-  const month = namedDate
-    ? calendarMonthNumber(namedDate[1] as string)
-    : Number(numericDate?.[1] ?? 0);
-  const day = Number(namedDate?.[2] ?? numericDate?.[2] ?? 0);
-  const year = Number(namedDate?.[3] ?? numericDate?.[3] ?? today.year);
-  if (month >= 1 && month <= 12 && day >= 1 && day <= daysInCalendarMonth(month, year)) {
-    return dateSearchResult(query, { day, month, year });
-  }
-  return undefined;
-}
-
-function calendarMonthNumber(value: string) {
-  return (
-    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"].indexOf(
-      value.slice(0, 3),
-    ) + 1
-  );
-}
-
-function daysInCalendarMonth(month: number, year: number) {
-  return new Date(Date.UTC(year, month, 0, 12)).getUTCDate();
 }
 
 function EventLocationPicker({ onDismiss }: { onDismiss: () => void }) {
@@ -604,6 +398,7 @@ function EventDateTimeControl({
   timeZone: string;
 }) {
   const [open, setOpen] = useState(false);
+  const preferences = useWorkspacePreferences("calendar");
   const selected = calendarDate(date);
   const dateLabel = new Intl.DateTimeFormat("en", {
     day: "numeric",
@@ -629,6 +424,7 @@ function EventDateTimeControl({
           </PopoverTrigger>
           <PopoverContent align="start" className="w-auto">
             <DatePicker
+              weekStartsOn={preferences.data?.preferences.weekStartsOn === "monday" ? 1 : 0}
               captionLayout="dropdown"
               defaultMonth={selected}
               endMonth={new Date(Date.UTC(referenceYear + 25, 11, 1, 12))}
@@ -805,6 +601,11 @@ function InlineEventComposer({
   user: User;
 }) {
   const queryClient = useQueryClient();
+  const preferences = useWorkspacePreferences("calendar");
+  const defaultDuration =
+    preferences.data?.preferences.defaultEventDurationMinutes ??
+    getDefaultWorkspacePreferences("calendar").defaultEventDurationMinutes;
+  const defaultCalendarId = useDefaultCalendarId();
   const writable = useMemo(
     () =>
       calendars
@@ -818,11 +619,11 @@ function InlineEventComposer({
   const start = draft
     ? new Date(draft.startsAt)
     : roundToQuarterHour(new Date(Date.now() + 30 * 60_000));
-  const end = draft ? new Date(draft.endsAt) : new Date(start.getTime() + 60 * 60_000);
+  const end = draft ? new Date(draft.endsAt) : new Date(start.getTime() + defaultDuration * 60_000);
   const initialStart = toDateTimeLocal(start, timeZone);
   const initialEnd = toDateTimeLocal(end, timeZone);
   const [allDay, setAllDay] = useState(false);
-  const [calendarId, setCalendarId] = useState(writable[0]?.id ?? "");
+  const [calendarId, setCalendarId] = useState<string | null>(null);
   const [calendarPickerOpen, setCalendarPickerOpen] = useState(false);
   const [conferenceChoice, setConferenceChoice] = useState<ConferenceChoice>("none");
   const [showConferencing, setShowConferencing] = useState(false);
@@ -834,11 +635,8 @@ function InlineEventComposer({
   const [endTime, setEndTime] = useState(initialEnd.slice(11));
   const endWasEdited = useRef(Boolean(draft));
   const [scheduleError, setScheduleError] = useState<string | null>(null);
-  const selectedCalendar = writable.find((calendar) => calendar.id === calendarId) ?? writable[0];
-  useEffect(() => {
-    const nextCalendarId = selectedCalendar?.id ?? "";
-    if (calendarId !== nextCalendarId) setCalendarId(nextCalendarId);
-  }, [calendarId, selectedCalendar?.id]);
+  const selectedCalendar =
+    writable.find((calendar) => calendar.id === (calendarId ?? defaultCalendarId)) ?? writable[0];
   useEffect(() => {
     if (conferenceChoice === "google_meet" && selectedCalendar?.provider !== "google") {
       setConferenceChoice("none");
@@ -855,13 +653,16 @@ function InlineEventComposer({
       const nextStart = localDateTimeToUtc(nextStartDate, timeToMinute(nextStartTime), timeZone);
       const currentEnd = localDateTimeToUtc(endDate, timeToMinute(endTime), timeZone);
       if (endWasEdited.current && currentEnd > nextStart) return;
-      const nextEnd = toDateTimeLocal(new Date(nextStart.getTime() + 60 * 60_000), timeZone);
+      const nextEnd = toDateTimeLocal(
+        new Date(nextStart.getTime() + defaultDuration * 60_000),
+        timeZone,
+      );
       const nextEndDate = parseLocalDate(nextEnd.slice(0, 10));
       const nextEndTime = nextEnd.slice(11);
       if (compareLocalDates(endDate, nextEndDate) !== 0) setEndDate(nextEndDate);
       if (endTime !== nextEndTime) setEndTime(nextEndTime);
     },
-    [allDay, endDate, endTime, timeZone],
+    [allDay, defaultDuration, endDate, endTime, timeZone],
   );
   const setValidatedEnd = (nextEndDate: LocalDate, nextEndTime: string) => {
     endWasEdited.current = true;
@@ -872,7 +673,10 @@ function InlineEventComposer({
     const startsAt = localDateTimeToUtc(startDate, timeToMinute(startTime), timeZone);
     const endsAt = localDateTimeToUtc(nextEndDate, timeToMinute(nextEndTime), timeZone);
     if (endsAt <= startsAt) {
-      const defaultEnd = toDateTimeLocal(new Date(startsAt.getTime() + 60 * 60_000), timeZone);
+      const defaultEnd = toDateTimeLocal(
+        new Date(startsAt.getTime() + defaultDuration * 60_000),
+        timeZone,
+      );
       setEndDate(parseLocalDate(defaultEnd.slice(0, 10)));
       setEndTime(defaultEnd.slice(11));
       return;
@@ -883,12 +687,10 @@ function InlineEventComposer({
   useEffect(() => {
     repairEndAfterStart(startDate, startTime);
   }, [repairEndAfterStart, startDate, startTime]);
-  const mutation = useMutation({
+  const mutation = useFeedbackMutation({
+    feedback: { action: "create the event", form: true },
     mutationFn: (input: Parameters<typeof api.createEvent>[0]) => api.createEvent(input),
-    onError: (error) =>
-      toast.error("Event couldn’t be created", { description: errorMessage(error) }),
     onSuccess: async (created) => {
-      await invalidateMaterial(queryClient);
       if (created.conferenceStatus === "pending") {
         toast.info("Event created", {
           description: "The meeting link is still being prepared.",
@@ -899,6 +701,7 @@ function InlineEventComposer({
         });
       }
       close();
+      await invalidateMaterial(queryClient);
     },
   });
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -917,7 +720,7 @@ function InlineEventComposer({
     setScheduleError(null);
     mutation.mutate({
       allDay,
-      calendarId,
+      calendarId: selectedCalendar?.id ?? "",
       conferenceProvider: conferenceChoice === "google_meet" ? "google_meet" : null,
       conferenceUrl: conferenceChoice === "link" ? nullable(form.get("conferenceUrl")) : null,
       endsAt,
@@ -941,7 +744,15 @@ function InlineEventComposer({
         <CloseButton close={close} />
       </CardHeader>
       <CardContent>
-        <form onSubmit={submit}>
+        <FeedbackForm
+          feedback={mutation.feedback}
+          onSubmit={submit}
+          validate={(form) => ({
+            ...(!String(new FormData(form).get("title") ?? "").trim()
+              ? { title: "Enter an event title." }
+              : {}),
+          })}
+        >
           <FieldGroup className="gap-3">
             <Field>
               <FieldLabel className="sr-only" htmlFor="floating-event-title">
@@ -1189,12 +1000,15 @@ function InlineEventComposer({
                 rows={2}
               />
             </Field>
+            {writable.length === 0 ? (
+              <p role="status">Connect a writable calendar before creating an event.</p>
+            ) : null}
             <Button disabled={mutation.isPending || writable.length === 0} type="submit">
               <PlusIcon data-icon="inline-start" />
               {mutation.isPending ? "Creating…" : "Create event"}
             </Button>
           </FieldGroup>
-        </form>
+        </FeedbackForm>
       </CardContent>
     </Card>
   );
@@ -1231,17 +1045,6 @@ function CloseButton({ close }: { close: () => void }) {
 
 function calendarDate(date: LocalDate) {
   return new Date(Date.UTC(date.year, date.month - 1, date.day, 12));
-}
-
-function dateSearchResult(label: string, date: LocalDate): SearchResult {
-  return {
-    date,
-    detail: new Intl.DateTimeFormat("en", { dateStyle: "full", timeZone: "UTC" }).format(
-      calendarDate(date),
-    ),
-    key: `date:${date.year}-${date.month}-${date.day}`,
-    label,
-  };
 }
 
 function addDays(date: LocalDate, amount: number): LocalDate {

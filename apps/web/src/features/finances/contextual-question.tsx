@@ -1,6 +1,6 @@
 import type { FinanceAnswer, FinanceContextualQuestion } from "@personal-os/domain";
 import { Spinner } from "@personal-os/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -9,11 +9,15 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 
 export function AddTransactionContext({ transactionId }: { transactionId: string }) {
   const navigate = useNavigate();
   const operationId = useRef<string | null>(null);
-  const create = useMutation({
+  const create = useFeedbackMutation({
+    feedback: { action: "create transaction context", safeToRetry: false, form: true },
     mutationFn: () => {
       operationId.current ??= crypto.randomUUID();
       return api.createFinanceContextualQuestion(transactionId, {
@@ -35,7 +39,7 @@ export function AddTransactionContext({ transactionId }: { transactionId: string
       >
         {create.isPending ? "Opening context…" : "Add context"}
       </Button>
-      {create.error ? <InlineError error={create.error} /> : null}
+      {create.error ? <MutationFeedback feedback={create.feedback} /> : null}
       {create.data?.state === "unavailable" ? (
         <p role="status" className="text-sm text-muted-foreground">
           Context is available for unresolved, uncategorized manual transactions.
@@ -45,7 +49,13 @@ export function AddTransactionContext({ transactionId }: { transactionId: string
   );
 }
 
-export function FinanceContextualQuestionPage({ id }: { id: string }) {
+export function FinanceContextualQuestionPage({
+  id,
+  onChanged,
+}: {
+  id: string;
+  onChanged?: (() => Promise<void>) | undefined;
+}) {
   const query = useQuery({
     queryKey: ["finance-contextual-question", id],
     queryFn: () => api.getFinanceContextualQuestion(id),
@@ -55,7 +65,11 @@ export function FinanceContextualQuestionPage({ id }: { id: string }) {
       {query.isPending ? <Spinner label="Loading transaction context" /> : null}
       {query.error ? (
         <>
-          <InlineError error={query.error} />
+          <InlineError
+            error={query.error}
+            retry={() => query.refetch()}
+            stale={query.data !== undefined}
+          />
           <Button variant="outline" onClick={() => void query.refetch()}>
             Reload context
           </Button>
@@ -67,17 +81,25 @@ export function FinanceContextualQuestionPage({ id }: { id: string }) {
       {query.data?.state === "available" ? (
         <ContextAnswer
           key={`${id}:${query.data.question.work.revision}`}
+          onChanged={onChanged}
           question={query.data.question}
         />
       ) : null}
     </section>
   );
 }
-function ContextAnswer({ question }: { question: FinanceContextualQuestion }) {
+function ContextAnswer({
+  question,
+  onChanged,
+}: {
+  question: FinanceContextualQuestion;
+  onChanged?: (() => Promise<void>) | undefined;
+}) {
   const [text, setText] = useState("");
   const command = useRef<FinanceAnswer | null>(null);
   const client = useQueryClient();
-  const answer = useMutation({
+  const answer = useFeedbackMutation({
+    feedback: { action: "save this answer", safeToRetry: true, form: true },
     mutationFn: () => {
       const normalized = text.trim();
       if (!command.current || command.current.text !== normalized)
@@ -90,6 +112,7 @@ function ContextAnswer({ question }: { question: FinanceContextualQuestion }) {
       return api.answerFinanceContextualQuestion(command.current);
     },
     onSuccess: () => {
+      void onChanged?.();
       void client.invalidateQueries({ queryKey: ["agent-access-work-items"] });
     },
   });
@@ -123,7 +146,8 @@ function ContextAnswer({ question }: { question: FinanceContextualQuestion }) {
       ) : unavailable ? (
         <p role="status">This context question is unavailable.</p>
       ) : (
-        <form
+        <FeedbackForm
+          feedback={answer.feedback}
           className="grid gap-4"
           onSubmit={(event) => {
             event.preventDefault();
@@ -133,6 +157,7 @@ function ContextAnswer({ question }: { question: FinanceContextualQuestion }) {
           <Field>
             <FieldLabel htmlFor="transaction-context-answer">{question.prompt}</FieldLabel>
             <Textarea
+              name="text"
               id="transaction-context-answer"
               value={text}
               onChange={(event) => setText(event.target.value)}
@@ -144,15 +169,11 @@ function ContextAnswer({ question }: { question: FinanceContextualQuestion }) {
           <p className="text-sm text-muted-foreground">
             Your answer adds context for review. It does not change the transaction or its category.
           </p>
-          {answer.error ? <InlineError error={answer.error} /> : null}
-          <Button
-            className="justify-self-start"
-            disabled={!text.trim() || answer.isPending}
-            type="submit"
-          >
+
+          <Button className="justify-self-start" disabled={answer.isPending} type="submit">
             {answer.isPending ? "Saving context…" : "Save context"}
           </Button>
-        </form>
+        </FeedbackForm>
       )}
       <div className="flex flex-wrap gap-4 text-sm">
         <Link

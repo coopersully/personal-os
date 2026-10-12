@@ -63,6 +63,7 @@ import {
   serializeMailThread,
 } from "./serialization.js";
 import type { Principal } from "./types.js";
+import { requireWorkspaceExecution } from "./workspace-execution.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 type MailSourceExecutor = Pick<Database, "select">;
@@ -719,27 +720,35 @@ export function createMailService({
       }
       const claimId = randomUUID();
       const claimedAt = now();
-      const [claimed] = await db
-        .update(mailDrafts)
-        .set({
-          sendClaimedAt: claimedAt,
-          sendClaimId: claimId,
-          sendStatus: "sending",
-          updatedAt: claimedAt,
-        })
-        .where(
-          and(
-            eq(mailDrafts.id, input.draftId),
-            eq(mailDrafts.userId, userId),
-            eq(mailDrafts.sendStatus, "draft"),
-            sql`date_trunc('milliseconds', ${mailDrafts.updatedAt}) = ${draft.updatedAt}`,
-            isNull(mailDrafts.sentAt),
-          ),
-        )
-        .returning({ id: mailDrafts.id });
-      if (!claimed) {
-        throw new AppError("conflict", "This draft is already being sent or changed.");
-      }
+      await db.transaction(async (tx) => {
+        await tx
+          .select({ id: mailDrafts.id })
+          .from(mailDrafts)
+          .where(and(eq(mailDrafts.id, input.draftId), eq(mailDrafts.userId, userId)))
+          .for("update");
+        await requireWorkspaceExecution(tx, context.principal, "mail", now());
+        const [claimed] = await tx
+          .update(mailDrafts)
+          .set({
+            sendClaimedAt: claimedAt,
+            sendClaimId: claimId,
+            sendStatus: "sending",
+            updatedAt: claimedAt,
+          })
+          .where(
+            and(
+              eq(mailDrafts.id, input.draftId),
+              eq(mailDrafts.userId, userId),
+              eq(mailDrafts.sendStatus, "draft"),
+              sql`date_trunc('milliseconds', ${mailDrafts.updatedAt}) = ${draft.updatedAt}`,
+              isNull(mailDrafts.sentAt),
+            ),
+          )
+          .returning({ id: mailDrafts.id });
+        if (!claimed) {
+          throw new AppError("conflict", "This draft is already being sent or changed.");
+        }
+      });
       try {
         await gateway.send(userId, draft.accountId, {
           body: draft.body,
@@ -894,6 +903,7 @@ export function createMailService({
       context: MutationContext,
     ): Promise<MailDraft> {
       return db.transaction(async (transaction) => {
+        await requireWorkspaceExecution(transaction, context.principal, "mail", now());
         const [draft] = await transaction
           .select()
           .from(mailDrafts)
@@ -1290,12 +1300,7 @@ export function createMailService({
       input: ActivateMailRuleInput,
       context: MutationContext,
     ): Promise<{ preview: MailRulePreview; rule: MailRule }> {
-      if (context.principal.actorType !== "user") {
-        throw new AppError(
-          "forbidden",
-          "Mail rule activation requires an interactive user session.",
-        );
-      }
+      await requireWorkspaceExecution(db, context.principal, "mail", now());
       const existing = await findRule(context.principal.userId, id);
       if (!existing) throw new AppError("not_found", "The mail rule was not found.");
       if (existing.version !== input.expectedVersion) {
@@ -1406,6 +1411,7 @@ export function createMailService({
         );
       }
       const updated = await db.transaction(async (transaction) => {
+        await requireWorkspaceExecution(transaction, context.principal, "mail", now());
         const lockedSources = await transaction
           .select({
             id: calendarAccounts.id,
@@ -1743,6 +1749,54 @@ export function createMailService({
       return serializeMailThread(record, await mailboxMap(userId));
     },
 
+    async downloadAttachment(
+      userId: string,
+      messageId: string,
+      attachmentId: string,
+      signal?: AbortSignal,
+    ) {
+      signal?.throwIfAborted();
+      const [record] = await db
+        .select({ message: mailMessages, accountId: mailThreads.accountId })
+        .from(mailMessages)
+        .innerJoin(mailThreads, eq(mailMessages.threadId, mailThreads.id))
+        .where(
+          and(
+            eq(mailMessages.id, messageId),
+            eq(mailThreads.userId, userId),
+            isNull(mailThreads.deletedAt),
+          ),
+        )
+        .limit(1);
+      const attachment = record?.message.attachments.find((file) => file.id === attachmentId);
+      if (!record || !attachment) throw new AppError("not_found", "The attachment was not found.");
+      if (attachment.projectionIssue || (attachment.size ?? 0) > 10 * 1024 * 1024)
+        throw new AppError(
+          "invalid_request",
+          "This attachment is too large to download here. Open it in your mail provider.",
+        );
+      if (!gateway.downloadAttachment)
+        throw new AppError(
+          "service_unavailable",
+          "Attachment downloads are unavailable for this connection.",
+        );
+      signal?.throwIfAborted();
+      const bytes = await gateway.downloadAttachment(
+        userId,
+        record.accountId,
+        record.message.remoteMessageId,
+        attachment,
+        signal,
+      );
+      if (bytes.length > 10 * 1024 * 1024)
+        throw new AppError("invalid_request", "This attachment exceeds the 10 MB download limit.");
+      return {
+        filename: (attachment.filename || "attachment").replace(/[/\\\p{Cc}]/gu, "_"),
+        contentType: attachment.contentType,
+        data: Buffer.from(bytes).toString("base64"),
+        size: bytes.length,
+      };
+    },
     async listMessages(userId: string, threadId: string): Promise<MailMessage[]> {
       const records = await db
         .select({ message: mailMessages })

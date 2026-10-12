@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatCalendarDate,
   formatMaterialDateTime,
   formatOrdinalDate,
   formatRelativeMaterialDateTime,
@@ -54,5 +55,13 @@ describe("ordinalSuffix", () => {
     expect(formatRelativeMaterialDateTime("2026-08-24T13:00:00.000Z", "UTC", { now })).toBe(
       "7 days ago, 1:00 PM",
     );
+  });
+});
+
+describe("formatCalendarDate", () => {
+  it("keeps date-only values on their written day across year and daylight-saving boundaries", () => {
+    expect(formatCalendarDate("2027-01-01")).toBe("Jan 1, 2027");
+    expect(formatCalendarDate("2026-11-01")).toBe("Nov 1, 2026");
+    expect(formatCalendarDate("invalid")).toBe("invalid");
   });
 });

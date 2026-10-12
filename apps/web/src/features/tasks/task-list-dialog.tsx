@@ -4,28 +4,31 @@ import {
   type TaskListIcon,
   taskListArchiveConflictSchema,
 } from "@personal-os/domain";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { toast } from "sonner";
+import {
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@/components/responsive-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
-import { api, errorMessage } from "../../api.js";
-import { InlineError } from "../../components/async-state.js";
+import { api } from "../../api.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+import { TaskCreationProgress } from "./creation-progress";
 import { taskListIconOptions } from "./task-list-icons";
 
 export function TaskListDialog({
@@ -53,15 +56,16 @@ export function TaskListDialog({
     ]);
     close();
   };
-  const save = useMutation({
+  const save = useFeedbackMutation({
+    feedback: { action: "save this list", safeToRetry: false, form: true },
     mutationFn: (input: { description: string | null; icon: TaskListIcon; name: string }) =>
       list
         ? api.updateTaskList(list.id, { ...input, expectedRevision: list.revision })
         : api.createTaskList({ ...input, color: null }),
-    onError: (error) => toast.error(errorMessage(error)),
     onSuccess: () => finish(list ? "List updated." : "List created."),
   });
-  const archive = useMutation({
+  const archive = useFeedbackMutation({
+    feedback: { action: "archive this list", safeToRetry: false, form: false },
     mutationFn: async (
       resolution?: "archive_contents_together" | "cancel" | "move_active_contents",
     ) => {
@@ -75,7 +79,6 @@ export function TaskListDialog({
     onError: (error) => {
       const parsed = taskListConflict(error);
       if (parsed) setConflict(parsed);
-      else toast.error(errorMessage(error));
     },
     onSuccess: (_result, resolution) => {
       if (resolution === "cancel") {
@@ -97,22 +100,24 @@ export function TaskListDialog({
 
   if (protectedInbox) return null;
   return (
-    <Dialog open onOpenChange={(open) => !open && close()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
+    <ResponsiveDialog open onOpenChange={(open) => !open && close()}>
+      <ResponsiveDialogContent className="max-sm:px-4 max-h-[calc(100dvh-2rem)] overflow-y-auto">
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>
             {archiveOnly && list
               ? `Archive ${list.name}?`
               : list
                 ? `Manage ${list.name}`
                 : "Create a List"}
-          </DialogTitle>
-          <DialogDescription>
+          </ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
             {archiveOnly
               ? "This list will move to Archive. If it has active contents, you’ll choose what happens to them next."
               : "Lists are stable areas for related Tasks and Projects. System View names are reserved."}
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveDialogDescription>
+          {!list && !archiveOnly ? <TaskCreationProgress step={2} total={2} /> : null}
+        </ResponsiveDialogHeader>
+        <MutationFeedback feedback={taskListConflict(archive.error) ? null : archive.feedback} />
         {conflict ? (
           <ListArchiveConflict
             conflict={conflict}
@@ -124,7 +129,7 @@ export function TaskListDialog({
             pending={archive.isPending}
           />
         ) : archiveOnly ? (
-          <DialogFooter>
+          <ResponsiveDialogFooter>
             <Button onClick={close} variant="outline">
               Cancel
             </Button>
@@ -135,10 +140,10 @@ export function TaskListDialog({
             >
               Archive List
             </Button>
-          </DialogFooter>
+          </ResponsiveDialogFooter>
         ) : (
           <>
-            <form onSubmit={submit}>
+            <FeedbackForm feedback={save.feedback} onSubmit={submit}>
               <FieldGroup>
                 <Field>
                   <FieldLabel htmlFor="task-list-name">Name</FieldLabel>
@@ -163,7 +168,7 @@ export function TaskListDialog({
                   <FieldLegend variant="label">Icon</FieldLegend>
                   <RadioGroup
                     aria-label="List icon"
-                    className="grid-cols-2 sm:grid-cols-4"
+                    className="grid-cols-[repeat(auto-fit,minmax(2.5rem,1fr))]"
                     onValueChange={(value) => setIcon(value as TaskListIcon)}
                     value={icon}
                   >
@@ -172,28 +177,28 @@ export function TaskListDialog({
                       return (
                         <RadioGroupItem
                           aria-label={option.label}
-                          className="h-9 w-full gap-2 rounded-md bg-muted px-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground data-checked:bg-primary data-checked:text-primary-foreground [&>[data-slot=radio-group-indicator]]:hidden [&>svg]:size-4"
+                          title={option.label}
+                          className="h-10 w-full aspect-square items-center justify-center gap-2 rounded-md bg-muted px-3 text-muted-foreground after:hidden hover:bg-accent hover:text-accent-foreground data-[state=checked]:bg-selection data-[state=checked]:text-foreground [&>[data-slot=radio-group-indicator]]:hidden [&>svg]:size-4"
                           key={option.value}
                           value={option.value}
                         >
                           <OptionIcon aria-hidden="true" />
-                          <span className="truncate text-xs">{option.label}</span>
                         </RadioGroupItem>
                       );
                     })}
                   </RadioGroup>
                 </FieldSet>
               </FieldGroup>
-              {save.isError ? <InlineError error={save.error} /> : null}
-              <DialogFooter className="mt-5">
+
+              <ResponsiveDialogFooter className="mt-5">
                 <Button onClick={close} type="button" variant="outline">
                   Cancel
                 </Button>
                 <Button disabled={save.isPending} type="submit">
                   {save.isPending ? "Saving…" : list ? "Save changes" : "Create List"}
                 </Button>
-              </DialogFooter>
-            </form>
+              </ResponsiveDialogFooter>
+            </FeedbackForm>
             {list ? (
               <Button
                 disabled={archive.isPending}
@@ -205,8 +210,8 @@ export function TaskListDialog({
             ) : null}
           </>
         )}
-      </DialogContent>
-    </Dialog>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   );
 }
 

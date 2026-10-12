@@ -1,10 +1,18 @@
 import type { Task, TaskMovePreview, User } from "@personal-os/domain";
 import { localDateTimeToUtc, parseLocalDate } from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import {
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from "@/components/responsive-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,9 +34,15 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+import { useWorkspacePreferences } from "../workspace-settings/preferences";
+import { taskCaptureList } from "./capture-default";
+import { TaskCreationProgress } from "./creation-progress";
 import { listAllTaskLists, listAllTaskProjects } from "./page.js";
 
 type TaskFields = {
@@ -49,27 +63,36 @@ type PendingMove = {
 };
 
 export function TaskDialog({
+  placement,
   close,
   task,
   user,
 }: {
   close: () => void;
   task: Task | undefined;
+  placement?: { listId: string; projectId: string | null } | undefined;
   user: User;
 }) {
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
+  const preferences = useWorkspacePreferences("tasks");
   const lists = useQuery({ queryFn: listAllTaskLists, queryKey: ["task-lists"] });
   const projects = useQuery({
     queryFn: listAllTaskProjects,
     queryKey: ["task-projects"],
   });
-  const requestedProjectId = searchParams.get("project") ?? "";
+  const requestedProjectId = placement
+    ? (placement.projectId ?? "")
+    : (searchParams.get("project") ?? "");
   const [currentTask, setCurrentTask] = useState(task);
-  const [listId, setListId] = useState(task?.listId ?? "");
-  const [projectId, setProjectId] = useState(task?.projectId ?? "");
+  const [listId, setListId] = useState(task?.listId ?? placement?.listId ?? "");
+  const [projectId, setProjectId] = useState(task?.projectId ?? placement?.projectId ?? "");
   const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
-  const inbox = lists.data?.items.find((list) => list.kind === "inbox");
+  const unscoped = !task && !placement && !searchParams.has("list") && !searchParams.has("project");
+  const captureList = taskCaptureList(
+    lists.data?.items ?? [],
+    unscoped ? preferences.data?.preferences.defaultCaptureListId : null,
+  );
   const activeLists = lists.data?.items.filter((list) => list.availability === "active") ?? [];
   const requestedProject = projects.data?.items.find(
     (project) =>
@@ -83,9 +106,19 @@ export function TaskDialog({
   );
 
   useEffect(() => {
-    if (listId) return;
-    setListId(requestedProject?.listId ?? requestedList?.id ?? inbox?.id ?? "");
-  }, [inbox?.id, listId, requestedList?.id, requestedProject?.listId]);
+    if (listId || (unscoped && preferences.isPending) || (requestedProjectId && projects.isPending))
+      return;
+    setListId(requestedProject?.listId ?? requestedList?.id ?? captureList?.id ?? "");
+  }, [
+    captureList?.id,
+    listId,
+    preferences.isPending,
+    projects.isPending,
+    requestedList?.id,
+    requestedProject?.listId,
+    requestedProjectId,
+    unscoped,
+  ]);
   useEffect(() => {
     if (!task && requestedProject && !projectId) setProjectId(requestedProject.id);
   }, [projectId, requestedProject, task]);
@@ -104,7 +137,8 @@ export function TaskDialog({
     close();
   };
 
-  const save = useMutation({
+  const save = useFeedbackMutation({
+    feedback: { action: "save this task", safeToRetry: false, form: true },
     mutationFn: async ({ fields }: { fields: TaskFields }) => {
       if (!task) {
         return api.createTask({
@@ -141,8 +175,7 @@ export function TaskDialog({
       setCurrentTask(movedTask);
       return api.updateTask(task.id, { ...fields, expectedRevision: movedTask.revision });
     },
-    onError: async (error) => {
-      toast.error(errorMessage(error));
+    onError: async (_error) => {
       await invalidateMaterial(queryClient);
     },
     onSuccess: async (result) => {
@@ -150,7 +183,8 @@ export function TaskDialog({
     },
   });
 
-  const confirmMove = useMutation({
+  const confirmMove = useFeedbackMutation({
+    feedback: { action: "move and save this task", safeToRetry: false, form: true },
     mutationFn: async () => {
       if (!task || !pendingMove) throw new Error("The Task move preview is no longer available.");
       const movedTask = await api.moveTask(task.id, {
@@ -168,14 +202,14 @@ export function TaskDialog({
         expectedRevision: movedTask.revision,
       });
     },
-    onError: async (error) => {
-      toast.error(errorMessage(error));
+    onError: async (_error) => {
       await invalidateMaterial(queryClient);
     },
     onSuccess: () => finish("Task moved and updated."),
   });
 
-  const transition = useMutation({
+  const transition = useFeedbackMutation({
+    feedback: { action: "update this task", safeToRetry: false, form: false },
     mutationFn: async (action: "cancel" | "complete" | "reopen" | "restore" | "trash") => {
       const persistedTask = currentTask ?? task;
       if (!persistedTask) throw new Error("Save the Task before changing its lifecycle.");
@@ -186,7 +220,6 @@ export function TaskDialog({
       if (action === "trash") return api.trashTask(persistedTask.id, input);
       return api.reopenTask(persistedTask.id, input);
     },
-    onError: (error) => toast.error(errorMessage(error)),
     onSuccess: (_result, action) => finish(taskActionResult(action)),
   });
 
@@ -215,12 +248,12 @@ export function TaskDialog({
   };
 
   const pending = save.isPending || confirmMove.isPending || transition.isPending;
-  const EditorRoot = task ? Sheet : Dialog;
-  const EditorContent = task ? SheetContent : DialogContent;
-  const EditorHeader = task ? SheetHeader : DialogHeader;
-  const EditorTitle = task ? SheetTitle : DialogTitle;
-  const EditorDescription = task ? SheetDescription : DialogDescription;
-  const EditorFooter = task ? SheetFooter : DialogFooter;
+  const EditorRoot = task ? Sheet : ResponsiveDialog;
+  const EditorContent = task ? SheetContent : ResponsiveDialogContent;
+  const EditorHeader = task ? SheetHeader : ResponsiveDialogHeader;
+  const EditorTitle = task ? SheetTitle : ResponsiveDialogTitle;
+  const EditorDescription = task ? SheetDescription : ResponsiveDialogDescription;
+  const EditorFooter = task ? SheetFooter : ResponsiveDialogFooter;
   return (
     <>
       <EditorRoot open={!pendingMove} onOpenChange={(open) => !open && !pendingMove && close()}>
@@ -228,7 +261,7 @@ export function TaskDialog({
           className={
             task
               ? "w-full overflow-y-auto sm:max-w-lg"
-              : "max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"
+              : "max-sm:px-4 max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg"
           }
         >
           <EditorHeader>
@@ -236,10 +269,16 @@ export function TaskDialog({
             <EditorDescription>
               Keep the commitment separate from its deadline and reserved time.
             </EditorDescription>
+            {!task ? <TaskCreationProgress step={3} total={3} /> : null}
           </EditorHeader>
+          <MutationFeedback feedback={transition.feedback} />
           {lists.isError ? (
             <div className="flex flex-col gap-3">
-              <InlineError error={lists.error} />
+              <InlineError
+                error={lists.error}
+                retry={lists.refetch}
+                stale={lists.data !== undefined}
+              />
               <Button onClick={() => lists.refetch()} type="button" variant="outline">
                 Retry Lists
               </Button>
@@ -247,13 +286,21 @@ export function TaskDialog({
           ) : null}
           {projects.isError ? (
             <div className="flex flex-col gap-3">
-              <InlineError error={projects.error} />
+              <InlineError
+                error={projects.error}
+                retry={projects.refetch}
+                stale={projects.data !== undefined}
+              />
               <Button onClick={() => projects.refetch()} type="button" variant="outline">
                 Retry Projects
               </Button>
             </div>
           ) : null}
-          <form className={task ? "px-4" : undefined} onSubmit={submit}>
+          <FeedbackForm
+            feedback={save.feedback}
+            className={task ? "px-4" : undefined}
+            onSubmit={submit}
+          >
             <FieldGroup>
               <Field>
                 <FieldLabel htmlFor="task-title">Task</FieldLabel>
@@ -280,6 +327,16 @@ export function TaskDialog({
                       </NativeSelectOption>
                     ))}
                   </NativeSelect>
+                  {unscoped &&
+                  lists.isSuccess &&
+                  preferences.data?.preferences.defaultCaptureListId &&
+                  captureList?.kind === "inbox" &&
+                  captureList.id === listId &&
+                  captureList.id !== preferences.data.preferences.defaultCaptureListId ? (
+                    <FieldDescription>
+                      Your default list is unavailable. This task will go to Inbox.
+                    </FieldDescription>
+                  ) : null}
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="task-project">Project</FieldLabel>
@@ -377,9 +434,7 @@ export function TaskDialog({
                 </FieldGroup>
               </details>
             </FieldGroup>
-            {save.isError || confirmMove.isError ? (
-              <InlineError error={save.error ?? confirmMove.error} />
-            ) : null}
+            <MutationFeedback feedback={confirmMove.feedback} />
             <EditorFooter className={task ? "mt-5 p-0" : "mt-5"}>
               <Button onClick={close} type="button" variant="outline">
                 Cancel
@@ -391,7 +446,7 @@ export function TaskDialog({
                 {save.isPending ? "Saving…" : task ? "Save changes" : "Create task"}
               </Button>
             </EditorFooter>
-          </form>
+          </FeedbackForm>
           {task ? (
             <div className="flex flex-col gap-4 px-4 pb-4">
               <details className="rounded-lg border border-border px-3 py-2">
@@ -465,7 +520,7 @@ export function TaskDialog({
                 open in the selected List.
               </DialogDescription>
             </DialogHeader>
-            {confirmMove.isError ? <InlineError error={confirmMove.error} /> : null}
+            <MutationFeedback feedback={confirmMove.feedback} />
             <DialogFooter>
               <Button
                 onClick={() => {

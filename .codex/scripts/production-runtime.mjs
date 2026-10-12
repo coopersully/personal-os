@@ -23,9 +23,9 @@ const CERTIFICATE_URL = "https://truststore.pki.rds.amazonaws.com/global/global-
 const CERTIFICATE_SHA256 = "e5bb2084ccf45087bda1c9bffdea0eb15ee67f0b91646106e466714f9de3c7e3";
 
 export function assertProductionAcknowledgement(environment) {
-  if (environment.ILO_PRODUCTION_RUNTIME !== ACKNOWLEDGEMENT) {
+  if (environment.PERSONAL_OS_PRODUCTION_RUNTIME !== ACKNOWLEDGEMENT) {
     throw new Error(
-      `Set ILO_PRODUCTION_RUNTIME=${ACKNOWLEDGEMENT} to acknowledge that every local action affects production.`,
+      `Set PERSONAL_OS_PRODUCTION_RUNTIME=${ACKNOWLEDGEMENT} to acknowledge that every local action affects production.`,
     );
   }
 }
@@ -280,7 +280,7 @@ function assumedAwsEnvironment(sourceProfile, region, sessionName) {
   );
   const partition = identity.Arn.split(":")[1] || "aws";
   const roleArn =
-    process.env.ILO_PRODUCTION_RUNTIME_ROLE_ARN ??
+    process.env.PERSONAL_OS_PRODUCTION_RUNTIME_ROLE_ARN ??
     `arn:${partition}:iam::${identity.Account}:role/personal-os-prod-local-production-runtime`;
   const assumption = awsJson(
     [
@@ -408,8 +408,8 @@ async function commandStart(options) {
     webPort: numberOption(options, "web-port"),
     webUrl: requiredOption(options, "web-url"),
   };
-  const region = process.env.ILO_PRODUCTION_AWS_REGION ?? "us-east-1";
-  const sourceProfile = process.env.ILO_PRODUCTION_SOURCE_PROFILE ?? "default";
+  const region = process.env.PERSONAL_OS_PRODUCTION_AWS_REGION ?? "us-east-1";
+  const sourceProfile = process.env.PERSONAL_OS_PRODUCTION_SOURCE_PROFILE ?? "default";
 
   mkdirSync(logsDir, { recursive: true, mode: 0o700 });
   if (existsSync(metadataPath)) {
@@ -437,7 +437,7 @@ async function commandStart(options) {
   process.once("SIGTERM", shutdown);
 
   try {
-    const sessionName = `ilo-local-${basename(root)
+    const sessionName = `personal-os-local-${basename(root)
       .replace(/[^a-zA-Z0-9+=,.@_-]/g, "-")
       .slice(0, 32)}-${process.pid}`;
     const awsEnvironment = assumedAwsEnvironment(sourceProfile, region, sessionName);
@@ -656,7 +656,7 @@ async function commandStart(options) {
       );
     }
 
-    process.stdout.write("[personal-os] ilo local production runtime is ready.\n");
+    process.stdout.write("[personal-os] personal-os local production runtime is ready.\n");
     process.stdout.write(`  App:       ${local.webUrl}\n`);
     process.stdout.write(`  API:       ${local.apiUrl}/health/ready\n`);
     process.stdout.write(`  MCP:       ${local.mcpUrl}/mcp\n`);

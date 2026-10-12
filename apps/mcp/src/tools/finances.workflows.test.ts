@@ -54,7 +54,7 @@ describe("Finance MCP workflows", () => {
     const tools = await client.listTools();
     expect(
       tools.tools.find((tool) => tool.name === "approve_finance_budget")?.description,
-    ).toContain("agent tokens cannot activate");
+    ).toContain("explicit finances:execute");
     await client.close();
     await server.close();
   });

@@ -123,10 +123,16 @@ describe("desktop action lifecycle", () => {
     }
     mocks.invoke.mockResolvedValueOnce({ action: "error", message: "Sign in again" });
     await emit("desktop-action");
-    expect(mocks.error).toHaveBeenLastCalledWith("Sign in again");
+    expect(mocks.error).toHaveBeenLastCalledWith(
+      "The desktop action failed. Try again from nohmi.",
+      { duration: Number.POSITIVE_INFINITY },
+    );
     mocks.invoke.mockResolvedValueOnce({ action: "error" });
     await emit("desktop-action");
-    expect(mocks.error).toHaveBeenLastCalledWith("The desktop action failed.");
+    expect(mocks.error).toHaveBeenLastCalledWith(
+      "The desktop action failed. Try again from nohmi.",
+      { duration: Number.POSITIVE_INFINITY },
+    );
     for (const payload of [
       null,
       { action: "open" },

@@ -21,6 +21,7 @@ extern "C" fn receive_action(data: *const c_char) {
         return;
     };
     if let Some(app) = APP.get() {
+        crate::updates::external_intent(app, value["action"].as_str().unwrap_or(""));
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             crate::lifecycle::action(app, value).await;
@@ -58,6 +59,12 @@ fn dispatch(value: Value) -> Result<Value, String> {
     Ok(result)
 }
 pub async fn call(app: &tauri::AppHandle, value: Value) -> Result<Value, String> {
+    if value["op"] == "quick_access" {
+        crate::updates::external_intent(app, "capture");
+        // If installation already committed, never mount a capture form that the
+        // imminent restart would discard. Otherwise the authority was released.
+        crate::updates::wait_for_startup(app).await;
+    }
     #[cfg(target_os = "macos")]
     {
         let (send, receive) = tokio::sync::oneshot::channel();
@@ -73,6 +80,9 @@ pub async fn call(app: &tauri::AppHandle, value: Value) -> Result<Value, String>
     {
         let _ = app;
         let operation = value["op"].as_str().unwrap_or("");
+        if operation.starts_with("ritual_") {
+            return Err("Desktop ritual presentation is available only on macOS. Configure rituals and view account history in Settings.".into());
+        }
         if operation.starts_with("keychain_") {
             let origin = value["serverUrl"].as_str().ok_or("Missing server origin")?;
             let entry = keyring::Entry::new("app.personal-os.desktop.session", origin)

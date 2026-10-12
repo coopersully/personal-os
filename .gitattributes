@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Stamp public source provenance when the Mac controller archives an exact commit.
+apps/api/src/release-revision.ts export-subst

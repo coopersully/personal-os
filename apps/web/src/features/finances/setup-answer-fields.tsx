@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { CurrencyInput } from "@/components/currency-input";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
@@ -123,12 +124,12 @@ export function SetupAnswerFields({
           <>
             <Field>
               <FieldLabel htmlFor="setup-floor">Reliable monthly take-home (USD)</FieldLabel>
-              <Input
+              <CurrencyInput
                 id="setup-floor"
                 inputMode="decimal"
                 disabled={pending}
                 value={income}
-                onChange={(event) => setIncome(event.target.value)}
+                onValueChange={(value) => setIncome(value)}
               />
             </Field>
             <Field>
@@ -159,11 +160,11 @@ export function SetupAnswerFields({
                 {debts ? (
                   <Field>
                     <FieldLabel htmlFor={`${row.id}-balance`}>Balance (USD)</FieldLabel>
-                    <Input
+                    <CurrencyInput
                       id={`${row.id}-balance`}
                       inputMode="decimal"
                       value={row.balance}
-                      onChange={(event) => update(row.id, { balance: event.target.value })}
+                      onValueChange={(value) => update(row.id, { balance: value })}
                     />
                   </Field>
                 ) : null}
@@ -175,11 +176,11 @@ export function SetupAnswerFields({
                         ? "Expected amount (USD), if known"
                         : "Monthly amount (USD), if known"}
                   </FieldLabel>
-                  <Input
+                  <CurrencyInput
                     id={`${row.id}-amount`}
                     inputMode="decimal"
                     value={row.amount}
-                    onChange={(event) => update(row.id, { amount: event.target.value })}
+                    onValueChange={(value) => update(row.id, { amount: value })}
                   />
                 </Field>
                 {!debts ? (

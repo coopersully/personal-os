@@ -76,6 +76,7 @@ import {
 import { deriveReimbursementStatus } from "./finance-reimbursement-service.js";
 import type { createFinanceService } from "./finance-service.js";
 import type { Principal } from "./types.js";
+import { requireWorkspaceExecution } from "./workspace-execution.js";
 
 type MutationContext = {
   principal: Principal;
@@ -453,6 +454,13 @@ function questionFromRow(row: typeof financeAgentActionReviews.$inferSelect): Fi
  * only source of bypass authority is the persisted Finance settings row.
  */
 export function createFinanceActionService({ db, finances, now }: FinanceActionServiceOptions) {
+  type ActionTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+  function actionTransaction<T>(
+    executor: ActionTransaction | undefined,
+    run: (tx: ActionTransaction) => Promise<T>,
+  ): Promise<T> {
+    return executor ? run(executor) : db.transaction(run);
+  }
   async function prepare(
     actionKind: SupportedActionKind,
     rawInput: Record<string, unknown>,
@@ -3419,14 +3427,14 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         .limit(limit);
       return rows.map(questionFromRow);
     },
-    async approve<T>(id: string, context: MutationContext): Promise<FinanceActionOutcome<T>> {
-      if (context.principal.actorType !== "user") {
-        throw new AppError(
-          "forbidden",
-          "Only an interactive user can approve a Finance action review.",
-        );
-      }
-      const approval = await db.transaction(async (tx) => {
+    async approve<T>(
+      id: string,
+      context: MutationContext,
+      executor?: ActionTransaction,
+    ): Promise<FinanceActionOutcome<T>> {
+      await requireWorkspaceExecution(executor ?? db, context.principal, "finances", now());
+      const approval = await actionTransaction(executor, async (tx) => {
+        await requireWorkspaceExecution(tx, context.principal, "finances", now());
         const [preview] = await tx
           .select()
           .from(financeAgentActionReviews)
@@ -3502,6 +3510,20 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             .update(financeAgentActionReviews)
             .set({ privatePayload: { ...payload, result }, status: "applied", updatedAt: now() })
             .where(eq(financeAgentActionReviews.id, review.id));
+          await tx.insert(auditEvents).values(
+            auditValues({
+              action: "finance.action_review_approved",
+              after: {
+                actionKind: review.actionKind,
+                fingerprint: review.fingerprint,
+                reviewId: review.id,
+              },
+              before: null,
+              entityId: review.id,
+              entityType: "finance_agent_action_review",
+              ...context,
+            }),
+          );
           return { result: result as T, status: "applied" as const };
         }
         const prepared: PreparedAction = {
@@ -3559,14 +3581,10 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         throw new AppError("conflict", approval.message);
       return approval as FinanceActionOutcome<T>;
     },
-    async dismiss(id: string, context: MutationContext) {
-      if (context.principal.actorType !== "user") {
-        throw new AppError(
-          "forbidden",
-          "Only an interactive user can dismiss a Finance action review.",
-        );
-      }
-      return db.transaction(async (tx) => {
+    async dismiss(id: string, context: MutationContext, executor?: ActionTransaction) {
+      await requireWorkspaceExecution(executor ?? db, context.principal, "finances", now());
+      return actionTransaction(executor, async (tx) => {
+        await requireWorkspaceExecution(tx, context.principal, "finances", now());
         const [review] = await tx
           .select()
           .from(financeAgentActionReviews)
@@ -3617,7 +3635,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
                 },
                 lastSafeError: {
                   code: "finance_maintenance_review_dismissed",
-                  message: "The user dismissed the proposed Finance maintenance turn.",
+                  message: "The proposed Finance maintenance turn was dismissed.",
                 },
                 leaseClaimId: null,
                 leaseExpiresAt: null,
@@ -3646,6 +3664,20 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             .where(eq(financeAgentActionReviews.id, review.id))
             .returning();
           if (!dismissed) throw new Error("The Finance action review could not be dismissed.");
+          await tx.insert(auditEvents).values(
+            auditValues({
+              action: "finance.action_review_dismissed",
+              after: {
+                actionKind: review.actionKind,
+                fingerprint: review.fingerprint,
+                reviewId: review.id,
+              },
+              before: null,
+              entityId: review.id,
+              entityType: "finance_agent_action_review",
+              ...context,
+            }),
+          );
           return reviewFromRow(dismissed);
         }
         return reviewFromRow(review);

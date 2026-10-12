@@ -4,7 +4,7 @@ import type {
   CalendarSourceFreshness,
   CalendarStatus,
 } from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
   AlertTriangleIcon,
@@ -42,7 +42,10 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, errorMessage } from "../../api.js";
+import { api } from "../../api.js";
+import { InlineError, QueryFeedback } from "../../components/async-state.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { calendarQueryKeys } from "./page.js";
 
 const unsupportedDimensions =
@@ -54,7 +57,8 @@ export function CalendarStewardshipPage() {
     queryFn: api.getCalendarStatus,
     queryKey: calendarQueryKeys.status,
   });
-  const assess = useMutation({
+  const assess = useFeedbackMutation({
+    feedback: { action: "assess the calendar" },
     mutationFn: () => api.createCalendarReview(),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: calendarQueryKeys.status });
@@ -62,7 +66,7 @@ export function CalendarStewardshipPage() {
   });
 
   if (status.isPending) return <CalendarStewardshipSkeleton />;
-  if (status.isError) {
+  if (status.isError && !status.data) {
     return (
       <CalendarStewardshipError
         error={status.error}
@@ -100,13 +104,8 @@ export function CalendarStewardshipPage() {
 
       <div aria-live="polite" className="contents">
         {assess.isSuccess ? <p className="sr-only">Assessment complete.</p> : null}
-        {assess.isError ? (
-          <Alert variant="destructive">
-            <AlertTriangleIcon aria-hidden="true" />
-            <AlertTitle>Assessment unavailable</AlertTitle>
-            <AlertDescription>{errorMessage(assess.error)}</AlertDescription>
-          </Alert>
-        ) : null}
+        <MutationFeedback feedback={assess.feedback} />
+        <QueryFeedback query={status} title="Couldn’t refresh workspace status." staleOnly />
       </div>
 
       <LifecyclePanel status={value} />
@@ -140,16 +139,7 @@ function CalendarStewardshipSkeleton() {
 function CalendarStewardshipError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-6 md:px-6">
-      <Alert variant="destructive">
-        <AlertTriangleIcon aria-hidden="true" />
-        <AlertTitle>Schedule health is unavailable</AlertTitle>
-        <AlertDescription>{errorMessage(error)}</AlertDescription>
-        <AlertAction>
-          <Button onClick={onRetry} size="sm" variant="outline">
-            Try again
-          </Button>
-        </AlertAction>
-      </Alert>
+      <InlineError error={error} title="Schedule health is unavailable" retry={onRetry} />
     </div>
   );
 }

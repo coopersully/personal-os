@@ -18,6 +18,7 @@ import {
 } from "@personal-os/domain";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { AppError } from "./errors.js";
+import { requireHostRunAuthority } from "./finance/host-run-authority.js";
 import { stableFinanceActionInput } from "./finance-action-identity.js";
 import type { createFinanceActionService, SupportedActionKind } from "./finance-action-service.js";
 import type { createFinanceService } from "./finance-service.js";
@@ -160,6 +161,18 @@ export function createFinanceChallengeService({ actions, db, finances, now }: Op
           .for("update")
           .limit(1);
         if (!challenge) throw new AppError("not_found", "The Finance challenge was not found.");
+        const [authorityRun] = await tx
+          .select()
+          .from(workspaceMaintenanceRuns)
+          .where(
+            and(
+              eq(workspaceMaintenanceRuns.id, challenge.runId),
+              eq(workspaceMaintenanceRuns.userId, context.principal.userId),
+            ),
+          )
+          .for("share");
+        if (!authorityRun) throw new AppError("not_found", "The Finance run was not found.");
+        await requireHostRunAuthority(tx, authorityRun, context.principal, now());
         if (challenge.state !== "prepared") {
           const submissionFingerprint = createHash("sha256")
             .update(stableFinanceActionInput(input))

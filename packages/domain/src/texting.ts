@@ -3,7 +3,7 @@ import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "./common.js";
 import { financeHumanWorkRefSchema } from "./finance/workflow-contracts.js";
 
-export const textingConsentVersion = "2026-08-28-v1" as const;
+export const textingConsentVersion = "2026-10-07-v2" as const;
 export const textingCountrySchema = z.enum(["US", "CA"]);
 export const textingConnectionStateSchema = z.enum([
   "active",
@@ -181,6 +181,9 @@ export function parseTextReply(
 
 export const startTextingVerificationInputSchema = z.object({
   consentAccepted: z.literal(true),
+  consentVersion: z.literal(textingConsentVersion, {
+    error: "Refresh nohmi and review the current SMS consent before requesting a code.",
+  }),
   country: textingCountrySchema,
   phoneNumber: z.string().trim().min(7).max(32),
 });

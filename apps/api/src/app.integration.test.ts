@@ -54,6 +54,12 @@ type RequestOptions = {
 };
 
 describe.sequential("ilo API", () => {
+  it("serves public desktop distribution status without requiring a session", async () => {
+    const response = await app.request("/v1/desktop-release");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ status: "disabled", release: null });
+  });
+
   let container: StartedPostgreSqlContainer;
   let database: DatabaseClient;
   let app: PersonalOsApp;
@@ -312,7 +318,7 @@ describe.sequential("ilo API", () => {
       capability: "unavailable",
       intents: [],
       preferences: [],
-      reason: "producer_not_registered",
+      reason: "delivery_not_enabled",
     });
     const unregisteredPublication = await agentRequest(
       fullAgent,
@@ -4911,7 +4917,7 @@ describe.sequential("ilo API", () => {
     });
   });
 
-  it("composes human-only budget policy management", async () => {
+  it("composes read-scoped budget policy management", async () => {
     const registration = await request("/v1/auth/register", {
       auth: "none",
       body: {
@@ -4945,13 +4951,8 @@ describe.sequential("ilo API", () => {
       headers: { authorization: `Bearer ${token}` },
     });
 
-    expect(rejected.status).toBe(403);
-    await expect(payload(rejected)).resolves.toMatchObject({
-      error: {
-        code: "forbidden",
-        message: "This operation requires an interactive user session.",
-      },
-    });
+    expect(rejected.status).toBe(200);
+    await expect(payload(rejected)).resolves.toEqual({ policies: [] });
   });
 
   it("enforces owner-issued, one-time invitations for private beta sign-up", async () => {
@@ -5082,17 +5083,21 @@ describe.sequential("ilo API", () => {
       .from(users)
       .where(inArray(users.email, fixtureEmails));
     expect(fixtureUsers).toHaveLength(qaFixtureAccounts.length);
-    const demo = fixtureUsers.find((record) => record.email === "demo+full@ilo.test");
-    const loaded = fixtureUsers.find((record) => record.email === "qa+loaded@ilo.test");
-    const onboarding = fixtureUsers.find((record) => record.email === "qa+onboarding-new@ilo.test");
-    const resumed = fixtureUsers.find((record) => record.email === "qa+onboarding-google@ilo.test");
-    const apple = fixtureUsers.find((record) => record.email === "qa+onboarding-apple@ilo.test");
-    const finances = fixtureUsers.find(
-      (record) => record.email === "qa+onboarding-finances@ilo.test",
+    const demo = fixtureUsers.find((record) => record.email === "demo+full@nohmi.test");
+    const loaded = fixtureUsers.find((record) => record.email === "qa+loaded@nohmi.test");
+    const onboarding = fixtureUsers.find(
+      (record) => record.email === "qa+onboarding-new@nohmi.test",
     );
-    const ready = fixtureUsers.find((record) => record.email === "qa+onboarding-ready@ilo.test");
-    const empty = fixtureUsers.find((record) => record.email === "qa+empty@ilo.test");
-    const degraded = fixtureUsers.find((record) => record.email === "qa+recovery@ilo.test");
+    const resumed = fixtureUsers.find(
+      (record) => record.email === "qa+onboarding-google@nohmi.test",
+    );
+    const apple = fixtureUsers.find((record) => record.email === "qa+onboarding-apple@nohmi.test");
+    const finances = fixtureUsers.find(
+      (record) => record.email === "qa+onboarding-finances@nohmi.test",
+    );
+    const ready = fixtureUsers.find((record) => record.email === "qa+onboarding-ready@nohmi.test");
+    const empty = fixtureUsers.find((record) => record.email === "qa+empty@nohmi.test");
+    const degraded = fixtureUsers.find((record) => record.email === "qa+recovery@nohmi.test");
     expect(demo).toBeDefined();
     expect(onboarding).toMatchObject({ emailVerifiedAt: null, setupStatus: "not_started" });
     expect(resumed).toMatchObject({ setupCurrentStep: "google", setupStatus: "in_progress" });
@@ -5212,7 +5217,7 @@ describe.sequential("ilo API", () => {
         expect.objectContaining({
           deletedAt: null,
           taskLifecycle: "open",
-          title: "Draft weekly product update",
+          title: "Draft weekly program update",
         }),
         expect.objectContaining({
           deletedAt: null,
@@ -5235,7 +5240,7 @@ describe.sequential("ilo API", () => {
         expect.objectContaining({ deletedAt: expect.any(Date), taskLifecycle: "open" }),
       ]),
     );
-    const draftTask = demoTasks.find((task) => task.title === "Draft weekly product update");
+    const draftTask = demoTasks.find((task) => task.title === "Draft weekly program update");
     expect(
       await database.db
         .select({
@@ -5253,7 +5258,7 @@ describe.sequential("ilo API", () => {
       },
     ]);
     const sameListMoveTask = demoTasks.find(
-      (task) => task.title === "Prepare launch follow-through",
+      (task) => task.title === "Prepare opening-weekend checklist",
     );
     const sameListProjects = demoTaskProjects.filter(
       (project) => project.listId === sameListMoveTask?.taskListId,
@@ -5279,7 +5284,7 @@ describe.sequential("ilo API", () => {
         .select()
         .from(taskProjects)
         .where(eq(taskProjects.userId, demo?.id ?? "")),
-    ).toHaveLength(3);
+    ).toHaveLength(7);
   });
 
   it("daily brief uses canonical lifecycle, deletion, and timing", async () => {
@@ -5408,6 +5413,7 @@ describe.sequential("ilo API", () => {
       status: "ready",
     });
     expect(ready.headers.get("x-ilo-drain-protocol")).toBe("quiesce-v1");
+    expect(ready.headers.get("cache-control")).toBe("no-store");
     const openApiDocument = await payload(await request("/openapi.json", { auth: "none" }));
     expect(openApiDocument.servers).toEqual([{ url: "https://api.example.com" }]);
     expect(openApiDocument.paths["/v1/calendars/status"].get.responses[200].description).toBe(
@@ -5482,6 +5488,32 @@ describe.sequential("ilo API", () => {
       currentStep: "google",
       dismissedAt: "2026-07-13T12:00:00.000Z",
       status: "dismissed",
+    });
+    const dismissedSetup = (await payload(await request("/v1/me"))).user.setup;
+    const preferences = await payload(
+      await request("/v1/setup", {
+        method: "PATCH",
+        body: { action: "preferences", selectedWorkspaces: ["tasks"] },
+      }),
+    );
+    expect(preferences.user.setup).toEqual({ ...dismissedSetup, selectedWorkspaces: ["tasks"] });
+    const completedSetup = (
+      await payload(
+        await request("/v1/setup", {
+          method: "PATCH",
+          body: { action: "complete" },
+        }),
+      )
+    ).user.setup;
+    const configured = await payload(
+      await request("/v1/setup", {
+        method: "PATCH",
+        body: { action: "preferences", selectedWorkspaces: ["calendar", "mail"] },
+      }),
+    );
+    expect(configured.user.setup).toEqual({
+      ...completedSetup,
+      selectedWorkspaces: ["calendar", "mail"],
     });
     expect((await request("/v1/weather")).status).toBe(400);
     weatherFetch.mockResolvedValueOnce(
@@ -5898,7 +5930,7 @@ describe.sequential("ilo API", () => {
           body: { idempotencyKey: "route-connect", provider: "plaid" },
         })
       ).status,
-    ).toBe(400);
+    ).toBe(503);
     expect(
       (
         await request("/v1/finances/transactions/classify", {
@@ -6386,7 +6418,7 @@ describe.sequential("ilo API", () => {
       ).status,
     ).toBe(400);
     expect((await payload(await request("/v1/access-tokens"))).tokens).toHaveLength(1);
-    expect((await request("/v1/connectors", { auth: "agent" })).status).toBe(403);
+    expect((await request("/v1/connectors", { auth: "agent" })).status).toBe(200);
     const financeGuidanceDraft = {
       categories: [],
       domain: "finances",
@@ -6657,6 +6689,10 @@ describe.sequential("ilo API", () => {
     const invalid = await request("/v1/desktop/activity?cursor=invalid");
     expect(invalid.status).toBe(400);
 
+    const privateCategory = await request("/v1/finances/categories", {
+      body: { name: "Private medical category" },
+    });
+    expect(privateCategory.status).toBe(200);
     const fullAgentToken = agentToken;
     const auditOnlyToken = await payload(
       await request("/v1/access-tokens", {
@@ -6671,6 +6707,13 @@ describe.sequential("ilo API", () => {
       await payload(await request("/v1/audit", { auth: "agent" }))
     ).events.filter((event: { action: string }) => event.action.startsWith("finance."));
     expect(auditOnlyFinanceEvents.length).toBeGreaterThan(0);
+    expect(auditOnlyFinanceEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "finance.category_saved", after: { saved: true } }),
+      ]),
+    );
+    expect(JSON.stringify(auditOnlyFinanceEvents)).not.toContain("Private medical category");
+
     expect(
       JSON.stringify(
         auditOnlyFinanceEvents.map((event: { after: unknown; before: unknown }) => ({

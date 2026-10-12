@@ -14,7 +14,10 @@ export function useDesktopActions(capture: (kind: "task" | "reminder" | "event")
     let disposed = false;
     const cleanup: Array<() => void> = [];
     const reportFailure = () => {
-      if (!disposed) toast.error("Desktop quick actions could not connect. Reopen nohmi to retry.");
+      if (!disposed)
+        toast.error("Desktop quick actions could not connect. Reopen nohmi to retry.", {
+          duration: Number.POSITIVE_INFINITY,
+        });
     };
     const receive = async () => {
       if (disposed) return;
@@ -27,7 +30,10 @@ export function useDesktopActions(capture: (kind: "task" | "reminder" | "event")
       if (disposed || !payload) return;
       if (payload.action === "open" && payload.path) navigate(payload.path);
       if (payload.action === "capture" && payload.kind) capture(payload.kind);
-      if (payload.action === "error") toast.error(payload.message ?? "The desktop action failed.");
+      if (payload.action === "error")
+        toast.error("The desktop action failed. Try again from nohmi.", {
+          duration: Number.POSITIVE_INFINITY,
+        });
     };
     const register = async () => {
       const registrations = await Promise.allSettled([

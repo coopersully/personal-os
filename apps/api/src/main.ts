@@ -4,6 +4,7 @@ import { serve } from "@hono/node-server";
 import { createDatabaseClient, migrateDatabase } from "@personal-os/database";
 import { createApp, type PersonalOsApp } from "./app.js";
 import { loadConfig } from "./config.js";
+import { financeReconciliationDiagnostic } from "./finance-reconciliation-errors.js";
 import {
   closeNodeHttpServer,
   createRuntimeLifecycle,
@@ -48,6 +49,13 @@ const scheduler = setInterval(() => {
     dispatchFinanceSetupIntegrity,
   );
 }, 60_000);
+const textingScheduler = setInterval(() => {
+  runtimeLifecycle.startBackgroundTask("scheduled-texting-recovery", dispatchTextingRecovery);
+  runtimeLifecycle.startBackgroundTask(
+    "scheduled-finance-notifications",
+    dispatchFinanceNotifications,
+  );
+}, 30_000);
 runtimeLifecycle.startBackgroundTask("startup-connector-sync", async () => {
   await app.syncDueConnectors().catch(() => {
     process.stderr.write("[personal-os] startup connector sync failed\n");
@@ -67,6 +75,8 @@ runtimeLifecycle.startBackgroundTask("startup-mail-maintenance", dispatchMailMai
 runtimeLifecycle.startBackgroundTask("startup-finance-sync", dispatchFinanceSync);
 runtimeLifecycle.startBackgroundTask("startup-finance-maintenance", dispatchFinanceMaintenance);
 runtimeLifecycle.startBackgroundTask("startup-finance-backfill", dispatchFinanceBackfill);
+runtimeLifecycle.startBackgroundTask("startup-texting-recovery", dispatchTextingRecovery);
+runtimeLifecycle.startBackgroundTask("startup-finance-notifications", dispatchFinanceNotifications);
 runtimeLifecycle.startBackgroundTask(
   "startup-finance-setup-integrity",
   dispatchFinanceSetupIntegrity,
@@ -111,6 +121,26 @@ async function dispatchFinanceBackfill(): Promise<void> {
     process.stderr.write(`[personal-os] finance learning backfill failed: ${String(error)}\n`);
     throw error;
   }
+}
+
+async function dispatchFinanceNotifications(): Promise<void> {
+  const pass = app.runFinanceNotifications();
+  if (pass)
+    await pass.catch((error: unknown) => {
+      process.stderr.write(
+        `[personal-os] Finance notification reconciliation failed: ${financeReconciliationDiagnostic(error)}\n`,
+      );
+      throw new Error("Finance notification reconciliation failed.");
+    });
+}
+
+async function dispatchTextingRecovery(): Promise<void> {
+  const pass = app.runTextingRecovery();
+  if (pass)
+    await pass.catch((error: unknown) => {
+      process.stderr.write(`[personal-os] Texting recovery failed: ${String(error)}\n`);
+      throw error;
+    });
 }
 
 async function dispatchFinanceSetupIntegrity(): Promise<void> {
@@ -170,7 +200,11 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
       closeDatabase: database.close,
       closeHttpServer: () => closeNodeHttpServer(server),
       lifecycle: runtimeLifecycle,
-      stopScheduling: () => clearInterval(scheduler),
+      stopScheduling: () => {
+        clearInterval(scheduler);
+        clearInterval(textingScheduler);
+        app.quiesceTextingRecovery();
+      },
       timeoutMs: config.apiShutdownTimeoutMs,
     });
     process.stdout.write("[personal-os] API drain completed successfully.\n");

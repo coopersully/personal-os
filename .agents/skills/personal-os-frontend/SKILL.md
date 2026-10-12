@@ -111,7 +111,8 @@ or chat surface.
   active workspace sidebar: Today has no contextual sidebar; Tasks owns
   Reminders. Goals, Motives, Reviews, and Activity belong to the account utility
   in Settings. Account configuration is a tenant of the shell: it uses the
-  shared frame, sidebar column, and app bar, but must not become a workspace,
+  shared frame and sidebar column, with a Settings page heading instead of an
+  app bar (see `docs/design/pages/settings.md`), but must not become a workspace,
   take a workspace identity, or enter the switcher. Only a standalone flow such
   as setup may replace the shell.
 - Combine only attributes that answer the same user question into one compact
@@ -139,6 +140,19 @@ or chat surface.
 - Update the page specification when a change establishes or revises a reusable
   interaction rule. UI and its specification must land together.
 
+## Menus and selection semantics
+
+Apply the app-wide [menu standards](../../../docs/design/system.md#menus-and-selection-controls-all-workspaces).
+Use `DropdownMenuItem` for commands/navigation, `DropdownMenuRadioGroup` and
+`DropdownMenuRadioItem` for mutually exclusive values, and `DropdownMenuCheckboxItem`
+for independent toggles. Shared trailing radio/checkbox indicators must remain visible
+when unchecked; do not append ad hoc checkmarks or nest interactive inputs in menu rows.
+Keep multi-select menus open while adjusting options. Reserve indicator space, constrain
+menus to the viewport, and separate destructive actions with a separator and destructive
+variant. Replace one-action overflow menus with accessible direct icon buttons.
+Verify keyboard navigation, selected/unselected/mixed/disabled states, and narrow layouts.
+These rules apply to every workspace and Settings, not only Tasks.
+
 ## Make user state honest
 
 Represent loading, empty, error, stale, reconnect, and capability states.
@@ -158,6 +172,27 @@ show what nohmi believes, whether the person stated it or nohmi inferred it, its
 scope, and allowed purposes, with direct promotion, correction, restriction, dispute, export, and
 deletion controls. Do not expose vector similarity, raw embeddings, or an unbounded memory dump as
 the primary experience.
+
+## Apply feedback consistently
+
+**Settings feedback invariant:** all settings errors and discrete action feedback MUST use
+Sonner. Never add inline pending/success/failure paragraphs, status rows, Alerts, banners, or
+cards for notification tests, connection tests, refreshes, permission requests, or native actions.
+Use one loading toast and update it on actual completion, with diagnostic next steps in its
+description. Do not replay cached success on page mount. Keep autosave success silent. Field
+corrections and actual permission/configuration state may remain inline but cannot replace the
+Sonner error. Test both the toast and the absence of inline action-result text. This overrides
+any generic inline-error guidance below; the canonical rule is `docs/design/feedback.md`.
+
+
+Follow `docs/design/feedback.md`. Use `useFeedbackMutation` with an explicit
+user-facing action and safe-retry classification. Render `MutationFeedback` for
+persistent failures; edit forms use `FeedbackForm`, named inputs, and field-name
+mapping instead of a second error banner. Prefer Sonner for transient action
+results. Preserve drafts, one-time secrets, and cached data after failed refresh;
+keep query recovery and stale status beside the affected work. Validate on
+submit/meaningful blur, never on the first keystroke. Confirm irreversible actions
+with `useConfirmAction`; keep feedback and focus reachable after menus close.
 
 ## Verify interaction behavior
 

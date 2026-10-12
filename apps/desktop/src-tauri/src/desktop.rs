@@ -6,7 +6,8 @@ use std::{
 use tauri::{Emitter, Manager};
 use tokio::sync::{watch, Mutex, Notify};
 
-pub const HOSTED_SERVER: &str = "https://api.ilo.coopersully.me";
+pub const HOSTED_SERVER: &str = "https://nohmi-api.coopersully.me";
+const LEGACY_HOSTED_SERVER: &str = "https://api.ilo.coopersully.me";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
@@ -49,6 +50,17 @@ pub struct DesktopSettings {
     pub launch_at_login: bool,
     pub pet_enabled: bool,
     pub pet_color: String,
+    pub pet_scale: f64,
+    pub pet_task_window: String,
+    pub pet_reminder_window: String,
+    pub pet_finance_window: String,
+    pub pet_tasks_include_overdue: bool,
+    pub pet_reminders_include_overdue: bool,
+    pub pet_show_rituals: bool,
+    pub pet_shoo_enabled: bool,
+    pub pet_shoo_sensitivity: String,
+    pub pet_sleep_enabled: bool,
+    pub pet_sleep_after_seconds: f64,
     pub pet_workspaces: Vec<String>,
     pub widget_workspaces: Vec<String>,
     pub notifications: NotificationSettings,
@@ -60,6 +72,17 @@ impl Default for DesktopSettings {
             launch_at_login: !cfg!(debug_assertions),
             pet_enabled: false,
             pet_color: "#C7D23C".into(),
+            pet_scale: 1.0,
+            pet_task_window: "today".into(),
+            pet_reminder_window: "today".into(),
+            pet_finance_window: "month".into(),
+            pet_tasks_include_overdue: true,
+            pet_reminders_include_overdue: true,
+            pet_show_rituals: false,
+            pet_shoo_enabled: false,
+            pet_shoo_sensitivity: "medium".into(),
+            pet_sleep_enabled: true,
+            pet_sleep_after_seconds: 3.0,
             pet_workspaces: vec!["tasks".into(), "reminders".into(), "calendar".into()],
             widget_workspaces: vec!["tasks".into(), "reminders".into(), "calendar".into()],
             notifications: NotificationSettings::default(),
@@ -69,6 +92,28 @@ impl Default for DesktopSettings {
 impl DesktopSettings {
     pub fn validate(&mut self) -> Result<(), String> {
         self.server_url = canonical_server(&self.server_url)?;
+        let windows = ["today", "week", "month", "next7", "next30", "allUpcoming"];
+        if !windows.contains(&self.pet_task_window.as_str())
+            || !windows.contains(&self.pet_reminder_window.as_str())
+        {
+            return Err("Choose a supported task or reminder date window.".into());
+        }
+        if !["today", "week", "month", "last30", "next30"]
+            .contains(&self.pet_finance_window.as_str())
+        {
+            return Err("Choose a supported finance date window.".into());
+        }
+        if !["low", "medium", "high"].contains(&self.pet_shoo_sensitivity.as_str()) {
+            return Err("Choose Low, Medium, or High shoo sensitivity.".into());
+        }
+        if !self.pet_scale.is_finite() || !(0.5..=2.0).contains(&self.pet_scale) {
+            return Err("Choose a pet scale between 50% and 200%.".into());
+        }
+        if !self.pet_sleep_after_seconds.is_finite()
+            || !(1.0..=300.0).contains(&self.pet_sleep_after_seconds)
+        {
+            return Err("Choose an idle delay between 1 and 300 seconds.".into());
+        }
         if !crate::is_hex_color(&self.pet_color) {
             return Err("Choose a six-digit pet color.".into());
         }
@@ -113,6 +158,13 @@ impl DesktopSettings {
         Ok(())
     }
 }
+fn migrate_legacy_hosted_server(settings: &mut DesktopSettings) -> bool {
+    if settings.server_url != LEGACY_HOSTED_SERVER {
+        return false;
+    }
+    settings.server_url = HOSTED_SERVER.into();
+    true
+}
 pub fn canonical_server(input: &str) -> Result<String, String> {
     let url = url::Url::parse(input.trim()).map_err(|_| "Enter a valid API server URL.")?;
     let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
@@ -132,13 +184,35 @@ pub fn api_path(path: &str) -> Result<(), String> {
     let pathname = path.split('?').next().unwrap_or("");
     if !pathname.starts_with("/v1/")
         || path.contains(['\\', '#', '\r', '\n'])
-        || pathname.contains('%')
+        || (pathname.contains('%') && !encoded_ritual_response_path(pathname))
         || pathname.split('/').any(|p| p == ".." || p == ".")
     {
         return Err("Invalid API request path.".into());
     }
     Ok(())
 }
+fn encoded_ritual_response_path(path: &str) -> bool {
+    let parts: Vec<_> = path.split('/').collect();
+    if parts.len() != 7
+        || parts[1..4] != ["v1", "rituals", "occurrences"]
+        || parts[5] != "responses"
+        || parts[4].is_empty()
+        || !parts[4]
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        return false;
+    }
+    crate::ritual::decode_segment(parts[6]).is_ok_and(|step| {
+        !step.is_empty()
+            && step != "."
+            && step != ".."
+            && !step
+                .chars()
+                .any(|c| c.is_control() || matches!(c, '/' | '\\' | '%'))
+    })
+}
+
 pub struct DesktopState {
     pub settings: Mutex<DesktopSettings>,
     pub settings_path: PathBuf,
@@ -157,7 +231,8 @@ impl DesktopState {
         let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let settings_path = dir.join("desktop.json");
-        let mut settings = if settings_path.exists() {
+        let settings_exist = settings_path.exists();
+        let mut settings = if settings_exist {
             serde_json::from_slice::<DesktopSettings>(
                 &std::fs::read(&settings_path).map_err(|e| e.to_string())?,
             )
@@ -165,12 +240,22 @@ impl DesktopState {
         } else {
             DesktopSettings::default()
         };
-        if cfg!(debug_assertions) && !settings_path.exists() {
+        if cfg!(debug_assertions) && !settings_exist {
             settings.server_url = option_env!("VITE_API_BASE_URL")
                 .unwrap_or("http://localhost:8787")
                 .into();
         }
+        let migrated = migrate_legacy_hosted_server(&mut settings);
         settings.validate()?;
+        if migrated {
+            let temporary = settings_path.with_extension("tmp");
+            std::fs::write(
+                &temporary,
+                serde_json::to_vec_pretty(&settings).map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+            std::fs::rename(temporary, &settings_path).map_err(|e| e.to_string())?;
+        }
         Ok(Self {
             settings: Mutex::new(settings),
             settings_path,
@@ -206,18 +291,134 @@ pub async fn desktop_settings(app: tauri::AppHandle) -> Result<serde_json::Value
         .await
         .clone();
     Ok(
-        serde_json::json!({"settings":settings,"native":native,"hostedServer":HOSTED_SERVER,"wallpaperError":wallpaper_error}),
+        serde_json::json!({"settings":settings,"native":native,"hostedServer":HOSTED_SERVER,"wallpaperError":wallpaper_error,"accountId":app.state::<DesktopState>().account_id.lock().await.clone()}),
     )
 }
+fn server_switch_cleanup(
+    old_origin: &str,
+    old_account: Option<&str>,
+    new_origin: &str,
+) -> Vec<serde_json::Value> {
+    let mut operations = vec![serde_json::json!({"op":"clear"})];
+    if let Some(account) = old_account {
+        operations.push(serde_json::json!({"op":"ritual_store_delete","identity":format!("{old_origin}|{account}")}));
+    }
+    operations.push(
+        serde_json::json!({"op":"ritual_store_delete","identity":format!("recovery|{old_origin}")}),
+    );
+    operations.push(serde_json::json!({"op":"keychain_delete","serverUrl":old_origin}));
+    // Switching always starts signed out, including a previously used destination.
+    operations.push(serde_json::json!({"op":"keychain_delete","serverUrl":new_origin}));
+    operations
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsIdentity {
+    server_url: String,
+    account_id: Option<String>,
+}
+impl SettingsIdentity {
+    fn validate(&self, server: &str, account: Option<&str>) -> Result<(), String> {
+        if self.server_url != server || self.account_id.as_deref() != account {
+            Err("Your account changed. Reopen desktop settings.".into())
+        } else {
+            Ok(())
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn desktop_save_settings(
     app: tauri::AppHandle,
-    mut settings: DesktopSettings,
+    settings: DesktopSettings,
+    preserve_pet_appearance: Option<bool>,
+    expected_identity: SettingsIdentity,
 ) -> Result<serde_json::Value, String> {
+    save_settings(
+        app,
+        SettingsChange::Replace(
+            settings,
+            preserve_pet_appearance.unwrap_or(false),
+            expected_identity,
+        ),
+    )
+    .await
+}
+pub async fn disable_pet(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    save_settings(app, SettingsChange::DisablePet).await
+}
+enum SettingsChange {
+    Replace(DesktopSettings, bool, SettingsIdentity),
+    DisablePet,
+    Appearance(AppearanceEdit),
+}
+async fn save_settings(
+    app: tauri::AppHandle,
+    replacement: SettingsChange,
+) -> Result<serde_json::Value, String> {
+    // Match mutation lock order: ritual fence, then settings/account state.
+    let ritual_runtime = app.state::<crate::ritual::RitualRuntime>();
+    let _ritual_guard = ritual_runtime.lock.lock().await;
+    let expected_identity = match &replacement {
+        SettingsChange::Replace(_, _, identity) => Some(identity.clone()),
+        _ => None,
+    };
+    let mut settings = match replacement {
+        SettingsChange::Replace(mut settings, preserve_appearance, _) => {
+            if preserve_appearance {
+                let current = app.state::<DesktopState>().settings.lock().await.clone();
+                settings.pet_color = current.pet_color;
+                settings.pet_scale = current.pet_scale;
+            }
+            settings
+        }
+        SettingsChange::DisablePet => {
+            let mut settings = app.state::<DesktopState>().settings.lock().await.clone();
+            settings.pet_enabled = false;
+            settings
+        }
+        SettingsChange::Appearance(edit) => {
+            let state = app.state::<DesktopState>();
+            let mut settings = state.settings.lock().await.clone();
+            if settings.server_url != edit.server_url
+                || *state.account_id.lock().await != edit.account_id
+            {
+                return Err("Your account changed. Reopen pet settings.".into());
+            }
+            let session = crate::native::call(
+                &app,
+                serde_json::json!({"op":"pet_appearance_session","sessionId":edit.session_id}),
+            )
+            .await?;
+            if session["accepted"] != true {
+                return Err("Reopen pet settings to change appearance.".into());
+            }
+            settings.pet_color = edit.color;
+            settings.pet_scale = edit.scale;
+            settings
+        }
+    };
     settings.validate()?;
+    let switching =
+        app.state::<DesktopState>().settings.lock().await.server_url != settings.server_url;
+    if switching {
+        crate::ritual::require_synced(&app).await?;
+    }
     let state = app.state::<DesktopState>();
     let mut current = state.settings.lock().await;
+    if let Some(identity) = expected_identity {
+        identity.validate(
+            &current.server_url,
+            state.account_id.lock().await.as_deref(),
+        )?;
+    }
     let switched = current.server_url != settings.server_url;
+    let old_origin = current.server_url.clone();
+    let old_account = match state.account_id.lock().await.clone() {
+        Some(account) => Some(account),
+        None => crate::ritual::recovery_account(&app, &old_origin).await?,
+    };
     let temporary = state.settings_path.with_extension("tmp");
     std::fs::write(
         &temporary,
@@ -249,29 +450,38 @@ pub async fn desktop_save_settings(
     }
     if switched {
         state.invalidate();
-        crate::native::call(&app, serde_json::json!({"op":"clear"})).await?;
+        crate::ritual::hide(&app).await;
         *state.account_id.lock().await = None;
         *state.pending_action.lock().await = None;
         *state.deferred_action.lock().await = None;
-        if let Err(error) = crate::native::call(
-            &app,
-            serde_json::json!({"op":"keychain_delete","serverUrl":settings.server_url}),
-        )
-        .await
+        for operation in
+            server_switch_cleanup(&old_origin, old_account.as_deref(), &settings.server_url)
         {
-            // Restore the committed origin if its previous session could not be cleared.
-            std::fs::write(
-                &temporary,
-                serde_json::to_vec_pretty(&*current).map_err(|e| e.to_string())?,
-            )
-            .map_err(|e| e.to_string())?;
-            std::fs::rename(&temporary, &state.settings_path).map_err(|e| e.to_string())?;
-            let _ = crate::native::call(
-                &app,
-                serde_json::json!({"op":"configure","settings":*current}),
-            )
-            .await;
-            return Err(error);
+            if !cfg!(target_os = "macos")
+                && operation["op"]
+                    .as_str()
+                    .is_some_and(|op| op.starts_with("ritual_"))
+            {
+                continue;
+            }
+            if let Err(error) = crate::native::call(&app, operation).await {
+                // Never publish a destination whose old private state could not
+                // be purged. Completed deletions stay deleted; restoring the old
+                // origin can require signing in again, but never restores secrets.
+                std::fs::write(
+                    &temporary,
+                    serde_json::to_vec_pretty(&*current).map_err(|e| e.to_string())?,
+                )
+                .map_err(|e| e.to_string())?;
+                std::fs::rename(&temporary, &state.settings_path).map_err(|e| e.to_string())?;
+                let _ = crate::native::call(
+                    &app,
+                    serde_json::json!({"op":"configure","settings":*current}),
+                )
+                .await;
+                let _ = app.emit("desktop-session-invalidated", ());
+                return Err(format!("Could not clear the previous desktop session. The previous server remains selected; sign in again if needed. {error}"));
+            }
         }
     }
     if !switched {
@@ -301,7 +511,7 @@ pub async fn desktop_save_settings(
         serde_json::json!({"serverChanged":switched}),
     )
     .map_err(|e| e.to_string())?;
-    desktop_settings(app).await
+    desktop_settings(app.clone()).await
 }
 #[tauri::command]
 pub async fn desktop_native_action(
@@ -310,10 +520,12 @@ pub async fn desktop_native_action(
 ) -> Result<serde_json::Value, String> {
     if ![
         "request_notification_permission",
+        "request_accessibility_permission",
         "test_notification",
         "reset_pet_position",
         "quick_access",
         "open_notification_settings",
+        "open_login_settings",
     ]
     .contains(&action.as_str())
     {
@@ -325,7 +537,108 @@ pub async fn desktop_native_action(
 mod tests {
     use super::*;
     #[test]
+    fn settings_writes_require_the_original_server_and_account() {
+        let identity: SettingsIdentity =
+            serde_json::from_str(r#"{"serverUrl":"https://example.com","accountId":"account-a"}"#)
+                .unwrap();
+        assert!(identity
+            .validate("https://example.com", Some("account-a"))
+            .is_ok());
+        assert!(identity
+            .validate("https://other.example.com", Some("account-a"))
+            .is_err());
+        assert!(identity
+            .validate("https://example.com", Some("account-b"))
+            .is_err());
+        assert!(identity.validate("https://example.com", None).is_err());
+        let signed_out = SettingsIdentity {
+            server_url: identity.server_url,
+            account_id: None,
+        };
+        assert!(signed_out.validate("https://example.com", None).is_ok());
+        assert!(signed_out
+            .validate("https://example.com", Some("account-a"))
+            .is_err());
+    }
+    #[test]
+    fn appearance_edits_validate_revision_and_native_values() {
+        let mut edit = AppearanceEdit {
+            server_url: "https://example.com".into(),
+            account_id: None,
+            session_id: "session".into(),
+            revision: 1,
+            color: "#FFFFFF".into(),
+            scale: 1.0,
+        };
+        assert!(edit.validate().is_ok());
+        for revision in [0, i32::MAX as u64 + 1] {
+            edit.revision = revision;
+            assert!(edit.validate().is_err());
+        }
+        edit.revision = 1;
+        for color in ["red", "#fff", "#GGGGGG"] {
+            edit.color = color.into();
+            assert!(edit.validate().is_err());
+        }
+        edit.color = "#000000".into();
+        edit.scale = f64::NAN;
+        assert!(edit.validate().is_err());
+        edit.scale = 1.0;
+        edit.session_id.clear();
+        assert!(edit.validate().is_err());
+    }
+    #[test]
+    fn shoo_preferences_default_and_validate() {
+        let mut settings: DesktopSettings = serde_json::from_str("{}").unwrap();
+        assert!(!settings.pet_shoo_enabled);
+        assert_eq!(settings.pet_shoo_sensitivity, "medium");
+        settings.pet_shoo_sensitivity = "unknown".into();
+        assert!(settings.validate().is_err());
+        for sensitivity in ["low", "medium", "high"] {
+            settings.pet_shoo_sensitivity = sensitivity.into();
+            assert!(settings.validate().is_ok());
+        }
+    }
+    #[test]
+    fn sleep_preferences_default_and_validate() {
+        let mut settings: DesktopSettings = serde_json::from_str("{}").unwrap();
+        assert!(settings.pet_sleep_enabled);
+        assert_eq!(settings.pet_sleep_after_seconds, 3.0);
+        for delay in [0.0, -1.0, 301.0, f64::NAN, f64::INFINITY] {
+            settings.pet_sleep_after_seconds = delay;
+            assert!(settings.validate().is_err());
+        }
+        settings.pet_sleep_after_seconds = 60.0;
+        settings.pet_sleep_enabled = false;
+        settings.validate().unwrap();
+        let restored: DesktopSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert!(!restored.pet_sleep_enabled);
+        assert_eq!(restored.pet_sleep_after_seconds, 60.0);
+    }
+    #[test]
+    fn pet_scale_defaults_and_rejects_unsafe_sizes() {
+        let mut settings: DesktopSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.pet_scale, 1.0);
+        for scale in [0.5, 1.0, 2.0] {
+            settings.pet_scale = scale;
+            assert!(settings.validate().is_ok());
+        }
+        for scale in [0.49, 2.01, f64::NAN, f64::INFINITY] {
+            settings.pet_scale = scale;
+            assert!(settings.validate().is_err());
+        }
+    }
+    #[test]
     fn server_origins_are_canonical_and_transport_safe() {
+        assert_eq!(
+            DesktopSettings::default().server_url,
+            "https://nohmi-api.coopersully.me"
+        );
+        let mut legacy = DesktopSettings::default();
+        legacy.server_url = "https://api.ilo.coopersully.me".into();
+        assert!(migrate_legacy_hosted_server(&mut legacy));
+        assert_eq!(legacy.server_url, "https://nohmi-api.coopersully.me");
         assert_eq!(
             canonical_server("https://EXAMPLE.com:443/").unwrap(),
             "https://example.com"
@@ -361,6 +674,45 @@ mod tests {
         assert!(api_path("/v1/tasks?completed=false").is_ok());
     }
     #[test]
+    fn server_switch_purges_old_private_state_before_destination_credential() {
+        let operations =
+            server_switch_cleanup("https://old.test", Some("account"), "https://new.test");
+        assert_eq!(
+            operations,
+            vec![
+                serde_json::json!({"op":"clear"}),
+                serde_json::json!({"op":"ritual_store_delete","identity":"https://old.test|account"}),
+                serde_json::json!({"op":"ritual_store_delete","identity":"recovery|https://old.test"}),
+                serde_json::json!({"op":"keychain_delete","serverUrl":"https://old.test"}),
+                serde_json::json!({"op":"keychain_delete","serverUrl":"https://new.test"}),
+            ]
+        );
+        let signed_out = server_switch_cleanup("https://old.test", None, "https://new.test");
+        assert_eq!(signed_out.len(), 4);
+        assert!(signed_out
+            .iter()
+            .all(|operation| operation["identity"] != "https://old.test|account"));
+    }
+
+    #[test]
+    fn ritual_response_paths_allow_safe_encoded_ids_only() {
+        for id in ["wake%20time", "%E2%98%80", "plus%2Bsign"] {
+            assert!(api_path(&format!("/v1/rituals/occurrences/123-ab/responses/{id}")).is_ok());
+        }
+        for id in [
+            "%2e%2e", "%2e", "%2F", "%5C", "%00", "%0A", "%25", "%FF", "%",
+        ] {
+            assert!(
+                api_path(&format!("/v1/rituals/occurrences/123-ab/responses/{id}")).is_err(),
+                "accepted {id}"
+            );
+        }
+        assert!(api_path("/v1/tasks/%E2%98%80").is_err());
+        assert!(api_path("/v1/rituals/occurrences/%2e%2e/responses/okay").is_err());
+        assert!(api_path("/v1/rituals/occurrences/123/responses/x%20y/extra").is_err());
+    }
+
+    #[test]
     fn preferences_reject_invalid_color_and_partial_quiet_hours() {
         let mut value = DesktopSettings::default();
         value.pet_color = "red".into();
@@ -380,4 +732,98 @@ pub async fn desktop_take_action(app: tauri::AppHandle) -> Option<serde_json::Va
         .lock()
         .await
         .take()
+}
+
+#[tauri::command]
+pub async fn desktop_preview_pet_scale(app: tauri::AppHandle, scale: f64) -> Result<(), String> {
+    if !scale.is_finite() || !(0.5..=2.0).contains(&scale) {
+        return Err("Invalid pet scale.".into());
+    }
+    crate::native::call(
+        &app,
+        serde_json::json!({"op":"preview_pet_scale","scale":scale}),
+    )
+    .await?;
+    Ok(())
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AppearanceEdit {
+    server_url: String,
+    account_id: Option<String>,
+    session_id: String,
+    revision: u64,
+    color: String,
+    scale: f64,
+}
+impl AppearanceEdit {
+    fn validate(&self) -> Result<(), String> {
+        let mut settings = DesktopSettings {
+            pet_color: self.color.clone(),
+            pet_scale: self.scale,
+            ..Default::default()
+        };
+        settings.validate()?;
+        if self.session_id.is_empty()
+            || self.session_id.len() > 64
+            || self.revision == 0
+            || self.revision > i32::MAX as u64
+        {
+            return Err("Invalid appearance session.".into());
+        }
+        Ok(())
+    }
+}
+#[tauri::command]
+pub async fn desktop_begin_pet_appearance(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<serde_json::Value, String> {
+    if window.label() != "main" {
+        return Err("Open pet settings to change appearance.".into());
+    }
+    let runtime = app.state::<crate::ritual::RitualRuntime>();
+    let _guard = runtime.lock.lock().await;
+    let state = app.state::<DesktopState>();
+    let settings = state.settings.lock().await;
+    let account = state.account_id.lock().await;
+    let mut value =
+        crate::native::call(&app, serde_json::json!({"op":"begin_pet_appearance"})).await?;
+    value["serverUrl"] = serde_json::json!(settings.server_url);
+    value["accountId"] = serde_json::json!(*account);
+    Ok(value)
+}
+#[tauri::command]
+pub async fn desktop_preview_pet_appearance(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    edit: AppearanceEdit,
+) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("Open pet settings to change appearance.".into());
+    }
+    edit.validate()?;
+    let state = app.state::<DesktopState>();
+    let settings = state.settings.lock().await;
+    let account = state.account_id.lock().await;
+    if settings.server_url != edit.server_url || *account != edit.account_id {
+        return Err("Your account changed. Reopen pet settings.".into());
+    }
+    crate::native::call(&app, serde_json::json!({"op":"preview_pet_appearance","sessionId":edit.session_id,"revision":edit.revision,"color":edit.color,"scale":edit.scale})).await?;
+    Ok(())
+}
+#[tauri::command]
+pub async fn desktop_save_pet_appearance(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    edit: AppearanceEdit,
+) -> Result<serde_json::Value, String> {
+    if window.label() != "main" {
+        return Err("Open pet settings to change appearance.".into());
+    }
+    edit.validate()?;
+    let result = save_settings(app.clone(), SettingsChange::Appearance(edit.clone())).await?;
+    crate::native::call(&app, serde_json::json!({"op":"finish_pet_appearance","sessionId":edit.session_id,"revision":edit.revision})).await?;
+    Ok(result)
 }

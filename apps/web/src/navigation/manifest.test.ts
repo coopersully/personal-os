@@ -11,11 +11,22 @@ import {
 } from "./manifest.js";
 
 describe("workspace navigation ownership", () => {
+  it("keeps decision queues inside each owning workspace", () => {
+    for (const workspace of ["calendar", "tasks", "mail", "finances"]) {
+      expect(navigationOwnerForLocation(`/${workspace}/decisions`)).toEqual({
+        kind: "workspace",
+        workspace,
+      });
+    }
+  });
   it("assigns every route family to a workspace or the account utility", () => {
     expect(navigationOwnerForLocation("/goals")).toEqual({ kind: "account-utility" });
     expect(navigationOwnerForLocation("/motives")).toEqual({ kind: "account-utility" });
     expect(navigationOwnerForLocation("/activity")).toEqual({ kind: "account-utility" });
-    expect(navigationOwnerForLocation("/reviews")).toEqual({ kind: "account-utility" });
+    expect(navigationOwnerForLocation("/reviews")).toEqual({
+      kind: "workspace",
+      workspace: "today",
+    });
     expect(navigationOwnerForLocation("/reminders")).toEqual({
       kind: "workspace",
       workspace: "tasks",

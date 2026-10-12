@@ -85,6 +85,34 @@ const violations = [];
 
 const pairs = [
   {
+    background: "--accent",
+    foreground: "--accent-foreground",
+    maxDelta: 5,
+    min: 4.5,
+    name: "quiet interaction",
+  },
+  {
+    background: "--canvas",
+    foreground: "--surface",
+    maxDelta: 0.15,
+    min: 1.16,
+    name: "canvas/card separation",
+  },
+  ...["--canvas", "--surface", "--sidebar"].map((background) => ({
+    background,
+    foreground: "--popover",
+    maxDelta: 0.75,
+    min: 1.1,
+    name: `overlay separation from ${background}`,
+  })),
+  ...["--popover", "--selection"].map((background) => ({
+    background,
+    foreground: "--content-secondary",
+    maxDelta: 4,
+    min: 4.5,
+    name: `supporting content on ${background}`,
+  })),
+  {
     background: "--canvas",
     foreground: "--content-primary",
     maxDelta: 2,
@@ -235,10 +263,27 @@ if (globalButtonRule?.[1] && /\bcolor\s*:\s*inherit\b/.test(globalButtonRule[1])
 }
 
 for (const match of stylesheet.matchAll(/#[\da-f]{3,8}\b|rgba\(/gi)) {
+  if (/^#(?:fff(?:fff)?|000(?:000)?)$/i.test(match[0])) {
+    violations.push(
+      `Pure white/black ${match[0]} is not permitted in the app theme; use a neutral scale tone.`,
+    );
+  }
   const index = match.index ?? -1;
   if (!tokenBlockRanges.some(([start, end]) => index >= start && index < end)) {
     const line = stylesheet.slice(0, index).split("\n").length;
     violations.push(`styles.css:${line} uses ${match[0]} outside the semantic token blocks.`);
+  }
+}
+
+// Page overrides must share the primitive radius scale, rather than bypass it.
+for (const match of stylesheet.matchAll(/border-radius:\s*([^;]+);/g)) {
+  const value = match[1];
+  if (
+    /(?<![\w-])(?:\d*\.)?\d+(?:px|rem|em)/.test(value) &&
+    value !== "999px" &&
+    value !== "min(var(--radius-sm), 0.3em)"
+  ) {
+    violations.push(`Use a shared radius token instead of border-radius: ${value}.`);
   }
 }
 

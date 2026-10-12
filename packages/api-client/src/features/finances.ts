@@ -10,6 +10,7 @@ import type {
   CreateFinanceBudgetPolicyInput,
   CreateFinanceBudgetRevisionProposalInput,
   CreateFinanceBudgetVersionInput,
+  CreateFinanceCategoryInput,
   CreateFinanceContextualQuestionInput,
   CreateFinanceTransactionInput,
   DesignateFinanceBudgetBaselineInput,
@@ -41,6 +42,7 @@ import type {
   FinanceCategorizationProposal,
   FinanceCategorizationProposalPage,
   FinanceCategory,
+  FinanceConfiguration,
   FinanceContextualQuestionResult,
   FinanceCsvImportInput,
   FinanceDomainOutcome,
@@ -72,6 +74,9 @@ import type {
   FinanceReimbursementQuestionAnswer,
   FinanceReviewCase,
   FinanceReviewDecisionInput,
+  FinanceReviewHistoryItem,
+  FinanceReviewHistoryPage,
+  FinanceReviewHistoryQuery,
   FinanceRule,
   FinanceScenarioInput,
   FinanceScenarioResult,
@@ -306,6 +311,9 @@ export function createFinanceApi(request: FinanceRequest) {
       return response.review;
     },
     createFinanceBudget,
+    async getFinanceConfiguration(): Promise<FinanceConfiguration> {
+      return request("/v1/finances/configuration");
+    },
     async setupFinances(input: FinanceSetupInput): Promise<FinanceToolResult<FinanceSetupPayload>> {
       return request("/v1/finances/setup", {
         body: JSON.stringify(input),
@@ -643,6 +651,13 @@ export function createFinanceApi(request: FinanceRequest) {
       const response = await request<{ export: FinanceExport }>("/v1/finances/export");
       return response.export;
     },
+    async createFinanceCategory(input: CreateFinanceCategoryInput): Promise<FinanceCategory> {
+      const response = await request<{ category: FinanceCategory }>("/v1/finances/categories", {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+      return response.category;
+    },
     async getFinanceCategories(): Promise<FinanceCategory[]> {
       const response = await request<{ categories: FinanceCategory[] }>("/v1/finances/categories");
       return response.categories;
@@ -688,6 +703,18 @@ export function createFinanceApi(request: FinanceRequest) {
     },
     async getFinanceInbox(): Promise<FinanceToolResult<FinanceInboxCase[]>> {
       return request("/v1/finances/inbox");
+    },
+    async listFinanceReviewHistory(
+      query: Partial<FinanceReviewHistoryQuery> = {},
+    ): Promise<FinanceReviewHistoryPage> {
+      const search = new URLSearchParams();
+      if (query.limit !== undefined) search.set("limit", String(query.limit));
+      if (query.cursor !== undefined) search.set("cursor", query.cursor);
+      const suffix = search.size ? `?${search.toString()}` : "";
+      return request(`/v1/finances/inbox/history${suffix}`);
+    },
+    async getFinanceReviewHistoryItem(id: string): Promise<FinanceReviewHistoryItem> {
+      return request(`/v1/finances/inbox/history/${encodeURIComponent(id)}`);
     },
     async answerFinanceReview(
       id: string,
@@ -736,9 +763,20 @@ export function createFinanceApi(request: FinanceRequest) {
     ): Promise<FinanceToolResult<FinanceAccountConnection>> {
       return request(`/v1/finances/account-connections/${encodeURIComponent(id)}`);
     },
-    async startFinanceAccountConnection(
-      input: StartFinanceAccountConnectionInput,
+    async completeFinanceAccountConnection(
+      id: string,
     ): Promise<FinanceToolResult<FinanceAccountConnection>> {
+      return request(`/v1/finances/account-connections/${encodeURIComponent(id)}/complete`, {
+        method: "POST",
+      });
+    },
+    async startFinanceAccountConnection(input: StartFinanceAccountConnectionInput): Promise<
+      FinanceToolResult<{
+        connectionId: string;
+        status: FinanceAccountConnection["status"];
+        externalHandoff: FinanceAccountConnection["externalHandoff"];
+      }>
+    > {
       return request("/v1/finances/account-connections", {
         body: JSON.stringify(input),
         method: "POST",
@@ -762,7 +800,9 @@ export function createFinanceApi(request: FinanceRequest) {
         method: "POST",
       });
     },
-    async getFinanceTransaction(id: string): Promise<FinanceToolResult<FinanceTransaction>> {
+    async getFinanceTransaction(
+      id: string,
+    ): Promise<FinanceToolResult<FinanceTransaction & { version: number }>> {
       return request(`/v1/finances/transactions/${encodeURIComponent(id)}`);
     },
     async removeFinanceTransaction(

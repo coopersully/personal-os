@@ -96,7 +96,7 @@ Requirements: Node 22+, pnpm 11, Docker, and Rust stable for desktop builds.
 pnpm env:start
 ```
 
-The Codex environment setup installs dependencies and creates `.env` with a local encryption key when needed. For a manual first-time setup, run:
+The `personal-os` Codex environment setup fetches `origin/main`, advances a clean checkout to that exact revision, installs locked dependencies, and creates `.env` with a local encryption key when needed. Dirty checkouts and commits outside `origin/main` stop setup without discarding work. See [local development](docs/local-development.md) for setup and runtime migration details. For a manual first-time setup, run:
 
 ```bash
 bash ./.codex/scripts/environment.sh setup

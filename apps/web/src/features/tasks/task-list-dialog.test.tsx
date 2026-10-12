@@ -124,6 +124,7 @@ it("resolves an active-content archive conflict with a destination and current r
         resolutions: ["move_active_contents", "archive_contents_together", "cancel"],
       },
     })
+    .mockRejectedValueOnce(new Error("private archive resolution failure"))
     .mockResolvedValueOnce({});
   render(
     <QueryClientProvider client={new QueryClient()}>
@@ -133,8 +134,13 @@ it("resolves an active-content archive conflict with a destination and current r
 
   await user.click(screen.getByRole("button", { name: "Archive List" }));
   expect(await screen.findByText("Choose what happens to active contents")).toBeVisible();
+  expect(screen.queryByText(/Couldn’t/)).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Move active contents" })).toBeDisabled();
   await user.selectOptions(screen.getByLabelText("Destination List"), "personal");
+  await user.click(screen.getByRole("button", { name: "Move active contents" }));
+  expect(
+    await screen.findByText(/Couldn’t confirm whether we could archive this list/),
+  ).toBeVisible();
   await user.click(screen.getByRole("button", { name: "Move active contents" }));
   await waitFor(() =>
     expect(mocks.archiveTaskList).toHaveBeenLastCalledWith("work", {
@@ -157,7 +163,7 @@ it("keeps save failures visible and closes from the standard cancel action", asy
   await user.type(screen.getByLabelText("Name"), "Work");
   await user.type(screen.getByLabelText("Description"), "  Useful work  ");
   await user.click(screen.getByRole("button", { name: "Create List" }));
-  expect(await screen.findByText("Name already exists")).toBeVisible();
+  expect(await screen.findByText(/confirm whether we could save this list/)).toBeVisible();
   await user.click(screen.getByRole("button", { name: "Cancel" }));
   expect(close).toHaveBeenCalled();
 });

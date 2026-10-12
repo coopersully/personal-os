@@ -33,7 +33,7 @@ parallel worktree ownership. It complements the system boundary in
 | Mail | `apps/web/src/features/mail`, `apps/api/src/routes/mail.ts`, `apps/api/src/mail-*`, `packages/domain/src/mail.ts`, `packages/connectors/src/google/mail.ts`, `packages/connectors/src/icloud-mail*` | Google OAuth core, Calendar provider adapter, Today composition |
 | Tasks | `apps/web/src/features/tasks`, `apps/api/src/routes/tasks.ts`, `apps/api/src/routes/task-lists.ts`, `apps/api/src/routes/task-projects.ts`, `apps/api/src/task-service.ts`, `apps/api/src/task-list-service.ts`, `apps/api/src/task-project-service.ts`, `packages/domain/src/task.ts`, `packages/domain/src/task-organization.ts`, `packages/api-client/src/features/tasks.ts`, `apps/mcp/src/tools/planning.ts` | Reminder lifecycle, Today composition, global navigation, generic Add menu, physical database extraction |
 | Reminders | `apps/web/src/features/reminders`, `apps/api/src/routes/reminders.ts`, `apps/api/src/reminder-service.ts`, `packages/domain/src/reminder.ts`, `packages/api-client/src/features/reminders.ts`, `apps/mcp/src/tools/reminders.ts` | Task/List/Project lifecycle, Prompt migration, Today composition, global navigation |
-| Tracking (planned) | `apps/web/src/features/tracking`, future Tracking route/service modules, `packages/domain` Tracking contracts, typed client and MCP Tracking adapters | Tasks, Reminders, Today composition, global navigation, provider health bridges |
+| Tracking | `apps/web/src/features/tracking`, `apps/api/src/routes/rituals.ts`, `apps/api/src/ritual-service.ts`, `packages/domain/src/ritual.ts`, `packages/api-client/src/features/rituals.ts`; future Tracking adapters | Tasks, Reminders, Today composition, global navigation, provider health bridges |
 | User Knowledge (planned) | future `apps/web/src/features/knowledge`, User Knowledge route/service modules, `packages/domain` knowledge and context contracts, typed client and MCP adapters | Workspace ledgers, domain playbooks, action policy, provider records |
 | Settings/Auth | `apps/web/src/features/settings`, `apps/api/src/routes/auth.ts`, `apps/api/src/auth-*`, `apps/api/src/security.ts`, account and token contracts | Feature-specific mail/calendar/finance workflows |
 | Calendar | `apps/web/src/features/calendar`, `apps/api/src/routes/calendar.ts`, `apps/api/src/calendar-*`, `packages/domain/src/calendar.ts`, `packages/connectors/src/google/calendar.ts`, `packages/connectors/src/icloud-calendar*` | Google OAuth core, Today composition, mail provider adapter |
@@ -129,6 +129,22 @@ coordination, channel settings, and response composition. A workspace owns every
 work node, policy decision, and terminal result. Workspace maintainers publish typed notification
 intents rather than rendered SMS and never call Twilio or consume the shared conversation directly.
 
+### Review and attention projections
+
+Mail, Calendar, Tasks, and Finances own their review/attention interpretation and native destinations
+in `mail-review-projection.ts`, `calendar-review-projection.ts`, `task-review-projection.ts`, and
+`finance/work-item-projection.ts`. Mail owns maintenance questions, runs, and inactive rules;
+Finances owns cases, approvals, reconnect work, and draft guidance, composing its existing effect
+and contextual-question projections. Calendar and Tasks retain their current attention semantics.
+
+`review-projections` supplies the internal row-reader contract, thin provider registry, and mechanical
+shared attention/account/profile reads and display helpers. Source identities, row-reader overrides,
+and conservative affected-domain/kind declarations remain stable. Each source settles independently:
+healthy siblings remain visible, while failed sources make affected counts unavailable rather than
+zero. `agent-access-work-items.ts` owns readable-scope enforcement, collection, summaries, ordering,
+signed snapshot pagination, and bounded transaction-based search; it owns no domain eligibility,
+wording, or destination decisions. Public domain schemas remain unchanged.
+
 ## Required seams
 
 ### Domain and API
@@ -189,3 +205,11 @@ vertical features are independently verified.
 
 This preserves a single source of truth for data, a single policy decision point
 for agent actions, and predictable review/merge order.
+
+## Shipping verification policy
+
+For an authorized ship-it run, follow [delivery verification](delivery-verification.md): converge review
+with focused checks, freeze/commit the candidate, then obtain complete local or equivalent hosted
+verification. This replaces duplicate full-suite invocations in the steps above; it does not waive
+any required check, unexplained failure, or issue-specific acceptance. Local `pnpm verify` uses the
+shared host runner. Metadata-only changes refresh metadata gates, not unchanged source verification.

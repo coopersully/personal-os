@@ -1,12 +1,18 @@
+import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import {
   createDatabaseClient,
+  type Database,
   type DatabaseClient,
   financeAccounts,
   financeCategories,
   financeCategoryRules,
+  financeContextualAnswers,
+  financeContextualQuestions,
   financeEconomicEvents,
   financeProfileVersions,
+  financeReviewArchives,
+  financeReviewCases,
   financeTransactions,
   migrateDatabase,
   users,
@@ -165,6 +171,392 @@ describe.sequential("transaction-backed Finance Inbox", () => {
     expect(answered.changes).toHaveLength(1);
   });
 
+  it("pages owned review history in stable order and protects exact evidence and cursors", async () => {
+    const [historyUser, otherUser] = await database.db
+      .insert(users)
+      .values([
+        {
+          displayName: "History",
+          email: `history-${randomUUID()}@example.com`,
+          passwordHash: "unused",
+        },
+        {
+          displayName: "Other",
+          email: `other-${randomUUID()}@example.com`,
+          passwordHash: "unused",
+        },
+      ])
+      .returning();
+    if (!historyUser || !otherUser) throw new Error("History users were not created.");
+    const historyUserId = historyUser.id;
+    const accounts = await database.db
+      .insert(financeAccounts)
+      .values([
+        { institution: "Bank", name: "History", provider: "manual", userId: historyUserId },
+        { institution: "Other Bank", name: "Private", provider: "manual", userId: otherUser.id },
+      ])
+      .returning();
+    if (!accounts[0] || !accounts[1]) throw new Error("History accounts were not created.");
+    const transactions = await database.db
+      .insert(financeTransactions)
+      .values([
+        {
+          accountId: accounts[0].id,
+          amount: 1200,
+          direction: "expense",
+          merchant: "History merchant",
+          transactionDate: "2026-10-07",
+          userId: historyUserId,
+        },
+        {
+          accountId: accounts[1].id,
+          amount: 500,
+          direction: "expense",
+          merchant: "Private merchant",
+          transactionDate: "2026-10-07",
+          userId: otherUser.id,
+        },
+      ])
+      .returning();
+    if (!transactions[0] || !transactions[1])
+      throw new Error("History transactions were not created.");
+    const ids = [randomUUID(), randomUUID(), randomUUID()] as const;
+    const foreignId = randomUUID();
+    await database.db.insert(financeReviewCases).values([
+      {
+        id: ids[0],
+        userId: historyUserId,
+        transactionId: transactions[0].id,
+        stableKey: `history:${ids[0]}`,
+        status: "open",
+        reasonCode: "category_ambiguity",
+        evidence: { source: "first", note: "Food or household" },
+        impactAmount: 1200,
+      },
+      {
+        id: ids[1],
+        userId: historyUserId,
+        transactionId: transactions[0].id,
+        stableKey: `history:${ids[1]}`,
+        status: "deferred",
+        reasonCode: "merchant_identity",
+        evidence: { source: "second" },
+        impactAmount: 1200,
+      },
+      {
+        id: ids[2],
+        userId: historyUserId,
+        transactionId: transactions[0].id,
+        stableKey: `history:${ids[2]}`,
+        status: "resolved",
+        reasonCode: "unusual_amount",
+        evidence: { source: "third" },
+        resolution: {
+          type: "dismiss",
+          rationale: "Consolidated into the canonical Finance Inbox case.",
+        },
+        resolutionProvenance: {
+          actorType: "user",
+          actorId: historyUserId,
+          requestId: "history-test",
+        },
+        resolvedAt: new Date("2026-10-08T10:00:00Z"),
+        impactAmount: 1200,
+      },
+      {
+        id: foreignId,
+        userId: otherUser.id,
+        transactionId: transactions[1].id,
+        stableKey: `history:${foreignId}`,
+        status: "resolved",
+        reasonCode: "unusual_amount",
+        evidence: { private: "Do not disclose" },
+        impactAmount: 500,
+      },
+    ]);
+    // PostgreSQL retains sub-millisecond precision, which the returned JS Date drops.
+    for (const [index, id] of ids.entries()) {
+      await database.pool.query(
+        "UPDATE finance_review_cases SET first_seen_at = $1::timestamptz WHERE id = $2",
+        [`2026-10-08T12:00:00.00000${index === 2 ? 1 : 3}Z`, id],
+      );
+    }
+    const service = createInboxService({ db: database.db, now: () => new Date() });
+    const tiedIds = [ids[0], ids[1]].sort((left, right) => right.localeCompare(left));
+    const first = await service.listFinanceReviewHistory(historyUserId, { limit: 2 });
+    expect(first.items.map((item) => item.id)).toEqual(tiedIds);
+    expect(first.items.map((item) => item.status).sort()).toEqual(["deferred", "open"]);
+    expect(first.nextCursor).toBe(tiedIds[1]);
+    const tiePage = await service.listFinanceReviewHistory(historyUserId, { limit: 1 });
+    if (!tiePage.nextCursor) throw new Error("Expected another tied review.");
+    const nextTiePage = await service.listFinanceReviewHistory(historyUserId, {
+      limit: 1,
+      cursor: tiePage.nextCursor,
+    });
+    expect(nextTiePage.items.map((item) => item.id)).toEqual([tiedIds[1]]);
+    const second = await service.listFinanceReviewHistory(historyUserId, {
+      limit: 2,
+      cursor: first.nextCursor,
+    });
+    expect(second.items.map((item) => item.id)).toEqual([ids[2]]);
+    expect(second.items[0]).toMatchObject({
+      status: "resolved",
+      context: { merchant: "History merchant" },
+    });
+    expect(second.items[0]).not.toHaveProperty("evidence");
+    expect(second.nextCursor).toBeNull();
+    expect(await service.getFinanceReviewHistoryItem(historyUserId, ids[2])).toMatchObject({
+      id: ids[2],
+      status: "resolved",
+      evidence: { source: "third" },
+      economicEventId: null,
+      resolution: { rationale: "Consolidated into the canonical Finance Inbox case." },
+      resolutionProvenance: { actorType: "user" },
+    });
+    await expect(
+      service.getFinanceReviewHistoryItem(historyUserId, foreignId),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.listFinanceReviewHistory(historyUserId, { cursor: foreignId }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.listFinanceReviewHistory(historyUserId, { cursor: "not-a-uuid" }),
+    ).rejects.toThrow();
+    await expect(service.listFinanceReviewHistory(historyUserId, { limit: 51 })).rejects.toThrow();
+    await database.db.insert(financeContextualQuestions).values({
+      id: randomUUID(),
+      userId: historyUserId,
+      subtype: "manual_transaction_purpose_v1",
+      reviewCaseId: ids[0],
+      transactionId: transactions[0].id,
+      accountId: accounts[0].id,
+      accountRevision: accounts[0].contextualRevision,
+      transactionRevision: transactions[0].contextualRevision,
+      reviewRevision: 1n,
+      prompt: "Purpose?",
+      merchant: "History merchant",
+      amount: 1200,
+      transactionDate: "2026-10-07",
+      state: "answered",
+      workRevision: 2n,
+    });
+    const [question] = await database.db
+      .select()
+      .from(financeContextualQuestions)
+      .where(eq(financeContextualQuestions.userId, historyUserId));
+    if (!question) throw new Error("Missing retained question fixture");
+    await database.db.insert(financeContextualAnswers).values({
+      userId: historyUserId,
+      questionId: question.id,
+      operationId: randomUUID(),
+      answeredWorkRevision: 1n,
+      answeredActionRevision: 1n,
+      resultingWorkRevision: 2n,
+      text: "For groceries",
+      sourceKind: "app",
+      actorType: "user",
+      actorId: historyUserId,
+      requestId: "retention-test",
+      recordedAt: new Date(),
+    });
+    await database.db
+      .delete(financeTransactions)
+      .where(eq(financeTransactions.id, transactions[0].id));
+    const retained = await service.getFinanceReviewHistoryItem(historyUserId, ids[0]);
+    expect(retained).toMatchObject({
+      archived: true,
+      evidence: { source: "first" },
+      context: { merchant: "History merchant" },
+      retainedAnswers: [{ text: "For groceries" }],
+      retainedQuestions: [{ prompt: "Purpose?" }],
+    });
+    expect(
+      (await service.listFinanceReviewHistory(historyUserId, { limit: 2 })).items.map(
+        (item) => item.id,
+      ),
+    ).toEqual(tiedIds);
+    expect(
+      (
+        await service.listFinanceReviewHistory(historyUserId, {
+          cursor: first.nextCursor,
+          limit: 2,
+        })
+      ).items.map((item) => item.id),
+    ).toEqual([ids[2]]);
+    const [liveTransaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: accounts[0].id,
+        amount: 900,
+        direction: "expense",
+        merchant: "Live review merchant",
+        transactionDate: "2026-10-07",
+        userId: historyUserId,
+      })
+      .returning();
+    if (!liveTransaction) throw new Error("Live history transaction was not created.");
+    const liveId = randomUUID();
+    await database.db.insert(financeReviewCases).values({
+      id: liveId,
+      userId: historyUserId,
+      transactionId: liveTransaction.id,
+      stableKey: `history:${liveId}`,
+      status: "open",
+      reasonCode: "unusual_amount",
+      evidence: { source: "live" },
+      impactAmount: 900,
+    });
+    await database.pool.query(
+      "UPDATE finance_review_cases SET first_seen_at = $1::timestamptz WHERE id = $2",
+      ["2026-10-08T12:00:00.000002Z", liveId],
+    );
+    const mixedFirst = await service.listFinanceReviewHistory(historyUserId, { limit: 2 });
+    const mixedSecond = await service.listFinanceReviewHistory(historyUserId, {
+      cursor: mixedFirst.nextCursor,
+      limit: 2,
+    });
+    expect(mixedFirst.items.map((item) => [item.id, item.archived])).toEqual(
+      tiedIds.map((id) => [id, true]),
+    );
+    expect(mixedSecond.items.map((item) => [item.id, item.archived])).toEqual([
+      [liveId, false],
+      [ids[2], true],
+    ]);
+    expect(mixedSecond.nextCursor).toBeNull();
+    await expect(service.getFinanceReviewHistoryItem(otherUser.id, ids[0])).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await expect(
+      database.db
+        .update(financeReviewArchives)
+        .set({ context: {} })
+        .where(eq(financeReviewArchives.id, ids[0])),
+    ).rejects.toThrow();
+    await database.db.delete(financeAccounts).where(eq(financeAccounts.id, accounts[1].id));
+    expect(await service.getFinanceReviewHistoryItem(otherUser.id, foreignId)).toMatchObject({
+      archived: true,
+      evidence: { private: "Do not disclose" },
+    });
+    await database.db.delete(users).where(eq(users.id, otherUser.id));
+    expect(
+      await database.db
+        .select()
+        .from(financeReviewArchives)
+        .where(eq(financeReviewArchives.userId, otherUser.id)),
+    ).toEqual([]);
+    await database.db.delete(users).where(eq(users.id, historyUserId));
+    expect(
+      await database.db
+        .select()
+        .from(financeReviewArchives)
+        .where(eq(financeReviewArchives.userId, historyUserId)),
+    ).toEqual([]);
+  });
+
+  it("keeps a history page and source context on one snapshot during deletion", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "History snapshot",
+        email: `history-snapshot-${randomUUID()}@example.com`,
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("History snapshot owner was not created.");
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Snapshot bank",
+        name: "Checking",
+        provider: "manual",
+        userId: owner.id,
+      })
+      .returning();
+    if (!account) throw new Error("History snapshot account was not created.");
+    const transactions = await database.db
+      .insert(financeTransactions)
+      .values(
+        ["Anchor merchant", "Source merchant"].map((merchant) => ({
+          accountId: account.id,
+          amount: 900,
+          direction: "expense" as const,
+          merchant,
+          transactionDate: "2026-10-08",
+          userId: owner.id,
+        })),
+      )
+      .returning();
+    const [anchorTransaction, sourceTransaction] = transactions;
+    if (!anchorTransaction || !sourceTransaction) throw new Error("Transactions were not created.");
+    const cases = await database.db
+      .insert(financeReviewCases)
+      .values([
+        {
+          userId: owner.id,
+          transactionId: anchorTransaction.id,
+          stableKey: `snapshot:${anchorTransaction.id}`,
+          status: "resolved",
+          reasonCode: "unusual_amount",
+          evidence: { source: "anchor" },
+          impactAmount: 900,
+          firstSeenAt: new Date("2026-10-09T12:00:01Z"),
+        },
+        {
+          userId: owner.id,
+          transactionId: sourceTransaction.id,
+          stableKey: `snapshot:${sourceTransaction.id}`,
+          status: "resolved",
+          reasonCode: "unusual_amount",
+          evidence: { source: "page" },
+          impactAmount: 900,
+          firstSeenAt: new Date("2026-10-09T12:00:00Z"),
+        },
+      ])
+      .returning();
+    const [anchorCase, sourceCase] = cases;
+    if (!anchorCase || !sourceCase) throw new Error("Review cases were not created.");
+
+    let deleted = false;
+    const wrappedDb = Object.create(database.db) as Database;
+    const originalTransaction = database.db.transaction.bind(database.db);
+    const wrappedTransaction: Database["transaction"] = (callback, config) =>
+      originalTransaction(async (tx) => {
+        const observed = Object.create(tx) as typeof tx;
+        const execute = tx.execute.bind(tx);
+        let statementCount = 0;
+        observed.execute = (async (...args: Parameters<typeof tx.execute>) => {
+          const result = await execute(...args);
+          if (++statementCount === 2) {
+            await database.db
+              .delete(financeTransactions)
+              .where(eq(financeTransactions.id, sourceTransaction.id));
+            deleted = true;
+          }
+          return result;
+        }) as typeof tx.execute;
+        return callback(observed);
+      }, config);
+    wrappedDb.transaction = wrappedTransaction;
+    const service = createInboxService({ db: wrappedDb, now: () => new Date() });
+    const page = await service.listFinanceReviewHistory(owner.id, {
+      cursor: anchorCase.id,
+      limit: 1,
+    });
+    expect(deleted).toBe(true);
+    expect(page.items).toMatchObject([
+      {
+        id: sourceCase.id,
+        archived: false,
+        context: { merchant: "Source merchant", institution: "Snapshot bank" },
+      },
+    ]);
+    expect(await service.getFinanceReviewHistoryItem(owner.id, sourceCase.id)).toMatchObject({
+      archived: true,
+      context: { merchant: "Source merchant" },
+    });
+    await database.db.delete(users).where(eq(users.id, owner.id));
+  });
+
   it("keeps clarification open, then classifies with trusted agent provenance", async () => {
     const now = () => new Date("2026-08-24T20:00:00Z");
     const service = createInboxService({ db: database.db, now });
@@ -310,7 +702,26 @@ describe.sequential("transaction-backed Finance Inbox", () => {
       },
       requestId: "concurrent-clarification",
     });
-    const attempts = await Promise.allSettled(
+    // Hold the case until both requests have observed the same resolution. Scheduling alone
+    // cannot prove a race: two genuinely sequential clarifications may both be valid.
+    let release: () => void = () => {};
+    let held: () => void = () => {};
+    const barrier = new Promise<void>((resolve) => {
+      held = resolve;
+    });
+    const blocker = database.db.transaction(async (tx) => {
+      await tx
+        .select()
+        .from(financeReviewCases)
+        .where(eq(financeReviewCases.id, review.id))
+        .for("update");
+      held();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    });
+    await barrier;
+    const pendingAttempts = Promise.allSettled(
       ["first note", "second note"].map((answer, index) =>
         service.answerFinanceReview(
           review.id,
@@ -323,6 +734,21 @@ describe.sequential("transaction-backed Finance Inbox", () => {
         ),
       ),
     );
+    try {
+      await vi.waitFor(
+        async () => {
+          const blocked = await database.pool.query(
+            "SELECT count(*)::int AS count FROM pg_stat_activity WHERE query LIKE '%update \"finance_review_cases\"%' AND cardinality(pg_blocking_pids(pid))>0",
+          );
+          expect(blocked.rows[0]?.count).toBe(2);
+        },
+        { timeout: 5000 },
+      );
+    } finally {
+      release();
+    }
+    await blocker;
+    const attempts = await pendingAttempts;
     expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
     expect(attempts.filter((attempt) => attempt.status === "rejected")).toHaveLength(1);
   });

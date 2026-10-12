@@ -71,16 +71,18 @@ seams are:
 All finance endpoints require `finances:read` for reads and `finances:write`
 for mutations. A Finance write token may mutate the accounting ledger, financial
 profile, income data, and budget plans through the same API and audit path;
-budgets are not human-only. Provider connection, import, account administration,
-and the Finance review-bypass setting remain human-only, as does any external
-financial activity such as moving money, trading, or paying bills. The MCP cannot
-enable its own bypass, approve, or dismiss action reviews. Each supported Finance
+budgets are not human-only. Registered execution operations additionally require explicit
+`finances:execute` and enabled review bypass: these include account administration, synchronization,
+activation, contextual-question creation and action-review decisions. MCP exposes imports and a
+hosted provider-consent handoff; provider login/MFA remains owner-controlled. Agents cannot change
+bypass or their own grants, move money, trade or pay bills. Each supported Finance
 semantic mutation, including insight refresh, returns `applied`, `pending_review`,
 or `needs_input`, derived by the API from evidence, confidence and ambiguity
 checks, ownership, revisions, policy, and the signed-in user's persisted app-only
 bypass setting. Bypass controls only queue-versus-apply after preparation; it
 never overrides evidence, confidence, or ambiguous-transfer protections. The
-signed-in app's Finance review routes alone approve or dismiss queued actions.
+Finance review routes require exact current work references; explicitly authorized execution agents
+may approve or dismiss eligible queued actions through those same domain services.
 Agents may apply a permanent merchant-learning rule only through an explicitly
 prepared categorization action, under those same checks. A scoped same-user
 agent may list pending questions through bounded public descriptors.
@@ -104,8 +106,8 @@ financial profile. Its `sourceContexts` are canonical Finance account IDs, not
 arbitrary labels, and the API rejects duplicates, stale accounts, and accounts
 owned by another user. They are interpretation guidance, not account-level
 authorization; token scopes determine access. Source-empty Finance domain
-profiles may remain drafts. An agent may save a draft, but activation requires
-a signed-in user, an exact profile version, and at least one owned account
+profiles may remain drafts. An agent may save a draft; activation requires an exact profile version and at least one owned account,
+plus either a signed-in user or explicit Finance execution authority and enabled bypass
 source. Guided setup exposes active guidance separately from an unapproved
 draft proposal; draft text is untrusted and non-operative until signed-in
 activation. A durable approval snapshot preserves the last signed-in approved
@@ -162,11 +164,11 @@ with a process-loss integration test.
 
 The defensive service path for an agent-attributed category review requires the
 accepted proposal confidence and transaction `updatedAt`, then applies the same
-proposal, policy, and stale-revision checks as batch categorization. Public
-agent routes do not expose review resolution. Interactive users may resolve a
-current review directly, but must submit its displayed transaction revision;
-the apply transaction locks the open review so concurrent signed-in decisions
-cannot both commit. Ambiguous transfer confirmation remains human-only.
+proposal, policy, and stale-revision checks as batch categorization. Explicit review execution uses
+`finances:execute` plus enabled bypass and preserves agent attribution. Both owner and authorized
+agent decisions submit the displayed transaction revision; the apply transaction locks the open
+review so concurrent decisions cannot both commit. Ordinary categorization proposals still cannot
+silently confirm an ambiguous transfer.
 
 An exact retry of an unchanged below-threshold decision reuses the existing
 open review and deferred evidence. The result reports `replayed: true` and does
@@ -252,15 +254,15 @@ read paths never materialize merchant/category enrichment. Finance also exposes
 write-scoped tools for ledger, profile, income, and budget mutations. The API
 continues to enforce ownership, revisions, policy, transactions, and audit, and
 returns `applied`, `pending_review`, or `needs_input` for every supported semantic
-mutation, including insight refresh. MCP cannot enable bypass, approve or dismiss
-action reviews, connect or disconnect providers, import transactions, administer
-accounts, or execute external financial activity. Bypass never waives evidence,
+mutation, including insight refresh. MCP cannot enable bypass or execute external financial
+activity. Registered account, provider-handoff and review execution paths require their explicit
+grants and standing authorization; provider login/MFA remains outside the agent boundary. Bypass never waives evidence,
 confidence, or ambiguity checks. Agents can apply an explicitly prepared permanent
 merchant-learning rule through categorization only after those checks. The
 account-list read accepts bounded name/institution, kind, status, and inclusion filters and returns
 the API-owned planning totals and trust disclosures. MCP forwards that typed result and does not
 reimplement provider classification, ownership weighting, debt signs, exclusion, or duplicate
-logic. The human-only question list returns bounded public descriptors; an originating agent
+logic. The scoped question list returns bounded public descriptors; an originating agent
 may answer a question with only its requested bounded fields, which are merged
 into the original action and prepared again. `resolve_finance_review` safely
 translates legacy categorization answers only.

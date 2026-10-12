@@ -1,6 +1,6 @@
 import type { FinanceCategory } from "@personal-os/domain";
 import { Spinner } from "@personal-os/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button as ShadcnButton } from "@/components/ui/button";
 import {
@@ -14,6 +14,9 @@ import { Checkbox as ShadcnCheckbox } from "@/components/ui/checkbox";
 import { Input as ShadcnInput } from "@/components/ui/input";
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
+import { FeedbackForm } from "../../components/feedback-form.js";
+import { MutationFeedback } from "../../components/mutation-feedback.js";
+import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 
 export function FinanceBudgetBucketManager({
   categories,
@@ -32,7 +35,8 @@ export function FinanceBudgetBucketManager({
     queryKey: ["finance-budget-buckets", month],
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["finance-budget-buckets"] });
-  const create = useMutation({
+  const create = useFeedbackMutation({
+    feedback: { action: "create this budget bucket", safeToRetry: false, form: true },
     mutationFn: () =>
       api.createFinanceBudgetBucket({
         description: description.trim() || null,
@@ -47,7 +51,8 @@ export function FinanceBudgetBucketManager({
   });
   const taxonomy = buckets.data?.taxonomy;
   const selectedBucket = taxonomy?.buckets.find((bucket) => bucket.id === selectedBucketId);
-  const update = useMutation({
+  const update = useFeedbackMutation({
+    feedback: { action: "save this budget bucket", safeToRetry: false, form: true },
     mutationFn: (input: { categoryIds: string[]; description: string | null }) => {
       if (!selectedBucket) throw new Error("Choose a bucket first.");
       return api.updateFinanceBudgetBucket(selectedBucket.id, {
@@ -60,7 +65,14 @@ export function FinanceBudgetBucketManager({
   });
   if (typeof api.listFinanceBudgetBuckets !== "function") return null;
   if (buckets.isPending) return <Spinner />;
-  if (buckets.isError) return <InlineError error={buckets.error} />;
+  if (buckets.isError && !buckets.data)
+    return (
+      <InlineError
+        error={buckets.error}
+        retry={() => buckets.refetch()}
+        stale={buckets.data !== undefined}
+      />
+    );
   return (
     <ShadcnCard className="mb-5">
       <ShadcnCardHeader>
@@ -71,23 +83,33 @@ export function FinanceBudgetBucketManager({
         </ShadcnCardDescription>
       </ShadcnCardHeader>
       <ShadcnCardContent className="grid gap-4">
-        <div className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+        <FeedbackForm
+          feedback={create.feedback}
+          onSubmit={(event) => {
+            event.preventDefault();
+            create.mutate();
+          }}
+          className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]"
+        >
           <ShadcnInput
             aria-label="New bucket name"
+            name="name"
+            required
             onChange={(event) => setName(event.target.value)}
             placeholder="New bucket"
             value={name}
           />
           <ShadcnInput
             aria-label="Bucket description"
+            name="description"
             onChange={(event) => setDescription(event.target.value)}
             placeholder="Optional description"
             value={description}
           />
-          <ShadcnButton disabled={!name.trim() || create.isPending} onClick={() => create.mutate()}>
+          <ShadcnButton disabled={create.isPending} type="submit">
             Add bucket
           </ShadcnButton>
-        </div>
+        </FeedbackForm>
         {taxonomy?.buckets.length ? (
           <div className="grid gap-4 md:grid-cols-[14rem_1fr]">
             <ul aria-label="Budget buckets" className="grid content-start gap-1">
@@ -157,7 +179,10 @@ export function FinanceBudgetBucketManager({
             No buckets yet. Existing category budgets remain under Unmapped categories.
           </p>
         )}
-        {create.error || update.error ? <InlineError error={create.error ?? update.error} /> : null}
+        <MutationFeedback feedback={update.feedback} />
+        {buckets.isError ? (
+          <InlineError error={buckets.error} retry={() => buckets.refetch()} stale />
+        ) : null}
       </ShadcnCardContent>
     </ShadcnCard>
   );

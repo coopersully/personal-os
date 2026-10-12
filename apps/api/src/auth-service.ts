@@ -43,6 +43,8 @@ const allScopes = new Set<AccessScope>([
   "mail:write",
   "goals:read",
   "goals:write",
+  "tracking:read",
+  "tracking:write",
   "finances:read",
   "finances:write",
   "finances:maintain",
@@ -219,6 +221,7 @@ export function createAuthService(options: AuthServiceOptions) {
         .where(eq(accessTokens.id, record.id));
       return {
         actorId: record.id,
+        authorizationConnectionId: record.authorizationConnectionId,
         actorType: "agent",
         scopes: new Set(record.scopes),
         userId: record.userId,
@@ -370,31 +373,33 @@ export function createAuthService(options: AuthServiceOptions) {
     async updateAccountSetup(userId: string, input: UpdateAccountSetupInput): Promise<User> {
       const currentTime = now();
       const values =
-        input.action === "progress"
-          ? {
-              setupCompletedAt: null,
-              setupCurrentStep: input.currentStep,
-              setupDismissedAt: null,
-              ...(input.selectedWorkspaces === undefined
-                ? {}
-                : { setupSelectedWorkspaces: input.selectedWorkspaces }),
-              setupStartedAt: sql`coalesce(${users.setupStartedAt}, ${currentTime})`,
-              setupStatus: "in_progress" as const,
-              updatedAt: currentTime,
-            }
-          : input.action === "dismiss"
+        input.action === "preferences"
+          ? { setupSelectedWorkspaces: input.selectedWorkspaces, updatedAt: currentTime }
+          : input.action === "progress"
             ? {
-                setupDismissedAt: currentTime,
-                setupStatus: "dismissed" as const,
+                setupCompletedAt: null,
+                setupCurrentStep: input.currentStep,
+                setupDismissedAt: null,
+                ...(input.selectedWorkspaces === undefined
+                  ? {}
+                  : { setupSelectedWorkspaces: input.selectedWorkspaces }),
+                setupStartedAt: sql`coalesce(${users.setupStartedAt}, ${currentTime})`,
+                setupStatus: "in_progress" as const,
                 updatedAt: currentTime,
               }
-            : {
-                setupCompletedAt: currentTime,
-                setupCurrentStep: "ready" as const,
-                setupDismissedAt: null,
-                setupStatus: "complete" as const,
-                updatedAt: currentTime,
-              };
+            : input.action === "dismiss"
+              ? {
+                  setupDismissedAt: currentTime,
+                  setupStatus: "dismissed" as const,
+                  updatedAt: currentTime,
+                }
+              : {
+                  setupCompletedAt: currentTime,
+                  setupCurrentStep: "ready" as const,
+                  setupDismissedAt: null,
+                  setupStatus: "complete" as const,
+                  updatedAt: currentTime,
+                };
       const user = requireDatabaseRecord(
         (await db.update(users).set(values).where(eq(users.id, userId)).returning())[0],
         "The setup progress could not be saved.",

@@ -6,7 +6,8 @@ export function financeTransactionFilters(
 ): Partial<FinanceTransactionQuery> {
   const result: Record<string, unknown> = { review: "all" };
   for (const key of ["accountId", "categoryId", "from", "to", "review", "search"] as const) {
-    const raw = params.get(key);
+    const raw =
+      key === "review" ? (params.get("reviewState") ?? params.get("review")) : params.get(key);
     const parsed = financeTransactionQuerySchema.shape[key].safeParse(raw ?? undefined);
     if (parsed.success && parsed.data !== undefined) result[key] = parsed.data;
   }

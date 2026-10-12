@@ -44,13 +44,13 @@ export const workspaceDefinitions: WorkspaceDefinition[] = [
 
 export function navigationOwnerForLocation(pathname: string): NavigationOwner {
   if (pathname === "/setup") return { kind: "standalone-flow" };
-  if (["/settings", "/reviews", "/goals", "/motives", "/activity"].includes(pathname)) {
+  if (["/settings", "/goals", "/motives", "/activity"].includes(pathname)) {
     return { kind: "account-utility" };
   }
-  if (pathname === "/today") {
+  if (pathname === "/today" || pathname === "/reviews") {
     return { kind: "workspace", workspace: "today" };
   }
-  if (pathname === "/reminders" || pathname === "/tasks") {
+  if (pathname === "/reminders" || pathname === "/tasks" || pathname.startsWith("/tasks/")) {
     return { kind: "workspace", workspace: "tasks" };
   }
   if (pathname === "/calendar" || pathname.startsWith("/calendar/")) {

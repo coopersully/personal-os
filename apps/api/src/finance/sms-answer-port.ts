@@ -1,10 +1,18 @@
 import {
+  financeContextualQuestions,
+  financeMutationRecords,
+  financeReviewActionRequests,
+  financeReviewAnswers,
+} from "@personal-os/database";
+import {
   type FinanceDomainOutcome,
   type FinanceHumanWorkRef,
+  type FinanceOutcomeReasonCode,
   type FinanceSmsAnswerCommand,
   financeDomainOutcomeSchema,
   financeSmsAnswerCommandSchema,
 } from "@personal-os/domain";
+import { and, eq, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { answerSmsContextualWork } from "./answer-service.js";
 import {
@@ -18,6 +26,7 @@ import {
   type ContextualOptions,
   contextualTransaction,
 } from "./contextual-question-store.js";
+import { answerMaintenanceReviewQuestion } from "./review-action-service.js";
 import { type FinanceSmsQuestionResolution, resolveSmsQuestion } from "./work-resolver.js";
 
 /**
@@ -31,7 +40,7 @@ export type AdmitSmsAnswer = (
   tx: FinanceTransaction,
   expected: FinanceSmsAnswerCommand & { userId: string },
 ) => Promise<
-  | { state: "unavailable" }
+  | { state: "unavailable"; reasonCode: FinanceOutcomeReasonCode }
   | {
       state: "verified";
       /**
@@ -67,7 +76,14 @@ export interface FinanceSmsPort {
 }
 
 export function createFinanceSmsPort(
-  options: ContextualOptions & { admitSmsAnswer: AdmitSmsAnswer },
+  options: ContextualOptions & {
+    admitSmsAnswer: AdmitSmsAnswer;
+    decideSmsApproval?: (
+      command: FinanceSmsAnswerCommand,
+      context: ContextualPrincipal,
+      tx: FinanceTransaction,
+    ) => Promise<FinanceDomainOutcome>;
+  },
 ): FinanceSmsPort {
   return {
     resolveSmsQuestion,
@@ -84,25 +100,82 @@ export function createFinanceSmsPort(
       };
       authorizeContextual(context, "finances:write");
       return contextualTransaction(options.db, undefined, async (tx) => {
+        const [record] = await tx
+          .select({ operation: financeMutationRecords.operation })
+          .from(financeMutationRecords)
+          .where(
+            and(
+              eq(financeMutationRecords.userId, userId),
+              eq(financeMutationRecords.idempotencyKey, command.operationId),
+            ),
+          );
+        const operation =
+          record &&
+          ["answer_finance_review_question_v1", "decide_finance_sms_categorization_v1"].includes(
+            record?.operation ?? "",
+          )
+            ? record.operation
+            : "answer_contextual_question_v1";
         const authority = await loadFinanceAuthorization({ db: tx, ...context });
         const receipt = await readFinanceAdmittedReceipt(tx, authority, {
           idempotencyKey: command.operationId,
-          operation: "answer_contextual_question_v1",
+          operation,
           sourceKind: "sms",
           payload: command,
         });
         if (!receipt) return { state: "absent" };
         if (receipt.status !== "completed") return { state: "incomplete", status: receipt.status };
         const parsed = financeDomainOutcomeSchema.safeParse(receipt.response);
+        // Canonical requests keep their immutable generation through evidence-only drift.
+        // The receipt's result is the actual case CAS revision, proven by its immutable answer.
+        let validResultRevision = false;
+        if (
+          parsed.success &&
+          parsed.data.state === "accepted" &&
+          /^[1-9][0-9]*$/.test(command.work.revision)
+        ) {
+          if (operation === "answer_finance_review_question_v1") {
+            const [answer] = await tx
+              .select({ revision: financeReviewAnswers.resultingWorkRevision })
+              .from(financeReviewAnswers)
+              .innerJoin(
+                financeReviewActionRequests,
+                and(
+                  eq(financeReviewActionRequests.userId, financeReviewAnswers.userId),
+                  eq(financeReviewActionRequests.id, financeReviewAnswers.requestId),
+                ),
+              )
+              .where(
+                and(
+                  eq(financeReviewAnswers.userId, userId),
+                  eq(financeReviewAnswers.operationId, command.operationId),
+                  eq(financeReviewAnswers.reviewCaseId, command.work.id),
+                  eq(financeReviewAnswers.text, command.text),
+                  eq(financeReviewAnswers.sourceKind, "sms"),
+                  eq(financeReviewAnswers.inboundMessageId, command.inboundMessageId),
+                  eq(financeReviewAnswers.replyBindingId, command.replyBindingId),
+                  eq(
+                    financeReviewAnswers.answeredActionRevision,
+                    BigInt(command.work.actionRevision),
+                  ),
+                  sql`${financeReviewActionRequests.request}->'work'->>'revision'=${command.work.revision}`,
+                  sql`${financeReviewActionRequests.request}->'work'->>'actionRevision'=${command.work.actionRevision}`,
+                ),
+              );
+            validResultRevision =
+              !!answer && parsed.data.resultRevision === answer.revision.toString();
+          } else {
+            validResultRevision =
+              parsed.data.resultRevision === (BigInt(command.work.revision) + 1n).toString();
+          }
+        }
         if (
           !parsed.success ||
           parsed.data.operationId !== command.operationId ||
           !["accepted", "blocked"].includes(parsed.data.state) ||
           parsed.data.work.length !== 0 ||
           (parsed.data.state === "accepted" &&
-            (parsed.data.reasonCode !== null ||
-              !/^[1-9][0-9]*$/.test(command.work.revision) ||
-              parsed.data.resultRevision !== (BigInt(command.work.revision) + 1n).toString())) ||
+            (parsed.data.reasonCode !== null || !validResultRevision)) ||
           (parsed.data.state === "blocked" &&
             (parsed.data.reasonCode !== "stale_revision" || parsed.data.resultRevision !== null))
         )
@@ -118,7 +191,29 @@ export function createFinanceSmsPort(
       )
         throw new AppError("forbidden", "SMS answers require the bound user's authority.");
       const command = financeSmsAnswerCommandSchema.parse(raw);
-      return answerSmsContextualWork(options, command, context, tx, options.admitSmsAnswer);
+      if (command.work.kind === "approval" && options.decideSmsApproval)
+        return options.decideSmsApproval(command, context, tx);
+      const [record] = await tx
+        .select({ operation: financeMutationRecords.operation })
+        .from(financeMutationRecords)
+        .where(
+          and(
+            eq(financeMutationRecords.userId, context.principal.userId),
+            eq(financeMutationRecords.idempotencyKey, command.operationId),
+          ),
+        );
+      const [question] = await tx
+        .select({ id: financeContextualQuestions.id })
+        .from(financeContextualQuestions)
+        .where(
+          and(
+            eq(financeContextualQuestions.userId, context.principal.userId),
+            eq(financeContextualQuestions.id, command.work.id),
+          ),
+        );
+      return record?.operation === "answer_contextual_question_v1" || (!record && question)
+        ? answerSmsContextualWork(options, command, context, tx, options.admitSmsAnswer)
+        : answerMaintenanceReviewQuestion(options, command, context, tx, options.admitSmsAnswer);
     },
   };
 }

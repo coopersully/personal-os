@@ -2896,6 +2896,13 @@ describe("ilo MCP server", () => {
       },
     });
     expect(api.syncFinanceAccount).toHaveBeenCalledTimes(3);
+    const syncText = response.content.find((block) => block.type === "text");
+    expect(syncText?.type).toBe("text");
+    const { _ilo: syncMetadata, ...syncPayload } = response.structuredContent as Record<
+      string,
+      unknown
+    >;
+    expect(JSON.parse(syncText?.text as string)).toEqual(syncPayload);
 
     const healthySync = await client.callTool({
       arguments: { accountIds: [id], idempotencyKey: "sync-one-account" },
@@ -2910,12 +2917,16 @@ describe("ilo MCP server", () => {
     expect(unexpected.isError).toBe(true);
 
     const profile = await client.callTool({ arguments: {}, name: "get_financial_profile" });
-    expect(profile.content).toEqual([
-      {
-        text: "Financial profile needs one answer.\n\nWhat is your monthly take-home pay?",
-        type: "text",
+    const profileText = profile.content.find((block) => block.type === "text");
+    expect(profileText?.type).toBe("text");
+    expect(JSON.parse(profileText?.text as string)).toMatchObject({
+      communication: {
+        headline: "Financial profile needs one answer.",
+        nextQuestion: { prompt: "What is your monthly take-home pay?" },
       },
-    ]);
+      outcome: "work_remaining",
+      remainingWork: { categories: ["profile"], count: 1 },
+    });
 
     await client.close();
     await server.close();

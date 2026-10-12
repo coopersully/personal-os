@@ -165,10 +165,25 @@
   The full verification command was stopped after 60 seconds in the deployment-drain scenario
   stage; full coverage/build verification is not claimed. This is branch work, not deployment.
 
-## 2026-10-05 — Desktop background setup (source)
+## 2026-10-11 — Desktop background setup and pet quick access (merged source)
+
+- [PR #218 — Improve desktop background setup and pet quick access](https://github.com/coopersully/personal-os/pull/218)
+  merged at `6c6c4ab936ecc19e43956f6cbf6518f3235a683a`. It includes the shared readiness
+  guidance described below and a single-window pet/card scene with cursor-selected anchors,
+  pinning/resizing, configurable idle sleep, and optional closed-card shoo. Shoo defaults to
+  disabled with Medium sensitivity and does not move an open card.
+- Quick access has independent task/reminder windows and optional ritual cards. Finance's
+  Next 30 days remains unavailable without scheduled-outflow evidence.
+- This supersedes the earlier source/draft status checkpoints, preserving their design history.
+  Source implementation and automated tests do not prove signed-installation startup, actual
+  OS notification delivery, smooth pointer behavior, cross-application click-through, or every
+  Dock/display/Spaces configuration. See [desktop background setup](../design/pages/desktop-background.md)
+  for the remaining native acceptance gaps.
+
+## 2026-10-05 — Desktop background setup (historical source checkpoint)
 
 - Tracked by [COO-77 — Guide desktop background setup and macOS permissions](https://linear.app/coopersully/issue/COO-77/guide-desktop-background-setup-and-macos-permissions)
-  and [PR #218 — Guide desktop background setup](https://github.com/coopersully/personal-os/pull/218).
+  and [PR #218 — Improve desktop background setup and pet quick access](https://github.com/coopersully/personal-os/pull/218).
 - UI refinement removes the application-wide ritual setup offer, promotes Desktop pet to a
   primary Settings destination, groups desktop preferences by decision, and hides login server
   configuration behind a dialog. Ritual background navigation uses a compact, bounded action.

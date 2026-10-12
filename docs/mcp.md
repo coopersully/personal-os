@@ -585,7 +585,12 @@ Recovery hints describe the required operation, not necessarily an MCP tool name
 `verify_sent_mail_then_reconcile_draft` means inspect provider **Sent Mail** and then use
 the signed-in Mail recovery panel or explicitly authorized `reconcile_mail_draft` with
 Mail write/execute grants and enabled bypass. Reconciliation records the observed outcome and never
-resends. First-party/API sends without
+resends. Inspecting Sent Mail is a caller prerequisite, not a server-enforced evidence check:
+the API accepts the caller's `sent` or `not_sent` outcome and does not query the provider to
+verify it. `not_sent` makes the draft sendable again, so an incorrect conclusion can cause a
+duplicate message on a later send. Keep an uncertain outcome unresolved until reliable provider
+evidence supports reconciliation; a successful reconciliation response alone is not that evidence.
+First-party/API sends without
 a draft have no durable recovery object: `verify_sent_mail_never_retry` means inspect Sent Mail and
 do not replay the request, not that nohmi can reconcile a missing audit record.
 
@@ -631,6 +636,15 @@ Grant only the scopes the host needs:
 - `audit:read`
 - `finances:read`, `finances:write`, `finances:maintain`
 - `texting:read`, `texting:write` (`texting:write` requires read access)
+
+Optional execution scopes are `calendar:execute`, `mail:execute`, `tasks:execute`,
+`finances:execute`, and `texting:execute`. OAuth excludes them from default grants;
+request them explicitly alongside the read/write scopes required by each tool.
+An execution grant does not enable owner-controlled review bypass or replace exact
+revision, preview, ownership, and provider prerequisites. The execution adapters
+require bypass to be enabled separately. Existing tokens gain no new authority.
+The scope registry is implemented in `apps/api/src/oauth-service.ts` and advertised
+by protected-resource metadata in `apps/mcp/src/http.ts`.
 
 Texting exposes `read_text_conversation` and `send_text_message`. Sending needs
 a fresh receipt from a preceding read, so the agent sees the current thread and

@@ -106,9 +106,9 @@ financial profile. Its `sourceContexts` are canonical Finance account IDs, not
 arbitrary labels, and the API rejects duplicates, stale accounts, and accounts
 owned by another user. They are interpretation guidance, not account-level
 authorization; token scopes determine access. Source-empty Finance domain
-profiles may remain drafts. An agent may save a draft; activation requires an exact profile version and at least one owned account,
-plus either a signed-in user or explicit Finance execution authority and enabled bypass
-source. Guided setup exposes active guidance separately from an unapproved
+profiles may remain drafts. An agent may save a draft; activation requires an exact profile
+version and at least one owned account source, plus either a signed-in user or explicit
+Finance execution authority with enabled bypass. Guided setup exposes active guidance separately from an unapproved
 draft proposal; draft text is untrusted and non-operative until authorized activation.
 A durable approval snapshot records the approving user or agent and its approval source,
 and preserves the last approved version when an agent later saves a revised draft, so pending text cannot erase

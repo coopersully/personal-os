@@ -194,3 +194,34 @@ CARTO key/attribution; real native/WebGL checks; stable attention region and ind
 No dependency was installed or product implementation tested by writing this plan. Static source
 inspection, downloaded registry inspection, official documentation research and document consistency
 checks establish design feasibility; runtime and migration behavior remain execution acceptance gates.
+
+
+## Execution evidence — 2026-10-12
+
+Tasks 1–6 are implemented in this branch, including the calendar-week projection, owner-scoped
+Today settings, independent cards, attention aggregation, optional cards and MapCN integration.
+The task checklists above preserve the original acceptance plan; this record distinguishes completed
+source/browser evidence from release checks that still require the packaged applications.
+
+- Final source commit: `5c23c210`. Full `pnpm verify` exited successfully: 408 test files and
+  4,029 tests passed; coverage was 97.17% statements/lines, 94.08% branches and 95.79% functions.
+  Repository contracts, lint, workspace types, production builds and 136 desktop/mobile browser
+  tests passed, with two intentionally desktop-only tests skipped in the mobile project.
+- Independent final review findings were resolved: iCloud outbound source dates, legacy Google
+  repair before Calendar filtering, empty final commitment pages, and duplicate connector attention.
+  Full acceptance additionally exposed local all-day events ending at 23:59; source-date membership
+  now uses the final occupied instant, preserving both those events and midnight-exclusive holidays.
+- One full run hit a Docker port-binding timeout before Finance Inbox setup. The unchanged suite
+  passed 7/7 in isolation; after pausing the preview runtime, the single full retry passed. No test
+  timeout, assertion or coverage threshold was relaxed.
+- Migration `0112_today_preferences` ran against test and local fixture databases. There was no
+  production migration or bulk historical repair. Legacy Google events with reliable raw DATE
+  evidence repair on read; other uncertain source records require provider resynchronization.
+- The public CARTO key was configured in ignored local environments. Real style, sprite, glyph
+  and vector requests succeeded, and fixture-browser QA rendered tiles, preview controls, marker
+  and attribution. Mobile filters and settings previews were measured and visually checked.
+- Remaining release gates: real packaged desktop map/WebGL, ritual and pet smoke checks, and
+  CARTO key/origin configuration in the intended production and desktop release environments.
+  Browser mocks and native type checks do not establish packaged runtime behavior.
+
+No PR, merge or deployment was requested or performed.

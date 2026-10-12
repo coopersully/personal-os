@@ -10,9 +10,15 @@
   glyph, sprite and vector resources returned HTTP 200; fixture-browser QA rendered the map.
   The public key is configured only in ignored local environments. Production/desktop release
   builds accept `VITE_CARTO_API_KEY`; configure their intended origins with CARTO separately.
-- Verification is in progress. No merge, deployment, native packaged WebGL verification or
-  provider-wide historical backfill is claimed. Proven Google legacy source dates are corrected
-  on read; uncertain legacy data requires a successful provider resync.
+- Full `pnpm verify` passed at source commit `5c23c210`: 4,029 unit/integration tests,
+  136 desktop/mobile browser acceptance tests (two expected mobile skips), lint, types and
+  production builds. Coverage: 97.17% statements/lines, 94.08% branches, 95.79% functions.
+  Browser QA also verified authorized CARTO tiles, mobile filter containment and settings previews.
+- Source-date membership preserves both provider midnight-exclusive DATE ranges and existing
+  locally created all-day events with non-midnight ends. Proven Google legacy source dates are
+  corrected on read; uncertain legacy data requires a successful provider resync.
+- No merge, deployment, native packaged map/ritual/pet smoke or provider-wide historical backfill
+  is claimed. Packaged desktop and production CARTO origin checks remain release gates.
 
 
 ## 2026-10-11 — Explicit workspace agent execution

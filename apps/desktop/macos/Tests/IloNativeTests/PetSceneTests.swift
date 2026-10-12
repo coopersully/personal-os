@@ -112,6 +112,8 @@ final class PetSceneTests: XCTestCase {
     try controller.readyOverlay(windowAddress: address)
     XCTAssertEqual(shields().count, NSScreen.screens.count)
     let shield = try XCTUnwrap(shields().first)
+    XCTAssertTrue(shield.collectionBehavior.contains(.fullScreenAuxiliary))
+    XCTAssertFalse(shield.collectionBehavior.contains(.fullScreenNone))
     let view = try XCTUnwrap(shield.contentView)
     let event = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: .zero,
       modifierFlags: [], timestamp: 0, windowNumber: shield.windowNumber, context: nil,

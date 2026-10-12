@@ -29,7 +29,7 @@ final class PetDismissalSurface {
         panel.acceptsMouseMovedEvents = true
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenNone]
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         let view = PetDismissalView(frame: .zero)
         view.dismiss = { [weak self] in self?.dismiss?() }
         panel.contentView = view

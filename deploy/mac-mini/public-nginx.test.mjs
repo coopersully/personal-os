@@ -19,6 +19,9 @@ test("production nginx keeps public directory redirects on the visitor's HTTPS o
     mkdirSync(join(directory, path));
     writeFileSync(join(directory, path, "index.html"), `<h1>${path}</h1>`);
   }
+  mkdirSync(join(directory, "maplibre", "6.14.0"), { recursive: true });
+  for (const module of ["maplibre-gl-worker.mjs", "maplibre-gl-shared.mjs"])
+    writeFileSync(join(directory, "maplibre", "6.14.0", module), "export {}; ");
   const dockerfile = readFileSync(new URL("../../Dockerfile", import.meta.url), "utf8");
   const image = dockerfile.match(/^FROM (\S+) AS web$/m)?.[1];
   assert.ok(image, "Use the same nginx image as the production web container");
@@ -54,6 +57,10 @@ test("production nginx keeps public directory redirects on the visitor's HTTPS o
     if (!ready) await new Promise((resolve) => setTimeout(resolve, 100));
   }
   assert.ok(ready, "Production nginx starts within five seconds");
+  const worker = await request("/maplibre/6.14.0/maplibre-gl-worker.mjs");
+  assert.equal(worker.status, 200);
+  assert.match(worker.headers.get("content-type"), /(?:application|text)\/javascript/);
+  assert.equal((await request("/maplibre/6.14.0/missing.mjs")).status, 404);
   for (const path of paths) {
     const response = await request(`/${path}?source=policy`);
     assert.equal(response.status, 301);

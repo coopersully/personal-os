@@ -104,7 +104,7 @@ try {
       webPort,
       "--strictPort",
     ],
-    { VITE_API_BASE_URL: "/", VITE_PROXY_API_TARGET: apiUrl },
+    { VITE_API_BASE_URL: "/", VITE_PROXY_API_TARGET: apiUrl, VITE_CARTO_API_KEY: "" },
   );
   await waitFor(webUrl);
   await new Promise(() => undefined);

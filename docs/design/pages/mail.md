@@ -9,8 +9,9 @@ remain available as an app-bar visibility filter for troubleshooting and deliber
 review, not as sidebar destinations or the normal way to use Mail.
 
 Signed-in people may compose, reply, forward, and send plain-text messages. Every message is an
-nohmi-owned durable draft, autosaved before an explicit final confirmation. MCP and autonomous
-stewardship have no send capability.
+nohmi-owned durable draft, autosaved before an explicit final confirmation. Explicitly authorized
+MCP callers may send an exact saved draft under the execution boundary below; autonomous
+Mail maintenance has no send capability.
 
 The current draft and provider-delivery contracts do not preserve rich text or outbound
 attachments. Mail does not expose formatting or attachment controls until those capabilities are
@@ -80,7 +81,14 @@ poll, sequence steps, retry effects, or decide completion.
 | Approved rule | Mark read/unread, star/unstar, archive, or move only through an active exact rule |
 | Individual approval | Trash and rule activation |
 | Signed-in person | Compose, edit drafts, reply, forward, explicitly confirm send, and reconcile uncertain delivery |
-| Unavailable | Autonomous or MCP-originated email transmission |
+| Explicit agent execution | Exact-draft send, uncertain-delivery reconciliation, and rule activation require `mail:write`, opt-in `mail:execute`, and owner-enabled review bypass |
+| Unavailable | Email composition or transmission by autonomous Mail maintenance; response briefs remain non-transmittable |
+
+The [workspace execution contract](../../engineering/workspace-agent-capabilities.md) supersedes
+the earlier blanket MCP no-send restriction. Existing grants are not widened. Explicit agent
+operations preserve owner isolation, exact draft revisions or rule previews, provider capability,
+and audit attribution; bypass cannot supply missing scopes or evidence. Uncertain delivery must
+be reconciled from provider evidence before any resend.
 
 One-off question answers resolve only the exact record. Reusable learning requires an explicit
 generalization proposal with examples, counterexamples, and exceptions, followed by separate rule
@@ -110,8 +118,8 @@ approval, learning, status inference, or completion decision. Existing surgical 
 approved-rule preview tools remain typed API adapters.
 
 In v1, nohmi does not infer intent from prose and does not use model judgment for assessment. It asks
-a bounded question when explicit evidence is absent. Only the signed-in human Mail surface can
-initiate delivery.
+a bounded question when explicit evidence is absent. Maintenance does not initiate delivery;
+the signed-in Mail surface and separately authorized exact-draft MCP calls use the delivery service.
 
 ## Acceptance
 
@@ -163,7 +171,8 @@ initiate delivery.
 - No provider response body, token-shaped value, socket message, or exception reaches the Mail UI.
 - The exact-thread stewardship panel exposes disposition, obligation state, question answers,
   explicit feedback, Calendar evidence handoff, and a private non-transmittable response brief.
-- No MCP or autonomous Mail surface renders a send action or obtains provider delivery authority.
+- Autonomous Mail maintenance never composes or sends. Separately invoked MCP draft/send tools
+  follow the explicit execution boundary above; they do not turn a response brief into a message.
 
 Floating action sizing, colors, and labels use the shared
 [floating workspace actions contract](../system.md#floating-workspace-actions).

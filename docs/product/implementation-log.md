@@ -1,5 +1,20 @@
 # nohmi — Implementation Log
 
+## 2026-10-11 — Public product, policy, and authentication pages merged
+
+- [PR #237 — Add public product and policy pages](https://github.com/coopersully/personal-os/pull/237)
+  merged at `933e5b8cf52abc908711e5910f8c3b161b975f52`. The public landing page and seven
+  product/policy documents render without an account or JavaScript. Dedicated authentication
+  routes preserve safe return destinations; SMS enrollment retains the consent version accepted
+  on its verification challenge.
+- Final source head `b4511c839de50a8baadfa79602a865947ed357c7` passed repository contracts,
+  lint, Node quality, browser acceptance, both selected desktop jobs, infrastructure checks,
+  and required CI. This supersedes the incomplete branch verification state recorded below;
+  those earlier failures remain historical evidence, not the final release gate.
+- Public-page reachability, deployed enrollment screenshots, actual HELP/STOP/START behavior,
+  sender registration, and provider approval require their own evidence. Merge and source
+  checks do not satisfy the [messaging submission gates](../engineering/public-documentation.md).
+
 ## 2026-10-11 — Explicit workspace agent execution
 
 - Added typed MCP paths for shipped Mail, Tasks/Reminders, Calendar, Finance and shared settings,

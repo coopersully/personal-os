@@ -459,8 +459,9 @@ the ledger. Compatibility `finances:write` action tools may submit ledger, profi
 budget changes and receive `applied`, `pending_review`, or
 `needs_input`. The API derives the disposition from the signed-in user's
 persisted app-only review bypass and current evidence; this includes the Finance
-insight refresh mutation. Agents cannot toggle bypass or approve/dismiss action
-reviews. They may apply a permanent merchant-learning rule only as part of an
+insight refresh mutation. Agents cannot toggle bypass. Approving or dismissing action reviews
+additionally requires explicit `finances:execute`, enabled bypass, and the current work reference.
+They may apply a permanent merchant-learning rule only as part of an
 explicitly prepared categorization action, and it remains subject to the same
 confidence, ambiguity, evidence, ownership, and revision checks; bypass never
 waives those checks. A scoped same-user agent may list pending Finance questions
@@ -474,7 +475,8 @@ questions use a typed answer and may conditionally classify allocations or
 create/match an internal reimbursement case; they never initiate a payment or
 any other external financial activity. The deprecated `resolve_finance_review`
 compatibility alias only translates legacy categorization answers. Legacy action-review
-approval/dismissal remains a signed-in control. Canonical connection,
+approval/dismissal is available to the signed-in owner or explicitly authorized Finance execution
+agents with enabled review bypass and exact current work references. Canonical connection,
 import, account correction, and typed transaction-relationship tools have their own scoped API
 contracts and are available to authorized MCP callers; no relationship operation moves money.
 
@@ -487,11 +489,12 @@ query or resume support, and abort-aware scheduling. MCP exposes it as
 other Finance actions.
 
 The shared `save_domain_profile` tool may save a Finance guidance draft with
-`finances:write`. It cannot activate that draft: activation is a signed-in
-action in **Finance settings → Profile**, requires an owned account source, and uses
-the profile version guard. `get_finance_guided_setup` exposes active guidance
+`finances:write`. Activation requires an owned account source, the profile version guard,
+and either a signed-in action in **Finance settings → Profile** or opt-in
+`finances:execute` with owner-enabled review bypass. `get_finance_guided_setup` exposes active guidance
 separately from a draft proposal. Draft text is explicitly untrusted and
-non-operative until that signed-in activation; hosts must not inject it as
+non-operative until authorized activation; approval readback distinguishes user instruction from
+agent self-approval. Hosts must not inject unapproved drafts as
 operating instructions. `sourceContexts` describe how to interpret accounts;
 they do not limit which accounts a token can read. Scalar alert preferences
 currently use one USD planning currency. Cadence and threshold preferences
@@ -560,9 +563,11 @@ era. Deployment verification must therefore perform a least-privilege authentica
 the intended account without invoking a provider mutation.
 
 Tool annotations are host hints, not authorization. Read-only cached Mail tools are closed-world;
-provider writes and sending are open-world. Rule activation is intentionally absent from MCP
-because approved rules can mutate provider state; it requires the signed-in Settings review.
-Reviewed Google archive and recoverable Trash rules may activate after signed-in review; automatic
+provider writes and sending are open-world. `activate_mail_rule` requires the exact saved rule
+version and current bounded preview; agent callers also need `mail:write`, opt-in `mail:execute`,
+and owner-enabled review bypass. These grants do not replace the preview's evidence or provider
+capability. Reviewed Google archive and recoverable Trash rules may activate through the signed-in
+surface or this explicit execution path; automatic
 execution for unsupported providers remains unavailable. The API still enforces scopes, source
 ownership, policy, optimistic versions, audit, and the distinction between recoverable Trash and
 permanent deletion. Bulk
@@ -573,12 +578,16 @@ local commits and a controlled response. If a provider succeeds but the atomic l
 projection-and-audit transaction fails, the item failure reports `partialEffect: true` and directs
 the caller to synchronize that Mail account before retrying.
 
-Repair actions are signed-in user actions, not MCP tools. `sync_mail_account` means **Mail → Sync**;
-`reconnect_then_sync_mail_account` means **Settings → Connections → reconnect**, then **Mail →
-Sync**. `verify_sent_mail_then_reconcile_draft` means inspect provider **Sent Mail** and then use
-the signed-in **Ilo Mail** recovery panel; never resend automatically. First-party/API sends without
+Recovery hints describe the required operation, not necessarily an MCP tool name.
+`sync_mail_account` means **Mail → Sync**; authorized agents may use the registered
+`sync_workspace_source` path with all affected workspace grants and enabled bypass.
+`reconnect_then_sync_mail_account` still requires owner-controlled provider reconnection before sync.
+`verify_sent_mail_then_reconcile_draft` means inspect provider **Sent Mail** and then use
+the signed-in Mail recovery panel or explicitly authorized `reconcile_mail_draft` with
+Mail write/execute grants and enabled bypass. Reconciliation records the observed outcome and never
+resends. First-party/API sends without
 a draft have no durable recovery object: `verify_sent_mail_never_retry` means inspect Sent Mail and
-do not replay the request, not that Ilo can reconcile a missing audit record.
+do not replay the request, not that nohmi can reconcile a missing audit record.
 
 ## Authorization
 

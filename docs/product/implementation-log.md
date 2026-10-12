@@ -1,5 +1,20 @@
 # nohmi — Implementation Log
 
+## 2026-10-12 — Today refinements (branch implementation)
+
+- Separate daily timeline and calendar-week commitment cards, source-date all-day fixes,
+  revisioned Today personalization, optional spending/ritual/pet cards, and workspace/account
+  attention aggregation are implemented in this branch. Weekly material uses a bounded owner
+  projection with aggregate counts and signed cursors rather than the daily brief's limits.
+- MapCN is adapted for reicon, pinned MapLibre 6.14.0 and local worker assets. CARTO style,
+  glyph, sprite and vector resources returned HTTP 200; fixture-browser QA rendered the map.
+  The public key is configured only in ignored local environments. Production/desktop release
+  builds accept `VITE_CARTO_API_KEY`; configure their intended origins with CARTO separately.
+- Verification is in progress. No merge, deployment, native packaged WebGL verification or
+  provider-wide historical backfill is claimed. Proven Google legacy source dates are corrected
+  on read; uncertain legacy data requires a successful provider resync.
+
+
 ## 2026-10-11 — Explicit workspace agent execution
 
 - Added typed MCP paths for shipped Mail, Tasks/Reminders, Calendar, Finance and shared settings,

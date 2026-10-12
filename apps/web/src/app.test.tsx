@@ -6,6 +6,7 @@ import { ApiClientError } from "@personal-os/api-client";
 import {
   type CalendarStatus,
   getDefaultWorkspacePreferences,
+  resolveTodaySettings,
   type UpdateAccountSetupInput,
   type User,
 } from "@personal-os/domain";
@@ -451,6 +452,9 @@ function iloSetupFixture() {
 
 const mocks = vi.hoisted(() => ({
   searchWorkspace: vi.fn(),
+  getTodaySettings: vi.fn(),
+  updateTodaySettings: vi.fn(),
+  getTodayCommitments: vi.fn(),
   getWorkspaceSettings: vi.fn(),
   updateWorkspaceSettings: vi.fn(),
   listAgentAccessWorkItems: vi.fn(),
@@ -1712,6 +1716,25 @@ beforeEach(() => {
   // queued one-off implementations, which made later calendar tests render an
   // unrelated prior state instead of their documented defaults.
   vi.resetAllMocks();
+  let todaySettings = resolveTodaySettings(null);
+  mocks.getTodaySettings.mockImplementation(async () => todaySettings);
+  mocks.updateTodaySettings.mockImplementation(async (input) => {
+    todaySettings = {
+      revision: todaySettings.revision + 1,
+      preferences: { ...todaySettings.preferences, ...input.preferences },
+    };
+    return todaySettings;
+  });
+  mocks.getTodayCommitments.mockResolvedValue({
+    generatedAt: now,
+    timeZone: "UTC",
+    weekStart: "2026-07-12",
+    weekEndExclusive: "2026-07-19",
+    items: [{ kind: "reminder", group: "today", material: reminder }],
+    nextCursor: null,
+    counts: { all: 1, overdue: 0, tasks: 0, reminders: 1 },
+    unavailableSources: [],
+  });
   mocks.listAgentAccessWorkItems.mockResolvedValue({
     items: [],
     nextCursor: null,
@@ -1917,7 +1940,7 @@ describe("ilo web app", () => {
       expect(screen.getByText("3min ago")).toBeInTheDocument();
       expect(screen.getByText("Sensitive groups")).toBeInTheDocument();
       await browser.click(screen.getByRole("button", { name: "Weather location: NYC" }));
-      expect(screen.getByTitle("Map of New York, New York, United States")).toBeInTheDocument();
+      expect(screen.getByText("© OpenStreetMap contributors")).toBeInTheDocument();
       expect(screen.getAllByText("Using this device")).not.toHaveLength(0);
       expect(screen.getByText("40.7000, -74.0000")).toBeInTheDocument();
       expect(
@@ -2086,11 +2109,7 @@ describe("ilo web app", () => {
     try {
       // No device permission and no saved location: say what would fix it.
       const withoutLocation = setup("/today");
-      expect(
-        await screen.findByText(
-          "Allow device location or add a saved location in Account settings.",
-        ),
-      ).toBeInTheDocument();
+      expect(await screen.findByText("Set location")).toBeInTheDocument();
       withoutLocation.unmount();
 
       // A saved location that cannot be read reports the failure rather than
@@ -2105,9 +2124,7 @@ describe("ilo web app", () => {
       });
       mocks.getWeather.mockRejectedValue(new Error("Weather unavailable"));
       setup("/today");
-      expect(
-        await screen.findByText("Conditions are temporarily unavailable."),
-      ).toBeInTheDocument();
+      expect(await screen.findByText("Unavailable")).toBeInTheDocument();
     } finally {
       if (originalGeolocation) Object.defineProperty(navigator, "geolocation", originalGeolocation);
       else Reflect.deleteProperty(navigator, "geolocation");
@@ -6436,8 +6453,8 @@ describe("ilo web app", () => {
     });
     expect(scheduledTaskButton).toBeVisible();
     expect(screen.getByRole("heading", { name: "Your timeline" })).toBeInTheDocument();
-    expect(screen.getByText("1 total event, 1 left today")).toBeVisible();
-    expect(screen.getByText("1 total event, 1 left today")).toHaveClass(
+    expect(screen.getByText("Today · Events, tasks and reminders")).toBeVisible();
+    expect(screen.getByText("Today · Events, tasks and reminders")).toHaveClass(
       "today-section-heading__description",
     );
     expect(screen.queryByText("The day is open")).not.toBeInTheDocument();
@@ -6448,40 +6465,26 @@ describe("ilo web app", () => {
     expect(screen.queryByText("Later today")).not.toBeInTheDocument();
     expect(screen.queryByText("Decision queue")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "To take care of" })).toBeInTheDocument();
-    expect(screen.getByText("7 things left, 2 overdue")).toHaveClass(
-      "today-section-heading__description",
-    );
+    expect(screen.getByText("This week · Tasks and reminders")).toBeVisible();
     const todayQueue = screen.getByRole("complementary", { name: "To take care of" });
     expect(
       within(todayQueue).getByRole("radiogroup", { name: "Commitment filters" }),
     ).toBeVisible();
-    expect(within(todayQueue).queryByRole("heading", { level: 3 })).not.toBeInTheDocument();
-    const commitmentList = within(todayQueue).getByRole("list", { name: "Commitments" });
-    expect(within(commitmentList).getAllByRole("listitem")[0]).toHaveTextContent("Draft brief");
-    expect(within(commitmentList).getAllByRole("listitem")[0]).toHaveClass(
-      "today-commitment-row--overdue",
+    await waitFor(() =>
+      expect(mocks.getTodayCommitments).toHaveBeenCalledWith({
+        filter: "all",
+        includeUndated: false,
+        limit: 6,
+      }),
     );
-    expect(within(todayQueue).getByText("1–6 of 7")).toBeVisible();
-    expect(within(todayQueue).queryByText("Suggested follow-up")).not.toBeInTheDocument();
-    expect(within(todayQueue).queryByText("Future task")).not.toBeInTheDocument();
-    expect(within(todayQueue).queryByText("Ready next")).not.toBeInTheDocument();
-    expect(within(todayQueue).queryByText("High priority")).not.toBeInTheDocument();
-    expect(within(todayQueue).queryByText("Time reserved")).not.toBeInTheDocument();
-    await browser.click(within(todayQueue).getByRole("link", { name: "Go to next page" }));
-    expect(within(todayQueue).getByText("7–7 of 7")).toBeVisible();
-    await browser.click(within(todayQueue).getByRole("radio", { name: "Tasks" }));
-    expect(within(todayQueue).getByText("1–3 of 3")).toBeVisible();
-    expect(within(todayQueue).queryByText("Overdue reminder")).not.toBeInTheDocument();
-    await browser.click(within(todayQueue).getByRole("radio", { name: "Overdue" }));
-    expect(within(todayQueue).getByText("1–2 of 2")).toBeVisible();
-    expect(within(todayQueue).getByText("Overdue reminder")).toBeVisible();
-    await browser.click(within(todayQueue).getByRole("radio", { name: "All" }));
-    await browser.click(
-      within(todayQueue).getAllByRole("button", { name: "Open Draft brief" })[0] as HTMLElement,
+    await browser.click(within(todayQueue).getByRole("radio", { name: /^Tasks/ }));
+    await waitFor(() =>
+      expect(mocks.getTodayCommitments).toHaveBeenCalledWith({
+        filter: "tasks",
+        includeUndated: false,
+        limit: 6,
+      }),
     );
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
-    fireEvent.keyDown(document, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     const doneToday = screen.getByText("Done today").closest("button");
     expect(doneToday).toHaveAttribute("aria-expanded", "false");
     await browser.click(doneToday as HTMLButtonElement);
@@ -6493,7 +6496,8 @@ describe("ilo web app", () => {
   it("explains a completed-reminder query failure on Today", async () => {
     mocks.listReminders.mockRejectedValueOnce(new Error("Completed reminders unavailable"));
     const view = setup();
-    expect(await screen.findByText("Couldn’t load this material.")).toBeInTheDocument();
+    expect(await screen.findByText("Completed history unavailable.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "To take care of" })).toBeInTheDocument();
     view.unmount();
   });
 
@@ -6504,9 +6508,7 @@ describe("ilo web app", () => {
     expect(screen.getByText("Test reminder")).toBeInTheDocument();
     const allDayStrip = screen.getByRole("region", { name: "All-day occasions" });
     const todaySchedule = screen.getByRole("region", { name: "Today's calendar" });
-    expect(
-      within(todaySchedule).getByText("3 total events, 2 left today, 1 ongoing"),
-    ).toBeVisible();
+    expect(within(todaySchedule).getByText("Today · Events, tasks and reminders")).toBeVisible();
     expect(todaySchedule).toContainElement(allDayStrip);
     expect(
       within(todaySchedule)
@@ -6528,10 +6530,10 @@ describe("ilo web app", () => {
     expect(within(todaySchedule).getByText("1 PM")).toBeVisible();
     expect(within(todaySchedule).getByText("2 PM")).toBeVisible();
     expect(todaySchedule.querySelectorAll('[data-slot="today-timeline-minor-tick"]')).toHaveLength(
-      6,
+      10,
     );
     expect(todaySchedule.querySelectorAll('[data-slot="today-timeline-grid-line"]')).toHaveLength(
-      9,
+      14,
     );
     expect(
       within(todaySchedule).getByRole("timer", { name: "Current time 12:00 PM" }),
@@ -6552,7 +6554,7 @@ describe("ilo web app", () => {
     expect(screen.getByText("Live focus").closest('[data-slot="event-card"]')).toHaveStyle({
       height: "90px",
     });
-    expect(todayTimeline).toHaveStyle({ height: "180px" });
+    expect(todayTimeline).toHaveStyle({ height: "292.5px" });
     expect(screen.queryByText("Later today")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Current commitment")).not.toBeInTheDocument();
 

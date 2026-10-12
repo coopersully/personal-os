@@ -53,6 +53,8 @@ try {
         `org.opencontainers.image.revision=${revision}`,
         "--build-arg",
         "VITE_API_BASE_URL=https://nohmi-api.coopersully.me",
+        "--build-arg",
+        "VITE_CARTO_API_KEY",
         "-t",
         tag,
         source,

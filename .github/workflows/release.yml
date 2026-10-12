@@ -82,6 +82,7 @@ jobs:
       - run: pnpm --filter @personal-os/web build
         env:
           VITE_API_BASE_URL: ${{ vars.PERSONAL_OS_API_BASE_URL }}
+          VITE_CARTO_API_KEY: ${{ vars.VITE_CARTO_API_KEY }}
       - name: Require signing and production API configuration
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -91,6 +92,7 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           VITE_API_BASE_URL: ${{ vars.PERSONAL_OS_API_BASE_URL }}
+          VITE_CARTO_API_KEY: ${{ vars.VITE_CARTO_API_KEY }}
         run: |
           test -n "$VITE_API_BASE_URL"
           test -n "$APPLE_CERTIFICATE"
@@ -109,6 +111,7 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           VITE_API_BASE_URL: ${{ vars.PERSONAL_OS_API_BASE_URL }}
+          VITE_CARTO_API_KEY: ${{ vars.VITE_CARTO_API_KEY }}
           ILO_HOST_PROFILE_BASE64: ${{ secrets.ILO_HOST_PROFILE_BASE64 }}
           ILO_WIDGET_PROFILE_BASE64: ${{ secrets.ILO_WIDGET_PROFILE_BASE64 }}
           NOHMI_UPDATER_PUBLIC_KEY: ${{ vars.NOHMI_UPDATER_PUBLIC_KEY }}

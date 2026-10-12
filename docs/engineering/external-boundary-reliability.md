@@ -148,3 +148,18 @@ Behavior coverage must prove pending persistence, success metadata, expiry, reda
 idempotent replay. Production-equivalent evidence must separately prove runtime authority,
 outbound HTTPS reachability, Link configuration, callback correctness, and successful transition
 from a handoff to connected accounts. Green mock tests do not prove any of those runtime facts.
+
+## Today basemap release configuration
+
+Today uses an optional public `VITE_CARTO_API_KEY`, embedded by the web build. Local lifecycle
+loads it from the primary checkout's ignored `.env`. GitHub web and desktop releases read the
+repository variable of that name; the Mac production image builder forwards the process variable
+as a Docker build argument. An absent key is supported and leaves the quiet default background.
+Configure CARTO origin restrictions for each actual web/desktop origin; do not treat an accepted
+localhost request as evidence for production or Tauri. Never use an administrative CARTO token.
+
+MapLibre 6.14.0's worker and shared module are copied together by `maps:prepare` and served from
+`/maplibre/6.14.0/`; `worker-src 'self'` preserves the desktop's same-origin script policy.
+A release must exercise actual style, source metadata, vector, sprite and glyph requests, WebGL2,
+light/dark changes, attribution, unmount cleanup and the no-key/network/WebGL fallback. Local
+fixture browser evidence does not establish packaged macOS/Windows webview compatibility.

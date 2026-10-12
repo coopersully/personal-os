@@ -27,6 +27,7 @@ export * from "./task-organization.js";
 export * from "./task-workspace.js";
 export * from "./texting.js";
 export * from "./time.js";
+export * from "./today.js";
 export * from "./weather.js";
 export * from "./workspace-search.js";
 export * from "./workspace-settings.js";

@@ -352,6 +352,22 @@ describe.sequential("Calendar commitment proposals", () => {
     expect((await service.listEvents(userId, query)).find((event) => event.id === row!.id)).toEqual(
       first,
     );
+    expect(
+      (
+        await service.listEvents(userId, {
+          from: "2026-10-13T01:00:00Z",
+          to: "2026-10-13T03:00:00Z",
+        })
+      ).some((event) => event.id === row!.id),
+    ).toBe(true);
+    expect(
+      (
+        await service.listEvents(userId, {
+          from: "2026-10-11T04:00:00Z",
+          to: "2026-10-12T04:00:00Z",
+        })
+      ).some((event) => event.id === row!.id),
+    ).toBe(false);
   });
 
   it("keeps caller-supplied strong evidence preview-only and exposes source state", async () => {

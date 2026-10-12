@@ -293,6 +293,62 @@ function summarizeItems(
   const count = (predicate: (item: AgentAccessWorkItem) => boolean) =>
     items.filter(predicate).length;
   return {
+    reviewByDomain: {
+      calendar:
+        unavailableDomains.has("calendar") || failedKinds.has("review")
+          ? null
+          : count((item) => item.kind === "review" && item.domain === "calendar"),
+      finances:
+        unavailableDomains.has("finances") || failedKinds.has("review")
+          ? null
+          : count((item) => item.kind === "review" && item.domain === "finances"),
+      mail:
+        unavailableDomains.has("mail") || failedKinds.has("review")
+          ? null
+          : count((item) => item.kind === "review" && item.domain === "mail"),
+      tasks:
+        unavailableDomains.has("tasks") || failedKinds.has("review")
+          ? null
+          : count((item) => item.kind === "review" && item.domain === "tasks"),
+    },
+    attentionByDomain: {
+      calendar:
+        unavailableDomains.has("calendar") || failedKinds.has("attention")
+          ? null
+          : count(
+              (item) =>
+                item.kind === "attention" &&
+                !item.id.startsWith("reconnect:") &&
+                item.domain === "calendar",
+            ),
+      finances:
+        unavailableDomains.has("finances") || failedKinds.has("attention")
+          ? null
+          : count(
+              (item) =>
+                item.kind === "attention" &&
+                !item.id.startsWith("reconnect:") &&
+                item.domain === "finances",
+            ),
+      mail:
+        unavailableDomains.has("mail") || failedKinds.has("attention")
+          ? null
+          : count(
+              (item) =>
+                item.kind === "attention" &&
+                !item.id.startsWith("reconnect:") &&
+                item.domain === "mail",
+            ),
+      tasks:
+        unavailableDomains.has("tasks") || failedKinds.has("attention")
+          ? null
+          : count(
+              (item) =>
+                item.kind === "attention" &&
+                !item.id.startsWith("reconnect:") &&
+                item.domain === "tasks",
+            ),
+    },
     byDomain: {
       calendar: unavailableDomains.has("calendar")
         ? null

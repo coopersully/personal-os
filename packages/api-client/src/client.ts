@@ -47,6 +47,7 @@ import { createRitualsApiClient } from "./features/rituals.js";
 import { createTaskWorkspaceApiClient } from "./features/task-workspace.js";
 import { createTaskApiClient } from "./features/tasks.js";
 import { createTextingApiClient } from "./features/texting.js";
+import { createTodayApiClient } from "./features/today.js";
 
 export class ApiClientError extends Error {
   public readonly code: string;
@@ -211,6 +212,7 @@ export function createApiClient(options: ClientOptions) {
     ...createCalendarApiClient(request),
     ...createGoalsApiClient(request),
     ...createRitualsApiClient(request),
+    ...createTodayApiClient(request),
     ...createDesktopReleaseApiClient(request),
     ...createMailApiClient(request, toQuery),
     ...createMailStewardshipApiClient(request),

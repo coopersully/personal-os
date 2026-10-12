@@ -52,3 +52,5 @@ apps/web/public/support/
 
 # Shared static landing render consumed by Vite.
 apps/web/.public-site/
+
+apps/web/public/maplibre/

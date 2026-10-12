@@ -4,6 +4,7 @@ import type { CSSProperties, ReactNode } from "react";
 
 export type TimelinePositionable = {
   allDay: boolean;
+  point?: boolean;
   endsAt: string;
   id: string;
   startsAt: string;
@@ -208,12 +209,15 @@ export function DayTimeline<T extends TimelinePositionable>({
         </div>
         {layouts.map((layout) => {
           const snappedRange = todayTimelineItemRange(layout.startMinute, layout.endMinute);
-          const visibleStartMinute = Math.max(startMinute, snappedRange.start);
+          const visibleStartMinute = Math.max(
+            startMinute,
+            layout.event.point ? layout.startMinute : snappedRange.start,
+          );
           const visibleEndMinute = Math.max(visibleStartMinute + 15, snappedRange.end);
           const visibleDurationMinutes = visibleEndMinute - visibleStartMinute;
           const columnGap = 8;
           const layoutStyle = {
-            height: visibleDurationMinutes * todayTimelinePixelsPerMinute,
+            height: layout.event.point ? 32 : visibleDurationMinutes * todayTimelinePixelsPerMinute,
             left: `calc(${(layout.column / layout.columns) * 100}% + ${layout.column === 0 ? 0 : columnGap / 2}px)`,
             top: (visibleStartMinute - startMinute) * todayTimelinePixelsPerMinute,
             width: `calc(${100 / layout.columns}% - ${layout.columns === 1 ? 0 : columnGap / 2}px)`,

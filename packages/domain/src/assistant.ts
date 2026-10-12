@@ -198,6 +198,22 @@ export type AgentAccessWorkItem = z.infer<typeof agentAccessWorkItemSchema>;
 const agentAccessWorkItemCountSchema = z.int().nonnegative().nullable();
 
 export const agentAccessWorkItemSummarySchema = z.object({
+  reviewByDomain: z
+    .object({
+      calendar: agentAccessWorkItemCountSchema,
+      finances: agentAccessWorkItemCountSchema,
+      mail: agentAccessWorkItemCountSchema,
+      tasks: agentAccessWorkItemCountSchema,
+    })
+    .optional(),
+  attentionByDomain: z
+    .object({
+      calendar: agentAccessWorkItemCountSchema,
+      finances: agentAccessWorkItemCountSchema,
+      mail: agentAccessWorkItemCountSchema,
+      tasks: agentAccessWorkItemCountSchema,
+    })
+    .optional(),
   byDomain: z.object({
     calendar: agentAccessWorkItemCountSchema,
     finances: agentAccessWorkItemCountSchema,

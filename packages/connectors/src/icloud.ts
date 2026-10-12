@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
   type CreateEventInput,
+  localDateAt,
+  localDateToIso,
   type MailAddress,
   normalizeProviderAllDayRange,
   type UpdateEventInput,
@@ -772,7 +774,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
           status: 404,
         });
       }
-      const data = updateEventDocument(String(existing.data), input);
+      const data = updateEventDocument(String(existing.data), input, calendar.timezone ?? "UTC");
       const response = await client.updateCalendarObject({
         calendarObject: {
           data,
@@ -982,7 +984,11 @@ function eventDocument(uid: string, input: CreateEventInput): string {
   return root.toString();
 }
 
-function updateEventDocument(data: string, input: UpdateEventInput): string {
+function updateEventDocument(
+  data: string,
+  input: UpdateEventInput,
+  fallbackTimezone: string,
+): string {
   const root = new ICAL.Component(ICAL.parse(data));
   const component = root.getFirstSubcomponent("vevent");
   if (!component) {
@@ -994,11 +1000,20 @@ function updateEventDocument(data: string, input: UpdateEventInput): string {
       status: 502,
     });
   }
-  applyEvent(new ICAL.Event(component), input);
+  applyEvent(new ICAL.Event(component), input, fallbackTimezone);
   return root.toString();
 }
 
-function applyEvent(event: ICAL.Event, input: CreateEventInput | UpdateEventInput): void {
+function applyEvent(
+  event: ICAL.Event,
+  input: CreateEventInput | UpdateEventInput,
+  fallbackTimezone = "UTC",
+): void {
+  const allDay = input.allDay ?? event.startDate?.isDate ?? false;
+  const timezone =
+    input.timezone ??
+    (event.startDate?.zone?.tzid !== "floating" ? event.startDate?.zone?.tzid : undefined) ??
+    fallbackTimezone;
   const conferenceUrl = "conferenceUrl" in input ? input.conferenceUrl : undefined;
   if (input.title !== undefined) event.summary = input.title;
   if (input.notes !== undefined || conferenceUrl !== undefined) {
@@ -1010,17 +1025,17 @@ function applyEvent(event: ICAL.Event, input: CreateEventInput | UpdateEventInpu
   }
   if (input.location !== undefined) event.location = input.location ?? "";
   if (input.startsAt !== undefined) {
-    event.startDate = eventTime(input.startsAt, input.allDay ?? false);
+    event.startDate = eventTime(input.startsAt, allDay, timezone);
   }
   if (input.endsAt !== undefined) {
-    event.endDate = eventTime(input.endsAt, input.allDay ?? false);
+    event.endDate = eventTime(input.endsAt, allDay, timezone);
   }
 }
 
-function eventTime(value: string, allDay: boolean): ICAL.Time {
-  const time = ICAL.Time.fromJSDate(new Date(value), true);
-  time.isDate = allDay;
-  return time;
+function eventTime(value: string, allDay: boolean, timezone: string): ICAL.Time {
+  if (allDay)
+    return ICAL.Time.fromDateString(localDateToIso(localDateAt(new Date(value), timezone)));
+  return ICAL.Time.fromJSDate(new Date(value), true);
 }
 
 function imapMailboxRole(specialUse: string | undefined, path: string): RemoteMailbox["role"] {

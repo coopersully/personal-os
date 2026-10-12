@@ -84,6 +84,7 @@ type EventItem = {
   allDay: boolean;
   conferenceUrl?: string;
   calendarId?: string;
+  provider?: string;
 };
 export type PetData = {
   contentError?: string;
@@ -170,7 +171,7 @@ function PetContent() {
   const calendarEnabled =
     visible && !!data.data?.snapshot && !!data.data?.workspaces.includes("calendar");
   const calendars = useQuery({
-    queryKey: ["calendars"],
+    queryKey: ["pet-calendars", data.data?.snapshot?.serverUrl, data.data?.snapshot?.accountId],
     queryFn: api.listCalendars,
     enabled: calendarEnabled,
     staleTime: 60_000,
@@ -335,16 +336,27 @@ function PetContent() {
       minute: "2-digit",
       timeZone: snapshot?.timeZone,
     });
+  const eventDateZone = (event: EventItem) =>
+    event.provider && event.provider !== "local" ? "UTC" : (snapshot?.timeZone ?? "UTC");
   const events =
-    snapshot?.events.filter(
-      (event) =>
+    snapshot?.events.filter((event) => {
+      if (event.allDay) {
+        const today = localDateToIso(localDateAt(now, snapshot.timeZone));
+        const start = localDateToIso(localDateAt(new Date(event.startsAt), eventDateZone(event)));
+        const end = localDateToIso(
+          localDateAt(new Date(new Date(event.endsAt).getTime() - 1), eventDateZone(event)),
+        );
+        return start <= today && today <= end;
+      }
+      return (
         new Date(event.endsAt) > now &&
         (new Date(event.startsAt) <= now ||
           sameLocalDate(
             localDateAt(new Date(event.startsAt), snapshot.timeZone),
             localDateAt(now, snapshot.timeZone),
-          )),
-    ) ?? [];
+          ))
+      );
+    }) ?? [];
   const calendar =
     snapshot && data.data?.workspaces.includes("calendar") ? (
       <section
@@ -357,10 +369,10 @@ function PetContent() {
           {events
             .filter((event) => event.allDay)
             .map((event) => {
-              const start = localDateAt(new Date(event.startsAt), snapshot.timeZone);
+              const start = localDateAt(new Date(event.startsAt), eventDateZone(event));
               const end = localDateAt(
                 new Date(new Date(event.endsAt).getTime() - 1),
-                snapshot.timeZone,
+                eventDateZone(event),
               );
               const label = (date: typeof start) =>
                 new Intl.DateTimeFormat("en", {

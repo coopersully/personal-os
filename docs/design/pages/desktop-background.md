@@ -407,3 +407,7 @@ the resize edge so both remain usable.
 Pet task and reminder rows compose the shared TaskItem and ReminderItem families inside ItemGroup,
 including their completion, primary-action, content, and title slots. Native account-scoped
 completion and stale-data guards remain the pet's action boundary.
+
+Calendar colors in quick access are scoped to the snapshot's server and account. Provider all-day
+boundaries retain their date-only meaning through the native snapshot; local all-day events use the
+account time zone. An all-day occasion remains visible through the end of its local calendar day.

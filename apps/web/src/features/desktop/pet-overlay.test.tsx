@@ -826,3 +826,64 @@ it("dismisses calendar color errors when the calendar workspace is removed", asy
   await waitFor(() => expect(toast.dismiss).toHaveBeenCalledWith(call?.[1]?.id));
   expect(api.listCalendars).toHaveBeenCalledTimes(1);
 });
+
+it("keeps provider all-day dates on their calendar day through late evening", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-07-15T03:00:00Z"));
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "pet_snapshot"
+      ? {
+          ...fixture,
+          workspaces: ["calendar"],
+          snapshot: {
+            ...fixture.snapshot,
+            timeZone: "America/New_York",
+            events: [
+              {
+                id: "all-day",
+                title: "Planning day",
+                provider: "google",
+                allDay: true,
+                startsAt: "2026-07-14T00:00:00Z",
+                endsAt: "2026-07-15T00:00:00Z",
+              },
+              {
+                id: "tomorrow",
+                title: "Tomorrow's event",
+                provider: "google",
+                allDay: true,
+                startsAt: "2026-07-15T00:00:00Z",
+                endsAt: "2026-07-16T00:00:00Z",
+              },
+            ],
+          },
+        }
+      : undefined,
+  );
+  mount();
+  const event = await screen.findByRole("button", { name: /All day Planning day/ });
+  expect(event.querySelector("time")).toHaveAttribute("datetime", "2026-07-14");
+  expect(screen.queryByText("Tomorrow's event")).not.toBeInTheDocument();
+});
+
+it("loads calendar colors again when the pet snapshot account changes", async () => {
+  vi.mocked(api.listCalendars).mockRejectedValueOnce(new Error("old account offline"));
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "pet_snapshot" ? { ...fixture, workspaces: ["calendar"] } : undefined,
+  );
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  mount(client);
+  const message = "Couldn’t refresh calendar colors. Try reopening quick access.";
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith(message, expect.anything()));
+  const errorCall = vi.mocked(toast.error).mock.calls.find(([text]) => text === message);
+  act(() =>
+    client.setQueryData(["pet-snapshot"], {
+      ...fixture,
+      workspaces: ["calendar"],
+      snapshot: { ...fixture.snapshot, accountId: "account-b" },
+    }),
+  );
+  await waitFor(() => expect(api.listCalendars).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(toast.dismiss).toHaveBeenCalledWith(errorCall?.[1]?.id));
+  expect(screen.queryByText(message)).not.toBeInTheDocument();
+});

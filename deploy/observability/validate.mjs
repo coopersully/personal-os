@@ -84,6 +84,8 @@ try {
       capability: "PRIVATE_CANARY",
     }),
     "malformed_PRIVATE_CANARY",
+    // The final record marks completion of this ordered stream, including rejected inputs.
+    JSON.stringify({ event: "request", status: 204 }),
   ];
   const payload = {
     streams: [
@@ -117,11 +119,19 @@ try {
   for (let attempt = 0; attempt < 30; attempt++) {
     const captured = spawnSync("docker", ["logs", name], { encoding: "utf8" });
     logs = captured.stdout + captured.stderr;
-    if (logs.includes("event=connector_capability_failed")) break;
+    if (
+      logs.includes("event=connector_capability_failed") &&
+      logs.includes("status=500") &&
+      logs.includes("status=204") &&
+      (logs.match(/received log entry/g) ?? []).length >= 4
+    ) {
+      break;
+    }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   assert.ok(logs.includes("code=google_permission_missing"), "Expected safe event missing");
   assert.ok(logs.includes("status=500"), "Expected safe request missing");
+  assert.ok(logs.includes("status=204"), "Final stream record missing");
   assert.match(
     logs,
     /freshnessAgeMs=(172800000|1[.]728e[+]08)/,
@@ -130,7 +140,7 @@ try {
   assert.match(logs, /durationMs=(172800000|1[.]728e[+]08)/);
   assert.match(logs, /failureCount=(1000000|1e[+]06)/);
   assert.equal(logs.includes("PRIVATE_CANARY"), false, "Privacy filter forwarded private content");
-  assert.equal((logs.match(/received log entry/g) ?? []).length, 3, "Unexpected records forwarded");
+  assert.equal((logs.match(/received log entry/g) ?? []).length, 4, "Unexpected records forwarded");
   console.log("Alloy configuration and real log-pipeline privacy checks passed.");
 } finally {
   try {

@@ -15,7 +15,7 @@ import {
   updateFinanceTransactionInputSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
-import { apiResult } from "../tool-result.js";
+import { apiResult, result } from "../tool-result.js";
 
 const id = z.string().uuid().describe("nohmi object identifier");
 const idempotencyKey = z
@@ -36,16 +36,8 @@ function envelope<T>(data: T, headline: string): FinanceToolResult<T> {
 }
 
 function financeResult<T>(value: FinanceToolResult<T>) {
-  const question = value.communication.nextQuestion?.prompt;
   return {
-    content: [
-      {
-        type: "text" as const,
-        text: question
-          ? `${value.communication.headline}\n\n${question}`
-          : value.communication.headline,
-      },
-    ],
+    ...result(value),
     structuredContent: value,
   };
 }

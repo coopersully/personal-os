@@ -157,6 +157,25 @@ export async function createMcpWorkspaceFixture(
         timeZone: "America/New_York",
       });
       const client = new Client({ name: "workspace-parity-test", version: "1" });
+      const callWithStructuredContent = client.callTool.bind(client);
+      client.callTool = async (...args: Parameters<typeof callWithStructuredContent>) => {
+        const response = await callWithStructuredContent(...args);
+        if (response.structuredContent) {
+          const { _ilo, ...payload } = response.structuredContent as Record<string, unknown>;
+          // Empty acknowledgments have no records to recover. Every other API
+          // payload must remain usable by hosts that expose only text content.
+          if (!(Object.keys(payload).length === 1 && payload.ok === true)) {
+            const text = response.content
+              .filter((block) => block.type === "text")
+              .map((block) => block.text)
+              .join("\n");
+            expect(JSON.parse(text), `${args[0].name} text fallback`).toEqual(
+              "result" in payload ? payload.result : payload,
+            );
+          }
+        }
+        return response;
+      };
       if (process.env.WORKSPACE_MCP_TRACE) {
         const call = client.callTool.bind(client);
         client.callTool = async (...args: Parameters<typeof call>) => {

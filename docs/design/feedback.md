@@ -1,5 +1,26 @@
 # Feedback and validation
 
+## Stable asynchronous layout
+
+Accepted UX rule, 2026-10-12: loading and refreshing belong inside the component that owns the
+data. Preserve its identity, placement, focus and allocated space. Initial loading uses an in-place
+skeleton or busy treatment; refreshing retains usable content with an accessible freshness/busy
+indication. Do not insert and remove temporary page-body rows for header-owned data, replace usable
+content with a page spinner, or move sibling content solely to report request progress.
+
+Independent values load independently: location can remain usable when weather is unavailable.
+No-data, denied and failed states retain an actionable component surface. Never label unchecked or
+partially checked data as empty or healthy. Real material changes may change layout; transient
+request-status chrome should not. This rule does not suppress persistent problems requiring action.
+
+Discrete action results and settings errors still use Sonner, and successful background autosaves
+stay silent. Skeletons and busy indicators are not action-result messages. Include regression checks
+for retained controls/content, no temporary body status row, stable focus and in-place recovery.
+
+The [Today refinement spec](../superpowers/specs/2026-10-12-today-refinements-design.md) applies this
+rule to weather, location and supporting cards; this statement is target UX policy, not a claim that
+every existing screen has been migrated.
+
 This is nohmi's toast-first feedback policy, informed by the sources below and a
 source-code review on 2026-09-30. It defines the intended standard; the audit
 records implementation gaps. The implementation notes below distinguish the original audit from the resulting shared behavior.

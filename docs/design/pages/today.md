@@ -1,5 +1,27 @@
 # Today — reference page specification
 
+## Accepted refinement scope — 2026-10-12
+
+The user has accepted the following target scope. It supersedes the older no-card layout,
+today-only queue, and body conditions fallback descriptions below; those sections still describe
+the pre-refinement implementation. Detailed design and defaults remain under review in the
+[refinement spec](../../superpowers/specs/2026-10-12-today-refinements-design.md) and
+[implementation plan](../../superpowers/plans/2026-10-12-today-refinements.md). No delivery is claimed.
+
+- Your timeline is its own card for today's events, tasks and reminders, with correct source-date
+  handling for all-day occasions and no leakage of tomorrow's items.
+- To take care of is its own card for tasks and reminders in the configured calendar week, plus
+  overdue work. Calendar's saved week-start preference and the account planning timezone define it.
+- Keep weather/location controls mounted with in-place loading and independent unavailable states;
+  no temporary page-body conditions row. Follow the shared stable asynchronous layout rule.
+- Dedicated Today presentation settings offer Default, Weather and Map backgrounds and optional
+  spending, ritual and desktop-pet cards, plus counted remembered filters and clear date grouping.
+  Customize Today opens the canonical editor. Today does not become a fifth domain workspace.
+- Actionable account failures and workspace reviews stay clearly discoverable regardless of optional
+  cards. Review actions open the owning workspace's existing review flow, not a separate global queue.
+- Use MapCN for the location preview and optional map background, adapted to the app's icon,
+  accessibility and runtime policies; provider and packaged-desktop verification remain release gates.
+
 ## User job
 
 **Help me orient to this day, protect the commitment that matters now, and make

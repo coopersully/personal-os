@@ -367,16 +367,17 @@ function PetContent() {
                   timeZone: "UTC",
                 }).format(new Date(Date.UTC(date.year, date.month - 1, date.day)));
               return (
-                <OccasionCard
-                  key={event.id}
-                  accentColor={calendarColors.get(event.calendarId ?? "") ?? "#777ce3"}
-                  startDateTime={localDateToIso(start)}
-                  endDateTime={localDateToIso(end)}
-                  startLabel={label(start)}
-                  endLabel={label(end)}
-                  title={event.title}
-                  onOpen={() => open("/calendar")}
-                />
+                <div key={event.id} role="listitem">
+                  <OccasionCard
+                    accentColor={calendarColors.get(event.calendarId ?? "") ?? "#777ce3"}
+                    startDateTime={localDateToIso(start)}
+                    endDateTime={localDateToIso(end)}
+                    startLabel={label(start)}
+                    endLabel={label(end)}
+                    title={event.title}
+                    onOpen={() => open("/calendar")}
+                  />
+                </div>
               );
             })}
         </ItemGroup>
@@ -684,11 +685,26 @@ function PetContent() {
         )}
       </PetSectionScroll>
       {(["n", "s", "e", "w", "ne", "nw", "se", "sw"] as const).map((edge) => (
-        <div
+        <button
           key={edge}
-          aria-hidden="true"
+          type="button"
+          tabIndex={edge === "se" ? 0 : -1}
+          aria-hidden={edge !== "se"}
+          aria-label="Resize pet card"
           data-no-drag="true"
-          className={`pet-resize pet-resize--${edge}`}
+          className={`pet-resize pet-resize--${edge} focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring`}
+          onKeyDown={(event) => {
+            const sizes = {
+              ArrowLeft: [-20, 0],
+              ArrowRight: [20, 0],
+              ArrowUp: [0, 20],
+              ArrowDown: [0, -20],
+            }[event.key];
+            if (!sizes) return;
+            event.preventDefault();
+            event.stopPropagation();
+            action.mutate({ action: "resize", dw: sizes[0], dh: sizes[1] });
+          }}
           onPointerDown={(event) => {
             if (event.button !== 0) return;
             event.preventDefault();

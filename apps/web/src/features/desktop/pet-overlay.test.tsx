@@ -143,7 +143,7 @@ it("reports failed card dragging through Sonner", async () => {
   );
   await waitFor(() => expect(toast.error).toHaveBeenCalled());
 });
-it("drags the card surface, excludes controls, and exposes pin without a resize button", async () => {
+it("drags the card surface, excludes controls, and exposes pin and a keyboard resize handle", async () => {
   mount();
   const body = await screen.findByRole("dialog", { name: "Pet quick access" });
   fireEvent(body, new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
@@ -160,7 +160,7 @@ it("drags the card surface, excludes controls, and exposes pin without a resize 
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith("pet_action", { value: { action: "pin", pinned: true } }),
   );
-  expect(screen.queryByRole("button", { name: "Resize pet card" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Resize pet card" })).toHaveClass("pet-resize--se");
   expect(screen.getByRole("button", { name: "Next section" })).toBeInTheDocument();
 });
 
@@ -612,7 +612,7 @@ it("pauses refresh while hidden and ignores stale presentation events", async ()
   }
 });
 
-it("ignores secondary drag buttons and supports pointer resize without dragging", async () => {
+it("ignores secondary drag buttons and supports pointer and keyboard resize without dragging", async () => {
   mount();
   const move = await screen.findByRole("button", { name: "Move pet card" });
   const resize = document.querySelector(".pet-resize--se");
@@ -621,6 +621,12 @@ it("ignores secondary drag buttons and supports pointer resize without dragging"
   fireEvent(move, new MouseEvent("pointerdown", { bubbles: true, button: 2 }));
   fireEvent.keyDown(move, { key: "a" });
   expect(invoke).not.toHaveBeenCalled();
+  fireEvent.keyDown(resize, { key: "ArrowRight" });
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("pet_action", {
+      value: { action: "resize", dw: 20, dh: 0 },
+    }),
+  );
   fireEvent(resize, new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith("pet_action", { value: { action: "resize", edge: "se" } }),

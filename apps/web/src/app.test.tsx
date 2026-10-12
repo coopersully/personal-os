@@ -6064,7 +6064,7 @@ describe("ilo web app", () => {
       tomorrow: [],
     });
     const noTime = setup();
-    expect(await screen.findByText("Nothing needs your attention")).toBeInTheDocument();
+    expect(await screen.findByLabelText("An open calendar")).toBeInTheDocument();
     expect(screen.queryByText(/free until/)).not.toBeInTheDocument();
     noTime.unmount();
 
@@ -6084,7 +6084,7 @@ describe("ilo web app", () => {
       tomorrow: [],
     });
     const minutes = setup();
-    expect(await screen.findByText("Nothing needs your attention")).toBeInTheDocument();
+    expect(await screen.findByLabelText("An open calendar")).toBeInTheDocument();
     minutes.unmount();
 
     mocks.getDailyBrief.mockResolvedValueOnce({
@@ -6103,7 +6103,7 @@ describe("ilo web app", () => {
       tomorrow: [],
     });
     const mixed = setup();
-    expect(await screen.findByText("Nothing needs your attention")).toBeInTheDocument();
+    expect(await screen.findByLabelText("An open calendar")).toBeInTheDocument();
     mixed.unmount();
   });
 
@@ -7540,7 +7540,7 @@ describe("ilo web app", () => {
       today: [reminder, completedReminder],
       tomorrow: [],
     });
-    setup();
+    const view = setup();
     const browser = userEvent.setup();
     await browser.click(await screen.findByRole("button", { name: /All day Quiet day/ }));
     expect(screen.getByText("Monday, July 13, 2026 · All day")).toBeInTheDocument();
@@ -7559,8 +7559,11 @@ describe("ilo web app", () => {
         name: "Today at a Glance",
       }),
     );
-    await browser.click(screen.getByRole("button", { name: /^11:00 PM New year work/ }));
-    await browser.click(screen.getByRole("menuitem", { name: "View Event in Calendar" }));
+    expect(
+      screen.queryByRole("button", { name: /^11:00 PM New year work/ }),
+    ).not.toBeInTheDocument();
+    view.unmount();
+    setup(`/calendar?date=2026-12-31&view=day&event=${crossYear.id}`);
     expect(
       await screen.findByText("Dec 31, 2026, 11:00 PM – Jan 1, 2027, 1:00 AM"),
     ).toBeInTheDocument();
@@ -9234,14 +9237,23 @@ describe("ilo web app", () => {
       today: [],
       tomorrow: [],
     });
+    mocks.getTodayCommitments.mockResolvedValue({
+      generatedAt: now,
+      timeZone: "UTC",
+      weekStart: "2026-07-12",
+      weekEndExclusive: "2026-07-19",
+      items: [],
+      nextCursor: null,
+      counts: { all: 0, overdue: 0, tasks: 0, reminders: 0 },
+      unavailableSources: [],
+    });
     mocks.listConnectors.mockResolvedValue([]);
     mocks.listTasks.mockResolvedValue({ items: [], nextCursor: null });
     mocks.createReminder.mockRejectedValue(new Error("Could not save"));
     setup();
     const browser = userEvent.setup();
-    expect(await screen.findByText("Nothing scheduled today")).toBeInTheDocument();
-    expect(screen.getByLabelText("An open calendar")).toBeVisible();
-    expect(screen.getByText("Nothing pulling at you")).toBeInTheDocument();
+    expect(await screen.findByLabelText("An open calendar")).toBeVisible();
+    expect(await screen.findByText("Nothing in this view.")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Add" }));
     await browser.click(screen.getByRole("menuitem", { name: /Reminder/ }));
     await browser.type(screen.getByLabelText("What needs attention?"), "Failing reminder");

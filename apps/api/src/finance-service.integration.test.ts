@@ -113,7 +113,11 @@ function plaidFetch(): typeof globalThis.fetch {
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     if (path === "/link/token/create") {
       expect(body.link_customization_name).toBe("default");
-      return Response.json({ link_token: "link-token" });
+      return Response.json({
+        link_token: "link-token",
+        hosted_link_url: "https://secure.plaid.com/hl/fixture",
+        expiration: "2026-07-19T12:30:00.000Z",
+      });
     }
     if (path === "/item/public_token/exchange") {
       expect(body.public_token).toBe("public-token");
@@ -930,12 +934,7 @@ describe.sequential("finance service", () => {
       executionPolicy.update({ expectedVersion: 1, reviewBypassEnabled: false }, context),
     ).rejects.toMatchObject({ code: "conflict" });
     await expect(service.getGuidedSetupContext(userId)).resolves.toMatchObject({
-      humanOnlyActions: [
-        "connect_or_disconnect_source",
-        "import_transactions",
-        "manage_accounts",
-        "refresh_provider_data",
-      ],
+      humanOnlyActions: ["provider_authorization"],
     });
     await expect(
       database.db
@@ -5907,7 +5906,7 @@ describe.sequential("finance service", () => {
       data: {
         connectionId: expect.any(String),
         externalHandoff: {
-          artifact: "link-token",
+          artifact: "https://secure.plaid.com/hl/fixture",
           expiresAt: "2026-07-19T12:30:00.000Z",
         },
         status: "pending",
@@ -5919,7 +5918,7 @@ describe.sequential("finance service", () => {
       .from(financeAccountConnections)
       .where(eq(financeAccountConnections.id, connectionResult.data.connectionId));
     expect(persistedConnection).toMatchObject({
-      externalHandoffUrl: "link-token",
+      externalHandoffUrl: "https://secure.plaid.com/hl/fixture",
       status: "pending",
     });
     const accounts = await service.exchangePlaidToken(

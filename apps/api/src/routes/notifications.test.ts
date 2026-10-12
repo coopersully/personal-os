@@ -86,11 +86,18 @@ it("maps bounded notification operations and rejects authority and input expansi
         json("DELETE", { expectedRevision: 2 }),
       )
     ).status,
-  ).toBe(403);
+  ).toBe(200);
   expect(
     (await app.request("/v1/texting/notifications/preferences/global", json("PATCH", input)))
       .status,
-  ).toBe(403);
+  ).toBe(200);
+  // Execution grants and bypass are revalidated by the real notification service.
+  expect(notifications.savePreferences).toHaveBeenLastCalledWith(
+    principal,
+    "global",
+    input,
+    "test",
+  );
   principal.scopes = new Set(["texting:read", "texting:write"]);
   expect((await app.request("/v1/texting/notifications")).status).toBe(403);
   principal.actorType = "user";

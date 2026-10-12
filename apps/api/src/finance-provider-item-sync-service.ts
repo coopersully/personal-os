@@ -41,6 +41,7 @@ import { financeAccountKindFromProviderType } from "./finance/account-semantics.
 import { lockReimbursementTopology } from "./finance-reimbursement-locks.js";
 import { decryptJson } from "./security.js";
 import type { Principal, RequestLog } from "./types.js";
+import { requireWorkspaceExecution } from "./workspace-execution.js";
 
 export type FinanceProviderItemSyncContext = {
   maintenance?: {
@@ -323,6 +324,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
   async function claimItem(
     itemId: string,
     context: FinanceProviderItemSyncContext,
+    requireExecution: boolean,
   ): Promise<{
     accounts: Array<typeof financeAccounts.$inferSelect>;
     claim: ActiveClaim;
@@ -430,6 +432,10 @@ export function createFinanceProviderItemSyncService(options: Options) {
           updatedAt: sql`NOW()`,
         })
         .where(eq(financeAccounts.providerItemRecordId, itemId));
+      // Acquire all contested item/account locks before admitting this explicit
+      // execution. Maintenance retains its separate lease and approved-rule authority.
+      if (requireExecution)
+        await requireWorkspaceExecution(tx, context.principal, "finances", now());
       return {
         accounts,
         claim: { generation: claimed.syncClaimGeneration, id: claimId, owner: claimOwner },
@@ -1148,9 +1154,10 @@ export function createFinanceProviderItemSyncService(options: Options) {
     accountId: string,
     context: FinanceProviderItemSyncContext,
     onProgress?: FinanceSyncProgress,
+    requireExecution = false,
   ) {
     const startedAt = Date.now();
-    const claimed = await claimItem(itemId, context);
+    const claimed = await claimItem(itemId, context, requireExecution);
     const previousFailureCount = claimed.item.syncFailureCount;
     const linkedProviderAccountIds = new Set(
       claimed.accounts.flatMap((account) =>
@@ -1472,7 +1479,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
       if (!ownedItem) {
         throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
       }
-      return synchronizeItem(owned.itemId, accountId, context, onProgress);
+      return synchronizeItem(owned.itemId, accountId, context, onProgress, !context.maintenance);
     },
 
     async syncDueItems(): Promise<FinanceSyncBatchResult> {

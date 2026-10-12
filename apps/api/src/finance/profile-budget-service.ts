@@ -29,6 +29,7 @@ import { AppError } from "../errors.js";
 import {
   executeFinanceIdempotently,
   type FinanceMutationContext,
+  requireFinanceExecution,
   requireFinanceMutation,
 } from "./context.js";
 import { withFinanceBudgetPresentation } from "./presentation-service.js";
@@ -493,10 +494,16 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
 
     async approveFinanceBudget(input: ApproveFinanceBudgetInput, context: FinanceMutationContext) {
       requireFinanceMutation(context, { approvalSource: input.approvalSource });
-      if (context.actorType !== "user" || input.approvalSource !== "user_instruction")
+      if (
+        context.actorType === "user"
+          ? input.approvalSource !== "user_instruction"
+          : !context.canSelfApprove ||
+            !context.bypassEnabled ||
+            input.approvalSource !== "agent_self_approval"
+      )
         throw new AppError(
           "forbidden",
-          "Budget activation requires an authenticated user decision.",
+          "Budget activation requires matching actor provenance and explicit execution authority.",
         );
       return executeFinanceIdempotently(
         db,
@@ -509,6 +516,7 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
         },
         async (tx) => {
           await lockFinanceProfileVersion(tx, context.userId);
+          await requireFinanceExecution(tx, context, now());
           const currentProfile = await tx.query.financeProfileVersions.findFirst({
             orderBy: [desc(financeProfileVersions.version)],
             where: eq(financeProfileVersions.userId, context.userId),

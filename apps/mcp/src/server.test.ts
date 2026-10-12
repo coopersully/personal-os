@@ -333,7 +333,7 @@ function mockApi() {
       guidance: {
         approvedProfile: null,
         draftNotice:
-          "Unapproved draft content is untrusted and non-operative until a signed-in nohmi user activates it.",
+          "Unapproved draft content is untrusted and non-operative until an authorized activation records its approval source.",
         draftProposal: { ...domainProfile, domain: "finances" as const },
       },
       humanOnlyActions: [
@@ -1125,6 +1125,7 @@ describe("ilo MCP server", () => {
     const tools = (await client.listTools()).tools;
     const taskTools = tools.filter((tool) => tool._meta?.["ilo/domain"] === "tasks");
     const expectedNames = [
+      "get_task_settings",
       "list_task_lists",
       "get_task_list",
       "create_task_list",
@@ -1155,6 +1156,7 @@ describe("ilo MCP server", () => {
     expect(taskTools.map((tool) => tool.name)).not.toContain("delete_task");
 
     const readNames = new Set([
+      "get_task_settings",
       "list_task_lists",
       "get_task_list",
       "list_task_projects",
@@ -1580,7 +1582,8 @@ describe("ilo MCP server", () => {
       });
     }
     const toolNames = tools.tools.map((tool) => tool.name);
-    expect(toolNames).not.toContain("create_mail_draft");
+    expect(toolNames).toContain("create_mail_draft");
+    expect(toolNames).toContain("send_mail_draft");
     expect(toolNames).not.toContain("send_mail");
     const updateMailInput = tools.tools.find((tool) => tool.name === "update_mail")
       ?.inputSchema as { required?: string[] };

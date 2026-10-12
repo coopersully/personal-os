@@ -5,6 +5,7 @@ import {
   type TwilioMessage,
 } from "@personal-os/connectors";
 import {
+  auditEvents,
   type Database,
   textInboundClaims,
   textingConnections,
@@ -23,6 +24,7 @@ import {
   textingConsentVersion,
 } from "@personal-os/domain";
 import { and, asc, desc, eq, gt, gte, inArray, lt, ne, or, sql } from "drizzle-orm";
+import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError, isUniqueViolation } from "./errors.js";
 import type { NotificationTransaction } from "./notification-work-resolver.js";
@@ -30,6 +32,7 @@ import { decryptJson, encryptJson } from "./security.js";
 import { issueConversationReceipt, verifyConversationReceipt } from "./texting-security.js";
 import { formatTextLocalTime } from "./texting-time.js";
 import type { Principal } from "./types.js";
+import { requireWorkspaceExecution } from "./workspace-execution.js";
 
 type Options = {
   apiBaseUrl: string;
@@ -274,14 +277,34 @@ export function createTextingService(options: Options) {
     return publicConnection(await connectionRow(userId));
   }
 
-  async function disconnect(userId: string) {
+  async function disconnect(
+    userId: string,
+    principal?: Principal,
+    requestId: string = crypto.randomUUID(),
+  ) {
+    if (principal && principal.userId !== userId)
+      throw new AppError("forbidden", "The Texting connection belongs to another owner.");
+    if (principal) await requireWorkspaceExecution(options.db, principal, "texting", now());
     const row = await connectionRow(userId);
     if (!row) return;
     await options.db.transaction(async (tx) => {
+      if (principal) await requireWorkspaceExecution(tx, principal, "texting", now());
       await tx
         .update(textingConnections)
         .set({ disconnectedAt: now(), state: "disconnected", updatedAt: now() })
         .where(eq(textingConnections.id, row.id));
+      if (principal)
+        await tx.insert(auditEvents).values(
+          auditValues({
+            action: "texting.disconnected",
+            before: { state: row.state },
+            after: { state: "disconnected" },
+            entityId: row.id,
+            entityType: "texting_connection",
+            principal,
+            requestId,
+          }),
+        );
       await tx.insert(textingConsentEvents).values({
         connectionId: row.id,
         kind: "disconnected",

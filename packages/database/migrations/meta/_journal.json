@@ -820,6 +820,20 @@
       "when": 1791562000000,
       "tag": "0108_finance_sms_completion",
       "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "7",
+      "when": 1791734400000,
+      "tag": "0110_workspace_agent_approval_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1791734401000,
+      "tag": "0111_finance_hosted_link_state",
+      "breakpoints": true
     }
   ]
 }

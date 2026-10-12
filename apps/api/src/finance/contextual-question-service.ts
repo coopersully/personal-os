@@ -8,6 +8,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
+import { requireWorkspaceExecution } from "../workspace-execution.js";
 import { answerContextualWork } from "./answer-service.js";
 import {
   executeFinanceAdmittedMutation,
@@ -48,11 +49,6 @@ export function createFinanceContextualQuestionService(options: ContextualOption
       executor?: FinanceTransaction,
     ): Promise<FinanceContextualQuestionResult> {
       authorizeContextual(context, "finances:write");
-      if (context.principal.actorType !== "user")
-        throw new AppError(
-          "forbidden",
-          "Creating contextual questions requires an interactive user session.",
-        );
       idSchema.parse(transactionId);
       const input = createFinanceContextualQuestionInputSchema.parse(raw);
       return contextualTransaction(options.db, executor, async (tx) => {
@@ -64,7 +60,7 @@ export function createFinanceContextualQuestionService(options: ContextualOption
             idempotencyKey: input.operationId,
             operation: "create_contextual_question_v1",
             payload: { ...input, transactionId },
-            sourceKind: "app",
+            sourceKind: context.principal.actorType === "agent" ? "agent" : "app",
           },
           async (preparedTx) => {
             const parent = await lockContextualTransaction(
@@ -100,6 +96,12 @@ export function createFinanceContextualQuestionService(options: ContextualOption
             return { state: "admitted", prepared: { kind: "create", parent } };
           },
           async (writeTx, prepared) => {
+            await requireWorkspaceExecution(
+              writeTx,
+              context.principal,
+              "finances",
+              options.now?.() ?? new Date(),
+            );
             if (prepared.kind === "existing")
               return { state: "available", question: contextualValue(prepared.locked) };
             const { account, transaction } = prepared.parent;
@@ -112,7 +114,10 @@ export function createFinanceContextualQuestionService(options: ContextualOption
                 stableKey: `contextual-purpose:${transaction.id}`,
                 reason: "unknown_merchant",
                 reasonCode: "missing_provenance",
-                rationale: "Context requested by the person.",
+                rationale:
+                  context.principal.actorType === "agent"
+                    ? "Context requested by an authorized agent."
+                    : "Context requested by the person.",
                 createdAt: recordedAt,
                 updatedAt: recordedAt,
               })

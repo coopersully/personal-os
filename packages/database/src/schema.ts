@@ -712,9 +712,14 @@ export const domainProfileApprovals = pgTable(
     profileId: uuid("profile_id").notNull(),
     profileVersion: integer("profile_version").notNull(),
     profile: jsonb("profile").$type<DomainProfile>().notNull(),
-    approvedByUserId: uuid("approved_by_user_id")
+    approvedByUserId: uuid("approved_by_user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
+    approvalSource: text("approval_source")
+      .$type<"user_instruction" | "agent_self_approval">()
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .default("user_instruction"),
+    approvedByAgentId: text("approved_by_agent_id"),
     approvedAt: timestamp("approved_at", { withTimezone: true }).notNull(),
     ...timestamps,
   },
@@ -727,6 +732,10 @@ export const domainProfileApprovals = pgTable(
       name: "domain_profile_approvals_owned_profile_fk",
     }).onDelete("cascade"),
     check("domain_profile_approvals_owner_check", sql`${table.approvedByUserId} = ${table.userId}`),
+    check(
+      "domain_profile_approvals_provenance_check",
+      sql`((${table.approvalSource} = 'user_instruction' AND ${table.approvedByUserId} = ${table.userId} AND ${table.approvedByAgentId} IS NULL) OR (${table.approvalSource} = 'agent_self_approval' AND ${table.approvedByUserId} IS NULL AND length(${table.approvedByAgentId}) > 0)) IS TRUE`,
+    ),
     check(
       "domain_profile_approvals_snapshot_check",
       sql`(${table.profile}->>'id' = ${table.profileId}::text
@@ -3326,6 +3335,7 @@ export const financeAccountConnections = pgTable(
       .default("pending"),
     accountIds: jsonb("account_ids").$type<string[]>().notNull().default([]),
     externalHandoffUrl: text("external_handoff_url"),
+    encryptedHandoffState: jsonb("encrypted_handoff_state").$type<EncryptedCredentials>(),
     externalHandoffExpiresAt: timestamp("external_handoff_expires_at", { withTimezone: true }),
     lastError: jsonb("last_error").$type<Record<string, unknown>>(),
     version: integer("version").notNull().default(1),

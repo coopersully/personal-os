@@ -15,7 +15,11 @@ import type {
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { accountMatchesQuery, summarizeFinanceAccounts } from "./account-semantics.js";
-import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
+import {
+  executeFinanceIdempotently,
+  type FinanceMutationContext,
+  requireFinanceExecution,
+} from "./context.js";
 
 type AccountChange = {
   expectedUpdatedAt?: string | undefined;
@@ -152,17 +156,28 @@ export async function serializeFinanceAccountRows(
   );
 }
 
-function connection(row: typeof financeAccountConnections.$inferSelect): FinanceAccountConnection {
+function connection(
+  row: typeof financeAccountConnections.$inferSelect,
+  includeHandoff: boolean,
+  at: Date,
+): FinanceAccountConnection {
   const lastError = row.lastError;
   return {
     accountIds: row.accountIds,
-    externalHandoff: row.externalHandoffUrl
-      ? {
-          artifact: row.externalHandoffUrl,
-          expiresAt: row.externalHandoffExpiresAt?.toISOString() ?? null,
-          provider: row.provider,
-        }
-      : null,
+    externalHandoff:
+      includeHandoff &&
+      row.status === "pending" &&
+      !row.lastError &&
+      row.encryptedHandoffState &&
+      row.externalHandoffUrl &&
+      row.externalHandoffExpiresAt &&
+      row.externalHandoffExpiresAt > at
+        ? {
+            artifact: row.externalHandoffUrl,
+            expiresAt: row.externalHandoffExpiresAt?.toISOString() ?? null,
+            provider: row.provider,
+          }
+        : null,
     id: row.id,
     lastError:
       lastError &&
@@ -214,8 +229,13 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
       };
     },
 
-    async getConnection(userId: string, id: string) {
-      const [row] = await db
+    async getConnection(
+      userId: string,
+      id: string,
+      executor: Pick<Database, "select"> = db,
+      includeHandoff = false,
+    ) {
+      const [row] = await executor
         .select()
         .from(financeAccountConnections)
         .where(
@@ -223,7 +243,7 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
         )
         .limit(1);
       if (!row) throw new AppError("not_found", "The account connection was not found.");
-      return result(connection(row), "Account connection loaded.");
+      return result(connection(row, includeHandoff, now()), "Account connection loaded.");
     },
 
     async update(
@@ -384,6 +404,7 @@ export function createFinanceAccountService(input: { db: Database; now: () => Da
               "The account is synchronizing. Retry disconnection after it finishes.",
             );
           }
+          await requireFinanceExecution(tx, context, now());
           const [updated] = await tx
             .update(financeAccounts)
             .set({

@@ -503,6 +503,8 @@ describe("database schema contracts", () => {
       "0106_finance_review_action_authority",
       "0107_finance_host_continuation",
       "0108_finance_sms_completion",
+      "0110_workspace_agent_approval_provenance",
+      "0111_finance_hosted_link_state",
     ]);
   });
 

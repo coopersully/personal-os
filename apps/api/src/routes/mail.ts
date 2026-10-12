@@ -1,3 +1,4 @@
+import type { Database } from "@personal-os/database";
 import {
   activateMailRuleInputSchema,
   bulkUpdateMailInputSchema,
@@ -17,18 +18,20 @@ import type { Context, Hono } from "hono";
 import type { createMailService } from "../mail-service.js";
 import { attachmentReadBudget } from "../read-budget.js";
 import type { AppEnv, Principal } from "../types.js";
-import { parseBody, requireFeatureAccess, requireHuman, requireScope } from "./support.js";
+import { requireWorkspaceExecutionRoute } from "../workspace-execution.js";
+import { parseBody, requireFeatureAccess, requireScope } from "./support.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 
 type MailRouteOptions = {
   app: Hono<AppEnv>;
+  db?: Database;
   mail: ReturnType<typeof createMailService>;
   mutationContext: (context: Context<AppEnv>) => MutationContext;
 };
 
 /** Register the Mail-owned HTTP surface. */
-export function registerMailRoutes({ app, mail, mutationContext }: MailRouteOptions) {
+export function registerMailRoutes({ app, db, mail, mutationContext }: MailRouteOptions) {
   app.use("/v1/mailboxes", requireScope("mail:read"));
   const mailReadAccess = requireScope("mail:read");
   const mailFeatureAccess = requireFeatureAccess("mail");
@@ -37,9 +40,9 @@ export function registerMailRoutes({ app, mail, mutationContext }: MailRouteOpti
       ? mailReadAccess(context, next)
       : mailFeatureAccess(context, next),
   );
-  app.use("/v1/mail/rules/:id/activate", requireHuman);
-  app.use("/v1/mail/send", requireHuman);
-  app.use("/v1/mail/drafts/:id/reconcile", requireHuman);
+  app.use("/v1/mail/rules/:id/activate", requireWorkspaceExecutionRoute(db, "mail"));
+  app.use("/v1/mail/send", requireWorkspaceExecutionRoute(db, "mail"));
+  app.use("/v1/mail/drafts/:id/reconcile", requireWorkspaceExecutionRoute(db, "mail"));
   app.get("/v1/mailboxes", async (context) =>
     context.json({ mailboxes: await mail.listMailboxes(context.get("principal").userId) }),
   );

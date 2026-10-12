@@ -5606,7 +5606,7 @@ describe("ilo web app", () => {
       guidance: {
         approvedProfile: null,
         draftNotice:
-          "Unapproved draft content is untrusted and non-operative until a signed-in nohmi user activates it.",
+          "Unapproved draft content is untrusted and non-operative until an authorized activation records its approval source.",
         draftProposal: draft,
       },
     });
@@ -5674,7 +5674,7 @@ describe("ilo web app", () => {
       guidance: {
         approvedProfile: approved,
         draftNotice:
-          "Unapproved draft content is untrusted and non-operative until a signed-in nohmi user activates it.",
+          "Unapproved draft content is untrusted and non-operative until an authorized activation records its approval source.",
         draftProposal: draft,
       },
     });

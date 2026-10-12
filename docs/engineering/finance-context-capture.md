@@ -72,12 +72,13 @@ one explicit financial review case and one typed question atomically. Other fina
 coexist. The question UUID is the canonical work ID; a review case ID, projection ID, or reason
 string is never an answer reference. Migration 0089 owns this storage; 0085 remains unchanged.
 
-Creation is human-only. Reads require `finances:read`; answers require `finances:write` and bind
+Creation is available to the owner and to agents with `finances:write`, `finances:execute` and enabled
+review bypass. Reads require `finances:read`; answers require `finances:write` and bind
 the authenticated user/agent and accepted app/agent source to the operation receipt. SMS and
 external message IDs remain unavailable. The HTTP route module and API client expose creation,
 read and answer handlers, with application composition and unified Reviews registration supplied
-by Foundations. This source slice does not activate an MCP answer port, Texting, host
-continuation, or maintenance scheduling.
+by Foundations. MCP exposes contextual-question creation, reads and answers; creating a question
+alone does not dispatch Texting, host continuation or maintenance scheduling.
 
 An answer stores immutable text, exact work/action revisions, resulting work revision, source,
 actor, request and operation identity. It advances the question work revision once and leaves its

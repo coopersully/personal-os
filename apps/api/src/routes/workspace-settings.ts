@@ -3,18 +3,20 @@ import { workspaceSchema, workspaceSettingsUpdateSchemas } from "@personal-os/do
 import type { Context, Hono } from "hono";
 import type { AppEnv, Principal } from "../types.js";
 import { createWorkspaceSettingsService } from "../workspace-settings/service.js";
-import { parseBody, requireFeatureAccess, requireHuman } from "./support.js";
+import { parseBody, requireFeatureAccess } from "./support.js";
 
 export function registerWorkspaceSettingsRoutes({
   app,
   db,
   mutationContext,
+  now = () => new Date(),
 }: {
   app: Hono<AppEnv>;
   db: Database;
+  now?: () => Date;
   mutationContext: (context: Context<AppEnv>) => { principal: Principal; requestId: string };
 }) {
-  const settings = createWorkspaceSettingsService(db);
+  const settings = createWorkspaceSettingsService(db, now);
   app.use("/v1/workspaces/:workspace/settings", async (context, next) =>
     requireFeatureAccess(workspaceSchema.parse(context.req.param("workspace")))(context, next),
   );
@@ -26,7 +28,7 @@ export function registerWorkspaceSettingsRoutes({
       ),
     ),
   );
-  app.patch("/v1/workspaces/:workspace/settings", requireHuman, async (context) => {
+  app.patch("/v1/workspaces/:workspace/settings", async (context) => {
     const workspace = workspaceSchema.parse(context.req.param("workspace"));
     return context.json(
       await settings.update(

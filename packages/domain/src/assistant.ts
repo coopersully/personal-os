@@ -244,12 +244,19 @@ export const configuredRuleBaseSchema = z.object({
 });
 export type ConfiguredRuleBase = z.infer<typeof configuredRuleBaseSchema>;
 
+export const profileApprovalProvenanceSchema = z.object({
+  source: z.enum(["user_instruction", "agent_self_approval"]),
+  agentId: idSchema.nullable(),
+  userId: idSchema.nullable(),
+});
+
 export const assistantSetupStatusSchema = z.object({
   domains: z.array(
     z.object({
       canRead: z.boolean(),
       canWrite: z.boolean(),
       domain: assistantDomainSchema,
+      approvedProfileApproval: profileApprovalProvenanceSchema.nullable().optional(),
       approvedProfileStatus: z.literal("active").nullable(),
       approvedProfileVersion: z.int().positive().nullable(),
       pendingDraftVersion: z.int().positive().nullable(),
@@ -327,6 +334,7 @@ export const assistantSetupPlanSchema = z.object({
   domain: assistantDomainSchema,
   nextAction: z.string().min(1),
   profile: z.object({
+    approval: profileApprovalProvenanceSchema.nullable().optional(),
     approvedStatus: z.literal("active").nullable(),
     approvedVersion: z.int().positive().nullable(),
     pendingDraftVersion: z.int().positive().nullable(),

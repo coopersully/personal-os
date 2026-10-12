@@ -20,7 +20,7 @@ Compare the workflow against the candidate's verifier inputs; check names alone 
 | `pnpm check:node` (types, coverage, builds) | Node quality |
 | `pnpm test:e2e` | Browser acceptance |
 
-Every row must be represented and successful for hosted full equivalence, even if scoped CI omitted
+Every row must name a distinct stage job and be successful for hosted full equivalence, even if scoped CI omitted
 an unaffected stage. Omission is not evidence: if any core hosted stage is missing, use the
 complete local verifier. Native/platform, live-provider, and issue-specific acceptance remain
 additional requirements when relevant. Preserve all coverage floors, assertions, and required checks.

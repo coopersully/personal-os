@@ -252,6 +252,7 @@ def evaluate(state):
             verification.get("equivalenceVerified") is True
             and set(coverage) == gates
             and all(isinstance(name, str) and name in expected for name in coverage.values())
+            and len(set(coverage.values())) == len(gates)
             and all(any(c.get("name") == name and check_state(c) == ("COMPLETED", "SUCCESS")
                         for c in checks) for name in coverage.values())
             and verification.get("localOnlyComplete") is True
@@ -262,6 +263,8 @@ def evaluate(state):
         and f.get("evidence") and f.get("focusedReproduction") == "SUCCESS"
         for f in failures
     )
+    if verification.get("pnpmVerify") == "FAILURE" and not failures:
+        failures_resolved = False
     if verification.get("focused") != "SUCCESS" or not full_verified or not failures_resolved:
         remediation_codes.append("verification_incomplete")
         remediation_reasons.append(

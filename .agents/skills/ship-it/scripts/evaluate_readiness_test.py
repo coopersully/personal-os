@@ -125,7 +125,14 @@ class EvaluateReadinessTest(unittest.TestCase):
             state["ci"]["expectedSelectedChecks"].append(name)
             state["ci"]["expectedCheckApps"][name] = 15368
             state["ci"]["checks"].append(dict(state["ci"]["checks"][0], name=name))
+        self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
+        state["verification"]["pnpmVerify"] = "NOT_RUN"
         self.assertEqual(evaluate(state)["decision"], "MERGE")
+        original = state["verification"]["equivalentChecks"]
+        state["verification"]["equivalentChecks"] = {key: "CI required" for key in original}
+        self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
+        state["verification"]["equivalentChecks"] = original
+        state["verification"]["pnpmVerify"] = "FAILURE"
         state["verification"]["localFailures"] = [{"classification": "unknown"}]
         self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
         state["verification"]["localFailures"] = [{"classification": "environment", "evidence": "isolated-log", "focusedReproduction": "SUCCESS"}]

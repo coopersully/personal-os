@@ -57,6 +57,23 @@ class CollectorTest(unittest.TestCase):
         self.assertNotIn("private", str(result))
         self.assertNotIn("rulesVerified", str(result))
 
+    def test_same_head_runs_preserve_distinct_pr_and_base_associations(self):
+        client = FakeGitHub()
+        original = client.pages
+        def pages(endpoint, field=None):
+            if "/actions/runs?" in endpoint:
+                return [{"id": i, "head_sha": "a", "event": "pull_request",
+                         "pull_requests": [{"number": number, "base": {"sha": base, "ref": "main", "private": "omit"},
+                                            "head": {"sha": "a", "ref": "feature"}}]}
+                        for i, number, base in [(1, 1, "base"), (2, 2, "base"), (3, 1, "other-base")]]
+            return original(endpoint, field)
+        client.pages = pages
+        rows = collect(client, "owner/repo", 1)["sources"]["runs"]
+        self.assertEqual([(r["pull_requests"][0]["number"], r["pull_requests"][0]["base"]["sha"]) for r in rows],
+                         [(1, "base"), (2, "base"), (1, "other-base")])
+        self.assertTrue(all(r["pull_requests"][0]["head"]["sha"] == "a" for r in rows))
+        self.assertNotIn("private", str(rows))
+
     def test_head_change_invalidates_collection(self):
         result = collect(FakeGitHub(changed=True), "owner/repo", 1)
         self.assertFalse(result["stable"])

@@ -85,8 +85,15 @@ def collect(client, repository, number):
     source("checks", checks)
     source("statuses", lambda: [pick(row, "id context state target_url created_at updated_at")
                                 for row in client.pages(f"{prefix}/commits/{head}/statuses")])
-    source("runs", lambda: [pick(row, "id workflow_id run_attempt event head_sha status conclusion html_url check_suite_id")
-                            for row in client.pages(f"{prefix}/actions/runs?head_sha={head}", "workflow_runs")])
+    def runs():
+        rows = client.pages(f"{prefix}/actions/runs?head_sha={head}", "workflow_runs")
+        return [{**pick(row, "id workflow_id run_attempt event head_sha status conclusion html_url check_suite_id"),
+                 "pull_requests": [{"number": pr.get("number"),
+                                    "base": pick(pr.get("base") or {}, "sha ref"),
+                                    "head": pick(pr.get("head") or {}, "sha ref")}
+                                   for pr in (row.get("pull_requests") or [])]}
+                for row in rows]
+    source("runs", runs)
     source("reviews", lambda: [{**pick(row, "id state commit_id submitted_at html_url"),
                                 "author": pick(row.get("user") or {}, "id login type")}
                                for row in client.pages(f"{prefix}/pulls/{number}/reviews")])

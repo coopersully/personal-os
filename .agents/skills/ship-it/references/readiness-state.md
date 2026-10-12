@@ -138,9 +138,9 @@ policy comes from live rules; when no approval is required, explicitly record th
 [delivery verification contract](../../../../docs/engineering/delivery-verification.md).
 Set `equivalenceVerified: true` after comparing commands/configuration, with `equivalentChecks`
 mapping `repository`, `lint`, `types-tests-coverage-builds`, and `browser` to the successful
-current-head CI check names. These names must also appear in expected required/selected checks
+four distinct current-head CI stage check names; a shared aggregate cannot fill multiple rows. These names must also appear in expected required/selected checks
 with their provider IDs. Set `localOnlyComplete` only after any additional native/platform or
 issue-specific requirements pass. Record each attempted local failure in `localFailures` with
 `classification` (`fixed` or `environment`), an `evidence` reference, and successful
-`focusedReproduction`. Unknown failures block equivalence. The evidence map must include the
-workflow revision, configuration comparison, and failure diagnosis records; do not invent them.
+`focusedReproduction`. Unknown failures block equivalence. An explicit pnpmVerify FAILURE requires at least one diagnosis record. The evidence map must include the
+workflow revision, configuration comparison, workflow-run PR/head/base association, and failure diagnosis records; do not invent them.

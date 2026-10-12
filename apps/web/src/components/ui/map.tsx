@@ -76,12 +76,14 @@ export function Map({
   interactive,
   apiKey,
   onFailure,
+  onReady,
 }: {
   longitude: number;
   latitude: number;
   interactive: boolean;
   apiKey: string;
   onFailure: () => void;
+  onReady?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [instance, setInstance] = useState<MapLibreGL.Map | null>(null);
@@ -120,7 +122,10 @@ export function Map({
         new MapLibreGL.Marker({ element: marker }).setLngLat([longitude, latitude]).addTo(map);
       map.once("load", () => {
         clearTimeout(timer);
-        if (!disposed) setLoaded(true);
+        if (!disposed) {
+          setLoaded(true);
+          onReady?.();
+        }
       });
       map.on("error", fail);
       timer = setTimeout(fail, 10000);
@@ -134,7 +139,7 @@ export function Map({
       map?.off("error", fail);
       map?.remove();
     };
-  }, [longitude, latitude, interactive, apiKey, theme, onFailure]);
+  }, [longitude, latitude, interactive, apiKey, theme, onFailure, onReady]);
   return (
     <div className="relative size-full" aria-label={interactive ? "Location map" : undefined}>
       <div

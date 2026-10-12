@@ -37,7 +37,19 @@ export function TodayAttention() {
     ...(finance.data?.details.accounts?.items ?? []).filter(
       (item) => !coveredAccounts.has(item.id) && item.synchronization.state === "blocked",
     ),
-  ];
+  ].map((item) => ({
+    ...item,
+    label:
+      "name" in item
+        ? item.name
+        : [
+            ...new Set(
+              (finance.data?.details.accounts?.items ?? [])
+                .filter((account) => item.accountIds.includes(account.id))
+                .map((account) => account.institution),
+            ),
+          ].join(", ") || "Finance connection",
+  }));
   const domains = (["calendar", "finances", "mail", "tasks"] as const)
     .map((domain) => {
       const reviews = work.data?.summary.reviewByDomain?.[domain];
@@ -119,7 +131,7 @@ export function TodayAttention() {
         {blocked.map((item) => (
           <div key={item.id} className="flex items-center justify-between gap-4 py-2">
             <span>
-              Finance connection ·{" "}
+              {item.label} ·{" "}
               {item.synchronization.recovery === "reconnect"
                 ? "Reconnect required"
                 : "Service issue"}

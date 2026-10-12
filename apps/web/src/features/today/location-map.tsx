@@ -1,17 +1,30 @@
 import type { WeatherCoordinates } from "@personal-os/domain";
-import { Component, lazy, type ReactNode, Suspense, useCallback, useState } from "react";
+import {
+  Component,
+  lazy,
+  type ReactNode,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 
 const LazyMap = lazy(() =>
   import("@/components/ui/map").then((module) => ({ default: module.Map })),
 );
 class MapBoundary extends Component<
-  { children: ReactNode; fallback: ReactNode },
+  { children: ReactNode; fallback: ReactNode; onFailure: () => void },
   { failed: boolean }
 > {
   override state = { failed: false };
   static getDerivedStateFromError() {
     return { failed: true };
+  }
+  override componentDidCatch() {
+    this.props.onFailure();
   }
   override render() {
     return this.state.failed ? this.props.fallback : this.props.children;
@@ -41,7 +54,26 @@ function LocationMapInstance({
 }) {
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
-  const onFailure = useCallback(() => setFailed(true), []);
+  const retryToast = useRef<string | number | undefined>(undefined);
+  useEffect(
+    () => () => {
+      if (retryToast.current !== undefined) toast.dismiss(retryToast.current);
+    },
+    [],
+  );
+  const onFailure = useCallback(() => {
+    setFailed(true);
+    if (retryToast.current !== undefined) {
+      toast.error("Could not load the map.", { id: retryToast.current });
+      retryToast.current = undefined;
+    }
+  }, []);
+  const onReady = useCallback(() => {
+    if (retryToast.current !== undefined) {
+      toast.success("Map loaded.", { id: retryToast.current });
+      retryToast.current = undefined;
+    }
+  }, []);
   const apiKey = import.meta.env.VITE_CARTO_API_KEY as string | undefined;
   const fallback = (
     <div
@@ -54,6 +86,7 @@ function LocationMapInstance({
             <Button
               variant="link"
               onClick={() => {
+                retryToast.current = toast.loading("Loading map…");
                 setFailed(false);
                 setAttempt((value) => value + 1);
               }}
@@ -70,7 +103,7 @@ function LocationMapInstance({
       {!apiKey || failed ? (
         fallback
       ) : (
-        <MapBoundary key={attempt} fallback={fallback}>
+        <MapBoundary key={attempt} fallback={fallback} onFailure={onFailure}>
           <Suspense
             fallback={
               <div
@@ -87,6 +120,7 @@ function LocationMapInstance({
               interactive={mode === "preview"}
               apiKey={apiKey}
               onFailure={onFailure}
+              onReady={onReady}
             />
           </Suspense>
         </MapBoundary>

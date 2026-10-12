@@ -44,7 +44,7 @@ export function TodayRitualCard() {
               if (isDesktop())
                 toast.promise(openCurrentRitual(), {
                   loading: "Opening ritual…",
-                  success: "Ritual opened.",
+                  success: "Ritual requested.",
                   error: "Could not open the ritual.",
                 });
               else setOpen(true);

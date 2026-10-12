@@ -14,6 +14,12 @@ test("Today keeps independent cards, saves personalization and uses weekly filte
   try {
     await page.getByRole("link", { name: "Personalize Today" }).click();
     await expect(page.getByRole("heading", { name: "Today at a Glance settings" })).toBeVisible();
+    const previewWidths = await page
+      .getByRole("radiogroup", { name: "Background", exact: true })
+      .locator(".choice-card__preview")
+      .evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().width));
+    expect(previewWidths).toHaveLength(3);
+    expect(previewWidths.every((width) => width >= 80)).toBeTruthy();
     const save = page.waitForResponse(
       (response) => response.url().endsWith(path) && response.request().method() === "PATCH",
     );

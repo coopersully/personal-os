@@ -1,6 +1,7 @@
 import { defaultTodayPreferences, type TodayPreferences } from "@personal-os/domain";
 import { Link } from "react-router-dom";
 import { ChoiceCardGroup } from "@/components/choice-card-group";
+import { CloudIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { SettingsSection } from "@/features/settings/settings-layout";
@@ -63,18 +64,25 @@ function TodaySettingsContent() {
               {
                 value: "default",
                 label: "Default",
-                preview: <span className="block h-20 w-full rounded bg-muted" />,
+                preview: <span className="block h-20 w-32 rounded bg-muted" />,
               },
               {
                 value: "weather",
                 label: "Weather",
-                preview: <span className="today-weather-preview block h-20 w-full rounded" />,
+                preview: (
+                  <span
+                    className="today-weather-preview flex h-20 w-32 items-center justify-center rounded"
+                    aria-hidden="true"
+                  >
+                    <CloudIcon className="size-8" />
+                  </span>
+                ),
               },
               {
                 value: "map",
                 label: "Map",
                 preview: (
-                  <span className="today-map-preview h-20 w-full rounded" aria-hidden="true">
+                  <span className="today-map-preview h-20 w-32 rounded" aria-hidden="true">
                     {["north", "northeast", "east", "south", "southwest", "west"].map(
                       (direction) => (
                         <span key={direction} />

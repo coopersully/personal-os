@@ -5,7 +5,7 @@ import {
   type Task,
   type TodayPreferences,
 } from "@personal-os/domain";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -87,6 +87,7 @@ function CommitmentPage({
   renderTask: (task: Task) => ReactNode;
   renderReminder: (reminder: Reminder) => ReactNode;
 }) {
+  const cache = useQueryClient();
   const [cursors, setCursors] = useState<Array<string | undefined>>([undefined]);
   const cursor = cursors.at(-1);
   const query = useQuery({
@@ -100,6 +101,21 @@ function CommitmentPage({
       setCursors((value) => (value.length > 1 ? value.slice(0, -1) : value));
     }
   }, [cursor, query.isSuccess, query.isFetching, query.data]);
+  const refresh = () =>
+    toast.promise(
+      cache
+        .fetchQuery({
+          queryKey: ["today-commitments", day, filter, includeUndated, undefined],
+          queryFn: () => api.getTodayCommitments({ filter, includeUndated, limit: 6 }),
+          staleTime: 0,
+        })
+        .then(() => setCursors([undefined])),
+      {
+        loading: "Refreshing commitments…",
+        success: "Commitments refreshed.",
+        error: "Could not refresh commitments.",
+      },
+    );
   const labels = {
     overdue: "Overdue",
     today: "Today",
@@ -110,22 +126,7 @@ function CommitmentPage({
     return (
       <div className="min-h-48" aria-busy={query.isPending}>
         {query.isError ? (
-          <Button
-            variant="outline"
-            onClick={() => {
-              setCursors([undefined]);
-              toast.promise(
-                query.refetch().then((result) => {
-                  if (result.isError) throw result.error;
-                }),
-                {
-                  loading: "Refreshing commitments…",
-                  success: "Commitments refreshed.",
-                  error: "Could not refresh commitments.",
-                },
-              );
-            }}
-          >
+          <Button variant="outline" onClick={refresh}>
             Retry commitments
           </Button>
         ) : (
@@ -142,22 +143,7 @@ function CommitmentPage({
       {query.isError || query.data.unavailableSources.length ? (
         <p className="text-sm text-muted-foreground">
           Some commitments could not be refreshed.{" "}
-          <Button
-            variant="link"
-            onClick={() => {
-              setCursors([undefined]);
-              toast.promise(
-                query.refetch().then((result) => {
-                  if (result.isError) throw result.error;
-                }),
-                {
-                  loading: "Refreshing commitments…",
-                  success: "Commitments refreshed.",
-                  error: "Could not refresh commitments.",
-                },
-              );
-            }}
-          >
+          <Button variant="link" onClick={refresh}>
             Refresh
           </Button>
         </p>

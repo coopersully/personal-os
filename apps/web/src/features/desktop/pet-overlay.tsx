@@ -367,7 +367,7 @@ function PetContent() {
                   timeZone: "UTC",
                 }).format(new Date(Date.UTC(date.year, date.month - 1, date.day)));
               return (
-                <div key={event.id} role="listitem">
+                <li key={event.id}>
                   <OccasionCard
                     accentColor={calendarColors.get(event.calendarId ?? "") ?? "#777ce3"}
                     startDateTime={localDateToIso(start)}
@@ -377,7 +377,7 @@ function PetContent() {
                     title={event.title}
                     onOpen={() => open("/calendar")}
                   />
-                </div>
+                </li>
               );
             })}
         </ItemGroup>

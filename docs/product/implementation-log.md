@@ -21,6 +21,32 @@
   non-transmittable. See [capability boundaries](../engineering/workspace-agent-capabilities.md).
 - Implementation evidence does not establish production deployment or exhaustive input-variant coverage.
 
+## 2026-10-12 — Connector capability recovery and monitoring (branch implementation)
+
+- Calendar and Mail now retain independent health, freshness and retry state. Healthy siblings
+  continue while failed capabilities wait for recovery; prolonged retries become visible service
+  attention. Google quota/permission errors are distinguished, refreshed sync credentials persist
+  before subsequent requests, and notification listeners defer account health to the fenced sync.
+- Connections display per-service health and last success. Domain source health, reconnect review
+  tasks and Calendar stewardship use the relevant capability's state.
+- Added read-only Mac production diagnostics and an optional Grafana Cloud Free collector/dashboard
+  for container resources, sanitized API/connector events and health probes. A Cloud Free stack was
+  created on October 12; production collector installation, live ingestion and alert delivery remain
+  operator acceptance, not shipped production claims. See the
+  [monitoring runbook](../../deploy/observability/README.md).
+- Local validation: 3,779 tests across 359 files pass; coverage is 96.77% statements/lines,
+  95.54% functions and 94.01% branches with unchanged thresholds. Type checks and production builds
+  pass. Browser acceptance passes 80 tests with two intentional mobile skips; all 42 Mac production
+  tests pass. The pinned Alloy configuration and actual log-pipeline privacy checks pass. An unrelated
+  UI test's screen-loading waits now match adjacent tests after exposing contention-sensitive failures.
+- The branch was updated to current main and its additive migration moved after published history
+  as `0112_connector_capability_health`. The validation counts above describe the October 11
+  candidate; current-candidate shipping verification is recorded separately.
+- On October 12, the operator console confirmed Google OAuth publishing status **In production**
+  after completing nohmi branding with the live homepage, privacy and terms links. This removes
+  Testing status; it does not establish Google verification, restore expired grants, or prove
+  deployment of these application changes. Existing expired grants need one reconnect.
+
 ## 2026-10-10 — Finance history, continuations, and settings recovery merged
 
 - [PR #229 — Expose Finance review history and exact evidence](https://github.com/coopersully/personal-os/pull/229)

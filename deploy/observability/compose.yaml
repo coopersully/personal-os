@@ -1,0 +1,31 @@
+name: nohmi-observability
+services:
+  alloy:
+    # Pinned multi-platform release; revalidate configuration when upgrading.
+    image: grafana/alloy:v1.20.0@sha256:f111cce835516c5f99166342be7038496b52ced16667be5a11e19258a3e4cd30
+    privileged: true # cAdvisor requires host cgroup/device visibility; isolated operator service.
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 0.5
+    command: [run, --server.http.listen-addr=127.0.0.1:12345, --storage.path=/var/lib/alloy, /etc/alloy/config.alloy]
+    environment:
+      GRAFANA_PROMETHEUS_URL: ${GRAFANA_PROMETHEUS_URL:?Set the HTTPS remote-write endpoint}
+      GRAFANA_PROMETHEUS_USER: ${GRAFANA_PROMETHEUS_USER:?Set metrics instance ID}
+      GRAFANA_LOKI_URL: ${GRAFANA_LOKI_URL:?Set the HTTPS Loki push endpoint}
+      GRAFANA_LOKI_USER: ${GRAFANA_LOKI_USER:?Set logs instance ID}
+    volumes:
+      - ./config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /:/rootfs:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - alloy-data:/var/lib/alloy
+    secrets: [grafana-token]
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "3"}
+secrets:
+  grafana-token:
+    file: ${GRAFANA_TOKEN_FILE:?Set absolute private token-file path}
+volumes:
+  alloy-data: {}

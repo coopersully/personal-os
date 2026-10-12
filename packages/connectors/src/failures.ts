@@ -43,7 +43,7 @@ export async function connectorHttpError(
   const retryAfterMs = retryAfter(response.headers.get("retry-after"));
   const safeProviderError =
     provider === "google"
-      ? await readGoogleOAuthErrorCode(response)
+      ? await readGoogleErrorCode(response)
       : provider === "plaid"
         ? await readPlaidErrorCode(response)
         : null;
@@ -100,6 +100,50 @@ export async function connectorHttpError(
       disposition: "operator",
       message: "Google is not configured correctly.",
       status: response.status,
+    });
+  }
+  if (provider === "google" && response.status === 403) {
+    if (
+      [
+        "rateLimitExceeded",
+        "userRateLimitExceeded",
+        "dailyLimitExceeded",
+        "quotaExceeded",
+      ].includes(safeProviderError ?? "")
+    ) {
+      return new ConnectorError({
+        category: "rate_limited",
+        code: "google_rate_limited",
+        disposition: "retry",
+        message: "Google is temporarily rate-limiting nohmi.",
+        status: 403,
+        ...(retryAfterMs === null ? {} : { retryAfterMs }),
+      });
+    }
+    if (safeProviderError === "insufficientPermissions") {
+      return new ConnectorError({
+        category: "authorization",
+        code: "google_permission_missing",
+        disposition: "reconnect",
+        message: "Google needs additional permissions for this capability.",
+        status: 403,
+      });
+    }
+    if (safeProviderError === "accessNotConfigured") {
+      return new ConnectorError({
+        category: "configuration",
+        code: "google_configuration_invalid",
+        disposition: "operator",
+        message: "A required Google API is not enabled.",
+        status: 403,
+      });
+    }
+    return new ConnectorError({
+      category: "rejected",
+      code: "google_permission_denied",
+      disposition: "operator",
+      message: "Google denied access to this resource.",
+      status: 403,
     });
   }
   if (response.status === 401 || response.status === 403) {
@@ -163,7 +207,6 @@ export function classifyICloudError(service: "calendar" | "mail", error: unknown
   const authenticationFailed =
     details?.authenticationFailed === true ||
     status === 401 ||
-    status === 403 ||
     responseStatus === "AUTHENTICATIONFAILED" ||
     code === "AUTHENTICATIONFAILED" ||
     code === "AUTH_FAILED" ||
@@ -176,6 +219,15 @@ export function classifyICloudError(service: "calendar" | "mail", error: unknown
       disposition: "reconnect",
       message: `iCloud ${label} authorization is no longer valid.`,
       ...(status === null ? {} : { status }),
+    });
+  }
+  if (status === 403) {
+    return new ConnectorError({
+      category: "rejected",
+      code: `icloud_${service}_permission_denied`,
+      disposition: "operator",
+      message: `iCloud denied access to this ${label} resource.`,
+      status,
     });
   }
   return new ConnectorError({
@@ -194,12 +246,18 @@ type GoogleOAuthErrorCode =
   | "invalid_client"
   | "invalid_grant"
   | "redirect_uri_mismatch"
-  | "unauthorized_client";
+  | "unauthorized_client"
+  | "rateLimitExceeded"
+  | "userRateLimitExceeded"
+  | "dailyLimitExceeded"
+  | "quotaExceeded"
+  | "insufficientPermissions"
+  | "accessNotConfigured";
 type PlaidErrorCode = "INVALID_API_KEYS" | "ITEM_LOGIN_REQUIRED" | "RATE_LIMIT_EXCEEDED";
 
-async function readGoogleOAuthErrorCode(response: Response): Promise<GoogleOAuthErrorCode | null> {
+async function readGoogleErrorCode(response: Response): Promise<GoogleOAuthErrorCode | null> {
   if (
-    response.status !== 400 ||
+    (response.status !== 400 && response.status !== 403) ||
     !response.headers.get("content-type")?.toLowerCase().includes("application/json") ||
     !response.body
   ) {
@@ -231,6 +289,23 @@ async function readGoogleOAuthErrorCode(response: Response): Promise<GoogleOAuth
   try {
     const parsed = JSON.parse(serialized) as unknown;
     const error = objectDetails(parsed)?.error;
+    if (response.status === 403) {
+      const errors = objectDetails(error)?.errors;
+      if (!Array.isArray(errors)) return null;
+      for (const entry of errors) {
+        const reason = objectDetails(entry)?.reason;
+        if (
+          reason === "rateLimitExceeded" ||
+          reason === "userRateLimitExceeded" ||
+          reason === "dailyLimitExceeded" ||
+          reason === "quotaExceeded" ||
+          reason === "insufficientPermissions" ||
+          reason === "accessNotConfigured"
+        )
+          return reason;
+      }
+      return null;
+    }
     if (
       error === "invalid_client" ||
       error === "invalid_grant" ||

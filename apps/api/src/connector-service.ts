@@ -467,7 +467,7 @@ export function createConnectorService({
   }
 
   async function withConnectorSyncClaim<T>(
-    account: AccountRow,
+    account: Pick<AccountRow, "id" | "userId">,
     syncClaim: SyncClaim,
     work: (transaction: DatabaseTransaction) => Promise<T>,
   ): Promise<T> {
@@ -836,7 +836,12 @@ export function createConnectorService({
   async function syncAccount(
     userId: string,
     accountId: string,
-    options: { skipMail?: boolean; context?: { principal: Principal; requestId: string } } = {},
+    options: {
+      skipMail?: boolean;
+      automatic?: boolean;
+      triggered?: boolean;
+      context?: { principal: Principal; requestId: string };
+    } = {},
   ): Promise<{ changed: number }> {
     throwIfQuiescing();
     const startedAt = Date.now();
@@ -913,6 +918,123 @@ export function createConnectorService({
     };
     const requestId = `sync:${syncClaimId}`;
     const principal = { actorId: claimedAccount.id, actorType: "connector", userId } as const;
+    const capabilityStates = { ...claimedAccount.syncCapabilities };
+    const capabilityErrors: unknown[] = [];
+    const blockedCapabilityErrors = new Set<unknown>();
+    let changed = 0;
+    const provider = claimedAccount.provider === "icloud" ? "icloud" : "google";
+    const runCapability = async (capability: "calendar" | "mail", work: () => Promise<void>) => {
+      const previous = capabilityStates[capability];
+      if (
+        options.automatic &&
+        previous &&
+        (previous.health.recovery === "reconnect" ||
+          ((previous.errorCode || !options.triggered) &&
+            previous.health.nextSyncAt &&
+            new Date(previous.health.nextSyncAt) > now()))
+      ) {
+        if (previous.errorCode) {
+          const error = new ConnectorError({
+            category: previous.errorCategory ?? "unknown",
+            code: previous.errorCode,
+            disposition:
+              previous.health.recovery === "reconnect"
+                ? "reconnect"
+                : previous.health.recovery === "operator"
+                  ? "operator"
+                  : "retry",
+            message: "This capability is waiting for recovery.",
+            ...(previous.status === null ? {} : { status: previous.status }),
+          });
+          capabilityErrors.push(error);
+          if (previous.health.recovery === "reconnect") blockedCapabilityErrors.add(error);
+        }
+        return;
+      }
+      let failure: ConnectorSyncFailure | null = null;
+      try {
+        await work();
+      } catch (error) {
+        if (shutdown?.signal.aborted || (error instanceof AppError && error.code === "conflict"))
+          throw error;
+        failure = classifyConnectorSyncFailure(error, provider);
+        capabilityErrors.push(error);
+      }
+      const settledAt = now();
+      const failureCount = failure ? (previous?.failureCount ?? 0) + 1 : 0;
+      const nextSyncAt =
+        failure?.recovery === "reconnect"
+          ? null
+          : failure
+            ? connectorRetryAt({
+                accountId,
+                failureCount,
+                now: settledAt,
+                retryAfterMs: failure.retryAfterMs,
+              })
+            : new Date(settledAt.getTime() + 5 * 60_000);
+      const stale =
+        failure &&
+        failure.recovery === "automatic" &&
+        settledAt.getTime() -
+          new Date(
+            previous?.lastSyncedAt ?? claimedAccount.lastSyncedAt ?? claimedAccount.createdAt,
+          ).getTime() >=
+          24 * 60 * 60_000;
+      capabilityStates[capability] = {
+        lastAttemptAt: attemptedAt.toISOString(),
+        lastSyncedAt: failure ? (previous?.lastSyncedAt ?? null) : settledAt.toISOString(),
+        failureCount,
+        errorCode: failure?.code ?? null,
+        errorCategory: failure?.category ?? null,
+        status: failure?.status ?? null,
+        health: {
+          state: stale
+            ? "service_attention"
+            : failure?.recovery === "reconnect"
+              ? "reconnect"
+              : failure?.recovery === "operator"
+                ? "service_attention"
+                : failure
+                  ? "retrying"
+                  : "ready",
+          recovery: failure?.recovery ?? null,
+          message: stale
+            ? `${capability === "mail" ? "Mail" : "Calendar"} has not synced successfully for over 24 hours. Service attention is needed; automatic retries continue.`
+            : (failure?.message ?? null),
+          nextSyncAt: nextSyncAt?.toISOString() ?? null,
+        },
+      };
+      await withConnectorSyncClaim(claimedAccount, syncClaim, async (transaction) => {
+        await transaction
+          .update(calendarAccounts)
+          .set({ syncCapabilities: capabilityStates })
+          .where(eq(calendarAccounts.id, accountId));
+      });
+      log?.({
+        event: failure ? "connector_capability_failed" : "connector_capability_completed",
+        capability,
+        accountId,
+        provider,
+        requestId,
+        method: "CONNECTOR",
+        path: "/internal/connectors/sync",
+        durationMs: Date.now() - startedAt,
+        status: failure?.status ?? (failure ? 503 : 200),
+        ...(failure
+          ? { code: failure.code, category: failure.category, disposition: failure.recovery }
+          : {}),
+        failureCount,
+        nextSyncAt: nextSyncAt?.toISOString() ?? null,
+        freshnessAgeMs: Math.max(
+          0,
+          settledAt.getTime() -
+            new Date(
+              capabilityStates[capability].lastSyncedAt ?? claimedAccount.createdAt,
+            ).getTime(),
+        ),
+      });
+    };
     try {
       throwIfQuiescing();
       if (!claimedAccount.encryptedCredentials) {
@@ -930,108 +1052,148 @@ export function createConnectorService({
       };
       let googleCredentials =
         account.provider === "google" ? credentials<GoogleCredentials>(account) : null;
+      const googleOperation = (): ProviderOperationOptions => ({
+        ...syncOperation(),
+        persistGoogleCredentials: async (value) => {
+          googleCredentials = await saveGoogleCredentials(account.id, value, true, syncClaim);
+          return googleCredentials;
+        },
+      });
       const icloudCredentials =
         account.provider === "icloud" ? credentials<ICloudCredentials>(account) : null;
-      let changed = 0;
       let mailCredentialsPersisted = false;
       if (account.calendarEnabled) {
-        if (account.provider === "google" && googleCredentials) {
-          const remoteCalendars = await google.listCalendars(googleCredentials, syncOperation());
-          googleCredentials = remoteCalendars.credentials;
-          throwIfQuiescing();
-          await saveCalendars(
-            account,
-            remoteCalendars.value,
-            "google",
-            principal,
-            requestId,
-            syncClaim,
-          );
-        } else if (account.provider === "icloud" && icloudCredentials) {
-          await saveCalendars(
-            account,
-            await icloud.listCalendars(icloudCredentials, syncOperation()),
-            "icloud",
-            principal,
-            requestId,
-            syncClaim,
-          );
-        }
-        const accountCalendars = await db
-          .select()
-          .from(calendars)
-          .where(and(eq(calendars.accountId, account.id), isNull(calendars.deletedAt)))
-          .orderBy(asc(calendars.name));
-        for (const calendar of accountCalendars) {
-          throwIfQuiescing();
-          if (!calendar.remoteCalendarId) continue;
-          let result: SyncResult["value"];
-          if (calendar.provider === "google" && googleCredentials) {
-            const remote = await google.syncCalendar(
+        await runCapability("calendar", async () => {
+          if (account.provider === "google" && googleCredentials) {
+            const remoteCalendars = await google.listCalendars(
               googleCredentials,
-              calendar.remoteCalendarId,
-              calendar.syncToken,
-              syncOperation(),
+              googleOperation(),
             );
-            googleCredentials = remote.credentials;
-            result = remote.value;
-          } else if (calendar.provider === "icloud" && icloudCredentials) {
-            result = await icloud.syncCalendar(
-              icloudCredentials,
-              calendar.remoteCalendarId,
-              calendar.syncToken,
-              syncOperation(),
+            googleCredentials = await saveGoogleCredentials(
+              account.id,
+              remoteCalendars.credentials,
+              true,
+              syncClaim,
             );
-          } else {
-            continue;
+            throwIfQuiescing();
+            await saveCalendars(
+              account,
+              remoteCalendars.value,
+              "google",
+              principal,
+              requestId,
+              syncClaim,
+            );
+          } else if (account.provider === "icloud" && icloudCredentials) {
+            await saveCalendars(
+              account,
+              await icloud.listCalendars(icloudCredentials, syncOperation()),
+              "icloud",
+              principal,
+              requestId,
+              syncClaim,
+            );
           }
-          throwIfQuiescing();
-          changed += await withConnectorSyncClaim(account, syncClaim, (transaction) =>
-            projectCalendarChanges(transaction, userId, calendar, result, principal, requestId),
-          );
-        }
+          const accountCalendars = await db
+            .select()
+            .from(calendars)
+            .where(and(eq(calendars.accountId, account.id), isNull(calendars.deletedAt)))
+            .orderBy(asc(calendars.name));
+          for (const calendar of accountCalendars) {
+            throwIfQuiescing();
+            if (!calendar.remoteCalendarId) continue;
+            let result: SyncResult["value"];
+            if (calendar.provider === "google" && googleCredentials) {
+              const remote = await google.syncCalendar(
+                googleCredentials,
+                calendar.remoteCalendarId,
+                calendar.syncToken,
+                googleOperation(),
+              );
+              googleCredentials = await saveGoogleCredentials(
+                account.id,
+                remote.credentials,
+                true,
+                syncClaim,
+              );
+              result = remote.value;
+            } else if (calendar.provider === "icloud" && icloudCredentials) {
+              result = await icloud.syncCalendar(
+                icloudCredentials,
+                calendar.remoteCalendarId,
+                calendar.syncToken,
+                googleOperation(),
+              );
+            } else {
+              continue;
+            }
+            throwIfQuiescing();
+            changed += await withConnectorSyncClaim(account, syncClaim, (transaction) =>
+              projectCalendarChanges(transaction, userId, calendar, result, principal, requestId),
+            );
+          }
+        });
       }
       throwIfQuiescing();
       if (account.mailEnabled && !options.skipMail) {
-        let mail: MailSyncResult["value"];
-        if (account.provider === "google" && googleCredentials && google.syncMail) {
-          const result = await google.syncMail(
+        await runCapability("mail", async () => {
+          let mail: MailSyncResult["value"];
+          if (account.provider === "google" && googleCredentials && google.syncMail) {
+            const result = await google.syncMail(
+              googleCredentials,
+              account.mailSyncToken,
+              googleOperation(),
+            );
+            googleCredentials = await saveGoogleCredentials(
+              account.id,
+              result.credentials,
+              true,
+              syncClaim,
+            );
+            mailCredentialsPersisted = true;
+            mail = result.value;
+          } else if (account.provider === "icloud" && icloudCredentials) {
+            mail = await icloud.syncMail(icloudCredentials, account.mailSyncToken, syncOperation());
+          } else {
+            throw new ConnectorError({
+              category: "configuration",
+              code: "connector_mail_capability_unavailable",
+              disposition: "operator",
+              message: "Connected Mail capability is unavailable.",
+              status: 503,
+            });
+          }
+          throwIfQuiescing();
+          const projected = await projectMail(
+            account,
+            mail,
+            principal,
+            requestId,
             googleCredentials,
-            account.mailSyncToken,
-            syncOperation(),
-          );
-          googleCredentials = await saveGoogleCredentials(
-            account.id,
-            result.credentials,
-            true,
             syncClaim,
           );
-          mailCredentialsPersisted = true;
-          mail = result.value;
-        } else if (account.provider === "icloud" && icloudCredentials) {
-          mail = await icloud.syncMail(icloudCredentials, account.mailSyncToken, syncOperation());
-        } else {
-          throw new ConnectorError({
-            category: "configuration",
-            code: "connector_mail_capability_unavailable",
-            disposition: "operator",
-            message: "Connected Mail capability is unavailable.",
-            status: 503,
-          });
-        }
-        throwIfQuiescing();
-        const projected = await projectMail(
-          account,
-          mail,
-          principal,
-          requestId,
-          googleCredentials,
-          syncClaim,
-        );
-        changed += projected.changed;
-        mailCredentialsPersisted = mailCredentialsPersisted || projected.credentials !== null;
-        googleCredentials = projected.credentials ?? googleCredentials;
+          changed += projected.changed;
+          mailCredentialsPersisted = mailCredentialsPersisted || projected.credentials !== null;
+          googleCredentials = projected.credentials ?? googleCredentials;
+        });
       }
+      if (options.skipMail && account.mailEnabled && capabilityStates.mail?.errorCode) {
+        const previous = capabilityStates.mail;
+        capabilityErrors.push(
+          new ConnectorError({
+            category: previous.errorCategory ?? "unknown",
+            code: previous.errorCode ?? "connector_unknown_failure",
+            disposition:
+              previous.health.recovery === "reconnect"
+                ? "reconnect"
+                : previous.health.recovery === "operator"
+                  ? "operator"
+                  : "retry",
+            message: "Mail still needs attention.",
+          }),
+        );
+      }
+      if (capabilityErrors.length) throw capabilityErrors[0];
       throwIfQuiescing();
       const completedAt = now();
       const [completedAccount] = await db
@@ -1108,16 +1270,25 @@ export function createConnectorService({
           }
         : classifyConnectorSyncFailure(error, provider);
       const failedAt = now();
+      const capabilityDueDates = Object.entries(capabilityStates)
+        .filter(([capability]) =>
+          capability === "calendar" ? claimedAccount.calendarEnabled : claimedAccount.mailEnabled,
+        )
+        .flatMap(([, state]) =>
+          state.health.nextSyncAt ? [Date.parse(state.health.nextSyncAt)] : [],
+        );
       const nextSyncAt = interrupted
         ? failedAt
-        : failure.recovery === "reconnect"
-          ? null
-          : connectorRetryAt({
-              accountId: claimedAccount.id,
-              failureCount,
-              now: failedAt,
-              retryAfterMs: failure.retryAfterMs,
-            });
+        : capabilityDueDates.length
+          ? new Date(Math.min(...capabilityDueDates))
+          : failure.recovery === "reconnect"
+            ? null
+            : connectorRetryAt({
+                accountId,
+                failureCount,
+                now: failedAt,
+                retryAfterMs: failure.retryAfterMs,
+              });
       try {
         const [settledAccount] = await db
           .update(calendarAccounts)
@@ -1156,6 +1327,15 @@ export function createConnectorService({
             requestId,
             status: failure.status ?? 503,
           });
+          // A notification is consumed once every runnable capability succeeds. Keep
+          // reconnect health, but do not replay the same signal for a blocked sibling.
+          if (
+            options.triggered &&
+            !interrupted &&
+            capabilityErrors.includes(error) &&
+            capabilityErrors.every((entry) => blockedCapabilityErrors.has(entry))
+          )
+            return { changed };
         }
       } catch {
         if (interrupted) {
@@ -3463,6 +3643,7 @@ export function createConnectorService({
                 syncFailureCount: 0,
                 syncGeneration: sql`${calendarAccounts.syncGeneration} + 1`,
                 syncRecovery: null,
+                syncCapabilities: null,
                 syncStatus: "idle",
                 updatedAt: now(),
               })
@@ -3652,6 +3833,7 @@ export function createConnectorService({
                 syncFailureCount: 0,
                 syncGeneration: sql`${calendarAccounts.syncGeneration} + 1`,
                 syncRecovery: null,
+                syncCapabilities: null,
                 syncStatus: "idle",
                 updatedAt: now(),
               })
@@ -3750,6 +3932,7 @@ export function createConnectorService({
         .where(and(eq(calendarAccounts.userId, userId), ne(calendarAccounts.provider, "local")))
         .orderBy(asc(calendarAccounts.createdAt));
       return records.map((record) => ({
+        capabilities: record.syncCapabilities ?? {},
         calendarEnabled: record.calendarEnabled,
         avatarUrl: record.avatarUrl,
         email: record.email,
@@ -3803,7 +3986,10 @@ export function createConnectorService({
     },
 
     dispatchTriggeredSyncs(options: { concurrency?: number; limit?: number } = {}) {
-      return notifications.dispatchTriggeredSyncs(syncAccount, options);
+      return notifications.dispatchTriggeredSyncs(
+        (userId, accountId) => syncAccount(userId, accountId, { automatic: true, triggered: true }),
+        options,
+      );
     },
 
     enqueueSyncTrigger(
@@ -3844,34 +4030,33 @@ export function createConnectorService({
     }> {
       const observedAt = now();
       const accounts = await db
-        .select({
-          createdAt: calendarAccounts.createdAt,
-          lastSyncedAt: calendarAccounts.lastSyncedAt,
-        })
+        .select()
         .from(calendarAccounts)
         .where(
           and(
             ne(calendarAccounts.provider, "local"),
             or(eq(calendarAccounts.calendarEnabled, true), eq(calendarAccounts.mailEnabled, true)),
-            or(
-              isNull(calendarAccounts.syncRecovery),
-              eq(calendarAccounts.syncRecovery, "automatic"),
-            ),
           ),
         );
+      const eligible = accounts.flatMap((account) => {
+        const ages = (["calendar", "mail"] as const).flatMap((capability) => {
+          if (!(capability === "calendar" ? account.calendarEnabled : account.mailEnabled))
+            return [];
+          const scoped = account.syncCapabilities?.[capability];
+          const recovery = scoped ? scoped.health.recovery : account.syncRecovery;
+          if (recovery !== null && recovery !== "automatic") return [];
+          const lastSuccess = scoped
+            ? scoped.lastSyncedAt
+              ? new Date(scoped.lastSyncedAt)
+              : account.createdAt
+            : (account.lastSyncedAt ?? account.createdAt);
+          return [Math.max(0, observedAt.getTime() - lastSuccess.getTime())];
+        });
+        return ages.length ? [Math.max(...ages)] : [];
+      });
       return {
-        eligibleAccountCount: accounts.length,
-        freshnessAgeMs: accounts.reduce(
-          (maximumAge, account) =>
-            Math.max(
-              maximumAge,
-              Math.max(
-                0,
-                observedAt.getTime() - (account.lastSyncedAt ?? account.createdAt).getTime(),
-              ),
-            ),
-          0,
-        ),
+        eligibleAccountCount: eligible.length,
+        freshnessAgeMs: eligible.reduce((maximum, age) => Math.max(maximum, age), 0),
       };
     },
     async syncDueAccounts(options: { concurrency?: number; limit?: number } = {}): Promise<{
@@ -3902,10 +4087,6 @@ export function createConnectorService({
                 ne(calendarAccounts.syncStatus, "syncing"),
                 isNotNull(calendarAccounts.nextSyncAt),
                 lte(calendarAccounts.nextSyncAt, selectedAt),
-                or(
-                  isNull(calendarAccounts.syncRecovery),
-                  ne(calendarAccounts.syncRecovery, "reconnect"),
-                ),
               ),
               and(
                 eq(calendarAccounts.syncStatus, "syncing"),
@@ -3930,7 +4111,7 @@ export function createConnectorService({
           cursor += 1;
           if (!account) continue;
           try {
-            await syncAccount(account.userId, account.id);
+            await syncAccount(account.userId, account.id, { automatic: true });
             result.succeeded += 1;
             if (account.syncFailureCount > 0) result.recovered += 1;
           } catch (error) {

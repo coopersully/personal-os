@@ -543,6 +543,10 @@ API + Domain policy engine ──► Postgres + encrypted credential store + aud
   retrieves only the facts, preferences, inferences, policy, and missing requirements needed for a
   specific workflow; semantic indexes are rebuildable aids rather than truth.
 - Maintain provider-neutral connectors with capability discovery. Google uses incremental OAuth and Gmail write scopes only when needed; iCloud uses IMAP/CalDAV and app-specific passwords; Plaid uses Link, webhook/sync cursor, and transaction enrichment.
+- Track Calendar and Mail health, last successful sync and recovery independently, even when they
+  share a provider account. A failed service must not block a healthy sibling. Temporary failures
+  retry automatically; prolonged failures remain visible, and reconnect is reserved for evidence
+  that authorization needs renewal. Expose the same scoped health to people and agents.
 - Add connector contracts for mail mutations, calendar RSVP/availability, attachments, finance transactions/rules, notification targets, and platform widgets. A capability matrix prevents unsupported controls from appearing enabled. Gmail "delete" means move to Trash unless a provider offers a separately scoped reversible behavior; permanent deletion is never implied by an archive/triage shortcut.
 - Build normalized projections with remote ID, version/etag, original timezone, raw encrypted/provider payload reference, and tombstone state. Webhooks are hints; sync is idempotent reconciliation.
 - Keep coding-agent skills and host prompts as documentation and invocation aids, never as product

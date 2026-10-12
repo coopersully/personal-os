@@ -221,6 +221,7 @@ export type SendRemoteMailInput = {
 };
 
 export type ProviderOperationOptions = {
+  persistGoogleCredentials?: (credentials: GoogleCredentials) => Promise<GoogleCredentials>;
   deadlineMs?: number;
   signal?: AbortSignal;
 };

@@ -1,8 +1,53 @@
-import type { ConnectedAccountHealth } from "@personal-os/domain";
+import type { ConnectedAccountHealth, ConnectorCapabilities } from "@personal-os/domain";
 import { AlertTriangleIcon, LinkOffIcon, RefreshIcon } from "@/components/icons";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
 import { Badge } from "../../components/ui/badge.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
+
+export function ConnectionCapabilityHealth({
+  capabilities,
+  enabled,
+  fallback,
+}: {
+  capabilities: ConnectorCapabilities;
+  enabled: { calendar: boolean; mail: boolean };
+  fallback: { health: ConnectedAccountHealth; lastSyncedAt: string | null };
+}) {
+  return (
+    <dl className="flex flex-col gap-2">
+      {(["calendar", "mail"] as const).map((capability) => {
+        if (!enabled[capability]) return null;
+        const value = capabilities[capability] ?? fallback;
+        return (
+          <div key={capability}>
+            <dt className="flex items-center gap-2">
+              <strong>{capability === "calendar" ? "Calendar" : "Mail"}</strong>
+              <ConnectionHealthBadge health={value.health} />
+            </dt>
+            <dd>
+              <ConnectionHealthDescription
+                health={value.health}
+                lastSyncedAt={value.lastSyncedAt}
+              />
+            </dd>
+            <dd className="text-xs">
+              {value.lastSyncedAt ? (
+                <>
+                  Last successful sync:{" "}
+                  <time dateTime={value.lastSyncedAt}>
+                    {new Date(value.lastSyncedAt).toLocaleString()}
+                  </time>
+                </>
+              ) : (
+                "No successful sync recorded yet."
+              )}
+            </dd>
+          </div>
+        );
+      })}
+    </dl>
+  );
+}
 
 export function ConnectionHealthBadge({ health }: { health: ConnectedAccountHealth }) {
   if (health.state === "syncing") {

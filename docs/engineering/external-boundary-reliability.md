@@ -155,6 +155,11 @@ Today uses an optional public `VITE_CARTO_API_KEY`, embedded by the web build. L
 loads it from the primary checkout's ignored `.env`. GitHub web and desktop releases read the
 repository variable of that name; the Mac production image builder forwards the process variable
 as a Docker build argument. An absent key is supported and leaves the quiet default background.
+The continuous Mac controller uses an installed copy of the builder outside the release source.
+Updating the repository variable or merging the builder change does not update that installed copy
+or its process environment. Provision the public value for the controller's build process and
+install the reviewed builder during an attended, idle controller update; verify the resulting
+web image before claiming production maps are configured.
 Configure CARTO origin restrictions for each actual web/desktop origin; do not treat an accepted
 localhost request as evidence for production or Tauri. Never use an administrative CARTO token.
 

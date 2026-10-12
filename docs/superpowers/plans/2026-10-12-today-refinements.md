@@ -220,8 +220,19 @@ source/browser evidence from release checks that still require the packaged appl
 - The public CARTO key was configured in ignored local environments. Real style, sprite, glyph
   and vector requests succeeded, and fixture-browser QA rendered tiles, preview controls, marker
   and attribution. Mobile filters and settings previews were measured and visually checked.
-- Remaining release gates: real packaged desktop map/WebGL, ritual and pet smoke checks, and
-  CARTO key/origin configuration in the intended production and desktop release environments.
-  Browser mocks and native type checks do not establish packaged runtime behavior.
+- Packaged macOS smoke checks subsequently passed on the rebased branch: actual light/dark
+  CARTO backgrounds and previews, marker, zoom controls, attribution, Escape focus restoration,
+  navigation remount, native pet quick access, and native ritual launch/response sync/completion.
+  Both the standard debug bundle and an isolated smoke bundle built successfully. Fixture data
+  and the isolated pet preference were restored after testing. A separate bundle built with an
+  empty key verified the default background and unavailable preview without losing preferences.
+  Its first capture remained blank despite an interactive accessibility tree; a clean app restart
+  restored visible rendering and the fallback checks passed. No source change was made for this
+  transient capture/runtime observation.
+- GitHub Actions `VITE_CARTO_API_KEY` was provisioned and read-back verified. Live style requests
+  accepted production web, macOS Tauri and Windows Tauri origin headers. Windows header
+  acceptance is not evidence of rendering in its webview.
+- Remaining release gates: attended production Mac builder/environment update (host access
+  pending), followed by evidence from its actual web image, and Windows webview runtime checks.
 
-No PR, merge or deployment was requested or performed.
+PR publication is authorized. No merge or deployment was requested or performed.

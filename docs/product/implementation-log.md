@@ -8,8 +8,9 @@
   projection with aggregate counts and signed cursors rather than the daily brief's limits.
 - MapCN is adapted for reicon, pinned MapLibre 6.14.0 and local worker assets. CARTO style,
   glyph, sprite and vector resources returned HTTP 200; fixture-browser QA rendered the map.
-  The public key is configured only in ignored local environments. Production/desktop release
-  builds accept `VITE_CARTO_API_KEY`; configure their intended origins with CARTO separately.
+  The public key is configured in ignored local environments and the GitHub Actions repository
+  variable `VITE_CARTO_API_KEY` (read-back verified). Live style requests accepted the production
+  web and both Tauri origin headers; the packaged macOS app rendered real light/dark tiles.
 - Full `pnpm verify` passed at source commit `5c23c210`: 4,029 unit/integration tests,
   136 desktop/mobile browser acceptance tests (two expected mobile skips), lint, types and
   production builds. Coverage: 97.17% statements/lines, 94.08% branches, 95.79% functions.
@@ -17,8 +18,15 @@
 - Source-date membership preserves both provider midnight-exclusive DATE ranges and existing
   locally created all-day events with non-midnight ends. Proven Google legacy source dates are
   corrected on read; uncertain legacy data requires a successful provider resync.
-- No merge, deployment, native packaged map/ritual/pet smoke or provider-wide historical backfill
-  is claimed. Packaged desktop and production CARTO origin checks remain release gates.
+- Packaged macOS smoke checks passed for map backgrounds/previews, marker, zoom controls,
+  attribution, Escape focus restoration and navigation remount. Today opened the native pet
+  quick-access panel and the native ritual checklist; responses synchronized and completion
+  removed the Continue action. Tests used an isolated application identifier and disposable
+  fixture account; fixture data was restored afterward. A separate no-key bundle preserved the
+  selected map preference while rendering the default background and unavailable preview.
+- No merge, deployment or provider-wide historical backfill is claimed. The production Mac's
+  installed builder/environment still needs an attended update once host access is available.
+  Windows webview execution remains unverified on this macOS host.
 
 
 ## 2026-10-11 — Explicit workspace agent execution

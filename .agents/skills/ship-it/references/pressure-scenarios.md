@@ -26,7 +26,7 @@
 | Same-name checks lack supersession evidence | Keep ambiguous; do not arbitrarily choose the green one. |
 | A required eligible approval is missing | WAIT; the PR author cannot manufacture approval. |
 | Chat restarts after merge request times out | Read the pending checkpoint and GitHub; reconcile before retrying. |
-| A second executor claims the same PR or merge base | Reject its claim; transfer only after proving the prior executor stopped. |
+| A second executor claims the same PR or merge base | Reject its claim; only the current owner may transfer after stopping its execution. |
 | A transient retry fails without changed recovery evidence | Persist blocker and notify once; do not spin or weaken gates. |
 | GitHub merged successfully but Linear is unavailable | Preserve merged evidence and retry reconciliation only. |
 | Metadata edit reruns hosted CI without changing source | Reuse valid local verification, wait for current applicable hosted runs. |
@@ -38,3 +38,4 @@
 | Review finds a defect while final verification runs | Stop only the owned verifier before edits; retire its candidate and reverify the new candidate. |
 | Description is edited during browser CI | Metadata gate refreshes and waits for source evidence; source workflow keeps running. |
 | Active chat has an older policy version | Update/reload at a safe checkpoint and reconcile evidence before resuming. |
+| Source CI succeeds on a same-head retry but CI required is still failed | Rerun the failed metadata workflow once, record both attempts, and wait for the fresh result; do not edit unrelated metadata to trigger it. |

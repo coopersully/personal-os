@@ -20,7 +20,7 @@ title merely as decoration.
 
 Before a PR is ready for review or merge:
 
-1. **PR Work map** must validate the submitted PR body against the live Nohmi Project URL and at
+1. **PR Work map validation**, inside **CI required**, must validate the submitted PR body against the live Nohmi Project URL and at
    least one concrete, internally consistent `COO-*` issue link.
 2. **CI required** and every selected scoped job must pass. This includes repository contracts,
    lint and formatting, types, coverage at the configured floor, production builds, browser
@@ -202,7 +202,7 @@ URL when one exists.
 
 - a PR with all conversations resolved;
 - strict, up-to-date branches and linear history;
-- **PR Work map**, **CI required**, and the selected scoped checks;
+- **CI required** (including Work map validation) and the selected scoped checks;
 - no force pushes or deletion; and
 - enforcement for administrators.
 

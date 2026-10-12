@@ -32,12 +32,11 @@ requires source references but does not authenticate their contents; inspect eac
     "rulesVerified": true,
     "inventoryComplete": true,
     "selectedChecksVerified": true,
-    "expectedRequiredChecks": ["CI required", "PR Work map"],
+    "expectedRequiredChecks": ["CI required"],
     "expectedSelectedChecks": [],
-    "expectedCheckApps": { "CI required": 15368, "PR Work map": 15368 },
+    "expectedCheckApps": { "CI required": 15368 },
     "checks": [
       { "name": "CI required", "headSha": "<PR head SHA>", "appId": 15368, "status": "COMPLETED", "conclusion": "SUCCESS" },
-      { "name": "PR Work map", "headSha": "<PR head SHA>", "appId": 15368, "status": "COMPLETED", "conclusion": "SUCCESS" },
       { "name": "Optional aggregate", "headSha": "<PR head SHA>", "appId": 57789, "status": "COMPLETED", "conclusion": "NEUTRAL", "required": false }
     ]
   },

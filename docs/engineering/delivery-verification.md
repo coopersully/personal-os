@@ -72,6 +72,13 @@ and waits for the latest applicable successful source workflow for that PR on it
 failed, or canceled source runs cannot pass the gate. Each workflow has a separate concurrency group;
 editing a description cancels only a superseded metadata gate, never source tests.
 
+A failed/canceled source run fails its waiting metadata gate. A same-head source retry does not
+trigger a new PR event: after source recovery, the shipping controller must rerun the failed/canceled
+PR metadata workflow (`gh run rerun <metadata-run-id> --failed`) and wait for the new protected result.
+Record both source and metadata run/attempt IDs under the existing bounded retry policy. Do not
+edit the PR body to trigger recovery or reuse the failed metadata result. Ignored `.context` evidence
+is excluded from source lint so collecting provider records cannot create a formatting failure.
+
 Retargeting a PR changes its integration context: catch up to its actual base and push a new candidate
 before merging. Do not reuse a successful run from a different target base. Final ship-it collection
 still checks live metadata, head/base, source attempts, reviews, and protections before normal merge.

@@ -34,6 +34,7 @@ final class PetController: NSObject {
     contentRect: CGRect(x: 0, y: 0, width: 72, height: 72),
     styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
   private let scene = PetSceneView(frame: .zero)
+  private let dismissal = PetDismissalSurface()
   private let anchors = PetAnchorView(frame: .zero)
   private let anchorPanel = PetPanel(
     contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel],
@@ -127,10 +128,11 @@ final class PetController: NSObject {
       default: self.dismissForNavigation(); self.action?(["action": "open", "path": "/today"])
       }
     }
+    dismissal.dismiss = { [weak self] in self?.closeOverlay() }
     sprite.click = { [weak self] in self?.quickAccess() }
-    sprite.dragStart = { [weak self] in
+    sprite.dragStart = { [weak self] origin in
       guard let self else { return }
-      self.beginGesture(card: self.motion.progress > 0, sprite: true)
+      self.beginGesture(card: self.motion.progress > 0, sprite: true, origin: origin)
     }
     sprite.dragChange = { [weak self] in self?.queueGesture() }
     sprite.moved = { [weak self] in self?.endGesture() }
@@ -340,6 +342,7 @@ final class PetController: NSObject {
     if ready { startClock() }
   }
   func closeOverlay(immediately: Bool = false) {
+    dismissal.hide()
     shoo.reset()
     pendingOpen = false
     cancelIdle()
@@ -623,10 +626,13 @@ final class PetController: NSObject {
         if let dashboard { panel.makeFirstResponder(dashboard) }
       }
     }
+    dismissal.update(
+      visible: sceneActive && !sleeping && ready && motion.target == 1 && !placements.pinned,
+      below: panel)
     trackPointer()
   }
   private func updateAnchorGuides() {
-    guard sceneActive, !sleeping, dragOrigin != nil, resizeEdge == nil else {
+    guard sceneActive, !sleeping, dragOrigin != nil, gestureMoved, resizeEdge == nil else {
       if anchorPanel.isVisible { anchorPanel.orderOut(nil) }
       return
     }
@@ -654,7 +660,7 @@ final class PetController: NSObject {
     guard sceneActive, !sleeping else { return }
     if event.type == .leftMouseDragged && dragOrigin != nil { queueGesture() }
     if event.type == .leftMouseUp && dragOrigin != nil { endGesture() }
-    if [.leftMouseDown, .rightMouseDown].contains(event.type), motion.target == 1,
+    if [.leftMouseDown, .rightMouseDown].contains(event.type), !dismissal.owns(event.window), motion.target == 1,
       !placements.pinned,
       !card.union(visiblePet).contains(NSEvent.mouseLocation), dragOrigin == nil
     {
@@ -733,7 +739,7 @@ final class PetController: NSObject {
       self.startClock()
     }
   }
-  private func beginGesture(card isCard: Bool, edge: String? = nil, sprite: Bool = false) {
+  private func beginGesture(card isCard: Bool, edge: String? = nil, sprite: Bool = false, origin: CGPoint? = nil) {
     wake()
     pendingOpen = false
     guard enabled || isCard && motion.target == 1 else { return }
@@ -741,7 +747,7 @@ final class PetController: NSObject {
     draggingCard = isCard
     grabbedSprite = sprite
     resizeEdge = edge
-    dragOrigin = NSEvent.mouseLocation
+    dragOrigin = origin ?? NSEvent.mouseLocation
     refreshGeometry(at: NSEvent.mouseLocation, force: true)
     dragCard = card
     dragPet = compact
@@ -775,7 +781,7 @@ final class PetController: NSObject {
     let pointer = NSEvent.mouseLocation
     let dx = pointer.x - start.x
     let dy = pointer.y - start.y
-    guard gestureMoved || hypot(dx, dy) >= 4 else { return }
+    guard gestureMoved || hypot(dx, dy) >= PetView.dragThreshold else { return }
     gestureMoved = true
     if tuck.progress > 0 {
       tuck.request(open: false, immediately: true)

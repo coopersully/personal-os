@@ -6,6 +6,7 @@ import {
   type TimelinePositionable,
   type TodayTimelineDensity,
 } from "./features/calendar/day-timeline.js";
+import { calendarEventColorStyle } from "./features/calendar/event-color.js";
 
 export {
   positionTimelineEvents,
@@ -1978,7 +1979,7 @@ function WorkspaceAppBarForRoute({
                   aria-pressed={pinned}
                   onClick={togglePin}
                   size="icon"
-                  variant="ghost"
+                  variant={pinned ? "secondary" : "ghost"}
                 >
                   <PinIcon aria-hidden="true" weight={pinned ? "Filled" : "Outline"} />
                 </ShadcnButton>
@@ -4267,10 +4268,6 @@ function useCalendarRangeSelection(onCreateRange: (draft: EventDraft) => void, t
     selection: selection?.active ? selection : null,
     start,
   };
-}
-
-function calendarEventColorStyle(color: string | null | undefined): CSSProperties {
-  return { "--calendar-color": color ?? "#777ce3" } as CSSProperties;
 }
 
 type EventBlockColor = { color: string; id: string; mode: "busy" | "details" };

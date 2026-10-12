@@ -495,7 +495,12 @@ interactive routines; wake recovery respects the existing catch-up window.
 - **Blocked:** neither human shortcut nor agent token may perform it through that route.
 
 Global review bypass is a settlement preference, not another policy tier. It allows an otherwise
-policy-authorized reversible action to execute instead of entering review; it cannot alter scopes,
+policy-authorized reversible action to execute instead of entering review. Separately registered
+operations (such as exact-draft Mail sending, rule activation, guidance and budget activation,
+and workspace settings) may use explicit owner-granted `<workspace>:execute` authority together
+with enabled bypass. Sending remains irreversible. Existing write grants do not acquire these
+execution grants automatically, and unregistered irreversible effects keep their existing denial
+or approval requirements. Bypass cannot alter scopes,
 source selection, provider capability, reversibility, evidence requirements, or a stronger
 approval boundary.
 

@@ -12,15 +12,17 @@ export function registerWorkspaceSearchRoutes({
   app,
   db,
   mutationContext,
+  now = () => new Date(),
   workItems,
 }: {
   app: Hono<AppEnv>;
   db: Database;
+  now?: () => Date;
   workItems: ReturnType<typeof createAgentAccessWorkItemService>;
   mutationContext: (context: Context<AppEnv>) => { principal: Principal; requestId: string };
 }) {
   const search = createWorkspaceSearchService(db);
-  registerWorkspaceSettingsRoutes({ app, db, mutationContext });
+  registerWorkspaceSettingsRoutes({ app, db, mutationContext, now });
   app.use("/v1/workspaces/:workspace/search", async (context, next) => {
     const workspace = searchableWorkspaceSchema.parse(context.req.param("workspace"));
     return requireFeatureAccess(workspace)(context, next);

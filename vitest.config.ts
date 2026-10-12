@@ -42,6 +42,7 @@ export default defineConfig({
     globals: true,
     include: [
       ".codex/scripts/**/*.test.ts",
+      "integration/**/*.test.ts",
       "apps/*/src/**/*.test.{ts,tsx}",
       "packages/*/src/**/*.test.{ts,tsx}",
     ],

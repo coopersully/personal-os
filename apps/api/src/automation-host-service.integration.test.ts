@@ -86,7 +86,7 @@ describe.sequential("tenant-bound host schedules", () => {
       recurrence: { type: "interval", everyMinutes: 15, timeZone: "America/New_York" },
     },
   });
-  it("requires explicit human setup and one owner's live grant", async () => {
+  it("requires explicit execution authority for setup and one owner's live grant", async () => {
     const f = await fixture(),
       other = await fixture();
     await expect(f.service.create(f.agent, input(f.connectionId))).rejects.toMatchObject({
@@ -104,7 +104,9 @@ describe.sequential("tenant-bound host schedules", () => {
     expect(await f.service.connections(f.human)).toEqual([
       { id: f.connectionId, label: "Original host", scopes: ["finances:maintain"] },
     ]);
-    await expect(f.service.connections(f.agent)).rejects.toMatchObject({ code: "forbidden" });
+    expect(await f.service.connections(f.agent)).toEqual([
+      { id: f.connectionId, label: "Original host", scopes: ["finances:maintain"] },
+    ]);
     const created = await f.service.create(f.human, input(f.connectionId));
     expect(created.schedule.state).toBe("setup_pending");
     expect(created.health.state).toBe("setup_pending");
@@ -119,18 +121,23 @@ describe.sequential("tenant-bound host schedules", () => {
       }),
     ).rejects.toMatchObject({ code: "not_found" });
   });
-  it("keeps host settings metadata private to the interactive owner", async () => {
+  it("keeps host metadata scoped to the owner or original maintenance connection", async () => {
     const f = await fixture();
     await f.service.create(f.human, input(f.connectionId));
     const principals: Principal[] = [
       { ...f.agent, scopes: new Set(["finances:read"]) },
-      { ...f.agent, scopes: new Set(["finances:read", "finances:maintain"]) },
+      {
+        ...f.agent,
+        authorizationConnectionId: "",
+        scopes: new Set(["finances:read", "finances:maintain"]),
+      },
       { ...f.human, actorId: randomUUID() },
     ];
     for (const principal of principals) {
       await expect(f.service.list(principal)).rejects.toMatchObject({ code: "forbidden" });
     }
     expect(await f.service.list(f.human)).toHaveLength(1);
+    expect(await f.service.list(f.agent)).toHaveLength(1);
   });
   it("binds exact versions and reports health without manufacturing host execution", async () => {
     const f = await fixture();
@@ -1461,7 +1468,7 @@ describe.sequential("tenant-bound host schedules", () => {
       new Set([...humanFirst.continuations, ...humanSecond.continuations].map((row) => row.id))
         .size,
     ).toBe(102);
-    await expect(f.service.pendingAnswers(f.agent)).rejects.toMatchObject({ code: "forbidden" });
+    expect((await f.service.pendingAnswers(f.agent)).continuations).toHaveLength(100);
     const other = await fireFixture();
     await expect(
       f.service.continuations(f.agent, f.scheduleId, other.answer.id),

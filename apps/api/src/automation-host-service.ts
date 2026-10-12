@@ -28,6 +28,7 @@ import { AppError } from "./errors.js";
 import { reconcileFinanceContinuations } from "./finance/continuation-reconciliation.js";
 import { encryptJson } from "./security.js";
 import type { Principal } from "./types.js";
+import { requireWorkspaceExecution } from "./workspace-execution.js";
 
 type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
 export function createAutomationHostService(options: {
@@ -39,6 +40,26 @@ export function createAutomationHostService(options: {
   function human(principal: Principal) {
     if (principal.actorType !== "user" || principal.actorId !== principal.userId)
       throw new AppError("forbidden", "Only you can configure a host connection.");
+  }
+  function requireConnection(principal: Principal, connectionId: string) {
+    if (
+      principal.actorType === "agent" &&
+      (!principal.scopes.has("finances:maintain") ||
+        principal.authorizationConnectionId !== connectionId)
+    )
+      throw new AppError("forbidden", "Use this schedule's original host connection.");
+  }
+  async function authorizeHost(principal: Principal, write = false) {
+    if (principal.actorType === "user") {
+      human(principal);
+      return;
+    }
+    if (!principal.authorizationConnectionId || !principal.scopes.has("finances:maintain"))
+      throw new AppError(
+        "forbidden",
+        "Host controls require an existing connection with finances:maintain.",
+      );
+    if (write) await requireWorkspaceExecution(db, principal, "finances", now());
   }
   async function liveGrant(tx: Tx, userId: string, connectionId: string) {
     const rows = await tx
@@ -68,23 +89,52 @@ export function createAutomationHostService(options: {
       )
       .for("update");
     if (!row) throw new AppError("not_found", "Host schedule not found.");
+    requireConnection(principal, row.authorizationConnectionId);
     return row;
   }
   const result = (schedule: AutomationHostSchedule) => ({
     schedule,
     health: observeAutomationHostScheduleHealth(schedule, now()),
   });
+  function scheduleAudit(schedule: AutomationHostSchedule) {
+    return {
+      state: schedule.state,
+      version: schedule.version,
+      connectionId: schedule.tenantAuthorizationConnectionId,
+      hostSurface: schedule.hostSurface,
+    };
+  }
+  async function recordScheduleChange(
+    tx: Tx,
+    principal: Principal,
+    after: AutomationHostSchedule,
+    before: AutomationHostSchedule | null,
+  ) {
+    await tx.insert(auditEvents).values({
+      userId: principal.userId,
+      actorType: principal.actorType,
+      actorId: principal.actorId,
+      requestId: randomUUID(),
+      action: before ? "finance.host_schedule.changed" : "finance.host_schedule.created",
+      entityId: after.id,
+      entityType: "automation_host_schedule",
+      before: before ? scheduleAudit(before) : null,
+      after: scheduleAudit(after),
+    });
+  }
   async function change(
     principal: Principal,
     id: string,
     expectedVersion: number,
     apply: (schedule: AutomationHostSchedule, tx: Tx) => Promise<AutomationHostSchedule>,
+    requiresExecution = true,
   ) {
     return db.transaction(async (tx) => {
       const row = await owned(tx, principal, id);
       if (row.schedule.version !== expectedVersion)
         throw new AppError("conflict", "The host schedule changed. Reload it before continuing.");
       const updated = automationHostScheduleSchema.parse(await apply(row.schedule, tx));
+      if (requiresExecution) await requireWorkspaceExecution(tx, principal, "finances", now());
       await tx
         .update(automationHostSchedules)
         .set({
@@ -95,12 +145,13 @@ export function createAutomationHostService(options: {
             : {}),
         })
         .where(eq(automationHostSchedules.id, row.id));
+      await recordScheduleChange(tx, principal, updated, row.schedule);
       return result(updated);
     });
   }
   return {
     async pendingAnswers(principal: Principal, cursorId?: string) {
-      human(principal);
+      await authorizeHost(principal);
       const [cursor] = cursorId
         ? await db
             .select({ id: financeAnswerContinuations.id })
@@ -108,6 +159,9 @@ export function createAutomationHostService(options: {
             .where(
               and(
                 eq(financeAnswerContinuations.userId, principal.userId),
+                principal.actorType === "agent"
+                  ? sql`EXISTS (SELECT 1 FROM automation_host_schedules AS owned_host WHERE owned_host.id = ${financeAnswerContinuations.automationScheduleId} AND owned_host.user_id = ${principal.userId}::uuid AND owned_host.authorization_connection_id = ${principal.authorizationConnectionId}::uuid)`
+                  : undefined,
                 eq(financeAnswerContinuations.id, cursorId),
               ),
             )
@@ -128,6 +182,9 @@ export function createAutomationHostService(options: {
         .where(
           and(
             eq(financeAnswerContinuations.userId, principal.userId),
+            principal.actorType === "agent"
+              ? sql`EXISTS (SELECT 1 FROM automation_host_schedules AS owned_host WHERE owned_host.id = ${financeAnswerContinuations.automationScheduleId} AND owned_host.user_id = ${principal.userId}::uuid AND owned_host.authorization_connection_id = ${principal.authorizationConnectionId}::uuid)`
+              : undefined,
             inArray(financeAnswerContinuations.state, ["pending", "accepted", "unavailable"]),
             cursor
               ? sql`(${financeAnswerContinuations.createdAt},${financeAnswerContinuations.id})>(SELECT created_at,id FROM finance_answer_continuations WHERE user_id=${principal.userId}::uuid AND id=${cursor.id}::uuid)`
@@ -143,7 +200,7 @@ export function createAutomationHostService(options: {
       };
     },
     async hostRuns(principal: Principal) {
-      human(principal);
+      await authorizeHost(principal);
       return db
         .select({
           id: workspaceMaintenanceRuns.id,
@@ -157,6 +214,12 @@ export function createAutomationHostService(options: {
           and(
             eq(workspaceMaintenanceRuns.userId, principal.userId),
             eq(workspaceMaintenanceRuns.domain, "finances"),
+            principal.actorType === "agent"
+              ? eq(
+                  workspaceMaintenanceRuns.authorizationConnectionId,
+                  principal.authorizationConnectionId ?? "",
+                )
+              : undefined,
             sql`${workspaceMaintenanceRuns.automationScheduleId} IS NOT NULL`,
             inArray(workspaceMaintenanceRuns.status, [
               "queued",
@@ -171,7 +234,7 @@ export function createAutomationHostService(options: {
         .limit(25);
     },
     async recoverHostRun(principal: Principal, id: string, raw: unknown) {
-      human(principal);
+      await authorizeHost(principal, true);
       const input = z
         .object({
           scheduleId: z.uuid(),
@@ -224,6 +287,10 @@ export function createAutomationHostService(options: {
             "conflict",
             "This run changed or is executing. Reload its status before recovery.",
           );
+        if (principal.actorType === "agent") {
+          requireConnection(principal, run.authorizationConnectionId ?? "");
+          await requireWorkspaceExecution(tx, principal, "finances", now());
+        }
         await tx
           .update(workspaceMaintenanceRuns)
           .set({
@@ -244,7 +311,7 @@ export function createAutomationHostService(options: {
           );
         await tx.insert(auditEvents).values({
           userId: principal.userId,
-          actorType: "user",
+          actorType: principal.actorType,
           actorId: principal.actorId,
           requestId: randomUUID(),
           action: "finance.host_run.rebound",
@@ -265,7 +332,7 @@ export function createAutomationHostService(options: {
       });
     },
     async reconcileDelivery(principal: Principal, id: string, raw: unknown) {
-      human(principal);
+      await authorizeHost(principal, true);
       const input = z
         .object({ expectedUpdatedAt: z.iso.datetime(), hostChecked: z.literal(true) })
         .strict()
@@ -299,6 +366,12 @@ export function createAutomationHostService(options: {
             "conflict",
             "This delivery changed or may still be executing. Reload before recovery.",
           );
+        if (principal.actorType === "agent") {
+          if (!answer.automationScheduleId)
+            throw new AppError("forbidden", "This answer has no original host connection.");
+          await owned(tx, principal, answer.automationScheduleId);
+          await requireWorkspaceExecution(tx, principal, "finances", now());
+        }
         if (answer.fireState === "accepted") {
           const [schedule] = answer.automationScheduleId
             ? await tx
@@ -327,7 +400,7 @@ export function createAutomationHostService(options: {
           .where(eq(financeAnswerContinuations.id, id));
         await tx.insert(auditEvents).values({
           userId: principal.userId,
-          actorType: "user",
+          actorType: principal.actorType,
           actorId: principal.actorId,
           requestId: randomUUID(),
           action: "finance.host_delivery.reconciled",
@@ -344,12 +417,29 @@ export function createAutomationHostService(options: {
       });
     },
     async bindAnswer(principal: Principal, id: string, scheduleId: string) {
-      human(principal);
+      await authorizeHost(principal, true);
       return db.transaction(async (tx) => {
         const schedule = await owned(tx, principal, scheduleId);
         if (schedule.schedule.state !== "active")
           throw new AppError("conflict", "Choose an active host schedule.");
         await liveGrant(tx, principal.userId, schedule.authorizationConnectionId);
+        const [existing] = await tx
+          .select()
+          .from(financeAnswerContinuations)
+          .where(
+            and(
+              eq(financeAnswerContinuations.id, id),
+              eq(financeAnswerContinuations.userId, principal.userId),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (principal.actorType === "agent") {
+          if (!existing?.automationScheduleId)
+            throw new AppError("forbidden", "Only the owner can assign an unbound answer.");
+          await owned(tx, principal, existing.automationScheduleId);
+          await requireWorkspaceExecution(tx, principal, "finances", now());
+        }
         const [answer] = await tx
           .update(financeAnswerContinuations)
           .set({ automationScheduleId: scheduleId, fireState: "pending", updatedAt: now() })
@@ -365,6 +455,19 @@ export function createAutomationHostService(options: {
           .returning({ id: financeAnswerContinuations.id });
         if (!answer)
           throw new AppError("conflict", "This answer has been submitted or is no longer pending.");
+        await tx.insert(auditEvents).values({
+          userId: principal.userId,
+          actorType: principal.actorType,
+          actorId: principal.actorId,
+          requestId: randomUUID(),
+          action: "finance.host_answer.bound",
+          entityId: answer.id,
+          entityType: "finance_answer_continuation",
+          before: existing
+            ? { scheduleId: existing.automationScheduleId, fireState: existing.fireState }
+            : null,
+          after: { scheduleId, fireState: "pending" },
+        });
         return answer;
       });
     },
@@ -459,11 +562,22 @@ export function createAutomationHostService(options: {
       });
     },
     async connections(principal: Principal) {
-      human(principal);
+      await authorizeHost(principal);
       const tokens = await db
         .select()
         .from(accessTokens)
-        .where(and(eq(accessTokens.userId, principal.userId), activeHostConnectionGrant(now())));
+        .where(
+          and(
+            eq(accessTokens.userId, principal.userId),
+            activeHostConnectionGrant(now()),
+            principal.actorType === "agent"
+              ? eq(
+                  accessTokens.authorizationConnectionId,
+                  principal.authorizationConnectionId ?? "",
+                )
+              : undefined,
+          ),
+        );
       return [
         ...new Map(
           tokens
@@ -476,15 +590,36 @@ export function createAutomationHostService(options: {
       ];
     },
     async list(principal: Principal) {
-      human(principal);
+      await authorizeHost(principal);
       const rows = await db
         .select()
         .from(automationHostSchedules)
-        .where(eq(automationHostSchedules.userId, principal.userId));
+        .where(
+          and(
+            eq(automationHostSchedules.userId, principal.userId),
+            principal.actorType === "agent"
+              ? eq(
+                  automationHostSchedules.authorizationConnectionId,
+                  principal.authorizationConnectionId ?? "",
+                )
+              : undefined,
+          ),
+        );
       const tokens = await db
         .select()
         .from(accessTokens)
-        .where(and(eq(accessTokens.userId, principal.userId), activeHostConnectionGrant(now())));
+        .where(
+          and(
+            eq(accessTokens.userId, principal.userId),
+            activeHostConnectionGrant(now()),
+            principal.actorType === "agent"
+              ? eq(
+                  accessTokens.authorizationConnectionId,
+                  principal.authorizationConnectionId ?? "",
+                )
+              : undefined,
+          ),
+        );
       return rows.map((row) => ({
         ...result(row.schedule),
         connectionAvailable: tokens.some(
@@ -495,8 +630,14 @@ export function createAutomationHostService(options: {
       }));
     },
     async create(principal: Principal, raw: unknown) {
-      human(principal);
+      await authorizeHost(principal, true);
       const input = automationHostScheduleCreateInputSchema.parse(raw);
+      requireConnection(principal, input.tenantAuthorizationConnectionId);
+      if (
+        principal.actorType === "agent" &&
+        input.requestedScopes.some((scope) => !principal.scopes.has(scope))
+      )
+        throw new AppError("forbidden", "A schedule cannot expand the caller's scopes.");
       return db.transaction(async (tx) => {
         const tokens = await liveGrant(tx, principal.userId, input.tenantAuthorizationConnectionId);
         if (
@@ -520,17 +661,19 @@ export function createAutomationHostService(options: {
           createdAt: now().toISOString(),
           updatedAt: now().toISOString(),
         });
+        await requireWorkspaceExecution(tx, principal, "finances", now());
         await tx.insert(automationHostSchedules).values({
           id: schedule.id,
           userId: principal.userId,
           authorizationConnectionId: input.tenantAuthorizationConnectionId,
           schedule,
         });
+        await recordScheduleChange(tx, principal, schedule, null);
         return result(schedule);
       });
     },
     async bind(principal: Principal, id: string, raw: unknown) {
-      human(principal);
+      await authorizeHost(principal, true);
       const input = automationHostScheduleBindInputSchema.parse(raw);
       return change(principal, id, input.expectedVersion, async (schedule, tx) => {
         if (schedule.state !== "setup_pending" || schedule.hostSurface !== input.hostSurface)
@@ -556,30 +699,36 @@ export function createAutomationHostService(options: {
     },
     async observe(principal: Principal, id: string, raw: unknown) {
       const input = automationHostScheduleObservationInputSchema.parse(raw);
-      return change(principal, id, input.expectedVersion, async (schedule, tx) => {
-        if (
-          principal.actorType !== "agent" ||
-          principal.authorizationConnectionId !== schedule.tenantAuthorizationConnectionId ||
-          !principal.scopes.has("finances:maintain")
-        )
-          throw new AppError("forbidden", "Use this schedule's original host connection.");
-        if (schedule.state !== input.expectedState || schedule.hostSurface !== input.hostSurface)
-          throw new AppError("conflict", "The host schedule state changed.");
-        await liveGrant(tx, principal.userId, schedule.tenantAuthorizationConnectionId);
-        if (Math.abs(new Date(input.observedAt).getTime() - now().getTime()) > 5 * 60_000)
-          throw new AppError("invalid_request", "The host observation must be current.");
-        return automationHostScheduleSchema.parse({
-          ...schedule,
-          state: input.observedState,
-          lastObservedAt: input.observedAt,
-          nextExpectedAt: input.hostSurface === "codex_desktop" ? input.nextExpectedAt : null,
-          version: schedule.version + 1,
-          updatedAt: now().toISOString(),
-        });
-      });
+      return change(
+        principal,
+        id,
+        input.expectedVersion,
+        async (schedule, tx) => {
+          if (
+            principal.actorType !== "agent" ||
+            principal.authorizationConnectionId !== schedule.tenantAuthorizationConnectionId ||
+            !principal.scopes.has("finances:maintain")
+          )
+            throw new AppError("forbidden", "Use this schedule's original host connection.");
+          if (schedule.state !== input.expectedState || schedule.hostSurface !== input.hostSurface)
+            throw new AppError("conflict", "The host schedule state changed.");
+          await liveGrant(tx, principal.userId, schedule.tenantAuthorizationConnectionId);
+          if (Math.abs(new Date(input.observedAt).getTime() - now().getTime()) > 5 * 60_000)
+            throw new AppError("invalid_request", "The host observation must be current.");
+          return automationHostScheduleSchema.parse({
+            ...schedule,
+            state: input.observedState,
+            lastObservedAt: input.observedAt,
+            nextExpectedAt: input.hostSurface === "codex_desktop" ? input.nextExpectedAt : null,
+            version: schedule.version + 1,
+            updatedAt: now().toISOString(),
+          });
+        },
+        false,
+      );
     },
     async update(principal: Principal, id: string, raw: unknown) {
-      human(principal);
+      await authorizeHost(principal, true);
       const input = automationHostScheduleUpdateInputSchema.parse(raw);
       return change(principal, id, input.expectedVersion, async (schedule) => {
         if (schedule.state === "revoked" || schedule.state === "cancelled")
@@ -593,7 +742,7 @@ export function createAutomationHostService(options: {
       });
     },
     async cancel(principal: Principal, id: string, raw: unknown) {
-      human(principal);
+      await authorizeHost(principal, true);
       const input = automationHostScheduleCancelInputSchema.parse(raw);
       return change(principal, id, input.expectedVersion, async (schedule) => {
         if (schedule.state !== input.expectedState)
@@ -607,7 +756,7 @@ export function createAutomationHostService(options: {
       });
     },
     async revoke(principal: Principal, id: string, raw: unknown) {
-      human(principal);
+      await authorizeHost(principal, true);
       const input = automationHostScheduleRevokeInputSchema.parse(raw);
       return change(principal, id, input.expectedVersion, async (schedule) => {
         if (schedule.state !== input.expectedState)

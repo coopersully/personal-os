@@ -17,22 +17,27 @@ const allScopes = new Set<AccessScope>([
   "bookmarks:read",
   "calendar:read",
   "calendar:write",
+  "calendar:execute",
   "mail:read",
   "mail:write",
+  "mail:execute",
   "goals:read",
   "goals:write",
   "finances:read",
   "finances:write",
+  "finances:execute",
   "finances:maintain",
   "reminders:read",
   "reminders:write",
   "texting:read",
   "texting:write",
+  "texting:execute",
   "tasks:read",
   "tasks:write",
+  "tasks:execute",
 ]);
 const defaultScopes = new Set<AccessScope>(
-  [...allScopes].filter((scope) => scope !== "finances:maintain"),
+  [...allScopes].filter((scope) => scope !== "finances:maintain" && !scope.endsWith(":execute")),
 );
 
 export function createOAuthService(options: { db: Database; now: () => Date; resource: string }) {

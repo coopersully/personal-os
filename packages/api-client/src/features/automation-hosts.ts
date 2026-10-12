@@ -62,6 +62,18 @@ export function createAutomationHostApi(request: Request) {
         method: "PUT",
         body: JSON.stringify(input),
       }),
+    getFinanceAnswerContinuationPage: (cursor?: string) =>
+      request<{
+        continuations: Array<
+          FinanceContinuation & {
+            reviewCaseId: string;
+            updatedAt: string;
+            automationScheduleId: string | null;
+            fireState: "pending" | "submitting" | "accepted" | "uncertain" | "unavailable";
+          }
+        >;
+        nextCursor: string | null;
+      }>(`/v1/automation-hosts/answers${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`),
     listFinanceAnswerContinuations: async () => {
       type Answer = FinanceContinuation & {
         reviewCaseId: string;

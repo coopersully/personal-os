@@ -115,15 +115,29 @@ function provenance(context: FinanceMutationContext, now: Date, confidence: numb
   };
 }
 
+/** The database advances this generation for every material transaction edit. */
+function transactionVersion(revision: bigint): number {
+  const version = Number(revision);
+  if (!Number.isSafeInteger(version))
+    throw new AppError("conflict", "The transaction version exceeds the supported numeric range.");
+  return version;
+}
+
 export function createFinanceLedgerService(input: { db: Database; now: () => Date }) {
   const { db, now } = input;
 
-  async function ownedTransaction(userId: string, id: string, executor: FinanceExecutor = db) {
-    const [row] = await executor
+  async function ownedTransaction(
+    userId: string,
+    id: string,
+    executor: FinanceExecutor = db,
+    lock = false,
+  ) {
+    const query = executor
       .select()
       .from(financeTransactions)
       .where(and(eq(financeTransactions.id, id), eq(financeTransactions.userId, userId)))
       .limit(1);
+    const [row] = await (lock ? query.for("update") : query);
     if (!row) throw new AppError("not_found", "The transaction was not found.");
     return row;
   }
@@ -140,7 +154,11 @@ export function createFinanceLedgerService(input: { db: Database; now: () => Dat
 
   return {
     async getTransaction(userId: string, id: string) {
-      return result(transaction(await ownedTransaction(userId, id)), "Transaction loaded.");
+      const row = await ownedTransaction(userId, id);
+      return result(
+        { ...transaction(row), version: transactionVersion(row.contextualRevision) },
+        "Transaction loaded.",
+      );
     },
 
     async removeTransaction(id: string, idempotencyKey: string, context: FinanceMutationContext) {
@@ -345,9 +363,9 @@ export function createFinanceLedgerService(input: { db: Database; now: () => Dat
           payload: input,
         },
         async (tx) => {
-          const original = await ownedTransaction(context.userId, input.transactionId, tx);
-          const nextRevision = await nextFinanceTransactionRevision(tx, original.id);
-          const currentVersion = Math.max(1, nextRevision - 1);
+          const nextRevision = await nextFinanceTransactionRevision(tx, input.transactionId);
+          const original = await ownedTransaction(context.userId, input.transactionId, tx, true);
+          const currentVersion = transactionVersion(original.contextualRevision);
           if (input.expectedVersion !== currentVersion)
             throw new AppError(
               "conflict",

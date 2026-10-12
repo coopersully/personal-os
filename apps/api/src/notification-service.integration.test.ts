@@ -336,7 +336,7 @@ describe.sequential("durable notifications", () => {
         expectedRevision: 1,
         preferences: defaultNotificationPreferences,
       }),
-    ).rejects.toThrow("Only the person");
+    ).rejects.toThrow("explicit texting:execute access");
     await service.savePreferences(principal, "global", {
       expectedRevision: 1,
       preferences: defaultNotificationPreferences,
@@ -360,7 +360,7 @@ describe.sequential("durable notifications", () => {
         { ...principal, actorType: "agent" },
         { expectedRevision: 1 },
       ),
-    ).rejects.toThrow("Only the person");
+    ).rejects.toThrow("explicit texting:execute access");
     await expect(
       service.resetFinancePreferences(
         { ...principal, scopes: new Set(["texting:read", "finances:read"]) },

@@ -134,11 +134,15 @@ jobs:
       - run: pnpm audit --prod
 
   browser:
-    name: Browser acceptance
+    name: Browser acceptance (${{ matrix.project }})
     needs: changes
     if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.browser == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [desktop-chromium, mobile-chromium]
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -154,11 +158,11 @@ jobs:
           grep -rl "dl.google.com/linux/chrome" /etc/apt/sources.list.d 2>/dev/null \
             | xargs -r sudo rm -f
           pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e
+      - run: pnpm test:e2e --project=${{ matrix.project }}
       - if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.project }}
           path: |
             playwright-report
             test-results

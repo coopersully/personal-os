@@ -52,6 +52,7 @@ import {
   executeFinanceIdempotently,
   type FinanceMutationContext,
   type FinanceTransaction,
+  requireFinanceExecution,
 } from "./context.js";
 
 const capability = {
@@ -70,10 +71,13 @@ function conflict(
   if (condition) throw new AppError("conflict", message);
 }
 function requirePerson(context: FinanceMutationContext) {
-  if (context.actorType !== "user" || !context.canMutate)
+  if (
+    !context.canMutate ||
+    (context.actorType !== "user" && (!context.canSelfApprove || !context.bypassEnabled))
+  )
     throw new AppError(
       "forbidden",
-      "Budget policy management requires a person with finances:write.",
+      "Budget policy management requires finances:write and explicit execution authority for agents.",
     );
 }
 
@@ -111,7 +115,10 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
         requireUserAdmission: true,
         lockIdentities: [`finance-profile:${context.userId}`],
       },
-      fn,
+      async (tx) => {
+        await requireFinanceExecution(tx, context, now());
+        return fn(tx);
+      },
     );
   };
   async function audit(
@@ -201,7 +208,7 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
     );
     conflict(
       !(await policyBaseline(tx, userId, planId, terms)),
-      "Confirm the exact human-approved period baseline first.",
+      "Confirm the exact approved period baseline first.",
     );
     conflict(now().getTime() >= new Date(terms.expiresAt).getTime(), "Policy terms have expired.");
   }
@@ -664,7 +671,7 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
             budget.planId !== input.planId ||
             budget.effectiveFrom !== input.period.from.slice(0, 7) ||
             !budget.approvedAt ||
-            budget.approvedByActorType !== "user" ||
+            (budget.approvedByActorType !== "user" && budget.approvedByActorType !== "agent") ||
             !budget.approvedByActorId ||
             !["active", "retired"].includes(budget.status) ||
             budget.balanceDelta !== 0 ||
@@ -674,7 +681,7 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
             snapshot.resources.reduce((n, r) => n + r.amountCents, 0) !==
               budget.expectedResources ||
             snapshot.allocations.reduce((n, a) => n + a.amountCents, 0) !== budget.allocatedTotal,
-          "Baseline must be an exact, complete, human-approved budget for this plan and period.",
+          "Baseline must be an exact, complete, approved budget for this plan and period.",
         );
         const existing = await tx.query.financeBudgetPeriodBaselines.findFirst({
           where: and(

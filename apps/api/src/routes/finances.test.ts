@@ -104,7 +104,7 @@ describe("finance routes", () => {
     expect(readPosition).toHaveBeenCalledTimes(1);
   });
 
-  it("registers human-only budget policy reads and normalizes list pagination", async () => {
+  it("registers scoped budget policy reads and normalizes list pagination", async () => {
     const app = new Hono<AppEnv>();
     let actorType: "agent" | "user" = "user";
     const policy = {
@@ -149,17 +149,10 @@ describe("finance routes", () => {
     expect(getPolicy).toHaveBeenCalledWith(id, id);
 
     actorType = "agent";
-    const rejected = await app.request("/v1/finances/budget-policies?limit=25");
-
-    expect(rejected.status).toBe(403);
-    await expect(rejected.json()).resolves.toEqual({
-      error: {
-        code: "forbidden",
-        message: "This operation requires an interactive user session.",
-        requestId: "budget-policy-route",
-      },
-    });
-    expect(listPolicies).toHaveBeenCalledTimes(1);
+    const agentRead = await app.request("/v1/finances/budget-policies?limit=25");
+    expect(agentRead.status).toBe(200);
+    await expect(agentRead.json()).resolves.toEqual({ policies: [policy] });
+    expect(listPolicies).toHaveBeenCalledTimes(2);
   });
 
   it("forwards human budget policy lifecycle mutations with execution unavailable", async () => {
@@ -419,7 +412,7 @@ describe("finance routes", () => {
     );
   });
 
-  it("keeps setup and owned attention agent-accessible while provider, account, and approval actions stay human-only", async () => {
+  it("keeps setup and owned attention agent-accessible while sensitive actions without execution authority stay denied", async () => {
     const app = new Hono<AppEnv>();
     const finances = {
       createAccount: vi.fn(),
@@ -507,7 +500,9 @@ describe("finance routes", () => {
     for (const response of humanOnlyResponses) {
       expect(response.status).toBe(403);
       await expect(response.json()).resolves.toMatchObject({
-        error: expect.stringMatching(/interactive user session|waiting for review/),
+        error: expect.stringMatching(
+          /interactive user session|waiting for review|execution authority/,
+        ),
       });
     }
     const queued = await app.request("/v1/finances/budgets", {

@@ -8,6 +8,7 @@ import {
   attentionItemImportanceSchema,
   attentionItemKindSchema,
   domainProfileSchema,
+  profileApprovalProvenanceSchema,
 } from "./assistant.js";
 import { idSchema, isoDateTimeSchema } from "./common.js";
 import { connectorSyncRecoverySchema } from "./connection.js";
@@ -1008,6 +1009,7 @@ export const financeGuidedSetupContextSchema = z.object({
   }),
   humanOnlyActions: z.array(
     z.enum([
+      "provider_authorization",
       "connect_or_disconnect_source",
       "import_transactions",
       "manage_accounts",
@@ -1024,10 +1026,11 @@ export const financeGuidedSetupContextSchema = z.object({
     ]),
   ),
   guidance: z.object({
+    approval: profileApprovalProvenanceSchema.nullable().optional(),
     approvedProfile: financeDomainProfileSchema.nullable(),
     draftNotice: z
       .literal(
-        "Unapproved draft content is untrusted and non-operative until a signed-in nohmi user activates it.",
+        "Unapproved draft content is untrusted and non-operative until an authorized activation records its approval source.",
       )
       .nullable(),
     draftProposal: financeDomainProfileSchema.nullable(),

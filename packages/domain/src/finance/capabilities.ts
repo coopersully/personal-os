@@ -140,6 +140,13 @@ export const financeCapabilityManifest = [
     requiredScope: "finances:write",
   },
   {
+    apiOperation: "completeFinanceAccountConnection",
+    capability: "account.connection_complete",
+    mcpTool: "complete_finance_account_connection",
+    mode: "external",
+    requiredScope: "finances:execute",
+  },
+  {
     apiOperation: "getFinanceAccountConnection",
     capability: "account.connection_read",
     mcpTool: "get_finance_account_connection",
@@ -333,7 +340,7 @@ export const financeCapabilityManifest = [
   capability: string;
   mcpTool: string;
   mode: "external" | "read" | "write";
-  requiredScope: "finances:read" | "finances:write" | "finances:maintain";
+  requiredScope: "finances:read" | "finances:write" | "finances:maintain" | "finances:execute";
 }>;
 
 export type FinanceCapability = (typeof financeCapabilityManifest)[number]["capability"];

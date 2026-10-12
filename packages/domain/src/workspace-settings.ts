@@ -140,7 +140,7 @@ export const updateWorkspaceSettingsSchema = z.union([
 ]);
 export type UpdateWorkspaceSettings<W extends Workspace = Workspace> = {
   expectedRevision: number;
-  preferences: Partial<WorkspacePreferences<W>>;
+  preferences: { [K in keyof WorkspacePreferences<W>]?: WorkspacePreferences<W>[K] | undefined };
 };
 
 export function getDefaultWorkspacePreferences<W extends Workspace>(

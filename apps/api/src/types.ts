@@ -66,6 +66,7 @@ export type RequestLog = {
   event:
     | "calendar_provider_reconciliation"
     | "connector_authorization_callback_failed"
+    | "connector_handoff_failed"
     | "connector_notification_received"
     | "connector_subscription_expired"
     | "connector_subscription_failed"

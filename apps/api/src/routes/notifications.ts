@@ -6,7 +6,7 @@ import {
 import type { Hono } from "hono";
 import type { createNotificationService } from "../notification-service.js";
 import type { AppEnv } from "../types.js";
-import { parseBody, requireFeatureAccess, requireHuman, requireScope } from "./support.js";
+import { parseBody, requireFeatureAccess, requireScope } from "./support.js";
 
 /** Explicit bounded invocations only; external hosts retain cadence ownership. */
 export function registerNotificationRoutes(options: {
@@ -31,7 +31,6 @@ export function registerNotificationRoutes(options: {
   );
   app.delete(
     "/v1/texting/notifications/preferences/finances",
-    requireHuman,
     requireScope("texting:write"),
     async (context) =>
       context.json(
@@ -42,7 +41,7 @@ export function registerNotificationRoutes(options: {
         ),
       ),
   );
-  app.patch("/v1/texting/notifications/preferences/:scope", requireHuman, async (context) =>
+  app.patch("/v1/texting/notifications/preferences/:scope", async (context) =>
     context.json(
       await notifications.savePreferences(
         context.get("principal"),

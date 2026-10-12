@@ -19,6 +19,7 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
 import { assertSettingsRevision, type SettingsMutationContext } from "../settings-save.js";
+import { requireWorkspaceExecution } from "../workspace-execution.js";
 
 const tables = {
   calendar: calendarWorkspaceSettings,
@@ -26,7 +27,7 @@ const tables = {
   mail: mailWorkspaceSettings,
   finances: financesWorkspaceSettings,
 };
-export function createWorkspaceSettingsService(db: Database) {
+export function createWorkspaceSettingsService(db: Database, now: () => Date = () => new Date()) {
   const read = async <W extends Workspace>(
     database: Database,
     userId: string,
@@ -43,8 +44,6 @@ export function createWorkspaceSettingsService(db: Database) {
       value: unknown,
       context: SettingsMutationContext,
     ): Promise<WorkspaceSettings<W>> {
-      if (context.principal.actorType !== "user")
-        throw new AppError("forbidden", "Workspace preferences require an interactive user.");
       const parsed = workspaceSettingsUpdateSchemas[workspace].safeParse(value);
       if (!parsed.success)
         throw new AppError(
@@ -57,6 +56,7 @@ export function createWorkspaceSettingsService(db: Database) {
         await tx.execute(
           sql`SELECT pg_advisory_xact_lock(hashtextextended(${`workspace-settings:${workspace}:${userId}`}, 0))`,
         );
+        await requireWorkspaceExecution(tx, context.principal, workspace, now());
         const table = tables[workspace as Workspace];
         const [row] = await tx.select().from(table).where(eq(table.userId, userId));
         const revision = row?.revision ?? 0;

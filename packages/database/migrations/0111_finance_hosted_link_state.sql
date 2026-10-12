@@ -1,0 +1,1 @@
+ALTER TABLE finance_account_connections ADD COLUMN encrypted_handoff_state jsonb;

@@ -855,12 +855,12 @@ describe.sequential("human budget policy management", () => {
     ).rejects.toMatchObject({ code: "invalid_request" });
   });
   it.each([
-    "approved_by_actor_type = 'agent'",
+    "approved_by_actor_type = NULL",
     "approved_at = NULL",
     "status = 'proposed'",
     "status = 'incomplete', balance_delta_cents = 1, expected_resources_cents = 10001",
     "expected_resources_cents = 11000, allocated_total_cents = 11000",
-  ])("rejects a non-human or incomplete baseline: %s", async (change) => {
+  ])("rejects an unapproved or incomplete baseline: %s", async (change) => {
     const f = await fixture();
     await database.pool.query(`UPDATE finance_budget_versions SET ${change} WHERE id=$1`, [
       f.budgetId,

@@ -38,6 +38,7 @@ import { assertSettingsRevision } from "./settings-save.js";
 import { createTextReplyBindings } from "./texting-reply-binding.js";
 import type { createTextingService } from "./texting-service.js";
 import type { Principal } from "./types.js";
+import { requireWorkspaceExecution } from "./workspace-execution.js";
 
 const unavailable = { state: "unavailable", reason: "producer_not_registered" } as const;
 const leaseMs = 60_000;
@@ -106,11 +107,10 @@ export function createNotificationService(options: Options) {
     requestId: string = crypto.randomUUID(),
   ) {
     authorize(principal);
-    if (principal.actorType !== "user")
-      throw new AppError("forbidden", "Only the person can change notification preferences.");
     const value = notificationPreferencesSchema.parse(input.preferences);
     return options.db.transaction(async (tx) => {
       await lockUser(tx, principal.userId);
+      await requireWorkspaceExecution(tx, principal, "texting", now());
       const [previous] = await tx
         .select()
         .from(notificationPreferences)
@@ -119,6 +119,16 @@ export function createNotificationService(options: Options) {
             eq(notificationPreferences.userId, principal.userId),
             eq(notificationPreferences.scope, scope),
           ),
+        );
+      if (
+        principal.actorType === "agent" &&
+        scope === "global" &&
+        value.detail === "context" &&
+        (previous?.preferences.detail ?? defaultNotificationPreferences.detail) === "minimal"
+      )
+        throw new AppError(
+          "forbidden",
+          "Only the owner can widen the global notification disclosure ceiling.",
         );
       assertSettingsRevision(
         previous?.revision ?? null,
@@ -170,11 +180,10 @@ export function createNotificationService(options: Options) {
     requestId: string = crypto.randomUUID(),
   ) {
     authorize(principal);
-    if (principal.actorType !== "user")
-      throw new AppError("forbidden", "Only the person can change notification preferences.");
     const { expectedRevision } = resetFinanceNotificationPreferencesSchema.parse(input);
     return options.db.transaction(async (tx) => {
       await lockUser(tx, principal.userId);
+      await requireWorkspaceExecution(tx, principal, "texting", now());
       const [previous] = await tx
         .select()
         .from(notificationPreferences)

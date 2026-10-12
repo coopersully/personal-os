@@ -126,7 +126,7 @@ describe("Today owner settings and commitments", () => {
       {
         userId: other,
         kind: "task",
-        taskRevision: 1n,
+        taskRevision: 1,
         taskLifecycle: "open",
         taskListId: inbox.id,
         title: "Carry forward",
@@ -135,7 +135,7 @@ describe("Today owner settings and commitments", () => {
       {
         userId: other,
         kind: "task",
-        taskRevision: 1n,
+        taskRevision: 1,
         taskLifecycle: "open",
         taskListId: inbox.id,
         title: "Both dates",
@@ -145,7 +145,7 @@ describe("Today owner settings and commitments", () => {
       {
         userId: other,
         kind: "task",
-        taskRevision: 1n,
+        taskRevision: 1,
         taskLifecycle: "open",
         taskListId: inbox.id,
         title: "Overdue with reservation",
@@ -155,7 +155,7 @@ describe("Today owner settings and commitments", () => {
       {
         userId: other,
         kind: "task",
-        taskRevision: 1n,
+        taskRevision: 1,
         taskLifecycle: "open",
         taskListId: inbox.id,
         title: "Sunday included",
@@ -164,7 +164,7 @@ describe("Today owner settings and commitments", () => {
       {
         userId: other,
         kind: "task",
-        taskRevision: 1n,
+        taskRevision: 1,
         taskLifecycle: "open",
         taskListId: inbox.id,
         title: "Monday excluded",
@@ -173,7 +173,7 @@ describe("Today owner settings and commitments", () => {
       {
         userId: other,
         kind: "task",
-        taskRevision: 1n,
+        taskRevision: 1,
         taskLifecycle: "open",
         taskListId: inbox.id,
         title: "Undated task",
@@ -181,7 +181,7 @@ describe("Today owner settings and commitments", () => {
       {
         userId: other,
         kind: "task",
-        taskRevision: 1n,
+        taskRevision: 1,
         taskListId: inbox.id,
         title: "Completed",
         dueAt: new Date("2026-10-15T12:00:00Z"),

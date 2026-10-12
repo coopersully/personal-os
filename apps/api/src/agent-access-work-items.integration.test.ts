@@ -263,13 +263,13 @@ describe.sequential("Agent Access work-item projection", () => {
     expect(first.items.some((item) => item.title === "Reconnect Work for Calendar")).toBe(true);
     expect(first.summary.byKind.review).toBe(3);
     expect(
-      Object.values(first.summary.reviewByDomain ?? {}).reduce(
+      Object.values(first.summary.reviewByDomain ?? {}).reduce<number>(
         (total, count) => total + (count ?? 0),
         0,
       ),
     ).toBe(3);
     expect(
-      Object.values(first.summary.attentionByDomain ?? {}).reduce(
+      Object.values(first.summary.attentionByDomain ?? {}).reduce<number>(
         (total, count) => total + (count ?? 0),
         0,
       ),

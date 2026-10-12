@@ -7259,13 +7259,19 @@ describe.sequential("finance action service", () => {
       userId,
     });
 
-    const contentionDatabase = createStatementTimedDatabase(container.getConnectionUri());
+    const waiterObservationTimeoutMs = 15_000;
+    const writerStatementTimeoutMs = 30_000;
+    const contentionDatabase = createStatementTimedDatabase(
+      container.getConnectionUri(),
+      writerStatementTimeoutMs,
+    );
     const actions = createFinanceActionService({
       db: contentionDatabase.db,
       finances: createFinanceService({ db: contentionDatabase.db, now: () => now }),
       now: () => now,
     });
     const blocker = await database.pool.connect();
+    let operationSettlement: Promise<PromiseSettledResult<unknown>[]> | undefined;
     try {
       await blocker.query("BEGIN");
       await blocker.query("SET LOCAL statement_timeout = '5s'");
@@ -7285,31 +7291,39 @@ describe.sequential("finance action service", () => {
         }),
         { principal: agent(userId, "maintenance-answerer"), requestId: "question-order-answer" },
       );
-      const competingRequest = actions.performDirect(
-        "reimbursement",
-        {
-          allocationId: allocation.id,
-          dueDate: "2026-08-24",
-          evidence: {
-            sourceRefs: [
-              {
-                accountId: null,
-                provider: "local",
-                remoteId: "question-order-receipt",
-                revision: null,
-                sourceType: "local",
-              },
-            ],
-            summary: "Question-order receipt",
+      // Delay the second writer beyond the old five-second statement ceiling:
+      // both must remain blocked until the real PostgreSQL barrier is observed.
+      const competingRequest = new Promise<void>((resolvePromise) =>
+        setTimeout(resolvePromise, 6_000),
+      ).then(() =>
+        actions.performDirect(
+          "reimbursement",
+          {
+            allocationId: allocation.id,
+            dueDate: "2026-08-24",
+            evidence: {
+              sourceRefs: [
+                {
+                  accountId: null,
+                  provider: "local",
+                  remoteId: "question-order-receipt",
+                  revision: null,
+                  sourceType: "local",
+                },
+              ],
+              summary: "Question-order receipt",
+            },
+            expectedAmount: 180,
+            operation: "create",
+            payer: "Alex",
+            rationale: "Alex owes the smaller shared portion.",
           },
-          expectedAmount: 180,
-          operation: "create",
-          payer: "Alex",
-          rationale: "Alex owes the smaller shared portion.",
-        },
-        { principal: agent(userId, "competing-agent"), requestId: "question-order-competing" },
+          { principal: agent(userId, "competing-agent"), requestId: "question-order-competing" },
+        ),
       );
-      await waitForAdvisoryLockWaiters(database.pool, 2);
+      const operations = [answer, competingRequest];
+      operationSettlement = Promise.allSettled(operations);
+      await waitForAdvisoryLockWaiters(database.pool, 2, waiterObservationTimeoutMs);
       await blocker.query("COMMIT");
       const outcomes = await settleWithoutDeadlock([answer, competingRequest]);
       expect(
@@ -7321,6 +7335,7 @@ describe.sequential("finance action service", () => {
       ).toBe(true);
     } finally {
       await blocker.query("ROLLBACK").catch(() => undefined);
+      await operationSettlement;
       blocker.release();
       await contentionDatabase.close();
     }

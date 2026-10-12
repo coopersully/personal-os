@@ -1,8 +1,11 @@
 import tempfile
+import subprocess
+import sys
+import time
 import unittest
 from pathlib import Path
 
-from checkpoint import operate
+from checkpoint import operate, locked
 
 
 class CheckpointTest(unittest.TestCase):
@@ -13,6 +16,35 @@ class CheckpointTest(unittest.TestCase):
 
     def call(self, operation, payload=None, owner="task-a", key="repo/pull/1"):
         return operate(self.root, key, owner, operation, payload or {})
+
+    def test_concurrent_writer_waits_then_preserves_existing_owner(self):
+        script_dir = str(Path(__file__).resolve().parent)
+        code = "from pathlib import Path; from checkpoint import operate; import sys; print('ready', flush=True); operate(Path(sys.argv[1]), 'repo/pull/1', 'task-b', 'claim', {})"
+        self.call("claim")
+        with locked(self.root):
+            child = subprocess.Popen([sys.executable, "-c", code, str(self.root)], cwd=script_dir,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                self.assertEqual(child.stdout.readline().strip(), "ready")
+                time.sleep(.1)
+                self.assertIsNone(child.poll())
+            except BaseException:
+                child.kill()
+                child.communicate(timeout=5)
+                raise
+        _, errors = child.communicate(timeout=5)
+        self.assertNotEqual(child.returncode, 0)
+        self.assertIn("Another owner holds this claim", errors)
+        self.assertEqual(self.call("read")["owner"], "task-a")
+
+    def test_registry_wait_has_a_deadline(self):
+        script_dir = str(Path(__file__).resolve().parent)
+        code = "from pathlib import Path; from checkpoint import locked, RegistryBusyError; import sys\ntry:\n with locked(Path(sys.argv[1]), timeout=.05): pass\nexcept RegistryBusyError:\n sys.exit(75)"
+        with locked(self.root):
+            result = subprocess.run([sys.executable, "-c", code, str(self.root)], cwd=script_dir,
+                                    capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 75)
+        self.assertEqual(result.stderr, "")
 
     def test_owner_survives_restart_and_cannot_be_stolen(self):
         self.call("claim")

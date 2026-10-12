@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,11 +41,24 @@ def atomic_write(path, value):
             os.unlink(temporary)
 
 
+class RegistryBusyError(TimeoutError):
+    pass
+
+
 @contextmanager
-def locked(root):
+def locked(root, timeout=5):
     root.mkdir(parents=True, exist_ok=True)
     with (root / "registry.lock").open("a") as stream:
-        fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RegistryBusyError("Checkpoint registry is busy; retry after the current writer exits") from None
+                time.sleep(min(.05, remaining))
         yield
 
 
@@ -122,7 +136,13 @@ def main():
     parser.add_argument("--payload", type=Path, help="Sanitized JSON file; never include credentials or logs")
     args = parser.parse_args()
     payload = json.loads(args.payload.read_text()) if args.payload else {}
-    print(json.dumps(operate(registry_root(), args.key, args.owner, args.operation, payload), indent=2))
+    try:
+        value = operate(registry_root(), args.key, args.owner, args.operation, payload)
+    except RegistryBusyError as error:
+        parser.exit(75, f"{error}\n")
+    except ValueError as error:
+        parser.exit(2, f"{error}\n")
+    print(json.dumps(value, indent=2))
 
 
 if __name__ == "__main__":

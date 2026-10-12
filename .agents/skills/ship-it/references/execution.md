@@ -9,7 +9,9 @@ credential boundary. A skill installation alone does not start unattended work.
 Use `scripts/checkpoint.py <operation> --key <canonical-PR-URL> --owner <host/task-id>`.
 For `save`, `begin`, `finish`, and `transfer`, pass `--payload <sanitized-json-file>`.
 The registry is `<git-common-dir>/ship-it/`, shared by worktrees on this host. Writes use an exclusive
-file lock and atomic replacement. It is private, outside the checkout, and must never be committed.
+file lock and atomic replacement. A contended registry operation waits up to five seconds, then
+exits 75 with no mutation; retry the checkpoint operation after the writer exits, without repeating
+its external action. It is private, outside the checkout, and must never be committed.
 A network with a separate registry must record this claim there and retain its existing owner.
 Cross-host operation requires a shared serialized owner; these host-local files do not supply one.
 

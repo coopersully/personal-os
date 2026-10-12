@@ -36,8 +36,10 @@ def ready_state(**overrides):
             "headSha": HEAD,
             "rulesVerified": True,
             "inventoryComplete": True,
+            "selectedChecksVerified": True,
             "expectedRequiredChecks": ["CI required", "PR Work map"],
-            "expectedRequiredCheckApps": {"CI required": 15368, "PR Work map": 15368},
+            "expectedSelectedChecks": [],
+            "expectedCheckApps": {"CI required": 15368, "PR Work map": 15368},
             "checks": [
                 {
                     "name": "CI required",
@@ -73,6 +75,7 @@ def ready_state(**overrides):
             "headSha": HEAD,
             "collectionComplete": True,
             "unresolvedActionable": 0,
+            "unresolvedThreads": 0,
             "requiredApprovalsSatisfied": True,
             "approvalsCurrent": True,
         },
@@ -94,6 +97,7 @@ def ready_state(**overrides):
         "metadata": {"headSha": HEAD, "consistent": True},
         "merge": {
             "capabilitiesVerified": True,
+            "serverGatesVerified": True,
             "normalMergeAllowed": True,
             "adminMergeAllowed": True,
             "adminBypassOnly": False,
@@ -101,6 +105,9 @@ def ready_state(**overrides):
             "squashAllowed": True,
         },
     }
+    value["evidence"] = {name: [f"bundle.json#{name}"] for name in
+                         ("base", "verification", "ci", "codeRabbit", "feedback",
+                          "selfReview", "linear", "metadata", "merge")}
     for key, override in overrides.items():
         if isinstance(override, dict) and isinstance(value.get(key), dict):
             value[key] = {**value[key], **override}
@@ -110,42 +117,122 @@ def ready_state(**overrides):
 
 
 class EvaluateReadinessTest(unittest.TestCase):
+    def test_hosted_equivalence_requires_every_gate_and_diagnosed_local_failure(self):
+        state = ready_state(verification={"mode": "hosted", "pnpmVerify": "FAILURE",
+            "equivalenceVerified": True, "localOnlyComplete": True,
+            "equivalentChecks": {key: key for key in ("repository", "lint", "types-tests-coverage-builds", "browser")}})
+        for name in state["verification"]["equivalentChecks"].values():
+            state["ci"]["expectedSelectedChecks"].append(name)
+            state["ci"]["expectedCheckApps"][name] = 15368
+            state["ci"]["checks"].append(dict(state["ci"]["checks"][0], name=name))
+        self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
+        state["verification"]["pnpmVerify"] = "NOT_RUN"
+        self.assertEqual(evaluate(state)["decision"], "MERGE")
+        original = state["verification"]["equivalentChecks"]
+        state["verification"]["equivalentChecks"] = {key: "CI required" for key in original}
+        self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
+        state["verification"]["equivalentChecks"] = original
+        state["verification"]["pnpmVerify"] = "FAILURE"
+        state["verification"]["localFailures"] = [{"classification": "unknown"}]
+        self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
+        state["verification"]["localFailures"] = [{"classification": "environment", "evidence": "isolated-log", "focusedReproduction": "SUCCESS"}]
+        self.assertEqual(evaluate(state)["decision"], "MERGE")
+        state["ci"]["checks"][-1]["conclusion"] = "FAILURE"
+        self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
+
+    def test_hosted_matrix_requires_each_distinct_successful_member(self):
+        coverage = {"repository": "Repository", "lint": "Lint", "types-tests-coverage-builds": "Node",
+                    "browser": ["Browser desktop", "Browser mobile"]}
+        state = ready_state(verification={"mode": "hosted", "pnpmVerify": "NOT_RUN",
+            "equivalenceVerified": True, "localOnlyComplete": True, "equivalentChecks": coverage})
+        for name in ["Repository", "Lint", "Node", "Browser desktop", "Browser mobile"]:
+            state["ci"]["expectedSelectedChecks"].append(name)
+            state["ci"]["expectedCheckApps"][name] = 15368
+            state["ci"]["checks"].append(dict(state["ci"]["checks"][0], name=name))
+        self.assertEqual(evaluate(state)["decision"], "MERGE")
+        state["ci"]["checks"][-1]["conclusion"] = "FAILURE"
+        self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
+        state["ci"]["checks"][-1]["conclusion"] = "SUCCESS"
+        for invalid in [[], ["Browser desktop", "Lint"], ["Browser desktop", "Browser desktop"], [None]]:
+            state["verification"]["equivalentChecks"]["browser"] = invalid
+            self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
+        state["verification"]["equivalentChecks"]["browser"] = ["Browser desktop", "Browser mobile"]
+        state["ci"]["checks"].pop()
+        self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
+
+    def test_selected_job_must_exist_and_succeed_with_expected_provider(self):
+        state = ready_state()
+        state["ci"]["expectedSelectedChecks"] = ["Browser acceptance"]
+        state["ci"]["expectedCheckApps"]["Browser acceptance"] = 15368
+        self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
+        job = dict(state["ci"]["checks"][0], name="Browser acceptance", conclusion="SKIPPED")
+        state["ci"]["checks"].append(job)
+        self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
+        job["conclusion"] = "SUCCESS"
+        self.assertEqual(evaluate(state)["decision"], "MERGE")
+        job["appId"] = 1
+        self.assertEqual(evaluate(state)["decision"], "BLOCK")
+
+    def test_evidence_references_and_selected_scope_are_required(self):
+        for state in (ready_state(evidence={"ci": []}),
+                      ready_state(ci={"selectedChecksVerified": False})):
+            self.assertEqual(evaluate(state)["decision"], "BLOCK")
+
+    def test_unknown_ci_status_or_conclusion_never_merges(self):
+        for field, value in (("status", "UNKNOWN"), ("conclusion", "UNKNOWN")):
+            state = ready_state()
+            state["ci"]["checks"][2][field] = value
+            self.assertNotEqual(evaluate(state)["decision"], "MERGE")
+
     def test_prefers_normal_squash_merge_when_every_gate_is_current(self):
         result = evaluate(ready_state())
         self.assertEqual(result["decision"], "MERGE")
         self.assertEqual(result["mergeMode"], "normal")
 
-    def test_uses_admin_only_when_normal_merge_is_unavailable(self):
-        result = evaluate(
-            ready_state(
-                pr={"mergeStateStatus": "BLOCKED"},
+    def test_never_uses_admin_or_deferred_auto_merge(self):
+        for status in ("BLOCKED", "CLEAN"):
+            state = ready_state(
+                pr={"mergeStateStatus": status},
                 merge={"normalMergeAllowed": False, "adminBypassOnly": True},
             )
-        )
-        self.assertEqual(result["decision"], "MERGE")
-        self.assertEqual(result["mergeMode"], "admin")
-
-    def test_never_uses_admin_without_proving_the_only_block_is_bypassable(self):
-        result = evaluate(ready_state(merge={"normalMergeAllowed": False}))
-        self.assertEqual(result["decision"], "AUTO_MERGE")
-        self.assertEqual(result["mergeMode"], "auto")
+            self.assertEqual(evaluate(state)["decision"], "BLOCK")
 
     def test_never_treats_github_blocked_as_normal_merge_ready(self):
-        result = evaluate(ready_state(pr={"mergeStateStatus": "BLOCKED"}))
-        self.assertEqual(result["decision"], "BLOCK")
+        self.assertEqual(evaluate(ready_state(pr={"mergeStateStatus": "BLOCKED"}))["decision"], "BLOCK")
 
-    def test_uses_auto_merge_without_normal_or_admin_authority(self):
-        result = evaluate(
-            ready_state(
-                merge={
-                    "normalMergeAllowed": False,
-                    "adminMergeAllowed": False,
-                    "autoMergeAllowed": True,
-                }
-            )
-        )
-        self.assertEqual(result["decision"], "AUTO_MERGE")
-        self.assertEqual(result["mergeMode"], "auto")
+    def test_requires_server_enforced_gates(self):
+        self.assertEqual(evaluate(ready_state(merge={"serverGatesVerified": False}))["decision"], "BLOCK")
+
+    def test_pending_rabbit_without_coverage_waits(self):
+        state = ready_state(codeRabbit={"status": "PENDING", "coverageVerified": False})
+        self.assertEqual(evaluate(state)["decision"], "WAIT")
+
+    def test_unknown_or_skipped_rabbit_cannot_merge(self):
+        for status in ("UNRECOGNIZED", "SKIPPED", "NEUTRAL"):
+            self.assertEqual(evaluate(ready_state(codeRabbit={"status": status}))["decision"], "BLOCK")
+
+    def test_missing_rabbit_requests_review(self):
+        self.assertEqual(evaluate(ready_state(codeRabbit={"status": "MISSING", "coverageVerified": False}))["decision"], "REMEDIATE")
+
+    def test_every_thread_must_be_resolved(self):
+        for count in (None, 1, -1, False):
+            self.assertNotEqual(evaluate(ready_state(feedback={"unresolvedThreads": count}))["decision"], "MERGE")
+
+    def test_missing_approval_waits(self):
+        state = ready_state(feedback={"requiredApprovalsSatisfied": False})
+        self.assertEqual(evaluate(state)["decision"], "WAIT")
+
+    def test_latest_attempt_supersedes_failure_but_pending_still_waits(self):
+        state = ready_state()
+        old = state["ci"]["checks"][0]
+        old.update(workflowId=12, runId=23, runAttempt=1, event="pull_request", conclusion="FAILURE")
+        latest = dict(old, runAttempt=2, conclusion="SUCCESS")
+        state["ci"]["checks"].append(latest)
+        self.assertEqual(evaluate(state)["decision"], "MERGE")
+        latest.update(status="IN_PROGRESS", conclusion="")
+        self.assertEqual(evaluate(state)["decision"], "WAIT")
+        latest.update(event="push", status="COMPLETED", conclusion="SUCCESS")
+        self.assertNotEqual(evaluate(state)["decision"], "MERGE")
 
     def test_blocks_when_squash_or_every_merge_path_is_unavailable(self):
         for merge in (
@@ -229,7 +316,7 @@ class EvaluateReadinessTest(unittest.TestCase):
     def test_rejects_missing_or_non_numeric_required_check_provider_identity(self):
         for app_id in (None, True, 0, "15368"):
             state = ready_state()
-            state["ci"]["expectedRequiredCheckApps"]["CI required"] = app_id
+            state["ci"]["expectedCheckApps"]["CI required"] = app_id
             state["ci"]["checks"][0]["appId"] = app_id
             with self.subTest(app_id=app_id):
                 self.assertEqual(evaluate(state)["decision"], "BLOCK")
@@ -255,8 +342,6 @@ class EvaluateReadinessTest(unittest.TestCase):
         cases = (
             ready_state(codeRabbit={"actionableFindings": 1}),
             ready_state(feedback={"unresolvedActionable": 1}),
-            ready_state(feedback={"requiredApprovalsSatisfied": False}),
-            ready_state(feedback={"approvalsCurrent": False}),
             ready_state(selfReview={"newVerifiedFindings": 1}),
             ready_state(selfReview={"complete": False}),
         )
@@ -302,6 +387,16 @@ class EvaluateReadinessTest(unittest.TestCase):
                 result = evaluate(state)
                 self.assertEqual(result["decision"], "REMEDIATE")
                 self.assertIn("stale_evidence", result["reasonCodes"])
+
+
+class PendingReviewTest(unittest.TestCase):
+    def test_pending_review_without_count_waits(self):
+        state = ready_state(codeRabbit={"status": "PENDING", "coverageVerified": False})
+        del state["codeRabbit"]["actionableFindings"]
+        self.assertEqual(evaluate(state)["decision"], "WAIT")
+        state["codeRabbit"]["status"] = "SUCCESS"
+        state["codeRabbit"]["coverageVerified"] = True
+        self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
 
 
 if __name__ == "__main__":

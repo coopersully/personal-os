@@ -33,3 +33,11 @@ Run the nearest focused test while iterating, then run `pnpm verify` for the
 complete change. Do not lower coverage thresholds or exclude product code to
 make a change pass. Preserve deterministic fixtures and avoid real provider
 credentials or network calls in tests.
+
+## Shipping verification policy
+
+For an authorized ship-it run, follow `docs/engineering/delivery-verification.md`: converge review
+with focused checks, freeze/commit the candidate, then obtain complete local or equivalent hosted
+verification. This replaces duplicate full-suite invocations in the steps above; it does not waive
+any required check, unexplained failure, or issue-specific acceptance. Local `pnpm verify` uses the
+shared host runner. Metadata-only changes refresh metadata gates, not unchanged source verification.

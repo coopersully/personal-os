@@ -116,3 +116,11 @@ This includes repository mirror checks, lint, type checking, coverage enforcemen
   and failure states. Record what could still fail in production despite green tests.
 - Connector changes also follow `docs/engineering/connector-reliability.md` and keep provider
   timeouts and required ports aligned with the checked production network contract.
+
+## Shipping verification policy
+
+For an authorized ship-it run, follow `docs/engineering/delivery-verification.md`: converge review
+with focused checks, freeze/commit the candidate, then obtain complete local or equivalent hosted
+verification. This replaces duplicate full-suite invocations in the steps above; it does not waive
+any required check, unexplained failure, or issue-specific acceptance. Local `pnpm verify` uses the
+shared host runner. Metadata-only changes refresh metadata gates, not unchanged source verification.

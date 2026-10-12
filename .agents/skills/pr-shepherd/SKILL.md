@@ -72,7 +72,9 @@ Follow `plan.json.nextAction` as the single action for this pass:
 | `NOOP` | record a clean pass and stop |
 | `ESCALATE` | report the exact human decision needed |
 
-If a routed skill is stricter, follow it.
+If a routed skill is stricter, follow it. When ship-it uses these collection/planning helpers,
+its outer controller owns repetition, inherited in-scope authority, checkpoints, and final merge
+gates. A standalone shepherd remains non-merging and bounded to one action.
 
 ## Action budget and verification
 

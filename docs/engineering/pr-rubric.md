@@ -20,7 +20,7 @@ title merely as decoration.
 
 Before a PR is ready for review or merge:
 
-1. **PR Work map** must validate the submitted PR body against the live Nohmi Project URL and at
+1. **PR Work map validation**, inside **CI required**, must validate the submitted PR body against the live Nohmi Project URL and at
    least one concrete, internally consistent `COO-*` issue link.
 2. **CI required** and every selected scoped job must pass. This includes repository contracts,
    lint and formatting, types, coverage at the configured floor, production builds, browser
@@ -202,8 +202,16 @@ URL when one exists.
 
 - a PR with all conversations resolved;
 - strict, up-to-date branches and linear history;
-- **PR Work map**, **CI required**, and the selected scoped checks;
+- **CI required** (including Work map validation) and the selected scoped checks;
 - no force pushes or deletion; and
 - enforcement for administrators.
 
 Treat live branch protection as authoritative if it differs from this snapshot.
+
+## Shipping verification policy
+
+For an authorized ship-it run, follow [delivery verification](delivery-verification.md): converge review
+with focused checks, freeze/commit the candidate, then obtain complete local or equivalent hosted
+verification. This replaces duplicate full-suite invocations in the steps above; it does not waive
+any required check, unexplained failure, or issue-specific acceptance. Local `pnpm verify` uses the
+shared host runner. Metadata-only changes refresh metadata gates, not unchanged source verification.

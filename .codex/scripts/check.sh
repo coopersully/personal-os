@@ -44,7 +44,8 @@ node --test \
   ./.codex/scripts/worktree-runtime.test.mjs \
   ./.codex/scripts/compose-runtime-manager.test.mjs
 bash ./.codex/scripts/environment.test.sh
-PYTHONDONTWRITEBYTECODE=1 python3 ./.agents/skills/ship-it/scripts/evaluate_readiness_test.py
+PYTHONDONTWRITEBYTECODE=1 python3 .codex/scripts/verification-runner.test.py
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s ./.agents/skills/ship-it/scripts -p '*_test.py'
 
 grep -Eq '^## Work map$' .github/pull_request_template.md &&
   grep -Eq '^- Project: \[Nohmi\]\(https://linear\.app/coopersully/project/nohmi-6799e74a853f\)' .github/pull_request_template.md &&
@@ -53,9 +54,10 @@ grep -Eq '^## Work map$' .github/pull_request_template.md &&
   exit 1
 }
 
-grep -Fq 'types: [edited, opened, ready_for_review, reopened, synchronize]' .github/workflows/ci.yml || {
-  echo "CI must revalidate the PR Work map whenever pull request metadata changes" >&2
+grep -Fq 'types: [edited, opened, ready_for_review, reopened, synchronize]' .github/workflows/pr-metadata.yml || {
+  echo "Metadata CI must revalidate the PR Work map whenever pull request metadata changes" >&2
   exit 1
 }
 
+node --test .github/scripts/wait-source-ci.test.mjs
 echo "Codex repository check passed."

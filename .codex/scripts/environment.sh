@@ -137,7 +137,7 @@ case "${1:-}" in
   fixtures) command_fixtures ;;
   test) check_toolchain; require_docker; pnpm test:coverage ;;
   e2e) check_toolchain; require_docker; pnpm test:e2e ;;
-  verify) check_toolchain; require_docker; pnpm check; pnpm test:e2e ;;
+  verify) check_toolchain; require_docker; python3 "$ROOT/.codex/scripts/verification-runner.py" -- bash -c 'pnpm check && pnpm test:e2e' ;;
   build) check_toolchain; pnpm build ;;
   *) usage; exit 2 ;;
 esac

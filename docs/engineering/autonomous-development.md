@@ -220,7 +220,7 @@ Only the assigned orchestrator merges the assigned PR after verifying:
    packet, and policy revisions are current; a requirement change invalidates an older acceptance.
 2. The PR is open and non-draft, the pushed head is exact, dependencies are merged, the head contains
    the current target base, and mergeability is known and conflict-free.
-3. Focused verification and `pnpm verify` passed for the candidate head. There are no failed or
+3. Focused verification and a complete local or equivalent hosted verification set passed for the candidate head. There are no failed or
    pending selected CI jobs; required checks succeed with the expected provider identity. Discover
    the expected set from current workflow scope and live rules, not just the jobs that appeared.
 4. CodeRabbit completed a substantive review covering the current diff, with no unresolved findings.
@@ -237,8 +237,10 @@ Only the assigned orchestrator merges the assigned PR after verifying:
 Reuse `ship-it`'s read-only state schema and `scripts/evaluate_readiness.py` for its existing gates.
 Do not invoke its combined implementation/merge workflow. Its `MERGE`/`normal` verdict is necessary
 but insufficient: additionally prove zero unresolved threads, independent orchestrator acceptance,
-scope ownership, and dependency completion. `AUTO_MERGE`, `admin`, missing data, and unknown states
-do not pass this network's gate. The evaluator consumes evidence; it does not authenticate it.
+scope ownership, and dependency completion. The shared evaluator now permits normal protected merge
+only; missing data and unknown states do not pass this network's gate. The evaluator consumes evidence
+references; it does not authenticate them. Ship-it’s read-only collector and private Git-common-directory checkpoints may support the network registry, but never
+replace its role, acceptance, dependency, or cross-host ownership gates.
 
 Immediately before merge, re-read PR head/base, all checks, review surfaces, CodeRabbit coverage,
 rules, and Linear eligibility, requirements, and links. Rebuild the decision if anything changed.
@@ -291,3 +293,11 @@ purpose with every PR number and Linear key. Do not expose private registry or p
 Persist unchanged waits without repeated parent messages or notifications. A new head, completed
 milestone, finding, required action, or changed blocker can justify an update; a polling tick alone
 cannot. Keep a repeated permission blocker quiet after an actionable report until evidence changes.
+
+## Shipping verification policy
+
+For an authorized ship-it run, follow [delivery verification](delivery-verification.md): converge review
+with focused checks, freeze/commit the candidate, then obtain complete local or equivalent hosted
+verification. This replaces duplicate full-suite invocations in the steps below; it does not waive
+any required check, unexplained failure, or issue-specific acceptance. Local `pnpm verify` uses the
+shared host runner. Metadata-only changes refresh metadata gates, not unchanged source verification.

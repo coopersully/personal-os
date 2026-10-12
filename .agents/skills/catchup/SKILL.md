@@ -42,3 +42,11 @@ Treat base synchronization as engineering work, not a mechanical Git operation.
 Use the PR workflow output contract. Include source/base, integration strategy, incoming changes,
 conflicts and resolutions, branch adaptations, commit/push state, exact verification, Nohmi Linear
 issue/backlink state, audit path, and blockers.
+
+## Shipping verification policy
+
+For an authorized ship-it run, follow `docs/engineering/delivery-verification.md`: converge review
+with focused checks, freeze/commit the candidate, then obtain complete local or equivalent hosted
+verification. This replaces duplicate full-suite invocations in the steps below; it does not waive
+any required check, unexplained failure, or issue-specific acceptance. Local `pnpm verify` uses the
+shared host runner. Metadata-only changes refresh metadata gates, not unchanged source verification.

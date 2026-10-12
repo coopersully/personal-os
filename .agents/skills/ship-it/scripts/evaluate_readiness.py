@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -33,11 +34,34 @@ def check_state(check):
     return status, conclusion
 
 
+def current_attempts(checks):
+    """Supersede only attempts of the same evidenced workflow run and trigger.
+
+    Different runs remain ambiguous: timestamps or matching names alone do not
+    prove that a new run exercises the same scope.
+    """
+    groups = {}
+    for index, check in enumerate(checks):
+        fields = ("workflowId", "runId", "runAttempt")
+        proven = all(type(check.get(k)) is int and check[k] > 0 for k in fields)
+        key = (check.get("name"), check.get("appId"), check.get("headSha"),
+               check.get("workflowId"), check.get("runId"), check.get("event"))
+        if not proven or not check.get("event"):
+            key = ("unproven", index)
+        groups.setdefault(key, []).append(check)
+    selected = []
+    for group in groups.values():
+        latest = max(c.get("runAttempt", 0) for c in group)
+        selected.extend(c for c in group if c.get("runAttempt", 0) == latest)
+    return selected
+
+
 def evaluate(state):
     pr = state.get("pr") or {}
     head = pr.get("headSha")
 
-    if not head or not pr.get("baseSha"):
+    if not all(isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)
+               for sha in (head, pr.get("baseSha"))):
         return result(
             "BLOCK", head, ["ambiguous_target"], ["PR head or base SHA is missing"]
         )
@@ -86,6 +110,15 @@ def evaluate(state):
             [f"Evidence is missing or stale for: {', '.join(stale)}"],
         )
 
+    evidence = state.get("evidence") or {}
+    missing_sources = [name for name in (*head_bound, "merge")
+                       if not isinstance(evidence.get(name), list)
+                       or not evidence[name]
+                       or not all(isinstance(ref, str) and ref.strip() for ref in evidence[name])]
+    if missing_sources:
+        return result("BLOCK", head, ["evidence_sources_missing"],
+                      [f"Supporting evidence references are missing: {', '.join(missing_sources)}"])
+
     linear = state.get("linear") or {}
     if (
         linear.get("verified") is not True
@@ -109,6 +142,9 @@ def evaluate(state):
             ["merge_capabilities_unverified"],
             ["Live repository merge capabilities are unverified"],
         )
+    if merge.get("serverGatesVerified") is not True:
+        return result("BLOCK", head, ["server_gates_unverified"],
+                      ["Server enforcement of current checks and resolved conversations is unverified"])
     if merge.get("squashAllowed") is not True:
         return result(
             "BLOCK",
@@ -126,7 +162,11 @@ def evaluate(state):
             ["feedback_collection_incomplete"],
             ["Complete review feedback collection is unverified"],
         )
-    if rabbit.get("coverageVerified") is not True:
+    rabbit_status = str(rabbit.get("status") or "MISSING").upper()
+    if rabbit_status not in PENDING | FAILED | {"SUCCESS", "MISSING"}:
+        return result("BLOCK", head, ["coderabbit_status_unverified"],
+                      ["CodeRabbit status is unsupported; substantive success is required"])
+    if rabbit_status == "SUCCESS" and rabbit.get("coverageVerified") is not True:
         return result(
             "BLOCK",
             head,
@@ -136,12 +176,18 @@ def evaluate(state):
 
     ci = state.get("ci") or {}
     checks = ci.get("checks") or []
-    expected = ci.get("expectedRequiredChecks") or []
-    expected_apps = ci.get("expectedRequiredCheckApps") or {}
+    required = ci.get("expectedRequiredChecks") or []
+    selected = ci.get("expectedSelectedChecks")
+    if not isinstance(selected, list) or not all(isinstance(name, str) and name for name in selected):
+        return result("BLOCK", head, ["selected_check_policy_unverified"],
+                      ["The selected workflow job inventory is missing or invalid"])
+    expected = list(dict.fromkeys([*required, *selected]))
+    expected_apps = ci.get("expectedCheckApps") or {}
     if (
         ci.get("rulesVerified") is not True
         or ci.get("inventoryComplete") is not True
-        or not expected
+        or ci.get("selectedChecksVerified") is not True
+        or not required
         or set(expected_apps) != set(expected)
         or any(
             type(app_id) is not int or app_id <= 0 for app_id in expected_apps.values()
@@ -172,6 +218,8 @@ def evaluate(state):
                 [f"Required check has the wrong provider: {name}"],
             )
 
+    checks = current_attempts(checks)
+
     remediation_codes = []
     remediation_reasons = []
     if pr.get("isDraft") is True:
@@ -196,13 +244,28 @@ def evaluate(state):
         )
 
     verification = state.get("verification") or {}
-    if (
-        verification.get("focused") != "SUCCESS"
-        or verification.get("pnpmVerify") != "SUCCESS"
-    ):
+    full_verified = verification.get("pnpmVerify") == "SUCCESS"
+    if verification.get("mode") == "hosted":
+        coverage = verification.get("equivalentChecks") or {}
+        gates = {"repository", "lint", "types-tests-coverage-builds", "browser"}
+        full_verified = (
+            verification.get("equivalenceVerified") is True
+            and set(coverage) == gates
+            and all(isinstance(name, str) and name in expected for name in coverage.values())
+            and all(any(c.get("name") == name and check_state(c) == ("COMPLETED", "SUCCESS")
+                        for c in checks) for name in coverage.values())
+            and verification.get("localOnlyComplete") is True
+        )
+    failures = verification.get("localFailures", [])
+    failures_resolved = isinstance(failures, list) and all(
+        isinstance(f, dict) and f.get("classification") in {"fixed", "environment"}
+        and f.get("evidence") and f.get("focusedReproduction") == "SUCCESS"
+        for f in failures
+    )
+    if verification.get("focused") != "SUCCESS" or not full_verified or not failures_resolved:
         remediation_codes.append("verification_incomplete")
         remediation_reasons.append(
-            "Focused verification and pnpm verify have not both passed"
+            "Candidate needs complete local or equivalent hosted verification and diagnosed failures"
         )
 
     metadata = state.get("metadata") or {}
@@ -226,18 +289,20 @@ def evaluate(state):
         )
 
     if (
-        feedback.get("unresolvedActionable") != 0
-        or feedback.get("requiredApprovalsSatisfied") is not True
-        or feedback.get("approvalsCurrent") is not True
+        type(feedback.get("unresolvedActionable")) is not int
+        or feedback.get("unresolvedActionable") != 0
+        or type(feedback.get("unresolvedThreads")) is not int
+        or feedback.get("unresolvedThreads") != 0
     ):
         remediation_codes.append("review_incomplete")
         remediation_reasons.append(
-            "Actionable feedback or current-head approval requirements remain"
+            "Actionable feedback or unresolved threads remain"
         )
 
     self_review = state.get("selfReview") or {}
     if (
         self_review.get("complete") is not True
+        or type(self_review.get("newVerifiedFindings")) is not int
         or self_review.get("newVerifiedFindings") != 0
     ):
         remediation_codes.append("self_review_incomplete")
@@ -264,7 +329,9 @@ def evaluate(state):
         status, conclusion = check_state(check)
         if status in PENDING or not conclusion:
             pending_checks.append(name)
-        elif conclusion in FAILED or (name in expected and conclusion != "SUCCESS"):
+        elif (status != "COMPLETED" or conclusion not in {"SUCCESS", "NEUTRAL", "SKIPPED"}
+              or (name in expected and conclusion != "SUCCESS")
+              or (conclusion != "SUCCESS" and check.get("required") is not False)):
             failed_checks.append(name)
     if failed_checks:
         remediation_codes.append("checks_failed")
@@ -273,21 +340,24 @@ def evaluate(state):
         )
 
     rabbit_status = str(rabbit.get("status") or "MISSING").upper()
-    if rabbit.get("actionableFindings") != 0:
+    if type(rabbit.get("actionableFindings")) is not int or rabbit.get("actionableFindings") != 0:
         remediation_codes.append("coderabbit_findings")
         remediation_reasons.append("CodeRabbit has actionable findings")
     if rabbit_status in FAILED:
         remediation_codes.append("coderabbit_failed")
         remediation_reasons.append("CodeRabbit did not complete successfully")
     elif rabbit_status == "MISSING":
-        return result(
-            "BLOCK", head, ["coderabbit_missing"], ["CodeRabbit evidence is missing"]
-        )
+        remediation_codes.append("coderabbit_missing")
+        remediation_reasons.append("Request substantive CodeRabbit review for the current head")
 
     if remediation_codes:
         return result("REMEDIATE", head, remediation_codes, remediation_reasons)
-    if pending_checks or rabbit_status in PENDING:
+    approval_pending = (feedback.get("requiredApprovalsSatisfied") is not True
+                        or feedback.get("approvalsCurrent") is not True)
+    if pending_checks or rabbit_status in PENDING or approval_pending:
         reasons = []
+        if approval_pending:
+            reasons.append("Waiting for eligible current approval; never manufacture approval")
         if pending_checks:
             reasons.append(f"Checks pending: {', '.join(sorted(set(pending_checks)))}")
         if rabbit_status in PENDING:
@@ -321,31 +391,11 @@ def evaluate(state):
         return result(
             "MERGE", head, ["ready"], ["Every current-head gate is satisfied"], "normal"
         )
-    if (
-        merge.get("adminMergeAllowed") is True
-        and merge.get("adminBypassOnly") is True
-        and pr.get("mergeStateStatus") == "BLOCKED"
-    ):
-        return result(
-            "MERGE",
-            head,
-            ["ready_admin"],
-            ["Every gate is satisfied; admin merge is available"],
-            "admin",
-        )
-    if merge.get("autoMergeAllowed") is True:
-        return result(
-            "AUTO_MERGE",
-            head,
-            ["ready_auto_merge"],
-            ["Every gate is satisfied; immediate merge authority is unavailable"],
-            "auto",
-        )
     return result(
         "BLOCK",
         head,
         ["merge_authority_unavailable"],
-        ["No permitted merge path is available"],
+        ["Normal protected merge is unavailable; admin and deferred auto-merge are prohibited"],
     )
 
 

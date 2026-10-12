@@ -362,5 +362,15 @@ class EvaluateReadinessTest(unittest.TestCase):
                 self.assertIn("stale_evidence", result["reasonCodes"])
 
 
+class PendingReviewTest(unittest.TestCase):
+    def test_pending_review_without_count_waits(self):
+        state = ready_state(codeRabbit={"status": "PENDING", "coverageVerified": False})
+        del state["codeRabbit"]["actionableFindings"]
+        self.assertEqual(evaluate(state)["decision"], "WAIT")
+        state["codeRabbit"]["status"] = "SUCCESS"
+        state["codeRabbit"]["coverageVerified"] = True
+        self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
+
+
 if __name__ == "__main__":
     unittest.main()

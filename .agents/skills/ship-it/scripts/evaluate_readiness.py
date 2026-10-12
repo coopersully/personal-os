@@ -340,7 +340,10 @@ def evaluate(state):
         )
 
     rabbit_status = str(rabbit.get("status") or "MISSING").upper()
-    if type(rabbit.get("actionableFindings")) is not int or rabbit.get("actionableFindings") != 0:
+    rabbit_findings = rabbit.get("actionableFindings")
+    if ((type(rabbit_findings) is int and rabbit_findings > 0)
+            or (rabbit_status == "SUCCESS"
+                and (type(rabbit_findings) is not int or rabbit_findings != 0))):
         remediation_codes.append("coderabbit_findings")
         remediation_reasons.append("CodeRabbit has actionable findings")
     if rabbit_status in FAILED:

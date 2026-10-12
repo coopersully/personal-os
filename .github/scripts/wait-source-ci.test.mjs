@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { sourceDecision } from "./wait-source-ci.mjs";
+import { readRuns, sourceDecision } from "./wait-source-ci.mjs";
 
 const run = {
   pull_requests: [{ number: 42, base: { sha: "base" } }],
@@ -64,4 +64,42 @@ test("another PR sharing the head cannot replace this PR's source evidence", () 
   }
   const changedBase = { ...run, id: 2, pull_requests: [{ number: 42, base: { sha: "new-base" } }] };
   assert.equal(sourceDecision([run, changedBase], "candidate", "base", 42), "failure");
+});
+
+test("provider reads recover once without restarting source verification", async () => {
+  let reads = 0;
+  const pauses = [];
+  assert.deepEqual(
+    await readRuns(
+      () => {
+        if (++reads === 1) throw new Error("temporary transport failure");
+        return JSON.stringify({ workflow_runs: [run] });
+      },
+      async (ms) => {
+        pauses.push(ms);
+      },
+    ),
+    [run],
+  );
+  assert.equal(reads, 2);
+  assert.deepEqual(pauses, [30000]);
+  reads = 0;
+  await assert.rejects(
+    readRuns(
+      () => {
+        reads++;
+        return "not JSON";
+      },
+      async () => {},
+    ),
+    /failed twice/,
+  );
+  assert.equal(reads, 2);
+  await assert.rejects(
+    readRuns(
+      () => "{}",
+      async () => {},
+    ),
+    /failed twice/,
+  );
 });

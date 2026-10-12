@@ -18,6 +18,26 @@ export function sourceDecision(runs, head, base, number) {
   return latest.conclusion === "success" ? "success" : "failure";
 }
 
+export async function readRuns(
+  read,
+  pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = JSON.parse(read());
+      if (!Array.isArray(response.workflow_runs)) throw new Error("Missing workflow runs");
+      return response.workflow_runs;
+    } catch {
+      if (attempt === 1)
+        throw new Error(
+          "Source CI observation failed twice; inspect GitHub access before retrying",
+        );
+      console.warn("Source CI observation unavailable; retrying once in 30 seconds");
+      await pause(30000);
+    }
+  }
+}
+
 async function main() {
   const {
     GH_REPO: repository,
@@ -36,7 +56,7 @@ async function main() {
     throw new Error("Missing candidate identity");
   const deadline = Date.now() + 40 * 60 * 1000;
   while (Date.now() < deadline) {
-    const response = JSON.parse(
+    const runs = await readRuns(() =>
       execFileSync(
         "gh",
         [
@@ -46,7 +66,7 @@ async function main() {
         { encoding: "utf8", timeout: 30000 },
       ),
     );
-    const decision = sourceDecision(response.workflow_runs, head, base, number);
+    const decision = sourceDecision(runs, head, base, number);
     if (decision === "success") return;
     if (decision === "failure")
       throw new Error("Latest source CI failed or was canceled; inspect that run");

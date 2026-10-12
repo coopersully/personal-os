@@ -7,8 +7,12 @@ import { LocationMap } from "./location-map";
 vi.mock("@/components/ui/map", () => ({
   Map: ({ onFailure, onReady }: { onFailure: () => void; onReady: () => void }) => (
     <>
-      <button onClick={onFailure}>Simulate provider error</button>
-      <button onClick={onReady}>Simulate map ready</button>
+      <button type="button" onClick={onFailure}>
+        Simulate provider error
+      </button>
+      <button type="button" onClick={onReady}>
+        Simulate map ready
+      </button>
     </>
   ),
 }));

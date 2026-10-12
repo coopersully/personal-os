@@ -34,6 +34,19 @@ def check_state(check):
     return status, conclusion
 
 
+def equivalent_job_names(coverage):
+    gates = {"repository", "lint", "types-tests-coverage-builds", "browser"}
+    if not isinstance(coverage, dict) or set(coverage) != gates:
+        return None
+    names = []
+    for value in coverage.values():
+        group = [value] if isinstance(value, str) else value
+        if not isinstance(group, list) or not group or any(not isinstance(n, str) or not n for n in group):
+            return None
+        names.extend(group)
+    return names if len(names) == len(set(names)) else None
+
+
 def current_attempts(checks):
     """Supersede only attempts of the same evidenced workflow run and trigger.
 
@@ -246,15 +259,13 @@ def evaluate(state):
     verification = state.get("verification") or {}
     full_verified = verification.get("pnpmVerify") == "SUCCESS"
     if verification.get("mode") == "hosted":
-        coverage = verification.get("equivalentChecks") or {}
-        gates = {"repository", "lint", "types-tests-coverage-builds", "browser"}
+        names = equivalent_job_names(verification.get("equivalentChecks"))
         full_verified = (
             verification.get("equivalenceVerified") is True
-            and set(coverage) == gates
-            and all(isinstance(name, str) and name in expected for name in coverage.values())
-            and len(set(coverage.values())) == len(gates)
+            and names is not None
+            and all(name in expected for name in names)
             and all(any(c.get("name") == name and check_state(c) == ("COMPLETED", "SUCCESS")
-                        for c in checks) for name in coverage.values())
+                        for c in checks) for name in names)
             and verification.get("localOnlyComplete") is True
         )
     failures = verification.get("localFailures", [])

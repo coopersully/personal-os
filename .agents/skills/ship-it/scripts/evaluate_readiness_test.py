@@ -140,6 +140,26 @@ class EvaluateReadinessTest(unittest.TestCase):
         state["ci"]["checks"][-1]["conclusion"] = "FAILURE"
         self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
 
+    def test_hosted_matrix_requires_each_distinct_successful_member(self):
+        coverage = {"repository": "Repository", "lint": "Lint", "types-tests-coverage-builds": "Node",
+                    "browser": ["Browser desktop", "Browser mobile"]}
+        state = ready_state(verification={"mode": "hosted", "pnpmVerify": "NOT_RUN",
+            "equivalenceVerified": True, "localOnlyComplete": True, "equivalentChecks": coverage})
+        for name in ["Repository", "Lint", "Node", "Browser desktop", "Browser mobile"]:
+            state["ci"]["expectedSelectedChecks"].append(name)
+            state["ci"]["expectedCheckApps"][name] = 15368
+            state["ci"]["checks"].append(dict(state["ci"]["checks"][0], name=name))
+        self.assertEqual(evaluate(state)["decision"], "MERGE")
+        state["ci"]["checks"][-1]["conclusion"] = "FAILURE"
+        self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
+        state["ci"]["checks"][-1]["conclusion"] = "SUCCESS"
+        for invalid in [[], ["Browser desktop", "Lint"], ["Browser desktop", "Browser desktop"], [None]]:
+            state["verification"]["equivalentChecks"]["browser"] = invalid
+            self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
+        state["verification"]["equivalentChecks"]["browser"] = ["Browser desktop", "Browser mobile"]
+        state["ci"]["checks"].pop()
+        self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
+
     def test_selected_job_must_exist_and_succeed_with_expected_provider(self):
         state = ready_state()
         state["ci"]["expectedSelectedChecks"] = ["Browser acceptance"]

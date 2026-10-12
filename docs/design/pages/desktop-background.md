@@ -1,5 +1,23 @@
 # Desktop background setup
 
+## Current source status
+
+[PR #218 — Improve desktop background setup and pet quick access](https://github.com/coopersully/personal-os/pull/218)
+merged on October 11, 2026 at `6c6c4ab936ecc19e43956f6cbf6518f3235a683a`.
+The source includes shared setup/readiness guidance, the single-window pet/card scene,
+cursor-selected anchors, pinning/resizing, configurable idle sleep, and optional closed-card shoo.
+Shoo defaults to disabled with Medium sensitivity; it does not move an open card. Quick access
+includes independent task/reminder windows and optional ritual cards; Finance's Next 30 days
+remains unavailable without scheduled-outflow evidence.
+
+The dated design and worktree checkpoints below preserve how these requirements evolved. Their
+earlier “not implemented” or draft status does not describe the merged source. Implementation
+owners are the native scene and gesture modules under `apps/desktop/macos`,
+`apps/desktop/src-tauri/src/pet_content.rs`, and `apps/web/src/features/desktop/pet-overlay.tsx`.
+Source implementation and automated tests do not establish signed-release startup, actual OS
+notification presentation, smooth pointer behavior, cross-application click-through, or every
+Dock/display/Spaces configuration. Retain the native acceptance gaps recorded below.
+
 
 **Required: Sonner for all settings errors and discrete action feedback.** Pending, success,
 and failure messages for notification tests, connection tests, refreshes, permissions, and
@@ -162,11 +180,11 @@ clipped task titles; cards retain their content height and the overlay scrolls v
 
 ### Connected pet motion
 
-**Target behavior, revised during design on 2026-10-07; not a claim of native implementation.**
+**Accepted design recorded on 2026-10-07; see Current source status for the later merged slice.**
 The [living pet system decision record](../../superpowers/specs/2026-10-07-desktop-pet-system-design.md)
 tracks the agreed interactions, engineering proposals, unresolved choices, and required evidence.
 These rules supersede the earlier header-only dragging, always-above pet, and separate-window
-follower design described by the current implementation.
+follower design present at that design checkpoint.
 
 The pet and quick-access card form one moving object. Opening expands the card from the pet;
 closing collapses it into the pet. Repeated input reverses from the current pose without jumping.
@@ -313,10 +331,10 @@ a settled peek only redraws its expression when needed. Relocation clears the ol
   pinning suppresses outside-click dismissal. Refresh data every minute while open and update
   from newly published native snapshots without transferring private payloads in events.
 
-### Pet reassessment: accepted requirements, not implemented (2026-10-09)
+### Pet reassessment: historical requirements checkpoint (2026-10-09)
 
-Live user feedback supersedes the earlier implementation claims: the pet still clips whenever
-it sleeps, and color changes are severely laggy and sometimes inaccurate. Existing geometry
+At this checkpoint, live user feedback superseded the earlier implementation claims: the pet clipped
+when it slept, and color changes were severely laggy and sometimes inaccurate. Existing geometry
 tests do not establish correct rendering. Reproduce the actual sleep clipping at every edge
 and trace color input through preview, persistence, native updates, and rendering before
 choosing fixes. Review the whole interaction system for responsive, seamless animation;
@@ -355,14 +373,14 @@ at recognition. Respect Reduce Motion and preserve pin intent. Start with Low/Me
 sensitivity choices, calibrated against actual interaction traces; thresholds and defaults are
 not settled. The closed-card-only restriction above is an accepted requirement.
 
-The checkpoint has been pushed and the user approved an evidence-first system reassessment.
-These requirements must not be represented as already shipped.
+At this checkpoint, the user approved an evidence-first system reassessment. That approval alone
+did not establish delivery; the later merged source and remaining native evidence are distinguished above.
 
 The proposed implementation design is recorded in
 [Desktop pet reliability and quick access](../../superpowers/specs/2026-10-09-desktop-pet-reliability-design.md),
 with its [implementation plan](../../superpowers/plans/2026-10-09-desktop-pet-reliability.md).
-Both are for review; proposed defaults and engineering approaches do not supersede the accepted
-requirements above until approved. The first implementation milestone is a measured diagnosis.
+These records preserve the design review and implementation history; proposals alone do not
+supersede accepted requirements or prove delivery. The initial milestone was a measured diagnosis.
 
 The pet’s eyes remain horizontally centered on the body in every pose, including sleep, hover,
 rotation, and dragging. Eye spacing does not drift with screen position.

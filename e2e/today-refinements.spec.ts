@@ -33,6 +33,14 @@ test("Today keeps independent cards, saves personalization and uses weekly filte
     await expect(page.getByRole("radio", { name: "Weather", exact: true })).toBeChecked();
     await page.getByRole("link", { name: "Back to Today" }).click();
     await expect(page.getByRole("region", { name: "Today's calendar" })).toBeVisible();
+    const timeline = page.getByRole("region", { name: "Today's calendar" });
+    await expect(timeline).toHaveCSS("backdrop-filter", "blur(20px) saturate(1.15)");
+    await page.emulateMedia({ contrast: "more" });
+    await expect(timeline).toHaveCSS("backdrop-filter", "none");
+    await page.emulateMedia({ contrast: "no-preference", forcedColors: "active" });
+    await expect(timeline).toHaveCSS("backdrop-filter", "none");
+    await page.emulateMedia({ forcedColors: "none" });
+    await expect(timeline).toHaveCSS("backdrop-filter", "blur(20px) saturate(1.15)");
     const queue = page.getByRole("complementary", { name: "To take care of" });
     await expect(queue.getByText("This week · Tasks and reminders")).toBeVisible();
     await queue.getByRole("radio", { name: /^Tasks / }).click();

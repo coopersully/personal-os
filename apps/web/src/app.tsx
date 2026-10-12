@@ -2483,7 +2483,16 @@ function TodayPage({
   const eventSummary = "Today · Events, tasks and reminders";
   const openDayQuote = emptyDayQuote(today, remainingCount === 0);
   return (
-    <div className="today-layout" data-page="today">
+    <div
+      className="today-layout"
+      data-page="today"
+      data-material-scope={
+        preferences.data?.preferences.background === "weather" ||
+        preferences.data?.preferences.background === "map"
+          ? "frosted"
+          : undefined
+      }
+    >
       <TodayBackground
         timeZone={user.planningTimezone}
         mode={preferences.data?.preferences.background ?? "default"}

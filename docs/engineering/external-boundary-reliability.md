@@ -168,3 +168,9 @@ MapLibre 6.14.0's worker and shared module are copied together by `maps:prepare`
 A release must exercise actual style, source metadata, vector, sprite and glyph requests, WebGL2,
 light/dark changes, attribution, unmount cleanup and the no-key/network/WebGL fallback. Local
 fixture browser evidence does not establish packaged macOS/Windows webview compatibility.
+
+The dedicated Mac builder also reads the optional owner-private
+`~/nohmi-production/carto-api-key` on each build, allowing the stable controller's sudo boundary to
+retain the public basemap configuration without LaunchAgent environment assumptions. Follow
+`deploy/mac-mini/continuous.md` for the attended builder installation; do not infer deployment
+success from key-file installation.

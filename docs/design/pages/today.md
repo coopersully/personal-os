@@ -52,7 +52,9 @@ with retained attempted values and explicit review/reapply in settings.
 
 Default uses normal theme surfaces. Weather reuses semantic sky tokens and condition treatment;
 its narrowly scoped gradient is an approved decorative-background exception. Foreground cards
-remain opaque. Map uses an adapted MIT MapCN component with pinned MapLibre 6.14.0, reicon controls
+use the shared frosted material in Weather and Map modes, with fully opaque text and controls.
+Default remains opaque. Reduced transparency, increased contrast, forced colors and browsers without
+backdrop filtering use opaque cards. Map uses an adapted MIT MapCN component with pinned MapLibre 6.14.0, reicon controls
 and a same-origin module worker/shared module pair. Preview is interactive with a location marker;
 background is inert without a precise marker. Attribution remains visible and keyboard accessible.
 The explicit Open map link opens OpenStreetMap; the location trigger itself opens the preview.

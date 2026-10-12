@@ -146,3 +146,27 @@ budgets and process-group cleanup. Installation, real public CI availability,
 dedicated-engine build capacity, provider/network function, a successful merged
 main deployment, and physical reboot recovery need separate live evidence. Green
 tests cannot prove these production boundaries or offsite recovery.
+
+## Public CARTO basemap key
+
+The installed builder reads an optional owner-private
+`/Users/nohmi-production/nohmi-production/carto-api-key` on every build, before passing
+`VITE_CARTO_API_KEY` through the Docker build environment. The file takes precedence over the
+process environment. An absent file preserves the existing optional environment/no-map fallback;
+an empty, whitespace-containing or non-private file fails the build before Docker runs. This is a
+browser/public basemap key, never a CARTO administrative credential. The resulting web bundle
+necessarily exposes it; restrict its allowed origins in CARTO.
+
+The stable controller does not update itself when application changes merge. Install this branch's
+reviewed `deploy/mac-mini/build.mjs` into the existing controller alongside its existing safety and
+command modules. For this builder-only update, use `withLock` from the installed safety module so
+an active production operation prevents installation; never remove a held lock. Save an owned
+private backup of the previous builder. The long-lived controller launches a fresh builder process
+for each build, so this change requires no controller restart or LaunchAgent environment edit.
+Write the key with `writePrivate`, passing its value on stdin rather than shell history or command
+arguments. Do not alter `config.json`, provider encryption files, Docker identity or deployed state.
+
+This prepares subsequent builds; it does not rebuild the current image or trigger deployment.
+After the Today changes merge and the normal controller deploys the eligible main commit, inspect
+production Today in Map mode and verify actual tiles, attribution and reload recovery. A private key
+file or a successful HTTP style request alone does not prove the production WebGL integration.

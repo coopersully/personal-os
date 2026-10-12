@@ -1,0 +1,24 @@
+/* Opt in a surface directly, or share the material across a region's cards.
+   Keep text and controls opaque; only the surface fill is translucent. */
+.material-frosted,
+[data-material-scope="frosted"] [data-slot="card"] {
+  background: var(--card);
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .material-frosted,
+  [data-material-scope="frosted"] [data-slot="card"] {
+    background: color-mix(in oklab, var(--card) 78%, transparent);
+    -webkit-backdrop-filter: blur(20px) saturate(115%);
+    backdrop-filter: blur(20px) saturate(115%);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
+  .material-frosted,
+  [data-material-scope="frosted"] [data-slot="card"] {
+    background: var(--card);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}

@@ -261,7 +261,7 @@ colors, raw color utilities, or a second spacing scale.
 | Spacing | Use the shared 4 px rhythm. Block gaps are 24–32 px; row gaps are 8–12 px; dense metadata gaps are 4–8 px. |
 | Shape | Shared `--radius` owns component roundness. Use cards and controls from `src/components/ui`; do not invent parallel primitives. |
 | Color | Primary actions, selection, and current context use the monochrome ink scale. Warning, destructive, info, and success use semantic status tokens only. |
-| Effects | No decorative gradients, borders, elevation shadows, blur, glass, or translucent product surfaces. Hierarchy comes from spacing, type, and opaque tonal fields. A surface-colored edge fade with bounded backdrop blur is allowed only when it separates fixed navigation from scrolling content, as in Setup and Calendar. |
+| Effects | No decorative gradients, borders, elevation shadows, blur, glass, or translucent product surfaces, except the explicitly selected Today Weather/Map backgrounds and shared frosted material described below. Hierarchy comes from spacing, type, and opaque tonal fields. A surface-colored edge fade with bounded backdrop blur is allowed only when it separates fixed navigation from scrolling content, as in Setup and Calendar. |
 | Icons | Icons clarify an existing label or stand in only when the action has a familiar, accessible name. Icon-only actions require an accessible label and tooltip. |
 | Navigation | Active navigation keeps the same geometry as inactive navigation and uses the solid form of its icon; inactive items use the outline form. |
 | Motion | Motion confirms a spatial change and stays brief. It never conveys the only signal of urgency, completion, or error. Respect reduced motion. |
@@ -796,3 +796,16 @@ Settings controls and contextual Display menus use the same serialized save path
 Explicit URL choices remain temporary overrides. Device-specific shell geometry remains local.
 Tasks can save a default capture list and whether completed tasks appear in container views; explicit
 placement, lifecycle views, and URL filters take precedence.
+
+### Shared frosted material
+
+`apps/web/src/components/ui/materials.css` defines `.material-frosted` for an individual
+surface and `data-material-scope="frosted"` for a region's shared Card components.
+Today opts into this material only for the Weather and Map background preferences; Default
+keeps standard opaque cards. Other features can reuse the same material when explicitly designed
+for a decorative backdrop, without duplicating local glass effects.
+
+The fill uses the semantic card color at 78% opacity with a 20px backdrop blur. Text, controls,
+focus indicators and portaled overlays retain their normal opacity. Light and dark themes share
+the same semantic treatment. Unsupported backdrop filtering, reduced transparency, increased
+contrast and forced colors use an opaque card and no blur. Never set opacity on the whole card.

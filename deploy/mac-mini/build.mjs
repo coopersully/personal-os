@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { run } from "./commands.mjs";
-import { writePrivate } from "./safety.mjs";
+import { privateFile, writePrivate } from "./safety.mjs";
 
 // Build clean committed source, never an operator's ignored .env or dirty tree.
 process.umask(0o077);
@@ -25,6 +25,14 @@ try {
     throw new Error("Build requires the explicit dedicated nohmi-production Docker socket.");
   const env = { ...process.env, DOCKER_HOST: dockerHost };
   delete env.DOCKER_CONTEXT;
+  // launchd's sudo boundary does not preserve arbitrary environment variables.
+  // Read the dedicated account's optional public basemap key on every build.
+  const cartoKeyPath = join(homedir(), "nohmi-production", "carto-api-key");
+  if (existsSync(cartoKeyPath)) {
+    const key = privateFile(cartoKeyPath).trim();
+    if (!key || /\s/.test(key)) throw new Error("CARTO key file must contain one nonempty token.");
+    env.VITE_CARTO_API_KEY = key;
+  }
   if ((await run("git", ["-C", repository, "rev-parse", `${revision}^{commit}`])) !== revision)
     throw new Error("Release must resolve to the exact supplied commit.");
   temporary = mkdtempSync(join(tmpdir(), "ilo-release-build-"));

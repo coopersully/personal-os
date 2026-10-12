@@ -3,6 +3,7 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 @import "./features/public-site/documents.css";
+@import "./components/ui/materials.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -7612,7 +7613,7 @@ html.pet-window #root {
 /* Today reserves control geometry while asynchronous sources resolve. */
 .today-page-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; }
 .today-layout { gap: 1rem; }
-.today-schedule, .today-queue { padding: 1.25rem; background: var(--card); border-radius: var(--radius); }
+.today-schedule, .today-queue { padding: 1.25rem; border-radius: var(--radius); }
 .today-timeline__reminder { position: absolute; text-align: left; justify-content: start; overflow: hidden; text-overflow: ellipsis; border-left: 3px solid var(--primary); z-index: 2; }
 .workspace-app-bar__weather-trigger { min-width: 7rem; }
 .workspace-app-bar__weather-location { width: 10rem; }

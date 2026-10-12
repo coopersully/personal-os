@@ -52,6 +52,7 @@ export type CalendarProviderReconciliationLog = {
 
 export type RequestLog = {
   accountId?: string;
+  capability?: "calendar" | "mail";
   ageMs?: number | undefined;
   calendarProviderReconciliation?: CalendarProviderReconciliationLog;
   category?: ConnectorFailureCategory | "timeout" | "overflow" | "unexpected";
@@ -71,6 +72,8 @@ export type RequestLog = {
     | "connector_subscription_expired"
     | "connector_subscription_failed"
     | "connector_subscription_renewed"
+    | "connector_capability_completed"
+    | "connector_capability_failed"
     | "connector_sync_completed"
     | "connector_sync_failed"
     | "connector_sync_freshness_observed"

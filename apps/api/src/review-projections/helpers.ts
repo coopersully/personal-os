@@ -5,7 +5,7 @@ import {
   domainProfiles,
 } from "@personal-os/database";
 import type { AgentAccessDomain, AgentAccessWorkItem } from "@personal-os/domain";
-import { and, eq, lte } from "drizzle-orm";
+import { and, eq, lte, or, sql } from "drizzle-orm";
 import { readProjectionRows } from "../finance/search-projection-bounds.js";
 import type { ProjectionInput, SourceReaders } from "./contract.js";
 
@@ -22,7 +22,11 @@ export function createSharedProjectionReaders(
           .where(
             and(
               eq(calendarAccounts.userId, userId),
-              eq(calendarAccounts.syncRecovery, "reconnect"),
+              or(
+                eq(calendarAccounts.syncRecovery, "reconnect"),
+                sql`${calendarAccounts.syncCapabilities}->'calendar'->'health'->>'recovery' = 'reconnect'`,
+                sql`${calendarAccounts.syncCapabilities}->'mail'->'health'->>'recovery' = 'reconnect'`,
+              ),
               lte(calendarAccounts.updatedAt, snapshotAt),
             ),
           ),
@@ -91,6 +95,8 @@ export function projectReconnect(
   label: string,
   account: typeof calendarAccounts.$inferSelect,
 ): AgentAccessWorkItem[] {
+  const scoped = account.syncCapabilities?.[domain];
+  if ((scoped ? scoped.health.recovery : account.syncRecovery) !== "reconnect") return [];
   const items: AgentAccessWorkItem[] = [];
   items.push({
     action: { label: "Reconnect", to: "/settings?section=connections" },

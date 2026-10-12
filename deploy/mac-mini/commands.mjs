@@ -14,6 +14,7 @@ import {
 import { join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { composeModel, environmentFiles, validateConfig } from "./compose.mjs";
+import { collectDiagnostics } from "./diagnostics.mjs";
 import {
   assertEmptyDatabase,
   emptyDatabaseSql,
@@ -505,6 +506,7 @@ export async function stop(runtime) {
 export async function execute(action, configPath, args = []) {
   const runtime = loadRuntime(configPath);
   if (action === "status") return runtime.compose(["ps", "--format", "json"]);
+  if (action === "diagnostics") return JSON.stringify(await collectDiagnostics(runtime), null, 2);
   // Signal intent before contending with a running build. If the lock is busy,
   // the operator retries stop after it exits; the controller cannot publish it.
   const maintenance = join(runtime.root, "maintenance.json");
@@ -547,7 +549,7 @@ export async function execute(action, configPath, args = []) {
         return backup(runtime);
       default:
         throw new Error(
-          "Unknown command. Use prepare, check, database, restore, repair-tasks, activate, start, publish, stop, backup, or status.",
+          "Unknown command. Use prepare, check, database, restore, repair-tasks, activate, start, publish, stop, backup, status, or diagnostics.",
         );
     }
   });

@@ -298,3 +298,10 @@ updates and schema changes remain attended, with a fresh backup and rollback pla
 Run `pnpm test:mac-production` and `pnpm verify`. Tests are implementation evidence,
 not proof of Cloudflare authority, public certificates, real callbacks, startup
 recovery, or offsite restore. Record each live gate separately.
+
+## Diagnostics and centralized monitoring
+
+`node deploy/mac-mini/cli.mjs diagnostics /absolute/private/config.json` returns a bounded read-only
+snapshot of host/container resources, restart/OOM state and sanitized connector events. Missing
+readings are listed explicitly; the configured revision is not proof of the deployed revision.
+See [Grafana Cloud setup](../observability/README.md) for optional historical metrics and logs.

@@ -17,6 +17,7 @@ Read the root `AGENTS.md`, then use this map. Read the relevant sections, not th
 | What stewardship means and who owns execution | [Workspace stewardship](../product/workspace-stewardship.md) |
 | Shared personal context, learning, and consent | [User Knowledge](../product/user-knowledge.md) |
 | Full Finance/Texting toolkit design under written review | [Shared toolkit](../superpowers/specs/2026-09-28-shared-agent-toolkit-design.md), [Finance](../superpowers/specs/2026-09-28-finance-toolkit-design.md), [Texting](../superpowers/specs/2026-09-28-texting-toolkit-design.md) |
+| Detailed Finance/Texting completion contracts and implementation tasks | [Completion spec](../superpowers/specs/2026-10-12-finance-texting-completion-design.md), [implementation map](../superpowers/plans/2026-10-12-finance-texting-completion.md) |
 | Finance/Texting source coverage and remaining implementation order | [Spec reconciliation](finance-texting-spec-reconciliation.md) |
 | Actual delivered capabilities | [Implementation log](../product/implementation-log.md), current code, migrations, tests, and live evidence |
 | Packages, domain seams, and shared integration work | [System shape](../architecture/0001-system-shape.md), [feature ownership](feature-ownership.md) |

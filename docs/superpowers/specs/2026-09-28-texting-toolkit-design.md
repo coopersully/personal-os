@@ -12,6 +12,11 @@
 - Target behavior only. No real message, provider configuration or runtime change is authorized
   by this document. Implementation plans follow written-spec review.
 
+Detailed completion contracts and task plans were requested on 2026-10-12. Read the
+[completion specification](2026-10-12-finance-texting-completion-design.md) and
+[implementation map](../plans/2026-10-12-finance-texting-completion.md) with this design.
+The new documents refine remaining work; product implementation has not begun.
+
 ## 1. Purpose and ownership
 
 Texting gives the person one durable conversation with their external agents through nohmi.

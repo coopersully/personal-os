@@ -96,6 +96,12 @@ The [shared toolkit design](../superpowers/specs/2026-09-28-shared-agent-toolkit
 specifies cross-agent retrieval, mutation, history, and acceptance requirements. Its detailed
 design is pending written review; these account-owned knowledge principles are settled decisions.
 
+The [completion specification](../superpowers/specs/2026-10-12-finance-texting-completion-design.md)
+now defines the proposed typed storage, opt-in read/write scopes, bounded context, lifecycle, narrow
+deterministic promotion rule and migration contract. The
+[shared toolkit plan](../superpowers/plans/2026-10-12-shared-toolkit-completion.md) maps these to
+implementation and acceptance tasks. They remain target design, not delivered persistent memory.
+
 The source record and an exact excerpt or safe structured observation should remain available when
 the person is allowed to inspect it. A generated summary is useful retrieval material but cannot be
 the only evidence for a durable belief.

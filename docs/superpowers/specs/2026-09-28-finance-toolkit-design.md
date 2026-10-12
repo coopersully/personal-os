@@ -10,8 +10,13 @@
 - Canonical contracts: [master design](../../product/master-design.md),
   [Finance MVP](../../product/finance-workspace-plan.md),
   [finance invariants](../../architecture/0003-finance-intelligence.md).
-- This specifies the full Finance target in staged releases. Implementation planning follows
-  written approval; no product implementation or external action occurs through this document.
+- This specifies the full Finance target in staged releases. Detailed implementation planning was
+  requested on 2026-10-12; no product implementation or external action occurs through this document.
+
+Detailed completion contracts and task plans were requested on 2026-10-12. Read the
+[completion specification](2026-10-12-finance-texting-completion-design.md) and
+[implementation map](../plans/2026-10-12-finance-texting-completion.md) with this design.
+The new documents refine remaining work; product implementation has not begun.
 
 ## 1. Outcome and boundaries
 

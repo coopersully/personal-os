@@ -32,6 +32,15 @@ Read actual route and composition registrations as well as declarative manifests
 `packages/domain/src/finance/workflow-contracts.ts` still describes a narrower registration set than
 current runtime composition. A static declaration alone is neither proof of delivery nor proof of absence.
 
+Detailed remaining-work contracts and task-level plans are now available in the
+[completion specification](../superpowers/specs/2026-10-12-finance-texting-completion-design.md) and
+[implementation map](../superpowers/plans/2026-10-12-finance-texting-completion.md). These are planning
+artifacts, not additional delivered capability.
+
+The existing `agent-access-work-items.ts` service already provides cross-workspace review/attention
+listing with snapshot pagination. Reuse those native projections. The missing layer is durable generic
+claims, general SMS work and authority-preserving resumption, not all cross-workspace listing.
+
 ## Revised implementation order
 
 Each stage is a bounded implementation outcome with its own acceptance evidence. The detailed

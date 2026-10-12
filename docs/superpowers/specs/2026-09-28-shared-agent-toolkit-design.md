@@ -10,9 +10,14 @@
 - Authority: [master design](../../product/master-design.md),
   [User Knowledge](../../product/user-knowledge.md),
   [stewardship](../../product/workspace-stewardship.md).
-- Scope: design only. Detailed implementation plans follow written-spec review. No runtime,
+- Scope: design only. Detailed implementation plans are now drafted at Cooper's request for review. No runtime,
   migration, external account, production message, or existing automation changes are authorized
   by this document alone.
+
+Detailed completion contracts and task plans were requested on 2026-10-12. Read the
+[completion specification](2026-10-12-finance-texting-completion-design.md) and
+[implementation map](../plans/2026-10-12-finance-texting-completion.md) with this design.
+The new documents refine remaining work; product implementation has not begun.
 
 ## 1. Intent and settled boundaries
 
@@ -210,4 +215,4 @@ and SMS runtime, with bounded shared structured account knowledge. Do not rebuil
 recovery loops, host controls or registered agent adapters. Then finish Finance planning/authority, shared knowledge
 management and general cross-workspace Texting. Finish optional events and broader reporting without
 holding the initial usable journey for host integrations or semantic retrieval. These are dependency
-boundaries for the forthcoming plans, not dispatched tasks or claims of delivered milestones.
+boundaries for the linked plans, not dispatched tasks or claims of delivered milestones.

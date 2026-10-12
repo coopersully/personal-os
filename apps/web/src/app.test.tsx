@@ -9121,8 +9121,16 @@ describe("ilo web app", () => {
       expect(await screen.findByRole("heading", { name: "To take care of" })).toBeInTheDocument();
       await browser.click(screen.getByRole("button", { name: "Keep window on top" }));
       await waitFor(() => expect(mocks.setAlwaysOnTop).toHaveBeenCalledWith(true));
+      expect(screen.getByRole("button", { name: "Keep window on top" })).toHaveAttribute(
+        "data-variant",
+        "secondary",
+      );
       await browser.click(screen.getByRole("button", { name: "Keep window on top" }));
       await waitFor(() => expect(mocks.setAlwaysOnTop).toHaveBeenCalledWith(false));
+      expect(screen.getByRole("button", { name: "Keep window on top" })).toHaveAttribute(
+        "data-variant",
+        "ghost",
+      );
     } finally {
       desktopView.unmount();
       Reflect.deleteProperty(window, "__TAURI_INTERNALS__");

@@ -4,6 +4,50 @@ import XCTest
 @testable import IloNative
 
 final class PetSceneTests: XCTestCase {
+  func testClickDoesNotBeginOrFinishADrag() throws {
+    _ = NSApplication.shared
+    let pet = PetView(frame: CGRect(x: 0, y: 0, width: 72, height: 72))
+    var starts = 0, finishes = 0, clicks = 0
+    pet.dragStart = { _ in starts += 1 }
+    pet.moved = { finishes += 1 }
+    pet.click = { clicks += 1 }
+    let event = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: .zero,
+      modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+      eventNumber: 0, clickCount: 1, pressure: 1))
+    pet.mouseDown(with: event)
+    pet.mouseDragged(with: event)
+    pet.mouseUp(with: event)
+    XCTAssertEqual(starts, 0)
+    XCTAssertEqual(finishes, 0)
+    XCTAssertEqual(clicks, 1)
+    pet.mouseUp(with: event)
+    XCTAssertEqual(clicks, 1, "An unmatched release must not toggle quick access")
+  }
+  func testPetDragThresholdIgnoresJitterAndDoesNotToggleOnRelease() throws {
+    _ = NSApplication.shared
+    let pet = PetView(frame: CGRect(x: 0, y: 0, width: 72, height: 72))
+    var origins: [CGPoint] = [], finishes = 0, clicks = 0
+    pet.dragStart = { origins.append($0) }
+    pet.moved = { finishes += 1 }
+    pet.click = { clicks += 1 }
+    func event(_ type: NSEvent.EventType, x: CGFloat) throws -> NSEvent {
+      try XCTUnwrap(NSEvent.mouseEvent(with: type, location: CGPoint(x: x, y: 0),
+        modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+        eventNumber: 0, clickCount: 1, pressure: 1))
+    }
+    pet.mouseDown(with: try event(.leftMouseDown, x: 0))
+    pet.mouseDragged(with: try event(.leftMouseDragged, x: 5))
+    XCTAssertTrue(origins.isEmpty)
+    pet.mouseUp(with: try event(.leftMouseUp, x: 5))
+    XCTAssertEqual(clicks, 1)
+    pet.mouseDown(with: try event(.leftMouseDown, x: 0))
+    pet.mouseDragged(with: try event(.leftMouseDragged, x: 10))
+    pet.mouseDragged(with: try event(.leftMouseDragged, x: 20))
+    pet.mouseUp(with: try event(.leftMouseUp, x: 20))
+    XCTAssertEqual(origins, [.zero])
+    XCTAssertEqual(finishes, 1)
+    XCTAssertEqual(clicks, 1)
+  }
   private func settings(enabled: Bool, scale: Double = 1) -> NativeSettings {
     NativeSettings(
       serverUrl: "https://api.example.com", launchAtLogin: false,
@@ -50,7 +94,12 @@ final class PetSceneTests: XCTestCase {
     let address = UInt64(UInt(bitPattern: Unmanaged.passUnretained(owner).toOpaque()))
     try controller.prepareOverlay(windowAddress: address)
     try controller.readyOverlay(windowAddress: address)
+    func shields() -> [NSWindow] {
+      NSApp.windows.filter { $0.title == "nohmi quick access dismissal" && $0.isVisible }
+    }
+    XCTAssertEqual(shields().count, NSScreen.screens.count)
     controller.setPinned(true)
+    XCTAssertTrue(shields().isEmpty, "Pinned quick access must allow interaction with other apps")
     controller.dismissForNavigation()
     XCTAssertEqual(controller.presentationState["visible"] as? Bool, true)
     controller.closeOverlay(immediately: true)
@@ -58,6 +107,19 @@ final class PetSceneTests: XCTestCase {
     try controller.readyOverlay(windowAddress: address)
     XCTAssertEqual(controller.presentationState["pinned"] as? Bool, true)
     controller.setPinned(false)
+    // Reopening restores the transient dismissal surface without changing pin intent.
+    try controller.prepareOverlay(windowAddress: address)
+    try controller.readyOverlay(windowAddress: address)
+    XCTAssertEqual(shields().count, NSScreen.screens.count)
+    let shield = try XCTUnwrap(shields().first)
+    let view = try XCTUnwrap(shield.contentView)
+    let event = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: .zero,
+      modifierFlags: [], timestamp: 0, windowNumber: shield.windowNumber, context: nil,
+      eventNumber: 0, clickCount: 1, pressure: 1))
+    view.mouseDown(with: event)
+    XCTAssertEqual(controller.presentationState["visible"] as? Bool, true)
+    view.mouseUp(with: event)
+    XCTAssertTrue(shields().isEmpty)
     controller.dismissForNavigation()
     XCTAssertEqual(controller.presentationState["visible"] as? Bool, false)
   }

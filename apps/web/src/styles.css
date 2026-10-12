@@ -7608,3 +7608,14 @@ html.pet-window #root {
 .pet-resize--nw { top: 0; left: 0; cursor: nwse-resize; }
 .pet-resize--se { bottom: 0; right: 0; cursor: nwse-resize; }
 .pet-resize--sw { bottom: 0; left: 0; cursor: nesw-resize; }
+
+/* Let the webview gently settle near section starts without trapping long sections. */
+.pet-section-scroll [data-slot="scroll-area-viewport"] {
+  scroll-snap-type: y proximity;
+  scroll-padding-top: 12px;
+}
+.pet-section-scroll [data-pet-scroll-anchor] { scroll-snap-align: start; }
+/* Leave the outer edge available for native resizing beside the overlay scrollbar. */
+.pet-section-scroll [data-slot="scroll-area-scrollbar"][data-orientation="vertical"] {
+  right: 6px !important;
+}

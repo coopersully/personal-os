@@ -5,11 +5,17 @@ import { listen } from "@tauri-apps/api/event";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { api } from "../../api.js";
 import { type PetData, PetOverlay } from "./pet-overlay.js";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn().mockResolvedValue(() => {}) }));
-vi.mock("../../api.js", () => ({ api: { getMe: vi.fn().mockResolvedValue({ theme: "dark" }) } }));
+vi.mock("../../api.js", () => ({
+  api: {
+    getMe: vi.fn().mockResolvedValue({ theme: "dark" }),
+    listCalendars: vi.fn().mockResolvedValue([]),
+  },
+}));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), dismiss: vi.fn() }, Toaster: () => null }));
 const fixture: PetData = {
   workspaces: ["tasks"],
@@ -27,6 +33,7 @@ const fixture: PetData = {
 afterEach(() => vi.useRealTimers());
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(api.listCalendars).mockResolvedValue([]);
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     value: vi.fn(() => ({
@@ -136,7 +143,7 @@ it("reports failed card dragging through Sonner", async () => {
   );
   await waitFor(() => expect(toast.error).toHaveBeenCalled());
 });
-it("drags the card surface, excludes controls, and exposes pin and keyboard resize", async () => {
+it("drags the card surface, excludes controls, and exposes pin without a resize button", async () => {
   mount();
   const body = await screen.findByRole("dialog", { name: "Pet quick access" });
   fireEvent(body, new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
@@ -153,12 +160,8 @@ it("drags the card surface, excludes controls, and exposes pin and keyboard resi
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith("pet_action", { value: { action: "pin", pinned: true } }),
   );
-  fireEvent.keyDown(screen.getByRole("button", { name: "Resize pet card" }), { key: "ArrowRight" });
-  await waitFor(() =>
-    expect(invoke).toHaveBeenCalledWith("pet_action", {
-      value: { action: "resize", dw: 20, dh: 0 },
-    }),
-  );
+  expect(screen.queryByRole("button", { name: "Resize pet card" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Next section" })).toBeInTheDocument();
 });
 
 it("shows today's shared timeline before tasks, including an ongoing overnight event", async () => {
@@ -204,7 +207,9 @@ it("reports pin and resize failures through Sonner", async () => {
     "false",
   );
   vi.mocked(toast.error).mockClear();
-  fireEvent.keyDown(screen.getByRole("button", { name: "Resize pet card" }), { key: "ArrowRight" });
+  const edge = document.querySelector(".pet-resize--se");
+  if (!edge) throw new Error("Missing resize corner");
+  fireEvent(edge, new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
   await waitFor(() => expect(toast.error).toHaveBeenCalled());
 });
 
@@ -288,7 +293,7 @@ it("renders scoped content, undated grouping and honest finance qualifications",
   expect(screen.queryByText("Review the draft")).not.toBeInTheDocument();
   expect(screen.getByText("Undated")).toBeInTheDocument();
   expect(screen.getByText(/Showing a limited result/)).toBeInTheDocument();
-  expect(screen.getByText(/America\/New_York/)).toBeInTheDocument();
+  expect(screen.queryByText(/America\/New_York/)).not.toBeInTheDocument();
   expect(screen.getByText(/Last 30 days/)).toBeInTheDocument();
   expect(screen.getByText(/Qualified total/)).toBeInTheDocument();
 });
@@ -495,12 +500,14 @@ it("routes scoped task and reminder links and preserves grouping", async () => {
       : undefined,
   );
   mount();
-  await screen.findByText("Late task");
+  const task = await screen.findByText("Late task");
+  expect(task.closest('[data-slot="task-item"]')).not.toBeNull();
+  expect(screen.getByText("Call back").closest('[data-slot="reminder-item"]')).not.toBeNull();
   expect(screen.getAllByText("Overdue")).toHaveLength(1);
   expect(screen.getAllByText("Upcoming")).toHaveLength(2);
   for (const [name, path] of [
-    ["Late task", "/tasks"],
-    ["Call back", "/reminders"],
+    ["Open Late task", "/tasks"],
+    ["Open Call back", "/reminders"],
     ["View all tasks", "/tasks"],
     ["View all reminders", "/reminders"],
   ] as const) {
@@ -608,11 +615,11 @@ it("pauses refresh while hidden and ignores stale presentation events", async ()
 it("ignores secondary drag buttons and supports pointer resize without dragging", async () => {
   mount();
   const move = await screen.findByRole("button", { name: "Move pet card" });
-  const resize = screen.getByRole("button", { name: "Resize pet card" });
+  const resize = document.querySelector(".pet-resize--se");
+  if (!resize) throw new Error("Missing resize corner");
   vi.mocked(invoke).mockClear();
   fireEvent(move, new MouseEvent("pointerdown", { bubbles: true, button: 2 }));
   fireEvent.keyDown(move, { key: "a" });
-  fireEvent.keyDown(resize, { key: "a" });
   expect(invoke).not.toHaveBeenCalled();
   fireEvent(resize, new MouseEvent("pointerdown", { bubbles: true, button: 0 }));
   await waitFor(() =>
@@ -671,7 +678,7 @@ it("offers calendar navigation and HTTPS conference joins only for today's futur
       : undefined,
   );
   mount();
-  fireEvent.click(await screen.findByRole("button", { name: "Holiday · All day" }));
+  fireEvent.click(await screen.findByRole("button", { name: /All day Holiday/ }));
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith("pet_action", {
       value: { action: "open", path: "/calendar" },
@@ -720,4 +727,76 @@ it("resizes from a card edge only on primary pointer input", async () => {
     expect(invoke).toHaveBeenCalledWith("pet_action", { value: { action: "resize", edge: "nw" } }),
   );
   expect(invoke).not.toHaveBeenCalledWith("pet_action", { value: { action: "drag" } });
+});
+
+it("keeps task and reminder ranges inline without timezone descriptions", async () => {
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "pet_snapshot"
+      ? {
+          ...fixture,
+          workspaces: ["tasks", "reminders"],
+          content: {
+            tasks: {
+              items: [],
+              partial: false,
+              range: { label: "Today", timeZone: "America/New_York" },
+            },
+            reminders: {
+              items: [],
+              partial: false,
+              range: { label: "This week", timeZone: "America/New_York" },
+            },
+          },
+        }
+      : undefined,
+  );
+  mount();
+  expect(await screen.findByRole("heading", { name: "Tasks due today" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Reminders due this week" })).toBeInTheDocument();
+  expect(screen.queryByText(/America\/New_York/)).not.toBeInTheDocument();
+});
+
+it("uses calendar colors for shared timed and all-day cards in one scroll area", async () => {
+  vi.mocked(api.listCalendars).mockResolvedValue([{ id: "work", color: "#4285f4" }] as Awaited<
+    ReturnType<typeof api.listCalendars>
+  >);
+  const now = new Date();
+  const event = {
+    calendarId: "work",
+    startsAt: now.toISOString(),
+    endsAt: new Date(now.getTime() + 3_600_000).toISOString(),
+  };
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "pet_snapshot"
+      ? {
+          ...fixture,
+          workspaces: ["calendar"],
+          snapshot: {
+            ...fixture.snapshot,
+            events: [
+              { ...event, id: "timed", title: "Team sync", allDay: false },
+              { ...event, id: "day", title: "Planning day", allDay: true },
+            ],
+          },
+        }
+      : undefined,
+  );
+  const { container } = mount();
+  const timed = (await screen.findByText("Team sync")).closest('[data-slot="event-card"]');
+  await waitFor(() => expect(timed).toHaveStyle({ "--calendar-color": "#4285f4" }));
+  expect(timed).toHaveAttribute("data-tone", "calendar");
+  expect(screen.getByRole("button", { name: /All day Planning day/ })).toHaveStyle({
+    "--occasion-color": "#4285f4",
+  });
+  expect(container.querySelectorAll('[data-slot="scroll-area-viewport"]')).toHaveLength(1);
+  expect(container.querySelector(".today-timeline")?.parentElement).not.toHaveClass(
+    "overflow-y-auto",
+    "max-h-72",
+  );
+  const pin = screen.getByRole("button", { name: "Pin quick access" });
+  expect(pin).toHaveAttribute("data-variant", "ghost");
+  fireEvent.click(pin);
+  await waitFor(() => expect(pin).toHaveAttribute("aria-pressed", "true"));
+  expect(pin).toHaveAttribute("data-variant", "secondary");
+  expect(pin.querySelector('path[fill="currentColor"]')).not.toBeNull();
 });

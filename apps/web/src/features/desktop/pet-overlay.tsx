@@ -1,4 +1,4 @@
-import { localDateAt, sameLocalDate } from "@personal-os/domain";
+import { localDateAt, localDateToIso, sameLocalDate } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -12,7 +12,22 @@ import {
   EventCardPrimaryAction,
   EventCardTitle,
 } from "../../components/event-card.js";
-import { PinIcon, ResizeIcon } from "../../components/icons.js";
+import { PinIcon } from "../../components/icons.js";
+import { OccasionCard } from "../../components/occasion-card.js";
+import {
+  ReminderItem,
+  ReminderItemCompletion,
+  ReminderItemContent,
+  ReminderItemPrimaryAction,
+  ReminderItemTitle,
+} from "../../components/reminder-item.js";
+import {
+  TaskItem,
+  TaskItemCompletion,
+  TaskItemContent,
+  TaskItemPrimaryAction,
+  TaskItemTitle,
+} from "../../components/task-item.js";
 import { Button } from "../../components/ui/button.js";
 import {
   Card,
@@ -22,6 +37,7 @@ import {
   CardTitle,
 } from "../../components/ui/card.js";
 import { Checkbox } from "../../components/ui/checkbox.js";
+import { ItemGroup } from "../../components/ui/item.js";
 import { Skeleton } from "../../components/ui/skeleton.js";
 import { Toaster } from "../../components/ui/sonner.js";
 import {
@@ -33,6 +49,8 @@ import {
 import { SettingsFeedbackContext, useSettingsError } from "../../lib/settings-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { DayTimeline } from "../calendar/day-timeline.js";
+import { calendarEventColorStyle } from "../calendar/event-color.js";
+import { PetSectionScroll } from "./pet-section-scroll.js";
 
 type WorkItem = {
   id: string;
@@ -65,6 +83,7 @@ type EventItem = {
   endsAt: string;
   allDay: boolean;
   conferenceUrl?: string;
+  calendarId?: string;
 };
 export type PetData = {
   contentError?: string;
@@ -148,6 +167,14 @@ function PetContent() {
     retry: false,
   });
   const me = useQuery({ queryKey: ["me"], queryFn: api.getMe, retry: false });
+  const calendars = useQuery({
+    queryKey: ["calendars"],
+    queryFn: api.listCalendars,
+    enabled: visible && !!data.data?.snapshot && !!data.data?.workspaces.includes("calendar"),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const calendarColors = new Map(calendars.data?.map((calendar) => [calendar.id, calendar.color]));
   const rawSnapshot = data.data?.snapshot;
   const snapshot = rawSnapshot
     ? { ...rawSnapshot, stale: rawSnapshot.stale || data.isError || !!data.data?.contentError }
@@ -266,6 +293,10 @@ function PetContent() {
     "Couldn’t refresh pet rituals. They will retry automatically.",
   );
   useSettingsError(data.error, "Couldn’t load quick access. It will retry automatically.");
+  useSettingsError(
+    calendars.error,
+    "Couldn’t refresh calendar colors. Try reopening quick access.",
+  );
   useSettingsError(me.error, "Couldn’t refresh your account. Open nohmi to reconnect.");
   useEffect(() => {
     const theme = me.data?.theme ?? "system";
@@ -314,22 +345,43 @@ function PetContent() {
     ) ?? [];
   const calendar =
     snapshot && data.data?.workspaces.includes("calendar") ? (
-      <section aria-label="Today's calendar" className="flex shrink-0 flex-col gap-3">
+      <section
+        data-pet-scroll-anchor
+        aria-label="Today's calendar"
+        className="flex shrink-0 flex-col gap-3"
+      >
         <h2 className="text-sm font-medium">Your timeline</h2>
-        {events
-          .filter((event) => event.allDay)
-          .map((event) => (
-            <Button
-              key={event.id}
-              variant="secondary"
-              className="justify-start"
-              onClick={() => open("/calendar")}
-            >
-              {event.title} · All day
-            </Button>
-          ))}
+        <ItemGroup className="today-all-day-strip__events">
+          {events
+            .filter((event) => event.allDay)
+            .map((event) => {
+              const start = localDateAt(new Date(event.startsAt), snapshot.timeZone);
+              const end = localDateAt(
+                new Date(new Date(event.endsAt).getTime() - 1),
+                snapshot.timeZone,
+              );
+              const label = (date: typeof start) =>
+                new Intl.DateTimeFormat("en", {
+                  month: "short",
+                  day: "numeric",
+                  timeZone: "UTC",
+                }).format(new Date(Date.UTC(date.year, date.month - 1, date.day)));
+              return (
+                <OccasionCard
+                  key={event.id}
+                  accentColor={calendarColors.get(event.calendarId ?? "") ?? "#777ce3"}
+                  startDateTime={localDateToIso(start)}
+                  endDateTime={localDateToIso(end)}
+                  startLabel={label(start)}
+                  endLabel={label(end)}
+                  title={event.title}
+                  onOpen={() => open("/calendar")}
+                />
+              );
+            })}
+        </ItemGroup>
         {events.some((event) => !event.allDay) ? (
-          <div className="max-h-72 overflow-y-auto py-3" data-no-drag="true">
+          <div className="px-2 py-3" data-no-drag="true">
             <DayTimeline
               currentTime={now}
               items={events.filter((event) => !event.allDay)}
@@ -340,7 +392,11 @@ function PetContent() {
                   role="listitem"
                   className="today-timeline__event"
                   data-density={density}
-                  style={style}
+                  tone="calendar"
+                  style={{
+                    ...calendarEventColorStyle(calendarColors.get(event.calendarId ?? "")),
+                    ...style,
+                  }}
                 >
                   <EventCardContent>
                     <EventCardPrimaryAction
@@ -381,26 +437,42 @@ function PetContent() {
         )}
       </section>
     ) : null;
-  function work(items: WorkItem[], kind: string, title: string, content?: WorkContent) {
+  function work(
+    items: WorkItem[],
+    kind: "task" | "reminder",
+    title: string,
+    content?: WorkContent,
+  ) {
+    const Item = kind === "task" ? TaskItem : ReminderItem;
+    const Completion = kind === "task" ? TaskItemCompletion : ReminderItemCompletion;
+    const PrimaryAction = kind === "task" ? TaskItemPrimaryAction : ReminderItemPrimaryAction;
+    const Content = kind === "task" ? TaskItemContent : ReminderItemContent;
+    const Title = kind === "task" ? TaskItemTitle : ReminderItemTitle;
     const visible = (content?.items ?? items).filter(
       (item) =>
         !(completed.snapshotKey === snapshotKey && completed.ids.includes(`${kind}:${item.id}`)),
     );
     return (
-      <Card className="shrink-0">
+      <Card data-pet-scroll-anchor className="shrink-0">
         <CardHeader>
-          <CardTitle>{title}</CardTitle>
-          {content ? (
-            <CardDescription>
-              {content.range.label} · {content.range.timeZone}
-            </CardDescription>
-          ) : null}
+          <CardTitle>
+            <h2 className="flex flex-wrap items-baseline gap-x-1.5">
+              <span>{title}</span>
+              {content ? (
+                <span className="text-sm font-normal text-muted-foreground">
+                  {content.range.label === "All upcoming"
+                    ? "all upcoming"
+                    : `due ${content.range.label.toLowerCase()}`}
+                </span>
+              ) : null}
+            </h2>
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {visible.length ? (
-            <ul className="flex flex-col gap-3">
+            <ItemGroup>
               {visible.map((item, index) => (
-                <li key={item.id} className="flex flex-wrap items-start gap-3">
+                <Item key={item.id}>
                   {item.group && item.group !== visible[index - 1]?.group ? (
                     <h3 className="w-full text-xs font-medium text-muted-foreground">
                       {item.group === "undated"
@@ -410,23 +482,25 @@ function PetContent() {
                           : "Upcoming"}
                     </h3>
                   ) : null}
-                  <Checkbox
-                    className="mt-1"
-                    aria-label={`Complete ${item.title}`}
-                    checked={false}
-                    disabled={snapshot?.stale || complete.isPending}
-                    onCheckedChange={() => complete.mutate({ kind, id: item.id })}
-                  />
-                  <Button
-                    variant="link"
-                    className="h-auto min-w-0 flex-1 shrink justify-start whitespace-normal p-0 text-start wrap-anywhere"
+                  <Completion>
+                    <Checkbox
+                      aria-label={`Complete ${item.title}`}
+                      checked={false}
+                      disabled={snapshot?.stale || complete.isPending}
+                      onCheckedChange={() => complete.mutate({ kind, id: item.id })}
+                    />
+                  </Completion>
+                  <PrimaryAction
+                    aria-label={`Open ${item.title}`}
                     onClick={() => open(kind === "task" ? "/tasks" : "/reminders")}
                   >
-                    {item.title}
-                  </Button>
-                </li>
+                    <Content>
+                      <Title>{item.title}</Title>
+                    </Content>
+                  </PrimaryAction>
+                </Item>
               ))}
-            </ul>
+            </ItemGroup>
           ) : (
             <p className="text-sm text-muted-foreground">Nothing in this date window.</p>
           )}
@@ -451,7 +525,7 @@ function PetContent() {
     data.data?.content?.rituals
       ?.filter((ritual) => ritual.urgent === urgent)
       .map((ritual) => (
-        <Card key={ritual.id} className="shrink-0 gap-2 py-3">
+        <Card data-pet-scroll-anchor key={ritual.id} className="shrink-0 gap-2 py-3">
           <CardHeader className="px-3">
             <CardTitle>{ritual.kind === "morning" ? "Morning ritual" : "Night ritual"}</CardTitle>
             <CardDescription>
@@ -489,14 +563,14 @@ function PetContent() {
         if (
           event.target instanceof Element &&
           !event.target.closest(
-            'button, a, input, select, textarea, label, [role="checkbox"], [role="menu"], [data-no-drag], [contenteditable="true"]',
+            'button, a, input, select, textarea, label, [role="checkbox"], [role="menu"], [data-no-drag], [data-slot="scroll-area-scrollbar"], [contenteditable="true"]',
           )
         )
           drag(event);
       }}
     >
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-xl bg-background p-3">
-        <header className="flex shrink-0 items-center justify-between gap-2">
+      <PetSectionScroll>
+        <header data-pet-scroll-anchor className="flex shrink-0 items-center justify-between gap-2">
           <div
             className="min-w-0 cursor-grab"
             onPointerDown={(event) => {
@@ -537,7 +611,7 @@ function PetContent() {
               pressed={pinned}
               onClick={() => pin.mutate(!pinned)}
             >
-              <PinIcon />
+              <PinIcon weight={pinned ? "Filled" : "Outline"} />
             </IconAction>
             <IconAction label="Open nohmi" onClick={() => open("/today")}>
               <img src="/icon.svg" alt="" className="size-6 rounded-md" />
@@ -547,7 +621,7 @@ function PetContent() {
         {data.isPending ? (
           <Skeleton className="h-32 w-full" />
         ) : data.isError && !snapshot ? null : !snapshot ? (
-          <Card className="shrink-0">
+          <Card data-pet-scroll-anchor className="shrink-0">
             <CardHeader>
               <CardTitle>Sign in to see your day</CardTitle>
               <CardDescription>Open nohmi to connect your account.</CardDescription>
@@ -571,7 +645,7 @@ function PetContent() {
             {!sectionErrors?.finances &&
             data.data?.workspaces.includes("finances") &&
             (finance || snapshot.financeSummary) ? (
-              <Card className="shrink-0">
+              <Card data-pet-scroll-anchor className="shrink-0">
                 <CardHeader>
                   <CardTitle>Finances</CardTitle>
                   {finance ? (
@@ -608,7 +682,7 @@ function PetContent() {
             ) : null}
           </>
         )}
-      </div>
+      </PetSectionScroll>
       {(["n", "s", "e", "w", "ne", "nw", "se", "sw"] as const).map((edge) => (
         <div
           key={edge}
@@ -623,36 +697,6 @@ function PetContent() {
           }}
         />
       ))}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="absolute bottom-1 right-1 z-20 size-6 cursor-nwse-resize"
-            aria-label="Resize pet card"
-            onPointerDown={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              action.mutate({ action: "resize", edge: "se" });
-            }}
-            onKeyDown={(event) => {
-              const sizes = {
-                ArrowLeft: [-20, 0],
-                ArrowRight: [20, 0],
-                ArrowUp: [0, 20],
-                ArrowDown: [0, -20],
-              }[event.key];
-              if (sizes) {
-                event.preventDefault();
-                action.mutate({ action: "resize", dw: sizes[0], dh: sizes[1] });
-              }
-            }}
-          >
-            <ResizeIcon aria-hidden="true" className="text-muted-foreground" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Drag to resize, or use the arrow keys.</TooltipContent>
-      </Tooltip>
     </main>
   );
 }

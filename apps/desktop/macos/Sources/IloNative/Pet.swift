@@ -24,10 +24,11 @@ final class PetView: NSView {
   var contextAction: ((String) -> Void)?
   var click: (() -> Void)?
   var moved: (() -> Void)?
-  var dragStart: (() -> Void)?
+  var dragStart: ((CGPoint) -> Void)?
   var dragChange: (() -> Void)?
   var hoverChange: ((Bool) -> Void)?
   var color = NSColor.systemTeal { didSet { needsDisplay = true } }
+  static let dragThreshold: CGFloat = 8
   private var origin: NSPoint?
   private var dragged = false
   private var hovering = false
@@ -171,24 +172,27 @@ final class PetView: NSView {
     return self
   }
   override func mouseDown(with event: NSEvent) {
-    origin = NSEvent.mouseLocation
+    origin = event.window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow
     dragged = false
-    dragStart?()
   }
   override func mouseDragged(with event: NSEvent) {
     guard let origin else { return }
-    let current = NSEvent.mouseLocation
-    if hypot(current.x - origin.x, current.y - origin.y) > 4 { dragged = true }
+    let current = event.window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow
+    if !dragged && hypot(current.x - origin.x, current.y - origin.y) >= Self.dragThreshold {
+      dragged = true
+      dragStart?(origin)
+    }
     if dragged {
       dragChange?()
       needsDisplay = true
     }
   }
   override func mouseUp(with event: NSEvent) {
-    moved?()
-    if !dragged { click?() }
+    guard origin != nil else { return }
+    let wasDragged = dragged
     origin = nil
     dragged = false
+    if wasDragged { moved?() } else { click?() }
     needsDisplay = true
   }
   static func eyeRects(height: CGFloat, bob: CGFloat) -> [CGRect] {

@@ -379,3 +379,31 @@ Show rituals is opt-in. Due incomplete occurrences precede the calendar; complet
 missed, and scheduled occurrences follow it. Use the ritual's logical date and canonical state,
 including overnight ownership. Opening a ritual validates account and occurrence and preserves
 pin intent. Presentation revisions prevent old refresh responses from reversing newer pin state.
+
+### Quick-access click and card refinements (2026-10-12)
+
+A pet press remains a click until the pointer moves at least eight screen points. Only a
+confirmed drag displays anchor guides; releasing a click toggles quick access once without
+running drag completion. Card movement uses the same threshold for its guides.
+
+Open, unpinned quick access owns the next outside click and its release through temporary
+nonactivating dismissal panels, so dismissing it cannot also activate another app or macOS
+Show Desktop. These panels exist only while quick access is open and unpinned, cover connected
+displays, and disappear on close, pin, sleep, or teardown. Pinned quick access permits normal
+interaction with other apps. The closed pet retains silhouette-only hit testing.
+
+The card owns one shared ScrollArea. Its timeline expands to content height and reserves space
+for the current-time badge. Timed events use Today’s calendar-tone EventCard and calendar colors;
+all-day occasions use the shared OccasionCard. Task and reminder headings place the selected due
+window inline in description styling, without a timezone subtitle. Quick-access and main-window
+pin actions show a filled pin and an active control surface while pinned.
+
+Quick access provides section-start scroll anchors with native proximity alignment, allowing
+free scrolling within long sections. Minimal floating previous/next controls move smoothly
+between reachable section starts, stop at the ends, and respect Reduce Motion. Resizing uses
+the card's edges and corners; there is no separate resize button. The scrollbar sits inside
+the resize edge so both remain usable.
+
+Pet task and reminder rows compose the shared TaskItem and ReminderItem families inside ItemGroup,
+including their completion, primary-action, content, and title slots. Native account-scoped
+completion and stale-data guards remain the pet's action boundary.

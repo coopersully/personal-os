@@ -29,6 +29,21 @@ describe("calendar dates", () => {
     expect(calendarEventOccursOnDate(event, { year: 2026, month: 11, day: 2 }, "UTC")).toBe(true);
     expect(calendarEventOccursOnDate(event, { year: 2026, month: 11, day: 3 }, "UTC")).toBe(false);
   });
+  it("keeps locally created all-day ranges with a non-midnight end on their occupied dates", () => {
+    const event = {
+      allDay: true,
+      startsAt: "2026-10-12T04:00:00Z",
+      endsAt: "2026-10-13T03:59:00Z",
+      timezone: "America/New_York",
+    };
+    for (const zone of ["America/New_York", "Asia/Tokyo"]) {
+      for (const day of [11, 12, 13]) {
+        expect(calendarEventOccursOnDate(event, { year: 2026, month: 10, day }, zone)).toBe(
+          day === 12,
+        );
+      }
+    }
+  });
   it("uses instant overlap and exclusive midnight ends for timed appointments", () => {
     const event = {
       allDay: false,

@@ -39,8 +39,12 @@ export function calendarEventOccursOnDate(
   if (event.allDay) {
     const date = localDateToIso(day);
     const start = localDateToIso(localDateAt(new Date(event.startsAt), event.timezone));
-    const end = localDateToIso(localDateAt(new Date(event.endsAt), event.timezone));
-    return start <= date && date < end;
+    // Provider DATE ends are midnight-exclusive; local events also support a
+    // non-midnight end. The final occupied instant handles both representations.
+    const last = localDateToIso(
+      localDateAt(new Date(Date.parse(event.endsAt) - 1), event.timezone),
+    );
+    return start <= date && date <= last;
   }
   const range = localDateRange(day, addLocalDays(day, 1), planningTimezone);
   return (

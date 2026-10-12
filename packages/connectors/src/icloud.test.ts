@@ -655,10 +655,10 @@ describe("iCloud connector", () => {
     await expect(
       connector(client).value.syncCalendar(credentials, calendarId, "opaque-token"),
     ).rejects.toMatchObject({
-      category: "authorization",
-      code: "icloud_calendar_authorization_failed",
-      disposition: "reconnect",
-      message: "iCloud Calendar authorization is no longer valid.",
+      category: "rejected",
+      code: "icloud_calendar_permission_denied",
+      disposition: "operator",
+      message: "iCloud denied access to this Calendar resource.",
     });
 
     const unavailable = davClient({

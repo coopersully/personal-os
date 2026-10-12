@@ -266,13 +266,16 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       }),
       operation,
     );
-    return {
+    const refreshed = {
       accessToken: token.access_token,
       expiresAt: new Date(now().getTime() + token.expires_in * 1_000).toISOString(),
       refreshToken: token.refresh_token ?? credentials.refreshToken,
       scope: token.scope || credentials.scope,
       tokenType: token.token_type,
     };
+    return operation?.persistGoogleCredentials
+      ? operation.persistGoogleCredentials(refreshed)
+      : refreshed;
   }
 
   async function authenticatedRequest(

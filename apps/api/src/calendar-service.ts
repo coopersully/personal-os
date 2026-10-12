@@ -487,12 +487,19 @@ function serializeCalendarSource(
     ...serializeCalendar(calendar),
     source: {
       accountLabel: account.label,
-      health: connectionHealthForAccount(account),
+      health: connectionHealthForAccount(account, "calendar"),
       remoteCalendarId: calendar.remoteCalendarId,
-      syncError: account.syncError
+      syncError: connectionHealthForAccount(account, "calendar").message
         ? "The connected account needs attention. Synchronize Calendar or review Connections."
         : null,
-      syncStatus: account.syncStatus,
+      syncStatus:
+        account.syncStatus === "syncing"
+          ? "syncing"
+          : account.syncCapabilities?.calendar
+            ? account.syncCapabilities.calendar.errorCode
+              ? "error"
+              : "idle"
+            : account.syncStatus,
     },
   };
 }

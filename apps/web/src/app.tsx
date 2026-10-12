@@ -342,6 +342,7 @@ import {
   CalendarAppBarIdentity,
 } from "./features/calendar/workspace-header.js";
 import {
+  ConnectionCapabilityHealth,
   ConnectionHealthBadge,
   ConnectionHealthDescription,
   connectionHealth,
@@ -7764,7 +7765,15 @@ function ConnectorRow({
           <span>
             <ConnectionHealthDescription health={health} lastSyncedAt={account.lastSyncedAt} />
           </span>
-          <small>{connectionHealthGuidance(health.state)}</small>
+          {account.capabilities && Object.keys(account.capabilities).length > 0 ? (
+            <ConnectionCapabilityHealth
+              capabilities={account.capabilities}
+              enabled={{ calendar: account.calendarEnabled, mail: account.mailEnabled }}
+              fallback={{ health, lastSyncedAt: account.lastSyncedAt }}
+            />
+          ) : (
+            <small>{connectionHealthGuidance(health.state)}</small>
+          )}
         </>
       }
       title={account.label}

@@ -1,0 +1,130 @@
+// Run inside the dedicated production Linux VM. It observes VM/container resources,
+// not the physical macOS host. Never mount this collector in application containers.
+logging { level = "warn" }
+
+prometheus.exporter.cadvisor "containers" {
+  docker_host = "unix:///var/run/docker.sock"
+  docker_only = true
+  store_container_labels = false
+  allowlisted_container_labels = ["com.docker.compose.project", "com.docker.compose.service"]
+  enabled_metrics = ["cpu", "memory", "network", "diskIO", "oom_event"]
+  storage_duration = "2m"
+}
+prometheus.scrape "containers" {
+  targets = prometheus.exporter.cadvisor.containers.targets
+  scrape_interval = "60s"
+  forward_to = [prometheus.relabel.containers.receiver]
+}
+prometheus.relabel "containers" {
+  forward_to = [prometheus.remote_write.cloud.receiver]
+  rule {
+    source_labels = ["container_label_com_docker_compose_project"]
+    regex = "nohmi-production"
+    action = "keep"
+  }
+  rule {
+    source_labels = ["container_label_com_docker_compose_service"]
+    target_label = "service"
+  }
+  rule {
+    source_labels = ["__name__"]
+    regex = "container_(cpu_usage_seconds_total|memory_working_set_bytes|spec_memory_limit_bytes|network_receive_bytes_total|network_transmit_bytes_total|oom_events_total|last_seen|start_time_seconds|fs_reads_bytes_total|fs_writes_bytes_total)"
+    action = "keep"
+  }
+  rule {
+    target_label = "job"
+    replacement = "nohmi-containers"
+  }
+  rule {
+    target_label = "instance"
+    replacement = "nohmi-production"
+  }
+  rule {
+    action = "labelkeep"
+    // Keep container identity so overlapping replacements never produce duplicate samples.
+    regex = "__name__|job|instance|service|id|cpu|interface|device"
+  }
+}
+prometheus.remote_write "cloud" {
+  endpoint {
+    url = sys.env("GRAFANA_PROMETHEUS_URL")
+    basic_auth {
+      username = sys.env("GRAFANA_PROMETHEUS_USER")
+      password_file = "/run/secrets/grafana-token"
+    }
+  }
+}
+
+discovery.docker "application" {
+  host = "unix:///var/run/docker.sock"
+  filter {
+    name = "label"
+    values = ["com.docker.compose.project=nohmi-production", "com.docker.compose.service=api"]
+  }
+}
+loki.source.docker "application" {
+  host = "unix:///var/run/docker.sock"
+  targets = discovery.docker.application.targets
+  labels = { job = "nohmi-api", environment = "production" }
+  forward_to = [loki.process.safe_events.receiver]
+}
+// Reconstruct records from a fixed vocabulary. The original line is never forwarded.
+// No email, account IDs, URLs, OAuth callbacks, payloads, stack locals, or SQL.
+loki.process "safe_events" {
+  forward_to = [loki.write.cloud.receiver]
+  stage.json {
+    expressions = { event = "event", provider = "provider", capability = "capability", status = "status", duration = "durationMs", failures = "failureCount", freshness = "freshnessAgeMs", code = "code" }
+    drop_malformed = true
+  }
+  stage.template {
+    source = "safe"
+    template = "{{ if regexMatch `^(connector_(sync_(failed|completed|recovered|freshness_observed)|capability_(failed|completed)|subscription_(failed|expired|renewed)|trigger_dispatched|notification_received|recovery_failed)|request)$` (printf \"%v\" .event) }}event={{ .event }} {{ if regexMatch `^(google|icloud|plaid|x)$` (printf \"%v\" .provider) }}provider={{ .provider }} {{ end }}{{ if regexMatch `^(calendar|mail)$` (printf \"%v\" .capability) }}capability={{ .capability }} {{ end }}{{ if regexMatch `^[0-9]+$` (printf \"%v\" .status) }}status={{ .status }} {{ end }}{{ if regexMatch `^[0-9.]+$` (printf \"%v\" .duration) }}durationMs={{ .duration }} {{ end }}{{ if regexMatch `^[0-9]+$` (printf \"%v\" .failures) }}failureCount={{ .failures }} {{ end }}{{ if regexMatch `^[0-9]+$` (printf \"%v\" .freshness) }}freshnessAgeMs={{ .freshness }} {{ end }}{{ if regexMatch `^(google|icloud_calendar|icloud_mail|connector)_(authorization_failed|permission_missing|permission_denied|configuration_invalid|rate_limited|temporary_failure|transport_failure|unknown_failure|credentials_missing|sync_interrupted|request_rejected|resource_not_found)$` (printf \"%v\" .code) }}code={{ .code }}{{ end }}{{ else }}DROP{{ end }}"
+  }
+  stage.output { source = "safe" }
+  stage.drop { expression = "^DROP$" }
+  stage.label_keep { values = ["job", "environment"] }
+}
+loki.write "cloud" {
+  endpoint {
+    url = sys.env("GRAFANA_LOKI_URL")
+    basic_auth {
+      username = sys.env("GRAFANA_LOKI_USER")
+      password_file = "/run/secrets/grafana-token"
+    }
+  }
+}
+
+// Probes run from the production VM; cloud-side missing-data alerts detect host loss.
+prometheus.exporter.blackbox "public" {
+  config = "modules:\n  http_2xx:\n    prober: http\n    timeout: 10s\n    http:\n      method: GET\n      preferred_ip_protocol: ip4\n"
+  target { name = "app"
+    labels = { service = "app" }
+    address = "https://nohmi.coopersully.me"
+    module = "http_2xx" }
+  target { name = "api"
+    labels = { service = "api" }
+    address = "https://nohmi-api.coopersully.me/health/ready"
+    module = "http_2xx" }
+  target { name = "mcp"
+    labels = { service = "mcp" }
+    address = "https://nohmi-mcp.coopersully.me/health/live"
+    module = "http_2xx" }
+}
+prometheus.scrape "public" {
+  targets = discovery.relabel.public.output
+  scrape_interval = "60s"
+  job_name = "nohmi-public"
+  forward_to = [prometheus.remote_write.cloud.receiver]
+}
+
+discovery.relabel "public" {
+  targets = prometheus.exporter.blackbox.public.targets
+  rule {
+    target_label = "job"
+    replacement = "nohmi-public"
+  }
+  rule {
+    source_labels = ["service"]
+    target_label = "instance"
+  }
+}

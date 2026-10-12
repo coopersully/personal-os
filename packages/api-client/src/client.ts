@@ -30,6 +30,7 @@ import type {
 } from "@personal-os/domain";
 import {
   type ConnectedAccountHealth,
+  type ConnectorCapabilities,
   type ConnectorSyncStatus,
   connectedAccountHealthSchema,
   connectorAuthorizationOutcomeSchema,
@@ -93,6 +94,7 @@ export type AuditEvent = {
 };
 
 export type CalendarAccount = {
+  capabilities?: ConnectorCapabilities;
   avatarUrl?: string | null;
   calendarEnabled: boolean;
   email: string | null;

@@ -20,13 +20,18 @@ Cross-host operation requires a shared serialized owner; these host-local files 
 | `save` | Store phase, headSha, baseSha, evidence references, nextTrigger, retryAt, schedulerId, authorization, worktree, worker, acceptanceRevision, policyVersion, failureFingerprint, failedAttempts. |
 | `begin` | Store unique id, action, headSha, baseSha, and intended result before an external mutation. Reject another mutation while pending. |
 | `finish` | Supply the pending id, observed result, and evidence after re-reading the affected service. Clears pending. |
-| `transfer` | Supply previousOwner and stoppedEvidence proving the old executor stopped. Preserve pending work for reconciliation. |
+| `transfer` | Run as the current owner with nextOwner and stoppedEvidence after stopping execution. Preserve pending work for reconciliation. |
 | `release` | Release a reconciled claim while retaining its checkpoint. Pending mutations cannot be released. |
 
 Use phases `collect`, `repair`, `verify`, `review`, `wait`, `final_check`, `merge`, `reconcile`,
 `complete`, `blocked`, or `canceled`. Release the base claim on every reconciled non-merge exit or wait, and reacquire before final
 collection. A merged restart also releases a leftover base claim after reconciling its pending write.
-Claims never expire by age. A resumed task reconciles child
+Claims never expire by age. A replacement task cannot take an active claim by submitting its own
+stop assertion. Resume the original stable owner to reconcile and release/transfer; if that owner
+cannot resume, keep recovery blocked for explicit operator intervention. The current owner must
+stop its workers and external execution before transfer and must not continue after transfer.
+Owner IDs are cooperative task identities, not authentication against hostile code sharing the
+same operating-system account. A resumed task reconciles child
 liveness, worktree/unpushed commits, and GitHub/Linear before new writes. Verify authorization still
 applies. A canceled issue or user pause stops new pushes/merges and checkpoints active workers.
 

@@ -20,7 +20,7 @@ class CheckpointTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.call("claim", owner="task-b")
         with self.assertRaises(ValueError):
-            self.call("transfer", {"previousOwner": "task-a"}, owner="task-b")
+            self.call("transfer", {"nextOwner": "task-b", "stoppedEvidence": "claimed-stopped"}, owner="task-b")
 
     def test_uncertain_merge_must_be_reconciled_before_any_retry(self):
         operation = {"id": "merge-1", "action": "merge", "headSha": "a", "baseSha": "b"}
@@ -38,8 +38,12 @@ class CheckpointTest(unittest.TestCase):
 
     def test_transfer_preserves_pending_operation(self):
         self.call("begin", {"id": "push-1", "action": "push", "headSha": "a", "baseSha": "b"})
-        record = self.call("transfer", {"previousOwner": "task-a", "stoppedEvidence": "host-task-stopped"}, owner="task-b")
+        record = self.call("transfer", {"nextOwner": "task-b", "stoppedEvidence": "host-task-stopped"})
         self.assertEqual(record["pending"]["id"], "push-1")
+        self.assertEqual(record["owner"], "task-b")
+        with self.assertRaises(ValueError):
+            self.call("save", {"phase": "merge"})
+        self.call("finish", {"id": "push-1", "evidence": "observed-remote"}, owner="task-b")
 
     def test_release_retains_checkpoint_and_base_claim_serializes_prs(self):
         self.call("save", {"phase": "wait", "nextTrigger": "CI completion"})

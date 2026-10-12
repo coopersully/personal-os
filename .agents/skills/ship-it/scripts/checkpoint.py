@@ -52,7 +52,7 @@ def transition(record, owner, operation, payload):
     if not owner.strip():
         raise ValueError("A stable task/host owner identity is required")
     if record and record["owner"] != owner:
-        raise ValueError("Another owner holds this claim; reconcile liveness before transfer")
+        raise ValueError("Another owner holds this claim; only that owner may transfer it")
     record = dict(record or {"owner": owner, "phase": "collect", "pending": None})
     if operation == "begin":
         if record.get("pending"):
@@ -90,11 +90,14 @@ def operate(root, key, owner, operation, payload):
         if operation == "read":
             return record
         if operation == "transfer":
-            if not record or record["owner"] != payload.get("previousOwner"):
-                raise ValueError("Previous owner does not match")
-            if not payload.get("stoppedEvidence") or not owner.strip():
-                raise ValueError("Transfer requires evidence the previous executor stopped")
-            record.update(owner=owner, transferEvidence=payload["stoppedEvidence"])
+            if not record or record["owner"] != owner:
+                raise ValueError("Only the current owner may transfer this claim")
+            next_owner = payload.get("nextOwner")
+            if (not isinstance(next_owner, str) or not next_owner.strip()
+                    or next_owner == owner or not payload.get("stoppedEvidence")):
+                raise ValueError("Transfer requires a different next owner and evidence execution stopped")
+            record.update(owner=next_owner, transferFrom=owner, transferEvidence=payload["stoppedEvidence"])
+            owner = next_owner
             operation = "claim"
         if operation == "release":
             if not record or record["owner"] != owner or record.get("pending"):

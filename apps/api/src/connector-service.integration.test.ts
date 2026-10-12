@@ -8808,6 +8808,52 @@ describe.sequential("connector service", () => {
     ).toBe("ready");
   });
 
+  it("backs off account credential failures instead of reusing stale capability schedules", async () => {
+    const provider = mockICloud();
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        userId,
+        provider: "icloud",
+        providerAccountId: "missing-credentials-backoff",
+        label: "Missing credentials",
+        calendarEnabled: true,
+        mailEnabled: false,
+        encryptedCredentials: encryptJson(
+          { email: "backoff@example.com", appSpecificPassword: "private" },
+          encryptionKey,
+        ),
+      })
+      .returning();
+    if (!account) throw new Error("Missing fixture");
+    let clock = timestamp;
+    const localService = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google,
+      icloud: provider,
+      now: () => clock,
+    });
+    await localService.syncAccount(userId, account.id);
+    clock = new Date(timestamp.getTime() + 86_400_000);
+    await database.db
+      .update(calendarAccounts)
+      .set({ encryptedCredentials: null })
+      .where(eq(calendarAccounts.id, account.id));
+    await expect(localService.syncAccount(userId, account.id)).rejects.toMatchObject({
+      code: "service_unavailable",
+    });
+    const [stored] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, account.id));
+    expect(stored?.syncErrorCode).toBe("connector_credentials_missing");
+    expect(stored?.nextSyncAt?.getTime()).toBeGreaterThan(clock.getTime());
+    expect(Date.parse(stored?.syncCapabilities?.calendar?.health.nextSyncAt ?? "")).toBeLessThan(
+      clock.getTime(),
+    );
+  });
+
   it("escalates day-old retry failures while preserving automatic recovery", async () => {
     const provider = mockICloud();
     vi.mocked(provider.listCalendars).mockRejectedValue(new Error("private-canary"));

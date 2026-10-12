@@ -1270,13 +1270,17 @@ export function createConnectorService({
           }
         : classifyConnectorSyncFailure(error, provider);
       const failedAt = now();
-      const capabilityDueDates = Object.entries(capabilityStates)
-        .filter(([capability]) =>
-          capability === "calendar" ? claimedAccount.calendarEnabled : claimedAccount.mailEnabled,
-        )
-        .flatMap(([, state]) =>
-          state.health.nextSyncAt ? [Date.parse(state.health.nextSyncAt)] : [],
-        );
+      const capabilityDueDates = capabilityErrors.includes(error)
+        ? Object.entries(capabilityStates)
+            .filter(([capability]) =>
+              capability === "calendar"
+                ? claimedAccount.calendarEnabled
+                : claimedAccount.mailEnabled,
+            )
+            .flatMap(([, state]) =>
+              state.health.nextSyncAt ? [Date.parse(state.health.nextSyncAt)] : [],
+            )
+        : [];
       const nextSyncAt = interrupted
         ? failedAt
         : capabilityDueDates.length

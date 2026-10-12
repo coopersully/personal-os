@@ -65,6 +65,8 @@ try {
       status: 403,
       code: "google_permission_missing",
       freshnessAgeMs: 172800000,
+      durationMs: 172800000,
+      failureCount: 1000000,
       email: "PRIVATE_CANARY",
       message: "PRIVATE_CANARY",
     }),
@@ -125,6 +127,8 @@ try {
     /freshnessAgeMs=(172800000|1[.]728e[+]08)/,
     "Stale freshness must survive numeric JSON extraction",
   );
+  assert.match(logs, /durationMs=(172800000|1[.]728e[+]08)/);
+  assert.match(logs, /failureCount=(1000000|1e[+]06)/);
   assert.equal(logs.includes("PRIVATE_CANARY"), false, "Privacy filter forwarded private content");
   assert.equal((logs.match(/received log entry/g) ?? []).length, 3, "Unexpected records forwarded");
   console.log("Alloy configuration and real log-pipeline privacy checks passed.");

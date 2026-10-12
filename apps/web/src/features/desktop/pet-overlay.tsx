@@ -167,10 +167,12 @@ function PetContent() {
     retry: false,
   });
   const me = useQuery({ queryKey: ["me"], queryFn: api.getMe, retry: false });
+  const calendarEnabled =
+    visible && !!data.data?.snapshot && !!data.data?.workspaces.includes("calendar");
   const calendars = useQuery({
     queryKey: ["calendars"],
     queryFn: api.listCalendars,
-    enabled: visible && !!data.data?.snapshot && !!data.data?.workspaces.includes("calendar"),
+    enabled: calendarEnabled,
     staleTime: 60_000,
     retry: false,
   });
@@ -294,7 +296,7 @@ function PetContent() {
   );
   useSettingsError(data.error, "Couldn’t load quick access. It will retry automatically.");
   useSettingsError(
-    calendars.error,
+    calendarEnabled ? calendars.error : null,
     "Couldn’t refresh calendar colors. Try reopening quick access.",
   );
   useSettingsError(me.error, "Couldn’t refresh your account. Open nohmi to reconnect.");

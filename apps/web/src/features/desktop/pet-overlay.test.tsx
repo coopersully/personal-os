@@ -809,3 +809,20 @@ it("uses calendar colors for shared timed and all-day cards in one scroll area",
   expect(pin).toHaveAttribute("data-variant", "secondary");
   expect(pin.querySelector('path[fill="currentColor"]')).not.toBeNull();
 });
+
+it("dismisses calendar color errors when the calendar workspace is removed", async () => {
+  vi.mocked(api.listCalendars).mockRejectedValue(new Error("offline"));
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "pet_snapshot" ? { ...fixture, workspaces: ["calendar", "tasks"] } : undefined,
+  );
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  mount(client);
+  const message = "Couldn’t refresh calendar colors. Try reopening quick access.";
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith(message, expect.anything()));
+  const call = vi.mocked(toast.error).mock.calls.find(([text]) => text === message);
+  expect(screen.queryByText(message)).not.toBeInTheDocument();
+  vi.mocked(toast.dismiss).mockClear();
+  act(() => client.setQueryData(["pet-snapshot"], fixture));
+  await waitFor(() => expect(toast.dismiss).toHaveBeenCalledWith(call?.[1]?.id));
+  expect(api.listCalendars).toHaveBeenCalledTimes(1);
+});

@@ -22,6 +22,7 @@ import type {
   TaskProject,
   User,
 } from "@personal-os/domain";
+import { repairCalendarAllDayRange } from "./calendar-all-day-repair.js";
 
 type UserRow = typeof users.$inferSelect;
 type AttentionItemRow = typeof attentionItems.$inferSelect;
@@ -206,6 +207,7 @@ export function serializeEvent(
   accountId: string | null = null,
   sourceCalendarIds: string[] = [row.calendarId],
 ): CalendarEvent {
+  const range = repairCalendarAllDayRange(row);
   return {
     allDay: row.allDay,
     attendees: row.attendees,
@@ -216,7 +218,7 @@ export function serializeEvent(
     conferenceStatus: calendarConferenceStatus(row),
     conferenceUrl: row.conferenceUrl,
     createdAt: row.createdAt.toISOString(),
-    endsAt: row.endsAt.toISOString(),
+    endsAt: range.endsAt.toISOString(),
     eventType: row.eventType,
     id: row.id,
     location: row.location,
@@ -234,7 +236,7 @@ export function serializeEvent(
       sourceType: "calendar_event",
     },
     sourceCalendarIds,
-    startsAt: row.startsAt.toISOString(),
+    startsAt: range.startsAt.toISOString(),
     status: row.status,
     transparency: row.transparency,
     timezone: row.timezone,

@@ -464,6 +464,32 @@ describe("Google Calendar connector", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("normalizes provider calendar dates to midnight in the source timezone", async () => {
+    const fetch = queued(
+      response({
+        nextSyncToken: "next",
+        timeZone: "America/New_York",
+        items: [
+          {
+            id: "holiday",
+            start: { date: "2026-10-12" },
+            end: { date: "2026-10-13" },
+            status: "confirmed",
+          },
+        ],
+      }),
+    );
+    const result = await connector(fetch).syncCalendar(fresh, "calendar", null);
+    expect(result.value.changes[0]).toMatchObject({
+      kind: "upsert",
+      event: {
+        startsAt: new Date("2026-10-12T04:00:00Z"),
+        endsAt: new Date("2026-10-13T04:00:00Z"),
+        timezone: "America/New_York",
+      },
+    });
+  });
+
   it("creates, updates, and deletes timed and all-day events", async () => {
     const fetch = queued(
       response(timedEvent),

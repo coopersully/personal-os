@@ -2,6 +2,7 @@ import { type Database, users } from "@personal-os/database";
 import type { AccessScope, DailyBrief, TaskListQuery } from "@personal-os/domain";
 import {
   addLocalDays,
+  calendarEventOccursOnDate,
   localDateAt,
   localDateRange,
   localDateTimeToUtc,
@@ -59,11 +60,16 @@ export function createDailyBriefService(options: DailyBriefServiceOptions) {
     const current = now();
     const todayRange = localDayRange(current, timeZone);
     const localTomorrow = addLocalDays(localDateAt(current, timeZone), 1);
-    const tomorrowRange = localDateRange(localTomorrow, addLocalDays(localTomorrow, 1), timeZone);
     const canReadTasks = scopes?.has("tasks:read") ?? true;
-    const [todayEvents, tomorrow, reminders, tasks, completedTasks, planning] = await Promise.all([
-      options.listEvents(userId, todayRange),
-      options.listEvents(userId, tomorrowRange),
+    const [eventCandidates, reminders, tasks, completedTasks, planning] = await Promise.all([
+      options.listEvents(
+        userId,
+        localDateRange(
+          addLocalDays(localDateAt(current, timeZone), -2),
+          addLocalDays(localTomorrow, 3),
+          timeZone,
+        ),
+      ),
       options.listReminders(userId),
       canReadTasks
         ? listAllTasks(options, userId, { lifecycle: "open", limit: 100 })
@@ -77,6 +83,12 @@ export function createDailyBriefService(options: DailyBriefServiceOptions) {
         .where(eq(users.id, userId))
         .limit(1),
     ]);
+    const todayEvents = eventCandidates.filter((event) =>
+      calendarEventOccursOnDate(event, localDateAt(current, timeZone), timeZone),
+    );
+    const tomorrow = eventCandidates.filter((event) =>
+      calendarEventOccursOnDate(event, localTomorrow, timeZone),
+    );
     const openReminders = reminders.filter((reminder) => reminder.completedAt === null);
     const currentTime = current.getTime();
     const endOfToday = new Date(todayRange.to).getTime();

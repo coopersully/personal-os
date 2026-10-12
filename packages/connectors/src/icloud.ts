@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import type { CreateEventInput, MailAddress, UpdateEventInput } from "@personal-os/domain";
+import {
+  type CreateEventInput,
+  type MailAddress,
+  normalizeProviderAllDayRange,
+  type UpdateEventInput,
+} from "@personal-os/domain";
 import ICAL from "ical.js";
 import { ImapFlow } from "imapflow";
 import { type AddressObject, simpleParser } from "mailparser";
@@ -908,6 +913,10 @@ function normalizeCalendarObject(
     });
   }
   const eventTimezone = eventZone.tzid;
+  const timezone = eventTimezone === "floating" ? fallbackTimezone : eventTimezone;
+  const allDayRange = event.startDate.isDate
+    ? normalizeProviderAllDayRange(event.startDate.toString(), event.endDate.toString(), timezone)
+    : null;
   const status = String(component.getFirstPropertyValue("status") ?? "confirmed").toLowerCase();
   const recurrence = component.getAllProperties("rrule").map((property) => {
     const value = property.getFirstValue();
@@ -946,16 +955,16 @@ function normalizeCalendarObject(
     allDay: event.startDate.isDate,
     attendees,
     conferenceUrl: extractConferenceUrl(event.description) ?? extractConferenceUrl(event.location),
-    endsAt: event.endDate.toJSDate(),
+    endsAt: allDayRange?.endsAt ?? event.endDate.toJSDate(),
     etag: object.etag ?? null,
     location: event.location || null,
     notes: event.description || null,
     raw: { data: object.data, url: object.url },
     recurrence,
     remoteEventId: object.url,
-    startsAt: event.startDate.toJSDate(),
+    startsAt: allDayRange?.startsAt ?? event.startDate.toJSDate(),
     status: status === "cancelled" || status === "tentative" ? status : "confirmed",
-    timezone: eventTimezone === "floating" ? fallbackTimezone : eventTimezone,
+    timezone,
     title: event.summary || "Untitled event",
   };
 }

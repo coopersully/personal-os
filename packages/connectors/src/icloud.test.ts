@@ -333,7 +333,13 @@ describe("iCloud connector", () => {
       kind: "upsert",
     });
     expect(sync.changes[1]).toMatchObject({
-      event: { allDay: true, status: "cancelled", title: "Untitled event" },
+      event: {
+        allDay: true,
+        status: "cancelled",
+        title: "Untitled event",
+        startsAt: new Date("2026-07-16T04:00:00Z"),
+        endsAt: new Date("2026-07-17T04:00:00Z"),
+      },
     });
 
     const updated = await value.updateEvent(

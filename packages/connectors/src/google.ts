@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import type { CreateEventInput, UpdateEventInput } from "@personal-os/domain";
+import {
+  type CreateEventInput,
+  normalizeProviderAllDayRange,
+  type UpdateEventInput,
+} from "@personal-os/domain";
 import nodemailer from "nodemailer";
 import { z } from "zod";
 import { ConnectorError, connectorHttpError } from "./failures.js";
@@ -115,6 +119,7 @@ const eventListResponseSchema = z.object({
   items: z.array(eventSchema).default([]),
   nextPageToken: z.string().optional(),
   nextSyncToken: z.string().optional(),
+  timeZone: z.string().optional(),
 });
 
 const labelSchema = z.object({
@@ -360,7 +365,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       const result = await authenticatedRequest(currentCredentials, url.toString(), {}, operation);
       currentCredentials = result.credentials;
       const page = eventListResponseSchema.parse(await parseResponse(result.response));
-      changes.push(...page.items.map((event) => normalizeChange(event, "UTC")));
+      changes.push(...page.items.map((event) => normalizeChange(event, page.timeZone ?? "UTC")));
       pageToken = page.nextPageToken;
       nextSyncToken = page.nextSyncToken ?? nextSyncToken;
     } while (pageToken);
@@ -1180,8 +1185,13 @@ function normalizeEvent(event: GoogleEvent, fallbackTimezone: string): Normalize
   const startValue =
     event.start.dateTime ?? (event.start.date ? `${event.start.date}T00:00:00.000Z` : "");
   const endValue = event.end.dateTime ?? (event.end.date ? `${event.end.date}T00:00:00.000Z` : "");
-  const startsAt = new Date(startValue);
-  const endsAt = new Date(endValue);
+  const timezone = event.start.timeZone ?? event.end.timeZone ?? fallbackTimezone;
+  const range =
+    allDay && event.start.date && event.end.date
+      ? normalizeProviderAllDayRange(event.start.date, event.end.date, timezone)
+      : null;
+  const startsAt = range?.startsAt ?? new Date(startValue);
+  const endsAt = range?.endsAt ?? new Date(endValue);
   if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
     throw new ConnectorError({
       category: "invalid_response",
@@ -1217,7 +1227,7 @@ function normalizeEvent(event: GoogleEvent, fallbackTimezone: string): Normalize
     remoteEventId: event.id,
     startsAt,
     status: event.status,
-    timezone: event.start.timeZone ?? event.end.timeZone ?? fallbackTimezone,
+    timezone,
     title: event.summary ?? "Untitled event",
   };
 }

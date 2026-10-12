@@ -1,7 +1,10 @@
 # Complete Texting toolkit design
 
 - Status: Written design for Cooper's review; conversation-level direction approved 2026-09-28.
-- Source baseline: local `3daaa61f`, inspected 2026-09-28; not a production certification.
+- Source baseline: `origin/main` at `f918b63a91fd8a997af75e9f14b02f53f4305b49`, merged and
+  inspected 2026-10-12. Source evidence is not production proof.
+- Reconciliation: [satisfied requirements and revised remaining-work roadmap](../../engineering/finance-texting-spec-reconciliation.md).
+  Existing implementation is retained; detailed design choices remain subject to written review.
 - Companions: [shared toolkit](2026-09-28-shared-agent-toolkit-design.md),
   [Finance](2026-09-28-finance-toolkit-design.md).
 - Canonical contracts: [Texting](../../product/texting-operations.md),
@@ -27,21 +30,26 @@ request. nohmi makes the message available. An authorized external caller decide
 uses the toolkit. Success means no lost work, honest states, safe execution and usable tools—not
 a guaranteed response time from an external agent.
 
-## 2. Foundation and remaining work
+## 2. Foundation and remaining work (2026-10-12)
 
-| Existing source | Completion requirement |
+| Satisfied source capability | Remaining completion |
 | --- | --- |
-| Twilio verification, encrypted recipients, signed webhooks, consent and STOP/START | Preserve and prove runtime configuration/consent for the released path |
-| Guarded `read_text_conversation` / `send_text_message`, persisted delivery lifecycle | Add processing/work views without weakening read-before-send receipts or uncertain-delivery behavior |
-| T0 preferences, intents and attempts; production resolver absent | Register real domain work resolvers, publication and bounded delivery/recovery invocation |
-| T1 signed claims, exact outbound bindings, transactional Finance admission | Integrate real question delivery and safe answer/approval admission; expose truthful unsupported cases |
-| T2 exact status and internal `runPage` | Wire bounded deterministic recovery with explicit authority; add agent claim/discovery surfaces |
-| Finance contextual questions/answer services | Add applicable agent authority and real API/MCP/inbox integration; preserve domain receipts |
+| Verified Twilio transport, signed webhooks, consent/STOP/START, guarded manual read/send and public SMS disclosures | Authorized real provider/sender/carrier/consent evidence; no activation by documentation |
+| Registered real Finance resolver, notification discovery/publication/drain and quiet/reminder controls | General workspace producers, generic controls and adaptive/check-in preferences |
+| Exact Finance question answers and restricted categorization approve/reject | Generic inbox/new-request handling and broader supported reversible proposals; bare yes still does not approve |
+| Signed `Finance:` prospective context with immutable routing/completion receipts | General interpretation by external agents, matching and shared knowledge beyond verbatim notes |
+| Durable acknowledgments, exact reply status, startup/tick bounded recovery and shutdown fencing | Generic external claims, work discovery, coordinated replies and complete navigation/retention coverage |
+| Persisted accepted-answer host continuation and explicit recovery | Vendor-neutral polling/handoff contract; current bound runs reject another connection |
+| Workspace-scoped Reviews dialog/drawer and Finance history | Unified multi-workspace review destination and remaining generated-link repairs |
 
-Current internal components are not proof of an active two-way journey. In particular, the recovery
-service is composed but not invoked as a complete processing loop, and notification composition
-has no authoritative Finance resolver. Never mark a port available based solely on an injected test
-fixture. Keep current transport and source-level availability boundaries visible during rollout.
+`app.ts` now injects `resolveFinanceWorks` and composes context, acknowledgment, host and notification
+phases. `main.ts` invokes bounded background recovery; the earlier unscheduled-T2 and missing-T0-
+producer descriptions are historical. Do not rebuild these components. Preserve their transactional
+admission, uncertain-delivery and shutdown safety tests while extending the tooling around them.
+
+Finance SMS is still behind default-off `FINANCE_SMS_ENABLED`, transport enablement and consent.
+Source/runtime composition and local provider-double tests do not establish real delivery. General
+Texting discovery/claim/maintain tools and a cross-agent knowledge service are still missing.
 
 ## 3. Inbound lifecycle
 
@@ -187,12 +195,12 @@ read/send tools remain usable during staged delivery with their current constrai
 
 ## 9. Staging and release evidence
 
-1. **Finance question round trip:** connect real notification producers, binding, inbound recording,
-   fresh-session discovery, answer admission and app projection. Verify with an authorized caller
-   and real SMS; no named host or automatic agent wake-up is required.
+1. **Complete the existing Finance round trip:** retain composed producers, bindings, answer
+   admission, acknowledgment and recovery. Add generic fresh-session work access, repair generated
+   links and verify authorized real SMS. No named host or automatic agent wake-up is required.
 2. **General inbox tools:** pending discovery/claims, unsolicited messages, structured routing,
    clarifications, cross-workspace child results and composed external-agent responses.
-3. **Full policy and recovery:** exact reversible approvals, adaptive/check-in preferences,
+3. **Full policy and recovery:** extend existing restricted approvals, add adaptive/check-in preferences,
    cross-workspace aggregation, deterministic catch-up, app controls and retention repair.
 4. **Optional events:** publish committed work through the shared authenticated event contract.
    Polling and manual agent invocation remain supported first-class paths.
@@ -210,3 +218,16 @@ real question/answer/resolution journey. A scripted fresh authenticated client c
 resumability without certifying a model host. Keep any vendor walkthrough labeled as an optional
 interoperability example. Runtime boundaries may still fail despite green mocks; record exact
 evidence and honest unavailable states instead of weakening gates.
+
+### Current navigation and authority compatibility
+
+Use the existing Finance-scoped review flow for Finance-only messages. A multi-workspace message
+still requires a destination that preserves every requested workspace; `/settings?section=reviews`
+and `/reviews` currently fall back to Account and do not satisfy that requirement. Repair assistant,
+Texting reply-status and MCP links as one producer-to-browser change. Do not revert the scoped
+Reviews dialog/drawer or silently narrow cross-workspace work to Finance.
+
+Preserve new `texting:execute`/`finances:execute` grants and owner-enabled bypass for registered
+operations. Phone verification and scope/bypass administration remain owner-only. Exact SMS source
+admission is separate from agent-authored arguments; exposing a tool never authorizes forging a
+signed inbound source or broadening the currently restricted categorization approvals.

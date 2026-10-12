@@ -1,10 +1,12 @@
 # Finance budget policy management storage
 
-This is the bounded source contract for migration `0087`. Human-session management/read HTTP
-routes and typed API-client methods are registered. The source implementation represented here
-passed full `pnpm verify`. This verification does not establish production activation.
-Management retains `executionAvailable:false`, and position and usage remain unavailable.
-Automatic application, MCP/UI surfaces, host scheduling and Texting activation are not implemented.
+This records the bounded storage contract originally delivered by migration `0087`; statements
+about that slice's routes, validation and verification are historical, not the current capability list.
+Current source at the 2026-10-12 reconciliation includes agent management tools and qualified position
+in evaluation. Monthly usage remains unavailable and `executionAvailable:false` remains correct:
+automatic budget application is not wired. See the
+[spec reconciliation](finance-texting-spec-reconciliation.md) for current coverage and remaining work.
+Historical verification does not establish production activation.
 
 ## Immutable history and exact lineage
 
@@ -35,7 +37,8 @@ months, cents, unique resource/allocation/direction/protection/delta identities,
 and delta arithmetic. Preview input/result identities, observed revisions, evaluation time, and
 explicit expiry agree. Drizzle JSON columns use the domain snapshot and terms types.
 
-Stored position and usage accept only the unavailable variants this management slice produces.
+The original migration accepts only the unavailable stored position and usage variants that its
+management slice produced.
 Consequently, stored results must be denied and execution unavailable. Adding an available
 producer requires a separately reviewed storage transition; plausible provider JSON cannot
 bypass this boundary. Validators enforce the public packet schema, not a second policy evaluator.

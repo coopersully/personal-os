@@ -481,8 +481,11 @@ internal reasoning agent when an external caller is unavailable.
 
 The target product and architecture contracts are
 [`texting and SMS`](texting-operations.md) and
-[`ADR 0006`](../architecture/0006-texting-inbox.md). The current transport foundation does not yet
-ship general routing, maintenance dispatch, global bypass, or SMS-bound reviews.
+[`ADR 0006`](../architecture/0006-texting-inbox.md). Current source composes bounded Finance question delivery, exact answers, categorization approvals
+and durable recovery. Explicit execution grants and owner-enabled bypass cover registered operations.
+General inbox routing, host-independent work retrieval and unified Reviews remain target gaps; see the
+[spec reconciliation](../engineering/finance-texting-spec-reconciliation.md). Source implementation
+does not establish production activation.
 
 ### 6.10 Desktop overlay, widgets, notifications, and mobile
 

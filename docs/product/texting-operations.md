@@ -571,8 +571,9 @@ fires dispatch one exact case answer per session; unrelated answers remain pendi
 not retried. A human may move an undispatched waiting answer to a different live host.
 
 These are merged source claims. The PR's final verification record covers integrated local tests,
-builds, browser acceptance and review. Real authorized transport plus separate Codex and Claude
-post-session continuation trials, measured latency and usage remain launch evidence requirements.
+builds, browser acceptance and review. Real authorized transport and durable retrieval from a fresh authorized session require separate
+evidence. Optional host integrations need their own continuation evidence; no particular vendor,
+agent runtime, or external completion latency is a toolkit launch requirement.
 Source merge does not establish production activation or provider delivery.
 
 The Finance SMS switch gates pending question admission as well as approvals and delivery. Disabling it leaves previously bound replies retryable without a financial receipt or answer. Terminal admission outcomes retain policy, authority or delivery reason codes; they do not blame a registered Finance producer for a consent or handoff failure.

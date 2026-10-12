@@ -1,7 +1,10 @@
 # Complete Finance toolkit design
 
 - Status: Written design for Cooper's review; conversation-level direction approved 2026-09-28.
-- Source baseline: local `3daaa61f`, inspected 2026-09-28; not a production certification.
+- Source baseline: `origin/main` at `f918b63a91fd8a997af75e9f14b02f53f4305b49`, merged and
+  inspected 2026-10-12. Source evidence is not production proof.
+- Reconciliation: [satisfied requirements and revised remaining-work roadmap](../../engineering/finance-texting-spec-reconciliation.md).
+  Existing implementation is retained; detailed design choices remain subject to written review.
 - Companions: [shared toolkit](2026-09-28-shared-agent-toolkit-design.md),
   [Texting](2026-09-28-texting-toolkit-design.md).
 - Canonical contracts: [master design](../../product/master-design.md),
@@ -46,23 +49,30 @@ Daily coaching is a preference exposed to external agents, not a nohmi-owned rec
 No approved dollar values, percentage values, protected amounts, or production policy are supplied
 by this spec. Setup collects them and requires exact approval.
 
-## 3. Existing source and integration gaps
+## 3. Existing source and integration gaps (2026-10-12)
 
-| Area | Foundation to reuse | Remaining completion |
+| Area | Satisfied source capability to reuse | Remaining completion |
 | --- | --- | --- |
-| Sources/ledger | Plaid lifecycle, manual/import accounts, economic events, splits, transfers, reimbursement services and rules | Verify complete lifecycle and one consistent accounting treatment across readers, corrections and period boundaries |
-| Position | `finance/position-service.ts`, registered position read, maintenance checkpoint | Finish consumer convergence, evidence qualification, source/ownership coverage and accurate spendable calculation |
-| Setup | Versioned profile and progressive first-plan modules | Connect complete qualified position, income/obligation evidence and useful app/agent setup |
-| Budget authority | Policy management/evaluator modules with execution unavailable | Explicit activation, complete position/usage producers, atomic application, caps/floors, UI/API/MCP parity |
-| Context | Capture store, contextual question and answer services, Reviews projection | Agent access, prospective matching, reusable knowledge, complete SMS integration and correction lifecycle |
-| Maintenance | Canonical runs/challenges, settlement and immutable reviews | Integrate all real producers, expose agent work and verify meaningful terminal states |
-| Delivery | Typed contracts and partial notification/reply foundations | Real producers, work-bound questions and authority-preserving reply resolution |
+| Sources/ledger | Existing ledger; explicit agent sync and durable hosted-bank consent handoff with real MCP/database tests | Live provider evidence and complete source/ownership/period-boundary acceptance; never redo the handoff |
+| Position | Registered position API/MCP, maintenance position and budget-evaluation checkpoints | Wire qualified position into first-plan generation and converge all consumer arithmetic |
+| Setup and app | Progressive first plan, shared configuration/autosave recovery, explicit preparation/check actions, responsive Reviews and history | First-plan position remains unavailable; full planning and funded-goal/commitment evidence still needed |
+| Budget authority | Real-position policy preview, dollar caps/floors/directions, immutable baselines, management and MCP access | Execution remains false; usage ledger, authority/commit fence, percentages, rollover and activation UI remain |
+| Questions/context | Canonical questions, app/MCP answers, signed prospective SMS context, immutable receipts and history | General prospective matching and shared reusable knowledge remain; existing notes are not a shared brain |
+| Finance SMS | Real producer, bounded notification discovery/drain, exact questions, restricted categorization approvals, durable acknowledgments, startup/tick recovery | Generic inbox/work access, broader safe approvals, unified review links and real transport evidence |
+| Continuation | Persisted host setup, accepted-answer continuations, guarded dispatch and explicit recovery | Current host-bound continuation is not generic fresh-session/cross-agent work resumption |
+| Agent access | Broad typed tools and explicit opt-in execution scopes with actor provenance | New capabilities must use these existing controls; exposure does not establish automatic reallocation |
 
-See the [implementation log](../../product/implementation-log.md) and engineering contracts for
-exact evidence. The workflow manifest currently advertises position and maintenance resumption;
-the other named ports remain unavailable. Contextual questions include interactive-user restrictions;
-existing question tools are not proof of new contextual or SMS capability. Inventory callers and
-permissions before widening a surface. Source presence must not become a claim of production use.
+The [reconciliation](../../engineering/finance-texting-spec-reconciliation.md) links evidence and
+reorders remaining work. The static Finance workflow manifest still registers only position and
+maintenance resumption despite additional real routes/composition: do not use that manifest alone
+to decide a feature is absent or promise a port that is not registered. Preserve its fail-closed
+behavior while aligning discovery with actual callable capabilities.
+
+Setup's position input still returns unavailable in `finance/setup-service.ts`; a registered
+position reader does not prove a complete first budget. Policy management now passes real position
+into evaluation, but `usage` remains unavailable and `executionAvailable` remains false. Explicit
+`finances:execute` plus owner-enabled bypass permits registered actions; it cannot make this absent
+automatic budget executor available or turn a saved preview into authority.
 
 ## 4. Financial sources and ledger
 
@@ -213,11 +223,14 @@ nohmi-owned recurring reasoning task.
 
 ## 11. Completion sequence and acceptance
 
-1. **Usable Finance conversation:** finish discoverable questions, real SMS binding/answers,
-   fresh-session retrieval, authorized resolution and the same app result. No host certification.
-2. **Trustworthy position and planning:** converge all financial consumers, complete setup and
+1. **Complete the existing Finance conversation:** preserve the now-composed producer, binding,
+   answer, approval, acknowledgment and recovery path. Add generic work discovery and safe
+   fresh-session handoff, repair review links and prove authorized real transport. No host certification.
+2. **Trustworthy position and planning:** connect the existing position reader to first-plan inputs,
+   converge all financial consumers, complete setup and
    baseline approval, goals, recurring activity and forecast qualification.
-3. **Bounded budget automation:** finish policy activation and usage enforcement, all carryover
+3. **Bounded budget automation:** reuse current policy management and previews; finish atomic
+   execution authority, usage enforcement and percentage limits, all carryover
    modes, period repair and app/API/MCP controls.
 4. **Full Finance toolkit:** complete modes/views, shared knowledge and prospective matching,
    reports, watchlists, subscriptions and evidence-backed review/advice support.
@@ -233,3 +246,16 @@ mobile journeys for setup, approval, correction and recovery. Future implementat
 `pnpm verify`. Real connector and SMS evidence requires separately authorized provider journeys;
 passing tests or draft policies cannot establish production activation. A missing agent leaves work
 pending and inspectable; it is not a failure of nohmi to host or wake that agent.
+
+### Current authority and navigation compatibility
+
+The October agent-execution implementation permits exact registered actions through opt-in execute
+scopes and owner-enabled bypass, retaining agent approval provenance. Preserve these grants and
+negative authorization tests; do not restore older blanket interactive-user guards. New automated
+reallocation remains subject to the stricter policy in §8. Read-only previews do not need execute.
+
+Current Reviews is a workspace-scoped responsive dialog/drawer, not a routed unified queue. Finance
+notifications use `/finances?review=open`; some assistant, MCP and Texting status links are still
+legacy. Full multi-workspace Reviews is a target gap, not a reason to replace working scoped UI.
+Settings action errors use Sonner; successful background autosaves stay silent, while actual state
+and correction controls remain visible. Preserve the current settings conflict/reapply behavior.

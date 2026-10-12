@@ -1,7 +1,10 @@
 # Shared agent toolkit and persistent knowledge design
 
 - Status: Written design for Cooper's review; conversation-level direction approved 2026-09-28.
-- Source baseline: local `3daaa61f`, inspected 2026-09-28. Source evidence is not production proof.
+- Source baseline: `origin/main` at `f918b63a91fd8a997af75e9f14b02f53f4305b49`, merged and
+  inspected 2026-10-12. Source evidence is not production proof.
+- Reconciliation: [satisfied requirements and revised remaining-work roadmap](../../engineering/finance-texting-spec-reconciliation.md).
+  Existing implementation is retained; detailed design choices remain subject to written review.
 - Companion specs: [Finance](2026-09-28-finance-toolkit-design.md),
   [Texting](2026-09-28-texting-toolkit-design.md).
 - Authority: [master design](../../product/master-design.md),
@@ -47,20 +50,26 @@ The first journey may use bounded structured knowledge and existing domain recor
 knowledge lifecycle and cross-agent reuse remain required for full completion; vector search,
 model hosting, and vendor-specific adapters are not prerequisites.
 
-## 3. Existing foundation and remaining work
+## 3. Existing foundation and remaining work (2026-10-12)
 
-| Surface | Inspected foundation | Completion requirement |
+| Surface | Satisfied source capability | Completion requirement |
 | --- | --- | --- |
-| Authority and operations | Scoped API/MCP, global execution policy, audit, revisioned Finance workflows | Consistent capability discovery and documented authority across all new operations |
-| Durable Finance work | Maintenance runs, candidates, challenges, work records and immutable reviews | Bounded cross-session discovery, explicit waiting-for-agent state and safe caller handoff |
-| Knowledge | Profiles, goals, notes, provenance in domain records; target User Knowledge docs | Typed shared persistence, tools, context retrieval, conflicts, source-preserving migration and user controls |
-| Texting work | Transport, exact Finance reply binding and internal recovery components | Agent-readable work discovery/claims, integrated execution and truthful processing state |
-| External continuation | Host-specific domain schema, without full dispatch integration | Generic work retrieval and optional events; no mandatory host registry |
+| Authority and operations | Expanded API/MCP execution with opt-in execute scopes, owner bypass and attributed approvals; real protocol/database evidence | Reuse these controls for new operations; preserve owner-only scope/bypass/consent boundaries |
+| Durable Finance work | Canonical runs, questions/answers, history/evidence and accepted-answer continuation receipts | Generic bounded discovery and safe cross-connection handoff without a mandatory schedule |
+| Knowledge | Domain profiles, goals, source notes and signed Finance context | Shared typed persistence, cross-agent retrieval, conflicts, provenance-preserving migration and controls remain |
+| Texting work | Real notification producer/drain, bounded Finance SMS admission, acknowledgments and startup/tick recovery | Agent-facing general work discovery/claims and coordinated handling remain |
+| External continuation | Persisted vendor schedules, APIs/MCP, setup UI, dispatcher and recovery | Retain as optional integration; provide generic work access without weakening existing ownership fences |
 
-Existing port names and route registrations are not proof of complete capability. The Finance
-workflow manifest currently registers only position reading and maintenance resumption; inspect
-actual registrations before every implementation slice. Preserve delivered behavior and historical
-records while replacing unimplemented host requirements in the target.
+The earlier statement that host integration was only a schema is no longer true. Current host-bound
+runs deliberately reject another authorization connection; an arbitrary fresh agent cannot resume
+one. Same-account collaboration needs a reviewed ownership transfer/claim contract, not removal of
+those checks. Pending knowledge/work are separate from host authority and must retain audit history.
+
+The inspected tree still has no complete shared User Knowledge persistence/tool lifecycle. Shared
+profiles and Finance context are valuable source material, not proof that agent B can retrieve and
+manage typed knowledge from agent A. Current tool execution evidence is recorded in
+[workspace agent verification](../../engineering/workspace-agent-verification.md); provider doubles
+and successful blocked/needs-input outcomes are not production or complete-workflow proof.
 
 ## 4. Component boundaries
 
@@ -169,9 +178,9 @@ fact; conflicts become visible. An implementation inventory must identify each l
 before changing a shared contract. Published migrations remain immutable; expand/repair/cutover
 must preserve accepted work and rollback readability.
 
-The unimplemented host registry is not promoted into a required dependency. If a host declaration
-has live callers at implementation time, preserve their accepted work and provide a documented
-cutover to generic connection/work identity. Removing a target requirement is not authorization to
+The now-implemented host registry is retained as an optional integration, not promoted into a
+required toolkit dependency. Preserve existing accepted work, secrets, revocation and original-
+connection guards; provide a reviewed cutover to generic connection/work identity where needed. Removing a target requirement is not authorization to
 delete persisted runtime data or alter existing external schedules.
 
 ## 10. Completion and verification
@@ -196,8 +205,9 @@ do not prove Twilio, connectors, event transport or another vendor's runtime.
 
 ## 11. Staged completion
 
-First connect the existing Finance question/answer and SMS foundations using small shared work
-contracts and structured account knowledge. Then finish Finance planning/authority, shared knowledge
+First expose generic work discovery and safe handoff over the now-connected Finance question/answer
+and SMS runtime, with bounded shared structured account knowledge. Do not rebuild its producer,
+recovery loops, host controls or registered agent adapters. Then finish Finance planning/authority, shared knowledge
 management and general cross-workspace Texting. Finish optional events and broader reporting without
 holding the initial usable journey for host integrations or semantic retrieval. These are dependency
 boundaries for the forthcoming plans, not dispatched tasks or claims of delivered milestones.

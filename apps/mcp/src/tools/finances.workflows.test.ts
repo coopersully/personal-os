@@ -14,6 +14,31 @@ const base = {
 };
 
 describe("Finance MCP workflows", () => {
+  it.each([
+    { items: [{ id, merchant: "Market", amount: 12.5, currency: "USD" }], nextCursor: "next-page" },
+    { items: [], nextCursor: null },
+  ])("returns transaction rows and pagination to text-only clients: %j", async (page) => {
+    const server = new McpServer({ name: "finance-text-results", version: "1" });
+    registerFinanceTools(server, {
+      listFinanceTransactions: vi.fn(async () => page),
+    } as unknown as PersonalOsApiClient);
+    const client = new Client({ name: "text-only-client", version: "1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    try {
+      const response = await client.callTool({ name: "list_finance_transactions", arguments: {} });
+      const text = response.content
+        .filter((block) => block.type === "text")
+        .map((block) => block.text)
+        .join("\n");
+      expect(JSON.parse(text)).toMatchObject({ data: page, outcome: "completed" });
+      expect(JSON.parse(text)).toEqual(response.structuredContent);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   it("forwards exact approval profile evidence and setup skips without hiding agent denial", async () => {
     const approveFinanceBudget = vi.fn(async () => {
       throw new ApiClientError({

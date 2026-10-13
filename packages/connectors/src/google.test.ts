@@ -65,6 +65,42 @@ function queued(...responses: Response[]) {
 }
 
 describe("Google Calendar connector", () => {
+  it("persists refreshed credentials before a later provider failure", async () => {
+    const request = queued(
+      response({
+        access_token: "new-access",
+        refresh_token: "rotated",
+        expires_in: 3600,
+        token_type: "Bearer",
+      }),
+      response({}, 503),
+    );
+    const persistGoogleCredentials = vi.fn(async (value: GoogleCredentials) => {
+      expect(request).toHaveBeenCalledTimes(1);
+      return value;
+    });
+    await expect(
+      connector(request).listCalendars(expired, { persistGoogleCredentials }),
+    ).rejects.toThrow();
+    expect(persistGoogleCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({ refreshToken: "rotated" }),
+    );
+  });
+
+  it("does not use a refreshed token when durable persistence fails", async () => {
+    const request = queued(
+      response({ access_token: "new-access", expires_in: 3600, token_type: "Bearer" }),
+    );
+    await expect(
+      connector(request).listCalendars(expired, {
+        persistGoogleCredentials: async () => {
+          throw new Error("persistence unavailable");
+        },
+      }),
+    ).rejects.toThrow("persistence unavailable");
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
   it("bounds nested Gmail MIME trees and calendar attachment metadata", () => {
     let nested: Record<string, unknown> = {
       body: {},

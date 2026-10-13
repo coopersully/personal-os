@@ -183,9 +183,12 @@ rules use `approved_rule`; normal reads use `read_only`. `get_ilo_context` retur
 actually available on that connection together with the safe workflow and links back to Today,
 activity, Reviews, Workspace access, approvals, and recovery.
 
-Every tool result keeps its feature payload under `result` (or its structured `error`/empty `ok`)
-and adds `_ilo` with the domain, stage, policy, read-only state, and first-party links. Text content
-remains available for clients that do not consume structured output.
+Tool results keep their feature payload under `result` (or their structured `error`/empty `ok`);
+existing Finance workflow results retain their versioned envelope with `data`, `communication`,
+and outcome/recovery fields. The surface adds `_ilo` with the domain, stage, policy, read-only state,
+and first-party links. Text content serializes the complete feature payload, including records,
+pagination, questions, disclosures, and recovery details, so clients that expose only text can
+use the result. A headline alone is not a data result. Empty acknowledgments may use plain text.
 
 ## Resources, prompts, and selective visual presentations
 

@@ -17,6 +17,7 @@ import {
   migrateDatabase,
   users,
 } from "@personal-os/database";
+import type { ConnectedAccountHealth } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
@@ -24,6 +25,7 @@ import { type ConnectedMailGateway, MailProviderRejectedError } from "./connecto
 import { errorResponse } from "./errors.js";
 import { durableMailRuleActionFingerprint } from "./mail-rule-work.js";
 import { createMailService } from "./mail-service.js";
+import { projectReconnect } from "./review-projections/helpers.js";
 import { registerMailRoutes } from "./routes/mail.js";
 import { migrationsWithout } from "./test-migrations.js";
 import type { AppEnv } from "./types.js";
@@ -2157,5 +2159,79 @@ describe.sequential("mail service", () => {
       scannedCount: 200,
       window: { limit: 200, truncated: true },
     });
+  });
+  it.each([
+    "ready",
+    "retrying",
+    "reconnect",
+    "syncing",
+  ] as const)("keeps scoped Mail %s health independent of Calendar authorization", async (state) => {
+    const at = "2026-07-16T12:00:00.000Z";
+    const recovery =
+      state === "reconnect" ? "reconnect" : state === "retrying" ? "automatic" : null;
+    const health: ConnectedAccountHealth = {
+      state: state === "syncing" ? ("ready" as const) : state,
+      recovery,
+      message: recovery ? "Mail needs recovery" : null,
+      nextSyncAt: recovery === "reconnect" ? null : at,
+    };
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        userId,
+        provider: "google",
+        providerAccountId: `scoped-${state}`,
+        label: `Scoped ${state}`,
+        calendarEnabled: true,
+        mailEnabled: true,
+        syncStatus: state === "syncing" ? "syncing" : "error",
+        syncRecovery: "reconnect",
+        syncFailureCount: 1,
+        syncErrorCode: "google_permission_missing",
+        syncErrorCategory: "authorization",
+        syncClaimId: state === "syncing" ? "11111111-1111-4111-8111-111111111111" : null,
+        syncError: "Calendar authorization required",
+        lastSyncedAt: new Date(at),
+        syncCapabilities: {
+          calendar: {
+            lastAttemptAt: at,
+            lastSyncedAt: null,
+            failureCount: 1,
+            errorCode: "google_permission_missing",
+            errorCategory: "authorization",
+            status: 403,
+            health: {
+              state: "reconnect",
+              recovery: "reconnect",
+              message: "Calendar authorization required",
+              nextSyncAt: null,
+            },
+          },
+          mail: {
+            lastAttemptAt: at,
+            lastSyncedAt: null,
+            failureCount: recovery ? 1 : 0,
+            errorCode: recovery ? "google_permission_missing" : null,
+            errorCategory: recovery ? "authorization" : null,
+            status: recovery ? 403 : null,
+            health,
+          },
+        },
+      })
+      .returning();
+    if (!account) throw new Error("Missing scoped account");
+    const setup = await service.listSetupContext(userId);
+    const mail = setup.accounts.find((source) => source.accountId === account.id);
+    expect(mail).toMatchObject({
+      health: { state },
+      lastSyncedAt: null,
+      lastSyncAttemptAt: at,
+      nextSyncAt: health.nextSyncAt,
+      syncStatus: state === "syncing" ? "syncing" : recovery ? "error" : "idle",
+      sendCapability: state === "reconnect" ? "reconnect" : "available",
+    });
+    expect(projectReconnect("mail", "Mail", account)).toHaveLength(state === "reconnect" ? 1 : 0);
+    expect(projectReconnect("calendar", "Calendar", account)).toHaveLength(1);
+    await database.db.delete(calendarAccounts).where(eq(calendarAccounts.id, account.id));
   });
 });

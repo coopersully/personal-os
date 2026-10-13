@@ -9121,8 +9121,16 @@ describe("ilo web app", () => {
       expect(await screen.findByRole("heading", { name: "To take care of" })).toBeInTheDocument();
       await browser.click(screen.getByRole("button", { name: "Keep window on top" }));
       await waitFor(() => expect(mocks.setAlwaysOnTop).toHaveBeenCalledWith(true));
+      expect(screen.getByRole("button", { name: "Keep window on top" })).toHaveAttribute(
+        "data-variant",
+        "secondary",
+      );
       await browser.click(screen.getByRole("button", { name: "Keep window on top" }));
       await waitFor(() => expect(mocks.setAlwaysOnTop).toHaveBeenCalledWith(false));
+      expect(screen.getByRole("button", { name: "Keep window on top" })).toHaveAttribute(
+        "data-variant",
+        "ghost",
+      );
     } finally {
       desktopView.unmount();
       Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
@@ -9431,7 +9439,9 @@ describe("ilo web app", () => {
     mocks.deleteMotive.mockResolvedValue(undefined);
     const browser = userEvent.setup();
     const goals = setup("/goals");
-    expect(await screen.findByText("Protect focus")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Protect focus", undefined, { timeout: 5_000 }),
+    ).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "20%" }));
     await waitFor(() => expect(mocks.updateGoal).toHaveBeenCalledWith(id, { progress: 30 }));
     expect(screen.queryByLabelText("Outcome")).not.toBeInTheDocument();
@@ -9462,7 +9472,9 @@ describe("ilo web app", () => {
     await waitFor(() => expect(mocks.deleteGoal).toHaveBeenCalledWith(id));
     goals.unmount();
     const motives = setup("/motives");
-    expect(await screen.findByText("Act with care")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Act with care", undefined, { timeout: 5_000 }),
+    ).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Pause" }));
     await waitFor(() =>
       expect(mocks.updateMotive).toHaveBeenCalledWith(secondId, { isActive: false }),

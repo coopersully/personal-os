@@ -10,6 +10,11 @@ Shoo defaults to disabled with Medium sensitivity; it does not move an open card
 includes independent task/reminder windows and optional ritual cards; Finance's Next 30 days
 remains unavailable without scheduled-outflow evidence.
 
+[PR #244 — Refine desktop pet interactions and quick-access cards](https://github.com/coopersully/personal-os/pull/244)
+merged on October 12 at `c6847a9e3bbbb7bd9687488b8f30a8cf2ed94e18`. Its click threshold,
+outside-click dismissal, shared card components and section navigation are part of current source;
+the [dated refinement contract](#quick-access-click-and-card-refinements-2026-10-12) describes them.
+
 The dated design and worktree checkpoints below preserve how these requirements evolved. Their
 earlier “not implemented” or draft status does not describe the merged source. Implementation
 owners are the native scene and gesture modules under `apps/desktop/macos`,

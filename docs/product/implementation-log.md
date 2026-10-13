@@ -1,5 +1,21 @@
 # nohmi — Implementation Log
 
+## 2026-10-12 — Finance text results and desktop pet refinements merged
+
+- [PR #242 — Fix Finance MCP text responses](https://github.com/coopersully/personal-os/pull/242)
+  merged at `2a84761d635792ba6c14273ec53a16713997315e`. Finance text responses now serialize
+  the complete versioned result instead of only its headline/question. Text-only hosts can read
+  records, pagination, disclosures and recovery information while structured payloads and
+  API-owned authorization remain unchanged. See the [MCP result contract](../mcp.md).
+- [PR #244 — Refine desktop pet interactions and quick-access cards](https://github.com/coopersully/personal-os/pull/244)
+  merged at `c6847a9e3bbbb7bd9687488b8f30a8cf2ed94e18`. Clicks tolerate pointer jitter before
+  becoming drags; unpinned quick access consumes outside dismissal clicks, while pinned cards
+  preserve multitasking. Shared Calendar, Task and Reminder components, account-scoped calendar
+  colors, local-day all-day visibility and section navigation refine the card without changing
+  domain ownership. See [desktop behavior](../design/pages/desktop-background.md).
+- These are merged-source checkpoints. Source tests do not establish provider journeys, installed
+  desktop behavior on every display configuration, or deployment of a particular release.
+
 ## 2026-10-11 — Public product, policy, and authentication pages merged
 
 - [PR #237 — Add public product and policy pages](https://github.com/coopersully/personal-os/pull/237)
@@ -36,8 +52,11 @@
   non-transmittable. See [capability boundaries](../engineering/workspace-agent-capabilities.md).
 - Implementation evidence does not establish production deployment or exhaustive input-variant coverage.
 
-## 2026-10-12 — Connector capability recovery and monitoring (branch implementation)
+## 2026-10-12 — Connector capability recovery and monitoring merged
 
+- [PR #241 — Keep connector capabilities recovering and add production monitoring](https://github.com/coopersully/personal-os/pull/241)
+  merged at `72ad1841c109b9a40efcfea95a49c0e4083030d8`. This supersedes the branch-only
+  delivery label; the earlier candidate's validation counts below remain historical evidence.
 - Calendar and Mail now retain independent health, freshness and retry state. Healthy siblings
   continue while failed capabilities wait for recovery; prolonged retries become visible service
   attention. Google quota/permission errors are distinguished, refreshed sync credentials persist

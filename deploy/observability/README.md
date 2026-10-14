@@ -1,8 +1,11 @@
 # Production observability
 
 This optional Grafana Cloud collector targets the current Mac mini / dedicated Colima production
-runtime. It is prepared in source, **not activated**. Creating a stack and installing the collector
-are still required. Existing AWS CloudWatch definitions do not prove monitoring of this runtime.
+runtime. It is prepared in source, **not verified as activated**. The
+[implementation log](../../docs/product/implementation-log.md#2026-10-12--connector-capability-recovery-and-monitoring-merged)
+records a Cloud Free stack created on October 12. Collector installation, live ingestion and alert
+delivery still require production acceptance. Existing AWS CloudWatch definitions do not prove
+monitoring of this runtime.
 
 ## What it covers
 

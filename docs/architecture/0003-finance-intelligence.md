@@ -11,10 +11,10 @@ pending, duplicated, or represent movement between accounts rather than a new
 purchase. The product also needs to surface pay, subscriptions, bills, and
 cash-flow guidance without an agent silently changing a user's financial record.
 
-## Finance Ilo intent
+## Finance stewardship intent
 
-Finances is a workspace with an Ilo, not merely a transaction store and collection of MCP tools.
-The target Finance Ilo combines the useful disciplines of a bookkeeper, accountant/controller,
+Finances is a workspace with a steward, not merely a transaction store and collection of MCP tools.
+The target Finance steward combines the useful disciplines of a bookkeeper, accountant/controller,
 financial planner, investment analyst, auditor, and coach to keep a living financial ledger
 trustworthy and useful. It owns four continuous loops:
 
@@ -106,12 +106,12 @@ financial profile. Its `sourceContexts` are canonical Finance account IDs, not
 arbitrary labels, and the API rejects duplicates, stale accounts, and accounts
 owned by another user. They are interpretation guidance, not account-level
 authorization; token scopes determine access. Source-empty Finance domain
-profiles may remain drafts. An agent may save a draft; activation requires an exact profile version and at least one owned account,
-plus either a signed-in user or explicit Finance execution authority and enabled bypass
-source. Guided setup exposes active guidance separately from an unapproved
-draft proposal; draft text is untrusted and non-operative until signed-in
-activation. A durable approval snapshot preserves the last signed-in approved
-version when an agent later saves a revised draft, so pending text cannot erase
+profiles may remain drafts. An agent may save a draft; activation requires an exact profile
+version and at least one owned account source, plus either a signed-in user or explicit
+Finance execution authority with enabled bypass. Guided setup exposes active guidance separately from an unapproved
+draft proposal; draft text is untrusted and non-operative until authorized activation.
+A durable approval snapshot records the approving user or agent and its approval source,
+and preserves the last approved version when an agent later saves a revised draft, so pending text cannot erase
 or masquerade as operative guidance. Finance preference keys use explicit units: confidence is a 0–1
 fraction, scalar currency thresholds require the current USD planning
 currency, and `recurringAmountChangePercent` is percentage points (`20` means

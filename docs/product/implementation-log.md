@@ -1,5 +1,18 @@
 # nohmi — Implementation Log
 
+## 2026-10-14 — Today recovery surfaces (branch implementation)
+
+- Account, offline and essential Today read failures replace the whole screen with one shared
+  recovery surface, including failed refreshes with cached material. Drafts/observers remain
+  mounted; the recovery surface blocks background controls and workspace shortcuts.
+- Removed the shell banner insertion slot and transient grid/navigation failure messages.
+  Optional failures use Sonner; skeletons stay in their existing value slots. Actual connector
+  recovery work remains product content, rather than a card manufactured by a failed check.
+- Repository instructions, the frontend skill and canonical feedback/system/Today documents
+  prohibit alerts and loading/status items in bento grids, navigation, rails and sidebars.
+  Focused coverage exercises cached outages, recovery, optional spending geometry and shortcut
+  isolation. This records branch behavior, not a merge, deployment or completed release gate.
+
 ## 2026-10-12 — Today refinements (branch implementation)
 
 - Separate daily timeline and calendar-week commitment cards, source-date all-day fixes,
@@ -28,6 +41,36 @@
   installed builder/environment still needs an attended update once host access is available.
   Windows webview execution remains unverified on this macOS host.
 
+## 2026-10-12 — Finance text results and desktop pet refinements merged
+
+- [PR #242 — Fix Finance MCP text responses](https://github.com/coopersully/personal-os/pull/242)
+  merged at `2a84761d635792ba6c14273ec53a16713997315e`. Finance text responses now serialize
+  the complete versioned result instead of only its headline/question. Text-only hosts can read
+  records, pagination, disclosures and recovery information while structured payloads and
+  API-owned authorization remain unchanged. See the [MCP result contract](../mcp.md).
+- [PR #244 — Refine desktop pet interactions and quick-access cards](https://github.com/coopersully/personal-os/pull/244)
+  merged at `c6847a9e3bbbb7bd9687488b8f30a8cf2ed94e18`. Clicks tolerate pointer jitter before
+  becoming drags; unpinned quick access consumes outside dismissal clicks, while pinned cards
+  preserve multitasking. Shared Calendar, Task and Reminder components, account-scoped calendar
+  colors, local-day all-day visibility and section navigation refine the card without changing
+  domain ownership. See [desktop behavior](../design/pages/desktop-background.md).
+- These are merged-source checkpoints. Source tests do not establish provider journeys, installed
+  desktop behavior on every display configuration, or deployment of a particular release.
+
+## 2026-10-11 — Public product, policy, and authentication pages merged
+
+- [PR #237 — Add public product and policy pages](https://github.com/coopersully/personal-os/pull/237)
+  merged at `933e5b8cf52abc908711e5910f8c3b161b975f52`. The public landing page and seven
+  product/policy documents render without an account or JavaScript. Dedicated authentication
+  routes preserve safe return destinations; SMS enrollment retains the consent version accepted
+  on its verification challenge.
+- Final source head `b4511c839de50a8baadfa79602a865947ed357c7` passed repository contracts,
+  lint, Node quality, browser acceptance, both selected desktop jobs, infrastructure checks,
+  and required CI. This supersedes the incomplete branch verification state recorded below;
+  those earlier failures remain historical evidence, not the final release gate.
+- Public-page reachability, deployed enrollment screenshots, actual HELP/STOP/START behavior,
+  sender registration, and provider approval require their own evidence. Merge and source
+  checks do not satisfy the [messaging submission gates](../engineering/public-documentation.md).
 
 ## 2026-10-11 — Explicit workspace agent execution
 
@@ -50,8 +93,11 @@
   non-transmittable. See [capability boundaries](../engineering/workspace-agent-capabilities.md).
 - Implementation evidence does not establish production deployment or exhaustive input-variant coverage.
 
-## 2026-10-12 — Connector capability recovery and monitoring (branch implementation)
+## 2026-10-12 — Connector capability recovery and monitoring merged
 
+- [PR #241 — Keep connector capabilities recovering and add production monitoring](https://github.com/coopersully/personal-os/pull/241)
+  merged at `72ad1841c109b9a40efcfea95a49c0e4083030d8`. This supersedes the branch-only
+  delivery label; the earlier candidate's validation counts below remain historical evidence.
 - Calendar and Mail now retain independent health, freshness and retry state. Healthy siblings
   continue while failed capabilities wait for recovery; prolonged retries become visible service
   attention. Google quota/permission errors are distinguished, refreshed sync credentials persist
@@ -205,10 +251,25 @@
   The full verification command was stopped after 60 seconds in the deployment-drain scenario
   stage; full coverage/build verification is not claimed. This is branch work, not deployment.
 
-## 2026-10-05 — Desktop background setup (source)
+## 2026-10-11 — Desktop background setup and pet quick access (merged source)
+
+- [PR #218 — Improve desktop background setup and pet quick access](https://github.com/coopersully/personal-os/pull/218)
+  merged at `6c6c4ab936ecc19e43956f6cbf6518f3235a683a`. It includes the shared readiness
+  guidance described below and a single-window pet/card scene with cursor-selected anchors,
+  pinning/resizing, configurable idle sleep, and optional closed-card shoo. Shoo defaults to
+  disabled with Medium sensitivity and does not move an open card.
+- Quick access has independent task/reminder windows and optional ritual cards. Finance's
+  Next 30 days remains unavailable without scheduled-outflow evidence.
+- This supersedes the earlier source/draft status checkpoints, preserving their design history.
+  Source implementation and automated tests do not prove signed-installation startup, actual
+  OS notification delivery, smooth pointer behavior, cross-application click-through, or every
+  Dock/display/Spaces configuration. See [desktop background setup](../design/pages/desktop-background.md)
+  for the remaining native acceptance gaps.
+
+## 2026-10-05 — Desktop background setup (historical source checkpoint)
 
 - Tracked by [COO-77 — Guide desktop background setup and macOS permissions](https://linear.app/coopersully/issue/COO-77/guide-desktop-background-setup-and-macos-permissions)
-  and [PR #218 — Guide desktop background setup](https://github.com/coopersully/personal-os/pull/218).
+  and [PR #218 — Improve desktop background setup and pet quick access](https://github.com/coopersully/personal-os/pull/218).
 - UI refinement removes the application-wide ritual setup offer, promotes Desktop pet to a
   primary Settings destination, groups desktop preferences by decision, and hides login server
   configuration behind a dialog. Ritual background navigation uses a compact, bounded action.

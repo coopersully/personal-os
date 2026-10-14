@@ -612,10 +612,14 @@ describe.sequential("connector service", () => {
         );
       }
       expect(JSON.stringify(logs)).not.toContain("PRIVATE_CANARY");
-      await diagnostics.syncAccount(userId, account.id);
-      expect(logs).toContainEqual(
-        expect.objectContaining({ event: "connector_sync_completed", syncSource: "manual" }),
-      );
+      await database.db
+        .update(calendarAccounts)
+        .set({ nextSyncAt: timestamp, syncCapabilities: null })
+        .where(eq(calendarAccounts.id, account.id));
+      await diagnostics.syncAccount(userId, account.id, options);
+      for (const event of ["connector_sync_completed", "connector_sync_recovered"]) {
+        expect(logs).toContainEqual(expect.objectContaining({ event, syncSource }));
+      }
     } finally {
       await database.db.delete(calendarAccounts).where(eq(calendarAccounts.id, account.id));
     }
@@ -1437,6 +1441,7 @@ describe.sequential("connector service", () => {
       expect.objectContaining({
         accountId: failingAccount.id,
         event: "connector_sync_recovered",
+        syncSource: "scheduled",
       }),
     );
   });

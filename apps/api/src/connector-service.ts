@@ -1254,6 +1254,7 @@ export function createConnectorService({
           accountId: claimedAccount.id,
           durationMs: Date.now() - startedAt,
           event: "connector_sync_recovered",
+          syncSource: options.triggered ? "triggered" : options.automatic ? "scheduled" : "manual",
           failureCount: claimedAccount.syncFailureCount,
           method: "CONNECTOR",
           path: `/internal/connectors/${claimedAccount.id}/sync`,

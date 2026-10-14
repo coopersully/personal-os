@@ -1,7 +1,7 @@
 # Public documentation and Twilio submission
 
-Status: repository implementation; production publication and provider verification require evidence.
-Last reviewed: October 7, 2026.
+Status: merged repository implementation; production publication and provider verification require evidence.
+Last reviewed: October 12, 2026.
 
 ## Public contract
 
@@ -164,7 +164,19 @@ Requirements were checked against Twilio's official documentation on October 7, 
 Recheck current requirements before submitting; acceptance depends on the full application and
 review, not just these pages.
 
-## Local verification evidence
+## Verification evidence
+
+### Final merged source
+
+[PR #237 — Add public product and policy pages](https://github.com/coopersully/personal-os/pull/237)
+merged on October 11 at `933e5b8cf52abc908711e5910f8c3b161b975f52`. Its final source head
+`b4511c839de50a8baadfa79602a865947ed357c7` has successful repository-contract, lint,
+Node-quality, browser-acceptance, macOS/Windows desktop, Terraform, and required CI checks.
+These final hosted results supersede the incomplete branch-verification status in the dated
+attempts below. They do not turn those earlier attempts into passes or establish production
+publication, installed-PWA acceptance, live messaging behavior, or provider approval.
+
+### Historical branch attempts
 
 During the initial October 7, 2026 documentation pass, the 25 focused Texting UI/domain/database tests passed, as did all 18 public
 documentation browser checks across desktop and mobile. Sign-in checks were repeated successfully
@@ -184,7 +196,7 @@ return paths. The web production build and type check passed. All seven producti
 reference an existing compiled stylesheet, contain no scripts, and include the shared system-dark
 theme tokens. Desktop and mobile screenshots were inspected after the final spacing/contrast fixes.
 
-The final repository-wide `pnpm verify` attempt passed lint/infrastructure checks and workspace
+The later October 7 repository-wide `pnpm verify` attempt passed lint/infrastructure checks and workspace
 type checks, then reported timeout failures in unchanged Calendar/goals/Finance tests and Task
 migration tests. Five of seven UI failures passed on focused rerun; the other two passed using
 the repository's existing CI timeout (20 seconds versus the local five seconds). The broad run

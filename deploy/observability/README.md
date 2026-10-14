@@ -2,7 +2,10 @@
 
 This optional Grafana Cloud collector targets the current Mac mini / dedicated Colima production
 runtime. This directory is the collector template; its presence does not prove activation on a
-particular host. Verify ingestion in the target stack after installation or configuration changes.
+particular host. The
+[implementation log](../../docs/product/implementation-log.md#2026-10-12--connector-capability-recovery-and-monitoring-merged)
+records a Cloud Free stack created on October 12. Confirm collector installation, live ingestion
+and alert delivery for the target host, and recheck ingestion after configuration changes.
 Existing AWS CloudWatch definitions do not prove monitoring of this runtime.
 
 ## What it covers

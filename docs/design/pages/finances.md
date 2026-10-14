@@ -217,9 +217,12 @@ Review.
   through an exhaustive label map. They describe available portal actions;
   canonical scoped MCP operations have their own authorization contract.
 - Loading and failure remain local to the affected source or guidance section.
-- An agent-authored compatibility domain-guidance profile remains a draft. The
-  signed-in activation control appears only for a draft and stays disabled until the draft contains at
-  least one owned account source; activation submits the exact profile version.
+- Ordinary agent saves leave a compatibility domain-guidance profile as a draft.
+  Explicit agent activation requires `finances:write`, `finances:execute`, owner-enabled
+  review bypass, the exact profile version, and at least one owned account source. Its
+  approval snapshot records agent provenance (`agent_self_approval`). The signed-in
+  activation control appears only for a draft and stays disabled until the draft contains
+  at least one owned account source; activation submits the exact profile version.
 
 ## Finance review history
 

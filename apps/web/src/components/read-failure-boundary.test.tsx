@@ -159,3 +159,18 @@ it("blocks a successful response when both essential commitment sources are unav
   expect(screen.getByRole("heading", { name: "Can’t connect" })).toBeVisible();
   expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
 });
+
+it("prevents background workspace keyboard shortcuts while recovery owns the screen", async () => {
+  const shortcut = vi.fn();
+  window.addEventListener("keydown", shortcut);
+  try {
+    setup("daily-brief", async () => {
+      throw new TypeError("unavailable");
+    });
+    const retry = await screen.findByRole("button", { name: "Try again" });
+    fireEvent.keyDown(retry, { key: "k", metaKey: true });
+    expect(shortcut).not.toHaveBeenCalled();
+  } finally {
+    window.removeEventListener("keydown", shortcut);
+  }
+});

@@ -132,6 +132,7 @@ export function ReadFailureBoundary({ children }: { children: ReactNode }) {
           aria-modal="true"
           className="read-failure-screen"
           onCancel={(event) => event.preventDefault()}
+          onKeyDown={(event) => event.stopPropagation()}
         >
           <ErrorPage
             kind={kind}

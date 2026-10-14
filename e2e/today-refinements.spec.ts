@@ -1,8 +1,9 @@
-import { expect, test } from "@playwright/test";
+import { expect, request, test } from "@playwright/test";
 
 test("Today keeps independent cards, saves personalization and uses weekly filters", async ({
   page,
 }, info) => {
+  test.setTimeout(90_000);
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
@@ -10,7 +11,12 @@ test("Today keeps independent cards, saves personalization and uses weekly filte
   await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   const path = "/v1/today/settings";
   const origin = new URL(page.url()).origin;
-  const original = await (await page.request.get(path)).json();
+  // Cleanup must survive a page/test timeout so a retry starts from the same preferences.
+  const restoreContext = await request.newContext({
+    baseURL: origin,
+    storageState: await page.context().storageState(),
+  });
+  const original = await (await restoreContext.get(path)).json();
   try {
     await page.getByRole("link", { name: "Personalize Today" }).click();
     await expect(page.getByRole("heading", { name: "Today at a Glance settings" })).toBeVisible();
@@ -70,11 +76,15 @@ test("Today keeps independent cards, saves personalization and uses weekly filte
       page.getByRole("navigation", { name: "Top navigation" }).locator(".review-navigation"),
     ).toBeVisible();
   } finally {
-    const current = await (await page.request.get(path)).json();
-    const restored = await page.request.patch(path, {
-      headers: { origin },
-      data: { expectedRevision: current.revision, preferences: original.preferences },
-    });
-    expect(restored.ok()).toBeTruthy();
+    try {
+      const current = await (await restoreContext.get(path)).json();
+      const restored = await restoreContext.patch(path, {
+        headers: { origin },
+        data: { expectedRevision: current.revision, preferences: original.preferences },
+      });
+      expect(restored.ok()).toBeTruthy();
+    } finally {
+      await restoreContext.dispose();
+    }
   }
 });

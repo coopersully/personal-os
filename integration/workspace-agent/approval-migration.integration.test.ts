@@ -25,11 +25,12 @@ describe("approval provenance migration", () => {
     await mkdir(join(folder, "meta"));
     const migrationRoot = resolve("packages/database/migrations");
     const journal = JSON.parse(await readFile(join(migrationRoot, "meta/_journal.json"), "utf8"));
-    const approvalMigrationIndex = journal.entries.findIndex(
+    const migrationIndex = journal.entries.findIndex(
       (entry: { tag: string }) => entry.tag === "0110_workspace_agent_approval_provenance",
     );
-    expect(approvalMigrationIndex).toBeGreaterThan(0);
-    journal.entries = journal.entries.slice(0, approvalMigrationIndex);
+    expect(migrationIndex).toBeGreaterThan(0);
+    // Start before the migration under test, including when newer migrations are added.
+    journal.entries = journal.entries.slice(0, migrationIndex);
     for (const entry of journal.entries)
       await copyFile(join(migrationRoot, `${entry.tag}.sql`), join(folder, `${entry.tag}.sql`));
     await writeFile(join(folder, "meta/_journal.json"), JSON.stringify(journal));

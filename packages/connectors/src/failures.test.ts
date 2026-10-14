@@ -25,7 +25,7 @@ describe("connector failure boundary", () => {
 
   it.each([
     [401, "authorization", "reconnect", "google_authorization_failed"],
-    [403, "authorization", "reconnect", "google_authorization_failed"],
+    [403, "rejected", "operator", "google_permission_denied"],
     [404, "not_found", "operator", "google_resource_not_found"],
     [408, "temporary", "retry", "google_temporary_failure"],
     [429, "rate_limited", "retry", "google_rate_limited"],
@@ -38,6 +38,83 @@ describe("connector failure boundary", () => {
 
     expect(error).toMatchObject({ category, code, disposition, status });
     expect(error.message).not.toContain("provider-authored secret");
+  });
+
+  it.each([
+    "rateLimitExceeded",
+    "userRateLimitExceeded",
+    "dailyLimitExceeded",
+    "quotaExceeded",
+  ])("retries Google 403 %s without invalidating authorization", async (reason) => {
+    const error = await connectorHttpError(
+      Response.json(
+        {
+          error: {
+            errors: [{ reason }],
+            message: "private-token-canary",
+          },
+        },
+        { status: 403, headers: { "retry-after": "120" } },
+      ),
+      "google",
+    );
+    expect(error).toMatchObject({
+      category: "rate_limited",
+      disposition: "retry",
+      retryAfterMs: 120_000,
+    });
+    expect(JSON.stringify(error)).not.toContain("private-token-canary");
+  });
+
+  it.each([
+    { error: { status: "PERMISSION_DENIED", message: "private-token-canary" } },
+    { error: { errors: [{ reason: "provider_private_reason" }], message: "private-token-canary" } },
+  ])("keeps unrecognized Google 403 details out of recovery evidence", async (body) => {
+    const error = await connectorHttpError(Response.json(body, { status: 403 }), "google");
+    expect(error).toMatchObject({ code: "google_permission_denied", disposition: "operator" });
+    expect(JSON.stringify(error)).not.toMatch(/private-token-canary|provider_private_reason/);
+  });
+
+  it("retries a Google quota response without a Retry-After header", async () => {
+    const error = await connectorHttpError(
+      Response.json({ error: { errors: [{ reason: "quotaExceeded" }] } }, { status: 403 }),
+      "google",
+    );
+    expect(error).toMatchObject({
+      code: "google_rate_limited",
+      disposition: "retry",
+      retryAfterMs: null,
+    });
+  });
+
+  it("distinguishes missing Google scopes from disabled APIs", async () => {
+    for (const [reason, code, disposition] of [
+      ["insufficientPermissions", "google_permission_missing", "reconnect"],
+      ["accessNotConfigured", "google_configuration_invalid", "operator"],
+    ]) {
+      const error = await connectorHttpError(
+        Response.json(
+          {
+            error: {
+              errors: [{ reason }],
+              message: "private-token-canary",
+            },
+          },
+          { status: 403 },
+        ),
+        "google",
+      );
+      expect(error).toMatchObject({ code, disposition });
+      expect(JSON.stringify(error)).not.toContain("private-token-canary");
+    }
+  });
+
+  it("does not treat a collection-level iCloud 403 as a revoked password", () => {
+    expect(classifyICloudError("calendar", { status: 403 })).toMatchObject({
+      category: "rejected",
+      disposition: "operator",
+      code: "icloud_calendar_permission_denied",
+    });
   });
 
   it("uses only allowlisted Google OAuth error codes as positive recovery evidence", async () => {

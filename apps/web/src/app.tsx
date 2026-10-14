@@ -19,6 +19,7 @@ import {
   type TimelinePositionable,
   type TodayTimelineDensity,
 } from "./features/calendar/day-timeline.js";
+import { calendarEventColorStyle } from "./features/calendar/event-color.js";
 
 export {
   positionTimelineEvents,
@@ -355,6 +356,7 @@ import {
   CalendarAppBarIdentity,
 } from "./features/calendar/workspace-header.js";
 import {
+  ConnectionCapabilityHealth,
   ConnectionHealthBadge,
   ConnectionHealthDescription,
   connectionHealth,
@@ -2001,7 +2003,7 @@ function WorkspaceAppBarForRoute({
                   aria-pressed={pinned}
                   onClick={togglePin}
                   size="icon"
-                  variant="ghost"
+                  variant={pinned ? "secondary" : "ghost"}
                 >
                   <PinIcon aria-hidden="true" weight={pinned ? "Filled" : "Outline"} />
                 </ShadcnButton>
@@ -4237,10 +4239,6 @@ function useCalendarRangeSelection(onCreateRange: (draft: EventDraft) => void, t
     selection: selection?.active ? selection : null,
     start,
   };
-}
-
-function calendarEventColorStyle(color: string | null | undefined): CSSProperties {
-  return { "--calendar-color": color ?? "#777ce3" } as CSSProperties;
 }
 
 type EventBlockColor = { color: string; id: string; mode: "busy" | "details" };
@@ -7738,7 +7736,15 @@ function ConnectorRow({
           <span>
             <ConnectionHealthDescription health={health} lastSyncedAt={account.lastSyncedAt} />
           </span>
-          <small>{connectionHealthGuidance(health.state)}</small>
+          {account.capabilities && Object.keys(account.capabilities).length > 0 ? (
+            <ConnectionCapabilityHealth
+              capabilities={account.capabilities}
+              enabled={{ calendar: account.calendarEnabled, mail: account.mailEnabled }}
+              fallback={{ health, lastSyncedAt: account.lastSyncedAt }}
+            />
+          ) : (
+            <small>{connectionHealthGuidance(health.state)}</small>
+          )}
         </>
       }
       title={account.label}

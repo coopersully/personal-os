@@ -16,6 +16,16 @@ final class NativeTests: XCTestCase {
       id: id, title: "Private title", dueAt: due, status: completed ? "completed" : "next",
       completedAt: completed ? "2026-09-08T10:00:00Z" : nil)
   }
+  func testCalendarProviderSurvivesSnapshotRoundTrip() throws {
+    var value = snapshot()
+    value.events = [CalendarItem(id: "day", title: "All day",
+      startsAt: "2026-07-14T00:00:00Z", endsAt: "2026-07-15T00:00:00Z",
+      allDay: true, conferenceUrl: nil, calendarId: "work", provider: "google", status: "confirmed")]
+    let data = try JSONEncoder().encode(value)
+    let decoded = try JSONDecoder().decode(NativeSnapshot.self, from: data)
+    XCTAssertEqual(decoded.events.first?.provider, "google")
+    XCTAssertEqual(decoded.events.first?.startsAt, "2026-07-14T00:00:00Z")
+  }
   func testTodaySurvivesAmbientHistoryLimit() {
     var s = snapshot()
     s.tasks = (0..<150).map { item("old-\($0)", "2026-09-01T12:00:00Z") }

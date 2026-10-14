@@ -1186,7 +1186,7 @@ export function createMailService({
       const sendCapabilities = new Map(
         await Promise.all(
           accounts.map(async (account) => {
-            const health = connectionHealthForAccount(account);
+            const health = connectionHealthForAccount(account, "mail");
             let capability: "available" | "reconnect" | "unavailable";
             if (health.state === "reconnect") capability = "reconnect";
             else {
@@ -1212,16 +1212,30 @@ export function createMailService({
           },
           automaticRuleExecution: account.provider === "google",
           email: account.email,
-          health: connectionHealthForAccount(account),
+          health: connectionHealthForAccount(account, "mail"),
           label: account.label,
-          lastSyncAttemptAt: account.lastSyncAttemptAt?.toISOString() ?? null,
-          lastSyncedAt: account.lastSyncedAt?.toISOString() ?? null,
+          lastSyncAttemptAt:
+            account.syncCapabilities?.mail?.lastAttemptAt ??
+            account.lastSyncAttemptAt?.toISOString() ??
+            null,
+          lastSyncedAt: account.syncCapabilities?.mail
+            ? account.syncCapabilities.mail.lastSyncedAt
+            : (account.lastSyncedAt?.toISOString() ?? null),
           mailboxes: mailboxesByAccount.get(account.id) ?? [],
           provider: account.provider as "google" | "icloud",
           sendCapability: sendCapabilities.get(account.id) ?? "unavailable",
-          nextSyncAt: account.nextSyncAt?.toISOString() ?? null,
-          syncError: account.syncError,
-          syncStatus: account.syncStatus,
+          nextSyncAt: account.syncCapabilities?.mail
+            ? account.syncCapabilities.mail.health.nextSyncAt
+            : (account.nextSyncAt?.toISOString() ?? null),
+          syncError: connectionHealthForAccount(account, "mail").message,
+          syncStatus:
+            account.syncStatus === "syncing"
+              ? "syncing"
+              : account.syncCapabilities?.mail
+                ? account.syncCapabilities.mail.errorCode
+                  ? "error"
+                  : "idle"
+                : account.syncStatus,
         })),
         automation: {
           executionLimitPerRun: MAIL_RULE_EXECUTION_LIMIT_PER_RUN,

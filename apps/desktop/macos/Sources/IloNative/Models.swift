@@ -55,6 +55,7 @@ struct CalendarItem: Codable, Identifiable {
   var allDay: Bool
   var conferenceUrl: String?
   var calendarId: String
+  var provider: String? = nil
   var status: String
   var active: Bool { !["cancelled", "canceled", "deleted", "declined"].contains(status) }
 }

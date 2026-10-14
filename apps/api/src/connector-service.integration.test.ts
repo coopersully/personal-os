@@ -907,7 +907,7 @@ describe.sequential("connector service", () => {
     expect(syncMail).toHaveBeenLastCalledWith(
       expect.objectContaining({ accessToken: expect.any(String) }),
       "history-before",
-      undefined,
+      expect.objectContaining({ persistGoogleCredentials: expect.any(Function) }),
     );
     const [updatedAccount] = await database.db
       .select({ mailSyncToken: calendarAccounts.mailSyncToken })
@@ -1370,7 +1370,7 @@ describe.sequential("connector service", () => {
 
     await database.db
       .update(calendarAccounts)
-      .set({ nextSyncAt: timestamp })
+      .set({ nextSyncAt: timestamp, syncCapabilities: null })
       .where(eq(calendarAccounts.id, failingAccount.id));
     await expect(schedulerService.syncDueAccounts()).resolves.toMatchObject({
       recovered: 1,
@@ -4851,7 +4851,7 @@ describe.sequential("connector service", () => {
       .from(calendarAccounts)
       .where(eq(calendarAccounts.id, account.id));
     expect(reconnect).toMatchObject({
-      nextSyncAt: null,
+      nextSyncAt: new Date(timestamp.getTime() + 5 * 60_000),
       syncErrorCategory: "authorization",
       syncFailureCount: 2,
       syncRecovery: "reconnect",
@@ -8594,5 +8594,423 @@ describe.sequential("connector service", () => {
     });
 
     await expect(failingService.startGoogleAuthorization(userId)).rejects.toBe(unexpected);
+  });
+  it("keeps Mail syncing when Calendar fails and reports capability-specific health", async () => {
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        userId,
+        provider: "google",
+        providerAccountId: "isolated-capabilities",
+        label: "Isolated capabilities",
+        calendarEnabled: true,
+        mailEnabled: true,
+        encryptedCredentials: encryptJson(
+          { ...credentials, scope: googleCalendarAndMailScope },
+          encryptionKey,
+        ),
+      })
+      .returning();
+    if (!account) throw new Error("Missing fixture");
+    vi.mocked(google.listCalendars).mockRejectedValueOnce(
+      new ConnectorError({
+        category: "authorization",
+        code: "google_permission_missing",
+        disposition: "reconnect",
+        message: "private-provider-canary",
+        status: 403,
+      }),
+    );
+    await expect(service.syncAccount(userId, account.id)).rejects.toMatchObject({
+      code: "service_unavailable",
+    });
+    const [stored] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, account.id));
+    expect(stored?.mailSyncToken).toBe("mail-history");
+    expect(stored?.nextSyncAt).not.toBeNull();
+    const listed = (await service.listAccounts(userId)).find((row) => row.id === account.id);
+    expect(listed?.capabilities).toMatchObject({
+      calendar: { health: { state: "reconnect" }, errorCode: "google_permission_missing" },
+      mail: { health: { state: "ready" }, lastSyncedAt: timestamp.toISOString() },
+    });
+    expect(JSON.stringify(listed)).not.toContain("private-provider-canary");
+  });
+
+  it.each([
+    false,
+    true,
+  ])("persists refreshed Google credentials across later failure (within request: %s)", async (withinRequest) => {
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        userId,
+        provider: "google",
+        providerAccountId: `partial-refresh-${withinRequest}`,
+        label: "Partial refresh",
+        calendarEnabled: true,
+        mailEnabled: true,
+        encryptedCredentials: encryptJson(
+          { ...credentials, scope: googleCalendarAndMailScope },
+          encryptionKey,
+        ),
+      })
+      .returning();
+    if (!account) throw new Error("Missing fixture");
+    if (withinRequest) {
+      vi.mocked(google.listCalendars).mockImplementationOnce(async (_credentials, operation) => {
+        if (!operation?.persistGoogleCredentials)
+          throw new Error("Missing durable refresh callback");
+        await operation.persistGoogleCredentials({
+          ...rotatedCredentials,
+          refreshToken: "rotated-refresh",
+        });
+        throw new ConnectorError({
+          category: "temporary",
+          code: "google_temporary_failure",
+          disposition: "retry",
+          message: "private-provider-canary",
+          status: 503,
+        });
+      });
+    } else {
+      vi.mocked(google.listCalendars).mockResolvedValueOnce({
+        credentials: { ...rotatedCredentials, refreshToken: "rotated-refresh" },
+        value: [],
+      });
+    }
+    if (!google.syncMail) throw new Error("Missing Mail connector");
+    vi.mocked(google.syncMail).mockRejectedValueOnce(new Error("private-provider-canary"));
+    await expect(service.syncAccount(userId, account.id)).rejects.toMatchObject({
+      code: "service_unavailable",
+    });
+    const [stored] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, account.id));
+    if (!stored?.encryptedCredentials) throw new Error("Missing stored credentials");
+    expect(
+      decryptJson<GoogleCredentials>(stored.encryptedCredentials, encryptionKey).refreshToken,
+    ).toBe("rotated-refresh");
+  });
+  it("keeps scheduled healthy siblings running without retrying a blocked capability", async () => {
+    const provider = mockGoogle();
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        userId,
+        provider: "google",
+        providerAccountId: "scheduled-partial",
+        label: "Partial schedule",
+        calendarEnabled: true,
+        mailEnabled: true,
+        encryptedCredentials: encryptJson(
+          { ...credentials, scope: googleCalendarAndMailScope },
+          encryptionKey,
+        ),
+      })
+      .returning();
+    if (!account || !provider.syncMail) throw new Error("Missing fixture");
+    let clock = timestamp;
+    const localService = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google: provider,
+      icloud,
+      now: () => clock,
+    });
+    vi.mocked(provider.listCalendars).mockRejectedValueOnce(
+      new ConnectorError({
+        category: "authorization",
+        code: "google_permission_missing",
+        disposition: "reconnect",
+        message: "private",
+        status: 403,
+      }),
+    );
+    await expect(localService.syncAccount(userId, account.id)).rejects.toMatchObject({
+      code: "service_unavailable",
+    });
+    clock = new Date(timestamp.getTime() + 5 * 60_000);
+    vi.mocked(provider.syncMail).mockResolvedValueOnce({
+      credentials,
+      value: {
+        deletedThreadIds: [],
+        mailboxes: [],
+        threads: [],
+        reset: false,
+        nextSyncToken: "healthy-sibling-advanced",
+      },
+    });
+    await expect(
+      localService.syncAccount(userId, account.id, { automatic: true }),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+    const [stored] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, account.id));
+    expect(stored?.mailSyncToken).toBe("healthy-sibling-advanced");
+    expect(stored?.syncCapabilities?.calendar?.lastAttemptAt).toBe(timestamp.toISOString());
+    expect(stored?.syncCapabilities?.mail?.lastSyncedAt).toBe(clock.toISOString());
+    expect(stored?.nextSyncAt).toEqual(new Date(clock.getTime() + 5 * 60_000));
+    // Notification work can refresh the healthy sibling before its reconciliation deadline.
+    const calendarCalls = vi.mocked(provider.listCalendars).mock.calls.length;
+    const mailCalls = vi.mocked(provider.syncMail).mock.calls.length;
+    await database.db.delete(connectorSyncTriggers);
+    await localService.enqueueSyncTrigger(account.id, "notification");
+    await expect(localService.dispatchTriggeredSyncs()).resolves.toMatchObject({
+      attempted: 1,
+      succeeded: 1,
+      failed: 0,
+    });
+    expect(
+      await database.db
+        .select()
+        .from(connectorSyncTriggers)
+        .where(eq(connectorSyncTriggers.accountId, account.id)),
+    ).toEqual([]);
+    expect(
+      (await localService.listAccounts(userId)).find((row) => row.id === account.id)?.capabilities
+        .calendar?.health.recovery,
+    ).toBe("reconnect");
+    expect(provider.listCalendars).toHaveBeenCalledTimes(calendarCalls);
+    expect(provider.syncMail).toHaveBeenCalledTimes(mailCalls + 1);
+    const partialFreshness = await localService.observeSyncFreshness();
+    if (!stored?.syncCapabilities?.mail) throw new Error("Missing Mail health");
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        syncCapabilities: {
+          ...stored.syncCapabilities,
+          mail: {
+            ...stored.syncCapabilities.mail,
+            health: {
+              state: "reconnect",
+              recovery: "reconnect",
+              message: "Reconnect",
+              nextSyncAt: null,
+            },
+          },
+        },
+      })
+      .where(eq(calendarAccounts.id, account.id));
+    expect((await localService.observeSyncFreshness()).eligibleAccountCount).toBe(
+      partialFreshness.eligibleAccountCount - 1,
+    );
+    // Explicit retry rechecks the blocked capability and clears its failure on success.
+    await expect(localService.syncAccount(userId, account.id)).resolves.toMatchObject({
+      changed: 0,
+    });
+    expect(
+      (await localService.listAccounts(userId)).find((row) => row.id === account.id)?.capabilities
+        .calendar?.health.state,
+    ).toBe("ready");
+  });
+
+  it("backs off account credential failures instead of reusing stale capability schedules", async () => {
+    const provider = mockICloud();
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        userId,
+        provider: "icloud",
+        providerAccountId: "missing-credentials-backoff",
+        label: "Missing credentials",
+        calendarEnabled: true,
+        mailEnabled: false,
+        encryptedCredentials: encryptJson(
+          { email: "backoff@example.com", appSpecificPassword: "private" },
+          encryptionKey,
+        ),
+      })
+      .returning();
+    if (!account) throw new Error("Missing fixture");
+    let clock = timestamp;
+    const localService = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google,
+      icloud: provider,
+      now: () => clock,
+    });
+    await localService.syncAccount(userId, account.id);
+    clock = new Date(timestamp.getTime() + 86_400_000);
+    await database.db
+      .update(calendarAccounts)
+      .set({ encryptedCredentials: null })
+      .where(eq(calendarAccounts.id, account.id));
+    await expect(localService.syncAccount(userId, account.id)).rejects.toMatchObject({
+      code: "service_unavailable",
+    });
+    const [stored] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, account.id));
+    expect(stored?.syncErrorCode).toBe("connector_credentials_missing");
+    expect(stored?.nextSyncAt?.getTime()).toBeGreaterThan(clock.getTime());
+    expect(Date.parse(stored?.syncCapabilities?.calendar?.health.nextSyncAt ?? "")).toBeLessThan(
+      clock.getTime(),
+    );
+  });
+
+  it("escalates day-old retry failures while preserving automatic recovery", async () => {
+    const provider = mockICloud();
+    vi.mocked(provider.listCalendars).mockRejectedValue(new Error("private-canary"));
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        userId,
+        provider: "icloud",
+        providerAccountId: "stale-capability",
+        label: "Stale capability",
+        calendarEnabled: true,
+        mailEnabled: false,
+        createdAt: new Date(timestamp.getTime() - 2 * 86_400_000),
+        encryptedCredentials: encryptJson(
+          { email: "stale@example.com", appSpecificPassword: "private" },
+          encryptionKey,
+        ),
+      })
+      .returning();
+    if (!account) throw new Error("Missing fixture");
+    const localService = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google,
+      icloud: provider,
+      now: () => timestamp,
+    });
+    await expect(localService.syncAccount(userId, account.id)).rejects.toMatchObject({
+      code: "service_unavailable",
+    });
+    const listed = (await localService.listAccounts(userId)).find((row) => row.id === account.id);
+    expect(listed?.health).toMatchObject({
+      state: "service_attention",
+      recovery: "automatic",
+      nextSyncAt: expect.any(String),
+    });
+    expect(listed?.capabilities.calendar?.errorCode).toBe("connector_unknown_failure");
+    expect(JSON.stringify(listed)).not.toContain("private-canary");
+  });
+  it.each([
+    "retry",
+    "operator",
+    "reconnect",
+  ] as const)("preserves Mail %s recovery through early notifications and Calendar-only sync", async (disposition) => {
+    const provider = mockGoogle();
+    if (!provider.syncMail) throw new Error("Missing Mail connector");
+    vi.mocked(provider.syncMail).mockRejectedValue(
+      new ConnectorError({
+        disposition,
+        category:
+          disposition === "retry"
+            ? "rate_limited"
+            : disposition === "operator"
+              ? "configuration"
+              : "authorization",
+        code:
+          disposition === "retry"
+            ? "google_rate_limited"
+            : disposition === "operator"
+              ? "google_configuration_invalid"
+              : "google_permission_missing",
+        message: "private-canary",
+      }),
+    );
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        userId,
+        provider: "google",
+        providerAccountId: `mail-recovery-${disposition}`,
+        label: "Mail recovery",
+        calendarEnabled: true,
+        mailEnabled: true,
+        createdAt: new Date(timestamp.getTime() - 2 * 86_400_000),
+        encryptedCredentials: encryptJson(credentials, encryptionKey),
+      })
+      .returning();
+    if (!account) throw new Error("Missing recovery account");
+    const localService = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google: provider,
+      icloud,
+      now: () => timestamp,
+    });
+    await expect(localService.syncAccount(userId, account.id)).rejects.toBeDefined();
+    const first = (await localService.listAccounts(userId)).find(
+      (value) => value.id === account.id,
+    );
+    expect(first?.capabilities.mail?.health.state).toBe(
+      disposition === "reconnect" ? "reconnect" : "service_attention",
+    );
+    const calendarCalls = vi.mocked(provider.listCalendars).mock.calls.length;
+    const mailCalls = vi.mocked(provider.syncMail).mock.calls.length;
+    await expect(
+      localService.syncAccount(userId, account.id, { automatic: true }),
+    ).rejects.toBeDefined();
+    expect(provider.listCalendars).toHaveBeenCalledTimes(calendarCalls);
+    expect(provider.syncMail).toHaveBeenCalledTimes(mailCalls);
+    await expect(
+      localService.syncAccount(userId, account.id, { skipMail: true }),
+    ).rejects.toBeDefined();
+    expect(provider.listCalendars).toHaveBeenCalledTimes(calendarCalls + 1);
+    expect(provider.syncMail).toHaveBeenCalledTimes(mailCalls);
+    const final = (await localService.listAccounts(userId)).find(
+      (value) => value.id === account.id,
+    );
+    expect(final?.capabilities.calendar?.health.state).toBe("ready");
+    expect(final?.capabilities.mail).toEqual(first?.capabilities.mail);
+    expect(JSON.stringify(final)).not.toContain("private-canary");
+  });
+  it("stops automatic reconciliation when both capabilities lose authorization", async () => {
+    const provider = mockGoogle();
+    if (!provider.syncMail) throw new Error("Missing Mail connector");
+    const rejected = new ConnectorError({
+      category: "authorization",
+      code: "google_authorization_failed",
+      disposition: "reconnect",
+      message: "private-canary",
+      status: 401,
+    });
+    vi.mocked(provider.listCalendars).mockRejectedValueOnce(rejected);
+    vi.mocked(provider.syncMail).mockRejectedValueOnce(rejected);
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        userId,
+        provider: "google",
+        providerAccountId: "both-revoked",
+        label: "Both revoked",
+        calendarEnabled: true,
+        mailEnabled: true,
+        encryptedCredentials: encryptJson(credentials, encryptionKey),
+      })
+      .returning();
+    if (!account) throw new Error("Missing revoked account");
+    const localService = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google: provider,
+      icloud,
+      now: () => timestamp,
+    });
+    await expect(localService.syncAccount(userId, account.id)).rejects.toMatchObject({
+      code: "service_unavailable",
+    });
+    const [stored] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, account.id));
+    expect(stored?.nextSyncAt).toBeNull();
+    expect(stored?.syncCapabilities?.calendar?.health.recovery).toBe("reconnect");
+    expect(stored?.syncCapabilities?.mail?.health.recovery).toBe("reconnect");
+    await localService.syncAccount(userId, account.id);
+    expect(
+      (await localService.listAccounts(userId)).find((value) => value.id === account.id)?.health
+        .state,
+    ).toBe("ready");
   });
 });

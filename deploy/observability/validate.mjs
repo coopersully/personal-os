@@ -88,7 +88,7 @@ try {
       event: "request",
       status: 500,
       path: "PRIVATE_CANARY",
-      code: "PRIVATE_CANARY",
+      code: "google_authorization_failedPRIVATE_CANARY",
       transportCode: "PRIVATE_CANARY",
       transportPhase: "PRIVATE_CANARY",
       syncSource: "PRIVATE_CANARY",

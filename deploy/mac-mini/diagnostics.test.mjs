@@ -2,6 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { collectDiagnostics, summarizeConnectorLogs } from "./diagnostics.mjs";
 
+test("rejects private suffixes appended to allowlisted provider codes", () => {
+  for (const prefix of [
+    "google_authorization_failed",
+    "plaid_transport_failure",
+    "connector_unknown_failure",
+    "plaid_invalid_cursor",
+  ]) {
+    const summary = summarizeConnectorLogs(
+      JSON.stringify({ event: "connector_sync_failed", code: `${prefix}PRIVATE_CANARY` }),
+    );
+    assert.equal(summary.events[0].code, undefined);
+    assert.ok(!JSON.stringify(summary).includes("PRIVATE_CANARY"));
+  }
+});
+
 test("preserves fixed Plaid projection and cursor failure codes", () => {
   for (const code of [
     "plaid_invalid_response",

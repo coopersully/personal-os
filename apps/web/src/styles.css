@@ -7657,7 +7657,7 @@ html.pet-window #root {
 .pet-portrait__ear { top: 19%; width: 19.4%; height: 26.4%; border-radius: 50%; }
 .pet-portrait__ear--left { left: 18%; }
 .pet-portrait__ear--right { right: 19.4%; }
-.pet-portrait__eye { position: absolute; top: 43%; width: 7.5%; height: 11.4%; border-radius: 50%; background: var(--content-primary); }
+.pet-portrait__eye { position: absolute; top: 43%; width: 7.5%; height: 11.4%; border-radius: 50%; background: var(--pet-face); }
 .pet-portrait__eye--left { left: 33.75%; }
 .pet-portrait__eye--right { left: 58.75%; }
 

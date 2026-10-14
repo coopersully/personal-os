@@ -10,11 +10,26 @@ import { useDesktopUpdateStatus } from "./updates";
 
 /** A still of the bundled native creature, using its silhouette and selected color. */
 function PetPortrait({ color }: { color: string }) {
+  // Match the native sprite's face contrast for both light and dark user colors.
+  const value = Number.parseInt(color.replace("#", ""), 16);
+  const linear = (channel: number) => {
+    const unit = channel / 255;
+    return unit <= 0.04045 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance =
+    0.2126 * linear((value >> 16) & 255) +
+    0.7152 * linear((value >> 8) & 255) +
+    0.0722 * linear(value & 255);
   return (
     <span
       className="pet-portrait"
       aria-hidden="true"
-      style={{ "--pet-color": color } as CSSProperties}
+      style={
+        {
+          "--pet-color": color,
+          "--pet-face": luminance > 0.179 ? "black" : "white",
+        } as CSSProperties
+      }
     >
       <span className="pet-portrait__body" />
       <span className="pet-portrait__ear pet-portrait__ear--left" />

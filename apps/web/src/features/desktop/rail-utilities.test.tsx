@@ -99,3 +99,13 @@ it("never reads desktop settings or displays native controls in a browser", () =
   expect(screen.queryByRole("link")).not.toBeInTheDocument();
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });
+
+it.each([
+  ["#ffffff", "black"],
+  ["#000000", "white"],
+])("keeps the native pet face visible on body color %s", async (color, face) => {
+  mocks.settings.mockResolvedValue({ settings: { petEnabled: true, petColor: color } });
+  mount();
+  const pet = await screen.findByRole("link", { name: "Pet settings" });
+  expect(pet.querySelector(".pet-portrait")).toHaveStyle(`--pet-face: ${face}`);
+});

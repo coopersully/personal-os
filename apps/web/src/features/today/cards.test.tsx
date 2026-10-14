@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { getDefaultWorkspacePreferences, type RitualState } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { toast } from "sonner";
@@ -23,11 +23,12 @@ const state: RitualState = {
 function setup(child: React.ReactNode) {
   const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   cache.setQueryData(["me"], { id: "owner" });
-  return render(
+  const view = render(
     <MemoryRouter>
       <QueryClientProvider client={cache}>{child}</QueryClientProvider>
     </MemoryRouter>,
   );
+  return { ...view, cache };
 }
 beforeEach(() => {
   vi.spyOn(api, "getXBookmarkAccount").mockResolvedValue(null);
@@ -117,4 +118,41 @@ it("keeps connection failures independent of review navigation", async () => {
   expect(container).toBeEmptyDOMElement();
   expect(screen.queryByText("Some connections could not be checked")).not.toBeInTheDocument();
   expect(screen.queryByRole("link", { name: /Open calendar attention/ })).not.toBeInTheDocument();
+});
+
+it("retains spending geometry after a failed refresh and sends the error through Sonner", async () => {
+  vi.spyOn(api, "getWorkspaceSettings").mockImplementation(
+    async (workspace) =>
+      ({
+        workspace,
+        revision: 1,
+        preferences: getDefaultWorkspacePreferences(workspace),
+      }) as Awaited<ReturnType<typeof api.getWorkspaceSettings>>,
+  );
+  const read = vi
+    .spyOn(api, "getFinancePosition")
+    .mockResolvedValue({ postedSpend: { cents: 1250, quality: "qualified" } } as Awaited<
+      ReturnType<typeof api.getFinancePosition>
+    >);
+  const feedback = vi.spyOn(toast, "error");
+  const { cache, container } = setup(
+    <TodaySpendingCard
+      now={new Date("2026-10-14T16:00:00Z")}
+      timeZone="America/New_York"
+      window="week"
+    />,
+  );
+  await screen.findByText("$12.50");
+  const before = container.querySelector('[data-slot="card-content"]')?.childElementCount;
+  read.mockRejectedValue(new Error("unavailable"));
+  await act(async () => {
+    await cache.refetchQueries({ queryKey: ["today-spending"] });
+  });
+  await waitFor(() =>
+    expect(feedback).toHaveBeenCalledWith("Couldn’t refresh spending.", expect.any(Object)),
+  );
+  expect(screen.getByText("$12.50")).toBeVisible();
+  expect(screen.queryByText("Could not refresh this amount.")).not.toBeInTheDocument();
+  expect(container.querySelector('[data-slot="card-content"]')?.childElementCount).toBe(before);
+  expect(container.querySelector('[role="alert"], [role="status"]')).toBeNull();
 });

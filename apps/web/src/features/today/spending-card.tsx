@@ -2,6 +2,7 @@ import { localDateAt, localDateToIso, todayWeekRange } from "@personal-os/domain
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "@/api";
+import { useQueryFeedback } from "@/components/async-state";
 import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
 import {
   Card,
@@ -11,6 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useWorkspacePreferences } from "@/features/workspace-settings/preferences";
 import { useSaveTodayPreferences } from "./preferences";
 export function TodaySpendingCard({
@@ -44,6 +46,9 @@ export function TodaySpendingCard({
       }),
     refetchInterval: 60000,
   });
+  useQueryFeedback({ query, title: "Couldn’t refresh spending." });
+  useQueryFeedback({ query: finance, title: "Couldn’t load spending preferences." });
+  useQueryFeedback({ query: calendar, title: "Couldn’t load calendar preferences." });
   const fact = query.data?.postedSpend;
   return (
     <Card>
@@ -73,15 +78,17 @@ export function TodaySpendingCard({
         {save.recovery ? (
           <Link to="/settings?section=today">Review unsaved preferences</Link>
         ) : null}
-        <p className="text-2xl">
-          {fact && fact.cents !== null && fact.quality !== "unavailable"
-            ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
-                Number(fact.cents) / 100,
-              )
-            : query.isPending && !finance.isError && !calendar.isError
-              ? "Loading…"
-              : "Unavailable"}
-        </p>
+        <div className="text-2xl">
+          {fact && fact.cents !== null && fact.quality !== "unavailable" ? (
+            new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
+              Number(fact.cents) / 100,
+            )
+          ) : query.isPending && !finance.isError && !calendar.isError ? (
+            <Skeleton className="h-8 w-28" aria-label="Loading spending" />
+          ) : (
+            "Unavailable"
+          )}
+        </div>
         <p className="text-sm text-muted-foreground">
           {accountIds?.length === 0
             ? "No accounts selected."
@@ -89,9 +96,6 @@ export function TodaySpendingCard({
               ? "Partial evidence · posted spending through today"
               : "Posted spending through today"}
         </p>
-        {query.isError && query.data ? (
-          <p className="text-sm text-muted-foreground">Could not refresh this amount.</p>
-        ) : null}
       </CardContent>
       <CardFooter>
         <Link to="/finances">Open Finance</Link>

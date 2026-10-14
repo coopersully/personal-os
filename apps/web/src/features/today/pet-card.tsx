@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
+import { useQueryFeedback } from "@/components/async-state";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDesktopSettings, isDesktop, nativeAction } from "@/features/desktop/bridge";
@@ -12,6 +13,7 @@ export function TodayPetCard() {
     enabled: isDesktop(),
     refetchInterval: 30000,
   });
+  useQueryFeedback({ query, title: "Couldn’t refresh pet settings." });
   if (!isDesktop() || !query.data?.settings.petEnabled) return null;
   return (
     <Card>

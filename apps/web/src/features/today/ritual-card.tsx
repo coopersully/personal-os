@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
+import { useQueryFeedback } from "@/components/async-state";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -11,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 import { isDesktop } from "@/features/desktop/bridge";
 import {
   openCurrentRitual,
@@ -27,6 +29,7 @@ export function TodayRitualCard() {
     queryFn: readRitualState,
     refetchInterval: 30000,
   });
+  useQueryFeedback({ query, title: "Couldn’t refresh your ritual." });
   const occurrence = query.data?.current;
   return (
     <Card>
@@ -36,11 +39,13 @@ export function TodayRitualCard() {
         </CardTitle>
         <CardDescription>
           {occurrence?.definition.title ??
-            (query.isPending
-              ? "Loading…"
-              : query.isError
-                ? "Ritual unavailable"
-                : "No current ritual")}
+            (query.isPending ? (
+              <Skeleton className="h-5 w-32" aria-label="Loading ritual" />
+            ) : query.isError ? (
+              "Unavailable"
+            ) : (
+              "No current ritual"
+            ))}
         </CardDescription>
       </CardHeader>
       {query.data?.syncStatus === "queued" ? (

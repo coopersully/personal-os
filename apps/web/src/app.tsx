@@ -2383,6 +2383,7 @@ function TodayPage({
   };
 }) {
   const preferences = useTodayPreferences();
+  useQueryFeedback({ query: preferences, title: "Couldn’t load Today preferences." });
   const currentTime = useTodayClock(user.planningTimezone);
   const completedReminders = useQuery({
     queryFn: () => api.listReminders({ completed: true, limit: 100 }),

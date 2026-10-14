@@ -174,3 +174,18 @@ The dedicated Mac builder also reads the optional owner-private
 retain the public basemap configuration without LaunchAgent environment assumptions. Follow
 `deploy/mac-mini/continuous.md` for the attended builder installation; do not infer deployment
 success from key-file installation.
+
+## Liquid-glass renderer
+
+React Bits Glass Surface is vendored at a pinned source revision with its license. The optical
+renderer does not fetch content: SVG displacement maps and weather/map stills are local, in-memory
+assets. WebKit/Firefox use the upstream WebGL path when a usable local backdrop exists; missing
+pixels, failed texture upload and context loss degrade to frosted surfaces. Reduced transparency,
+increased contrast and forced colors disable the optical layer. Maps preserve drawing buffers only
+for inert background capture; previews retain their original behavior. Theme/resize changes refresh
+the map still, and unmount removes images, observers, GPU resources and animation frames.
+
+Native update rail controls reuse the signed, bounded existing updater. A ready update already has
+verified bytes staged; the rail invokes the same install/restart command as Settings and reports
+only the confirmed handoff through Sonner. Mock bridge tests do not establish release availability
+or successful installation on a user's device.

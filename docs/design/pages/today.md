@@ -10,12 +10,14 @@ and [implementation plan](../../superpowers/plans/2026-10-12-today-refinements.m
 
 ## Hierarchy and boundaries
 
-The app frame holds the planning date, weather, location and capture. Always reserve weather
-and location control geometry, including loading and unavailable states. Resolve their data
+The app frame holds the planning date, weather, location and capture. Weather and location controls keep their normal compact button anatomy, including loading and
+unavailable states. Use intrinsic widths with a bounded location label; do not stretch short labels. Resolve their data
 independently; never add a transient conditions row to the body.
 
-Needs your attention precedes two separate, flat cards: Your timeline and To take care of.
-Show account recovery and workspace review totals regardless of optional-card preferences.
+Two separate cards hold Your timeline and Your commitments. Workspace reviews use the standard
+review action in the top navigation, with a workspace chooser opening each owning review flow.
+Account recovery remains in Needs your attention when a connection fails; no clear/pending review
+card repeats the top navigation. Show these controls regardless of optional-card preferences.
 Group reviews by their owning workspace and open its existing review flow; never approve from
 Today. If an attention source fails, retain available evidence and disclose incomplete checks.
 Automatic provider retries are not reconnect demands. Poll visible attention sources each minute.
@@ -24,7 +26,7 @@ Automatic provider retries are not reconnect demands. Poll visible attention sou
 | --- | --- | --- |
 | Your timeline | Today's all-day occasions, remaining events and task reservations, reminders at their actual due time | Existing event quick actions and material editors; reminders are point markers, not invented appointments |
 | Due today within timeline | Open tasks due today without a remaining reservation, plus earlier uncompleted reminders due today | Compact titles/timing and existing completion/editor actions |
-| To take care of | Open tasks/reminders due or reserved in the configured calendar week, plus all overdue deadlines | Remembered All/Overdue/Tasks/Reminders filters with full counts, six-row pages, and Overdue/Today/Later this week/optional Undated groups |
+| Your commitments | Open tasks/reminders due or reserved in the configured calendar week, plus all overdue deadlines | Remembered All/Overdue/Tasks/Reminders filters with full counts, six-row pages, and Overdue/Today/Later this week/optional Undated groups |
 | Done today | Completed tasks/reminders from today | Standard Collapsible, closed initially |
 | Spending, optional | Posted spending through today, week or month, using Finance's account selection | Shared saved period selector and Finance link; unavailable is never zero |
 | Current ritual, optional | Existing current occurrence | Native ritual overlay on desktop; shared checklist dialog on web |
@@ -52,7 +54,7 @@ with retained attempted values and explicit review/reapply in settings.
 
 Default uses normal theme surfaces. Weather reuses semantic sky tokens and condition treatment;
 its narrowly scoped gradient is an approved decorative-background exception. Foreground cards
-use the shared frosted material in Weather and Map modes, with fully opaque text and controls.
+use the shared React Bits liquid-glass material in Weather and Map modes, with fully opaque text and controls.
 Default remains opaque. Reduced transparency, increased contrast, forced colors and browsers without
 backdrop filtering use opaque cards. Map uses an adapted MIT MapCN component with pinned MapLibre 6.14.0, reicon controls
 and a same-origin module worker/shared module pair. Preview is interactive with a location marker;

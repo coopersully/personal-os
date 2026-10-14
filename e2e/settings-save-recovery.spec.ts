@@ -22,7 +22,7 @@ test("two editors retain attempted workspace values and explicitly recover repea
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   const path = "/v1/workspaces/calendar/settings";
   const origin = new URL(page.url()).origin;
   const restoreContext = await request.newContext({
@@ -127,7 +127,7 @@ for (const workspace of ["calendar", "mail"] as const) {
     await page.getByLabel("Email").fill("demo+full@nohmi.test");
     await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
     await page.getByRole("button", { name: "Log in" }).click();
-    await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
     const path = `/v1/workspaces/${workspace}/settings`;
     const origin = new URL(page.url()).origin;
     const restoreContext = await request.newContext({
@@ -233,7 +233,7 @@ test("Finance account selection recovery stays readable after reopening and navi
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   const path = "/v1/workspaces/finances/settings";
   const origin = new URL(page.url()).origin;
   const restoreContext = await request.newContext({
@@ -329,7 +329,7 @@ test("Tasks failed project pin reaches Settings and reapplies only its reviewed 
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   const path = "/v1/workspaces/tasks/settings";
   const origin = new URL(page.url()).origin;
   const restoreContext = await request.newContext({

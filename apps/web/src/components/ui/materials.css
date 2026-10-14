@@ -1,24 +1,16 @@
-/* Opt in a surface directly, or share the material across a region's cards.
-   Keep text and controls opaque; only the surface fill is translucent. */
-.material-frosted,
-[data-material-scope="frosted"] [data-slot="card"] {
-  background: var(--card);
+/* The app-owned composition of React Bits Glass Surface. */
+.material-liquid { position: relative; isolation: isolate; background: transparent; }
+.material-liquid > :not(.material-liquid__layer) { position: relative; z-index: 1; }
+.material-liquid__layer { position: absolute; inset: 0; pointer-events: none; border-radius: inherit; overflow: hidden; }
+.material-liquid__layer .glass-surface { border-radius: inherit !important; }
+.material-liquid__layer .glass-surface--svg,
+.material-liquid__layer .glass-surface--fallback,
+.material-liquid__layer .glass-surface__frame { background: color-mix(in oklab, var(--card) 68%, transparent); }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .material-liquid { background: var(--card); }
+  .material-liquid__layer { display: none; }
 }
-
-@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .material-frosted,
-  [data-material-scope="frosted"] [data-slot="card"] {
-    background: color-mix(in oklab, var(--card) 78%, transparent);
-    -webkit-backdrop-filter: blur(20px) saturate(115%);
-    backdrop-filter: blur(20px) saturate(115%);
-  }
-}
-
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
-  .material-frosted,
-  [data-material-scope="frosted"] [data-slot="card"] {
-    background: var(--card);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-  }
+  .material-liquid { background: var(--card); }
+  .material-liquid__layer { display: none; }
 }

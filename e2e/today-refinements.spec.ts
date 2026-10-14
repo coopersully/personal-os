@@ -7,7 +7,7 @@ test("Today keeps independent cards, saves personalization and uses weekly filte
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   const path = "/v1/today/settings";
   const origin = new URL(page.url()).origin;
   const original = await (await page.request.get(path)).json();
@@ -34,14 +34,15 @@ test("Today keeps independent cards, saves personalization and uses weekly filte
     await page.getByRole("link", { name: "Back to Today" }).click();
     await expect(page.getByRole("region", { name: "Today's calendar" })).toBeVisible();
     const timeline = page.getByRole("region", { name: "Today's calendar" });
-    await expect(timeline).toHaveCSS("backdrop-filter", "blur(20px) saturate(1.15)");
+    await expect(timeline.locator(".material-liquid__layer")).toHaveCount(1);
+    await expect(timeline.locator(".material-liquid__layer")).toBeVisible();
     await page.emulateMedia({ contrast: "more" });
-    await expect(timeline).toHaveCSS("backdrop-filter", "none");
+    await expect(timeline.locator(".material-liquid__layer")).toBeHidden();
     await page.emulateMedia({ contrast: "no-preference", forcedColors: "active" });
-    await expect(timeline).toHaveCSS("backdrop-filter", "none");
+    await expect(timeline.locator(".material-liquid__layer")).toBeHidden();
     await page.emulateMedia({ forcedColors: "none" });
-    await expect(timeline).toHaveCSS("backdrop-filter", "blur(20px) saturate(1.15)");
-    const queue = page.getByRole("complementary", { name: "To take care of" });
+    await expect(timeline.locator(".material-liquid__layer")).toBeVisible();
+    const queue = page.getByRole("complementary", { name: "Your commitments" });
     await expect(queue.getByText("This week · Tasks and reminders")).toBeVisible();
     await queue.getByRole("radio", { name: /^Tasks / }).click();
     await expect
@@ -63,9 +64,11 @@ test("Today keeps independent cards, saves personalization and uses weekly filte
     await page.route("**/v1/daily-brief**", (route) => route.abort());
     await page.route("**/v1/weather**", (route) => route.abort());
     await page.reload();
-    await expect(queue.getByRole("heading", { name: "To take care of" })).toBeVisible();
+    await expect(queue.getByRole("heading", { name: "Your commitments" })).toBeVisible();
     await expect(page.locator(".workspace-app-bar__weather-location")).toBeVisible();
-    await expect(page.locator(".today-attention")).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "Top navigation" }).locator(".review-navigation"),
+    ).toBeVisible();
   } finally {
     const current = await (await page.request.get(path)).json();
     const restored = await page.request.patch(path, {

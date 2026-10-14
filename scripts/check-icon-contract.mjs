@@ -58,6 +58,8 @@ const rules = [
     appliesTo: (path) =>
       path !== registryPath &&
       path !== brandMarksPath &&
+      // React Bits uses SVG filter primitives for optics, never interface glyphs.
+      path !== resolve(repositoryRoot, "apps/web/src/components/ui/react-bits/GlassSurface.tsx") &&
       !testSuffixes.some((suffix) => path.endsWith(suffix)),
   },
   {

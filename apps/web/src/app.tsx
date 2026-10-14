@@ -1,4 +1,6 @@
 import { calendarEventOccursOnDate } from "@personal-os/domain";
+import { LiquidGlassScope } from "@/components/ui/liquid-glass";
+import { DesktopRailUtilities } from "@/features/desktop/rail-utilities";
 import { TodayAttention } from "@/features/today/attention";
 import { TodayBackground } from "@/features/today/background";
 import { useTodayClock } from "@/features/today/clock";
@@ -379,7 +381,7 @@ import {
 import { ProductLanding } from "./features/public-site/landing.js";
 import { ReminderRow, RemindersCreateButton } from "./features/reminders/page.js";
 import { ReviewFlowHost } from "./features/reviews/flow.js";
-import { ReviewNavigation } from "./features/reviews/navigation.js";
+import { ReviewNavigation, TodayReviewNavigation } from "./features/reviews/navigation.js";
 import { AccountIdentity, AccountOverview } from "./features/settings/account-overview.js";
 import {
   ConnectedAgentsSettings,
@@ -2025,7 +2027,9 @@ function WorkspaceAppBarForRoute({
         ) : null
       }
       attention={
-        isSpatialCalendar ? (
+        workspace === "today" ? (
+          <TodayReviewNavigation />
+        ) : isSpatialCalendar ? (
           <ReviewNavigation workspace="calendar" />
         ) : workspaceSwitcher &&
           (workspace === "mail" || workspace === "tasks" || workspace === "finances") ? (
@@ -2089,25 +2093,28 @@ function WorkspaceRail({
           );
         })}
       </div>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <ShadcnButton
-            asChild
-            className="workspace-rail__link workspace-rail__settings"
-            size="icon"
-            variant={owner.kind === "account-utility" ? "secondary" : "ghost"}
-          >
-            <Link
-              aria-current={owner.kind === "account-utility" ? "page" : undefined}
-              aria-label="Settings"
-              to="/settings"
+      <div className="workspace-rail__utilities">
+        <DesktopRailUtilities />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <ShadcnButton
+              asChild
+              className="workspace-rail__link workspace-rail__settings"
+              size="icon"
+              variant={owner.kind === "account-utility" ? "secondary" : "ghost"}
             >
-              <SettingsIcon aria-hidden="true" />
-            </Link>
-          </ShadcnButton>
-        </TooltipTrigger>
-        <TooltipContent side="right">Settings</TooltipContent>
-      </Tooltip>
+              <Link
+                aria-current={owner.kind === "account-utility" ? "page" : undefined}
+                aria-label="Settings"
+                to="/settings"
+              >
+                <SettingsIcon aria-hidden="true" />
+              </Link>
+            </ShadcnButton>
+          </TooltipTrigger>
+          <TooltipContent side="right">Settings</TooltipContent>
+        </Tooltip>
+      </div>
     </nav>
   );
 }
@@ -2483,7 +2490,11 @@ function TodayPage({
   const eventSummary = "Today · Events, tasks and reminders";
   const openDayQuote = emptyDayQuote(today, remainingCount === 0);
   return (
-    <div
+    <LiquidGlassScope
+      enabled={
+        preferences.data?.preferences.background === "weather" ||
+        preferences.data?.preferences.background === "map"
+      }
       className="today-layout"
       data-page="today"
       data-material-scope={
@@ -2612,7 +2623,7 @@ function TodayPage({
       >
         <div className="section-heading today-section-heading">
           <div className="today-section-heading__copy">
-            <h2 id="today-queue-title">To take care of</h2>
+            <h2 id="today-queue-title">Your commitments</h2>
             <p className="today-section-heading__description">This week · Tasks and reminders</p>
           </div>
         </div>
@@ -2679,7 +2690,7 @@ function TodayPage({
         {preferences.data?.preferences.showRitual ? <TodayRitualCard /> : null}
         {preferences.data?.preferences.showPet ? <TodayPetCard /> : null}
       </div>
-    </div>
+    </LiquidGlassScope>
   );
 }
 function TodayWeatherTopbar({

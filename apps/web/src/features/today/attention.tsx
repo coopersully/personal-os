@@ -24,11 +24,6 @@ export function TodayAttention() {
     queryFn: () => api.getFinanceStatus(),
     refetchInterval: interval,
   });
-  const work = useQuery({
-    queryKey: ["agent-access-work-items", "today"],
-    queryFn: () => api.listAgentAccessWorkItems({ limit: 10 }),
-    refetchInterval: interval,
-  });
   const connections = attentionConnections(accounts.data ?? []);
   const providerItems = finance.data?.details.accounts?.providerItems ?? [];
   const coveredAccounts = new Set(providerItems.flatMap((item) => item.accountIds));
@@ -50,54 +45,28 @@ export function TodayAttention() {
             ),
           ].join(", ") || "Finance connection",
   }));
-  const domains = (["calendar", "finances", "mail", "tasks"] as const)
-    .map((domain) => {
-      const reviews = work.data?.summary.reviewByDomain?.[domain];
-      const attention = work.data?.summary.attentionByDomain?.[domain];
-      return [
-        domain,
-        reviews === null || attention === null ? null : (reviews ?? 0) + (attention ?? 0),
-      ] as const;
-    })
-    .filter(([, count]) => count !== null && count > 0);
-  const unknown =
-    bookmarks.isError ||
-    accounts.isError ||
-    finance.isError ||
-    work.isError ||
-    !!work.data?.unavailableDomains.length ||
-    work.data?.summary.total === null ||
-    (!!work.data && (!work.data.summary.reviewByDomain || !work.data.summary.attentionByDomain));
-  const checking = accounts.isPending || finance.isPending || work.isPending || bookmarks.isPending;
+  const unknown = bookmarks.isError || accounts.isError || finance.isError;
   const bookmarkFailure = bookmarks.data?.syncStatus === "error";
-  const hasAttention = connections.length + blocked.length + domains.length > 0 || bookmarkFailure;
+  const hasAttention = connections.length + blocked.length > 0 || bookmarkFailure;
+  if (!hasAttention && !unknown) return null;
   return (
     <Card className="today-attention py-0" aria-label="Needs your attention">
       <CardContent className="flex flex-wrap items-center gap-x-4 gap-y-2 p-4">
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-medium">
-            {hasAttention
-              ? "Needs your attention"
-              : checking
-                ? "Checking connections and reviews…"
-                : unknown
-                  ? "Some attention sources are unavailable"
-                  : "Connections and reviews are clear"}
+            {hasAttention ? "Needs your attention" : "Some connections could not be checked"}
           </h2>
           {unknown ? (
             <Button
               variant="outline"
               onClick={() => {
                 toast.promise(
-                  Promise.all([
-                    accounts.refetch(),
-                    finance.refetch(),
-                    work.refetch(),
-                    bookmarks.refetch(),
-                  ]).then((results) => {
-                    if (results.some((result) => result.isError))
-                      throw new Error("Source unavailable");
-                  }),
+                  Promise.all([accounts.refetch(), finance.refetch(), bookmarks.refetch()]).then(
+                    (results) => {
+                      if (results.some((result) => result.isError))
+                        throw new Error("Source unavailable");
+                    },
+                  ),
                   {
                     loading: "Checking attention sources…",
                     success: "Attention sources refreshed.",
@@ -140,14 +109,6 @@ export function TodayAttention() {
               <Link to="/finances/accounts">Review account</Link>
             </Button>
           </div>
-        ))}
-        {domains.map(([domain, count]) => (
-          <Button key={domain} variant="secondary" asChild>
-            <Link to={`/${domain}?review=open`} aria-label={`Open ${domain} attention: ${count}`}>
-              {domain[0]?.toUpperCase()}
-              {domain.slice(1)} · {count}
-            </Link>
-          </Button>
         ))}
         {hasAttention && unknown ? (
           <p className="text-sm text-muted-foreground">Additional sources could not be checked.</p>

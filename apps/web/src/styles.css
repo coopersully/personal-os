@@ -3,6 +3,7 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 @import "./features/public-site/documents.css";
+@import "./components/ui/react-bits/GlassSurface.css";
 @import "./components/ui/materials.css";
 
 @custom-variant dark (&:is(.dark *));
@@ -708,9 +709,9 @@ p {
     width: 100%;
   }
 }
-.workspace-rail__settings {
-  margin-top: auto;
-}
+.workspace-rail__utilities { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
+.workspace-rail__utility { width: 2.25rem; height: 2.25rem; border-radius: 50%; }
+.workspace-rail__update { border: 1.5px solid var(--status-info); }
 .desktop .workspace-rail {
   height: 100%;
 }
@@ -7615,8 +7616,8 @@ html.pet-window #root {
 .today-layout { gap: 1rem; }
 .today-schedule, .today-queue { padding: 1.25rem; border-radius: var(--radius); }
 .today-timeline__reminder { position: absolute; text-align: left; justify-content: start; overflow: hidden; text-overflow: ellipsis; border-left: 3px solid var(--primary); z-index: 2; }
-.workspace-app-bar__weather-trigger { min-width: 7rem; }
-.workspace-app-bar__weather-location { width: 10rem; }
+.workspace-app-bar__weather-trigger { flex: 0 0 auto; width: auto; min-width: 0; }
+.workspace-app-bar__weather-location { width: auto; max-width: 10rem; }
 .workspace-app-bar__weather-location span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .today-due-area { margin-top: 1rem; }
 .today-layout { position: relative; isolation: isolate; }
@@ -7648,3 +7649,16 @@ html.pet-window #root {
 @media (max-width: 600px) {
   .today-commitments .segmented-control { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; overflow: visible; }
 }
+
+/* Portrait geometry matches the native 72px pet silhouette; selected color is user artwork. */
+.pet-portrait { position: relative; width: 1.5rem; height: 1.5rem; display: block; }
+.pet-portrait__body, .pet-portrait__ear { position: absolute; background: var(--pet-color); }
+.pet-portrait__body { left: 18%; top: 28%; width: 64%; height: 56%; border-radius: 42%; }
+.pet-portrait__ear { top: 19%; width: 19.4%; height: 26.4%; border-radius: 50%; }
+.pet-portrait__ear--left { left: 18%; }
+.pet-portrait__ear--right { right: 19.4%; }
+.pet-portrait__eye { position: absolute; top: 43%; width: 7.5%; height: 11.4%; border-radius: 50%; background: var(--content-primary); }
+.pet-portrait__eye--left { left: 33.75%; }
+.pet-portrait__eye--right { left: 58.75%; }
+
+.today-glass-backdrop { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; pointer-events: none; }

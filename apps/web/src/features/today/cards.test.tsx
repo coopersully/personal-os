@@ -106,28 +106,10 @@ it("renders no current ritual honestly without calling a native launch", async (
   expect(await screen.findByText("No current ritual")).toBeInTheDocument();
   expect(open).not.toHaveBeenCalled();
 });
-it("retains workspace totals beyond the first page and never claims clear on source failure", async () => {
+it("keeps connection failures independent of review navigation", async () => {
   vi.spyOn(api, "listConnectors").mockRejectedValue(new Error("unavailable"));
   vi.spyOn(api, "getFinanceStatus").mockRejectedValue(new Error("unavailable"));
-  vi.spyOn(api, "listAgentAccessWorkItems").mockResolvedValue({
-    items: [],
-    nextCursor: "another-page",
-    filteredTotal: 23,
-    snapshotAt: "2026-10-14T16:00:00Z",
-    summary: {
-      byKind: { attention: 0, review: 23 },
-      total: 23,
-      byDomain: { calendar: 25, mail: 2, tasks: 0, finances: 0 },
-      reviewByDomain: { calendar: 23, mail: 0, tasks: 0, finances: 0 },
-      attentionByDomain: { calendar: 0, mail: 0, tasks: 0, finances: 0 },
-    },
-    unavailableDomains: [],
-  } as Awaited<ReturnType<typeof api.listAgentAccessWorkItems>>);
   setup(<TodayAttention />);
-  expect(await screen.findByRole("link", { name: "Open calendar attention: 23" })).toHaveAttribute(
-    "href",
-    "/calendar?review=open",
-  );
-  expect(await screen.findByText("Additional sources could not be checked.")).toBeInTheDocument();
-  expect(screen.queryByText("Connections and reviews are clear")).not.toBeInTheDocument();
+  expect(await screen.findByText("Some connections could not be checked")).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /Open calendar attention/ })).not.toBeInTheDocument();
 });

@@ -36,7 +36,7 @@ function TodaySettingsContent() {
     [
       "includeUndated",
       "Undated commitments",
-      "Include tasks and reminders without a date in To take care of.",
+      "Include tasks and reminders without a date in Your commitments.",
     ],
   ] as const;
   return (

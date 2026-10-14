@@ -4,6 +4,7 @@ import * as MapLibreGL from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState } from "react";
 import { MinusIcon, PlusIcon } from "@/components/icons";
+import { useMaterialBackdrop } from "./liquid-glass";
 import { Button } from "@/components/ui/button";
 import { cartoResource, cartoStyle, mapWorkerPath } from "@/lib/map-provider";
 
@@ -89,10 +90,12 @@ export function Map({
   const [instance, setInstance] = useState<MapLibreGL.Map | null>(null);
   const [loaded, setLoaded] = useState(false);
   const theme = useResolvedTheme();
+  const setBackdrop = useMaterialBackdrop();
   useEffect(() => {
     if (!containerRef.current) return;
     let map: MapLibreGL.Map | undefined;
     let disposed = false;
+    let backdropImage: HTMLImageElement | undefined;
     let timer: ReturnType<typeof setTimeout>;
     let resize: ResizeObserver | undefined;
     const fail = () => {
@@ -106,6 +109,7 @@ export function Map({
         center: [longitude, latitude],
         zoom: interactive ? 12 : 11,
         interactive,
+        canvasContextAttributes: { preserveDrawingBuffer: !interactive },
         renderWorldCopies: false,
         attributionControl: false,
         transformRequest: (url) => ({ url: cartoResource(url, apiKey) }),
@@ -127,6 +131,22 @@ export function Map({
           onReady?.();
         }
       });
+      if (!interactive) {
+        // A still local image avoids uploading the full map texture every animation frame.
+        // It never leaves this document or enters storage. Missing/tainted pixels degrade quietly.
+        map.on("idle", () => {
+          if (disposed || !map || !containerRef.current) return;
+          try {
+            backdropImage ??= document.createElement("img");
+            backdropImage.alt = "";
+            backdropImage.setAttribute("aria-hidden", "true");
+            Object.assign(backdropImage.style, { position: "absolute", inset: "0", width: "100%", height: "100%", opacity: "0", pointerEvents: "none" });
+            backdropImage.onload = () => { if (!disposed && backdropImage) setBackdrop(backdropImage); };
+            containerRef.current.appendChild(backdropImage);
+            backdropImage.src = map.getCanvas().toDataURL();
+          } catch { setBackdrop(null); }
+        });
+      }
       map.on("error", fail);
       timer = setTimeout(fail, 10000);
     } catch {
@@ -138,8 +158,9 @@ export function Map({
       clearTimeout(timer);
       map?.off("error", fail);
       map?.remove();
+      if (backdropImage) { backdropImage.onload = null; backdropImage.remove(); setBackdrop(null); }
     };
-  }, [longitude, latitude, interactive, apiKey, theme, onFailure, onReady]);
+  }, [longitude, latitude, interactive, apiKey, theme, onFailure, onReady, setBackdrop]);
   return (
     <div className="relative size-full" aria-label={interactive ? "Location map" : undefined}>
       <div

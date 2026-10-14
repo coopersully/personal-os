@@ -797,15 +797,35 @@ Explicit URL choices remain temporary overrides. Device-specific shell geometry 
 Tasks can save a default capture list and whether completed tasks appear in container views; explicit
 placement, lifecycle views, and URL filters take precedence.
 
-### Shared frosted material
+### Shared liquid-glass material
 
-`apps/web/src/components/ui/materials.css` defines `.material-frosted` for an individual
-surface and `data-material-scope="frosted"` for a region's shared Card components.
-Today opts into this material only for the Weather and Map background preferences; Default
-keeps standard opaque cards. Other features can reuse the same material when explicitly designed
-for a decorative backdrop, without duplicating local glass effects.
+The shared material vendors [React Bits Glass Surface](https://reactbits.dev/components/glass-surface)
+with its MIT + Commons Clause license and pinned source revision recorded beside the component.
+`LiquidGlassScope` opts a region's outer shared Cards into `LiquidGlassMaterial`; nested record
+cards retain their semantic fills. Standalone surfaces can compose the same decorative material.
+Today uses it only for Weather and Map preferences; Default remains opaque.
 
-The fill uses the semantic card color at 78% opacity with a 20px backdrop blur. Text, controls,
-focus indicators and portaled overlays retain their normal opacity. Light and dark themes share
-the same semantic treatment. Unsupported backdrop filtering, reduced transparency, increased
-contrast and forced colors use an opaque card and no blur. Never set opacity on the whole card.
+The optical renderer supplies edge refraction, restrained chromatic dispersion, blurred backdrop,
+and highlights. The app adds a semantic card tint for readable dense content. SVG filtering is used
+where supported; WebKit and Firefox can use the upstream WebGL path with a local still backdrop.
+Weather creates its still from semantic sky colors, and the inert map captures a local canvas still
+on idle/resize/theme changes. These pixels remain in memory and are never stored or transmitted.
+Missing pixels or GPU failure fall back to the component's frosted treatment. Unsupported backdrop
+filtering, reduced transparency, increased contrast and forced colors use opaque cards, with no
+optical layer. Text, controls, focus indicators and portaled overlays retain normal opacity.
+
+SVG in `components/ui/react-bits/GlassSurface.tsx` is solely optical filter machinery and displacement
+maps, a named exception to the interface-icon registry restriction. Interface glyphs still use reicon.
+Browser engine fallbacks are an implementation limit; this is Apple-style glass, not a claim of
+identical rendering on every platform.
+
+### Desktop rail utilities
+
+When the workspace rail is visible, its bottom utility group places an available desktop update
+first, an enabled pet portrait second, and Settings last. Update and pet controls are 36px round
+shared icon buttons, smaller than the 48px workspace destinations. The update control reserves a
+semantic blue circle boundary and contains only the download glyph. Downloading/installing states
+are disabled; a ready, verified update installs through the existing native updater on click.
+Discrete outcomes update one Sonner toast. The pet portrait mirrors the bundled native silhouette
+and selected color and opens Pet settings. Hidden/disabled pets and unavailable updates add no
+control. These native controls do not appear in a browser or in a hidden rail.

@@ -8,7 +8,7 @@ for (const sizing of ["root font", "independent header"] as const) {
     await page.getByLabel("Email").fill("demo+full@nohmi.test");
     await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
     await page.getByRole("button", { name: "Log in" }).click();
-    await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
     await page.goto("/mail");
     // Controlled browser sizing exercises actual stylesheet snapping, not mocked geometry.
     await page.addStyleTag({

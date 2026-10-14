@@ -57,16 +57,33 @@ try {
     "/etc/alloy/config.alloy",
   );
   const address = docker("port", name, "12346").trim();
+  const safeFailureCodes = [
+    "plaid_invalid_response",
+    "plaid_invalid_cursor",
+    "plaid_transactions_cursor_invalid",
+    "plaid_invalid_cursor_replay_in_progress",
+    "plaid_invalid_cursor_replay_failed",
+    "plaid_account_missing_from_item",
+    "plaid_configuration_missing",
+    "plaid_sync_page_limit_exceeded",
+    "plaid_sync_cursor_not_advancing",
+    "finance_encryption_configuration_missing",
+    "finance_provider_item_identity_mismatch",
+    "finance_provider_item_identity_conflict",
+  ];
   const lines = [
     JSON.stringify({
       event: "connector_capability_failed",
       provider: "google",
       capability: "mail",
       status: 403,
-      code: "google_permission_missing",
+      code: "plaid_authorization_failed",
       freshnessAgeMs: 172800000,
       durationMs: 172800000,
       failureCount: 1000000,
+      transportCode: "ENOTFOUND",
+      transportPhase: "dns",
+      syncSource: "scheduled",
       email: "PRIVATE_CANARY",
       message: "PRIVATE_CANARY",
     }),
@@ -74,7 +91,10 @@ try {
       event: "request",
       status: 500,
       path: "PRIVATE_CANARY",
-      code: "PRIVATE_CANARY",
+      code: "google_authorization_failedPRIVATE_CANARY",
+      transportCode: "PRIVATE_CANARY",
+      transportPhase: "PRIVATE_CANARY",
+      syncSource: "PRIVATE_CANARY",
     }),
     JSON.stringify({ event: "private_PRIVATE_CANARY", provider: "PRIVATE_CANARY" }),
     JSON.stringify({
@@ -84,6 +104,14 @@ try {
       capability: "PRIVATE_CANARY",
     }),
     "malformed_PRIVATE_CANARY",
+    ...safeFailureCodes.map((code) =>
+      JSON.stringify({
+        event: "connector_sync_failed",
+        provider: "plaid",
+        code,
+        message: "PRIVATE_CANARY",
+      }),
+    ),
     // The final record marks completion of this ordered stream, including rejected inputs.
     JSON.stringify({ event: "request", status: 204 }),
   ];
@@ -123,13 +151,13 @@ try {
       logs.includes("event=connector_capability_failed") &&
       logs.includes("status=500") &&
       logs.includes("status=204") &&
-      (logs.match(/received log entry/g) ?? []).length >= 4
+      (logs.match(/received log entry/g) ?? []).length >= 4 + safeFailureCodes.length
     ) {
       break;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  assert.ok(logs.includes("code=google_permission_missing"), "Expected safe event missing");
+  assert.ok(logs.includes("code=plaid_authorization_failed"), "Expected safe event missing");
   assert.ok(logs.includes("status=500"), "Expected safe request missing");
   assert.ok(logs.includes("status=204"), "Final stream record missing");
   assert.match(
@@ -138,9 +166,17 @@ try {
     "Stale freshness must survive numeric JSON extraction",
   );
   assert.match(logs, /durationMs=(172800000|1[.]728e[+]08)/);
+  assert.match(logs, /transportCode=ENOTFOUND/);
+  assert.match(logs, /transportPhase=dns/);
+  assert.match(logs, /syncSource=scheduled/);
   assert.match(logs, /failureCount=(1000000|1e[+]06)/);
   assert.equal(logs.includes("PRIVATE_CANARY"), false, "Privacy filter forwarded private content");
-  assert.equal((logs.match(/received log entry/g) ?? []).length, 4, "Unexpected records forwarded");
+  for (const code of safeFailureCodes) assert.ok(logs.includes(`code=${code}`));
+  assert.equal(
+    (logs.match(/received log entry/g) ?? []).length,
+    4 + safeFailureCodes.length,
+    "Unexpected records forwarded",
+  );
   console.log("Alloy configuration and real log-pipeline privacy checks passed.");
 } finally {
   try {

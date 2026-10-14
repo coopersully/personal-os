@@ -564,6 +564,67 @@ describe.sequential("connector service", () => {
     ).rejects.toMatchObject({ code: "invalid_request" });
   });
 
+  it.each([
+    "manual",
+    "scheduled",
+    "triggered",
+  ] as const)("logs sanitized transport evidence and %s sync origin", async (syncSource) => {
+    const provider = mockGoogle();
+    const logs: unknown[] = [];
+    const diagnostics = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google: provider,
+      now: () => timestamp,
+      log: (entry) => logs.push(entry),
+    });
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        userId,
+        provider: "google",
+        providerAccountId: `diagnostics-${syncSource}`,
+        label: "Diagnostics",
+        calendarEnabled: true,
+        mailEnabled: false,
+        encryptedCredentials: encryptJson(credentials, encryptionKey),
+      })
+      .returning();
+    if (!account) throw new Error("Missing fixture");
+    try {
+      vi.mocked(provider.listCalendars).mockRejectedValueOnce(
+        new Error("PRIVATE_CANARY", {
+          cause: { code: "ECONNRESET", address: "PRIVATE_CANARY" },
+        }),
+      );
+      const options = { automatic: syncSource !== "manual", triggered: syncSource === "triggered" };
+      await expect(diagnostics.syncAccount(userId, account.id, options)).rejects.toMatchObject({
+        code: "service_unavailable",
+      });
+      for (const event of ["connector_capability_failed", "connector_sync_failed"]) {
+        expect(logs).toContainEqual(
+          expect.objectContaining({
+            event,
+            syncSource,
+            transportCode: "ECONNRESET",
+            transportPhase: "socket",
+          }),
+        );
+      }
+      expect(JSON.stringify(logs)).not.toContain("PRIVATE_CANARY");
+      await database.db
+        .update(calendarAccounts)
+        .set({ nextSyncAt: timestamp, syncCapabilities: null })
+        .where(eq(calendarAccounts.id, account.id));
+      await diagnostics.syncAccount(userId, account.id, options);
+      for (const event of ["connector_sync_completed", "connector_sync_recovered"]) {
+        expect(logs).toContainEqual(expect.objectContaining({ event, syncSource }));
+      }
+    } finally {
+      await database.db.delete(calendarAccounts).where(eq(calendarAccounts.id, account.id));
+    }
+  });
+
   it("preserves safe attachment failure categories and records boundary diagnostics", async () => {
     const [account] = await database.db
       .select()
@@ -1380,6 +1441,7 @@ describe.sequential("connector service", () => {
       expect.objectContaining({
         accountId: failingAccount.id,
         event: "connector_sync_recovered",
+        syncSource: "scheduled",
       }),
     );
   });

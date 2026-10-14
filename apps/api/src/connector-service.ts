@@ -1013,6 +1013,7 @@ export function createConnectorService({
       });
       log?.({
         event: failure ? "connector_capability_failed" : "connector_capability_completed",
+        syncSource: options.triggered ? "triggered" : options.automatic ? "scheduled" : "manual",
         capability,
         accountId,
         provider,
@@ -1022,7 +1023,13 @@ export function createConnectorService({
         durationMs: Date.now() - startedAt,
         status: failure?.status ?? (failure ? 503 : 200),
         ...(failure
-          ? { code: failure.code, category: failure.category, disposition: failure.recovery }
+          ? {
+              code: failure.code,
+              category: failure.category,
+              disposition: failure.recovery,
+              transportCode: failure.transportCode,
+              transportPhase: failure.transportPhase,
+            }
           : {}),
         failureCount,
         nextSyncAt: nextSyncAt?.toISOString() ?? null,
@@ -1231,6 +1238,7 @@ export function createConnectorService({
         accountId: claimedAccount.id,
         durationMs: Date.now() - startedAt,
         event: "connector_sync_completed",
+        syncSource: options.triggered ? "triggered" : options.automatic ? "scheduled" : "manual",
         freshnessAgeMs: Math.max(
           0,
           completedAt.getTime() - (claimedAccount.lastSyncedAt?.getTime() ?? attemptedAt.getTime()),
@@ -1246,6 +1254,7 @@ export function createConnectorService({
           accountId: claimedAccount.id,
           durationMs: Date.now() - startedAt,
           event: "connector_sync_recovered",
+          syncSource: options.triggered ? "triggered" : options.automatic ? "scheduled" : "manual",
           failureCount: claimedAccount.syncFailureCount,
           method: "CONNECTOR",
           path: `/internal/connectors/${claimedAccount.id}/sync`,
@@ -1320,9 +1329,16 @@ export function createConnectorService({
             accountId: claimedAccount.id,
             category: failure.category,
             code: failure.code,
+            transportCode: failure.transportCode,
+            transportPhase: failure.transportPhase,
             disposition: failure.recovery,
             durationMs: Date.now() - startedAt,
             event: "connector_sync_failed",
+            syncSource: options.triggered
+              ? "triggered"
+              : options.automatic
+                ? "scheduled"
+                : "manual",
             failureCount,
             method: "CONNECTOR",
             nextSyncAt: nextSyncAt?.toISOString() ?? null,

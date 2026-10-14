@@ -11,18 +11,84 @@ export type ConnectorFailureCategory =
 
 export type ConnectorFailureDisposition = "operator" | "reconnect" | "retry";
 
+// Only runtime-owned codes cross the logging boundary. Never inspect exception text,
+// hostnames, addresses, URLs, stacks, or provider response bodies.
+const transportPhases = {
+  ENOTFOUND: "dns",
+  EAI_AGAIN: "dns",
+  EAI_FAIL: "dns",
+  CERT_HAS_EXPIRED: "tls",
+  CERT_NOT_YET_VALID: "tls",
+  DEPTH_ZERO_SELF_SIGNED_CERT: "tls",
+  SELF_SIGNED_CERT_IN_CHAIN: "tls",
+  UNABLE_TO_VERIFY_LEAF_SIGNATURE: "tls",
+  UNABLE_TO_GET_ISSUER_CERT_LOCALLY: "tls",
+  ERR_TLS_CERT_ALTNAME_INVALID: "tls",
+  ERR_SSL_WRONG_VERSION_NUMBER: "tls",
+  ECONNRESET: "socket",
+  ECONNREFUSED: "socket",
+  EPIPE: "socket",
+  ENETUNREACH: "socket",
+  EHOSTUNREACH: "socket",
+  UND_ERR_SOCKET: "socket",
+  ETIMEDOUT: "timeout",
+  ESOCKETTIMEDOUT: "timeout",
+  UND_ERR_CONNECT_TIMEOUT: "timeout",
+  UND_ERR_HEADERS_TIMEOUT: "timeout",
+  UND_ERR_BODY_TIMEOUT: "timeout",
+} as const;
+export type TransportCode = keyof typeof transportPhases;
+export type TransportPhase = (typeof transportPhases)[TransportCode];
+export type TransportDiagnostics = {
+  transportCode?: TransportCode | undefined;
+  transportPhase?: TransportPhase | undefined;
+};
+
+export function transportDiagnostics(error: unknown): TransportDiagnostics {
+  try {
+    const pending: unknown[] = [error];
+    const seen = new Set<unknown>();
+    for (let index = 0; index < pending.length && index < 16; index++) {
+      const value = pending[index];
+      if (!value || typeof value !== "object" || seen.has(value)) continue;
+      seen.add(value);
+      const details = value as Record<string, unknown>;
+      // Native abort/deadline timeouts have numeric DOMException code 23.
+      // Normalize that runtime shape without accepting arbitrary provider-authored names.
+      if (value instanceof DOMException && value.name === "TimeoutError" && value.code === 23) {
+        return { transportCode: "ETIMEDOUT", transportPhase: "timeout" };
+      }
+      const code = details.code;
+      if (typeof code === "string" && Object.hasOwn(transportPhases, code)) {
+        const transportCode = code as TransportCode;
+        return { transportCode, transportPhase: transportPhases[transportCode] };
+      }
+      if (pending.length < 16 && details.cause) pending.push(details.cause);
+      if (Array.isArray(details.errors))
+        pending.push(...details.errors.slice(0, 16 - pending.length));
+    }
+  } catch {
+    // Diagnostics must never replace the provider failure or interrupt settlement.
+    return {};
+  }
+  return {};
+}
+
 export class ConnectorError extends Error {
   public readonly category: ConnectorFailureCategory;
   public readonly code: string;
   public readonly disposition: ConnectorFailureDisposition;
   public readonly retryAfterMs: number | null;
   public readonly status: number | null;
+  public readonly transportCode?: TransportCode | undefined;
+  public readonly transportPhase?: TransportPhase | undefined;
 
   public constructor(input: {
     category: ConnectorFailureCategory;
     code: string;
     disposition: ConnectorFailureDisposition;
     message: string;
+    transportCause?: unknown;
     retryAfterMs?: number;
     status?: number;
   }) {
@@ -33,6 +99,9 @@ export class ConnectorError extends Error {
     this.disposition = input.disposition;
     this.retryAfterMs = input.retryAfterMs ?? null;
     this.status = input.status ?? null;
+    const diagnostic = transportDiagnostics(input.transportCause);
+    this.transportCode = diagnostic.transportCode;
+    this.transportPhase = diagnostic.transportPhase;
   }
 }
 
@@ -233,6 +302,7 @@ export function classifyICloudError(service: "calendar" | "mail", error: unknown
   return new ConnectorError({
     category: "transport",
     code: `icloud_${service}_transport_failure`,
+    transportCause: error,
     disposition: "retry",
     message: `iCloud ${label} is temporarily unavailable.`,
     ...(status === null ? {} : { status }),

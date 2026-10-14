@@ -2,6 +2,7 @@ import type {
   GoogleConnector,
   ICloudConnector,
   PlaidConnector,
+  TransportDiagnostics,
   TwilioConnector,
   XConnector,
 } from "@personal-os/connectors";
@@ -50,7 +51,8 @@ export type CalendarProviderReconciliationLog = {
   operation: string;
 };
 
-export type RequestLog = {
+export type RequestLog = TransportDiagnostics & {
+  syncSource?: "scheduled" | "triggered" | "manual";
   accountId?: string;
   capability?: "calendar" | "mail";
   ageMs?: number | undefined;

@@ -2,15 +2,61 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { collectDiagnostics, summarizeConnectorLogs } from "./diagnostics.mjs";
 
+test("rejects private suffixes appended to allowlisted provider codes", () => {
+  for (const prefix of [
+    "google_authorization_failed",
+    "plaid_transport_failure",
+    "connector_unknown_failure",
+    "plaid_invalid_cursor",
+  ]) {
+    const summary = summarizeConnectorLogs(
+      JSON.stringify({ event: "connector_sync_failed", code: `${prefix}PRIVATE_CANARY` }),
+    );
+    assert.equal(summary.events[0].code, undefined);
+    assert.ok(!JSON.stringify(summary).includes("PRIVATE_CANARY"));
+  }
+});
+
+test("preserves fixed Finance provider, projection and cursor failure codes", () => {
+  for (const code of [
+    "plaid_invalid_response",
+    "plaid_invalid_cursor",
+    "plaid_transactions_cursor_invalid",
+    "plaid_invalid_cursor_replay_in_progress",
+    "plaid_invalid_cursor_replay_failed",
+    "plaid_account_missing_from_item",
+    "plaid_configuration_missing",
+    "plaid_sync_page_limit_exceeded",
+    "plaid_sync_cursor_not_advancing",
+    "finance_encryption_configuration_missing",
+    "finance_provider_item_identity_mismatch",
+    "finance_provider_item_identity_conflict",
+  ]) {
+    const summary = summarizeConnectorLogs(
+      JSON.stringify({
+        event: "connector_sync_failed",
+        provider: "plaid",
+        code,
+        message: "PRIVATE_CANARY",
+      }),
+    );
+    assert.equal(summary.events[0].code, code);
+    assert.ok(!JSON.stringify(summary).includes("PRIVATE_CANARY"));
+  }
+});
+
 test("diagnostics retain only safe connector fields, never provider payloads or account identities", () => {
   const logs = [
     JSON.stringify({
       event: "connector_capability_failed",
       provider: "google",
       capability: "mail",
-      code: "google_rate_limited",
+      code: "plaid_authorization_failed",
       status: 403,
       failureCount: 4,
+      transportCode: "ENOTFOUND",
+      transportPhase: "dns",
+      syncSource: "scheduled",
       requestId: "sync:11111111-1111-4111-8111-111111111111",
       message: "private-canary",
       accountId: "private-canary",
@@ -22,14 +68,20 @@ test("diagnostics retain only safe connector fields, never provider payloads or 
     JSON.stringify({
       event: "connector_sync_failed",
       code: "private-canary",
+      transportCode: "private-canary",
+      transportPhase: "private-canary",
+      syncSource: "private-canary",
       provider: "private-canary",
       status: "private-canary",
     }),
   ].join("\n");
   const summary = summarizeConnectorLogs(logs);
   assert.equal(summary.events.length, 2);
-  assert.equal(summary.events[0].code, "google_rate_limited");
+  assert.equal(summary.events[0].code, "plaid_authorization_failed");
   assert.equal(summary.events[0].capability, "mail");
+  assert.equal(summary.events[0].transportCode, "ENOTFOUND");
+  assert.equal(summary.events[0].transportPhase, "dns");
+  assert.equal(summary.events[0].syncSource, "scheduled");
   assert.ok(!JSON.stringify(summary).includes("private-canary"));
 });
 

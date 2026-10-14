@@ -1312,6 +1312,8 @@ export function createFinanceProviderItemSyncService(options: Options) {
         accountId,
         category: settled.failure.category,
         code: settled.failure.code,
+        transportCode: settled.failure.transportCode,
+        transportPhase: settled.failure.transportPhase,
         disposition: settled.failure.recovery,
         durationMs: Date.now() - startedAt,
         event: "connector_sync_failed",

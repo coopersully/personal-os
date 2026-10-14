@@ -1,4 +1,8 @@
-import { ConnectorError } from "@personal-os/connectors";
+import {
+  ConnectorError,
+  type TransportDiagnostics,
+  transportDiagnostics,
+} from "@personal-os/connectors";
 import type {
   CalendarProvider,
   ConnectedAccountHealth,
@@ -11,7 +15,7 @@ import { AppError } from "./errors.js";
 
 type ExternalConnectorProvider = Extract<CalendarProvider, "google" | "icloud"> | "plaid";
 
-export type ConnectorSyncFailure = {
+export type ConnectorSyncFailure = TransportDiagnostics & {
   category: ConnectorFailureCategory;
   code: string;
   message: string;
@@ -32,6 +36,8 @@ export function classifyConnectorSyncFailure(
           ? "operator"
           : "automatic";
     return {
+      transportCode: error.transportCode,
+      transportPhase: error.transportPhase,
       category: error.category,
       code: error.code,
       message:
@@ -44,6 +50,7 @@ export function classifyConnectorSyncFailure(
     };
   }
   return {
+    ...transportDiagnostics(error),
     category: "unknown",
     code: "connector_unknown_failure",
     message: `${providerLabel(provider)} is temporarily unavailable. nohmi will retry automatically.`,

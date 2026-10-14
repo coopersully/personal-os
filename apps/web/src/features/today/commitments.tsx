@@ -20,6 +20,7 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { useWorkspacePreferences } from "@/features/workspace-settings/preferences";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useTodayPreferences } from "./preferences";
 
 type Props = {
@@ -67,6 +68,7 @@ function CommitmentPage({
   setPageSize: (size: number) => void;
 }) {
   const cache = useQueryClient();
+  const isMobile = useIsMobile();
   const [cursors, setCursors] = useState<Array<string | undefined>>([undefined]);
   const [page, setPage] = useState(0);
   const [navigating, setNavigating] = useState(false);
@@ -163,7 +165,12 @@ function CommitmentPage({
     },
   });
   const visiblePages = Array.from(
-    new Set([0, page - 1, page, page + 1, ...(pages === null ? [] : [pages - 1])]),
+    new Set([
+      0,
+      page,
+      ...(isMobile && pages !== null && pages > 5 ? [] : [page - 1, page + 1]),
+      ...(pages === null ? [] : [pages - 1]),
+    ]),
   )
     .filter(
       (value) =>

@@ -9261,7 +9261,7 @@ describe("ilo web app", () => {
     setup();
     const browser = userEvent.setup();
     expect(await screen.findByLabelText("An open calendar")).toBeVisible();
-    expect(await screen.findByText("Nothing in this view.")).toBeInTheDocument();
+    expect(await screen.findByText("No commitments this week.")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Add" }));
     await browser.click(screen.getByRole("menuitem", { name: /Reminder/ }));
     await browser.type(screen.getByLabelText("What needs attention?"), "Failing reminder");

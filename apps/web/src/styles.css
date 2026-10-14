@@ -7661,7 +7661,7 @@ html.pet-window #root {
 .today-commitments__footer { flex-direction: column; align-items: stretch; gap: .5rem; }
 .today-commitments__page-options { display: flex; align-items: center; justify-content: space-between; gap: .5rem; min-width: 0; }
 /* The same front layer applies to spatial Calendar and Today records, including keyboard/menu selection. */
-.timeline-record:is(:hover, :focus-within, :active), .timeline-record[data-state="open"], .timeline-record:has([data-state="open"]) { z-index: 1000 !important; }
+.timeline-record:is(:hover, :focus-within, :active), .timeline-record[data-state="open"], .timeline-record:has([data-state="open"]) { z-index: var(--overlap-front-layer, 1000) !important; }
 .today-timeline__commitment { position: absolute; min-width: 0; border-radius: var(--radius-md); background: var(--card); overflow: hidden; }
 .today-timeline__commitment > [data-component="commitment-item"] { height: 100%; min-height: 0; padding: .25rem; gap: .25rem; flex-wrap: nowrap; align-items: center; }
 .today-timeline__commitment:is(:hover, :focus-within) { background: var(--selection); }
@@ -7669,3 +7669,6 @@ html.pet-window #root {
 .today-timeline__commitment [data-slot$="-title"] { font-size: .8125rem; line-height: 1.1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; display: block; }
 .today-timeline__commitment[data-density="compact"] [data-slot$="-description"], .today-timeline__commitment[data-density="compact"] [data-slot$="-due"] { display: none; }
 @media (max-width: 960px) { .today-layout { display: flex; flex-direction: column; align-items: stretch; } .today-layout > .day-column, .today-supporting-column { width: 100%; } }
+
+/* Preserve the shell's floating mobile-dock clearance inside the full-page backdrop. */
+@media (max-width: 900px) { .today-layout { padding-bottom: calc(92px + env(safe-area-inset-bottom)); } }

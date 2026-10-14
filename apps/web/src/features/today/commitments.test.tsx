@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/api";
+import * as mobile from "@/hooks/use-mobile";
 import { TodayCommitments } from "./commitments";
 
 afterEach(() => vi.restoreAllMocks());
@@ -189,4 +190,28 @@ it("does not invent a page total when a commitment source is unavailable", async
   }));
   await screen.findByText("Page 1 · total unavailable");
   expect(screen.getByText(/Some commitments could not be refreshed/)).toBeVisible();
+});
+
+it("condenses a long mobile page range without hiding the current or endpoint pages", async () => {
+  vi.spyOn(mobile, "useIsMobile").mockReturnValue(true);
+  renderPages(async (input) => {
+    const index = Number(input?.cursor ?? 0);
+    return {
+      ...pageResult(index),
+      counts: { all: 60, tasks: 30, reminders: 30, overdue: 0 },
+      nextCursor: index < 9 ? String(index + 1) : null,
+    };
+  });
+  await screen.findByText("Page 1 of 10");
+  await userEvent.click(screen.getByRole("link", { name: "Page 10" }));
+  await screen.findByText("Page 10 of 10");
+  for (let number = 9; number >= 5; number--) {
+    await userEvent.click(screen.getByRole("link", { name: "Go to previous page" }));
+    await screen.findByText(`Page ${number} of 10`);
+  }
+  expect(screen.getByRole("link", { name: "Page 1" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "Page 5" })).toHaveAttribute("aria-current", "page");
+  expect(screen.getByRole("link", { name: "Page 10" })).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Page 4" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Page 6" })).not.toBeInTheDocument();
 });

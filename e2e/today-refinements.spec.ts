@@ -112,14 +112,19 @@ test("Today uses standard settings, collapsible commitments and shared record su
     ).toBeVisible();
     await page.goto("/calendar?view=day");
     const calendarRecord = page.locator(".calendar-timeline-event").first();
+    await page.mouse.move(0, 0);
+    const restingLayer = await calendarRecord.evaluate((element) =>
+      Number(getComputedStyle(element).zIndex),
+    );
     await calendarRecord.hover();
     await expect
-      .poll(() => calendarRecord.evaluate((element) => getComputedStyle(element).zIndex))
-      .toBe("1000");
+      .poll(() => calendarRecord.evaluate((element) => Number(getComputedStyle(element).zIndex)))
+      .toBeGreaterThan(restingLayer);
+    await page.mouse.move(0, 0);
     await calendarRecord.focus();
     await expect
-      .poll(() => calendarRecord.evaluate((element) => getComputedStyle(element).zIndex))
-      .toBe("1000");
+      .poll(() => calendarRecord.evaluate((element) => Number(getComputedStyle(element).zIndex)))
+      .toBeGreaterThan(restingLayer);
   } finally {
     try {
       const current = await (await restoreContext.get(path)).json();
@@ -132,4 +137,85 @@ test("Today uses standard settings, collapsible commitments and shared record su
       await restoreContext.dispose();
     }
   }
+});
+
+test("commitment pagination stays reachable on a narrow screen with many pages", async ({
+  page,
+}) => {
+  await page.goto("/login");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
+  const baseline = await (
+    await page.request.get("/v1/today/commitments?filter=all&limit=6")
+  ).json();
+  const template = baseline.items.find((item: { kind: string }) => item.kind === "task");
+  expect(template).toBeTruthy();
+  const preferences = await (await page.request.get("/v1/today/settings")).json();
+  await page.route("**/v1/today/settings", (route) =>
+    route.fulfill({
+      json: {
+        ...preferences,
+        preferences: {
+          ...preferences.preferences,
+          background: "default",
+          showSpending: false,
+          showRitual: false,
+          showPet: false,
+        },
+      },
+    }),
+  );
+  await page.route("**/v1/today/commitments**", (route) => {
+    const index = Number(new URL(route.request().url()).searchParams.get("cursor") ?? 0);
+    return route.fulfill({
+      json: {
+        ...baseline,
+        counts: { all: 60, tasks: 60, reminders: 0, overdue: 0 },
+        items: Array.from({ length: 6 }, (_, offset) => ({
+          kind: "task",
+          group: "today",
+          material: {
+            ...template.material,
+            id: `${template.material.id.slice(0, 24)}${(index * 6 + offset).toString(16).padStart(12, "0")}`,
+            title: `Commitment ${index * 6 + offset + 1}`,
+            dueAt: null,
+            scheduledAt: new Date().toISOString(),
+          },
+        })),
+        nextCursor: index < 9 ? String(index + 1) : null,
+      },
+    });
+  });
+  await page.setViewportSize({ width: 320, height: 844 });
+  await page.reload();
+  const queue = page.getByRole("complementary", { name: "Your commitments" });
+  await queue.getByRole("link", { name: "Page 10", exact: true }).click();
+  await expect(queue.getByText("Page 10 of 10")).toBeVisible();
+  await queue.getByRole("link", { name: "Page 1", exact: true }).click();
+  for (let number = 2; number <= 5; number++) {
+    await queue.getByRole("link", { name: "Go to next page" }).click();
+    await expect(queue.getByText(`Page ${number} of 10`)).toBeVisible();
+  }
+  const navigation = queue.getByRole("navigation", { name: "Commitment pages" });
+  const bounds = await navigation.boundingBox();
+  expect(bounds).not.toBeNull();
+  const links = await navigation.getByRole("link").evaluateAll((elements) =>
+    elements.map((element) => {
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, right: rect.right };
+    }),
+  );
+  for (const link of links) {
+    expect(link.left).toBeGreaterThanOrEqual(bounds!.x);
+    expect(link.right).toBeLessThanOrEqual(bounds!.x + bounds!.width);
+  }
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+  ).toBeTruthy();
+  // The final card's footer must clear the floating workspace dock at the bottom of the page.
+  await navigation.scrollIntoViewIfNeeded();
+  await queue.getByRole("link", { name: "Go to next page" }).click();
+  await expect(queue.getByText("Page 6 of 10")).toBeVisible();
 });

@@ -129,6 +129,7 @@ export function ReadFailureBoundary({ children }: { children: ReactNode }) {
         <dialog
           ref={surface}
           aria-label="Connection recovery"
+          aria-modal="true"
           className="read-failure-screen"
           onCancel={(event) => event.preventDefault()}
         >

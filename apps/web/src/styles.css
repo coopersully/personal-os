@@ -7663,6 +7663,7 @@ html.pet-window #root {
 
 /* One top-layer recovery screen blocks the shell and any existing portals. */
 .read-failure-screen {
+  z-index: 2147483647;
   position: fixed;
   inset: 0;
   width: 100vw;

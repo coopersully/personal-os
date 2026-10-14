@@ -54,8 +54,10 @@ A rule preview records each proposal's immutable version or fingerprint, conditi
 selection, representative matches and non-matches, action, consequences, conflicts/precedence,
 authority requirement, and disable/rollback behavior. Large proposal sets may be grouped and
 paginated, but every rule remains individually inspectable and deselectable. Any proposal or sample
-drift invalidates the preview; setup completion and global review bypass cannot activate an action
-rule.
+drift invalidates the preview; setup completion cannot activate an action rule. The later
+[explicit execution contract](../engineering/workspace-agent-capabilities.md) permits registered
+agent rule activation with opt-in execution grants and owner-enabled review bypass. Bypass alone
+cannot activate a rule or replace its exact version and current preview evidence.
 
 ## Package responsibilities
 

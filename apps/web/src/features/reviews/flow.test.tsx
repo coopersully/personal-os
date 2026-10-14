@@ -1,3 +1,4 @@
+import { expectQueryToast, watchQueryFeedback } from "../../../test-support/query-feedback";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { AgentAccessDomain } from "@personal-os/domain";
@@ -329,7 +330,7 @@ it("does not expose a partial first page as a complete session when the next pag
     return { items: [first], nextCursor: "next", unavailableDomains: [] };
   });
   setup();
-  expect(await screen.findByText("Couldn’t load your review session.")).toBeVisible();
+  await expectQueryToast("Couldn’t load your review session.");
   expect(screen.queryByText("Protect travel time")).not.toBeInTheDocument();
 });
 
@@ -372,3 +373,6 @@ it.each([
   expect(client.getQueryState(["events"])?.isInvalidated).toBe(workspace === "calendar");
   expect(client.getQueryState(["me"])?.isInvalidated).toBe(false);
 });
+
+beforeEach(watchQueryFeedback);
+afterEach(() => vi.restoreAllMocks());

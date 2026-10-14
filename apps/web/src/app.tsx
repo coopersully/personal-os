@@ -592,6 +592,13 @@ export function App() {
 function SessionApp() {
   const me = useQuery({ queryFn: api.getMe, queryKey: ["me"] });
   const [toastTarget, setToastTarget] = useState<HTMLElement | null>(null);
+  const [toastHost] = useState(() => document.createElement("div"));
+  const toastHome = useRef<HTMLDivElement>(null);
+  // Moving one stable portal host preserves Sonner's subscription and pending/result state.
+  useEffect(() => {
+    (toastTarget ?? toastHome.current)?.appendChild(toastHost);
+  }, [toastHost, toastTarget]);
+  useEffect(() => () => toastHost.remove(), [toastHost]);
   const feedback = (
     <Toaster
       theme={typeof window.matchMedia === "function" ? (me.data?.theme ?? "system") : "light"}
@@ -600,7 +607,8 @@ function SessionApp() {
   return (
     <RecoveryToastTargetContext.Provider value={setToastTarget}>
       <AppContent me={me} />
-      {toastTarget ? createPortal(feedback, toastTarget) : feedback}
+      <div ref={toastHome} />
+      {createPortal(feedback, toastHost)}
     </RecoveryToastTargetContext.Provider>
   );
 }

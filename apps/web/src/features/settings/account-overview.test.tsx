@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { expectQueryToast, watchQueryFeedback } from "../../../test-support/query-feedback";
 import { AccountOverview } from "./account-overview";
 
 const mocks = vi.hoisted(() => ({
@@ -68,7 +69,7 @@ it("surfaces setup actions and unavailable domains without claiming all clear", 
   expect(await screen.findByText("Setup needs your attention")).toBeInTheDocument();
   expect(screen.getByRole("status", { name: "Mail: Action required" })).toBeInTheDocument();
   expect(await screen.findByText("Attention status unavailable")).toBeInTheDocument();
-  expect(await screen.findByText("Couldn’t check connected accounts.")).toBeInTheDocument();
+  await expectQueryToast("Couldn’t check connected accounts.");
   expect(screen.queryByText("No accounts connected yet.")).not.toBeInTheDocument();
 });
 
@@ -88,3 +89,6 @@ it("surfaces provider reconnection errors beside the affected account", async ()
     "/settings?section=connections",
   );
 });
+
+beforeEach(watchQueryFeedback);
+afterEach(() => vi.restoreAllMocks());

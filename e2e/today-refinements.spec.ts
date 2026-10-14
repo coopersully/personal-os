@@ -1,9 +1,30 @@
-import { expect, request, test } from "@playwright/test";
+import type { WeatherSnapshot } from "@personal-os/domain";
+import { expect, type Route, request, test } from "@playwright/test";
 
 test("Today uses standard settings, collapsible commitments and shared record surfaces", async ({
   page,
 }, info) => {
   test.setTimeout(90_000);
+  // This journey verifies layout, not live weather-provider availability.
+  const weather: WeatherSnapshot = {
+    alerts: [],
+    condition: "Clear",
+    temperatureF: 72,
+    usAqi: 42,
+    observedAt: new Date().toISOString(),
+    location: {
+      city: "New York",
+      coordinates: { latitude: 40.7, longitude: -74 },
+      country: "United States",
+      label: "New York, New York, United States",
+      region: "New York",
+      shortLabel: "New York",
+      source: "saved",
+      mapUrl: "https://www.openstreetmap.org/?mlat=40.7&mlon=-74",
+    },
+  };
+  const serveWeather = (route: Route) => route.fulfill({ json: { weather } });
+  await page.route("**/v1/weather**", serveWeather);
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
@@ -112,11 +133,17 @@ test("Today uses standard settings, collapsible commitments and shared record su
     await page.screenshot({ path: info.outputPath("today-outage.png"), fullPage: true });
     await page.unroute("**/v1/daily-brief**");
     await page.unroute("**/v1/weather**");
+    await page.route("**/v1/weather**", serveWeather);
     await page.getByRole("button", { name: "Try again" }).click();
     await expect(queue.getByRole("heading", { name: "Your commitments" })).toBeVisible();
     await expect(
       page.locator(".today-layout [role=alert], .today-layout [role=status]"),
     ).toHaveCount(0);
+    await expect(
+      page
+        .locator("[data-sonner-toast]")
+        .filter({ hasText: "Connected. Your information is refreshed." }),
+    ).toBeVisible();
     // An isolated optional weather failure does not add grid/status items or block commitments.
     await page.route("**/v1/weather**", (route) => route.abort());
     await page.reload();

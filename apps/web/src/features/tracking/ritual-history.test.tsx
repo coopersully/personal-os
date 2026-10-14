@@ -3,6 +3,7 @@ import type { RitualOccurrence } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { toast } from "sonner";
+import { expectQueryToast, watchQueryFeedback } from "../../../test-support/query-feedback";
 import { SettingsFeedbackContext } from "../../lib/settings-feedback.js";
 import { RitualHistory } from "./ritual-history.js";
 import { RitualLocal } from "./ritual-local.js";
@@ -150,7 +151,7 @@ it("requires explicit deletion and keeps failure visible for retry", async () =>
 it("reports unavailable account history", async () => {
   mocks.history.mockRejectedValue(new Error("History unavailable"));
   mount(<RitualHistory />);
-  expect(await screen.findByRole("status")).toHaveTextContent("Couldn’t load ritual history");
+  await expectQueryToast("Couldn’t load ritual history.");
 });
 it("exports pending native evidence and only discards after explicit confirmation", async () => {
   mocks.invoke.mockResolvedValue({
@@ -195,3 +196,6 @@ it("keeps orphaned local history inspectable even without queued requests", asyn
   expect(await screen.findByRole("status")).toHaveTextContent("0 ritual changes");
   expect(screen.getByText(/Unmatched answer/)).toBeInTheDocument();
 });
+
+beforeEach(watchQueryFeedback);
+afterEach(() => vi.restoreAllMocks());

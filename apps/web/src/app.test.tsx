@@ -1773,6 +1773,7 @@ beforeEach(() => {
 
 afterEach(() => {
   toast.dismiss();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -6518,9 +6519,15 @@ describe("ilo web app", () => {
   });
 
   it("explains a completed-reminder query failure on Today", async () => {
+    const feedback = vi.spyOn(toast, "error");
     mocks.listReminders.mockRejectedValueOnce(new Error("Completed reminders unavailable"));
     const view = setup();
-    expect(await screen.findByText("Couldn’t refresh completed reminders.")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(feedback).toHaveBeenCalledWith(
+        "Couldn’t refresh completed reminders.",
+        expect.any(Object),
+      ),
+    );
     expect(screen.queryByText("Completed history unavailable.")).not.toBeInTheDocument();
     expect(document.querySelector(".today-layout [role=alert]")).toBeNull();
     expect(screen.getByRole("heading", { name: "Your commitments" })).toBeInTheDocument();
@@ -9683,11 +9690,14 @@ describe("ilo web app", () => {
   });
 
   it("keeps invitation and email-confirmation failures actionable", async () => {
+    const feedback = vi.spyOn(toast, "error");
     const browser = userEvent.setup();
     mocks.getMe.mockResolvedValue({ ...user, canManageInvitations: true });
     mocks.listInvitations.mockRejectedValueOnce(new Error("Invitations unavailable"));
     const unavailable = setup("/settings?section=invitations");
-    expect(await screen.findByText("Couldn’t load invitations.")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(feedback).toHaveBeenCalledWith("Couldn’t load invitations.", expect.any(Object)),
+    );
     unavailable.unmount();
 
     mocks.listInvitations.mockResolvedValue([]);

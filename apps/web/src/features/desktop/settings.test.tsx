@@ -17,7 +17,16 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("sonner", () => ({
-  toast: { dismiss: vi.fn(), error: vi.fn(), loading: vi.fn(), success: mocks.success },
+  toast: {
+    dismiss: vi.fn(),
+    error: vi.fn(),
+    loading: vi.fn(),
+    success: mocks.success,
+    promise: vi.fn((pending: Promise<unknown>) => {
+      void pending.catch(() => {});
+      return { unwrap: () => pending };
+    }),
+  },
 }));
 vi.mock("../../api.js", () => ({
   api: {

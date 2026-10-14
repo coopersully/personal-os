@@ -69,10 +69,16 @@ export function ReadFailureBoundary({ children }: { children: ReactNode }) {
     if (blocked) {
       previousFocus.current =
         document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      // Use the physical dialog boundary so portalled Sonner controls cannot reach
+      // background workspace shortcuts either.
+      const dialog = surface.current;
+      const stopShortcut = (event: KeyboardEvent) => event.stopPropagation();
+      dialog?.addEventListener("keydown", stopShortcut);
       // The native top layer also blocks existing portalled menus/dialogs.
       if (surface.current?.showModal) surface.current.showModal();
       else surface.current?.setAttribute("open", "");
       retryButton.current?.focus();
+      return () => dialog?.removeEventListener("keydown", stopShortcut);
     } else if (previousFocus.current?.isConnected) {
       previousFocus.current.focus();
       previousFocus.current = null;
@@ -122,7 +128,7 @@ export function ReadFailureBoundary({ children }: { children: ReactNode }) {
   return (
     <ReadFailureContext.Provider value={blocked}>
       {/* Keep observers and drafts mounted so recovery cannot bounce between screens. */}
-      <div hidden={blocked} inert={blocked}>
+      <div hidden={blocked} inert={blocked} style={{ display: blocked ? "none" : "contents" }}>
         {children}
       </div>
       {blocked ? (
@@ -132,7 +138,6 @@ export function ReadFailureBoundary({ children }: { children: ReactNode }) {
           aria-modal="true"
           className="read-failure-screen"
           onCancel={(event) => event.preventDefault()}
-          onKeyDown={(event) => event.stopPropagation()}
         >
           <ErrorPage
             kind={kind}

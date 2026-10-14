@@ -1,3 +1,8 @@
+import {
+  expectQueryToast,
+  retryQueryToast,
+  watchQueryFeedback,
+} from "../../../test-support/query-feedback";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { ApiClientError } from "@personal-os/api-client";
@@ -198,8 +203,8 @@ describe("Reviews", () => {
 
     mocks.listAgentAccessWorkItems.mockRejectedValueOnce(new Error("Queue unavailable"));
     await browser.click(screen.getByRole("radio", { name: "Review" }));
-    expect(await screen.findByText("Couldn’t load your reviews.")).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Try again" }));
+    await expectQueryToast("Couldn’t load your reviews.");
+    retryQueryToast("Couldn’t load your reviews.");
     expect(await screen.findByText("Review newsletters")).toBeInTheDocument();
   });
 
@@ -333,8 +338,8 @@ describe("Reviews", () => {
     renderPage();
     expect(await screen.findByText("First review")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Next page" }));
-    expect(await screen.findByText("Couldn’t load your reviews.")).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Try again" }));
+    await expectQueryToast("Couldn’t load your reviews.");
+    retryQueryToast("Couldn’t load your reviews.");
 
     await waitFor(() =>
       expect(mocks.listAgentAccessWorkItems).toHaveBeenLastCalledWith({ limit: 10 }),
@@ -386,3 +391,6 @@ describe("Reviews", () => {
     expect(screen.getByRole("link", { name: "Review rule" })).toBeInTheDocument();
   });
 });
+
+beforeEach(watchQueryFeedback);
+afterEach(() => vi.restoreAllMocks());

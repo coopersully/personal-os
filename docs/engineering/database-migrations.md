@@ -63,3 +63,19 @@ rather than assuming it can run inside Drizzle's transactional migration runner.
 This policy applies to every domain. A product-specific architecture decision
 may explain a particular migration's invariants, but it does not override the
 append-only history rule.
+
+## Parallel 0112 lineage reconciliation
+
+The Today branch and connector-health release independently published `0112_today_preferences`
+and `0112_connector_capability_health` with ordinal 117 and different timestamps. Both SQL files
+and complete journal entries remain immutable, including that historical ordinal collision.
+Drizzle's runtime migrator consumes tag, timestamp and SQL hash; it does not use the ordinal.
+The merged journal retains both branch histories and appends
+`0113_connector_capability_health_reconciliation` at the next array ordinal.
+
+A database that already applied the later Today timestamp would skip the earlier connector
+migration, so the reconciliation adds the nullable capability column with `IF NOT EXISTS`.
+Fresh and current-main databases retain both capabilities, while earlier Today databases preserve
+their saved preferences. Integration coverage initializes each lineage, applies the merged chain
+and repeats it to verify idempotency and data preservation. Do not renumber either published 0112
+entry to make the historical metadata look cleaner.

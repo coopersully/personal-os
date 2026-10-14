@@ -148,3 +148,44 @@ Behavior coverage must prove pending persistence, success metadata, expiry, reda
 idempotent replay. Production-equivalent evidence must separately prove runtime authority,
 outbound HTTPS reachability, Link configuration, callback correctness, and successful transition
 from a handoff to connected accounts. Green mock tests do not prove any of those runtime facts.
+
+## Today basemap release configuration
+
+Today uses an optional public `VITE_CARTO_API_KEY`, embedded by the web build. Local lifecycle
+loads it from the primary checkout's ignored `.env`. GitHub web and desktop releases read the
+repository variable of that name; the Mac production image builder forwards the process variable
+as a Docker build argument. An absent key is supported and leaves the quiet default background.
+The continuous Mac controller uses an installed copy of the builder outside the release source.
+Updating the repository variable or merging the builder change does not update that installed copy
+or its process environment. Provision the public value for the controller's build process and
+install the reviewed builder during an attended, idle controller update; verify the resulting
+web image before claiming production maps are configured.
+Configure CARTO origin restrictions for each actual web/desktop origin; do not treat an accepted
+localhost request as evidence for production or Tauri. Never use an administrative CARTO token.
+
+MapLibre 6.14.0's worker and shared module are copied together by `maps:prepare` and served from
+`/maplibre/6.14.0/`; `worker-src 'self'` preserves the desktop's same-origin script policy.
+A release must exercise actual style, source metadata, vector, sprite and glyph requests, WebGL2,
+light/dark changes, attribution, unmount cleanup and the no-key/network/WebGL fallback. Local
+fixture browser evidence does not establish packaged macOS/Windows webview compatibility.
+
+The dedicated Mac builder also reads the optional owner-private
+`~/nohmi-production/carto-api-key` on each build, allowing the stable controller's sudo boundary to
+retain the public basemap configuration without LaunchAgent environment assumptions. Follow
+`deploy/mac-mini/continuous.md` for the attended builder installation; do not infer deployment
+success from key-file installation.
+
+## Liquid-glass renderer
+
+React Bits Glass Surface is vendored at a pinned source revision with its license. The optical
+renderer does not fetch content: SVG displacement maps and weather/map stills are local, in-memory
+assets. WebKit/Firefox use the upstream WebGL path when a usable local backdrop exists; missing
+pixels, failed texture upload and context loss degrade to frosted surfaces. Reduced transparency,
+increased contrast and forced colors disable the optical layer. Maps preserve drawing buffers only
+for inert background capture; previews retain their original behavior. Theme/resize changes refresh
+the map still, and unmount removes images, observers, GPU resources and animation frames.
+
+Native update rail controls reuse the signed, bounded existing updater. A ready update already has
+verified bytes staged; the rail invokes the same install/restart command as Settings and reports
+only the confirmed handoff through Sonner. Mock bridge tests do not establish release availability
+or successful installation on a user's device.

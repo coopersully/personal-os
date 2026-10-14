@@ -175,6 +175,16 @@ the primary experience.
 
 ## Apply feedback consistently
 
+**Hard placement invariant:** never put alerts, refresh failures, loading/status rows, or diagnostic
+cards in a bento grid, top navigation, workspace rail, or sidebar. A warning button or ordinary
+Card wrapper is not an exception. Essential account/page-read failures use one shared blocking
+screen, including failed refreshes with cached data; optional failures use deduplicated Sonner.
+Keep reserved skeletons inside the owning component. Navigation contains destinations and normal
+count slots, never progress/error labels. Failed connector checks cannot create attention cards.
+Read `docs/design/feedback.md` and test cached outage, recovery, optional failure, and the absence
+of status items in those surfaces before claiming completion.
+
+
 **Settings feedback invariant:** all settings errors and discrete action feedback MUST use
 Sonner. Never add inline pending/success/failure paragraphs, status rows, Alerts, banners, or
 cards for notification tests, connection tests, refreshes, permission requests, or native actions.
@@ -190,7 +200,7 @@ user-facing action and safe-retry classification. Render `MutationFeedback` for
 persistent failures; edit forms use `FeedbackForm`, named inputs, and field-name
 mapping instead of a second error banner. Prefer Sonner for transient action
 results. Preserve drafts, one-time secrets, and cached data after failed refresh;
-keep query recovery and stale status beside the affected work. Validate on
+use the shared blocking boundary for essential read failures and Sonner for optional refresh failures; never insert status chrome into layout or navigation. Validate on
 submit/meaningful blur, never on the first keystroke. Confirm irreversible actions
 with `useConfirmAction`; keep feedback and focus reachable after menus close.
 

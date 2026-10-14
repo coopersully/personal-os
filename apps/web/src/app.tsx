@@ -1,3 +1,16 @@
+import { calendarEventOccursOnDate } from "@personal-os/domain";
+import { LiquidGlassScope } from "@/components/ui/liquid-glass";
+import { DesktopRailUtilities } from "@/features/desktop/rail-utilities";
+import { TodayAttention } from "@/features/today/attention";
+import { TodayBackground } from "@/features/today/background";
+import { useTodayClock } from "@/features/today/clock";
+import { TodayCommitments } from "@/features/today/commitments";
+import { LocationMap } from "@/features/today/location-map";
+import { TodayPetCard } from "@/features/today/pet-card";
+import { useTodayPreferences } from "@/features/today/preferences";
+import { TodayRitualCard } from "@/features/today/ritual-card";
+import { TodaySettingsPage } from "@/features/today/settings";
+import { TodaySpendingCard } from "@/features/today/spending-card";
 import {
   DayTimeline,
   localDateTimeAt,
@@ -46,6 +59,7 @@ import {
   localDateRange,
   localDateTimeToUtc,
   localDateToIso,
+  localDayRange,
   parseLocalDate,
   sameLocalDate,
 } from "@personal-os/domain";
@@ -146,6 +160,7 @@ import {
   MonitorIcon,
   MoonIcon,
   PaintBrushIcon,
+  PanelTopIcon,
   PauseIcon,
   PinIcon,
   PlayIcon,
@@ -163,13 +178,16 @@ import {
   UserCircleIcon,
   UserIcon,
   UsersIcon,
-  WifiOffIcon,
   XIcon,
 } from "@/components/icons";
 import { LogoMark } from "@/components/logo-mark";
 import { OccasionCard } from "@/components/occasion-card";
 import { OfflineState } from "@/components/offline-state";
 import { QuoteCard } from "@/components/quote-card";
+import {
+  ReadFailureBoundary,
+  RecoveryToastTargetContext,
+} from "@/components/read-failure-boundary";
 import {
   ResponsiveDialog,
   ResponsiveDialogBody,
@@ -314,7 +332,12 @@ import { ConnectionAuthorizationOutcome } from "@/features/connections/authoriza
 import { TaskCreationProgress } from "@/features/tasks/creation-progress";
 import { api, isUnauthorized } from "./api.js";
 import { scrollTimelineToMinute } from "./calendar-timeline.js";
-import { InlineError, PageLoading, QueryFeedback } from "./components/async-state.js";
+import {
+  InlineError,
+  PageLoading,
+  QueryFeedback,
+  useQueryFeedback,
+} from "./components/async-state.js";
 import { useConfirmAction } from "./components/confirm-action.js";
 import { FeedbackForm } from "./components/feedback-form.js";
 import { MobileWorkspaceDock } from "./components/mobile-workspace-dock.js";
@@ -369,7 +392,7 @@ import {
 import { ProductLanding } from "./features/public-site/landing.js";
 import { ReminderRow, RemindersCreateButton } from "./features/reminders/page.js";
 import { ReviewFlowHost } from "./features/reviews/flow.js";
-import { ReviewNavigation } from "./features/reviews/navigation.js";
+import { ReviewNavigation, TodayReviewNavigation } from "./features/reviews/navigation.js";
 import { AccountIdentity, AccountOverview } from "./features/settings/account-overview.js";
 import {
   ConnectedAgentsSettings,
@@ -568,13 +591,25 @@ export function App() {
 
 function SessionApp() {
   const me = useQuery({ queryFn: api.getMe, queryKey: ["me"] });
+  const [toastTarget, setToastTarget] = useState<HTMLElement | null>(null);
+  const [toastHost] = useState(() => document.createElement("div"));
+  const toastHome = useRef<HTMLDivElement>(null);
+  // Moving one stable portal host preserves Sonner's subscription and pending/result state.
+  useEffect(() => {
+    (toastTarget ?? toastHome.current)?.appendChild(toastHost);
+  }, [toastHost, toastTarget]);
+  useEffect(() => () => toastHost.remove(), [toastHost]);
+  const feedback = (
+    <Toaster
+      theme={typeof window.matchMedia === "function" ? (me.data?.theme ?? "system") : "light"}
+    />
+  );
   return (
-    <>
+    <RecoveryToastTargetContext.Provider value={setToastTarget}>
       <AppContent me={me} />
-      <Toaster
-        theme={typeof window.matchMedia === "function" ? (me.data?.theme ?? "system") : "light"}
-      />
-    </>
+      <div ref={toastHome} />
+      {createPortal(feedback, toastHost)}
+    </RecoveryToastTargetContext.Provider>
   );
 }
 
@@ -611,8 +646,9 @@ function AppContent({ me }: { me: UseQueryResult<User> }) {
     );
   return (
     <TooltipProvider>
-      <QueryFeedback query={me} title="Couldn’t refresh your account." staleOnly />
-      <AuthenticatedExperience user={me.data as User} />
+      <ReadFailureBoundary>
+        <AuthenticatedExperience user={me.data as User} />
+      </ReadFailureBoundary>
     </TooltipProvider>
   );
 }
@@ -1221,7 +1257,6 @@ function AuthenticatedApp({ user }: { user: User }) {
   );
   useDesktopActions(desktopCapture);
   const [calendarTodaySnap, setCalendarTodaySnap] = useState(0);
-  const [online, setOnline] = useState(navigator.onLine);
   const [pinned, setPinned] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(storedSidebarWidth);
   const [railCollapsed, setRailCollapsed] = useState(() => {
@@ -1325,17 +1360,6 @@ function AuthenticatedApp({ user }: { user: User }) {
     queryFn: api.getFinanceInbox,
     queryKey: ["finance-inbox"],
   });
-
-  useEffect(() => {
-    const connect = () => setOnline(true);
-    const disconnect = () => setOnline(false);
-    window.addEventListener("online", connect);
-    window.addEventListener("offline", disconnect);
-    return () => {
-      window.removeEventListener("online", connect);
-      window.removeEventListener("offline", disconnect);
-    };
-  }, []);
 
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
@@ -1536,14 +1560,6 @@ function AuthenticatedApp({ user }: { user: User }) {
         />
         <WorkspaceLayout
           contentMode={isCalendarWorkspace || sidebarMode === "mail" ? "panes" : "page"}
-          banner={
-            !online && (
-              <div className="offline-banner">
-                <WifiOffIcon className="size-[15px]" /> Offline — changes are paused until you
-                reconnect.
-              </div>
-            )
-          }
           primaryNavigation={
             shellPathname === "/settings" ? (
               isMobileWorkspaceDock ? (
@@ -1585,12 +1601,15 @@ function AuthenticatedApp({ user }: { user: User }) {
                 togglePin={togglePin}
                 user={user}
                 weather={weather.data}
+                weatherPending={weather.isPending}
+                weatherError={weather.isError}
+                deviceWeatherLocation={deviceWeatherLocation}
               />
             )
           }
         >
           <main
-            className={`content${isSpatialCalendar ? " content--calendar" : shellPathname === "/mail" ? " content--mail" : ""}`}
+            className={`content${isSpatialCalendar ? " content--calendar" : shellPathname === "/mail" ? " content--mail" : shellPathname === "/today" ? " content--today" : ""}`}
             id="main-content"
           >
             <div className="workspace-stage">
@@ -1705,6 +1724,7 @@ function WorkspaceRoutes({
           element={<Navigate replace to={`/${workspace}?review=open`} />}
         />
       ))}
+      <Route path="/today/settings" element={<Navigate replace to="/settings?section=today" />} />
       <Route
         path="/today"
         element={
@@ -1875,6 +1895,9 @@ function WorkspaceAppBarForRoute({
   togglePin,
   user,
   weather,
+  weatherPending,
+  weatherError,
+  deviceWeatherLocation,
   workspaceSwitcher,
 }: {
   sidebarOwnsTitle: boolean;
@@ -1887,6 +1910,9 @@ function WorkspaceAppBarForRoute({
   togglePin: () => void;
   user: User;
   weather: WeatherSnapshot | undefined;
+  weatherPending: boolean;
+  weatherError: boolean;
+  deviceWeatherLocation: DeviceWeatherLocation;
   workspaceSwitcher: ReactNode;
 }) {
   const navigateSearch = useNavigate();
@@ -1910,14 +1936,7 @@ function WorkspaceAppBarForRoute({
       {workspaceSwitcher ? (
         <div className="calendar-workspace-switcher">{workspaceSwitcher}</div>
       ) : null}
-      {todayBrief ? (
-        <TodayNavigationTitle
-          generatedAt={todayBrief.generatedAt}
-          timeZone={user.planningTimezone}
-        />
-      ) : (
-        <span className="workspace-app-bar__title">Today</span>
-      )}
+      <TodayNavigationTitle timeZone={user.planningTimezone} />
     </div>
   ) : workspace === "mail" ? (
     <div className="mail-app-bar__identity-cluster">
@@ -1944,7 +1963,14 @@ function WorkspaceAppBarForRoute({
       />
     </div>
   ) : pathname === "/today" ? (
-    <TodayWeatherTopbar generatedAt={todayBrief?.generatedAt} user={user} weather={weather} />
+    <TodayWeatherTopbar
+      generatedAt={todayBrief?.generatedAt}
+      user={user}
+      weather={weather}
+      pending={weatherPending}
+      failed={weatherError}
+      location={deviceWeatherLocation}
+    />
   ) : pathname === "/activity" ? (
     <ActivityTopbarControls />
   ) : pathname === "/reminders" ? (
@@ -2005,7 +2031,9 @@ function WorkspaceAppBarForRoute({
         ) : null
       }
       attention={
-        isSpatialCalendar ? (
+        workspace === "today" ? (
+          <TodayReviewNavigation />
+        ) : isSpatialCalendar ? (
           <ReviewNavigation workspace="calendar" />
         ) : workspaceSwitcher &&
           (workspace === "mail" || workspace === "tasks" || workspace === "finances") ? (
@@ -2069,25 +2097,28 @@ function WorkspaceRail({
           );
         })}
       </div>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <ShadcnButton
-            asChild
-            className="workspace-rail__link workspace-rail__settings"
-            size="icon"
-            variant={owner.kind === "account-utility" ? "secondary" : "ghost"}
-          >
-            <Link
-              aria-current={owner.kind === "account-utility" ? "page" : undefined}
-              aria-label="Settings"
-              to="/settings"
+      <div className="workspace-rail__utilities">
+        <DesktopRailUtilities />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <ShadcnButton
+              asChild
+              className="workspace-rail__link workspace-rail__settings"
+              size="icon"
+              variant={owner.kind === "account-utility" ? "secondary" : "ghost"}
             >
-              <SettingsIcon aria-hidden="true" />
-            </Link>
-          </ShadcnButton>
-        </TooltipTrigger>
-        <TooltipContent side="right">Settings</TooltipContent>
-      </Tooltip>
+              <Link
+                aria-current={owner.kind === "account-utility" ? "page" : undefined}
+                aria-label="Settings"
+                to="/settings"
+              >
+                <SettingsIcon aria-hidden="true" />
+              </Link>
+            </ShadcnButton>
+          </TooltipTrigger>
+          <TooltipContent side="right">Settings</TooltipContent>
+        </Tooltip>
+      </div>
     </nav>
   );
 }
@@ -2343,10 +2374,10 @@ function emptyDayQuote(day: LocalDate, allCommitmentsDone: boolean): EmptyDayQuo
 function TodayPage({
   brief,
   calendars,
+  weather,
   deviceWeatherLocation,
   setEditor,
   user,
-  weather,
 }: {
   brief: Pick<UseQueryResult<DailyBrief>, "data" | "error" | "isError" | "isPending" | "refetch">;
   calendars: Calendar[];
@@ -2359,27 +2390,39 @@ function TodayPage({
     isPending: boolean;
   };
 }) {
+  const preferences = useTodayPreferences();
+  useQueryFeedback({ query: preferences, title: "Couldn’t load Today preferences." });
+  const currentTime = useTodayClock(user.planningTimezone);
   const completedReminders = useQuery({
     queryFn: () => api.listReminders({ completed: true, limit: 100 }),
     queryKey: ["reminders", "completed"],
   });
-  if (brief.isError && !brief.data)
-    return <InlineError error={brief.error} retry={brief.refetch} />;
-  if (completedReminders.isError && !completedReminders.data)
-    return <InlineError error={completedReminders.error} retry={completedReminders.refetch} />;
-  if (brief.isPending || completedReminders.isPending || !brief.data) {
-    return <PageLoading workspace="today" />;
-  }
-  const agenda = brief.data;
+  useQueryFeedback({ query: completedReminders, title: "Couldn’t refresh completed reminders." });
+  const agenda = brief.data ?? {
+    allDay: [],
+    anytime: [],
+    laterToday: [],
+    next: null,
+    now: [],
+    overdue: [],
+    tasks: [],
+    completedTasks: [],
+    today: [],
+  };
   const calendarColorsById = new Map(
     calendars.map((calendar) => [calendar.id, calendar.color] as const),
   );
-  const currentTime = new Date(agenda.generatedAt);
   const today = localDateAt(currentTime, user.planningTimezone);
   const overdueReminders = agenda.overdue.filter((reminder) => reminder.completedAt === null);
-  const todayReminders = agenda.today.filter((reminder) => reminder.completedAt === null);
+  const todayReminders = [...agenda.today, ...agenda.overdue].filter(
+    (reminder, index, items) =>
+      reminder.completedAt === null &&
+      reminder.dueAt &&
+      sameLocalDate(localDateAt(new Date(reminder.dueAt), user.planningTimezone), today) &&
+      items.findIndex((other) => other.id === reminder.id) === index,
+  );
   const anytimeReminders = agenda.anytime.filter((reminder) => reminder.completedAt === null);
-  const doneToday = completedReminders.data.items.filter(
+  const doneToday = (completedReminders.data?.items ?? []).filter(
     (reminder) =>
       reminder.completedAt !== null &&
       sameLocalDate(localDateAt(new Date(reminder.completedAt), user.planningTimezone), today),
@@ -2392,12 +2435,6 @@ function TodayPage({
     currentTime,
     user.planningTimezone,
   );
-  const recommendedTasks = new Map(
-    (agenda.recommendedTasks ?? []).map((recommendation) => [
-      recommendation.task.id,
-      recommendation,
-    ]),
-  );
   const doneTasksToday = agenda.completedTasks.filter(
     (task) =>
       task.completedAt !== null &&
@@ -2409,18 +2446,14 @@ function TodayPage({
     anytimeReminders.length +
     overdueTasks.length +
     todayTasks.length;
-  const overdueCommitmentCount = overdueReminders.length + overdueTasks.length;
-  const commitmentCount =
-    overdueCommitmentCount + todayReminders.length + anytimeReminders.length + todayTasks.length;
-  const commitmentSummary =
-    commitmentCount === 0
-      ? "Nothing needs your attention"
-      : `${commitmentCount} ${commitmentCount === 1 ? "thing" : "things"} left${overdueCommitmentCount > 0 ? `, ${overdueCommitmentCount} overdue` : ""}`;
   const remainingTimedEvents = Array.from(
     new Map(
       [...agenda.now, ...(agenda.next ? [agenda.next] : []), ...agenda.laterToday]
         .filter(
-          (event) => !event.allDay && new Date(event.endsAt).getTime() > currentTime.getTime(),
+          (event) =>
+            !event.allDay &&
+            calendarEventOccursOnDate(event, today, user.planningTimezone) &&
+            new Date(event.endsAt).getTime() > currentTime.getTime(),
         )
         .map((event) => [event.id, event] as const),
     ).values(),
@@ -2429,7 +2462,8 @@ function TodayPage({
     if (!task.scheduledAt) return false;
     const endsAt = scheduledTaskEndsAt(task);
     return (
-      sameLocalDate(localDateAt(new Date(task.scheduledAt), user.planningTimezone), today) &&
+      new Date(task.scheduledAt).getTime() <
+        new Date(localDayRange(currentTime, user.planningTimezone).to).getTime() &&
       endsAt.getTime() > currentTime.getTime()
     );
   });
@@ -2441,6 +2475,16 @@ function TodayPage({
       material: { event, kind: "event" as const },
       startsAt: event.startsAt,
     })),
+    ...todayReminders
+      .filter((reminder) => reminder.dueAt && new Date(reminder.dueAt) >= currentTime)
+      .map((reminder) => ({
+        allDay: false as const,
+        point: true,
+        endsAt: reminder.dueAt!,
+        startsAt: reminder.dueAt!,
+        id: `reminder:${reminder.id}`,
+        material: { kind: "reminder" as const, reminder },
+      })),
     ...scheduledTasksToday.map((task) => ({
       allDay: false as const,
       endsAt: scheduledTaskEndsAt(task).toISOString(),
@@ -2449,344 +2493,270 @@ function TodayPage({
       startsAt: task.scheduledAt as string,
     })),
   ].sort((left, right) => new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime());
-  const ongoingEventCount = timelineItems.filter(
-    (item) =>
-      new Date(item.startsAt).getTime() <= currentTime.getTime() &&
-      new Date(item.endsAt).getTime() > currentTime.getTime(),
-  ).length;
-  const eventsLeftToday = timelineItems.length - ongoingEventCount;
-  const eventSummary =
-    timelineItems.length === 0
-      ? "Nothing scheduled today"
-      : `${timelineItems.length} total ${timelineItems.length === 1 ? "event" : "events"}, ${eventsLeftToday} left today${ongoingEventCount > 0 ? `, ${ongoingEventCount} ongoing` : ""}`;
+  const eventSummary = "Today · Events, tasks and reminders";
   const openDayQuote = emptyDayQuote(today, remainingCount === 0);
   return (
-    <div className="today-layout" data-page="today">
-      <QueryFeedback query={brief} title="Couldn’t refresh today’s plan." staleOnly />
-      <QueryFeedback
-        query={completedReminders}
-        title="Couldn’t refresh completed reminders."
-        staleOnly
+    <LiquidGlassScope
+      enabled={
+        preferences.data?.preferences.background === "weather" ||
+        preferences.data?.preferences.background === "map"
+      }
+      className="today-layout"
+      data-page="today"
+      data-material-scope={
+        preferences.data?.preferences.background === "weather" ||
+        preferences.data?.preferences.background === "map"
+          ? "frosted"
+          : undefined
+      }
+    >
+      <TodayBackground
+        timeZone={user.planningTimezone}
+        mode={preferences.data?.preferences.background ?? "default"}
+        weather={weather.data}
+        location={
+          deviceWeatherLocation.coordinates ??
+          weather.data?.location.coordinates ??
+          user.homeLocation?.coordinates ??
+          null
+        }
       />
+      <TodayAttention />
       <section className="day-column">
-        <section aria-label="Today's calendar" className="today-schedule">
-          <div className="section-heading today-section-heading">
-            <div className="today-section-heading__copy">
+        <ShadcnCard role="region" aria-label="Today's calendar" className="today-schedule">
+          <ShadcnCardHeader>
+            <ShadcnCardTitle>
               <h2>Your timeline</h2>
-              <p className="today-section-heading__description">{eventSummary}</p>
-            </div>
-          </div>
-          <TodayConditions
-            deviceWeatherLocation={deviceWeatherLocation}
-            savedLocation={user.homeLocation}
-            weather={weather}
-          />
-          {agenda.allDay.length > 0 ? (
-            <section aria-label="All-day occasions" className="today-all-day-strip">
-              <ShadcnItemGroup className="today-all-day-strip__events">
-                {agenda.allDay.map((event) => (
-                  <TodayAllDayEventCard
-                    calendarColor={calendarColorsById.get(event.calendarId)}
-                    event={event}
-                    key={event.id}
-                    onEdit={() => setEditor({ event, kind: "event" })}
-                    timeZone={user.planningTimezone}
-                  />
-                ))}
-              </ShadcnItemGroup>
-            </section>
-          ) : null}
-          {timelineItems.length > 0 ? (
-            <TodayTimeline
-              calendarColorsById={calendarColorsById}
-              currentTime={currentTime}
-              items={timelineItems}
-              onEditTask={(task) => setEditor({ kind: "task", task })}
-              timeZone={user.planningTimezone}
-            />
-          ) : (
-            <QuoteCard
-              {...(openDayQuote.author ? { author: openDayQuote.author } : {})}
-              {...(openDayQuote.source ? { source: openDayQuote.source } : {})}
-              className="today-empty-quote"
-              label="An open calendar"
-              text={openDayQuote.text}
-            />
-          )}
-        </section>
-      </section>
-      <aside aria-labelledby="today-queue-title" className="today-queue">
-        <div className="section-heading today-section-heading">
-          <div className="today-section-heading__copy">
-            <h2 id="today-queue-title">To take care of</h2>
-            <p className="today-section-heading__description">{commitmentSummary}</p>
-          </div>
-          <ShadcnBadge variant="secondary">{commitmentCount}</ShadcnBadge>
-        </div>
-        <TodayCommitmentList
-          anytimeReminders={anytimeReminders}
-          overdueReminders={overdueReminders}
-          overdueTasks={overdueTasks}
-          recommendedTasks={recommendedTasks}
-          setEditor={setEditor}
-          timeZone={user.planningTimezone}
-          todayReminders={todayReminders}
-          todayTasks={todayTasks}
-        />
-        {doneToday.length > 0 || doneTasksToday.length > 0 ? (
-          <ShadcnCollapsible className="today-history">
-            <ShadcnCollapsibleTrigger className="today-history__trigger" type="button">
-              <CircleCheckIcon aria-hidden="true" />
-              <span>Done today</span>
-              <ShadcnBadge variant="secondary">
-                {doneToday.length + doneTasksToday.length}
-              </ShadcnBadge>
-              <ChevronDownIcon aria-hidden="true" />
-            </ShadcnCollapsibleTrigger>
-            <ShadcnCollapsibleContent className="today-history__content">
-              {doneToday.length > 0 ? (
-                <ReminderGroup
-                  label="Completed reminders"
-                  reminders={doneToday}
-                  setEditor={setEditor}
-                  timeZone={user.planningTimezone}
-                />
-              ) : null}
-              {doneTasksToday.length > 0 ? (
+            </ShadcnCardTitle>
+            <ShadcnCardDescription>{eventSummary}</ShadcnCardDescription>
+          </ShadcnCardHeader>
+          <ShadcnCardContent>
+            {agenda.allDay.length > 0 ? (
+              <section aria-label="All-day occasions" className="today-all-day-strip">
+                <ShadcnItemGroup className="today-all-day-strip__events">
+                  {agenda.allDay
+                    .filter((event) =>
+                      calendarEventOccursOnDate(event, today, user.planningTimezone),
+                    )
+                    .map((event) => (
+                      <TodayAllDayEventCard
+                        calendarColor={calendarColorsById.get(event.calendarId)}
+                        event={event}
+                        key={event.id}
+                        onEdit={() => setEditor({ event, kind: "event" })}
+                        timeZone={event.timezone}
+                      />
+                    ))}
+                </ShadcnItemGroup>
+              </section>
+            ) : null}
+            {!brief.data ? (
+              <Skeleton
+                className="min-h-48"
+                aria-label="Loading timeline"
+                aria-busy={brief.isPending}
+              />
+            ) : timelineItems.length > 0 ? (
+              <TodayTimeline
+                calendarColorsById={calendarColorsById}
+                currentTime={currentTime}
+                items={timelineItems}
+                onEditTask={(task) => setEditor({ kind: "task", task })}
+                onEditReminder={(reminder) => setEditor({ kind: "reminder", reminder })}
+                timeZone={user.planningTimezone}
+              />
+            ) : (
+              <QuoteCard
+                {...(openDayQuote.author ? { author: openDayQuote.author } : {})}
+                {...(openDayQuote.source ? { source: openDayQuote.source } : {})}
+                className="today-empty-quote"
+                label="An open calendar"
+                text={openDayQuote.text}
+              />
+            )}
+            <div className="today-due-area">
+              {openTasks.filter(
+                (task) =>
+                  !!task.dueAt &&
+                  sameLocalDate(localDateAt(new Date(task.dueAt), user.planningTimezone), today) &&
+                  !scheduledTasksToday.some((scheduled) => scheduled.id === task.id),
+              ).length ? (
                 <TaskGroup
-                  label="Completed tasks"
+                  compact
+                  label="Due today"
+                  tasks={openTasks.filter(
+                    (task) =>
+                      !!task.dueAt &&
+                      sameLocalDate(
+                        localDateAt(new Date(task.dueAt), user.planningTimezone),
+                        today,
+                      ) &&
+                      !scheduledTasksToday.some((scheduled) => scheduled.id === task.id),
+                  )}
                   setEditor={setEditor}
-                  tasks={doneTasksToday}
                   timeZone={user.planningTimezone}
                 />
               ) : null}
-            </ShadcnCollapsibleContent>
-          </ShadcnCollapsible>
-        ) : null}
-      </aside>
-    </div>
-  );
-}
-
-type TodayCommitmentFilter = "all" | "overdue" | "tasks" | "reminders";
-type TodayCommitment =
-  | { kind: "task"; overdue: boolean; task: Task }
-  | { kind: "reminder"; overdue: boolean; reminder: Reminder };
-
-const todayCommitmentsPerPage = 6;
-
-function TodayCommitmentList({
-  anytimeReminders,
-  overdueReminders,
-  overdueTasks,
-  recommendedTasks,
-  setEditor,
-  timeZone,
-  todayReminders,
-  todayTasks,
-}: {
-  anytimeReminders: Reminder[];
-  overdueReminders: Reminder[];
-  overdueTasks: Task[];
-  recommendedTasks: Map<string, DailyBrief["recommendedTasks"][number]>;
-  setEditor: (editor: Editor) => void;
-  timeZone: string;
-  todayReminders: Reminder[];
-  todayTasks: Task[];
-}) {
-  const [filter, setFilter] = useState<TodayCommitmentFilter>("all");
-  const [requestedPage, setRequestedPage] = useState(1);
-  const commitments: TodayCommitment[] = [
-    ...overdueTasks.map((task) => ({ kind: "task" as const, overdue: true, task })),
-    ...overdueReminders.map((reminder) => ({
-      kind: "reminder" as const,
-      overdue: true,
-      reminder,
-    })),
-    ...todayReminders.map((reminder) => ({
-      kind: "reminder" as const,
-      overdue: false,
-      reminder,
-    })),
-    ...anytimeReminders.map((reminder) => ({
-      kind: "reminder" as const,
-      overdue: false,
-      reminder,
-    })),
-    ...todayTasks.map((task) => ({ kind: "task" as const, overdue: false, task })),
-  ];
-  const filteredCommitments = commitments.filter((commitment) => {
-    if (filter === "all") return true;
-    if (filter === "overdue") return commitment.overdue;
-    return filter === "tasks" ? commitment.kind === "task" : commitment.kind === "reminder";
-  });
-  const pageCount = Math.max(1, Math.ceil(filteredCommitments.length / todayCommitmentsPerPage));
-  const page = Math.min(requestedPage, pageCount);
-  const pageStart = (page - 1) * todayCommitmentsPerPage;
-  const visibleCommitments = filteredCommitments.slice(
-    pageStart,
-    pageStart + todayCommitmentsPerPage,
-  );
-  const selectFilter = (value: string) => {
-    if (!value) return;
-    setFilter(value as TodayCommitmentFilter);
-    setRequestedPage(1);
-  };
-  const selectPage = (nextPage: number) =>
-    setRequestedPage(Math.min(Math.max(nextPage, 1), pageCount));
-
-  return (
-    <div className="today-commitments">
-      <SegmentedControl aria-label="Commitment filters" onValueChange={selectFilter} value={filter}>
-        <SegmentedControlItem value="all">All</SegmentedControlItem>
-        <SegmentedControlItem value="overdue">Overdue</SegmentedControlItem>
-        <SegmentedControlItem value="tasks">Tasks</SegmentedControlItem>
-        <SegmentedControlItem value="reminders">Reminders</SegmentedControlItem>
-      </SegmentedControl>
-      {visibleCommitments.length > 0 ? (
-        <ShadcnScrollArea aria-label="Commitments" className="today-commitments__scroll">
-          <ShadcnItemGroup aria-label="Commitments" className="today-commitments__list">
-            {visibleCommitments.map((commitment) => {
-              if (commitment.kind === "task") {
-                const recommendation = recommendedTasks.get(commitment.task.id);
-                return (
-                  <TaskRow
-                    compact
-                    className={cn(commitment.overdue && "today-commitment-row--overdue")}
-                    key={`task:${commitment.task.id}`}
-                    onEdit={() => setEditor({ kind: "task", task: commitment.task })}
-                    {...(recommendation ? { recommendation } : {})}
-                    task={commitment.task}
-                    timeZone={timeZone}
-                  />
-                );
-              }
-              return (
-                <ReminderRow
-                  key={`reminder:${commitment.reminder.id}`}
-                  onEdit={() => setEditor({ kind: "reminder", reminder: commitment.reminder })}
-                  reminder={commitment.reminder}
-                  timeZone={timeZone}
+              {todayReminders.filter(
+                (reminder) => reminder.dueAt && new Date(reminder.dueAt) < currentTime,
+              ).length ? (
+                <ReminderGroup
+                  label="Due today · Reminders"
+                  reminders={todayReminders.filter(
+                    (reminder) => reminder.dueAt && new Date(reminder.dueAt) < currentTime,
+                  )}
+                  setEditor={setEditor}
+                  timeZone={user.planningTimezone}
                 />
-              );
-            })}
-          </ShadcnItemGroup>
-        </ShadcnScrollArea>
-      ) : (
-        <EmptyState
-          icon={<CircleCheckIcon />}
-          title={commitments.length === 0 ? "Nothing pulling at you" : "Nothing in this view"}
+              ) : null}
+            </div>
+          </ShadcnCardContent>
+        </ShadcnCard>
+      </section>
+      <div className="today-supporting-column">
+        <ShadcnCard
+          role="complementary"
+          aria-labelledby="today-queue-title"
+          className="today-queue"
         >
-          {commitments.length === 0
-            ? "Add something when it deserves your attention."
-            : "Try another filter."}
-        </EmptyState>
-      )}
-      {filteredCommitments.length > 0 ? (
-        <div className="today-commitments__pagination">
-          <span>
-            {pageStart + 1}–
-            {Math.min(pageStart + todayCommitmentsPerPage, filteredCommitments.length)} of{" "}
-            {filteredCommitments.length}
-          </span>
-          <ShadcnPagination>
-            <ShadcnPaginationContent>
-              <ShadcnPaginationItem>
-                <ShadcnPaginationPrevious
-                  aria-disabled={page === 1}
-                  href="#"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    selectPage(page - 1);
-                  }}
-                  tabIndex={page === 1 ? -1 : undefined}
-                  text="Prev"
-                />
-              </ShadcnPaginationItem>
-              {Array.from({ length: pageCount }, (_, index) => index + 1).map((pageNumber) => (
-                <ShadcnPaginationItem key={pageNumber}>
-                  <ShadcnPaginationLink
-                    aria-label={`Go to page ${pageNumber}`}
-                    href="#"
-                    isActive={pageNumber === page}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      selectPage(pageNumber);
-                    }}
-                  >
-                    {pageNumber}
-                  </ShadcnPaginationLink>
-                </ShadcnPaginationItem>
-              ))}
-              <ShadcnPaginationItem>
-                <ShadcnPaginationNext
-                  aria-disabled={page === pageCount}
-                  href="#"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    selectPage(page + 1);
-                  }}
-                  tabIndex={page === pageCount ? -1 : undefined}
-                />
-              </ShadcnPaginationItem>
-            </ShadcnPaginationContent>
-          </ShadcnPagination>
+          <ShadcnCardHeader>
+            <ShadcnCardTitle>
+              <h2 id="today-queue-title">Your commitments</h2>
+            </ShadcnCardTitle>
+            <ShadcnCardDescription>This week · Tasks and reminders</ShadcnCardDescription>
+          </ShadcnCardHeader>
+          <TodayCommitments
+            day={`${localDateToIso(today)}:${user.planningTimezone}`}
+            renderTask={(task) => (
+              <TaskRow
+                compact
+                task={task}
+                timeZone={user.planningTimezone}
+                onEdit={() => setEditor({ kind: "task", task })}
+              />
+            )}
+            renderReminder={(reminder) => (
+              <ReminderRow
+                reminder={reminder}
+                timeZone={user.planningTimezone}
+                onEdit={() => setEditor({ kind: "reminder", reminder })}
+              />
+            )}
+          >
+            {doneToday.length > 0 || doneTasksToday.length > 0 ? (
+              <ShadcnCollapsible className="today-history">
+                <ShadcnCollapsibleTrigger className="today-history__trigger" type="button">
+                  <CircleCheckIcon aria-hidden="true" />
+                  <span>Done today</span>
+                  <ShadcnBadge variant="secondary">
+                    {doneToday.length + doneTasksToday.length}
+                  </ShadcnBadge>
+                  <ChevronDownIcon aria-hidden="true" />
+                </ShadcnCollapsibleTrigger>
+                <ShadcnCollapsibleContent className="today-history__content">
+                  {doneToday.length > 0 ? (
+                    <ReminderGroup
+                      label="Completed reminders"
+                      reminders={doneToday}
+                      setEditor={setEditor}
+                      timeZone={user.planningTimezone}
+                    />
+                  ) : null}
+                  {doneTasksToday.length > 0 ? (
+                    <TaskGroup
+                      label="Completed tasks"
+                      setEditor={setEditor}
+                      tasks={doneTasksToday}
+                      timeZone={user.planningTimezone}
+                    />
+                  ) : null}
+                </ShadcnCollapsibleContent>
+              </ShadcnCollapsible>
+            ) : null}
+          </TodayCommitments>
+        </ShadcnCard>
+        <div className="today-optional-cards">
+          {preferences.data?.preferences.showSpending ? (
+            <TodaySpendingCard
+              now={currentTime}
+              timeZone={user.planningTimezone}
+              window={preferences.data.preferences.spendingWindow}
+            />
+          ) : null}
+          {preferences.data?.preferences.showRitual ? <TodayRitualCard /> : null}
+          {preferences.data?.preferences.showPet ? <TodayPetCard /> : null}
         </div>
-      ) : null}
-    </div>
+      </div>
+    </LiquidGlassScope>
   );
 }
-
-function TodayConditions({
-  deviceWeatherLocation,
-  savedLocation,
-  weather,
-}: {
-  deviceWeatherLocation: DeviceWeatherLocation;
-  savedLocation: HomeLocation | null;
-  weather: {
-    data: WeatherSnapshot | undefined;
-    isError: boolean;
-    isPending: boolean;
-  };
-}) {
-  if (weather.data) return null;
-  const description = weather.isError
-    ? "Conditions are temporarily unavailable."
-    : deviceWeatherLocation.status === "pending"
-      ? "Finding local conditions…"
-      : savedLocation
-        ? `Checking ${savedLocation.label}…`
-        : "Allow device location or add a saved location in Account settings.";
-  return (
-    <ShadcnItem className="today-conditions" size="sm">
-      <ShadcnItemMedia variant="icon">
-        <CloudIcon aria-hidden="true" />
-      </ShadcnItemMedia>
-      <ShadcnItemContent>
-        <ShadcnItemTitle>Current conditions</ShadcnItemTitle>
-        <ShadcnItemDescription>{description}</ShadcnItemDescription>
-      </ShadcnItemContent>
-      {deviceWeatherLocation.status === "pending" ||
-      (savedLocation !== null && weather.isPending) ? (
-        <ShadcnItemActions>
-          <ShadcnBadge variant="secondary">Updating</ShadcnBadge>
-        </ShadcnItemActions>
-      ) : null}
-    </ShadcnItem>
-  );
-}
-
 function TodayWeatherTopbar({
   generatedAt,
   user,
   weather,
+  pending,
+  failed,
+  location,
 }: {
   generatedAt: string | undefined;
   user: User;
   weather: WeatherSnapshot | undefined;
+  pending: boolean;
+  failed: boolean;
+  location: DeviceWeatherLocation;
 }) {
-  if (!weather) return null;
+  const availableCoordinates = location.coordinates ?? user.homeLocation?.coordinates;
+  if (!weather)
+    return (
+      <fieldset aria-label="Today conditions" className="workspace-app-bar__weather">
+        <ShadcnButton
+          variant="secondary"
+          className="workspace-app-bar__weather-trigger"
+          aria-busy={pending && !failed}
+          disabled
+        >
+          <CloudIcon aria-hidden="true" />
+          <span>{failed ? "Unavailable" : pending ? "Weather…" : "Weather"}</span>
+        </ShadcnButton>
+        {availableCoordinates ? (
+          <TodayWeatherPopover
+            content={
+              <WeatherLocationPopoverContent
+                location={{
+                  coordinates: availableCoordinates,
+                  label: location.coordinates ? "Current location" : user.homeLocation!.label,
+                  shortLabel: location.coordinates ? "Current location" : user.homeLocation!.label,
+                  source: location.coordinates ? "device" : "saved",
+                  mapUrl: `https://www.openstreetmap.org/?mlat=${availableCoordinates.latitude}&mlon=${availableCoordinates.longitude}`,
+                }}
+              />
+            }
+            contentClassName="weather-location-popover"
+            showHeader={false}
+            description={location.coordinates ? "Using this device" : "Home location"}
+            tooltip="Location"
+            title="Location"
+          >
+            <ShadcnButton variant="secondary" className="workspace-app-bar__weather-location">
+              <MapPinIcon aria-hidden="true" />
+              <span>{location.coordinates ? "Current location" : user.homeLocation!.label}</span>
+            </ShadcnButton>
+          </TodayWeatherPopover>
+        ) : (
+          <ShadcnButton
+            variant="secondary"
+            className="workspace-app-bar__weather-location"
+            aria-busy={location.status === "pending"}
+            asChild
+          >
+            <Link to="/settings?section=account">
+              <MapPinIcon aria-hidden="true" />
+              <span>{location.status === "pending" ? "Location…" : "Set location"}</span>
+            </Link>
+          </ShadcnButton>
+        )}
+      </fieldset>
+    );
   const WeatherIcon = todayWeatherIcon(weather, user.planningTimezone);
   const temperature = `${Math.round(weather.temperatureF)}°F`;
   const alertDescription =
@@ -2819,7 +2789,7 @@ function TodayWeatherTopbar({
         </ShadcnButton>
       </TodayWeatherPopover>
       <TodayWeatherPopover
-        content={<WeatherLocationPopoverContent weather={weather} />}
+        content={<WeatherLocationPopoverContent location={weather.location} />}
         contentClassName="weather-location-popover"
         description={weather.location.source === "device" ? "Using this device" : "Home location"}
         showHeader={false}
@@ -2829,7 +2799,7 @@ function TodayWeatherTopbar({
         <ShadcnButton
           aria-label={`Weather location: ${weather.location.shortLabel}`}
           className="workspace-app-bar__weather-location"
-          variant="ghost"
+          variant="secondary"
         >
           <MapPinIcon aria-hidden="true" />
           <span>{weather.location.shortLabel}</span>
@@ -2872,12 +2842,7 @@ function WeatherConditionsPopoverContent({
         <dl className="weather-popover__stats">
           <div>
             <dt>Updated</dt>
-            <dd>
-              {formatWeatherFreshness(
-                weather.observedAt,
-                generatedAt ? new Date(generatedAt).getTime() : Date.now(),
-              )}
-            </dd>
+            <dd>{formatWeatherFreshness(weather.observedAt, Date.now())}</dd>
           </div>
           <div>
             <dt>Air quality</dt>
@@ -2912,8 +2877,15 @@ export function airQualityDescription(usAqi: number | null): string {
   return "Hazardous";
 }
 
-function WeatherLocationPopoverContent({ weather }: { weather: WeatherSnapshot }) {
-  const { coordinates, label, mapUrl, shortLabel, source } = weather.location;
+function WeatherLocationPopoverContent({
+  location,
+}: {
+  location: Pick<
+    WeatherSnapshot["location"],
+    "coordinates" | "label" | "mapUrl" | "shortLabel" | "source"
+  >;
+}) {
+  const { coordinates, label, mapUrl, shortLabel, source } = location;
   const sourceLabel = source === "device" ? "Using this device" : "Home location";
   return (
     <>
@@ -2931,7 +2903,7 @@ function WeatherLocationPopoverContent({ weather }: { weather: WeatherSnapshot }
         </span>
       </div>
       <div className="weather-location-popover__map">
-        <iframe loading="lazy" src={weatherMapEmbedUrl(coordinates)} title={`Map of ${label}`} />
+        <LocationMap coordinates={coordinates} mode="preview" />
         <a
           aria-label={`Open ${label} in OpenStreetMap`}
           href={mapUrl}
@@ -2948,14 +2920,8 @@ function WeatherLocationPopoverContent({ weather }: { weather: WeatherSnapshot }
   );
 }
 
-function TodayNavigationTitle({
-  generatedAt,
-  timeZone,
-}: {
-  generatedAt: string;
-  timeZone: string;
-}) {
-  const currentTime = new Date(generatedAt);
+function TodayNavigationTitle({ timeZone }: { timeZone: string }) {
+  const currentTime = useTodayClock(timeZone);
   return (
     <h1 className="workspace-app-bar__title">
       <time dateTime={localDateToIso(localDateAt(currentTime, timeZone))}>
@@ -4681,7 +4647,7 @@ function TimelineEvent({
     >
       <button
         aria-label={`${formatTime(event.startsAt, timeZone)} ${event.title}`}
-        className={`calendar-timeline-event${compact ? " calendar-timeline-event--compact" : ""}${blockColors.length > 0 ? " has-blocks" : ""}${writable ? " is-draggable" : " is-readonly"}${isDragging ? " is-dragging" : ""}${moveBlocked ? " is-move-blocked" : ""}`}
+        className={`timeline-record calendar-timeline-event${compact ? " calendar-timeline-event--compact" : ""}${blockColors.length > 0 ? " has-blocks" : ""}${writable ? " is-draggable" : " is-readonly"}${isDragging ? " is-dragging" : ""}${moveBlocked ? " is-move-blocked" : ""}`}
         draggable={writable}
         onDragEnd={onDragEnd}
         onDragStart={(dragEvent) => startCalendarDrag(dragEvent, event, setDraggedEventId)}
@@ -5934,6 +5900,7 @@ type SettingsSectionId =
   | "agent-connections"
   | "appearance"
   | "calendar"
+  | "today"
   | "connections"
   | "finances"
   | "goals"
@@ -5988,6 +5955,7 @@ const settingsNavigation: Array<{
   {
     label: "Workspaces",
     items: [
+      { icon: PanelTopIcon, id: "today", label: "Today at a Glance" },
       { icon: CalendarIcon, id: "calendar", label: "Calendar" },
       { icon: ListChecksIcon, id: "tasks", label: "Tasks" },
       { icon: MailIcon, id: "mail", label: "Mail" },
@@ -6219,6 +6187,7 @@ function SettingsPageContent({
           </Link>
         </ShadcnButton>
       ) : null}
+      {section === "today" ? <TodaySettingsPage /> : null}
       {section === "mail" ? (
         <div className="settings-stack">
           <WorkspacePreferencesSection workspace="mail" />
@@ -8615,6 +8584,7 @@ function ReminderGroup({
 }
 
 function TaskGroup({
+  compact = false,
   label,
   overdue = false,
   recommendations,
@@ -8622,6 +8592,7 @@ function TaskGroup({
   tasks,
   timeZone,
 }: {
+  compact?: boolean;
   label: string;
   overdue?: boolean;
   recommendations?: Map<string, DailyBrief["recommendedTasks"][number]>;
@@ -8640,6 +8611,7 @@ function TaskGroup({
           const recommendation = recommendations?.get(task.id);
           return (
             <TaskRow
+              compact={compact}
               key={task.id}
               onEdit={() => setEditor({ kind: "task", task })}
               {...(recommendation ? { recommendation } : {})}
@@ -8698,7 +8670,7 @@ export function TodayEventCard({
   return (
     <DropdownMenu>
       <EventCard
-        className="today-timeline__event"
+        className="timeline-record today-timeline__event"
         data-density={density}
         role="listitem"
         style={{ ...calendarEventColorStyle(calendarColor), ...layoutStyle }}
@@ -8773,7 +8745,10 @@ export function TodayEventCard({
 }
 
 type TodayTimelineItem = TimelinePositionable & {
-  material: { event: CalendarEvent; kind: "event" } | { kind: "task"; task: Task };
+  material:
+    | { event: CalendarEvent; kind: "event" }
+    | { kind: "task"; task: Task }
+    | { kind: "reminder"; reminder: Reminder };
 };
 
 export function scheduledTaskEndsAt(task: Task): Date {
@@ -8784,7 +8759,6 @@ export function scheduledTaskEndsAt(task: Task): Date {
 }
 
 export function TodayTaskTimelineCard({
-  currentTime,
   density,
   item,
   layoutStyle,
@@ -8799,49 +8773,14 @@ export function TodayTaskTimelineCard({
   timeZone: string;
 }) {
   if (item.material.kind !== "task") return null;
-  const { task } = item.material;
-  const minutesUntilStart =
-    new Date(item.startsAt).getTime() > currentTime.getTime()
-      ? Math.max(1, Math.ceil((new Date(item.startsAt).getTime() - currentTime.getTime()) / 60_000))
-      : null;
-  const minutesRemaining =
-    new Date(item.startsAt).getTime() <= currentTime.getTime() &&
-    new Date(item.endsAt).getTime() > currentTime.getTime()
-      ? Math.max(1, Math.ceil((new Date(item.endsAt).getTime() - currentTime.getTime()) / 60_000))
-      : null;
-
   return (
-    <EventCard
-      className="today-timeline__event today-timeline__task"
+    <div
+      className="timeline-record today-timeline__commitment"
       data-density={density}
-      role="listitem"
       style={layoutStyle}
     >
-      <EventCardContent>
-        <EventCardPrimaryAction
-          aria-label={`Open task ${task.title}`}
-          className="today-timeline__event-action"
-          onClick={onEdit}
-        >
-          <EventCardBody>
-            <EventCardTitle>
-              <ListChecksIcon aria-hidden="true" />
-              <span className="min-w-0 truncate">{task.title}</span>
-              {minutesUntilStart !== null || minutesRemaining !== null ? (
-                <EventCardTitleMeta>
-                  {minutesUntilStart !== null
-                    ? `in ${formatMinutes(minutesUntilStart)}`
-                    : `${formatMinutes(minutesRemaining ?? 0)} left`}
-                </EventCardTitleMeta>
-              ) : null}
-            </EventCardTitle>
-            <EventCardDescription>
-              {formatTime(item.startsAt, timeZone)}–{formatTime(item.endsAt, timeZone)}
-            </EventCardDescription>
-          </EventCardBody>
-        </EventCardPrimaryAction>
-      </EventCardContent>
-    </EventCard>
+      <TaskRow dense task={item.material.task} onEdit={onEdit} timeZone={timeZone} />
+    </div>
   );
 }
 
@@ -8850,12 +8789,14 @@ function TodayTimeline({
   currentTime,
   items,
   onEditTask,
+  onEditReminder,
   timeZone,
 }: {
   calendarColorsById: Map<string, string | null>;
   currentTime: Date;
   items: TodayTimelineItem[];
   onEditTask: (task: Task) => void;
+  onEditReminder: (reminder: Reminder) => void;
   timeZone: string;
 }) {
   return (
@@ -8874,6 +8815,21 @@ function TodayTimeline({
             layoutStyle={layoutStyle}
             timeZone={timeZone}
           />
+        ) : item.material.kind === "reminder" ? (
+          <div
+            key={item.id}
+            className="timeline-record today-timeline__commitment"
+            data-density="compact"
+            style={{ ...layoutStyle, height: "auto", minHeight: 32 }}
+          >
+            <ReminderRow
+              reminder={item.material.reminder}
+              timeZone={timeZone}
+              onEdit={() => {
+                if (item.material.kind === "reminder") onEditReminder(item.material.reminder);
+              }}
+            />
+          </div>
         ) : (
           <TodayTaskTimelineCard
             key={item.id}
@@ -9828,22 +9784,6 @@ export function formatTimelineTimeRange(event: CalendarEvent, timeZone: string) 
 }
 function formatWeatherCoordinates(coordinates: WeatherCoordinates) {
   return `${coordinates.latitude.toFixed(4)}, ${coordinates.longitude.toFixed(4)}`;
-}
-
-function weatherMapEmbedUrl(coordinates: WeatherCoordinates) {
-  const latitudeSpan = 0.035;
-  const longitudeSpan = 0.05;
-  const parameters = new URLSearchParams({
-    bbox: [
-      coordinates.longitude - longitudeSpan,
-      coordinates.latitude - latitudeSpan,
-      coordinates.longitude + longitudeSpan,
-      coordinates.latitude + latitudeSpan,
-    ].join(","),
-    layer: "mapnik",
-    marker: `${coordinates.latitude},${coordinates.longitude}`,
-  });
-  return `https://www.openstreetmap.org/export/embed.html?${parameters.toString()}`;
 }
 
 export function weatherSkyPeriod(observedAt: string, timeZone: string) {

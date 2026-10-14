@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ReviewNavigation } from "./navigation.js";
+import { ReviewNavigation, TodayReviewNavigation } from "./navigation.js";
 
 const mocks = vi.hoisted(() => ({ listAgentAccessWorkItems: vi.fn() }));
 vi.mock("../../api.js", () => ({ api: mocks }));
@@ -44,9 +44,9 @@ it.each([
 it("surfaces failed counts instead of claiming there is no work", async () => {
   mocks.listAgentAccessWorkItems.mockRejectedValue(new Error("Unavailable"));
   renderEntry();
-  const button = await screen.findByRole("button", { name: "Check review status" });
-  expect(button).toHaveAttribute("data-attention", "true");
-  expect(button.querySelector(".review-navigation__count")).toHaveTextContent("!");
+  const button = await screen.findByRole("button", { name: "Reviews" });
+  expect(button).not.toHaveAttribute("data-attention");
+  expect(button.querySelector(".review-navigation__count")).toHaveTextContent("—");
 });
 
 it.each([
@@ -95,8 +95,48 @@ it("marks an unavailable domain honestly even when a stale count remains", async
     unavailableDomains: ["calendar"],
   });
   renderEntry();
-  const button = await screen.findByRole("button", { name: "Check review status" });
-  expect(button).toHaveAttribute("data-attention", "true");
-  expect(button.querySelector(".review-navigation__count")).toHaveTextContent("!");
+  const button = await screen.findByRole("button", { name: "Reviews" });
+  expect(button).not.toHaveAttribute("data-attention");
+  expect(button.querySelector(".review-navigation__count")).toHaveTextContent("—");
   expect(screen.queryByRole("button", { name: "3 items need review" })).not.toBeInTheDocument();
+});
+
+it("Today shows the aggregate review count and links each workspace to its existing flow", async () => {
+  mocks.listAgentAccessWorkItems.mockResolvedValue({
+    summary: { total: 23, byDomain: { calendar: 20, tasks: 0, mail: 3, finances: 0 } },
+    unavailableDomains: [],
+  });
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <MemoryRouter initialEntries={["/today"]}>
+        <TodayReviewNavigation />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  await userEvent.click(await screen.findByRole("button", { name: "23 items need review" }));
+  expect(await screen.findByRole("menuitem", { name: /Calendar/ })).toHaveAttribute(
+    "href",
+    "/calendar?review=open",
+  );
+  expect(screen.getByRole("menuitem", { name: /Mail/ })).toHaveAttribute(
+    "href",
+    "/mail?review=open",
+  );
+  expect(screen.queryByRole("menuitem", { name: /Tasks/ })).not.toBeInTheDocument();
+});
+it("Today exposes uncertain review sources without claiming zero work", async () => {
+  mocks.listAgentAccessWorkItems.mockRejectedValue(new Error("unavailable"));
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <MemoryRouter>
+        <TodayReviewNavigation />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  await userEvent.click(await screen.findByRole("button", { name: "Reviews" }));
+  expect(await screen.findAllByRole("menuitem")).toHaveLength(4);
 });

@@ -114,6 +114,7 @@ import { registerTaskWorkspaceRoutes } from "./routes/task-workspace.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
 import { registerTextingRoutes } from "./routes/texting.js";
 import { registerTextingRecoveryRoutes } from "./routes/texting-recovery.js";
+import { registerTodayRoutes } from "./routes/today.js";
 import { registerWorkspaceSearchRoutes } from "./routes/workspace-search.js";
 import { createTaskListService } from "./task-list-service.js";
 import { createTaskProjectService } from "./task-project-service.js";
@@ -1115,6 +1116,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/tasks", authenticate);
   app.use("/v1/task-workspace", authenticate);
   app.use("/v1/workspaces/*", authenticate);
+  app.use("/v1/today/*", authenticate, requireHuman);
   app.use("/v1/texting/*", authenticate);
   app.use("/v1/texting", authenticate);
   app.use("/v1/calendars/*", authenticate);
@@ -1456,6 +1458,13 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     mutationContext,
   });
 
+  registerTodayRoutes({
+    app,
+    db: dependencies.db,
+    now,
+    signingKey: dependencies.config.encryptionKey,
+    mutationContext,
+  });
   registerReminderRoutes({ app, mutationContext, reminders });
 
   registerTaskListRoutes({ app, mutationContext, taskLists });

@@ -5,6 +5,23 @@
 
 ## Purpose
 
+### Accepted Today personalization scope — 2026-10-12
+
+Today at a Glance gains its own typed presentation preferences and canonical editor, using the
+workspace-settings interaction and save/recovery conventions while remaining separate from the
+four domain workspaces. Scope includes Default/Weather/Map backgrounds, optional spending, ritual
+and desktop-pet cards, counted remembered filters and optional undated work. The calendar-week
+window inherits Calendar's week-start preference and the account planning timezone. Actionable
+connection failures and workspace review entries remain discoverable regardless of optional cards.
+Today review links open the owning workspace's review flow; they do not create a global review queue.
+
+This is accepted target scope, not shipped settings. Proposed storage, defaults and routes are under
+review in the [Today refinement spec](../superpowers/specs/2026-10-12-today-refinements-design.md).
+Desktop pet quick-access preferences remain independent. Central Settings may link to the Today
+editor but does not duplicate its form or turn presentation settings into agent execution authority.
+
+### Workspace purpose
+
 Each workspace needs one understandable place to define how its sources, steward, maintenance
 turns, agent access, notifications, questions, and recovery should behave. Settings should let the
 person describe their preferred workflow in ordinary language and inspect the explicit

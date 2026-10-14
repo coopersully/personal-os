@@ -5236,3 +5236,39 @@ export const automationHostSchedules = pgTable(
     ),
   ],
 );
+
+export const todaySettings = pgTable(
+  "today_settings",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    background: text("background")
+      .$type<"default" | "weather" | "map">()
+      .notNull()
+      .default("default"),
+    showSpending: boolean("show_spending").notNull().default(false),
+    showRitual: boolean("show_ritual").notNull().default(false),
+    showPet: boolean("show_pet").notNull().default(true),
+    spendingWindow: text("spending_window").$type<"week" | "month">().notNull().default("week"),
+    commitmentFilter: text("commitment_filter")
+      .$type<"all" | "overdue" | "tasks" | "reminders">()
+      .notNull()
+      .default("all"),
+    includeUndated: boolean("include_undated").notNull().default(false),
+    revision: integer("revision").notNull().default(1),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "today_settings_background_check",
+      sql`${table.background} IN ('default', 'weather', 'map')`,
+    ),
+    check("today_settings_window_check", sql`${table.spendingWindow} IN ('week', 'month')`),
+    check(
+      "today_settings_filter_check",
+      sql`${table.commitmentFilter} IN ('all', 'overdue', 'tasks', 'reminders')`,
+    ),
+    check("today_settings_revision_check", sql`${table.revision} > 0`),
+  ],
+);

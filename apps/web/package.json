@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "pnpm public:generate && vite build",
-    "dev": "pnpm public:generate && vite --host 0.0.0.0",
+    "build": "pnpm maps:prepare && pnpm public:generate && vite build",
+    "dev": "pnpm maps:prepare && pnpm public:generate && vite --host 0.0.0.0",
     "dev:container": "pnpm dev",
     "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc --noEmit",
-    "public:generate": "tsx --tsconfig tsconfig.json scripts/generate-public-documents.tsx"
+    "public:generate": "tsx --tsconfig tsconfig.json scripts/generate-public-documents.tsx",
+    "maps:prepare": "node scripts/prepare-map-assets.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -29,6 +30,7 @@
     "embla-carousel-react": "^8.6.0",
     "hono": "^4.13.7",
     "input-otp": "^1.4.2",
+    "maplibre-gl": "6.14.0",
     "motion": "^13.1.1",
     "next-themes": "^0.4.6",
     "radix-ui": "^1.6.7",

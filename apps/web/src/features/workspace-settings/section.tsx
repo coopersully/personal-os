@@ -17,6 +17,7 @@ import { Switch } from "@/components/ui/switch";
 import { SettingsSection } from "../settings/settings-layout";
 import { listAllTaskLists, listAllTaskProjects } from "../tasks/page";
 import { sameSession, usePreferenceSession } from "./account-save-session";
+import type { WorkspacePreferenceChange } from "./preferences";
 import { useSaveWorkspacePreferences, useWorkspacePreferences } from "./preferences";
 import { preferenceValueLabel, WorkspacePreferenceRecovery } from "./save-recovery";
 
@@ -57,7 +58,7 @@ function PreferenceSection<W extends Workspace>({
           value={values.includeArchivedInSearch}
           disabled={disabled}
           onChange={(includeArchivedInSearch) =>
-            save.mutate({ includeArchivedInSearch } as Partial<WorkspacePreferences<W>>)
+            save.mutate({ includeArchivedInSearch } as WorkspacePreferenceChange<W>)
           }
         />
       </FieldGroup>

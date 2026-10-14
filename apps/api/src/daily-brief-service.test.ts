@@ -132,3 +132,24 @@ describe("daily brief task material", () => {
     ).rejects.toThrow("repeated cursor");
   });
 });
+
+describe("daily brief source calendar dates", () => {
+  it.each([11, 12, 13])("does not leak the October 12 holiday into October %s", async (day) => {
+    const holiday = {
+      id: "holiday",
+      allDay: true,
+      startsAt: "2026-10-12T00:00:00Z",
+      endsAt: "2026-10-13T00:00:00Z",
+      timezone: "UTC",
+    };
+    const service = createDailyBriefService({
+      db: planningDatabase(),
+      listEvents: async () => [holiday] as never,
+      listReminders: async () => [],
+      listTasks: async () => [],
+      now: () => new Date(`2026-10-${day}T16:00:00Z`),
+    });
+    const brief = await service.dailyBrief("owner", "America/New_York");
+    expect(brief.allDay.map((event) => event.id)).toEqual(day === 12 ? ["holiday"] : []);
+  });
+});

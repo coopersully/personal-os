@@ -1,5 +1,8 @@
 import { ApiClientError } from "@personal-os/api-client";
+import { useContext, useEffect, useId, useRef } from "react";
+import { toast } from "sonner";
 import { useSettingsError } from "../lib/settings-feedback.js";
+import { ReadFailureContext } from "./read-failure-boundary";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert.js";
 import { Button } from "./ui/button.js";
 import { WorkspaceSkeleton, type WorkspaceSkeletonKind } from "./workspace-skeleton.js";
@@ -50,7 +53,7 @@ export function InlineError({
   );
 }
 
-export function QueryFeedback({
+export function useQueryFeedback({
   query,
   title,
   staleOnly = false,
@@ -59,13 +62,63 @@ export function QueryFeedback({
   title: string;
   staleOnly?: boolean;
 }) {
-  if (!query.isError || (staleOnly && query.data === undefined)) return null;
-  return (
-    <InlineError
-      error={query.error}
-      title={title}
-      stale={query.data !== undefined}
-      {...(query.refetch ? { retry: query.refetch } : {})}
-    />
+  const blocked = useContext(ReadFailureContext);
+  const id = useId();
+  const previous = useRef(false);
+  const retry = useRef(query.refetch);
+  retry.current = query.refetch;
+  const failed = !blocked && query.isError && (!staleOnly || query.data !== undefined);
+  useEffect(() => {
+    if (failed && !previous.current) {
+      toast.error(title, {
+        id,
+        duration: Number.POSITIVE_INFINITY,
+        description:
+          query.data !== undefined
+            ? "Showing the last available update."
+            : "Try again in a moment.",
+        ...(retry.current
+          ? {
+              action: {
+                label: "Try again",
+                onClick: () => {
+                  toast.promise(
+                    Promise.resolve(retry.current?.()).then((result) => {
+                      if (
+                        result &&
+                        typeof result === "object" &&
+                        "isError" in result &&
+                        result.isError
+                      )
+                        throw new Error("Read unavailable");
+                    }),
+                    {
+                      id,
+                      loading: "Refreshing…",
+                      success: "Refreshed.",
+                      error: { message: title, duration: Number.POSITIVE_INFINITY },
+                    },
+                  );
+                },
+              },
+            }
+          : {}),
+      });
+    }
+    if (!failed && previous.current) toast.dismiss(id);
+    previous.current = failed;
+  }, [failed, id, title, query.data]);
+  useEffect(
+    () => () => {
+      toast.dismiss(id);
+    },
+    [id],
   );
+  return null;
+}
+
+/** Feedback is an effect, never a layout item. */
+export function QueryFeedback(props: Parameters<typeof useQueryFeedback>[0]) {
+  useQueryFeedback(props);
+  return null;
 }

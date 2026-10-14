@@ -26,6 +26,14 @@ const fields = (
   }));
 
 export const settingsFields: SettingsField[] = [
+  ...fields("today", [
+    ["Background", "Background", "default weather map liquid glass today glance"],
+    ["Spending", "today-showSpending", "today dashboard card"],
+    ["Current ritual", "today-showRitual", "today dashboard card"],
+    ["Desktop pet", "today-showPet", "today dashboard companion card"],
+    ["Undated commitments", "today-includeUndated", "tasks reminders without a date"],
+    ["Spending period", "Spending period", "week month today"],
+  ]),
   ...fields("finances", [
     ["Transaction view", "financeTransactionView", "table cards saved default"],
     [

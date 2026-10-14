@@ -1,3 +1,4 @@
+import { expectQueryToast, watchQueryFeedback } from "../../../test-support/query-feedback";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { AgentAccessWorkItem } from "@personal-os/domain";
@@ -129,7 +130,7 @@ it("blocks attention writes when the requested item disappeared", async () => {
 it("blocks attention writes when its current revision cannot be loaded", async () => {
   mocks.listAttentionItems.mockRejectedValue(new Error("Unavailable"));
   setup("attention:older");
-  expect(await screen.findByText("Couldn’t load the current item.")).toBeVisible();
+  await expectQueryToast("Couldn’t load the current item.");
   expect(screen.getByRole("button", { name: "Mark resolved" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Dismiss" })).toBeDisabled();
   expect(mocks.updateAttentionItem).not.toHaveBeenCalled();
@@ -288,7 +289,10 @@ it("does not answer an exact Mail question that has already been closed", async 
 it("exposes a failed exact-question lookup without offering an answer", async () => {
   mocks.getMailQuestion.mockRejectedValue(new Error("Question unavailable"));
   setup("mail-question:failed");
-  expect(await screen.findByText("Couldn’t load the Mail question.")).toBeVisible();
+  await expectQueryToast("Couldn’t load the Mail question.");
   expect(screen.queryByRole("textbox", { name: "Your answer" })).not.toBeInTheDocument();
   expect(mocks.answerMailQuestion).not.toHaveBeenCalled();
 });
+
+beforeEach(watchQueryFeedback);
+afterEach(() => vi.restoreAllMocks());

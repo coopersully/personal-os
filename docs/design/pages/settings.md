@@ -216,3 +216,7 @@ queries, native actions, updates, and routine recovery. Keep inline field guidan
 controls where useful, preserve edits, and do not automatically retry uncertain writes.
 Repeated polling of the same unresolved failure must not repeatedly announce it; recovery
 clears its toast. Quiet-hour From and Until controls share a row on larger screens.
+
+Today at a Glance belongs in the standard Workspaces settings group at `/settings?section=today`.
+Its background, optional cards, spending period and undated commitments use the shared settings
+layout, search catalog, serialized autosaves and explicit save-recovery surface.

@@ -47,7 +47,7 @@ export function navigationOwnerForLocation(pathname: string): NavigationOwner {
   if (["/settings", "/goals", "/motives", "/activity"].includes(pathname)) {
     return { kind: "account-utility" };
   }
-  if (pathname === "/today" || pathname === "/reviews") {
+  if (pathname === "/today" || pathname === "/today/settings" || pathname === "/reviews") {
     return { kind: "workspace", workspace: "today" };
   }
   if (pathname === "/reminders" || pathname === "/tasks" || pathname.startsWith("/tasks/")) {

@@ -8,6 +8,7 @@ export default defineConfig({
     },
   },
   test: {
+    env: { VITE_CARTO_API_KEY: "" },
     coverage: {
       all: true,
       exclude: [

@@ -261,7 +261,7 @@ colors, raw color utilities, or a second spacing scale.
 | Spacing | Use the shared 4 px rhythm. Block gaps are 24–32 px; row gaps are 8–12 px; dense metadata gaps are 4–8 px. |
 | Shape | Shared `--radius` owns component roundness. Use cards and controls from `src/components/ui`; do not invent parallel primitives. |
 | Color | Primary actions, selection, and current context use the monochrome ink scale. Warning, destructive, info, and success use semantic status tokens only. |
-| Effects | No decorative gradients, borders, elevation shadows, blur, glass, or translucent product surfaces. Hierarchy comes from spacing, type, and opaque tonal fields. A surface-colored edge fade with bounded backdrop blur is allowed only when it separates fixed navigation from scrolling content, as in Setup and Calendar. |
+| Effects | No decorative gradients, borders, elevation shadows, blur, glass, or translucent product surfaces, except the explicitly selected Today Weather/Map backgrounds and shared frosted material described below. Hierarchy comes from spacing, type, and opaque tonal fields. A surface-colored edge fade with bounded backdrop blur is allowed only when it separates fixed navigation from scrolling content, as in Setup and Calendar. |
 | Icons | Icons clarify an existing label or stand in only when the action has a familiar, accessible name. Icon-only actions require an accessible label and tooltip. |
 | Navigation | Active navigation keeps the same geometry as inactive navigation and uses the solid form of its icon; inactive items use the outline form. |
 | Motion | Motion confirms a spatial change and stays brief. It never conveys the only signal of urgency, completion, or error. Respect reduced motion. |
@@ -796,3 +796,68 @@ Settings controls and contextual Display menus use the same serialized save path
 Explicit URL choices remain temporary overrides. Device-specific shell geometry remains local.
 Tasks can save a default capture list and whether completed tasks appear in container views; explicit
 placement, lifecycle views, and URL filters take precedence.
+
+### Shared liquid-glass material
+
+The shared material vendors [React Bits Glass Surface](https://reactbits.dev/components/glass-surface)
+with its MIT + Commons Clause license and pinned source revision recorded beside the component.
+`LiquidGlassScope` opts a region's outer shared Cards into `LiquidGlassMaterial`; nested record
+cards retain their semantic fills. Standalone surfaces can compose the same decorative material.
+Today uses it only for Weather and Map preferences; Default remains opaque.
+
+The optical renderer supplies edge refraction, restrained chromatic dispersion, blurred backdrop,
+and highlights. The app adds a semantic card tint for readable dense content. SVG filtering is used
+where supported; WebKit and Firefox can use the upstream WebGL path with a local still backdrop.
+Weather creates its still from semantic sky colors, and the inert map captures a local canvas still
+on idle/resize/theme changes. These pixels remain in memory and are never stored or transmitted.
+Missing pixels or GPU failure fall back to the component's frosted treatment. Unsupported backdrop
+filtering, reduced transparency, increased contrast and forced colors use opaque cards, with no
+optical layer. Dark mode keeps refraction and subtle tonal depth without white inset shadows, luminous rims or outline glow. Text, controls, focus indicators and portaled overlays retain normal opacity.
+
+SVG in `components/ui/react-bits/GlassSurface.tsx` is solely optical filter machinery and displacement
+maps, a named exception to the interface-icon registry restriction. Interface glyphs still use reicon.
+Browser engine fallbacks are an implementation limit; this is Apple-style glass, not a claim of
+identical rendering on every platform.
+
+### Desktop rail utilities
+
+When the workspace rail is visible, its bottom utility group places an available desktop update
+first, an enabled pet portrait second, and Settings last. Update and pet controls are 36px round
+shared icon buttons, smaller than the 48px workspace destinations. The update control reserves a
+semantic blue circle boundary and contains only the download glyph. Downloading/installing states
+are disabled; a ready, verified update installs through the existing native updater on click.
+Discrete outcomes update one Sonner toast. The pet portrait mirrors the bundled native silhouette
+and selected color and opens Pet settings. Pet controls react to saved enablement and appearance
+through the shared desktop settings state without waiting for a polling interval. Hidden/disabled pets and unavailable updates add no
+control. These native controls do not appear in a browser or in a hidden rail.
+
+### Shared timeline interaction layer
+
+Calendar spatial events and Today records use the shared `timeline-record` front layer on hover,
+keyboard focus, active selection and open menus. Raise the record above sibling records within its
+local timeline; retain the existing semantic hover/focus fill and never lift it above shell chrome.
+Today composes actual domain-owned task/reminder rows instead of converting them into event cards.
+
+## Feedback placement (all workspaces)
+
+**Never insert an Alert, error banner, loading/status row, or diagnostic card into a bento
+layout, workspace rail, sidebar, or top navigation.** Those surfaces own content and navigation;
+request failures must not change their children, spacing, order, or dimensions. A different tag,
+`role="status"`, warning-colored button, or ordinary Card wrapping the message does not exempt it.
+
+Essential account/page reads failing, including background refresh with cached material, replace
+the affected screen with one shared blocking error surface and one recovery action. A broad outage
+must never become a stack of independent warnings over stale interactive content. Keep mounted
+observers/drafts inaccessible behind the boundary so recovery can complete without losing edits.
+
+Isolated optional refresh failures use deduplicated Sonner feedback, retaining the component's
+allocated geometry; initial loading uses a reserved skeleton within the owning component or a
+shared page loading boundary. Never add a loading item to a grid. Unknown counts stay unknown
+inside the normal count slot; navigation labels remain destinations, never failure/progress copy.
+Actual connector recovery work may be represented as ordinary actionable product content, but a
+failed request to check connectors must never manufacture an attention card. Detailed diagnostic
+states belong in the relevant labelled detail/settings surface.
+
+Regression coverage must exercise cached-data outages, recovery, isolated optional failures, and
+verify that no alert/status item appears in the grid, rail, sidebar, or navigation. These placement
+constraints override the generic contextual Alert guidance below.

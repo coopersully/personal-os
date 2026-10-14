@@ -11,7 +11,6 @@ describe("workspace frame composition", () => {
   it("portals collection controls into chrome but keeps spatial axes beside their content", () => {
     const { container } = render(
       <WorkspaceLayout
-        banner={<p>Offline</p>}
         contentMode="panes"
         primaryNavigation={<WorkspaceAppBar workspace="calendar" identity="Calendar" />}
       >
@@ -32,7 +31,7 @@ describe("workspace frame composition", () => {
     expect(container.querySelector(".workspace")).toHaveAttribute("data-content-mode", "panes");
   });
 
-  it("preserves a primary action's local state when attention and banner content change", () => {
+  it("preserves a primary action's local state when review navigation changes", () => {
     function Action() {
       const [value, setValue] = useState("");
       return (
@@ -46,7 +45,6 @@ describe("workspace frame composition", () => {
     function Frame({ attention }: { attention: boolean }) {
       return (
         <WorkspaceLayout
-          banner={attention ? <p>Offline</p> : null}
           primaryNavigation={
             <WorkspaceAppBar
               workspace="tasks"

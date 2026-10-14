@@ -45,6 +45,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { auditValues } from "./audit.js";
+import { repairCalendarAllDayRange } from "./calendar-all-day-repair.js";
 import { invalidateCalendarProfileSources } from "./calendar-profile.js";
 import { buildCalendarCommitmentProposal } from "./calendar-proposal.js";
 import {
@@ -557,7 +558,7 @@ export function createCalendarService({
     if (!record) {
       throw new AppError("not_found", "The calendar event was not found.");
     }
-    return record;
+    return { ...record, ...repairCalendarAllDayRange(record) };
   }
 
   async function findActiveBlocks(userId: string, sourceEventId: string) {
@@ -1443,11 +1444,21 @@ export function createCalendarService({
       const accountIdByCalendarId = new Map(
         allCalendarRecords.map((calendar) => [calendar.id, calendar.accountId]),
       );
+      // Legacy Google DATE mirrors can be offset by a source-zone day. Select
+      // a bounded candidate margin, then repair before exact filtering and deduplication.
+      const candidateFrom = new Date(new Date(query.from).getTime() - 2 * 86400000);
+      const candidateTo = new Date(new Date(query.to).getTime() + 2 * 86400000);
+      const repairAndFilter = (records: Array<{ event: typeof calendarEvents.$inferSelect }>) =>
+        records
+          .map(({ event }) => ({ ...event, ...repairCalendarAllDayRange(event) }))
+          .filter(
+            (event) => event.startsAt < new Date(query.to) && event.endsAt > new Date(query.from),
+          );
       const conditions = [
         eq(calendarEvents.userId, userId),
         isNull(calendarEvents.deletedAt),
-        lt(calendarEvents.startsAt, new Date(query.to)),
-        gt(calendarEvents.endsAt, new Date(query.from)),
+        lt(calendarEvents.startsAt, candidateTo),
+        gt(calendarEvents.endsAt, candidateFrom),
         inArray(calendarEvents.calendarId, calendarIds),
       ];
       if (query.query) {
@@ -1473,14 +1484,12 @@ export function createCalendarService({
         )
         .where(and(...conditions))
         .orderBy(asc(calendarEvents.startsAt));
-      const eventRecords = records
-        .map(({ event }) => event)
-        .sort(
-          (left, right) =>
-            left.startsAt.getTime() - right.startsAt.getTime() ||
-            calendarIds.indexOf(left.calendarId) - calendarIds.indexOf(right.calendarId) ||
-            left.id.localeCompare(right.id),
-        );
+      const eventRecords = repairAndFilter(records).sort(
+        (left, right) =>
+          left.startsAt.getTime() - right.startsAt.getTime() ||
+          calendarIds.indexOf(left.calendarId) - calendarIds.indexOf(right.calendarId) ||
+          left.id.localeCompare(right.id),
+      );
       const identityRecords = await db
         .select({ event: calendarEvents })
         .from(calendarEvents)
@@ -1493,26 +1502,23 @@ export function createCalendarService({
             eq(calendarEvents.userId, userId),
             isNull(calendarEvents.blockSourceEventId),
             isNull(calendarEvents.deletedAt),
-            lt(calendarEvents.startsAt, new Date(query.to)),
-            gt(calendarEvents.endsAt, new Date(query.from)),
+            lt(calendarEvents.startsAt, candidateTo),
+            gt(calendarEvents.endsAt, candidateFrom),
           ),
         );
       const selectedCalendarPriority = new Map(
         calendarIds.map((calendarId, index) => [calendarId, index]),
       );
-      const identityEvents = identityRecords
-        .map(({ event }) => event)
-        .sort((left, right) => {
-          const leftPriority = selectedCalendarPriority.get(left.calendarId);
-          const rightPriority = selectedCalendarPriority.get(right.calendarId);
-          return (
-            left.startsAt.getTime() - right.startsAt.getTime() ||
-            (leftPriority ?? Number.MAX_SAFE_INTEGER) -
-              (rightPriority ?? Number.MAX_SAFE_INTEGER) ||
-            left.createdAt.getTime() - right.createdAt.getTime() ||
-            left.id.localeCompare(right.id)
-          );
-        });
+      const identityEvents = repairAndFilter(identityRecords).sort((left, right) => {
+        const leftPriority = selectedCalendarPriority.get(left.calendarId);
+        const rightPriority = selectedCalendarPriority.get(right.calendarId);
+        return (
+          left.startsAt.getTime() - right.startsAt.getTime() ||
+          (leftPriority ?? Number.MAX_SAFE_INTEGER) - (rightPriority ?? Number.MAX_SAFE_INTEGER) ||
+          left.createdAt.getTime() - right.createdAt.getTime() ||
+          left.id.localeCompare(right.id)
+        );
+      });
       const identity = deduplicateEvents(identityEvents, accountIdByCalendarId);
       const identityCalendarIdsByCanonicalId = new Map<string, Set<string>>();
       for (const record of identityEvents) {

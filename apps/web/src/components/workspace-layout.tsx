@@ -20,13 +20,11 @@ export const WorkspaceHeaderSlotContext = createContext<
  * page workspaces use the shell/document scroller. Spatial axes stay inline.
  */
 export function WorkspaceLayout({
-  banner,
   children,
   primaryNavigation,
   contentMode = "page",
 }: {
   contentMode?: "page" | "panes";
-  banner?: ReactNode;
   children: ReactNode;
   primaryNavigation: ReactNode;
 }) {
@@ -45,7 +43,6 @@ export function WorkspaceLayout({
       <WorkspaceSecondarySlotContext.Provider value={secondarySlot}>
         <div className="workspace" data-content-mode={contentMode}>
           <div className="workspace-chrome">
-            {banner}
             {primaryNavigation}
             <div
               className="workspace-secondary-slot"

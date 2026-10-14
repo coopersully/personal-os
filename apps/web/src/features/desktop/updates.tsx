@@ -31,7 +31,7 @@ import {
 } from "./update-bridge.js";
 
 const updateKey = ["desktop-update-status"];
-function useStatus() {
+export function useDesktopUpdateStatus() {
   return useQuery({
     queryKey: updateKey,
     meta: { sessionIndependent: true },
@@ -79,7 +79,7 @@ function UpdateProgress({ status }: { status: UpdateStatus }) {
   );
 }
 export function DesktopStartupGate({ children }: { children: ReactNode }) {
-  const status = useStatus();
+  const status = useDesktopUpdateStatus();
   const cache = useQueryClient();
   const open = useMutation({
     mutationFn: openWithoutUpdate,
@@ -125,7 +125,7 @@ export function DesktopStartupGate({ children }: { children: ReactNode }) {
   );
 }
 export function DesktopUpdates() {
-  const status = useStatus();
+  const status = useDesktopUpdateStatus();
   const cache = useQueryClient();
   const [confirm, setConfirm] = useState(false);
   const refresh = () => cache.invalidateQueries({ queryKey: updateKey });

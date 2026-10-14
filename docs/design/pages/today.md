@@ -2,154 +2,94 @@
 
 ## User job
 
-**Help me orient to this day, protect the commitment that matters now, and make
-the next small set of decisions without having to reconstruct my plan.**
+Help me orient to today, see the work I owe this calendar week, and reach the next decision.
+Today is a composition surface; Calendar, Tasks, Mail and Finances retain domain authority.
+The accepted [refinement spec](../../superpowers/specs/2026-10-12-today-refinements-design.md)
+and [implementation plan](../../superpowers/plans/2026-10-12-today-refinements.md) describe the
+2026-10-12 scope. This document describes the branch implementation, not a production release.
 
-Today is not a dashboard and does not compete with Calendar, Tasks, Mail, or
-Finances. It is an ordered operating surface that links to those domains when a
-deeper decision is needed.
+## Hierarchy and boundaries
 
-## Information hierarchy
+The app frame holds the planning date, weather, location and capture. Weather and location controls keep their normal compact button anatomy, including loading and
+unavailable states. Use intrinsic widths with a bounded location label; do not stretch short labels. Resolve their data
+independently; never add a transient conditions row to the body.
 
-```text
-Orientation (app frame)
-└── Local date · planning timezone · compact live conditions · capture
+Two separate cards hold Your timeline and Your commitments. Workspace reviews use the standard
+review action in the top navigation, with a workspace chooser opening each owning review flow.
+Account recovery remains in Needs your attention when a connection fails; no clear/pending review
+card repeats the top navigation. Show these controls regardless of optional-card preferences.
+Group reviews by their owning workspace and open its existing review flow; never approve from
+Today. If an attention source fails, retain available evidence and disclose incomplete checks.
+Automatic provider retries are not reconnect demands. Poll visible attention sources each minute.
 
-All-day markers (compact strip)
-└── Concise calendar-colored context for events marking the whole day
-
-Today schedule (ordered list)
-├── Every in-progress and upcoming timed event remaining today
-├── Absolute start times with relative countdowns for future events
-└── Direct event actions and in-progress meeting controls
-
-Decision queue (quiet rail)
-├── Remaining and overdue counts
-├── Overdue material and tasks due or reserved today
-├── Today and undated reminders
-└── Completion controls on each row
-
-History (collapsed)
-└── Done today, with the count visible before opening
-```
-
-## Block contracts
-
-| Block | Content and rules | Empty state |
+| Card | Scope | Interaction |
 | --- | --- | --- |
-| `all-day markers` | A compact, unlabelled shadcn `ItemGroup` above the timed schedule for occasions that shape the day or span several days. Keep an accessible section label, but do not add visible category chrome. Use the distinct `OccasionCard`, composed from `Item`, not `EventCard`. Multi-day occasions show inclusive start and end dates joined by a quiet duration rail; same-day occasions collapse that metadata to one date plus “All day.” Source calendar color identifies the occasion without making it look like an appointment. Use normal sentence case and never show redundant midnight times. | Omit the strip. |
-| `schedule` | “Your timeline” is one minimal vertical timeline of every in-progress and upcoming timed event remaining today. Its description summarizes total visible events and those left to start; append the ongoing count only when nonzero. It begins at the most recent 15-minute mark, labels each full hour at its true position, marks unlabeled quarter hours with smaller dots, carries Calendar's connected live now badge and rule, and ends with the last event. Continue Calendar's solid hour and dotted subhour rules across the event track. Snap each event's visual bounds outward to the 15-minute grid and size its block by that duration. Content disclosure follows available height: a 15-minute block shows its title, a 30-minute block adds its exact time, and longer blocks may add location. Keep the time-axis gutter narrow and omit the redundant time column and accent rail inside spatial event cards. Place events by time and use compact columns for overlaps without reproducing Calendar's full grid. Each preview follows Calendar's title → exact time range → location hierarchy and pairs future titles with a small inline relative countdown without parentheses. The whole event surface opens a quick-action menu; its first action navigates to Calendar's week view and opens the native event inspector, followed only by contextually valid directions, meeting, or source-link actions. Never underline its title. | “The day is open.” Do not invent a next event. |
-| `queue` | “To take care of” is one quiet, bounded vertical `ItemGroup`, never separate category sections. Its description reports things left and appends the overdue count only when nonzero; planning-window capacity does not belong in this heading. Order overdue tasks first, then overdue reminders, today reminders, undated reminders, and tasks due or reserved today. Task relevance uses the canonical open lifecycle and excludes trashed tasks; recommendations never pull unrelated future or undated tasks into Today. Place single-select All, Overdue, Tasks, and Reminders filters above a height-bounded `ScrollArea`; paginate the filtered result with the shared `Pagination` below it. Today keeps task titles and timing but suppresses verbose descriptions and tags. A row with title only collapses to one vertically centered line; timing or useful metadata expands it. Overdue tasks use the semantic danger surface as a restrained row highlight. | “Nothing in this view” when a filter has no matches; “Nothing pulling at you” only when the complete queue is empty. |
-| `history` | A labelled collapsible for completed reminders and tasks. Count remains visible when closed. | Omit when there is no completion history. |
+| Your timeline | Today's all-day occasions, remaining events and task reservations, reminders at their actual due time | Existing event quick actions and material editors; reminders are point markers, not invented appointments |
+| Due today within timeline | Open tasks due today without a remaining reservation, plus earlier uncompleted reminders due today | Compact titles/timing and existing completion/editor actions |
+| Your commitments | Open tasks/reminders due or reserved in the configured calendar week, plus all overdue deadlines | All commitment types together, independently collapsible Overdue/Today/Later this week/optional Undated groups, and standard numbered pagination with full page counts and 6/12/24 rows per page |
+| Done today | Completed tasks/reminders from today | Standard Collapsible, closed initially |
+| Spending, optional | Posted spending through today, week or month, using Finance's account selection | Shared saved period selector and Finance link; unavailable is never zero |
+| Current ritual, optional | Existing current occurrence | Native ritual overlay on desktop; shared checklist dialog on web |
+| Desktop pet, optional | Only desktop with pet enabled | Existing pet quick-access command, with Sonner feedback |
 
-## Content budget
+Use the account planning timezone and Calendar's saved Sunday/Monday week boundary. A past
+reservation is carry-forward work within the current week, not an overdue deadline. Exclude
+completed, trashed and non-open tasks. Truly undated work is opt-in; do not treat old reservations
+as undated. The weekly endpoint reads owner-scoped material and full counts independently of the
+bounded daily brief. Cursors bind account, permissions, local day/week, timezone and filters and
+expire after fifteen minutes; Refresh starts a fresh page sequence.
 
-- Keep one ordered timed-event list; never duplicate an event between schedule states.
-- The default queue may show all currently actionable material; it must not show
-  completed, cancelled, or trashed material. Tasks must be overdue, due today, or reserved today in the person’s planning timezone.
-- Each queue row shows one title, one most-useful time/plan fact, one state or
-  priority treatment, completion, and a secondary destructive action. Tasks and
-  reminders share the commitment-item structure but use distinct neutral
-  surfaces; next and high-priority states use a subtle surface treatment rather
-  than labels. Destructive actions float at the lower edge on hover or focus so
-  they do not constrain the title. Nearby dates use Today, Tomorrow, and
-  Yesterday; other dates use concise relative-day copy. Details open from the
-  material title rather than expanding every row inline.
-- A provider badge, source note, or recommendation is shown only when it changes
-  interpretation or action. It never displaces the title or current time.
-- Weather is orientation, not the page’s primary content. It belongs in the app
-  frame and opens detail on demand. Its trigger combines condition icon and
-  temperature; the separate location trigger opens an in-app map preview with
-  the map preview itself as the explicit external-map action. The location
-  preview uses the weather popover's compact tonal hierarchy: source and place
-  first, coordinates as quiet metadata, then a bounded map without duplicate
-  headings or bordered sections.
+All-day dates are inclusive-start/exclusive-end source calendar dates. Google DATE and iCloud DATE
+values normalize at source-zone midnight. Google legacy rows with provable raw source dates are
+repaired on read; uncertain rows are not shifted heuristically. Timed events intersect today's
+planning-zone interval. The live clock rolls at midnight and refreshes on focus/visibility changes.
 
-## State matrix
+## Personalization and map contract
 
-| Situation | Visible treatment | Hidden until requested |
-| --- | --- | --- |
-| Event in progress | Keep it in its timeline position with the same exact-range preview as other events | Join, directions, source link, event notes, source revision, audit history |
-| No fixed event | The schedule says “Nothing scheduled today” and shows a content-sized, stable daily `QuoteCard` using the system empty-state treatment: transparent with a quiet dashed border. The schedule column still fills the available height, and attribution appears only when supplied | Full calendar controls |
-| Overcommitted planning window | Queue summary says the consequence plainly; no red dashboard treatment | Scheduling alternatives and plan details |
-| No open capacity | Queue summary reports no time before planning-window end | Calendar calculations |
-| Location/weather unavailable | Compact status row only while unresolved or unavailable | Setup mechanics; Account settings is linked only when saved location is needed |
-| Provider material is stale/failing | Affected item shows source/freshness and an actionable reconnect/retry state | Raw provider payload |
-| Completed material | Count is visible; content is in Done today, closed by default | Full completed list |
+Today at a Glance is a standard Settings page at `/settings?section=today`, listed with the workspaces and discoverable through settings search. The old `/today/settings` route redirects there; no personalization action repeats in the Today body. A separate typed, revisioned Today preferences object
+stores Default/Weather/Map background, optional cards, spending period and undated choice. The existing filter field remains compatible with older saved data; Today displays all types instead of consuming it.
+It does not extend the four-domain workspace enum. All controls use the shared serialized save
+channel and exact-revision recovery. Background autosave success is silent; errors use Sonner,
+with retained attempted values and explicit review/reapply in settings.
 
-## Responsive contract
+Default uses normal theme surfaces. Weather reuses semantic sky tokens and condition treatment;
+its narrowly scoped gradient is an approved decorative-background exception. Foreground cards
+use the shared React Bits liquid-glass material in Weather and Map modes, with fully opaque text and controls.
+Default remains opaque. Reduced transparency, increased contrast, forced colors and browsers without
+backdrop filtering use opaque cards. Map uses an adapted MIT MapCN component with pinned MapLibre 6.14.0, reicon controls
+and a same-origin module worker/shared module pair. Preview is interactive with a location marker;
+background is inert without a precise marker. Attribution remains visible and keyboard accessible.
+The explicit Open map link opens OpenStreetMap; the location trigger itself opens the preview.
 
-- **Desktop:** moment and day flow occupy the primary column; decision queue is
-  a stable secondary rail, distinguished through spacing and hierarchy rather
-  than a structural divider or second page-sized card.
-- **Narrow/mobile:** use one sequence: moment → day flow → decision queue →
-  history. Do not move urgent material behind horizontal scrolling or a tab.
-- All-day occasion content must shrink within its card at narrow widths. Long
-  titles truncate visually while the full title remains in the accessible name
-  and event details; they must never expand the layout viewport or displace the
-  workspace dock’s hit targets.
-- The app frame keeps capture available. Conditions may compress to icon buttons
-  with accessible labels and popovers; narrow navigation is the shell-owned
-  bottom workspace dock and contextual Actions sheet.
+Missing key/location, WebGL failure, denied resource, network failure or a ten-second timeout
+leaves a quiet fallback and retains the saved preference. Maps are lazy, remove instances/workers
+on unmount and never cache authenticated provider responses as offline tiles. Public CARTO keys
+attach only to the exact HTTPS style/tile/glyph/sprite hosts in the map provider allowlist. Never
+send task/event data or log keys/precise coordinates. See the external-boundary reliability contract.
 
-## Interaction contract
+## State and responsive rules
 
-- Today has no desktop sidebar. Its app bar owns the workspace switcher and
-  account menu; the narrow workspace dock owns the equivalent mobile access.
-  Goals, Motives, and Activity live in Settings. Reviews opens from a workspace attention alert
-  or that workspace’s Settings header action; Today has no separate review-queue link. Reminders
-  remains a Tasks destination rather than a separate workspace.
-- Today uses the current condition glyph inside the same framed identity shape
-  as every workspace in desktop and mobile switchers. The frame remains neutral;
-  clear day, clear night, rain, and cloud/unavailable states change only the
-  glyph, never Today into a colored workspace identity.
-- Opening a timed event first presents its quick-action menu. “View Event in
-  Calendar” routes to the event’s week and opens the established Calendar
-  inspector; all-day occasions, tasks, and reminders retain their established
-  inspector/dialog behavior.
-- An open task with time reserved today appears in the Today timeline using a
-  neutral task treatment and opens the task editor. Its queue row may retain the
-  reserved time, but does not repeat a Scheduled or Time reserved label.
-- Your timeline and To take care of use the same title and description hierarchy and
-  align at the top of equal-height desktop columns. Weather fallback and
-  all-day context belong below the Today heading so optional states never shift
-  only one column's title. The empty-calendar quote is stable for the local day;
-  fully completed days may use completion-specific lines, while days with
-  remaining commitments use open-calendar lines.
-- Completing a row updates the queue and moves the item into Done today without
-  losing a direct reopen path.
-- Done today is a standard `Collapsible`, initially closed. Its trigger exposes
-  a label, count, expanded state, and icon rotation only as supplemental
-  feedback.
-- No route-level data is silently rearranged by an agent. Any planning proposal
-  presents the candidate set and consequence before a user accepts it.
-
-## Implementation map
-
-| System concept | Current implementation |
-| --- | --- |
-| `all-day markers` | `TodayPage` + `.today-all-day-strip` + shared `OccasionCard` |
-| `schedule` | `TodayPage` + `.today-schedule` + shared compound `EventCard` |
-| `queue` | `TodayPage` + `.today-queue` and the unified commitment list |
-| `history` | `TodayPage` + `.today-history` using shadcn `Collapsible` |
-| orientation | `TodayNavigationTitle` and `TodayWeatherTopbar` |
+- Essential account, timeline or commitment reads failing block the whole screen with one shared
+  error/retry surface, including failed background refresh with cached data. Do not let a broad
+  outage scatter warnings across the shell and cards. Preserve mounted observers and drafts.
+- Optional completed-history, weather and provider-check failures retain card geometry and use
+  deduplicated Sonner. Failed connector checks never create an attention card. Navigation remains
+  navigation; unknown review counts occupy the normal count slot without warning/progress labels.
+- No alerts, loading/status rows or diagnostic cards may be inserted into the bento grid, navigation,
+  rail or sidebar. Reserved loading skeletons stay inside their owning component. Manual refresh
+  and native action outcomes use one Sonner toast.
+- Desktop uses two independently sized bento columns: timeline on the left; natural-height commitments, Spending, ritual and pet cards on the right. Mobile stacks them with no horizontal page overflow; urgent attention precedes both. Weather/Map fill the complete content area, including remaining viewport space, rather than a card-sized inset.
+- Cards use default shadcn CardHeader, CardTitle, CardDescription, CardContent and CardFooter, with consistent title/description type sizes. Pagination belongs in the commitment footer; categories show the number of rows on the current page. Cursor jumps follow the existing bound cursor sequence; unavailable source totals stay explicitly unknown. Small screens condense long page ranges to first/current/last links and preserve floating workspace-dock clearance inside the full-page background.
+- Long titles truncate visually with full accessible names and existing detail access.
+- All-day occasions use the shared OccasionCard. Timed events use EventCard; timeline tasks and reminders use the actual TaskRow and ReminderRow, with their completion, editor and action behavior intact. Calendar and Today share the timeline front-layer rule for hover, keyboard focus and open menus. Existing overlap geometry remains owned by Calendar.
+- Today has no contextual sidebar. Reminders belongs to Tasks. Goals, Motives and Activity stay
+  in Settings. Follow the shared icon, feedback, theme and navigation contracts.
 
 ## Verification
 
-1. Render no-event, active-event, later-event, task-only, overcommitted, and
-   completed-material states.
-2. Verify no event is rendered both in Moment and Day flow.
-3. Verify Done today is closed initially, announces its count, and reveals
-   completed material when opened.
-4. Inspect desktop and narrow visual layouts with live data. Confirm the visual
-   scan still reads Moment → Day flow → Decision queue.
-5. Confirm each event, task, and reminder retains the existing direct action
-   and accessible name.
-
-## Feedback contract
-
-Follow [feedback and validation](../feedback.md). Keep cached plan and completed
-material visible when a background refresh fails, with a contextual stale status
-and Retry. An initial failure replaces only the unavailable region. Task and
-reminder actions use shared mutation feedback; irreversible deletion requires a
-named confirmation. Forms preserve values and show corrections at their inputs.
+Domain/provider tests cover source-date membership, DST and calendar-week boundaries. API tests
+cover ownership, strict preferences, revisions/audit, permissions, mixed material, counts and
+cursor tampering. UI tests cover saved choices, queued saves, source uncertainty and native
+feedback. Desktop/mobile E2E exercises settings persistence, collapsible groups, pagination, independent failure
+states and responsive overflow. Live fixture QA verifies rendered CARTO tiles and layout;
+packaged native WebGL and deployment-origin key restrictions need separate release evidence.

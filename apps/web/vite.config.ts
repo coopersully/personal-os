@@ -68,6 +68,14 @@ function agentSkillSitePlugin(): Plugin {
 export default defineConfig(({ mode }) => {
   const environment = loadEnv(mode, process.cwd(), "");
   return {
+    define: {
+      "import.meta.env.VITE_CARTO_API_KEY": JSON.stringify(
+        process.env.VITE_CARTO_API_KEY ??
+          environment.VITE_CARTO_API_KEY ??
+          loadEnv(mode, resolve(process.cwd(), "../.."), "VITE_").VITE_CARTO_API_KEY ??
+          "",
+      ),
+    },
     plugins: [
       react(),
       tailwindcss(),

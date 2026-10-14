@@ -19,7 +19,8 @@
       "!apps/web/src/styles.css",
       "!**/macos/.build",
       "!**/macos/build",
-      "!.codex/run"
+      "!.codex/run",
+      "!apps/web/public/maplibre"
     ]
   },
   "formatter": {

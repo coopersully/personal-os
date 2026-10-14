@@ -1,5 +1,50 @@
 # Feedback and validation
 
+## Feedback placement is a hard constraint
+
+**Never insert an Alert, error banner, loading/status row, or diagnostic card into a bento
+layout, workspace rail, sidebar, or top navigation.** Those surfaces own content and navigation;
+request failures must not change their children, spacing, order, or dimensions. A different tag,
+`role="status"`, warning-colored button, or ordinary Card wrapping the message does not exempt it.
+
+Essential account/page reads failing, including background refresh with cached material, replace
+the affected screen with one shared blocking error surface and one recovery action. A broad outage
+must never become a stack of independent warnings over stale interactive content. Keep mounted
+observers/drafts inaccessible behind the boundary so recovery can complete without losing edits.
+
+Isolated optional refresh failures use deduplicated Sonner feedback, retaining the component's
+allocated geometry; initial loading uses a reserved skeleton within the owning component or a
+shared page loading boundary. Never add a loading item to a grid. Unknown counts stay unknown
+inside the normal count slot; navigation labels remain destinations, never failure/progress copy.
+Actual connector recovery work may be represented as ordinary actionable product content, but a
+failed request to check connectors must never manufacture an attention card. Detailed diagnostic
+states belong in the relevant labelled detail/settings surface.
+
+Regression coverage must exercise cached-data outages, recovery, isolated optional failures, and
+verify that no alert/status item appears in the grid, rail, sidebar, or navigation. These placement
+constraints override the generic contextual Alert guidance below.
+
+## Stable asynchronous layout
+
+Accepted UX rule, 2026-10-12: loading and refreshing belong inside the component that owns the
+data. Preserve its identity, placement, focus and allocated space. Initial loading uses an in-place
+skeleton or busy treatment; refreshing retains usable content with an accessible freshness/busy
+indication. Do not insert and remove temporary page-body rows for header-owned data, replace usable
+content with a page spinner, or move sibling content solely to report request progress.
+
+Independent values load independently: location can remain usable when weather is unavailable.
+No-data, denied and failed states retain an actionable component surface. Never label unchecked or
+partially checked data as empty or healthy. Real material changes may change layout; transient
+request-status chrome should not. This rule does not suppress persistent problems requiring action.
+
+Discrete action results and settings errors still use Sonner, and successful background autosaves
+stay silent. Skeletons and busy indicators are not action-result messages. Include regression checks
+for retained controls/content, no temporary body status row, stable focus and in-place recovery.
+
+The [Today refinement spec](../superpowers/specs/2026-10-12-today-refinements-design.md) applies this
+rule to weather, location and supporting cards; this statement is target UX policy, not a claim that
+every existing screen has been migrated.
+
 This is nohmi's toast-first feedback policy, informed by the sources below and a
 source-code review on 2026-09-30. It defines the intended standard; the audit
 records implementation gaps. The implementation notes below distinguish the original audit from the resulting shared behavior.

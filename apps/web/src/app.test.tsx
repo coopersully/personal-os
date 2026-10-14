@@ -6449,13 +6449,14 @@ describe("ilo web app", () => {
     mocks.listReminders.mockResolvedValue({ items: [], nextCursor: null });
     const view = setup();
     const scheduledTaskButton = await screen.findByRole("button", {
-      name: "Open task Reserved today",
+      name: "Open Reserved today",
     });
     expect(scheduledTaskButton).toBeVisible();
     expect(screen.getByRole("heading", { name: "Your timeline" })).toBeInTheDocument();
     expect(screen.getByText("Today · Events, tasks and reminders")).toBeVisible();
-    expect(screen.getByText("Today · Events, tasks and reminders")).toHaveClass(
-      "today-section-heading__description",
+    expect(screen.getByText("Today · Events, tasks and reminders")).toHaveAttribute(
+      "data-slot",
+      "card-description",
     );
     expect(screen.queryByText("The day is open")).not.toBeInTheDocument();
     await browser.click(scheduledTaskButton);
@@ -6468,19 +6469,14 @@ describe("ilo web app", () => {
     expect(screen.getByText("This week · Tasks and reminders")).toBeVisible();
     const todayQueue = screen.getByRole("complementary", { name: "Your commitments" });
     expect(
-      within(todayQueue).getByRole("radiogroup", { name: "Commitment filters" }),
+      within(todayQueue).queryByRole("radiogroup", { name: "Commitment filters" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(todayQueue).getByRole("combobox", { name: "Commitments per page" }),
     ).toBeVisible();
     await waitFor(() =>
       expect(mocks.getTodayCommitments).toHaveBeenCalledWith({
         filter: "all",
-        includeUndated: false,
-        limit: 6,
-      }),
-    );
-    await browser.click(within(todayQueue).getByRole("radio", { name: /^Tasks/ }));
-    await waitFor(() =>
-      expect(mocks.getTodayCommitments).toHaveBeenCalledWith({
-        filter: "tasks",
         includeUndated: false,
         limit: 6,
       }),
@@ -6505,9 +6501,9 @@ describe("ilo web app", () => {
     const view = setup();
     const browser = userEvent.setup();
     expect(await screen.findByText("Focus block")).toBeInTheDocument();
-    expect(screen.getByText("Test reminder")).toBeInTheDocument();
     const allDayStrip = screen.getByRole("region", { name: "All-day occasions" });
     const todaySchedule = screen.getByRole("region", { name: "Today's calendar" });
+    expect(within(todaySchedule).getByText("Test reminder")).toBeInTheDocument();
     expect(within(todaySchedule).getByText("Today · Events, tasks and reminders")).toBeVisible();
     expect(todaySchedule).toContainElement(allDayStrip);
     expect(
@@ -6525,7 +6521,7 @@ describe("ilo web app", () => {
     expect(allDayStrip.querySelector('[data-slot="event-card"]')).not.toBeInTheDocument();
     const todayTimeline = todaySchedule.querySelector(".today-timeline") as HTMLElement;
     expect(todayTimeline).toBeVisible();
-    expect(within(todayTimeline).getAllByRole("listitem")).toHaveLength(3);
+    expect(within(todayTimeline).getAllByRole("listitem")).toHaveLength(4);
     expect(within(todaySchedule).getByText("12 PM")).toBeVisible();
     expect(within(todaySchedule).getByText("1 PM")).toBeVisible();
     expect(within(todaySchedule).getByText("2 PM")).toBeVisible();
@@ -6594,14 +6590,18 @@ describe("ilo web app", () => {
     await browser.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 
-    await browser.click(screen.getByRole("button", { name: "Open Test reminder" }));
+    await browser.click(within(todaySchedule).getByRole("button", { name: "Open Test reminder" }));
     await browser.clear(screen.getByLabelText("What needs attention?"));
     await browser.type(screen.getByLabelText("What needs attention?"), "Refined reminder");
     await browser.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(mocks.updateReminder).toHaveBeenCalled());
-    await browser.click(screen.getByRole("checkbox", { name: "Complete Test reminder" }));
+    await browser.click(
+      within(todaySchedule).getByRole("checkbox", { name: "Complete Test reminder" }),
+    );
     await waitFor(() => expect(mocks.completeReminder).toHaveBeenCalledWith(id, true));
-    await browser.click(screen.getByRole("button", { name: "Delete Test reminder" }));
+    await browser.click(
+      within(todaySchedule).getByRole("button", { name: "Delete Test reminder" }),
+    );
     await browser.click(
       within(await screen.findByRole("dialog")).getByRole("button", {
         name: "Delete reminder",

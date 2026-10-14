@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/api";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { connectionHealth } from "@/features/connections/health";
 import { attentionConnections } from "./attention-model";
 
@@ -50,13 +50,13 @@ export function TodayAttention() {
   const hasAttention = connections.length + blocked.length > 0 || bookmarkFailure;
   if (!hasAttention && !unknown) return null;
   return (
-    <Card className="today-attention py-0" aria-label="Needs your attention">
-      <CardContent className="flex flex-wrap items-center gap-x-4 gap-y-2 p-4">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="font-medium">
-            {hasAttention ? "Needs your attention" : "Some connections could not be checked"}
-          </h2>
-          {unknown ? (
+    <Card className="today-attention" aria-label="Needs your attention">
+      <CardHeader>
+        <CardTitle>
+          <h2>{hasAttention ? "Needs your attention" : "Some connections could not be checked"}</h2>
+        </CardTitle>
+        {unknown ? (
+          <CardAction>
             <Button
               variant="outline"
               onClick={() => {
@@ -77,8 +77,10 @@ export function TodayAttention() {
             >
               Refresh
             </Button>
-          ) : null}
-        </div>
+          </CardAction>
+        ) : null}
+      </CardHeader>
+      <CardContent className="flex flex-wrap items-center gap-x-4 gap-y-2">
         {bookmarkFailure ? (
           <Button variant="secondary" asChild>
             <Link to="/settings?section=connections">X bookmarks · Review connection</Link>

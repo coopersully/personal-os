@@ -812,7 +812,7 @@ Weather creates its still from semantic sky colors, and the inert map captures a
 on idle/resize/theme changes. These pixels remain in memory and are never stored or transmitted.
 Missing pixels or GPU failure fall back to the component's frosted treatment. Unsupported backdrop
 filtering, reduced transparency, increased contrast and forced colors use opaque cards, with no
-optical layer. Text, controls, focus indicators and portaled overlays retain normal opacity.
+optical layer. Dark mode keeps refraction and subtle tonal depth without white inset shadows, luminous rims or outline glow. Text, controls, focus indicators and portaled overlays retain normal opacity.
 
 SVG in `components/ui/react-bits/GlassSurface.tsx` is solely optical filter machinery and displacement
 maps, a named exception to the interface-icon registry restriction. Interface glyphs still use reicon.
@@ -830,3 +830,10 @@ Discrete outcomes update one Sonner toast. The pet portrait mirrors the bundled 
 and selected color and opens Pet settings. Pet controls react to saved enablement and appearance
 through the shared desktop settings state without waiting for a polling interval. Hidden/disabled pets and unavailable updates add no
 control. These native controls do not appear in a browser or in a hidden rail.
+
+### Shared timeline interaction layer
+
+Calendar spatial events and Today records use the shared `timeline-record` front layer on hover,
+keyboard focus, active selection and open menus. Raise the record above sibling records within its
+local timeline; retain the existing semantic hover/focus fill and never lift it above shell chrome.
+Today composes actual domain-owned task/reminder rows instead of converting them into event cards.

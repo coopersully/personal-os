@@ -3,7 +3,14 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "@/api";
 import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { useWorkspacePreferences } from "@/features/workspace-settings/preferences";
 import { useSaveTodayPreferences } from "./preferences";
 export function TodaySpendingCard({
@@ -41,7 +48,14 @@ export function TodaySpendingCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Spending</CardTitle>
+        <CardTitle>
+          <h2>Spending</h2>
+        </CardTitle>
+        <CardDescription>
+          Posted spending · {period === "week" ? "This week" : "This month"}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
         <SegmentedControl
           aria-label="Spending period"
           value={period}
@@ -56,9 +70,9 @@ export function TodaySpendingCard({
             This month
           </SegmentedControlItem>
         </SegmentedControl>
-        {save.recovery ? <Link to="/today/settings">Review unsaved preferences</Link> : null}
-      </CardHeader>
-      <CardContent>
+        {save.recovery ? (
+          <Link to="/settings?section=today">Review unsaved preferences</Link>
+        ) : null}
         <p className="text-2xl">
           {fact && fact.cents !== null && fact.quality !== "unavailable"
             ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(
@@ -78,8 +92,10 @@ export function TodaySpendingCard({
         {query.isError && query.data ? (
           <p className="text-sm text-muted-foreground">Could not refresh this amount.</p>
         ) : null}
-        <Link to="/finances">Open Finance</Link>
       </CardContent>
+      <CardFooter>
+        <Link to="/finances">Open Finance</Link>
+      </CardFooter>
     </Card>
   );
 }

@@ -26,7 +26,7 @@ Automatic provider retries are not reconnect demands. Poll visible attention sou
 | --- | --- | --- |
 | Your timeline | Today's all-day occasions, remaining events and task reservations, reminders at their actual due time | Existing event quick actions and material editors; reminders are point markers, not invented appointments |
 | Due today within timeline | Open tasks due today without a remaining reservation, plus earlier uncompleted reminders due today | Compact titles/timing and existing completion/editor actions |
-| Your commitments | Open tasks/reminders due or reserved in the configured calendar week, plus all overdue deadlines | Remembered All/Overdue/Tasks/Reminders filters with full counts, six-row pages, and Overdue/Today/Later this week/optional Undated groups |
+| Your commitments | Open tasks/reminders due or reserved in the configured calendar week, plus all overdue deadlines | All commitment types together, independently collapsible Overdue/Today/Later this week/optional Undated groups, and standard numbered pagination with full page counts and 6/12/24 rows per page |
 | Done today | Completed tasks/reminders from today | Standard Collapsible, closed initially |
 | Spending, optional | Posted spending through today, week or month, using Finance's account selection | Shared saved period selector and Finance link; unavailable is never zero |
 | Current ritual, optional | Existing current occurrence | Native ritual overlay on desktop; shared checklist dialog on web |
@@ -46,8 +46,8 @@ planning-zone interval. The live clock rolls at midnight and refreshes on focus/
 
 ## Personalization and map contract
 
-Personalize Today opens `/today/settings`. A separate typed, revisioned Today preferences object
-stores Default/Weather/Map background, optional cards, spending period, filter and undated choice.
+Today at a Glance is a standard Settings page at `/settings?section=today`, listed with the workspaces and discoverable through settings search. The old `/today/settings` route redirects there; no personalization action repeats in the Today body. A separate typed, revisioned Today preferences object
+stores Default/Weather/Map background, optional cards, spending period and undated choice. The existing filter field remains compatible with older saved data; Today displays all types instead of consuming it.
 It does not extend the four-domain workspace enum. All controls use the shared serialized save
 channel and exact-revision recovery. Background autosave success is silent; errors use Sonner,
 with retained attempted values and explicit review/reapply in settings.
@@ -72,11 +72,10 @@ send task/event data or log keys/precise coordinates. See the external-boundary 
 - Independent cards survive timeline, completed-history, weather or provider failures.
 - Keep cached material on refresh failure. Show source uncertainty beside the affected content;
   manual refresh and native action outcomes use one Sonner toast.
-- Desktop places timeline and weekly queue side by side. Mobile stacks them with no horizontal
-  page overflow; urgent attention precedes both. Optional cards follow the main work.
+- Desktop uses two independently sized bento columns: timeline on the left; natural-height commitments, Spending, ritual and pet cards on the right. Mobile stacks them with no horizontal page overflow; urgent attention precedes both. Weather/Map fill the complete content area, including remaining viewport space, rather than a card-sized inset.
+- Cards use default shadcn CardHeader, CardTitle, CardDescription, CardContent and CardFooter, with consistent title/description type sizes. Pagination belongs in the commitment footer; categories show the number of rows on the current page. Cursor jumps follow the existing bound cursor sequence; unavailable source totals stay explicitly unknown.
 - Long titles truncate visually with full accessible names and existing detail access.
-- All-day occasions use the shared OccasionCard. Timed material uses the shared timeline and
-  EventCard. Existing overlap and action-menu behavior remains owned by Calendar.
+- All-day occasions use the shared OccasionCard. Timed events use EventCard; timeline tasks and reminders use the actual TaskRow and ReminderRow, with their completion, editor and action behavior intact. Calendar and Today share the timeline front-layer rule for hover, keyboard focus and open menus. Existing overlap geometry remains owned by Calendar.
 - Today has no contextual sidebar. Reminders belongs to Tasks. Goals, Motives and Activity stay
   in Settings. Follow the shared icon, feedback, theme and navigation contracts.
 
@@ -85,6 +84,6 @@ send task/event data or log keys/precise coordinates. See the external-boundary 
 Domain/provider tests cover source-date membership, DST and calendar-week boundaries. API tests
 cover ownership, strict preferences, revisions/audit, permissions, mixed material, counts and
 cursor tampering. UI tests cover saved choices, queued saves, source uncertainty and native
-feedback. Desktop/mobile E2E exercises settings persistence, weekly filters, independent failure
+feedback. Desktop/mobile E2E exercises settings persistence, collapsible groups, pagination, independent failure
 states and responsive overflow. Live fixture QA verifies rendered CARTO tiles and layout;
 packaged native WebGL and deployment-origin key restrictions need separate release evidence.

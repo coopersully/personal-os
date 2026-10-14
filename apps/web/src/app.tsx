@@ -160,6 +160,7 @@ import {
   MonitorIcon,
   MoonIcon,
   PaintBrushIcon,
+  PanelTopIcon,
   PauseIcon,
   PinIcon,
   PlayIcon,
@@ -1607,7 +1608,7 @@ function AuthenticatedApp({ user }: { user: User }) {
           }
         >
           <main
-            className={`content${isSpatialCalendar ? " content--calendar" : shellPathname === "/mail" ? " content--mail" : ""}`}
+            className={`content${isSpatialCalendar ? " content--calendar" : shellPathname === "/mail" ? " content--mail" : shellPathname === "/today" ? " content--today" : ""}`}
             id="main-content"
           >
             <div className="workspace-stage">
@@ -1722,7 +1723,7 @@ function WorkspaceRoutes({
           element={<Navigate replace to={`/${workspace}?review=open`} />}
         />
       ))}
-      <Route path="/today/settings" element={<TodaySettingsPage />} />
+      <Route path="/today/settings" element={<Navigate replace to="/settings?section=today" />} />
       <Route
         path="/today"
         element={
@@ -2518,11 +2519,6 @@ function TodayPage({
         }
       />
       <TodayAttention />
-      <div className="today-page-actions">
-        <ShadcnButton variant="outline" asChild>
-          <Link to="/today/settings">Personalize Today</Link>
-        </ShadcnButton>
-      </div>
       <QueryFeedback query={brief} title="Couldn’t refresh today’s plan." staleOnly />
       <QueryFeedback
         query={completedReminders}
@@ -2530,167 +2526,174 @@ function TodayPage({
         staleOnly
       />
       <section className="day-column">
-        <ShadcnCard role="region" aria-label="Today's calendar" className="today-schedule p-5">
-          <div className="section-heading today-section-heading">
-            <div className="today-section-heading__copy">
+        <ShadcnCard role="region" aria-label="Today's calendar" className="today-schedule">
+          <ShadcnCardHeader>
+            <ShadcnCardTitle>
               <h2>Your timeline</h2>
-              <p className="today-section-heading__description">{eventSummary}</p>
-            </div>
-          </div>
-          {agenda.allDay.length > 0 ? (
-            <section aria-label="All-day occasions" className="today-all-day-strip">
-              <ShadcnItemGroup className="today-all-day-strip__events">
-                {agenda.allDay
-                  .filter((event) => calendarEventOccursOnDate(event, today, user.planningTimezone))
-                  .map((event) => (
-                    <TodayAllDayEventCard
-                      calendarColor={calendarColorsById.get(event.calendarId)}
-                      event={event}
-                      key={event.id}
-                      onEdit={() => setEditor({ event, kind: "event" })}
-                      timeZone={event.timezone}
-                    />
-                  ))}
-              </ShadcnItemGroup>
-            </section>
-          ) : null}
-          {!brief.data ? (
-            brief.isError ? (
-              <InlineError error={brief.error} retry={brief.refetch} />
+            </ShadcnCardTitle>
+            <ShadcnCardDescription>{eventSummary}</ShadcnCardDescription>
+          </ShadcnCardHeader>
+          <ShadcnCardContent>
+            {agenda.allDay.length > 0 ? (
+              <section aria-label="All-day occasions" className="today-all-day-strip">
+                <ShadcnItemGroup className="today-all-day-strip__events">
+                  {agenda.allDay
+                    .filter((event) =>
+                      calendarEventOccursOnDate(event, today, user.planningTimezone),
+                    )
+                    .map((event) => (
+                      <TodayAllDayEventCard
+                        calendarColor={calendarColorsById.get(event.calendarId)}
+                        event={event}
+                        key={event.id}
+                        onEdit={() => setEditor({ event, kind: "event" })}
+                        timeZone={event.timezone}
+                      />
+                    ))}
+                </ShadcnItemGroup>
+              </section>
+            ) : null}
+            {!brief.data ? (
+              brief.isError ? (
+                <InlineError error={brief.error} retry={brief.refetch} />
+              ) : (
+                <div className="min-h-48" aria-busy="true">
+                  Loading your timeline…
+                </div>
+              )
+            ) : timelineItems.length > 0 ? (
+              <TodayTimeline
+                calendarColorsById={calendarColorsById}
+                currentTime={currentTime}
+                items={timelineItems}
+                onEditTask={(task) => setEditor({ kind: "task", task })}
+                onEditReminder={(reminder) => setEditor({ kind: "reminder", reminder })}
+                timeZone={user.planningTimezone}
+              />
             ) : (
-              <div className="min-h-48" aria-busy="true">
-                Loading your timeline…
-              </div>
-            )
-          ) : timelineItems.length > 0 ? (
-            <TodayTimeline
-              calendarColorsById={calendarColorsById}
-              currentTime={currentTime}
-              items={timelineItems}
-              onEditTask={(task) => setEditor({ kind: "task", task })}
-              onEditReminder={(reminder) => setEditor({ kind: "reminder", reminder })}
-              timeZone={user.planningTimezone}
-            />
-          ) : (
-            <QuoteCard
-              {...(openDayQuote.author ? { author: openDayQuote.author } : {})}
-              {...(openDayQuote.source ? { source: openDayQuote.source } : {})}
-              className="today-empty-quote"
-              label="An open calendar"
-              text={openDayQuote.text}
-            />
-          )}
-          <div className="today-due-area">
-            {openTasks.filter(
-              (task) =>
-                !!task.dueAt &&
-                sameLocalDate(localDateAt(new Date(task.dueAt), user.planningTimezone), today) &&
-                !scheduledTasksToday.some((scheduled) => scheduled.id === task.id),
-            ).length ? (
-              <TaskGroup
-                compact
-                label="Due today"
-                tasks={openTasks.filter(
-                  (task) =>
-                    !!task.dueAt &&
-                    sameLocalDate(
-                      localDateAt(new Date(task.dueAt), user.planningTimezone),
-                      today,
-                    ) &&
-                    !scheduledTasksToday.some((scheduled) => scheduled.id === task.id),
-                )}
-                setEditor={setEditor}
-                timeZone={user.planningTimezone}
+              <QuoteCard
+                {...(openDayQuote.author ? { author: openDayQuote.author } : {})}
+                {...(openDayQuote.source ? { source: openDayQuote.source } : {})}
+                className="today-empty-quote"
+                label="An open calendar"
+                text={openDayQuote.text}
               />
-            ) : null}
-            {todayReminders.filter(
-              (reminder) => reminder.dueAt && new Date(reminder.dueAt) < currentTime,
-            ).length ? (
-              <ReminderGroup
-                label="Due today · Reminders"
-                reminders={todayReminders.filter(
-                  (reminder) => reminder.dueAt && new Date(reminder.dueAt) < currentTime,
-                )}
-                setEditor={setEditor}
-                timeZone={user.planningTimezone}
-              />
-            ) : null}
-          </div>
+            )}
+            <div className="today-due-area">
+              {openTasks.filter(
+                (task) =>
+                  !!task.dueAt &&
+                  sameLocalDate(localDateAt(new Date(task.dueAt), user.planningTimezone), today) &&
+                  !scheduledTasksToday.some((scheduled) => scheduled.id === task.id),
+              ).length ? (
+                <TaskGroup
+                  compact
+                  label="Due today"
+                  tasks={openTasks.filter(
+                    (task) =>
+                      !!task.dueAt &&
+                      sameLocalDate(
+                        localDateAt(new Date(task.dueAt), user.planningTimezone),
+                        today,
+                      ) &&
+                      !scheduledTasksToday.some((scheduled) => scheduled.id === task.id),
+                  )}
+                  setEditor={setEditor}
+                  timeZone={user.planningTimezone}
+                />
+              ) : null}
+              {todayReminders.filter(
+                (reminder) => reminder.dueAt && new Date(reminder.dueAt) < currentTime,
+              ).length ? (
+                <ReminderGroup
+                  label="Due today · Reminders"
+                  reminders={todayReminders.filter(
+                    (reminder) => reminder.dueAt && new Date(reminder.dueAt) < currentTime,
+                  )}
+                  setEditor={setEditor}
+                  timeZone={user.planningTimezone}
+                />
+              ) : null}
+            </div>
+          </ShadcnCardContent>
         </ShadcnCard>
       </section>
-      <ShadcnCard
-        role="complementary"
-        aria-labelledby="today-queue-title"
-        className="today-queue p-5"
-      >
-        <div className="section-heading today-section-heading">
-          <div className="today-section-heading__copy">
-            <h2 id="today-queue-title">Your commitments</h2>
-            <p className="today-section-heading__description">This week · Tasks and reminders</p>
-          </div>
+      <div className="today-supporting-column">
+        <ShadcnCard
+          role="complementary"
+          aria-labelledby="today-queue-title"
+          className="today-queue"
+        >
+          <ShadcnCardHeader>
+            <ShadcnCardTitle>
+              <h2 id="today-queue-title">Your commitments</h2>
+            </ShadcnCardTitle>
+            <ShadcnCardDescription>This week · Tasks and reminders</ShadcnCardDescription>
+          </ShadcnCardHeader>
+          <TodayCommitments
+            day={`${localDateToIso(today)}:${user.planningTimezone}`}
+            renderTask={(task) => (
+              <TaskRow
+                compact
+                task={task}
+                timeZone={user.planningTimezone}
+                onEdit={() => setEditor({ kind: "task", task })}
+              />
+            )}
+            renderReminder={(reminder) => (
+              <ReminderRow
+                reminder={reminder}
+                timeZone={user.planningTimezone}
+                onEdit={() => setEditor({ kind: "reminder", reminder })}
+              />
+            )}
+          >
+            {completedReminders.isError && !completedReminders.data ? (
+              <p className="text-sm text-muted-foreground">Completed history unavailable.</p>
+            ) : null}
+            {doneToday.length > 0 || doneTasksToday.length > 0 ? (
+              <ShadcnCollapsible className="today-history">
+                <ShadcnCollapsibleTrigger className="today-history__trigger" type="button">
+                  <CircleCheckIcon aria-hidden="true" />
+                  <span>Done today</span>
+                  <ShadcnBadge variant="secondary">
+                    {doneToday.length + doneTasksToday.length}
+                  </ShadcnBadge>
+                  <ChevronDownIcon aria-hidden="true" />
+                </ShadcnCollapsibleTrigger>
+                <ShadcnCollapsibleContent className="today-history__content">
+                  {doneToday.length > 0 ? (
+                    <ReminderGroup
+                      label="Completed reminders"
+                      reminders={doneToday}
+                      setEditor={setEditor}
+                      timeZone={user.planningTimezone}
+                    />
+                  ) : null}
+                  {doneTasksToday.length > 0 ? (
+                    <TaskGroup
+                      label="Completed tasks"
+                      setEditor={setEditor}
+                      tasks={doneTasksToday}
+                      timeZone={user.planningTimezone}
+                    />
+                  ) : null}
+                </ShadcnCollapsibleContent>
+              </ShadcnCollapsible>
+            ) : null}
+          </TodayCommitments>
+        </ShadcnCard>
+        <div className="today-optional-cards">
+          {preferences.data?.preferences.showSpending ? (
+            <TodaySpendingCard
+              now={currentTime}
+              timeZone={user.planningTimezone}
+              window={preferences.data.preferences.spendingWindow}
+            />
+          ) : null}
+          {preferences.data?.preferences.showRitual ? <TodayRitualCard /> : null}
+          {preferences.data?.preferences.showPet ? <TodayPetCard /> : null}
         </div>
-        <TodayCommitments
-          day={`${localDateToIso(today)}:${user.planningTimezone}`}
-          renderTask={(task) => (
-            <TaskRow
-              compact
-              task={task}
-              timeZone={user.planningTimezone}
-              onEdit={() => setEditor({ kind: "task", task })}
-            />
-          )}
-          renderReminder={(reminder) => (
-            <ReminderRow
-              reminder={reminder}
-              timeZone={user.planningTimezone}
-              onEdit={() => setEditor({ kind: "reminder", reminder })}
-            />
-          )}
-        />
-        {completedReminders.isError && !completedReminders.data ? (
-          <p className="text-sm text-muted-foreground">Completed history unavailable.</p>
-        ) : null}
-        {doneToday.length > 0 || doneTasksToday.length > 0 ? (
-          <ShadcnCollapsible className="today-history">
-            <ShadcnCollapsibleTrigger className="today-history__trigger" type="button">
-              <CircleCheckIcon aria-hidden="true" />
-              <span>Done today</span>
-              <ShadcnBadge variant="secondary">
-                {doneToday.length + doneTasksToday.length}
-              </ShadcnBadge>
-              <ChevronDownIcon aria-hidden="true" />
-            </ShadcnCollapsibleTrigger>
-            <ShadcnCollapsibleContent className="today-history__content">
-              {doneToday.length > 0 ? (
-                <ReminderGroup
-                  label="Completed reminders"
-                  reminders={doneToday}
-                  setEditor={setEditor}
-                  timeZone={user.planningTimezone}
-                />
-              ) : null}
-              {doneTasksToday.length > 0 ? (
-                <TaskGroup
-                  label="Completed tasks"
-                  setEditor={setEditor}
-                  tasks={doneTasksToday}
-                  timeZone={user.planningTimezone}
-                />
-              ) : null}
-            </ShadcnCollapsibleContent>
-          </ShadcnCollapsible>
-        ) : null}
-      </ShadcnCard>
-      <div className="today-optional-cards">
-        {preferences.data?.preferences.showSpending ? (
-          <TodaySpendingCard
-            now={currentTime}
-            timeZone={user.planningTimezone}
-            window={preferences.data.preferences.spendingWindow}
-          />
-        ) : null}
-        {preferences.data?.preferences.showRitual ? <TodayRitualCard /> : null}
-        {preferences.data?.preferences.showPet ? <TodayPetCard /> : null}
       </div>
     </LiquidGlassScope>
   );
@@ -4652,7 +4655,7 @@ function TimelineEvent({
     >
       <button
         aria-label={`${formatTime(event.startsAt, timeZone)} ${event.title}`}
-        className={`calendar-timeline-event${compact ? " calendar-timeline-event--compact" : ""}${blockColors.length > 0 ? " has-blocks" : ""}${writable ? " is-draggable" : " is-readonly"}${isDragging ? " is-dragging" : ""}${moveBlocked ? " is-move-blocked" : ""}`}
+        className={`timeline-record calendar-timeline-event${compact ? " calendar-timeline-event--compact" : ""}${blockColors.length > 0 ? " has-blocks" : ""}${writable ? " is-draggable" : " is-readonly"}${isDragging ? " is-dragging" : ""}${moveBlocked ? " is-move-blocked" : ""}`}
         draggable={writable}
         onDragEnd={onDragEnd}
         onDragStart={(dragEvent) => startCalendarDrag(dragEvent, event, setDraggedEventId)}
@@ -5905,6 +5908,7 @@ type SettingsSectionId =
   | "agent-connections"
   | "appearance"
   | "calendar"
+  | "today"
   | "connections"
   | "finances"
   | "goals"
@@ -5959,6 +5963,7 @@ const settingsNavigation: Array<{
   {
     label: "Workspaces",
     items: [
+      { icon: PanelTopIcon, id: "today", label: "Today at a Glance" },
       { icon: CalendarIcon, id: "calendar", label: "Calendar" },
       { icon: ListChecksIcon, id: "tasks", label: "Tasks" },
       { icon: MailIcon, id: "mail", label: "Mail" },
@@ -6190,6 +6195,7 @@ function SettingsPageContent({
           </Link>
         </ShadcnButton>
       ) : null}
+      {section === "today" ? <TodaySettingsPage /> : null}
       {section === "mail" ? (
         <div className="settings-stack">
           <WorkspacePreferencesSection workspace="mail" />
@@ -8672,7 +8678,7 @@ export function TodayEventCard({
   return (
     <DropdownMenu>
       <EventCard
-        className="today-timeline__event"
+        className="timeline-record today-timeline__event"
         data-density={density}
         role="listitem"
         style={{ ...calendarEventColorStyle(calendarColor), ...layoutStyle }}
@@ -8761,7 +8767,6 @@ export function scheduledTaskEndsAt(task: Task): Date {
 }
 
 export function TodayTaskTimelineCard({
-  currentTime,
   density,
   item,
   layoutStyle,
@@ -8776,49 +8781,14 @@ export function TodayTaskTimelineCard({
   timeZone: string;
 }) {
   if (item.material.kind !== "task") return null;
-  const { task } = item.material;
-  const minutesUntilStart =
-    new Date(item.startsAt).getTime() > currentTime.getTime()
-      ? Math.max(1, Math.ceil((new Date(item.startsAt).getTime() - currentTime.getTime()) / 60_000))
-      : null;
-  const minutesRemaining =
-    new Date(item.startsAt).getTime() <= currentTime.getTime() &&
-    new Date(item.endsAt).getTime() > currentTime.getTime()
-      ? Math.max(1, Math.ceil((new Date(item.endsAt).getTime() - currentTime.getTime()) / 60_000))
-      : null;
-
   return (
-    <EventCard
-      className="today-timeline__event today-timeline__task"
+    <div
+      className="timeline-record today-timeline__commitment"
       data-density={density}
-      role="listitem"
       style={layoutStyle}
     >
-      <EventCardContent>
-        <EventCardPrimaryAction
-          aria-label={`Open task ${task.title}`}
-          className="today-timeline__event-action"
-          onClick={onEdit}
-        >
-          <EventCardBody>
-            <EventCardTitle>
-              <ListChecksIcon aria-hidden="true" />
-              <span className="min-w-0 truncate">{task.title}</span>
-              {minutesUntilStart !== null || minutesRemaining !== null ? (
-                <EventCardTitleMeta>
-                  {minutesUntilStart !== null
-                    ? `in ${formatMinutes(minutesUntilStart)}`
-                    : `${formatMinutes(minutesRemaining ?? 0)} left`}
-                </EventCardTitleMeta>
-              ) : null}
-            </EventCardTitle>
-            <EventCardDescription>
-              {formatTime(item.startsAt, timeZone)}–{formatTime(item.endsAt, timeZone)}
-            </EventCardDescription>
-          </EventCardBody>
-        </EventCardPrimaryAction>
-      </EventCardContent>
-    </EventCard>
+      <TaskRow dense task={item.material.task} onEdit={onEdit} timeZone={timeZone} />
+    </div>
   );
 }
 
@@ -8854,17 +8824,20 @@ function TodayTimeline({
             timeZone={timeZone}
           />
         ) : item.material.kind === "reminder" ? (
-          <ShadcnButton
+          <div
             key={item.id}
-            variant="secondary"
-            className="today-timeline__reminder"
+            className="timeline-record today-timeline__commitment"
+            data-density="compact"
             style={{ ...layoutStyle, height: "auto", minHeight: 32 }}
-            onClick={() => {
-              if (item.material.kind === "reminder") onEditReminder(item.material.reminder);
-            }}
           >
-            • {formatTime(item.startsAt, timeZone)} · {item.material.reminder.title}
-          </ShadcnButton>
+            <ReminderRow
+              reminder={item.material.reminder}
+              timeZone={timeZone}
+              onEdit={() => {
+                if (item.material.kind === "reminder") onEditReminder(item.material.reminder);
+              }}
+            />
+          </div>
         ) : (
           <TodayTaskTimelineCard
             key={item.id}

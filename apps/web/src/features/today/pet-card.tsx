@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDesktopSettings, isDesktop, nativeAction } from "@/features/desktop/bridge";
 export function TodayPetCard() {
   const [pending, setPending] = useState(false);
@@ -16,9 +16,12 @@ export function TodayPetCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Your desktop pet</CardTitle>
+        <CardTitle>
+          <h2>Your desktop pet</h2>
+        </CardTitle>
+        <CardDescription>Your companion’s quick access</CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardFooter>
         <Button
           disabled={pending}
           onClick={() => {
@@ -35,7 +38,7 @@ export function TodayPetCard() {
         >
           Open quick access
         </Button>
-      </CardContent>
+      </CardFooter>
     </Card>
   );
 }

@@ -14,3 +14,12 @@
   .material-liquid { background: var(--card); }
   .material-liquid__layer { display: none; }
 }
+
+/* Refraction stays visible in dark mode without white inset lighting or rim glow. */
+.dark .material-liquid__layer .glass-surface--svg,
+.dark .material-liquid__layer .glass-surface__frame,
+.dark .material-liquid__layer .glass-surface--fallback { box-shadow: none; }
+.dark .material-liquid__layer .glass-surface__rim,
+.dark .material-liquid__layer .glass-surface__glow,
+.dark .material-liquid__layer .glass-surface__line { display: none; }
+.dark .material-liquid__layer .glass-surface__sheen { opacity: .15; }

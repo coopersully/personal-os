@@ -1,184 +1,305 @@
-import {
-  addLocalDays,
-  localDateToIso,
-  type Reminder,
-  type Task,
-  type TodayPreferences,
-} from "@personal-os/domain";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { type ReactNode, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { addLocalDays, localDateToIso, type Reminder, type Task } from "@personal-os/domain";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Fragment, type MouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/api";
-import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
+import { ChevronDownIcon } from "@/components/icons";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CardContent, CardFooter } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { ItemGroup } from "@/components/ui/item";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
 import { useWorkspacePreferences } from "@/features/workspace-settings/preferences";
-import { useSaveTodayPreferences, useTodayPreferences } from "./preferences";
+import { useTodayPreferences } from "./preferences";
 
-export function TodayCommitments({
-  day,
-  renderTask,
-  renderReminder,
-}: {
+type Props = {
   day: string;
   renderTask: (task: Task) => ReactNode;
   renderReminder: (reminder: Reminder) => ReactNode;
-}) {
+  children?: ReactNode;
+};
+const labels = {
+  overdue: "Overdue",
+  today: "Today",
+  later_this_week: "Later this week",
+  undated: "Undated",
+};
+
+export function TodayCommitments(props: Props) {
   const preferences = useTodayPreferences();
-  const save = useSaveTodayPreferences();
-  const filter = preferences.data?.preferences.commitmentFilter ?? "all";
-  const includeUndated = preferences.data?.preferences.includeUndated ?? false;
   const calendar = useWorkspacePreferences("calendar");
-  const scopeDay = `${day}:${calendar.data?.preferences.weekStartsOn ?? "sunday"}`;
-  const counts = useQuery({
-    queryKey: ["today-commitments", scopeDay, filter, includeUndated, undefined],
-    queryFn: () => api.getTodayCommitments({ filter, includeUndated, limit: 6 }),
-    refetchInterval: 60000,
-  });
+  const [pageSize, setPageSize] = useState(6);
+  const includeUndated = preferences.data?.preferences.includeUndated ?? false;
+  const day = `${props.day}:${calendar.data?.preferences.weekStartsOn ?? "sunday"}`;
   return (
-    <div className="today-commitments">
-      <SegmentedControl
-        aria-label="Commitment filters"
-        value={filter}
-        onValueChange={(value) => {
-          if (value)
-            save.mutate({ commitmentFilter: value as TodayPreferences["commitmentFilter"] });
-        }}
-      >
-        {(
-          [
-            ["all", "All"],
-            ["overdue", "Overdue"],
-            ["tasks", "Tasks"],
-            ["reminders", "Reminders"],
-          ] as const
-        ).map(([value, label]) => (
-          <SegmentedControlItem
-            key={value}
-            value={value}
-            disabled={!preferences.data || !!save.recovery}
-          >
-            {label} {counts.data?.counts[value] ?? "–"}
-          </SegmentedControlItem>
-        ))}
-      </SegmentedControl>
-      {save.recovery ? <Link to="/today/settings">Review unsaved preferences</Link> : null}
-      <CommitmentPage
-        key={`${scopeDay}:${filter}:${includeUndated}`}
-        filter={filter}
-        includeUndated={includeUndated}
-        day={scopeDay}
-        renderTask={renderTask}
-        renderReminder={renderReminder}
-      />
-    </div>
+    <CommitmentPage
+      {...props}
+      key={`${day}:${includeUndated}`}
+      day={day}
+      includeUndated={includeUndated}
+      pageSize={pageSize}
+      setPageSize={setPageSize}
+    />
   );
 }
+
 function CommitmentPage({
-  filter,
-  includeUndated,
   day,
+  includeUndated,
+  pageSize,
+  setPageSize,
   renderTask,
   renderReminder,
-}: {
-  filter: TodayPreferences["commitmentFilter"];
+  children,
+}: Props & {
   includeUndated: boolean;
-  day: string;
-  renderTask: (task: Task) => ReactNode;
-  renderReminder: (reminder: Reminder) => ReactNode;
+  pageSize: number;
+  setPageSize: (size: number) => void;
 }) {
   const cache = useQueryClient();
   const [cursors, setCursors] = useState<Array<string | undefined>>([undefined]);
-  const cursor = cursors.at(-1);
-  const query = useQuery({
-    queryKey: ["today-commitments", day, filter, includeUndated, cursor],
+  const [page, setPage] = useState(0);
+  const [navigating, setNavigating] = useState(false);
+  const [closed, setClosed] = useState<Set<string>>(new Set());
+  const active = useRef(true);
+  useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+    };
+  }, []);
+  const options = (cursor: string | undefined) => ({
+    queryKey: ["today-commitments", day, "all", includeUndated, pageSize, cursor],
     queryFn: () =>
-      api.getTodayCommitments({ filter, includeUndated, limit: 6, ...(cursor ? { cursor } : {}) }),
-    refetchInterval: cursor ? false : 60000,
+      api.getTodayCommitments({
+        filter: "all",
+        includeUndated,
+        limit: pageSize,
+        ...(cursor ? { cursor } : {}),
+      }),
+  });
+  const query = useQuery({
+    ...options(cursors[page]),
+    placeholderData: keepPreviousData,
+    refetchInterval: page ? false : 60000,
   });
   useEffect(() => {
-    if (cursor && query.isSuccess && !query.isFetching && query.data.items.length === 0) {
-      setCursors((value) => (value.length > 1 ? value.slice(0, -1) : value));
+    if (page && query.isSuccess && !query.isFetching && !query.data.items.length) {
+      setPage((value) => value - 1);
+      setCursors((value) => value.slice(0, page));
     }
-  }, [cursor, query.isSuccess, query.isFetching, query.data]);
+  }, [page, query.isSuccess, query.isFetching, query.data]);
+  const busy = navigating || query.isPlaceholderData;
+  const total = query.data?.counts.all;
+  const pages =
+    total === null || total === undefined ? null : Math.max(1, Math.ceil(total / pageSize));
+  const goTo = async (target: number) => {
+    if (busy || target === page || target < 0 || (pages !== null && target >= pages)) return;
+    if (target < cursors.length) {
+      setPage(target);
+      return;
+    }
+    setNavigating(true);
+    try {
+      const next = [...cursors];
+      while (next.length <= target && active.current) {
+        const previous = await cache.fetchQuery(options(next.at(-1)));
+        if (!previous.nextCursor) break;
+        next.push(previous.nextCursor);
+      }
+      if (!active.current) return;
+      const destination = Math.min(target, next.length - 1);
+      // Keep the current rows/footer mounted until the destination is ready.
+      await cache.fetchQuery(options(next[destination]));
+      if (active.current) {
+        setCursors(next);
+        setPage(destination);
+      }
+    } catch {
+      if (active.current)
+        toast.error("Could not open that page. Refresh commitments and try again.", {
+          action: {
+            label: "Refresh",
+            onClick: () => {
+              void refresh();
+            },
+          },
+        });
+    } finally {
+      if (active.current) setNavigating(false);
+    }
+  };
   const refresh = () =>
     toast.promise(
-      cache
-        .fetchQuery({
-          queryKey: ["today-commitments", day, filter, includeUndated, undefined],
-          queryFn: () => api.getTodayCommitments({ filter, includeUndated, limit: 6 }),
-          staleTime: 0,
-        })
-        .then(() => setCursors([undefined])),
+      cache.fetchQuery({ ...options(undefined), staleTime: 0 }).then(() => {
+        if (active.current) {
+          setCursors([undefined]);
+          setPage(0);
+        }
+      }),
       {
         loading: "Refreshing commitments…",
         success: "Commitments refreshed.",
         error: "Could not refresh commitments.",
       },
     );
-  const labels = {
-    overdue: "Overdue",
-    today: "Today",
-    later_this_week: "Later this week",
-    undated: "Undated",
-  };
-  if (!query.data)
-    return (
-      <div className="min-h-48" aria-busy={query.isPending}>
-        {query.isError ? (
-          <Button variant="outline" onClick={refresh}>
-            Retry commitments
-          </Button>
-        ) : (
-          <span className="text-muted-foreground">Loading commitments…</span>
-        )}
-      </div>
-    );
+  const link = (target: number, disabled = false) => ({
+    href: "#today-queue-title",
+    "aria-disabled": disabled || busy,
+    tabIndex: disabled || busy ? -1 : 0,
+    onClick: (event: MouseEvent<HTMLAnchorElement>) => {
+      event.preventDefault();
+      if (!disabled && !busy) void goTo(target);
+    },
+  });
+  const visiblePages = Array.from(
+    new Set([0, page - 1, page, page + 1, ...(pages === null ? [] : [pages - 1])]),
+  )
+    .filter(
+      (value) =>
+        value >= 0 &&
+        (pages === null ? value <= page + (query.data?.nextCursor ? 1 : 0) : value < pages),
+    )
+    .sort((a, b) => a - b);
   return (
     <>
-      <p className="text-sm text-muted-foreground">
-        {weekLabel(query.data.weekStart, query.data.weekEndExclusive)} ·{" "}
-        {query.data.counts[filter] ?? "Unknown"} {filter === "all" ? "commitments" : filter}
-      </p>
-      {query.isError || query.data.unavailableSources.length ? (
-        <p className="text-sm text-muted-foreground">
-          Some commitments could not be refreshed.{" "}
-          <Button variant="link" onClick={refresh}>
-            Refresh
-          </Button>
-        </p>
+      <CardContent className="today-commitments" aria-busy={busy}>
+        {!query.data ? (
+          <div className="min-h-48" aria-busy={query.isPending}>
+            {query.isError ? (
+              <Button variant="outline" onClick={refresh}>
+                Retry commitments
+              </Button>
+            ) : (
+              <span className="text-muted-foreground">Loading commitments…</span>
+            )}
+          </div>
+        ) : (
+          <>
+            <p className="text-sm text-muted-foreground">
+              {weekLabel(query.data.weekStart, query.data.weekEndExclusive)} · {total ?? "Unknown"}{" "}
+              commitments
+            </p>
+            {query.isError || query.data.unavailableSources.length ? (
+              <p className="text-sm text-muted-foreground">
+                Some commitments could not be refreshed.{" "}
+                <Button variant="link" onClick={refresh}>
+                  Refresh
+                </Button>
+              </p>
+            ) : null}
+            {query.data.items.length ? (
+              <div className="today-commitment-groups">
+                {(Object.keys(labels) as Array<keyof typeof labels>).map((group) => {
+                  const items = query.data.items.filter((item) => item.group === group);
+                  if (!items.length) return null;
+                  return (
+                    <Collapsible
+                      key={group}
+                      open={!closed.has(group)}
+                      onOpenChange={(open) =>
+                        setClosed((previous) => {
+                          const next = new Set(previous);
+                          if (open) next.delete(group);
+                          else next.add(group);
+                          return next;
+                        })
+                      }
+                    >
+                      <CollapsibleTrigger className="today-commitment-group__trigger" type="button">
+                        <span>{labels[group]}</span>
+                        <Badge variant="secondary" title="Shown on this page">
+                          {items.length}
+                        </Badge>
+                        <ChevronDownIcon aria-hidden="true" />
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <ItemGroup className="gap-2">
+                          {items.map((item) => (
+                            <div key={`${item.kind}:${item.material.id}`}>
+                              {item.kind === "task"
+                                ? renderTask(item.material)
+                                : renderReminder(item.material)}
+                            </div>
+                          ))}
+                        </ItemGroup>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="py-4 text-muted-foreground">No commitments this week.</p>
+            )}
+          </>
+        )}
+        {children}
+      </CardContent>
+      {query.data ? (
+        <CardFooter className="today-commitments__footer" aria-busy={busy}>
+          <div className="today-commitments__page-options">
+            <span className="text-sm text-muted-foreground">
+              Page {page + 1}
+              {pages === null ? " · total unavailable" : ` of ${pages}`}
+            </span>
+            <NativeSelect
+              aria-label="Commitments per page"
+              size="sm"
+              value={String(pageSize)}
+              onChange={(event) => {
+                setPage(0);
+                setCursors([undefined]);
+                setPageSize(Number(event.target.value));
+              }}
+              disabled={busy}
+            >
+              {[6, 12, 24].map((size) => (
+                <NativeSelectOption key={size} value={String(size)}>
+                  {size} per page
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </div>
+          <Pagination aria-label="Commitment pages">
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious {...link(page - 1, page === 0)} />
+              </PaginationItem>
+              {visiblePages.map((value, index) => (
+                <Fragment key={value}>
+                  {index && value > (visiblePages[index - 1] ?? -1) + 1 ? (
+                    <PaginationItem>
+                      <PaginationEllipsis />
+                    </PaginationItem>
+                  ) : null}
+                  <PaginationItem>
+                    <PaginationLink
+                      {...link(value)}
+                      aria-label={`Page ${value + 1}`}
+                      isActive={page === value}
+                    >
+                      {value + 1}
+                    </PaginationLink>
+                  </PaginationItem>
+                </Fragment>
+              ))}
+              <PaginationItem>
+                <PaginationNext {...link(page + 1, !query.data.nextCursor)} />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+        </CardFooter>
       ) : null}
-      {query.data.items.length ? (
-        <div>
-          {query.data.items.map((item, index) => (
-            <div key={`${item.kind}:${item.material.id}`}>
-              {index === 0 || query.data.items[index - 1]?.group !== item.group ? (
-                <h3 className="mb-2 mt-4 text-sm font-medium">{labels[item.group]}</h3>
-              ) : null}
-              {item.kind === "task" ? renderTask(item.material) : renderReminder(item.material)}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="py-8 text-muted-foreground">Nothing in this view.</p>
-      )}
-      <div className="flex items-center justify-between gap-2">
-        <Button
-          variant="outline"
-          disabled={cursors.length === 1}
-          onClick={() => setCursors((value) => value.slice(0, -1))}
-        >
-          Previous
-        </Button>
-        <span className="text-sm">Page {cursors.length}</span>
-        <Button
-          variant="outline"
-          disabled={!query.data.nextCursor}
-          onClick={() => setCursors((value) => [...value, query.data!.nextCursor!])}
-        >
-          Next
-        </Button>
-      </div>
     </>
   );
 }

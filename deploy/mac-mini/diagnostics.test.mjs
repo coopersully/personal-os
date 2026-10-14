@@ -17,7 +17,7 @@ test("rejects private suffixes appended to allowlisted provider codes", () => {
   }
 });
 
-test("preserves fixed Plaid projection and cursor failure codes", () => {
+test("preserves fixed Finance provider, projection and cursor failure codes", () => {
   for (const code of [
     "plaid_invalid_response",
     "plaid_invalid_cursor",
@@ -28,6 +28,9 @@ test("preserves fixed Plaid projection and cursor failure codes", () => {
     "plaid_configuration_missing",
     "plaid_sync_page_limit_exceeded",
     "plaid_sync_cursor_not_advancing",
+    "finance_encryption_configuration_missing",
+    "finance_provider_item_identity_mismatch",
+    "finance_provider_item_identity_conflict",
   ]) {
     const summary = summarizeConnectorLogs(
       JSON.stringify({

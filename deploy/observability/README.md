@@ -106,7 +106,8 @@ and the explicitly enumerated Node/Undici timeout codes. Native `TimeoutError` D
 HTTP abort signals and provider deadlines normalize to `ETIMEDOUT`; arbitrary names or exception
 messages are not accepted as timeout evidence. Extraction follows at most 16 exception
 nodes, including nested causes and aggregate errors, and emits the first recognized code. It does
-not preserve the exception itself or infer a cause from its message. Unknown causes remain unknown.
+not preserve the exception itself or infer a cause from its message. Unknown causes remain unknown;
+throwing accessors or proxies produce no diagnostics and cannot interrupt failure settlement.
 These details do not change retry, reconnect, or authorization decisions.
 
 Calendar/Mail sync events also include `syncSource=scheduled|triggered|manual`. This identifies the
@@ -125,7 +126,8 @@ Example Loki queries (select the incident's time window):
 
 Both Alloy and local diagnostics independently allowlist these fields. No hostname, IP, syscall,
 URL, error message, stack, or provider body is exported, and none of the new fields becomes an
-indexed label. Plaid's safe failure codes are retained alongside Google/iCloud codes. A stale Plaid
+indexed label. Plaid's safe failure codes and fixed Finance configuration/identity codes are retained
+alongside Google/iCloud codes. A stale Plaid
 alert can indicate a connection awaiting owner reauthorization, including an older connection whose
 replacement is healthy; inspect Finance connection status before treating it as an outage or
 removing an account. Freshness observations are not themselves evidence of a transport failure.

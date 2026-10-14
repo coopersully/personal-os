@@ -51,6 +51,25 @@ describe("connector sync health policy", () => {
   });
 
   it.each([
+    "google",
+    "plaid",
+  ] as const)("settles %s recovery classification when diagnostic access throws", (provider) => {
+    const error = Object.defineProperty({}, "code", {
+      get() {
+        throw new Error("PRIVATE_CANARY");
+      },
+    });
+    const failure = classifyConnectorSyncFailure(error, provider);
+    expect(failure).toMatchObject({
+      category: "unknown",
+      recovery: "automatic",
+      code: "connector_unknown_failure",
+    });
+    expect(failure.transportCode).toBeUndefined();
+    expect(JSON.stringify(failure)).not.toContain("PRIVATE_CANARY");
+  });
+
+  it.each([
     ["reconnect", "authorization", "reconnect"],
     ["operator", "configuration", "operator"],
     ["retry", "temporary", "automatic"],

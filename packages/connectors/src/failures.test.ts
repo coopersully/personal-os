@@ -329,6 +329,31 @@ describe("connector failure boundary", () => {
 });
 
 describe("sanitized transport diagnostics", () => {
+  it("fails closed when error inspection throws", () => {
+    for (const field of ["code", "cause", "errors"]) {
+      const error = Object.defineProperty({}, field, {
+        get() {
+          throw new Error("PRIVATE_CANARY");
+        },
+      });
+      expect(transportDiagnostics(error)).toEqual({});
+    }
+    const proxy = Proxy.revocable({}, {});
+    proxy.revoke();
+    expect(transportDiagnostics(proxy.proxy)).toEqual({});
+    expect(
+      transportDiagnostics(
+        new Proxy(
+          {},
+          {
+            getPrototypeOf() {
+              throw new Error("PRIVATE_CANARY");
+            },
+          },
+        ),
+      ),
+    ).toEqual({});
+  });
   it("recognizes the real HTTP timeout and provider deadline without exception text", async () => {
     const timeout = await providerFetch(
       async (_input, init) =>

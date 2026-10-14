@@ -45,26 +45,31 @@ export type TransportDiagnostics = {
 };
 
 export function transportDiagnostics(error: unknown): TransportDiagnostics {
-  const pending: unknown[] = [error];
-  const seen = new Set<unknown>();
-  for (let index = 0; index < pending.length && index < 16; index++) {
-    const value = pending[index];
-    if (!value || typeof value !== "object" || seen.has(value)) continue;
-    seen.add(value);
-    const details = value as Record<string, unknown>;
-    // Native abort/deadline timeouts have numeric DOMException code 23.
-    // Normalize that runtime shape without accepting arbitrary provider-authored names.
-    if (value instanceof DOMException && value.name === "TimeoutError" && value.code === 23) {
-      return { transportCode: "ETIMEDOUT", transportPhase: "timeout" };
+  try {
+    const pending: unknown[] = [error];
+    const seen = new Set<unknown>();
+    for (let index = 0; index < pending.length && index < 16; index++) {
+      const value = pending[index];
+      if (!value || typeof value !== "object" || seen.has(value)) continue;
+      seen.add(value);
+      const details = value as Record<string, unknown>;
+      // Native abort/deadline timeouts have numeric DOMException code 23.
+      // Normalize that runtime shape without accepting arbitrary provider-authored names.
+      if (value instanceof DOMException && value.name === "TimeoutError" && value.code === 23) {
+        return { transportCode: "ETIMEDOUT", transportPhase: "timeout" };
+      }
+      const code = details.code;
+      if (typeof code === "string" && Object.hasOwn(transportPhases, code)) {
+        const transportCode = code as TransportCode;
+        return { transportCode, transportPhase: transportPhases[transportCode] };
+      }
+      if (pending.length < 16 && details.cause) pending.push(details.cause);
+      if (Array.isArray(details.errors))
+        pending.push(...details.errors.slice(0, 16 - pending.length));
     }
-    const code = details.code;
-    if (typeof code === "string" && Object.hasOwn(transportPhases, code)) {
-      const transportCode = code as TransportCode;
-      return { transportCode, transportPhase: transportPhases[transportCode] };
-    }
-    if (pending.length < 16 && details.cause) pending.push(details.cause);
-    if (Array.isArray(details.errors))
-      pending.push(...details.errors.slice(0, 16 - pending.length));
+  } catch {
+    // Diagnostics must never replace the provider failure or interrupt settlement.
+    return {};
   }
   return {};
 }

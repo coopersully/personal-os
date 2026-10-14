@@ -57,7 +57,7 @@ try {
     "/etc/alloy/config.alloy",
   );
   const address = docker("port", name, "12346").trim();
-  const plaidFailureCodes = [
+  const safeFailureCodes = [
     "plaid_invalid_response",
     "plaid_invalid_cursor",
     "plaid_transactions_cursor_invalid",
@@ -67,6 +67,9 @@ try {
     "plaid_configuration_missing",
     "plaid_sync_page_limit_exceeded",
     "plaid_sync_cursor_not_advancing",
+    "finance_encryption_configuration_missing",
+    "finance_provider_item_identity_mismatch",
+    "finance_provider_item_identity_conflict",
   ];
   const lines = [
     JSON.stringify({
@@ -101,7 +104,7 @@ try {
       capability: "PRIVATE_CANARY",
     }),
     "malformed_PRIVATE_CANARY",
-    ...plaidFailureCodes.map((code) =>
+    ...safeFailureCodes.map((code) =>
       JSON.stringify({
         event: "connector_sync_failed",
         provider: "plaid",
@@ -148,7 +151,7 @@ try {
       logs.includes("event=connector_capability_failed") &&
       logs.includes("status=500") &&
       logs.includes("status=204") &&
-      (logs.match(/received log entry/g) ?? []).length >= 4 + plaidFailureCodes.length
+      (logs.match(/received log entry/g) ?? []).length >= 4 + safeFailureCodes.length
     ) {
       break;
     }
@@ -168,10 +171,10 @@ try {
   assert.match(logs, /syncSource=scheduled/);
   assert.match(logs, /failureCount=(1000000|1e[+]06)/);
   assert.equal(logs.includes("PRIVATE_CANARY"), false, "Privacy filter forwarded private content");
-  for (const code of plaidFailureCodes) assert.ok(logs.includes(`code=${code}`));
+  for (const code of safeFailureCodes) assert.ok(logs.includes(`code=${code}`));
   assert.equal(
     (logs.match(/received log entry/g) ?? []).length,
-    4 + plaidFailureCodes.length,
+    4 + safeFailureCodes.length,
     "Unexpected records forwarded",
   );
   console.log("Alloy configuration and real log-pipeline privacy checks passed.");

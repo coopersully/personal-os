@@ -591,30 +591,34 @@ describe.sequential("connector service", () => {
       })
       .returning();
     if (!account) throw new Error("Missing fixture");
-    vi.mocked(provider.listCalendars).mockRejectedValueOnce(
-      new Error("PRIVATE_CANARY", {
-        cause: { code: "ECONNRESET", address: "PRIVATE_CANARY" },
-      }),
-    );
-    const options = { automatic: syncSource !== "manual", triggered: syncSource === "triggered" };
-    await expect(diagnostics.syncAccount(userId, account.id, options)).rejects.toMatchObject({
-      code: "service_unavailable",
-    });
-    for (const event of ["connector_capability_failed", "connector_sync_failed"]) {
-      expect(logs).toContainEqual(
-        expect.objectContaining({
-          event,
-          syncSource,
-          transportCode: "ECONNRESET",
-          transportPhase: "socket",
+    try {
+      vi.mocked(provider.listCalendars).mockRejectedValueOnce(
+        new Error("PRIVATE_CANARY", {
+          cause: { code: "ECONNRESET", address: "PRIVATE_CANARY" },
         }),
       );
+      const options = { automatic: syncSource !== "manual", triggered: syncSource === "triggered" };
+      await expect(diagnostics.syncAccount(userId, account.id, options)).rejects.toMatchObject({
+        code: "service_unavailable",
+      });
+      for (const event of ["connector_capability_failed", "connector_sync_failed"]) {
+        expect(logs).toContainEqual(
+          expect.objectContaining({
+            event,
+            syncSource,
+            transportCode: "ECONNRESET",
+            transportPhase: "socket",
+          }),
+        );
+      }
+      expect(JSON.stringify(logs)).not.toContain("PRIVATE_CANARY");
+      await diagnostics.syncAccount(userId, account.id);
+      expect(logs).toContainEqual(
+        expect.objectContaining({ event: "connector_sync_completed", syncSource: "manual" }),
+      );
+    } finally {
+      await database.db.delete(calendarAccounts).where(eq(calendarAccounts.id, account.id));
     }
-    expect(JSON.stringify(logs)).not.toContain("PRIVATE_CANARY");
-    await diagnostics.syncAccount(userId, account.id);
-    expect(logs).toContainEqual(
-      expect.objectContaining({ event: "connector_sync_completed", syncSource: "manual" }),
-    );
   });
 
   it("preserves safe attachment failure categories and records boundary diagnostics", async () => {

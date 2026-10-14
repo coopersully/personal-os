@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { toast } from "sonner";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -19,12 +19,10 @@ vi.mock("sonner", () => ({
   toast: { loading: vi.fn(() => "install-toast"), success: vi.fn(), error: vi.fn() },
 }));
 const ready = { phase: "ready", availableVersion: "0.2.0" };
-function mount() {
+function mount(cache = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return render(
     <MemoryRouter>
-      <QueryClientProvider
-        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-      >
+      <QueryClientProvider client={cache}>
         <DesktopRailUtilities />
       </QueryClientProvider>
     </MemoryRouter>,
@@ -108,4 +106,27 @@ it.each([
   mount();
   const pet = await screen.findByRole("link", { name: "Pet settings" });
   expect(pet.querySelector(".pet-portrait")).toHaveStyle(`--pet-face: ${face}`);
+});
+
+it("responds immediately to settings saves through the shared desktop cache", async () => {
+  mocks.settings.mockResolvedValue({ settings: { petEnabled: false, petColor: "#ffffff" } });
+  const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  mount(cache);
+  await waitFor(() => expect(cache.getQueryData(["desktop-settings"])).toBeDefined());
+  expect(screen.queryByRole("link", { name: "Pet settings" })).not.toBeInTheDocument();
+  act(() => {
+    cache.setQueryData(["desktop-settings"], {
+      settings: { petEnabled: true, petColor: "#ffffff" },
+    });
+  });
+  expect(await screen.findByRole("link", { name: "Pet settings" })).toBeInTheDocument();
+  act(() => {
+    cache.setQueryData(["desktop-settings"], {
+      settings: { petEnabled: false, petColor: "#ffffff" },
+    });
+  });
+  await waitFor(() =>
+    expect(screen.queryByRole("link", { name: "Pet settings" })).not.toBeInTheDocument(),
+  );
+  expect(mocks.settings).toHaveBeenCalledOnce();
 });

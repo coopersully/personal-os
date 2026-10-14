@@ -827,5 +827,6 @@ shared icon buttons, smaller than the 48px workspace destinations. The update co
 semantic blue circle boundary and contains only the download glyph. Downloading/installing states
 are disabled; a ready, verified update installs through the existing native updater on click.
 Discrete outcomes update one Sonner toast. The pet portrait mirrors the bundled native silhouette
-and selected color and opens Pet settings. Hidden/disabled pets and unavailable updates add no
+and selected color and opens Pet settings. Pet controls react to saved enablement and appearance
+through the shared desktop settings state without waiting for a polling interval. Hidden/disabled pets and unavailable updates add no
 control. These native controls do not appear in a browser or in a hidden rail.

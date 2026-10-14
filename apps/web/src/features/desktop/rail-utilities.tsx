@@ -43,7 +43,7 @@ export function DesktopRailUtilities() {
   const desktop = isDesktop();
   const status = useDesktopUpdateStatus();
   const settings = useQuery({
-    queryKey: ["desktop-status"],
+    queryKey: ["desktop-settings"],
     queryFn: getDesktopSettings,
     enabled: desktop,
     refetchInterval: 30000,

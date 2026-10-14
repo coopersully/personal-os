@@ -73,6 +73,12 @@ export interface GlassSurfaceProps {
     className?: string;
     style?: CSSProperties;
 }
+// WKWebView identifies AppleWebKit without Safari; Chrome also identifies AppleWebKit.
+export function svgBackdropEligible(userAgent: string) {
+    const webkit = /AppleWebKit/.test(userAgent) && !/(Chrome|Chromium)\//.test(userAgent);
+    return !webkit && !/Firefox/.test(userAgent);
+}
+
 const FAR = 1e20;
 const GLASS_VERTEX = `#version 300 es
 in vec2 aPosition;
@@ -753,9 +759,7 @@ const GlassSurface = ({ children, width = 200, height = 80, borderRadius = 20, b
         if (typeof window === 'undefined' || typeof document === 'undefined') {
             return false;
         }
-        const isWebkit = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent);
-        const isFirefox = /Firefox/.test(navigator.userAgent);
-        if (isWebkit || isFirefox) {
+        if (!svgBackdropEligible(navigator.userAgent)) {
             return false;
         }
         const div = document.createElement('div');

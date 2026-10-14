@@ -7,7 +7,7 @@ import { getDesktopSettings, isDesktop, nativeAction } from "@/features/desktop/
 export function TodayPetCard() {
   const [pending, setPending] = useState(false);
   const query = useQuery({
-    queryKey: ["desktop-status"],
+    queryKey: ["desktop-settings"],
     queryFn: getDesktopSettings,
     enabled: isDesktop(),
     refetchInterval: 30000,

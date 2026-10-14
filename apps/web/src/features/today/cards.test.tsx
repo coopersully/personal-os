@@ -109,7 +109,12 @@ it("renders no current ritual honestly without calling a native launch", async (
 it("keeps connection failures independent of review navigation", async () => {
   vi.spyOn(api, "listConnectors").mockRejectedValue(new Error("unavailable"));
   vi.spyOn(api, "getFinanceStatus").mockRejectedValue(new Error("unavailable"));
-  setup(<TodayAttention />);
-  expect(await screen.findByText("Some connections could not be checked")).toBeInTheDocument();
+  const feedback = vi.spyOn(toast, "error");
+  const { container } = setup(<TodayAttention />);
+  await waitFor(() =>
+    expect(feedback).toHaveBeenCalledWith("Couldn’t check connections.", expect.any(Object)),
+  );
+  expect(container).toBeEmptyDOMElement();
+  expect(screen.queryByText("Some connections could not be checked")).not.toBeInTheDocument();
   expect(screen.queryByRole("link", { name: /Open calendar attention/ })).not.toBeInTheDocument();
 });

@@ -1,5 +1,29 @@
 # Feedback and validation
 
+## Feedback placement is a hard constraint
+
+**Never insert an Alert, error banner, loading/status row, or diagnostic card into a bento
+layout, workspace rail, sidebar, or top navigation.** Those surfaces own content and navigation;
+request failures must not change their children, spacing, order, or dimensions. A different tag,
+`role="status"`, warning-colored button, or ordinary Card wrapping the message does not exempt it.
+
+Essential account/page reads failing, including background refresh with cached material, replace
+the affected screen with one shared blocking error surface and one recovery action. A broad outage
+must never become a stack of independent warnings over stale interactive content. Keep mounted
+observers/drafts inaccessible behind the boundary so recovery can complete without losing edits.
+
+Isolated optional refresh failures use deduplicated Sonner feedback, retaining the component's
+allocated geometry; initial loading uses a reserved skeleton within the owning component or a
+shared page loading boundary. Never add a loading item to a grid. Unknown counts stay unknown
+inside the normal count slot; navigation labels remain destinations, never failure/progress copy.
+Actual connector recovery work may be represented as ordinary actionable product content, but a
+failed request to check connectors must never manufacture an attention card. Detailed diagnostic
+states belong in the relevant labelled detail/settings surface.
+
+Regression coverage must exercise cached-data outages, recovery, isolated optional failures, and
+verify that no alert/status item appears in the grid, rail, sidebar, or navigation. These placement
+constraints override the generic contextual Alert guidance below.
+
 ## Stable asynchronous layout
 
 Accepted UX rule, 2026-10-12: loading and refreshing belong inside the component that owns the

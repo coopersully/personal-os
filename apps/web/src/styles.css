@@ -1500,19 +1500,7 @@ p {
 .calendar-app-bar__weekends {
   flex: 0 0 auto;
 }
-.offline-banner {
-  align-items: center;
-  background: var(--status-warning-surface);
-  color: var(--status-warning-foreground);
-  display: flex;
-  font-size: 11px;
-  gap: 7px;
-  justify-content: center;
-  padding: 7px;
-  position: sticky;
-  top: 0;
-  z-index: 30;
-}
+
 .content {
   margin: 0 auto;
   max-width: 1440px;
@@ -7672,3 +7660,18 @@ html.pet-window #root {
 
 /* Preserve the shell's floating mobile-dock clearance inside the full-page backdrop. */
 @media (max-width: 900px) { .today-layout { padding-bottom: calc(92px + env(safe-area-inset-bottom)); } }
+
+/* One top-layer recovery screen blocks the shell and any existing portals. */
+.read-failure-screen {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--background);
+  color: var(--foreground);
+}

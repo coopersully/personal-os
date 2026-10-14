@@ -44,9 +44,9 @@ it.each([
 it("surfaces failed counts instead of claiming there is no work", async () => {
   mocks.listAgentAccessWorkItems.mockRejectedValue(new Error("Unavailable"));
   renderEntry();
-  const button = await screen.findByRole("button", { name: "Check review status" });
-  expect(button).toHaveAttribute("data-attention", "true");
-  expect(button.querySelector(".review-navigation__count")).toHaveTextContent("!");
+  const button = await screen.findByRole("button", { name: "Reviews" });
+  expect(button).not.toHaveAttribute("data-attention");
+  expect(button.querySelector(".review-navigation__count")).toHaveTextContent("—");
 });
 
 it.each([
@@ -95,9 +95,9 @@ it("marks an unavailable domain honestly even when a stale count remains", async
     unavailableDomains: ["calendar"],
   });
   renderEntry();
-  const button = await screen.findByRole("button", { name: "Check review status" });
-  expect(button).toHaveAttribute("data-attention", "true");
-  expect(button.querySelector(".review-navigation__count")).toHaveTextContent("!");
+  const button = await screen.findByRole("button", { name: "Reviews" });
+  expect(button).not.toHaveAttribute("data-attention");
+  expect(button.querySelector(".review-navigation__count")).toHaveTextContent("—");
   expect(screen.queryByRole("button", { name: "3 items need review" })).not.toBeInTheDocument();
 });
 
@@ -137,6 +137,6 @@ it("Today exposes uncertain review sources without claiming zero work", async ()
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  await userEvent.click(await screen.findByRole("button", { name: "Check review status" }));
+  await userEvent.click(await screen.findByRole("button", { name: "Reviews" }));
   expect(await screen.findAllByRole("menuitem")).toHaveLength(4);
 });

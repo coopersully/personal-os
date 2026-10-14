@@ -101,15 +101,28 @@ test("Today uses standard settings, collapsible commitments and shared record su
       .evaluateAll((elements) => elements.map((element) => getComputedStyle(element).fontSize));
     expect(new Set(headers).size).toBe(1);
     await page.screenshot({ path: info.outputPath("today-personalized.png"), fullPage: true });
-    // Timeline and weather outages must not hide the independent weekly queue or location control.
+    // Essential read failures replace the entire screen with one recovery surface.
     await page.route("**/v1/daily-brief**", (route) => route.abort());
+    await page.route("**/v1/weather**", (route) => route.abort());
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Can’t connect" })).toBeVisible();
+    await expect(page.getByRole("alert")).toHaveCount(1);
+    await expect(page.getByRole("navigation", { name: "Top navigation" })).toBeHidden();
+    await expect(queue).toBeHidden();
+    await page.screenshot({ path: info.outputPath("today-outage.png"), fullPage: true });
+    await page.unroute("**/v1/daily-brief**");
+    await page.unroute("**/v1/weather**");
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect(queue.getByRole("heading", { name: "Your commitments" })).toBeVisible();
+    await expect(
+      page.locator(".today-layout [role=alert], .today-layout [role=status]"),
+    ).toHaveCount(0);
+    // An isolated optional weather failure does not add grid/status items or block commitments.
     await page.route("**/v1/weather**", (route) => route.abort());
     await page.reload();
     await expect(queue.getByRole("heading", { name: "Your commitments" })).toBeVisible();
     await expect(page.locator(".workspace-app-bar__weather-location")).toBeVisible();
-    await expect(
-      page.getByRole("navigation", { name: "Top navigation" }).locator(".review-navigation"),
-    ).toBeVisible();
+    await page.unroute("**/v1/weather**");
     await page.goto("/calendar?view=day");
     const calendarRecord = page.locator(".calendar-timeline-event").first();
     await page.mouse.move(0, 0);

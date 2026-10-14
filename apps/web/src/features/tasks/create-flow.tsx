@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
-import { QueryFeedback } from "@/components/async-state";
+import { InlineError } from "@/components/async-state";
 import {
   ChevronRightIcon,
   ClockIcon,
@@ -180,9 +180,21 @@ function CreationFlow({
             </div>
           ) : (
             <>
-              <QueryFeedback query={lists} title="Couldn’t load lists." />
+              {lists.isError ? (
+                <InlineError
+                  error={lists.error}
+                  retry={lists.refetch}
+                  title="Couldn’t load lists."
+                />
+              ) : null}
               {step === "task" ? (
-                <QueryFeedback query={projects} title="Couldn’t load projects." />
+                projects.isError ? (
+                  <InlineError
+                    error={projects.error}
+                    retry={projects.refetch}
+                    title="Couldn’t load projects."
+                  />
+                ) : null
               ) : null}
               <FieldGroup>
                 <Field>

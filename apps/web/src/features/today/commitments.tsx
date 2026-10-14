@@ -3,9 +3,9 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import { Fragment, type MouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/api";
+import { QueryFeedback } from "@/components/async-state";
 import { ChevronDownIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { CardContent, CardFooter } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ItemGroup } from "@/components/ui/item";
@@ -19,6 +19,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useWorkspacePreferences } from "@/features/workspace-settings/preferences";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTodayPreferences } from "./preferences";
@@ -180,31 +181,37 @@ function CommitmentPage({
     .sort((a, b) => a - b);
   return (
     <>
+      <QueryFeedback
+        query={{
+          ...query,
+          isError: query.isError || !!query.data?.unavailableSources.length,
+          data: query.isError ? query.data : undefined,
+          refetch: async () => {
+            const result = await query.refetch();
+            if (result.data?.unavailableSources.length)
+              throw new Error("Commitment source unavailable");
+            return result;
+          },
+        }}
+        title={
+          query.isError
+            ? "Couldn’t refresh commitments."
+            : "Some commitment sources are unavailable."
+        }
+      />
       <CardContent className="today-commitments" aria-busy={busy}>
         {!query.data ? (
-          <div className="min-h-48" aria-busy={query.isPending}>
-            {query.isError ? (
-              <Button variant="outline" onClick={refresh}>
-                Retry commitments
-              </Button>
-            ) : (
-              <span className="text-muted-foreground">Loading commitments…</span>
-            )}
-          </div>
+          <Skeleton
+            className="min-h-48"
+            aria-label="Loading commitments"
+            aria-busy={query.isPending}
+          />
         ) : (
           <>
             <p className="text-sm text-muted-foreground">
               {weekLabel(query.data.weekStart, query.data.weekEndExclusive)} · {total ?? "Unknown"}{" "}
               commitments
             </p>
-            {query.isError || query.data.unavailableSources.length ? (
-              <p className="text-sm text-muted-foreground">
-                Some commitments could not be refreshed.{" "}
-                <Button variant="link" onClick={refresh}>
-                  Refresh
-                </Button>
-              </p>
-            ) : null}
             {query.data.items.length ? (
               <div className="today-commitment-groups">
                 {(Object.keys(labels) as Array<keyof typeof labels>).map((group) => {

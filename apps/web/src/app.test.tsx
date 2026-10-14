@@ -2941,7 +2941,7 @@ describe("ilo web app", () => {
     window.history.replaceState({}, "", "/");
   });
 
-  it("renders fatal and inline failures", async () => {
+  it("renders one blocking screen for account and essential Today failures", async () => {
     mocks.getMe.mockRejectedValueOnce(new TypeError("Load failed"));
     const offline = setup();
     expect(await screen.findByRole("heading", { name: "Can’t connect" })).toBeInTheDocument();
@@ -2956,7 +2956,27 @@ describe("ilo web app", () => {
     mocks.getMe.mockResolvedValueOnce(user);
     mocks.getDailyBrief.mockRejectedValue(new Error("calendar unavailable"));
     setup();
-    expect(await screen.findByText("Couldn’t load this material.")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Can’t connect" })).toBeVisible();
+    expect(screen.queryByRole("navigation", { name: "Top navigation" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Couldn’t load this material.")).not.toBeInTheDocument();
+  });
+
+  it("blocks a cached account refresh failure without warnings in the shell or Today grid", async () => {
+    const view = setup();
+    await screen.findByRole("heading", { name: "Your commitments" });
+    mocks.getMe.mockRejectedValue(new TypeError("Connection unavailable"));
+    await act(async () => {
+      await view.queryClient.refetchQueries({ queryKey: ["me"] });
+    });
+    expect(await screen.findByRole("heading", { name: "Can’t connect" })).toBeVisible();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.queryByRole("navigation", { name: "Top navigation" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Your commitments" })).not.toBeInTheDocument();
+    expect(document.querySelector(".today-layout [role=alert]")).toBeNull();
+    expect(screen.queryByText("Couldn’t refresh your account.")).not.toBeInTheDocument();
+    mocks.getMe.mockResolvedValue(user);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("heading", { name: "Your commitments" })).toBeVisible();
   });
 
   it("keeps desktop workspaces directly reachable beside contextual navigation", async () => {
@@ -3035,7 +3055,7 @@ describe("ilo web app", () => {
     "mail",
     "tasks",
     "finances",
-  ])("puts the compact switcher and review alert in the mobile %s header", async (workspace) => {
+  ])("puts the compact switcher and review navigation in the mobile %s header", async (workspace) => {
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
       value: vi.fn().mockReturnValue({
@@ -3053,7 +3073,7 @@ describe("ilo web app", () => {
       "data-active",
       "true",
     );
-    expect(await within(header).findByRole("button", { name: /review/ })).toBeInTheDocument();
+    expect(await within(header).findByRole("button", { name: /review/i })).toBeInTheDocument();
     const dock = screen.queryByRole("navigation", { name: "Workspace dock" });
     if (dock) {
       expect(
@@ -5046,9 +5066,13 @@ describe("ilo web app", () => {
       items: [inboxTaskList, workTaskList],
       nextCursor: null,
     });
-    await browser.click(screen.getByRole("button", { name: "Try again" }));
+    await browser.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Try again" }),
+    );
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument(),
+      expect(
+        within(screen.getByRole("dialog")).queryByRole("button", { name: "Try again" }),
+      ).not.toBeInTheDocument(),
     );
     listFailure.unmount();
 
@@ -5061,9 +5085,13 @@ describe("ilo web app", () => {
       await within(screen.getByRole("dialog")).findByText(/Couldn’t load (projects|this material)/),
     ).toBeInTheDocument();
     mocks.listTaskProjects.mockResolvedValue({ items: [launchTaskProject], nextCursor: null });
-    await browser.click(screen.getByRole("button", { name: "Try again" }));
+    await browser.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Try again" }),
+    );
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument(),
+      expect(
+        within(screen.getByRole("dialog")).queryByRole("button", { name: "Try again" }),
+      ).not.toBeInTheDocument(),
     );
     projectFailure.unmount();
   });
@@ -6492,7 +6520,9 @@ describe("ilo web app", () => {
   it("explains a completed-reminder query failure on Today", async () => {
     mocks.listReminders.mockRejectedValueOnce(new Error("Completed reminders unavailable"));
     const view = setup();
-    expect(await screen.findByText("Completed history unavailable.")).toBeInTheDocument();
+    expect(await screen.findByText("Couldn’t refresh completed reminders.")).toBeInTheDocument();
+    expect(screen.queryByText("Completed history unavailable.")).not.toBeInTheDocument();
+    expect(document.querySelector(".today-layout [role=alert]")).toBeNull();
     expect(screen.getByRole("heading", { name: "Your commitments" })).toBeInTheDocument();
     view.unmount();
   });
@@ -6640,7 +6670,8 @@ describe("ilo web app", () => {
 
     Object.defineProperty(window.navigator, "onLine", { configurable: true, value: false });
     fireEvent(window, new Event("offline"));
-    expect(await screen.findByText(/Offline/)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Can’t connect" })).toBeVisible();
+    Object.defineProperty(window.navigator, "onLine", { configurable: true, value: true });
     fireEvent(window, new Event("online"));
   }, 30_000);
 
@@ -8916,7 +8947,9 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     await browser.click(await screen.findByRole("button", { name: "Compose a message" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Mail accounts are unavailable");
-    await browser.click(screen.getByRole("button", { name: "Try again" }));
+    await browser.click(
+      within(screen.getByRole("alert")).getByRole("button", { name: "Try again" }),
+    );
     expect(await screen.findByLabelText("From")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled();
     setupErrorView.unmount();

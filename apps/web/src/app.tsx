@@ -178,13 +178,16 @@ import {
   UserCircleIcon,
   UserIcon,
   UsersIcon,
-  WifiOffIcon,
   XIcon,
 } from "@/components/icons";
 import { LogoMark } from "@/components/logo-mark";
 import { OccasionCard } from "@/components/occasion-card";
 import { OfflineState } from "@/components/offline-state";
 import { QuoteCard } from "@/components/quote-card";
+import {
+  ReadFailureBoundary,
+  RecoveryToastTargetContext,
+} from "@/components/read-failure-boundary";
 import {
   ResponsiveDialog,
   ResponsiveDialogBody,
@@ -329,7 +332,12 @@ import { ConnectionAuthorizationOutcome } from "@/features/connections/authoriza
 import { TaskCreationProgress } from "@/features/tasks/creation-progress";
 import { api, isUnauthorized } from "./api.js";
 import { scrollTimelineToMinute } from "./calendar-timeline.js";
-import { InlineError, PageLoading, QueryFeedback } from "./components/async-state.js";
+import {
+  InlineError,
+  PageLoading,
+  QueryFeedback,
+  useQueryFeedback,
+} from "./components/async-state.js";
 import { useConfirmAction } from "./components/confirm-action.js";
 import { FeedbackForm } from "./components/feedback-form.js";
 import { MobileWorkspaceDock } from "./components/mobile-workspace-dock.js";
@@ -583,13 +591,17 @@ export function App() {
 
 function SessionApp() {
   const me = useQuery({ queryFn: api.getMe, queryKey: ["me"] });
+  const [toastTarget, setToastTarget] = useState<HTMLElement | null>(null);
+  const feedback = (
+    <Toaster
+      theme={typeof window.matchMedia === "function" ? (me.data?.theme ?? "system") : "light"}
+    />
+  );
   return (
-    <>
+    <RecoveryToastTargetContext.Provider value={setToastTarget}>
       <AppContent me={me} />
-      <Toaster
-        theme={typeof window.matchMedia === "function" ? (me.data?.theme ?? "system") : "light"}
-      />
-    </>
+      {toastTarget ? createPortal(feedback, toastTarget) : feedback}
+    </RecoveryToastTargetContext.Provider>
   );
 }
 
@@ -626,8 +638,9 @@ function AppContent({ me }: { me: UseQueryResult<User> }) {
     );
   return (
     <TooltipProvider>
-      <QueryFeedback query={me} title="Couldn’t refresh your account." staleOnly />
-      <AuthenticatedExperience user={me.data as User} />
+      <ReadFailureBoundary>
+        <AuthenticatedExperience user={me.data as User} />
+      </ReadFailureBoundary>
     </TooltipProvider>
   );
 }
@@ -1236,7 +1249,6 @@ function AuthenticatedApp({ user }: { user: User }) {
   );
   useDesktopActions(desktopCapture);
   const [calendarTodaySnap, setCalendarTodaySnap] = useState(0);
-  const [online, setOnline] = useState(navigator.onLine);
   const [pinned, setPinned] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(storedSidebarWidth);
   const [railCollapsed, setRailCollapsed] = useState(() => {
@@ -1340,17 +1352,6 @@ function AuthenticatedApp({ user }: { user: User }) {
     queryFn: api.getFinanceInbox,
     queryKey: ["finance-inbox"],
   });
-
-  useEffect(() => {
-    const connect = () => setOnline(true);
-    const disconnect = () => setOnline(false);
-    window.addEventListener("online", connect);
-    window.addEventListener("offline", disconnect);
-    return () => {
-      window.removeEventListener("online", connect);
-      window.removeEventListener("offline", disconnect);
-    };
-  }, []);
 
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
@@ -1551,14 +1552,6 @@ function AuthenticatedApp({ user }: { user: User }) {
         />
         <WorkspaceLayout
           contentMode={isCalendarWorkspace || sidebarMode === "mail" ? "panes" : "page"}
-          banner={
-            !online && (
-              <div className="offline-banner">
-                <WifiOffIcon className="size-[15px]" /> Offline — changes are paused until you
-                reconnect.
-              </div>
-            )
-          }
           primaryNavigation={
             shellPathname === "/settings" ? (
               isMobileWorkspaceDock ? (
@@ -2395,6 +2388,7 @@ function TodayPage({
     queryFn: () => api.listReminders({ completed: true, limit: 100 }),
     queryKey: ["reminders", "completed"],
   });
+  useQueryFeedback({ query: completedReminders, title: "Couldn’t refresh completed reminders." });
   const agenda = brief.data ?? {
     allDay: [],
     anytime: [],
@@ -2519,12 +2513,6 @@ function TodayPage({
         }
       />
       <TodayAttention />
-      <QueryFeedback query={brief} title="Couldn’t refresh today’s plan." staleOnly />
-      <QueryFeedback
-        query={completedReminders}
-        title="Couldn’t refresh completed reminders."
-        staleOnly
-      />
       <section className="day-column">
         <ShadcnCard role="region" aria-label="Today's calendar" className="today-schedule">
           <ShadcnCardHeader>
@@ -2554,13 +2542,11 @@ function TodayPage({
               </section>
             ) : null}
             {!brief.data ? (
-              brief.isError ? (
-                <InlineError error={brief.error} retry={brief.refetch} />
-              ) : (
-                <div className="min-h-48" aria-busy="true">
-                  Loading your timeline…
-                </div>
-              )
+              <Skeleton
+                className="min-h-48"
+                aria-label="Loading timeline"
+                aria-busy={brief.isPending}
+              />
             ) : timelineItems.length > 0 ? (
               <TodayTimeline
                 calendarColorsById={calendarColorsById}
@@ -2648,9 +2634,6 @@ function TodayPage({
               />
             )}
           >
-            {completedReminders.isError && !completedReminders.data ? (
-              <p className="text-sm text-muted-foreground">Completed history unavailable.</p>
-            ) : null}
             {doneToday.length > 0 || doneTasksToday.length > 0 ? (
               <ShadcnCollapsible className="today-history">
                 <ShadcnCollapsibleTrigger className="today-history__trigger" type="button">

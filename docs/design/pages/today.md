@@ -69,9 +69,15 @@ send task/event data or log keys/precise coordinates. See the external-boundary 
 
 ## State and responsive rules
 
-- Independent cards survive timeline, completed-history, weather or provider failures.
-- Keep cached material on refresh failure. Show source uncertainty beside the affected content;
-  manual refresh and native action outcomes use one Sonner toast.
+- Essential account, timeline or commitment reads failing block the whole screen with one shared
+  error/retry surface, including failed background refresh with cached data. Do not let a broad
+  outage scatter warnings across the shell and cards. Preserve mounted observers and drafts.
+- Optional completed-history, weather and provider-check failures retain card geometry and use
+  deduplicated Sonner. Failed connector checks never create an attention card. Navigation remains
+  navigation; unknown review counts occupy the normal count slot without warning/progress labels.
+- No alerts, loading/status rows or diagnostic cards may be inserted into the bento grid, navigation,
+  rail or sidebar. Reserved loading skeletons stay inside their owning component. Manual refresh
+  and native action outcomes use one Sonner toast.
 - Desktop uses two independently sized bento columns: timeline on the left; natural-height commitments, Spending, ritual and pet cards on the right. Mobile stacks them with no horizontal page overflow; urgent attention precedes both. Weather/Map fill the complete content area, including remaining viewport space, rather than a card-sized inset.
 - Cards use default shadcn CardHeader, CardTitle, CardDescription, CardContent and CardFooter, with consistent title/description type sizes. Pagination belongs in the commitment footer; categories show the number of rows on the current page. Cursor jumps follow the existing bound cursor sequence; unavailable source totals stay explicitly unknown. Small screens condense long page ranges to first/current/last links and preserve floating workspace-dock clearance inside the full-page background.
 - Long titles truncate visually with full accessible names and existing detail access.

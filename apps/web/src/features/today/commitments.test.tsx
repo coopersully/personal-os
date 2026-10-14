@@ -189,7 +189,7 @@ it("does not invent a page total when a commitment source is unavailable", async
     unavailableSources: ["reminders"],
   }));
   await screen.findByText("Page 1 · total unavailable");
-  expect(screen.getByText(/Some commitments could not be refreshed/)).toBeVisible();
+  expect(screen.queryByText(/Some commitments could not be refreshed/)).not.toBeInTheDocument();
 });
 
 it("condenses a long mobile page range without hiding the current or endpoint pages", async () => {

@@ -2,6 +2,7 @@
 import { ApiClientError } from "@personal-os/api-client";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { toast } from "sonner";
 import { describe, expect, it, vi } from "vitest";
 import { InlineError, PageLoading, QueryFeedback } from "./async-state.js";
 
@@ -46,40 +47,52 @@ describe("query feedback", () => {
     expect(screen.queryByText(/private diagnostic/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Try refreshing/)).not.toBeInTheDocument();
   });
-  it("marks retained data as stale and exposes refetch without removing children", async () => {
-    const refetch = vi.fn();
-    render(
-      <>
-        <p>Saved event</p>
-        <QueryFeedback
-          query={{ isError: true, error: new Error("secret"), data: [], refetch }}
-          title="Couldn’t refresh your calendar."
-        />
-      </>,
-    );
-    expect(screen.getByText("Saved event")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Showing the last available update");
-    await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }));
-    expect(refetch).toHaveBeenCalledOnce();
-  });
-  it("shows initial failures, hides stale-only initial failures, and clears recovered query feedback", () => {
-    const failed = { isError: true, error: new Error("secret") };
-    const { rerender } = render(<QueryFeedback query={failed} title="Couldn’t load notes." />);
-    expect(screen.getByRole("status")).toHaveTextContent("Couldn’t load notes.");
-    expect(screen.getByRole("status")).not.toHaveTextContent("last available update");
-    rerender(<QueryFeedback query={failed} title="Couldn’t load notes." staleOnly />);
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    rerender(
-      <QueryFeedback query={{ ...failed, data: null }} title="Couldn’t refresh notes." staleOnly />,
-    );
-    expect(screen.getByRole("status")).toHaveTextContent("last available update");
-    rerender(
+  it("retains stale data and sends refresh failures to Sonner without any layout node", async () => {
+    const feedback = vi.spyOn(toast, "error");
+    const promise = vi.spyOn(toast, "promise");
+    const refetch = vi.fn().mockResolvedValue({ isError: false });
+    const { container, rerender } = render(
       <QueryFeedback
-        query={{ ...failed, data: [], isError: false }}
-        title="Couldn’t load notes."
+        query={{ isError: true, error: new Error("secret"), data: [], refetch }}
+        title="Couldn’t refresh your calendar."
       />,
     );
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
+    expect(feedback).toHaveBeenCalledWith(
+      "Couldn’t refresh your calendar.",
+      expect.objectContaining({
+        description: "Showing the last available update.",
+        action: expect.objectContaining({ label: "Try again" }),
+      }),
+    );
+    const options = feedback.mock.calls.at(-1)?.[1];
+    const action = options?.action;
+    if (action && typeof action === "object" && "onClick" in action) action.onClick({} as never);
+    expect(refetch).toHaveBeenCalledOnce();
+    expect(promise).toHaveBeenCalled();
+    rerender(
+      <QueryFeedback
+        query={{ isError: false, error: null, data: [] }}
+        title="Couldn’t refresh your calendar."
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
+    vi.restoreAllMocks();
+  });
+  it("announces initial failures through Sonner, while stale-only ignores initial failures", () => {
+    const feedback = vi.spyOn(toast, "error");
+    const failed = { isError: true, error: new Error("secret") };
+    const { container, rerender } = render(
+      <QueryFeedback query={failed} title="Couldn’t load notes." staleOnly />,
+    );
+    expect(feedback).not.toHaveBeenCalled();
+    rerender(<QueryFeedback query={failed} title="Couldn’t load notes." />);
+    expect(feedback).toHaveBeenCalledWith(
+      "Couldn’t load notes.",
+      expect.objectContaining({ description: "Try again in a moment." }),
+    );
+    expect(container).toBeEmptyDOMElement();
+    vi.restoreAllMocks();
   });
   it("makes loading perceivable to assistive technology", () => {
     render(<PageLoading />);

@@ -52,6 +52,11 @@ export function transportDiagnostics(error: unknown): TransportDiagnostics {
     if (!value || typeof value !== "object" || seen.has(value)) continue;
     seen.add(value);
     const details = value as Record<string, unknown>;
+    // Native abort/deadline timeouts have numeric DOMException code 23.
+    // Normalize that runtime shape without accepting arbitrary provider-authored names.
+    if (value instanceof DOMException && value.name === "TimeoutError" && value.code === 23) {
+      return { transportCode: "ETIMEDOUT", transportPhase: "timeout" };
+    }
     const code = details.code;
     if (typeof code === "string" && Object.hasOwn(transportPhases, code)) {
       const transportCode = code as TransportCode;

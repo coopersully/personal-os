@@ -2,6 +2,31 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { collectDiagnostics, summarizeConnectorLogs } from "./diagnostics.mjs";
 
+test("preserves fixed Plaid projection and cursor failure codes", () => {
+  for (const code of [
+    "plaid_invalid_response",
+    "plaid_invalid_cursor",
+    "plaid_transactions_cursor_invalid",
+    "plaid_invalid_cursor_replay_in_progress",
+    "plaid_invalid_cursor_replay_failed",
+    "plaid_account_missing_from_item",
+    "plaid_configuration_missing",
+    "plaid_sync_page_limit_exceeded",
+    "plaid_sync_cursor_not_advancing",
+  ]) {
+    const summary = summarizeConnectorLogs(
+      JSON.stringify({
+        event: "connector_sync_failed",
+        provider: "plaid",
+        code,
+        message: "PRIVATE_CANARY",
+      }),
+    );
+    assert.equal(summary.events[0].code, code);
+    assert.ok(!JSON.stringify(summary).includes("PRIVATE_CANARY"));
+  }
+});
+
 test("diagnostics retain only safe connector fields, never provider payloads or account identities", () => {
   const logs = [
     JSON.stringify({

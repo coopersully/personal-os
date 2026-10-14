@@ -137,12 +137,13 @@ const transactionPageSchema = z.object({
     .optional(),
 });
 
-function transportFailure(): ConnectorError {
+function transportFailure(transportCause: unknown): ConnectorError {
   return new ConnectorError({
     category: "transport",
     code: "plaid_transport_failure",
     disposition: "retry",
     message: "Plaid is temporarily unavailable.",
+    transportCause,
   });
 }
 
@@ -204,8 +205,8 @@ export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConne
         headers: { "content-type": "application/json" },
         method: "POST",
       });
-    } catch {
-      throw transportFailure();
+    } catch (error) {
+      throw transportFailure(error);
     }
     if (!response.ok) {
       if (await isInvalidCursorResponse(response.clone())) {

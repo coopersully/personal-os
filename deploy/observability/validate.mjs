@@ -57,6 +57,17 @@ try {
     "/etc/alloy/config.alloy",
   );
   const address = docker("port", name, "12346").trim();
+  const plaidFailureCodes = [
+    "plaid_invalid_response",
+    "plaid_invalid_cursor",
+    "plaid_transactions_cursor_invalid",
+    "plaid_invalid_cursor_replay_in_progress",
+    "plaid_invalid_cursor_replay_failed",
+    "plaid_account_missing_from_item",
+    "plaid_configuration_missing",
+    "plaid_sync_page_limit_exceeded",
+    "plaid_sync_cursor_not_advancing",
+  ];
   const lines = [
     JSON.stringify({
       event: "connector_capability_failed",
@@ -90,6 +101,14 @@ try {
       capability: "PRIVATE_CANARY",
     }),
     "malformed_PRIVATE_CANARY",
+    ...plaidFailureCodes.map((code) =>
+      JSON.stringify({
+        event: "connector_sync_failed",
+        provider: "plaid",
+        code,
+        message: "PRIVATE_CANARY",
+      }),
+    ),
     // The final record marks completion of this ordered stream, including rejected inputs.
     JSON.stringify({ event: "request", status: 204 }),
   ];
@@ -129,7 +148,7 @@ try {
       logs.includes("event=connector_capability_failed") &&
       logs.includes("status=500") &&
       logs.includes("status=204") &&
-      (logs.match(/received log entry/g) ?? []).length >= 4
+      (logs.match(/received log entry/g) ?? []).length >= 4 + plaidFailureCodes.length
     ) {
       break;
     }
@@ -149,7 +168,12 @@ try {
   assert.match(logs, /syncSource=scheduled/);
   assert.match(logs, /failureCount=(1000000|1e[+]06)/);
   assert.equal(logs.includes("PRIVATE_CANARY"), false, "Privacy filter forwarded private content");
-  assert.equal((logs.match(/received log entry/g) ?? []).length, 4, "Unexpected records forwarded");
+  for (const code of plaidFailureCodes) assert.ok(logs.includes(`code=${code}`));
+  assert.equal(
+    (logs.match(/received log entry/g) ?? []).length,
+    4 + plaidFailureCodes.length,
+    "Unexpected records forwarded",
+  );
   console.log("Alloy configuration and real log-pipeline privacy checks passed.");
 } finally {
   try {

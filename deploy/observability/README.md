@@ -99,7 +99,9 @@ Those are external boundaries; passing local tests does not establish them.
 Connector failures include `transportCode` and `transportPhase` when the exception contains a known
 runtime code. Phases are `dns`, `tls`, `socket`, and `timeout`; codes include `ENOTFOUND`,
 `EAI_AGAIN`, `CERT_HAS_EXPIRED`, `ERR_TLS_CERT_ALTNAME_INVALID`, `ECONNRESET`, `ECONNREFUSED`,
-and the explicitly enumerated Node/Undici timeout codes. Extraction follows at most 16 exception
+and the explicitly enumerated Node/Undici timeout codes. Native `TimeoutError` DOMExceptions from
+HTTP abort signals and provider deadlines normalize to `ETIMEDOUT`; arbitrary names or exception
+messages are not accepted as timeout evidence. Extraction follows at most 16 exception
 nodes, including nested causes and aggregate errors, and emits the first recognized code. It does
 not preserve the exception itself or infer a cause from its message. Unknown causes remain unknown.
 These details do not change retry, reconnect, or authorization decisions.

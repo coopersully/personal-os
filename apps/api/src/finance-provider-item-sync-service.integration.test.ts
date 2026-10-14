@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { ConnectorError, type PlaidConnector } from "@personal-os/connectors";
+import { ConnectorError, createPlaidConnector, type PlaidConnector } from "@personal-os/connectors";
 import {
   auditEvents,
   createDatabaseClient,
@@ -1594,6 +1594,42 @@ describe.sequential("Finance Provider Item synchronization", () => {
     ).rejects.toMatchObject({ code: "service_unavailable" });
     expect(getAccounts).not.toHaveBeenCalled();
     expect(syncTransactions).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["ENOTFOUND", "dns"],
+    ["CERT_HAS_EXPIRED", "tls"],
+    ["ECONNRESET", "socket"],
+  ])("logs sanitized %s from the real Plaid connector", async (code, transportPhase) => {
+    const { accounts, userId } = await fixture({ accountCount: 1 });
+    const target = accounts[0];
+    if (!target) throw new Error("Transport target was not created.");
+    const logs: RequestLog[] = [];
+    const provider = createPlaidConnector({
+      clientId: "PRIVATE_CANARY",
+      secret: "PRIVATE_CANARY",
+      environment: "sandbox",
+      fetch: async () => {
+        throw new TypeError("PRIVATE_CANARY", {
+          cause: Object.assign(new Error("PRIVATE_CANARY"), { code, hostname: "PRIVATE_CANARY" }),
+        });
+      },
+    });
+    await expect(
+      service(provider, (entry) => logs.push(entry)).syncAccount(target.id, {
+        principal: principal(userId),
+        requestId: "transport-diagnostics",
+      }),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+    expect(logs).toEqual([
+      expect.objectContaining({
+        event: "connector_sync_failed",
+        code: "plaid_transport_failure",
+        transportCode: code,
+        transportPhase,
+      }),
+    ]);
+    expect(JSON.stringify(logs)).not.toContain("PRIVATE_CANARY");
   });
 
   it("preserves an in-progress replay marker across an automatic transport failure and logs safely", async () => {

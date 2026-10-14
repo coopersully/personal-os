@@ -15,7 +15,7 @@ const events = new Set([
   "connector_recovery_failed",
 ]);
 const codePattern =
-  /^(google|icloud_calendar|icloud_mail|plaid|connector)_(authorization_failed|permission_missing|permission_denied|configuration_invalid|rate_limited|temporary_failure|transport_failure|unknown_failure|credentials_missing|sync_interrupted|request_rejected|resource_not_found)$/;
+  /^(google|icloud_calendar|icloud_mail|plaid|connector)_(authorization_failed|permission_missing|permission_denied|configuration_invalid|rate_limited|temporary_failure|transport_failure|unknown_failure|credentials_missing|sync_interrupted|request_rejected|resource_not_found)|^plaid_(invalid_response|invalid_cursor|transactions_cursor_invalid|invalid_cursor_replay_in_progress|invalid_cursor_replay_failed|account_missing_from_item|configuration_missing|sync_page_limit_exceeded|sync_cursor_not_advancing)$/;
 const transportCodePattern =
   /^(ENOTFOUND|EAI_AGAIN|EAI_FAIL|CERT_HAS_EXPIRED|CERT_NOT_YET_VALID|DEPTH_ZERO_SELF_SIGNED_CERT|SELF_SIGNED_CERT_IN_CHAIN|UNABLE_TO_VERIFY_LEAF_SIGNATURE|UNABLE_TO_GET_ISSUER_CERT_LOCALLY|ERR_TLS_CERT_ALTNAME_INVALID|ERR_SSL_WRONG_VERSION_NUMBER|ECONNRESET|ECONNREFUSED|EPIPE|ENETUNREACH|EHOSTUNREACH|UND_ERR_SOCKET|ETIMEDOUT|ESOCKETTIMEDOUT|UND_ERR_CONNECT_TIMEOUT|UND_ERR_HEADERS_TIMEOUT|UND_ERR_BODY_TIMEOUT)$/;
 const servicePattern = /^nohmi-production-(api|mcp|web|postgres|gateway|tunnel)-[0-9]+$/;

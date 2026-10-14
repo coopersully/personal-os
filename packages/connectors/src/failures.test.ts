@@ -5,6 +5,8 @@ import {
   connectorHttpError,
   transportDiagnostics,
 } from "./failures.js";
+import { providerFetch } from "./http.js";
+import { throwIfProviderOperationCancelled } from "./types.js";
 
 describe("connector failure boundary", () => {
   it.each([
@@ -327,6 +329,36 @@ describe("connector failure boundary", () => {
 });
 
 describe("sanitized transport diagnostics", () => {
+  it("recognizes the real HTTP timeout and provider deadline without exception text", async () => {
+    const timeout = await providerFetch(
+      async (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+            once: true,
+          });
+        }),
+      "https://example.com",
+      {},
+      1,
+    ).catch((error: unknown) => error);
+    expect(transportDiagnostics(timeout)).toEqual({
+      transportCode: "ETIMEDOUT",
+      transportPhase: "timeout",
+    });
+    try {
+      throwIfProviderOperationCancelled({ deadlineMs: 0 });
+      throw new Error("Expected an expired provider deadline");
+    } catch (error) {
+      expect(transportDiagnostics(error)).toEqual({
+        transportCode: "ETIMEDOUT",
+        transportPhase: "timeout",
+      });
+    }
+    expect(transportDiagnostics(new DOMException("PRIVATE_CANARY", "AbortError"))).toEqual({});
+    expect(
+      transportDiagnostics({ name: "TimeoutError", code: 23, message: "PRIVATE_CANARY" }),
+    ).toEqual({});
+  });
   it.each([
     ["ENOTFOUND", "dns"],
     ["EAI_AGAIN", "dns"],

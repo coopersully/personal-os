@@ -8,9 +8,12 @@ test("diagnostics retain only safe connector fields, never provider payloads or 
       event: "connector_capability_failed",
       provider: "google",
       capability: "mail",
-      code: "google_rate_limited",
+      code: "plaid_authorization_failed",
       status: 403,
       failureCount: 4,
+      transportCode: "ENOTFOUND",
+      transportPhase: "dns",
+      syncSource: "scheduled",
       requestId: "sync:11111111-1111-4111-8111-111111111111",
       message: "private-canary",
       accountId: "private-canary",
@@ -22,14 +25,20 @@ test("diagnostics retain only safe connector fields, never provider payloads or 
     JSON.stringify({
       event: "connector_sync_failed",
       code: "private-canary",
+      transportCode: "private-canary",
+      transportPhase: "private-canary",
+      syncSource: "private-canary",
       provider: "private-canary",
       status: "private-canary",
     }),
   ].join("\n");
   const summary = summarizeConnectorLogs(logs);
   assert.equal(summary.events.length, 2);
-  assert.equal(summary.events[0].code, "google_rate_limited");
+  assert.equal(summary.events[0].code, "plaid_authorization_failed");
   assert.equal(summary.events[0].capability, "mail");
+  assert.equal(summary.events[0].transportCode, "ENOTFOUND");
+  assert.equal(summary.events[0].transportPhase, "dns");
+  assert.equal(summary.events[0].syncSource, "scheduled");
   assert.ok(!JSON.stringify(summary).includes("private-canary"));
 });
 

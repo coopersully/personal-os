@@ -1,8 +1,9 @@
 # Production observability
 
 This optional Grafana Cloud collector targets the current Mac mini / dedicated Colima production
-runtime. It is prepared in source, **not activated**. Creating a stack and installing the collector
-are still required. Existing AWS CloudWatch definitions do not prove monitoring of this runtime.
+runtime. This directory is the collector template; its presence does not prove activation on a
+particular host. Verify ingestion in the target stack after installation or configuration changes.
+Existing AWS CloudWatch definitions do not prove monitoring of this runtime.
 
 ## What it covers
 
@@ -92,3 +93,43 @@ Those are external boundaries; passing local tests does not establish them.
 | Recovery | Collector can stop independently of nohmi; rotate tokens and retain buffers during repair. |
 | Observation | Dashboard, privacy-tested logs and diagnostics; alert delivery requires cloud configuration. |
 | Acceptance | Confirm real events, all services, resource history, missing-data alerts and Free usage after activation. |
+
+## Transport incident diagnostics
+
+Connector failures include `transportCode` and `transportPhase` when the exception contains a known
+runtime code. Phases are `dns`, `tls`, `socket`, and `timeout`; codes include `ENOTFOUND`,
+`EAI_AGAIN`, `CERT_HAS_EXPIRED`, `ERR_TLS_CERT_ALTNAME_INVALID`, `ECONNRESET`, `ECONNREFUSED`,
+and the explicitly enumerated Node/Undici timeout codes. Extraction follows at most 16 exception
+nodes, including nested causes and aggregate errors, and emits the first recognized code. It does
+not preserve the exception itself or infer a cause from its message. Unknown causes remain unknown.
+These details do not change retry, reconnect, or authorization decisions.
+
+Calendar/Mail sync events also include `syncSource=scheduled|triggered|manual`. This identifies the
+invocation path; a completed capability event proves that capability succeeded on that invocation.
+A trigger-driven success alone does not prove the scheduled fallback ran. A manual invocation can
+also originate from a user-authorized agent operation.
+
+Example Loki queries (select the incident's time window):
+
+```logql
+{job="nohmi-api"} | logfmt | provider="icloud" | event="connector_capability_failed"
+{job="nohmi-api"} | logfmt | transportPhase="dns"
+{job="nohmi-api"} | logfmt | syncSource="scheduled" | event="connector_capability_completed"
+{job="nohmi-api"} | logfmt | provider="plaid" | code="plaid_authorization_failed"
+```
+
+Both Alloy and local diagnostics independently allowlist these fields. No hostname, IP, syscall,
+URL, error message, stack, or provider body is exported, and none of the new fields becomes an
+indexed label. Plaid's safe failure codes are retained alongside Google/iCloud codes. A stale Plaid
+alert can indicate a connection awaiting owner reauthorization, including an older connection whose
+replacement is healthy; inspect Finance connection status before treating it as an outage or
+removing an account. Freshness observations are not themselves evidence of a transport failure.
+
+To activate changes, deploy the application revision and update the operator's persistent
+`config.alloy` from this directory, preserving its existing endpoints, secrets, log positions and
+host metrics. Validate with the installed Alloy version, then restart only the observability
+collector using its existing lifecycle. Older collectors silently omit the new fields. Verify
+new `syncSource` fields on real scheduled successes in Explore; transport fields require an actual
+recognized failure and must not be claimed verified just because a process restarted. Do not break
+production connectivity to manufacture such a failure. The local real-pipeline test supplies
+synthetic failure evidence without touching cloud credentials or provider data.

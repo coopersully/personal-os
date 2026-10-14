@@ -564,6 +564,59 @@ describe.sequential("connector service", () => {
     ).rejects.toMatchObject({ code: "invalid_request" });
   });
 
+  it.each([
+    "manual",
+    "scheduled",
+    "triggered",
+  ] as const)("logs sanitized transport evidence and %s sync origin", async (syncSource) => {
+    const provider = mockGoogle();
+    const logs: unknown[] = [];
+    const diagnostics = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google: provider,
+      now: () => timestamp,
+      log: (entry) => logs.push(entry),
+    });
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        userId,
+        provider: "google",
+        providerAccountId: `diagnostics-${syncSource}`,
+        label: "Diagnostics",
+        calendarEnabled: true,
+        mailEnabled: false,
+        encryptedCredentials: encryptJson(credentials, encryptionKey),
+      })
+      .returning();
+    if (!account) throw new Error("Missing fixture");
+    vi.mocked(provider.listCalendars).mockRejectedValueOnce(
+      new Error("PRIVATE_CANARY", {
+        cause: { code: "ECONNRESET", address: "PRIVATE_CANARY" },
+      }),
+    );
+    const options = { automatic: syncSource !== "manual", triggered: syncSource === "triggered" };
+    await expect(diagnostics.syncAccount(userId, account.id, options)).rejects.toMatchObject({
+      code: "service_unavailable",
+    });
+    for (const event of ["connector_capability_failed", "connector_sync_failed"]) {
+      expect(logs).toContainEqual(
+        expect.objectContaining({
+          event,
+          syncSource,
+          transportCode: "ECONNRESET",
+          transportPhase: "socket",
+        }),
+      );
+    }
+    expect(JSON.stringify(logs)).not.toContain("PRIVATE_CANARY");
+    await diagnostics.syncAccount(userId, account.id);
+    expect(logs).toContainEqual(
+      expect.objectContaining({ event: "connector_sync_completed", syncSource: "manual" }),
+    );
+  });
+
   it("preserves safe attachment failure categories and records boundary diagnostics", async () => {
     const [account] = await database.db
       .select()

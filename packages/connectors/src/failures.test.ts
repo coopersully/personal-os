@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { ConnectorError, classifyICloudError, connectorHttpError } from "./failures.js";
+import {
+  ConnectorError,
+  classifyICloudError,
+  connectorHttpError,
+  transportDiagnostics,
+} from "./failures.js";
 
 describe("connector failure boundary", () => {
   it.each([
@@ -319,4 +324,55 @@ describe("connector failure boundary", () => {
     });
     expect(cancel).toHaveBeenCalled();
   });
+});
+
+describe("sanitized transport diagnostics", () => {
+  it.each([
+    ["ENOTFOUND", "dns"],
+    ["EAI_AGAIN", "dns"],
+    ["CERT_HAS_EXPIRED", "tls"],
+    ["ERR_TLS_CERT_ALTNAME_INVALID", "tls"],
+    ["ECONNRESET", "socket"],
+    ["ECONNREFUSED", "socket"],
+    ["UND_ERR_CONNECT_TIMEOUT", "timeout"],
+  ])("retains nested %s without private context", (code, transportPhase) => {
+    const error = new Error("PRIVATE_CANARY", {
+      cause: Object.assign(new Error("PRIVATE_CANARY"), {
+        code,
+        hostname: "PRIVATE_CANARY",
+        address: "PRIVATE_CANARY",
+        syscall: "PRIVATE_CANARY",
+      }),
+    });
+    const result = classifyICloudError("calendar", error);
+    expect(result).toMatchObject({ transportCode: code, transportPhase, disposition: "retry" });
+    expect(JSON.stringify(result)).not.toContain("PRIVATE_CANARY");
+  });
+  it("handles aggregate errors and cycles with bounded traversal", () => {
+    const cycle: { cause?: unknown } = {};
+    cycle.cause = cycle;
+    expect(
+      classifyICloudError("mail", new AggregateError([cycle, { code: "EPIPE" }])),
+    ).toMatchObject({ transportCode: "EPIPE", transportPhase: "socket" });
+    expect(classifyICloudError("mail", cycle).transportCode).toBeUndefined();
+  });
+  it("does not infer diagnostics from messages or arbitrary codes", () => {
+    expect(
+      classifyICloudError("calendar", { code: "PRIVATE_CANARY", message: "ENOTFOUND" })
+        .transportCode,
+    ).toBeUndefined();
+    expect(classifyICloudError("calendar", { code: "toString" }).transportCode).toBeUndefined();
+  });
+});
+
+it("bounds diagnostic traversal of large and deeply nested error graphs", () => {
+  let nested: unknown = { code: "ENOTFOUND" };
+  for (let i = 0; i < 20; i++) nested = { cause: nested };
+  expect(transportDiagnostics(nested)).toEqual({});
+  expect(
+    transportDiagnostics(new AggregateError([...Array(20).fill(null), { code: "EPIPE" }])),
+  ).toEqual({});
+  for (const value of [null, undefined, "ENOTFOUND", 1, { code: 1 }]) {
+    expect(transportDiagnostics(value)).toEqual({});
+  }
 });

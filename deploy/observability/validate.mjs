@@ -63,10 +63,13 @@ try {
       provider: "google",
       capability: "mail",
       status: 403,
-      code: "google_permission_missing",
+      code: "plaid_authorization_failed",
       freshnessAgeMs: 172800000,
       durationMs: 172800000,
       failureCount: 1000000,
+      transportCode: "ENOTFOUND",
+      transportPhase: "dns",
+      syncSource: "scheduled",
       email: "PRIVATE_CANARY",
       message: "PRIVATE_CANARY",
     }),
@@ -75,6 +78,9 @@ try {
       status: 500,
       path: "PRIVATE_CANARY",
       code: "PRIVATE_CANARY",
+      transportCode: "PRIVATE_CANARY",
+      transportPhase: "PRIVATE_CANARY",
+      syncSource: "PRIVATE_CANARY",
     }),
     JSON.stringify({ event: "private_PRIVATE_CANARY", provider: "PRIVATE_CANARY" }),
     JSON.stringify({
@@ -129,7 +135,7 @@ try {
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  assert.ok(logs.includes("code=google_permission_missing"), "Expected safe event missing");
+  assert.ok(logs.includes("code=plaid_authorization_failed"), "Expected safe event missing");
   assert.ok(logs.includes("status=500"), "Expected safe request missing");
   assert.ok(logs.includes("status=204"), "Final stream record missing");
   assert.match(
@@ -138,6 +144,9 @@ try {
     "Stale freshness must survive numeric JSON extraction",
   );
   assert.match(logs, /durationMs=(172800000|1[.]728e[+]08)/);
+  assert.match(logs, /transportCode=ENOTFOUND/);
+  assert.match(logs, /transportPhase=dns/);
+  assert.match(logs, /syncSource=scheduled/);
   assert.match(logs, /failureCount=(1000000|1e[+]06)/);
   assert.equal(logs.includes("PRIVATE_CANARY"), false, "Privacy filter forwarded private content");
   assert.equal((logs.match(/received log entry/g) ?? []).length, 4, "Unexpected records forwarded");

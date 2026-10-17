@@ -148,3 +148,24 @@ Behavior coverage must prove pending persistence, success metadata, expiry, reda
 idempotent replay. Production-equivalent evidence must separately prove runtime authority,
 outbound HTTPS reachability, Link configuration, callback correctness, and successful transition
 from a handoff to connected accounts. Green mock tests do not prove any of those runtime facts.
+
+## Ritual optional-step follow-ups
+
+The ritual API owns acceptance of optional follow-ups. A human-session completion action authorizes
+up to 20 owner-scoped native Reminder rows in the same PostgreSQL transaction as ritual completion
+and its idempotency receipt. No new provider, port, credential, or recurring scheduler is introduced.
+The desktop coordinator fetches these reminders over the existing authenticated HTTPS API and uses
+the existing OS reminder scheduling path, preferences, quiet hours, and permission checks.
+
+The database commit is the acceptance point. Failure before commit rolls back completion and every
+reminder; replay returns the stored outcome without creating duplicates. The encrypted desktop
+queue holds offline intent, labels it pending sync, and uses existing conflict/export/discard
+recovery when a ritual expires or changes before synchronization. An accepted late reminder is
+moved to at least one minute after API acceptance so it remains eligible for scheduling. Requests
+are bounded to a time within 26 hours of the observed completion (including a DST fall-back day).
+Redacted reminder audit events link the occurrence without copying answers or step labels.
+
+Unit, database integration, and native tests establish acceptance and replay behavior. OS delivery
+can still fail with green tests if notifications are disabled, the Mac is asleep, the coordinator
+cannot refresh, or the OS refuses presentation. A rebuilt desktop app and an authorized real-device
+notification smoke are required before claiming production notification delivery for this change.

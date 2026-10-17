@@ -302,6 +302,30 @@ two 2026-08-12 Tasks and Tracking specifications. Cross-workspace goals, priorit
 relationships, circumstances, preferences, constraints, and inferred patterns belong to User
 Knowledge rather than a separate top-level workspace.
 
+#### Morning and evening rituals
+
+Ritual steps support required or optional participation and everyday, weekday, weekend, or custom
+weekday inclusion. Existing steps remain required every day. Resolve inclusion using the ritual's
+scheduled local date and time zone, then preserve the daily snapshot even if settings change.
+Only scheduled required steps gate explicit completion. A day with no scheduled steps settles
+without opening the checklist; an all-optional day still permits voluntary participation.
+
+Each ritual has a configurable default follow-up time (initially noon for morning and 22:00 for
+evening). When unfinished optional steps remain, offer an unchecked “Remind me about these later”
+checkbox with an editable time. Show Today or Tomorrow explicitly when the chosen time rolls over.
+Checking it requests one standalone Reminder per unfinished optional step on completion; leaving
+it unchecked records those steps as optional and not done. Completed optional steps never generate
+follow-ups. These reminders remain independently editable and completable in Reminders; completing
+them does not rewrite the settled ritual's original answers. Deleting ritual history does not
+remove independently created reminders.
+
+Reminder creation and completion must be atomic, owner-scoped, and safe to retry. Offline desktop
+completion retains the reminder request in its durable queue and does not claim a scheduled
+reminder until the API accepts it. If an otherwise valid completion syncs after its requested time,
+make the reminder due shortly after acceptance. Expired/conflicting completions retain the existing
+explicit recovery flow. Delivery follows the person's existing reminder notification settings and
+OS permissions; accepting a reminder is not evidence of a displayed notification.
+
 ### 6.7 Finances
 
 The first complete Finance release follows the [Finance MVP specification](finance-workspace-plan.md).

@@ -1,3 +1,4 @@
+import { unfinishedOptionalRitualSteps } from "@personal-os/domain";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { DateInput } from "@/components/date-input";
@@ -115,6 +116,16 @@ export function RitualHistory() {
                   })}
                 </p>
               ))}
+              {o.status === "completed"
+                ? unfinishedOptionalRitualSteps(o).map((step) => (
+                    <p key={`optional-${step.id}`}>
+                      {step.label}: Optional ·{" "}
+                      {o.optionalFollowUp?.stepIds.includes(step.id)
+                        ? `Reminder ${o.optionalFollowUp.reminderIds ? "scheduled" : "waiting to sync"} · ${new Date(o.optionalFollowUp.dueAt).toLocaleString(undefined, { timeZone: o.timeZone, timeZoneName: "short" })}`
+                        : "Not done"}
+                    </p>
+                  ))
+                : null}
               {o.actions.map((a) => (
                 <p key={a.id}>
                   {a.kind.replaceAll("_", " ")} · {a.outcome} ·{" "}

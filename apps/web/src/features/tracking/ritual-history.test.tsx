@@ -195,3 +195,32 @@ it("keeps orphaned local history inspectable even without queued requests", asyn
   expect(await screen.findByRole("status")).toHaveTextContent("0 ritual changes");
   expect(screen.getByText(/Unmatched answer/)).toBeInTheDocument();
 });
+
+it("distinguishes optional not done from accepted and queued follow-ups", async () => {
+  const steps = [{ id: "optional", label: "Stretch", kind: "checkbox" as const, optional: true }];
+  const base = { ...occurrence, definition: { ...occurrence.definition, steps }, responses: [] };
+  mocks.history.mockResolvedValue({
+    items: [
+      { ...base, id: "skipped" },
+      {
+        ...base,
+        id: "scheduled",
+        optionalFollowUp: {
+          dueAt: "2026-09-29T16:00:00Z",
+          stepIds: ["optional"],
+          reminderIds: ["reminder"],
+        },
+      },
+      {
+        ...base,
+        id: "queued",
+        optionalFollowUp: { dueAt: "2026-09-29T16:00:00Z", stepIds: ["optional"] },
+      },
+    ],
+    nextCursor: null,
+  });
+  mount(<RitualHistory />);
+  expect(await screen.findByText("Stretch: Optional · Not done")).toBeInTheDocument();
+  expect(screen.getByText(/Stretch: Optional · Reminder scheduled/)).toBeInTheDocument();
+  expect(screen.getByText(/Stretch: Optional · Reminder waiting to sync/)).toBeInTheDocument();
+});

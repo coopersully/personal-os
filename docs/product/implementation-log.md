@@ -1,5 +1,24 @@
 # nohmi — Implementation Log
 
+## 2026-10-17 — Configurable ritual steps and optional follow-ups
+
+- Added optional step participation and everyday, weekday, weekend, or custom weekday inclusion.
+  Daily checklists resolve in the ritual time zone and retain their original snapshots. Empty
+  days settle without opening; only required steps gate explicit completion on other days.
+- Added separate morning/evening reminder defaults and an unchecked follow-up checkbox with an
+  editable time during the ritual. The interface labels next-day times explicitly. Completion
+  creates native Reminders only for unfinished optional steps when requested, atomically with
+  the ritual and its retry receipt. History records optional not done or follow-up scheduling.
+- Desktop offline completion preserves follow-up intent in its existing encrypted queue. Pending
+  intent is not a confirmed reminder; conflicts retain existing recovery. Valid delayed requests
+  become due at least one minute after acceptance. Preview never writes reminders.
+- Focused domain, PostgreSQL integration, UI, and Rust checks cover scheduling, required/optional
+  completion, retry deduplication, invalid-request rollback, delayed acceptance, snapshots, and
+  offline follow-ups. Desktop/mobile browser coverage exercises settings and preview.
+- This is a source implementation checkpoint, not a deployed release or a verified OS notification.
+  Existing notification preferences and OS permissions still govern delivery; the native changes
+  require a rebuilt desktop app.
+
 ## 2026-10-12 — Finance text results and desktop pet refinements merged
 
 - [PR #242 — Fix Finance MCP text responses](https://github.com/coopersully/personal-os/pull/242)

@@ -1,4 +1,5 @@
 import {
+  defaultRitualReminderTime,
   type RitualDefinition,
   type RitualState,
   type RitualStep,
@@ -117,6 +118,7 @@ function initialDraft(
         ? "Good evening"
         : (definition?.title ?? `Good ${kind === "morning" ? "morning" : "evening"}`),
     enabled: definition?.enabled ?? false,
+    reminderTime: defaultRitualReminderTime(definition ?? { kind }),
     time: definition?.time ?? (kind === "morning" ? "06:00" : "21:00"),
     timeZone: definition?.timeZone ?? timeZone,
     steps: definition?.steps ?? [
@@ -164,7 +166,14 @@ function RitualForm({
       const local = draftRef.current;
       const rebased = { ...remote };
       // Keep edited fields; adopt remote updates to everything still untouched locally.
-      for (const key of ["title", "enabled", "time", "timeZone", "steps"] as const) {
+      for (const key of [
+        "title",
+        "enabled",
+        "time",
+        "reminderTime",
+        "timeZone",
+        "steps",
+      ] as const) {
         if (JSON.stringify(local[key]) !== JSON.stringify(base[key])) {
           Object.assign(rebased, { [key]: local[key] });
         }
@@ -331,6 +340,18 @@ function RitualForm({
                 <FieldDescription>Stays available until you complete or skip it</FieldDescription>
               </Field>
               <Field>
+                <FieldLabel htmlFor={`${kind}-reminder-time`}>{label} reminder time</FieldLabel>
+                <Input
+                  id={`${kind}-reminder-time`}
+                  type="time"
+                  value={draft.reminderTime}
+                  onChange={(event) => patch({ reminderTime: event.target.value })}
+                />
+                <FieldDescription>
+                  Default for optional steps you choose to do later
+                </FieldDescription>
+              </Field>
+              <Field>
                 <FieldLabel htmlFor={`${kind}-zone`}>Time zone</FieldLabel>
                 <Input
                   id={`${kind}-zone`}
@@ -470,6 +491,26 @@ function RitualForm({
                         ))}
                       </NativeSelect>
                     </Field>
+                    <Field>
+                      <FieldLabel htmlFor={`${kind}-${step.id}-requirement`}>
+                        Requirement
+                      </FieldLabel>
+                      <NativeSelect
+                        id={`${kind}-${step.id}-requirement`}
+                        value={step.optional ? "optional" : "required"}
+                        onChange={(event) =>
+                          update(step.id, { optional: event.target.value === "optional" })
+                        }
+                      >
+                        <NativeSelectOption value="required">Required</NativeSelectOption>
+                        <NativeSelectOption value="optional">Optional</NativeSelectOption>
+                      </NativeSelect>
+                    </Field>
+                    <StepDays
+                      id={`${kind}-${step.id}`}
+                      days={step.days}
+                      onChange={(days) => update(step.id, { days })}
+                    />
                     {step.kind === "multiple_choice" ? (
                       <Field>
                         <FieldLabel htmlFor={`${kind}-${step.id}-options`}>Choices</FieldLabel>
@@ -562,5 +603,78 @@ function SortableStep({
         </SettingsRecordContent>
       </Reorder.Item>
     </Item>
+  );
+}
+
+const weekdays = [1, 2, 3, 4, 5];
+const weekends = [0, 6];
+const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+function StepDays({
+  id,
+  days,
+  onChange,
+}: {
+  id: string;
+  days: number[] | undefined;
+  onChange: (days: number[] | undefined) => void;
+}) {
+  const [custom, setCustom] = useState(false);
+  const selected = days?.slice().sort().join(",");
+  const mode = custom
+    ? "custom"
+    : !days || days.length === 7
+      ? "daily"
+      : selected === weekdays.join(",")
+        ? "weekdays"
+        : selected === weekends.join(",")
+          ? "weekends"
+          : "custom";
+  return (
+    <Field>
+      <FieldLabel htmlFor={`${id}-days`}>Include on</FieldLabel>
+      <NativeSelect
+        id={`${id}-days`}
+        value={mode}
+        onChange={(event) => {
+          const mode = event.target.value;
+          setCustom(mode === "custom");
+          onChange(
+            mode === "daily"
+              ? undefined
+              : mode === "weekdays"
+                ? weekdays
+                : mode === "weekends"
+                  ? weekends
+                  : (days ?? weekdays),
+          );
+        }}
+      >
+        <NativeSelectOption value="daily">Every day</NativeSelectOption>
+        <NativeSelectOption value="weekdays">Weekdays</NativeSelectOption>
+        <NativeSelectOption value="weekends">Weekends</NativeSelectOption>
+        <NativeSelectOption value="custom">Custom days</NativeSelectOption>
+      </NativeSelect>
+      {mode === "custom" ? (
+        <fieldset className="flex flex-wrap gap-3" aria-label="Days of the week">
+          {[1, 2, 3, 4, 5, 6, 0].map((day) => (
+            <Field key={day} orientation="horizontal" className="w-auto">
+              <Checkbox
+                id={`${id}-day-${day}`}
+                checked={days?.includes(day) ?? true}
+                disabled={days?.length === 1 && days.includes(day)}
+                onCheckedChange={(checked) =>
+                  onChange(
+                    checked
+                      ? [...(days ?? []), day].sort()
+                      : days?.filter((value) => value !== day),
+                  )
+                }
+              />
+              <FieldLabel htmlFor={`${id}-day-${day}`}>{dayNames[day]}</FieldLabel>
+            </Field>
+          ))}
+        </fieldset>
+      ) : null}
+    </Field>
   );
 }

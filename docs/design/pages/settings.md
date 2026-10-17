@@ -216,3 +216,17 @@ queries, native actions, updates, and routine recovery. Keep inline field guidan
 controls where useful, preserve edits, and do not automatically retry uncertain writes.
 Repeated polling of the same unresolved failure must not repeatedly announce it; recovery
 clears its toast. Quiet-hour From and Until controls share a row on larger screens.
+
+## Ritual step configuration
+
+The immediate job is to define a realistic morning or evening checklist. Keep the ordered steps
+in the existing checklist, with Requirement (Required / Optional) and Include on (Every day /
+Weekdays / Weekends / Custom days) beside the step's response configuration. Reveal individual
+weekday checkboxes only for Custom days and retain at least one day. Each ritual's schedule group
+owns its default reminder time. Changes autosave; failed saves use Sonner and preserve edits.
+
+During a ritual, mark optional steps explicitly and count required progress separately. Show
+“Remind me about these later” only while optional steps are unfinished, with its editable time
+beside it and the actual day/time-zone context underneath. Unchecking it must not leave a reminder
+request in the completion payload. Preview uses today's scheduled steps and never creates
+reminders. History distinguishes optional not done from reminders scheduled or awaiting sync.

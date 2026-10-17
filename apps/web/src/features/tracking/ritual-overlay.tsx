@@ -1,10 +1,16 @@
 import {
+  defaultRitualReminderTime,
   latestRitualResponses,
+  localDateAt,
+  localDateToIso,
+  nextRitualReminderAt,
   type RitualActionInput,
   type RitualActionResult,
   type RitualResponseInput,
   type RitualState,
   ritualAnswerIsValid,
+  ritualIsAnswered,
+  unfinishedOptionalRitualSteps,
 } from "@personal-os/domain";
 import { useEffect, useRef, useState } from "react";
 import { NohmiBrandMark } from "../../components/brand-marks.js";
@@ -147,6 +153,10 @@ export function RitualChecklist({
     id: string;
     unavailable?: boolean | undefined;
   } | null>(null);
+  const [remindLater, setRemindLater] = useState(false);
+  const [reminderTime, setReminderTime] = useState(() =>
+    external.current ? defaultRitualReminderTime(external.current.definition) : "12:00",
+  );
   const [texts, setTexts] = useState<Record<string, string>>({});
   const failedDrafts = useRef<
     Record<string, { value: string | boolean; occurrenceId: string; revision: number }>
@@ -208,6 +218,18 @@ export function RitualChecklist({
       const result = await act({
         ...input(),
         kind,
+        ...(kind === "complete" &&
+        remindLater &&
+        stateRef.current.current &&
+        unfinishedOptionalRitualSteps(stateRef.current.current).length
+          ? {
+              optionalReminderAt: nextRitualReminderAt(
+                stateRef.current.current.definition,
+                reminderTime,
+                new Date().toISOString(),
+              )!,
+            }
+          : {}),
         ...(challenge
           ? {
               challengeId: challenge.id,
@@ -292,11 +314,26 @@ export function RitualChecklist({
       </div>
     );
   const answers = latestRitualResponses(occurrence);
-  const complete = occurrence.definition.steps.filter(
+  const required = occurrence.definition.steps.filter((step) => !step.optional);
+  const complete = required.filter(
     (s) => answers[s.id]?.submitted && ritualAnswerIsValid(s, answers[s.id]!.value),
   ).length;
+  const optional = unfinishedOptionalRitualSteps(occurrence);
+  const reminderAt = optional.length
+    ? nextRitualReminderAt(occurrence.definition, reminderTime, new Date().toISOString())
+    : null;
+  const reminderDay =
+    reminderAt &&
+    localDateToIso(localDateAt(new Date(reminderAt), occurrence.timeZone)) !==
+      localDateToIso(localDateAt(new Date(), occurrence.timeZone))
+      ? "Tomorrow"
+      : "Today";
   const dirty = Object.entries(texts).some(([id, value]) => value !== answers[id]?.value);
-  const ready = complete === occurrence.definition.steps.length && !dirty && !busy;
+  const ready =
+    ritualIsAnswered(occurrence) &&
+    !dirty &&
+    !busy &&
+    (!remindLater || !optional.length || !!reminderAt);
   return (
     <div className="ritual-presentation">
       <div className="ritual-logo">
@@ -388,12 +425,45 @@ export function RitualChecklist({
                       </>
                     )}
                   </Field>
+                  {step.optional ? (
+                    <span className="text-xs text-muted-foreground">Optional</span>
+                  ) : null}
                 </li>
               ))}
             </ul>
           )}
         </CardContent>
         <CardFooter className="shrink-0 flex-col gap-3 text-center">
+          {!challenge && optional.length > 0 ? (
+            <div className="flex w-full flex-col gap-2 text-left">
+              <div className="flex flex-wrap items-end gap-3">
+                <Field orientation="horizontal" className="flex-1">
+                  <Checkbox
+                    id="ritual-remind-later"
+                    checked={remindLater}
+                    disabled={busy}
+                    onCheckedChange={(value) => setRemindLater(value === true)}
+                  />
+                  <FieldLabel htmlFor="ritual-remind-later">Remind me about these later</FieldLabel>
+                </Field>
+                <Field className="w-auto">
+                  <FieldLabel htmlFor="ritual-reminder-time">Reminder time</FieldLabel>
+                  <Input
+                    id="ritual-reminder-time"
+                    type="time"
+                    value={reminderTime}
+                    disabled={!remindLater || busy}
+                    onChange={(event) => setReminderTime(event.target.value)}
+                  />
+                </Field>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {remindLater
+                  ? `${reminderDay} · ${occurrence.timeZone}. Reminders need account sync and follow your notification settings.`
+                  : "Unfinished optional steps will be marked not done for today."}
+              </p>
+            </div>
+          ) : null}
           {!challenge ? (
             <Button
               className="h-auto w-full flex-col gap-1 py-3"
@@ -404,7 +474,7 @@ export function RitualChecklist({
             >
               {ready
                 ? `Complete ${occurrence.definition.kind === "night" ? "Evening" : "Morning"} Ritual`
-                : `${complete} of ${occurrence.definition.steps.length} tasks completed`}
+                : `${complete} of ${required.length} tasks completed`}
             </Button>
           ) : null}
           {error ? <p role="alert">{error}</p> : null}

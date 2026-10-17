@@ -304,3 +304,41 @@ it("reports state-read failures as retryable without claiming an uncertain write
   view.unmount();
   read.mockRestore();
 });
+
+it("completes optional steps without requiring answers and sends only an opted-in reminder time", async () => {
+  const optionalState: RitualState = {
+    ...state,
+    current: {
+      ...state.current!,
+      scheduledLocalDate: "2026-10-17",
+      timeZone: "UTC",
+      definition: {
+        ...state.current!.definition,
+        timeZone: "UTC",
+        reminderTime: "15:30",
+        steps: [{ id: "journal", label: "Journal", kind: "short_text", optional: true }],
+      },
+    },
+  };
+  const action = vi.fn().mockResolvedValue({ outcome: "applied", state: optionalState });
+  render(<RitualChecklist state={optionalState} saveResponse={vi.fn()} act={action} />);
+  const finish = screen.getByRole("button", { name: "Complete Morning Ritual" });
+  expect(finish).toBeEnabled();
+  expect(screen.getByLabelText("Reminder time")).toHaveValue("15:30");
+  fireEvent.click(screen.getByRole("checkbox", { name: "Remind me about these later" }));
+  fireEvent.change(screen.getByLabelText("Reminder time"), { target: { value: "16:45" } });
+  fireEvent.click(finish);
+  await waitFor(() =>
+    expect(action).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "complete",
+        optionalReminderAt: expect.stringMatching(/T16:45:00.000Z$/),
+      }),
+    ),
+  );
+  await waitFor(() => expect(finish).toBeEnabled());
+  fireEvent.click(screen.getByRole("checkbox", { name: "Remind me about these later" }));
+  fireEvent.click(finish);
+  await waitFor(() => expect(action).toHaveBeenCalledTimes(2));
+  expect(action.mock.calls[1]![0]).not.toHaveProperty("optionalReminderAt");
+});

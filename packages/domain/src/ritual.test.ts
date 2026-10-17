@@ -167,3 +167,66 @@ it("a revised schedule cutoff excludes retroactive boundaries", () => {
     "2026-09-30T15:00:00.000Z",
   );
 });
+
+it("optional steps do not block completion, while legacy steps remain required", () => {
+  const occurrence = {
+    definition: {
+      ...definition("morning"),
+      steps: [{ id: "journal", label: "Journal", kind: "short_text", optional: true }],
+    },
+    responses: [],
+  } as unknown as RitualOccurrence;
+  expect(ritualIsAnswered(occurrence)).toBe(true);
+  occurrence.definition.steps.push({ id: "teeth", label: "Teeth", kind: "checkbox" });
+  expect(ritualIsAnswered(occurrence)).toBe(false);
+});
+
+it("rejects empty, duplicate, and invalid custom weekdays", () => {
+  for (const days of [[], [1, 1], [-1], [7], [1.5]]) {
+    expect(
+      ritualStepSchema.safeParse({ id: "one", label: "One", kind: "checkbox", days }).success,
+    ).toBe(false);
+  }
+});
+
+it("resolves selected days by the ritual's local date and preserves definitions", async () => {
+  const { ritualDefinitionForDate } = await import("./ritual.js");
+  const original = {
+    ...definition("morning"),
+    steps: [
+      { id: "daily", label: "Daily", kind: "checkbox" as const },
+      { id: "weekdays", label: "Weekdays", kind: "checkbox" as const, days: [1, 2, 3, 4, 5] },
+      { id: "weekends", label: "Weekends", kind: "checkbox" as const, days: [0, 6] },
+      { id: "tuesday", label: "Tuesday", kind: "checkbox" as const, days: [2] },
+    ],
+  };
+  expect(ritualDefinitionForDate(original, "2026-10-17").steps.map((s) => s.id)).toEqual([
+    "daily",
+    "weekends",
+  ]);
+  expect(ritualDefinitionForDate(original, "2026-10-20").steps.map((s) => s.id)).toEqual([
+    "daily",
+    "weekdays",
+    "tuesday",
+  ]);
+  expect(original.steps).toHaveLength(4);
+});
+
+it("resolves reminder times across midnight and daylight saving changes", async () => {
+  const { nextRitualReminderAt, defaultRitualReminderTime } = await import("./ritual.js");
+  expect(defaultRitualReminderTime(definition("morning"))).toBe("12:00");
+  expect(defaultRitualReminderTime(definition("night"))).toBe("22:00");
+  expect(defaultRitualReminderTime({ ...definition("night"), reminderTime: "23:00" })).toBe(
+    "23:00",
+  );
+  expect(nextRitualReminderAt(definition("night"), "22:00", "2026-10-18T03:00:00Z")).toBe(
+    "2026-10-19T02:00:00.000Z",
+  );
+  expect(nextRitualReminderAt(definition("morning"), "02:30", "2026-03-08T05:00:00Z")).toBe(
+    "2026-03-08T07:00:00.000Z",
+  );
+  expect(nextRitualReminderAt(definition("morning"), "01:30", "2026-11-01T04:00:00Z")).toBe(
+    "2026-11-01T05:30:00.000Z",
+  );
+  expect(nextRitualReminderAt(definition("night"), "25:00", "2026-10-18T03:00:00Z")).toBeNull();
+});

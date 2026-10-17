@@ -327,7 +327,7 @@ async fn api(
     validate_api_result(method, response.status, &value)?;
     Ok((response.status, value))
 }
-fn valid_definition(value: &Value) -> bool {
+fn valid_definition(value: &Value, allow_empty: bool) -> bool {
     value["id"].as_str().is_some_and(|id| !id.is_empty())
         && matches!(value["kind"].as_str(), Some("morning" | "night"))
         && value["revision"]
@@ -341,7 +341,7 @@ fn valid_definition(value: &Value) -> bool {
             .as_str()
             .is_some_and(|at| chrono::DateTime::parse_from_rfc3339(at).is_ok())
         && value["steps"].as_array().is_some_and(|steps| {
-            !steps.is_empty()
+            (allow_empty || !steps.is_empty())
                 && steps.len() <= 20
                 && steps.iter().all(|step| {
                     step["id"].is_string()
@@ -363,7 +363,7 @@ fn valid_definition(value: &Value) -> bool {
 fn valid_occurrence(value: &Value) -> bool {
     value["id"].is_string()
         && value["ritualId"].is_string()
-        && valid_definition(&value["definition"])
+        && valid_definition(&value["definition"], true)
         && value["revision"]
             .as_u64()
             .is_some_and(|revision| revision > 0)
@@ -392,7 +392,10 @@ fn valid_occurrence(value: &Value) -> bool {
 }
 fn valid_state(value: &Value) -> bool {
     value["definitions"].as_array().is_some_and(|definitions| {
-        definitions.len() <= 2 && definitions.iter().all(valid_definition)
+        definitions.len() <= 2
+            && definitions
+                .iter()
+                .all(|definition| valid_definition(definition, false))
     }) && value
         .get("current")
         .is_some_and(|current| current.is_null() || valid_occurrence(current))
@@ -706,7 +709,7 @@ pub async fn ritual_preview(
             Some("morning" | "night")
         ) || !state["current"]["definition"]["steps"]
             .as_array()
-            .is_some_and(|s| !s.is_empty() && s.len() <= 20)
+            .is_some_and(|s| s.len() <= 20)
         {
             return Err("Invalid ritual preview".into());
         }
@@ -906,50 +909,24 @@ fn apply_offline(
             let done = current["definition"]["steps"]
                 .as_array()
                 .is_some_and(|steps| {
-                    steps.iter().all(|step| {
-                        let answer = current["responses"]
-                            .as_array()
-                            .and_then(|r| r.iter().rev().find(|r| r["stepId"] == step["id"]));
-                        answer.is_some_and(|r| {
-                            r["submitted"] == true
-                                && if step["kind"] == "checkbox" {
-                                    r["value"] == true
-                                } else {
-                                    r["value"].as_str().is_some_and(|v| {
-                                        if v.trim().is_empty() {
-                                            return false;
-                                        }
-                                        match step["kind"].as_str() {
-                                            Some("time") => {
-                                                v.len() == 5
-                                                    && chrono::NaiveTime::parse_from_str(v, "%H:%M")
-                                                        .is_ok()
-                                            }
-                                            Some("date") => {
-                                                v.len() == 10
-                                                    && chrono::NaiveDate::parse_from_str(
-                                                        v, "%Y-%m-%d",
-                                                    )
-                                                    .is_ok()
-                                            }
-                                            Some("number") => {
-                                                v.parse::<f64>().is_ok_and(|n| n.is_finite())
-                                            }
-                                            Some("multiple_choice") => {
-                                                step["options"].as_array().is_some_and(|options| {
-                                                    options
-                                                        .iter()
-                                                        .any(|option| option.as_str() == Some(v))
-                                                })
-                                            }
-                                            _ => true,
-                                        }
-                                    })
-                                }
-                        })
-                    })
+                    steps
+                        .iter()
+                        .all(|step| step["optional"] == true || step_answered(current, step))
                 });
             if done {
+                if body["optionalReminderAt"].is_string() {
+                    let steps: Vec<Value> = current["definition"]["steps"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter(|step| step["optional"] == true && !step_answered(current, step))
+                        .map(|step| step["id"].clone())
+                        .collect();
+                    if !steps.is_empty() {
+                        current["optionalFollowUp"] =
+                            json!({"dueAt": body["optionalReminderAt"], "stepIds": steps});
+                    }
+                }
                 current["status"] = json!("completed");
                 current["settledAt"] = json!(now);
             }
@@ -1750,4 +1727,61 @@ mod completion_tests {
         answer(&mut data, "one", json!("Final"), true);
         assert_eq!(complete(&mut data)["outcome"], "applied");
     }
+}
+
+#[cfg(test)]
+mod optional_step_tests {
+    use super::*;
+
+    #[test]
+    fn optional_steps_complete_offline_with_a_pending_follow_up() {
+        let mut data = json!({"state":{"current":{"id":"today","status":"pending","revision":1,"expiresAt":"2099-01-01T00:00:00Z","definition":{"steps":[{"id":"journal","kind":"short_text","optional":true}]},"responses":[]}}});
+        let result = apply_offline(
+            &mut data,
+            "/actions",
+            "POST",
+            &json!({"kind":"complete","optionalReminderAt":"2090-01-01T12:00:00Z"}),
+        )
+        .unwrap();
+        assert_eq!(result["outcome"], "applied");
+        assert_eq!(
+            data["state"]["current"]["optionalFollowUp"]["stepIds"],
+            json!(["journal"])
+        );
+        assert!(data["state"]["current"]["optionalFollowUp"]["reminderIds"].is_null());
+    }
+}
+
+fn step_answered(current: &Value, step: &Value) -> bool {
+    let answer = current["responses"]
+        .as_array()
+        .and_then(|r| r.iter().rev().find(|r| r["stepId"] == step["id"]));
+    answer.is_some_and(|r| {
+        r["submitted"] == true
+            && if step["kind"] == "checkbox" {
+                r["value"] == true
+            } else {
+                r["value"].as_str().is_some_and(|v| {
+                    if v.trim().is_empty() {
+                        return false;
+                    }
+                    match step["kind"].as_str() {
+                        Some("time") => {
+                            v.len() == 5 && chrono::NaiveTime::parse_from_str(v, "%H:%M").is_ok()
+                        }
+                        Some("date") => {
+                            v.len() == 10
+                                && chrono::NaiveDate::parse_from_str(v, "%Y-%m-%d").is_ok()
+                        }
+                        Some("number") => v.parse::<f64>().is_ok_and(|n| n.is_finite()),
+                        Some("multiple_choice") => {
+                            step["options"].as_array().is_some_and(|options| {
+                                options.iter().any(|option| option.as_str() == Some(v))
+                            })
+                        }
+                        _ => true,
+                    }
+                })
+            }
+    })
 }

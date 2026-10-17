@@ -3,6 +3,7 @@ import {
   localDateToIso,
   type RitualDefinition,
   type RitualState,
+  ritualDefinitionForDate,
   ritualIsAnswered,
 } from "@personal-os/domain";
 import { useEffect, useRef, useState } from "react";
@@ -42,7 +43,7 @@ export async function makeRitualPreview(definition: RitualDefinition): Promise<R
       timeZone: definition.timeZone,
       dueAt: now,
       expiresAt: new Date(Date.now() + 86400000).toISOString(),
-      definition,
+      definition: ritualDefinitionForDate(definition, date),
       revision: 1,
       status: "pending",
       snoozedUntil: null,

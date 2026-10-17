@@ -429,3 +429,38 @@ it("blocks background setup navigation until ritual edits are saved", async () =
   await waitFor(() => expect(toast.error).toHaveBeenCalled());
   expect(screen.getByRole("button", { name: "Background settings" })).toBeDisabled();
 });
+
+it("autosaves optional steps, custom days, and independent reminder defaults", async () => {
+  mocks.list.mockResolvedValue({ rituals: [] });
+  mocks.save.mockReset().mockImplementation(async (input) => ({
+    ...input,
+    id: input.kind,
+    revision: input.expectedRevision + 1,
+    enabledAt: "2026-10-17T00:00:00Z",
+  }));
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <RitualSettings timeZone="UTC" />
+    </QueryClientProvider>,
+  );
+  const time = await screen.findByLabelText("Morning reminder time");
+  fireEvent.change(time, { target: { value: "13:45" } });
+  fireEvent.change(screen.getAllByLabelText("Requirement")[0]!, { target: { value: "optional" } });
+  fireEvent.change(screen.getAllByLabelText("Include on")[0]!, { target: { value: "custom" } });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Monday" }));
+  await waitFor(() =>
+    expect(mocks.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "morning",
+        reminderTime: "13:45",
+        steps: expect.arrayContaining([
+          expect.objectContaining({ optional: true, days: [2, 3, 4, 5] }),
+        ]),
+      }),
+    ),
+  );
+  fireEvent.click(screen.getByRole("radio", { name: "Evening" }));
+  expect(await screen.findByLabelText("Evening reminder time")).toHaveValue("22:00");
+});

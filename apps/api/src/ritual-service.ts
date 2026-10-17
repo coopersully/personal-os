@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   auditEvents,
   type Database,
+  reminders,
   ritualActions,
   ritualDefinitionRevisions,
   ritualDefinitions,
@@ -25,7 +26,9 @@ import {
   type RitualState,
   requiresSnoozeConfirmation,
   ritualAnswerIsValid,
+  ritualDefinitionForDate,
   ritualIsAnswered,
+  unfinishedOptionalRitualSteps,
   upcomingRitualWindows,
 } from "@personal-os/domain";
 import { and, desc, eq, gte, lt, lte, or, sql } from "drizzle-orm";
@@ -126,15 +129,18 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
           ) ?? null)
         : null);
     if (window && !current) {
-      const definition = defs.find((d) => d.id === window.ritualId)!;
+      const definition = ritualDefinitionForDate(
+        defs.find((d) => d.id === window.ritualId)!,
+        window.scheduledLocalDate,
+      );
       current = {
         ...window,
         id: occurrenceId(userId, window.ritualId, window.scheduledLocalDate),
         definition,
-        status: "pending",
+        status: definition.steps.length ? "pending" : "completed",
         revision: 1,
         snoozedUntil: null,
-        settledAt: null,
+        settledAt: definition.steps.length ? null : window.dueAt,
         responses: [],
         actions: [],
       };
@@ -150,17 +156,23 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
     }
     const state: RitualState = {
       definitions: defs,
-      upcoming: upcomingRitualWindows(defs, instant).map((window) => ({
-        ...window,
-        id: occurrenceId(userId, window.ritualId, window.scheduledLocalDate),
-        definition: defs.find((d) => d.id === window.ritualId) as RitualDefinition,
-        status: "pending" as const,
-        revision: 1,
-        snoozedUntil: null,
-        settledAt: null,
-        responses: [],
-        actions: [],
-      })),
+      upcoming: upcomingRitualWindows(defs, instant).map((window) => {
+        const definition = ritualDefinitionForDate(
+          defs.find((d) => d.id === window.ritualId)!,
+          window.scheduledLocalDate,
+        );
+        return {
+          ...window,
+          id: occurrenceId(userId, window.ritualId, window.scheduledLocalDate),
+          definition,
+          status: definition.steps.length ? ("pending" as const) : ("completed" as const),
+          revision: 1,
+          snoozedUntil: null,
+          settledAt: definition.steps.length ? null : window.dueAt,
+          responses: [],
+          actions: [],
+        };
+      }),
       current,
       serverNow: instant,
       snoozeCount: current ? countSnoozes(occurrences, current.ritualId, instant) : 0,
@@ -558,6 +570,57 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
           );
         if (valid) {
           if (input.kind === "complete" && ritualIsAnswered(occurrence)) {
+            const optional = unfinishedOptionalRitualSteps(occurrence);
+            if (input.optionalReminderAt && optional.length) {
+              const requestedAt = Date.parse(input.optionalReminderAt);
+              const observedAt = Date.parse(input.observedAt);
+              if (
+                !Number.isFinite(requestedAt) ||
+                requestedAt <= observedAt ||
+                requestedAt > observedAt + 26 * 3600000
+              ) {
+                throw new AppError(
+                  "invalid_request",
+                  "Choose a reminder time within the next day.",
+                );
+              }
+              // A queued completion may synchronize after the chosen time. Preserve
+              // the follow-up by making it due shortly after acceptance, never in the past.
+              const dueAt = new Date(Math.max(requestedAt, now().getTime() + 60000));
+              const reminderIds: string[] = [];
+              for (const step of optional) {
+                const reminderId = randomUUID();
+                await tx.insert(reminders).values({
+                  id: reminderId,
+                  userId: context.principal.userId,
+                  title: step.label,
+                  kind: "reminder",
+                  dueAt,
+                  timezone: occurrence.timeZone,
+                  notes: `${occurrence.definition.kind === "morning" ? "Morning" : "Evening"} ritual · ${occurrence.scheduledLocalDate}`,
+                });
+                await tx.insert(auditEvents).values(
+                  auditValues({
+                    ...context,
+                    action: "reminder.created",
+                    entityType: "reminder",
+                    entityId: reminderId,
+                    before: null,
+                    after: {
+                      occurrenceId: occurrence.id,
+                      dueAt: dueAt.toISOString(),
+                      source: "ritual",
+                    },
+                  }),
+                );
+                reminderIds.push(reminderId);
+              }
+              occurrence.optionalFollowUp = {
+                dueAt: dueAt.toISOString(),
+                stepIds: optional.map((step) => step.id),
+                reminderIds,
+              };
+            }
             await event("complete_applied", "applied");
             occurrence.status = "completed";
             occurrence.settledAt = instant;

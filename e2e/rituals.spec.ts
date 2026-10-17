@@ -101,6 +101,10 @@ test("settings support field search, ritual history, and resumable setup replay"
   await expect(page.getByLabel("Available from").nth(1)).toHaveValue("21:00");
   await page.getByRole("radio", { name: "Morning", exact: true }).click();
   await page.getByLabel("Prompt", { exact: true }).first().fill("Morning water");
+  await page.getByLabel("Requirement", { exact: true }).first().selectOption("optional");
+  await page.getByLabel("Requirement", { exact: true }).nth(1).selectOption("optional");
+  await page.getByLabel("Include on", { exact: true }).nth(1).selectOption("weekdays");
+  await page.getByLabel("Morning reminder time").fill("13:30");
   const saved = page.waitForResponse(
     (r) =>
       r.url().endsWith("/v1/rituals/morning") &&
@@ -112,6 +116,18 @@ test("settings support field search, ritual history, and resumable setup replay"
   await page.reload();
   await expect(page.getByLabel("Prompt", { exact: true }).first()).toHaveValue("Morning water");
   await expect(page.getByRole("checkbox", { name: "Enable morning ritual" })).toBeChecked();
+  await expect(page.getByLabel("Morning reminder time")).toHaveValue("13:30");
+  await expect(page.getByLabel("Requirement", { exact: true }).first()).toHaveValue("optional");
+  await expect(page.getByLabel("Include on", { exact: true }).nth(1)).toHaveValue("weekdays");
+  await page.getByRole("button", { name: "Show morning ritual" }).click();
+  const preview = page.getByRole("dialog", { name: "Ritual preview" });
+  await expect(preview.getByRole("button", { name: "Complete Morning Ritual" })).toBeEnabled();
+  await preview.getByRole("checkbox", { name: "Remind me about these later" }).check();
+  await expect(preview.getByLabel("Reminder time")).toHaveValue("13:30");
+  await preview.getByLabel("Reminder time").fill("14:00");
+  expect(await preview.evaluate((e) => e.scrollWidth <= e.clientWidth + 1)).toBe(true);
+  await preview.getByRole("button", { name: "Complete Morning Ritual" }).click();
+  await expect(preview).toHaveCount(0);
   await page.getByRole("radio", { name: "History and data", exact: true }).click();
   await expect(page.getByRole("region", { name: "Ritual history" })).toBeVisible();
   expect(await page.locator("html").evaluate((e) => e.scrollWidth <= innerWidth + 1)).toBe(true);

@@ -2,8 +2,15 @@
 
 import type { RitualState } from "@personal-os/domain";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { toast } from "sonner";
 import * as ritualBridge from "../desktop/ritual-bridge.js";
 import { RitualChecklist, RitualOverlay } from "./ritual-overlay.js";
+
+vi.mock("sonner", () => ({
+  toast: { error: vi.fn(), loading: vi.fn(), success: vi.fn(), dismiss: vi.fn() },
+  Toaster: () => null,
+}));
+beforeEach(() => vi.mocked(toast.error).mockClear());
 
 const state = {
   current: {
@@ -119,7 +126,13 @@ it("keeps unsaved text after failure and enables explicit completion only after 
   fireEvent.change(screen.getByRole("textbox", { name: "Journal" }), {
     target: { value: "Keep this answer" },
   });
-  expect(await screen.findByRole("alert")).toHaveTextContent("save your ritual answers");
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining("save your ritual answers"),
+      expect.anything(),
+    ),
+  );
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(screen.getByRole("textbox", { name: "Journal" })).toHaveValue("Keep this answer");
   fireEvent.change(screen.getByRole("textbox", { name: "Journal" }), {
     target: { value: "Keep this answer too" },
@@ -158,7 +171,13 @@ it("Escape cancels the pending confirmation and a rejected skip explains the con
     expect.objectContaining({ kind: "cancel_snooze", challengeId: "escape" }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Skip for Today" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("This ritual changed");
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "This ritual changed. Please try again.",
+      expect.anything(),
+    ),
+  );
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
 
 it("adopts a newer remote correction without resubmitting an already saved local answer", async () => {
@@ -227,7 +246,13 @@ it("does not retry a failed draft at the same revision, but resumes after a newe
   const response = vi.fn().mockRejectedValue(new Error("Revision conflict"));
   const view = render(<RitualChecklist state={state} saveResponse={response} act={vi.fn()} />);
   fireEvent.change(screen.getByLabelText("Journal"), { target: { value: "Unsaved answer" } });
-  expect(await screen.findByRole("alert")).toHaveTextContent("save your ritual answers");
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining("save your ritual answers"),
+      expect.anything(),
+    ),
+  );
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   view.rerender(
     <RitualChecklist state={structuredClone(state)} saveResponse={response} act={vi.fn()} />,
   );
@@ -341,4 +366,65 @@ it("completes optional steps without requiring answers and sends only an opted-i
   fireEvent.click(finish);
   await waitFor(() => expect(action).toHaveBeenCalledTimes(2));
   expect(action.mock.calls[1]![0]).not.toHaveProperty("optionalReminderAt");
+});
+
+it.each([
+  "saved",
+  "queued",
+  "failure",
+] as const)("uses one Sonner toast for optional reminder completion: %s", async (outcome) => {
+  vi.mocked(toast.loading).mockClear();
+  vi.mocked(toast.success).mockClear();
+  const current = {
+    ...state.current!,
+    timeZone: "UTC",
+    definition: {
+      ...state.current!.definition,
+      timeZone: "UTC",
+      reminderTime: "12:00",
+      steps: [{ id: "one", label: "Stretch", kind: "checkbox" as const, optional: true }],
+    },
+  };
+  const initial = { ...state, current };
+  const action =
+    outcome === "failure"
+      ? vi.fn().mockRejectedValue(new Error("unavailable"))
+      : vi.fn().mockResolvedValue({
+          outcome: "applied",
+          state: {
+            ...initial,
+            syncStatus: outcome,
+            current: {
+              ...current,
+              status: "completed",
+              optionalFollowUp: {
+                dueAt: "2026-10-18T12:00:00Z",
+                stepIds: ["one"],
+                ...(outcome === "saved" ? { reminderIds: ["reminder"] } : {}),
+              },
+            },
+          },
+        });
+  render(<RitualChecklist state={initial} saveResponse={vi.fn()} act={action} />);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Remind me about these later" }));
+  fireEvent.click(screen.getByRole("button", { name: "Complete Morning Ritual" }));
+  expect(toast.loading).toHaveBeenCalledWith("Finishing ritual…", expect.anything());
+  const loadingId = vi.mocked(toast.loading).mock.calls[0]![1]!.id;
+  if (outcome === "failure") {
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringContaining("save your ritual answers"),
+        { id: loadingId },
+      ),
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Remind me about these later" })).toBeChecked();
+  } else {
+    const message =
+      outcome === "saved"
+        ? "Ritual complete. Reminders saved."
+        : "Ritual saved on this Mac. Reminders are waiting to sync.";
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(message, { id: loadingId }));
+    expect(screen.queryByText(message)).not.toBeInTheDocument();
+  }
 });

@@ -12,7 +12,8 @@ import {
   ritualIsAnswered,
   unfinishedOptionalRitualSteps,
 } from "@personal-os/domain";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { toast } from "sonner";
 import { NohmiBrandMark } from "../../components/brand-marks.js";
 import { AlertTriangleIcon, CheckIcon, ClockIcon } from "../../components/icons.js";
 import { Button } from "../../components/ui/button.js";
@@ -21,6 +22,7 @@ import { Checkbox } from "../../components/ui/checkbox.js";
 import { Field, FieldLabel, FieldLegend, FieldSet } from "../../components/ui/field.js";
 import { Input } from "../../components/ui/input.js";
 import { RadioGroup, RadioGroupItem } from "../../components/ui/radio-group.js";
+import { Toaster } from "../../components/ui/sonner.js";
 import { Spinner } from "../../components/ui/spinner.js";
 import { Textarea } from "../../components/ui/textarea.js";
 import { classifyMutationError } from "../../lib/feedback.js";
@@ -104,6 +106,7 @@ export function RitualOverlay() {
   }, []);
   return (
     <>
+      <Toaster position="bottom-center" />
       {readinessError || error ? (
         <p
           role="alert"
@@ -147,7 +150,8 @@ export function RitualChecklist({
 }) {
   const [state, setState] = useState(external);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const actionToast = useId();
+  const showError = (message: string) => toast.error(message, { id: actionToast });
   const [challenge, setChallenge] = useState<{
     count: number;
     id: string;
@@ -182,7 +186,7 @@ export function RitualChecklist({
   }
   async function respond(stepId: string, value: string | boolean, submitted: boolean) {
     setBusy(true);
-    setError("");
+    toast.dismiss(actionToast);
     const attempt = input();
     const occurrenceId = stateRef.current.current!.id;
     try {
@@ -200,7 +204,7 @@ export function RitualChecklist({
       }
     } catch (e) {
       failedDrafts.current[stepId] = { value, occurrenceId, revision: attempt.expectedRevision };
-      setError(
+      showError(
         classifyMutationError(e, {
           action: "save your ritual answers",
           form: true,
@@ -213,7 +217,13 @@ export function RitualChecklist({
   }
   async function escapeAction(kind: RitualActionInput["kind"]) {
     setBusy(true);
-    setError("");
+    toast.dismiss(actionToast);
+    const requestingReminders =
+      kind === "complete" &&
+      remindLater &&
+      !!stateRef.current.current &&
+      unfinishedOptionalRitualSteps(stateRef.current.current).length > 0;
+    if (requestingReminders && !preview) toast.loading("Finishing ritual…", { id: actionToast });
     try {
       const result = await act({
         ...input(),
@@ -239,6 +249,17 @@ export function RitualChecklist({
           : {}),
       });
       setState(result.state);
+      if (requestingReminders && !preview && result.outcome === "applied") {
+        const followUp = result.state.current?.optionalFollowUp;
+        if (result.state.syncStatus === "queued")
+          toast.success("Ritual saved on this Mac. Reminders are waiting to sync.", {
+            id: actionToast,
+          });
+        else if (followUp?.reminderIds?.length)
+          toast.success("Ritual complete. Reminders saved.", { id: actionToast });
+        else
+          showError("Ritual complete, but reminders could not be confirmed. Check ritual history.");
+      }
       if (result.outcome === "confirmation_required")
         setChallenge({
           count: result.count,
@@ -247,10 +268,10 @@ export function RitualChecklist({
         });
       else {
         setChallenge(null);
-        if (result.outcome === "conflict") setError("This ritual changed. Please try again.");
+        if (result.outcome === "conflict") showError("This ritual changed. Please try again.");
       }
     } catch (e) {
-      setError(
+      showError(
         classifyMutationError(e, {
           action: "save your ritual answers",
           form: true,
@@ -477,7 +498,6 @@ export function RitualChecklist({
                 : `${complete} of ${required.length} tasks completed`}
             </Button>
           ) : null}
-          {error ? <p role="alert">{error}</p> : null}
         </CardFooter>
       </Card>
       <div className="ritual-support flex shrink-0 flex-col items-center gap-1">

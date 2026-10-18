@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { financeSpendingContributionSchema, financeSpendingScopeSchema } from "./spending.js";
+import {
+  financeSpendingContributionSchema,
+  financeSpendingQuerySchema,
+  financeSpendingScopeSchema,
+} from "./spending.js";
 
 describe("Spending contracts", () => {
   const scope = {
@@ -50,4 +54,26 @@ describe("Spending contracts", () => {
       financeSpendingContributionSchema.safeParse({ ...contribution, netCents: 80.5 }).success,
     ).toBe(false);
   });
+});
+
+it("preserves all versus explicit no accounts and query defaults", () => {
+  const scope = {
+    from: "2026-10-01",
+    through: "2026-10-31",
+    timezone: "America/New_York",
+    accountIds: null,
+    categoryIds: null,
+    basis: "personal_cost",
+    includePending: true,
+    subtractRefunds: true,
+  };
+  expect(financeSpendingQuerySchema.parse({ scope })).toMatchObject({
+    grouping: "auto",
+    includeUncategorized: true,
+    scope: { accountIds: null },
+  });
+  expect(
+    financeSpendingQuerySchema.parse({ scope: { ...scope, accountIds: [], categoryIds: [] } })
+      .scope,
+  ).toMatchObject({ accountIds: [], categoryIds: [] });
 });

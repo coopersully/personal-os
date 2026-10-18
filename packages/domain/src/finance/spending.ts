@@ -94,3 +94,63 @@ export const financeSpendingSnapshotSchema = z.object({
   }),
 });
 export type FinanceSpendingSnapshot = z.infer<typeof financeSpendingSnapshotSchema>;
+
+/** Validated API input; URL adapters preserve null (all) and [] (none). */
+export const financeSpendingQuerySchema = z.object({
+  scope: financeSpendingScopeSchema,
+  grouping: z.enum(["auto", "buckets", "categories"]).default("auto"),
+  includeUncategorized: z.boolean().default(true),
+});
+export type FinanceSpendingQuery = z.infer<typeof financeSpendingQuerySchema>;
+
+export const financeSpendingGroupSchema = z.object({
+  id: reference,
+  label: reference,
+  kind: z.enum(["bucket", "category"]),
+  categoryIds: z.array(reference.nullable()),
+  netCents: cents,
+  positiveAreaCents: cents.nonnegative(),
+  grossCents: cents.nonnegative(),
+  reimbursementAdjustmentCents: cents.nonnegative(),
+  reimbursementOutstandingCents: cents.nonnegative(),
+  refundAdjustmentCents: cents.nonnegative(),
+  pendingCents: cents,
+  drillDown: financeSpendingDrillDownSchema,
+});
+export type FinanceSpendingGroup = z.infer<typeof financeSpendingGroupSchema>;
+
+export const financeSpendingDashboardSchema = z.object({
+  schemaVersion: z.literal(1),
+  snapshot: financeSpendingSnapshotSchema,
+  effectiveGrouping: z.enum(["buckets", "categories"]),
+  groupingFallback: z.literal("buckets_unavailable").nullable(),
+  groups: z.array(
+    financeSpendingGroupSchema.extend({ categories: z.array(financeSpendingGroupSchema) }),
+  ),
+  positiveAreaCents: cents.nonnegative(),
+  negativeAdjustmentCents: cents.nonnegative(),
+  excludedUncategorizedCents: cents,
+  accounts: z.array(z.object({ id: reference, label: reference })),
+  categories: z.array(z.object({ id: reference, label: reference })),
+  transactions: z.array(
+    z.object({
+      id: reference,
+      accountId: reference,
+      merchant: z.string(),
+      date: z.string(),
+      pending: z.boolean(),
+    }),
+  ),
+  source: z.object({
+    freshness: z.enum(["current", "stale", "unavailable", "unknown"]),
+    lastSyncedAt: z.iso.datetime().nullable(),
+    reasons: z.array(reference),
+  }),
+  currency: z.object({
+    supported: z.literal("USD"),
+    unsupported: z.array(
+      z.object({ code: z.string().nullable(), transactionIds: z.array(reference) }),
+    ),
+  }),
+});
+export type FinanceSpendingDashboard = z.infer<typeof financeSpendingDashboardSchema>;

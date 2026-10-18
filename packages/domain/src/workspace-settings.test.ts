@@ -18,6 +18,13 @@ describe("workspace settings contracts", () => {
     expect(getDefaultWorkspacePreferences("finances")).toEqual({
       includeArchivedInSearch: true,
       financeTransactionView: "table",
+      financeSpendingView: "bubbles",
+      financeSpendingGrouping: "auto",
+      financeSpendingIncludePending: true,
+      financeSpendingIncludeUncategorized: true,
+      financeSpendingBasis: "personal_cost",
+      financeSpendingSubtractRefunds: true,
+      financeSpendingPeriod: "month",
       financeTransactionGroup: "none",
       spendAccountIds: null,
       cashAccountIds: null,

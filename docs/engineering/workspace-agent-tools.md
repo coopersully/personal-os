@@ -13256,7 +13256,7 @@ Set the conversation disposition using the current version and cited evidence. R
 
 ## setup_finances
 
-Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, preserve unknowns or record an explicit skip, and show the first plan with its missing evidence. Budget activation binds the current profile and proposal. Agents require finances:execute, enabled review bypass and approvalSource agent_self_approval; never impersonate a user approval. Do not ask the user to name a tool.
+Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, preserve unknowns or record an explicit skip, and show the first plan with its missing evidence. Budget activation binds the current profile and proposal and requires exact authenticated human approval in nohmi. Agents can propose but cannot activate budgets, even with execution or review bypass. Do not ask the user to name a tool.
 
 - Domain: finances; stage: commit; policy: approved_rule.
 - Grants (all): finances:write.

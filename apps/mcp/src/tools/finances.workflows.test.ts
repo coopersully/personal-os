@@ -80,6 +80,14 @@ describe("Finance MCP workflows", () => {
     expect(
       tools.tools.find((tool) => tool.name === "approve_finance_budget")?.description,
     ).toContain("exact authenticated human approval");
+    const setupDescription = tools.tools.find(
+      (tool) => tool.name === "setup_finances",
+    )?.description;
+    expect(setupDescription).toContain("requires exact authenticated human approval in nohmi");
+    expect(setupDescription).toContain(
+      "cannot activate budgets, even with execution or review bypass",
+    );
+    expect(setupDescription).not.toContain("agent_self_approval");
     await client.close();
     await server.close();
   });

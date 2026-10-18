@@ -21,6 +21,8 @@ import {
 import { automationHostScheduleSchema } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq } from "drizzle-orm";
+import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
+import type { FinanceStatusService } from "../finance-status-service.js";
 import type { Principal } from "../types.js";
 import { createFinanceContextualQuestionService } from "./contextual-question-service.js";
 import { createFinanceConversationService } from "./conversation-persistence.js";
@@ -28,6 +30,7 @@ import {
   captureFinanceConversationBatch,
   postgresConversationBatchStore,
 } from "./conversation-service.js";
+import { createFinanceMaintenanceIntentService } from "./maintenance-intent-service.js";
 
 /** Authored for the exclusive PostgreSQL verification slot; never run as a unit substitute. */
 describe.sequential("durable Finance conversation intake", () => {
@@ -111,7 +114,7 @@ describe.sequential("durable Finance conversation intake", () => {
     if (!run) throw new Error("run");
     return run;
   }
-  async function hostFixture() {
+  async function hostFixture(verifyImmediately = true) {
     const f = await fixture();
     const connectionId = randomUUID();
     const scheduleId = randomUUID();
@@ -167,23 +170,27 @@ describe.sequential("durable Finance conversation intake", () => {
       scopes: new Set(scopes),
     };
     const conversation = createFinanceConversationService({ db: database.db });
-    const challenge = await conversation.issueChallenge(f.principal, scheduleId);
-    const fetched = await conversation.advanceChallenge(agent, challenge.challengeId, {
-      kind: "fetch",
-    });
-    if (!fetched.nonce) throw new Error("nonce");
-    await conversation.advanceChallenge(agent, challenge.challengeId, {
-      kind: "acknowledge",
-      challengeId: challenge.challengeId,
-      nonce: fetched.nonce,
-    });
-    await conversation.advanceChallenge(agent, challenge.challengeId, {
-      kind: "respond",
-      challengeId: challenge.challengeId,
-      response: "Finance message protocol ready",
-    });
-    return { ...f, conversation, agent, scheduleId, connectionId, token };
+    const verify = async () => {
+      const challenge = await conversation.issueChallenge(f.principal, scheduleId);
+      const fetched = await conversation.advanceChallenge(agent, challenge.challengeId, {
+        kind: "fetch",
+      });
+      if (!fetched.nonce) throw new Error("nonce");
+      await conversation.advanceChallenge(agent, challenge.challengeId, {
+        kind: "acknowledge",
+        challengeId: challenge.challengeId,
+        nonce: fetched.nonce,
+      });
+      await conversation.advanceChallenge(agent, challenge.challengeId, {
+        kind: "respond",
+        challengeId: challenge.challengeId,
+        response: "Finance message protocol ready",
+      });
+    };
+    if (verifyImmediately) await verify();
+    return { ...f, conversation, agent, scheduleId, connectionId, token, verify };
   }
+
   it("keeps protocol traffic outside history and freezes sending on original grant loss", async () => {
     const f = await hostFixture();
     expect((await f.conversation.getReadiness(f.userId)).canSend).toBe(true);
@@ -194,6 +201,32 @@ describe.sequential("durable Finance conversation intake", () => {
       caseId: null,
       recordRefs: [],
     });
+    await database.db
+      .update(executionPolicySettings)
+      .set({ reviewBypassEnabled: false })
+      .where(eq(executionPolicySettings.userId, f.userId));
+    expect(await f.conversation.getReadiness(f.userId)).toMatchObject({
+      canSend: false,
+      reason: "execution_not_authorized",
+      recovery: "authorize_execution",
+    });
+    await database.db
+      .update(executionPolicySettings)
+      .set({ reviewBypassEnabled: true })
+      .where(eq(executionPolicySettings.userId, f.userId));
+    await database.db
+      .update(accessTokens)
+      .set({ scopes: ["finances:maintain"] })
+      .where(eq(accessTokens.id, f.token.id));
+    expect(await f.conversation.getReadiness(f.userId)).toMatchObject({
+      canSend: false,
+      reason: "execution_not_authorized",
+      recovery: "authorize_execution",
+    });
+    await database.db
+      .update(accessTokens)
+      .set({ scopes: ["finances:read", "finances:write", "finances:execute", "finances:maintain"] })
+      .where(eq(accessTokens.id, f.token.id));
     await database.db
       .update(accessTokens)
       .set({ revokedAt: new Date() })
@@ -408,5 +441,118 @@ describe.sequential("durable Finance conversation intake", () => {
           ),
         ),
     ).toHaveLength(0);
+  });
+  function intent() {
+    return createFinanceMaintenanceIntentService({
+      db: database.db,
+      now: () => new Date(),
+      maintenance: { dispatchRun: vi.fn(async () => null) } as unknown as FinanceMaintenanceService,
+      recoverHandoff: async () => ({ recovered: false }),
+      status: {
+        getFinanceStatus: async () => ({
+          details: { rulebookVersion: "conversation-intent-fixture" },
+          state: "maintained",
+          freshness: { blockers: [] },
+        }),
+      } as unknown as FinanceStatusService,
+    });
+  }
+  it("real resolveRun leaves pending messages unconsumed for manual and unverified starts", async () => {
+    const manual = await fixture();
+    await manual.questions.answerWork(manual.answer, manual.context);
+    const manualRun = await intent().maintainFinances(
+      { operation: "start", scope: { type: "all_outstanding" } },
+      {
+        ...manual.principal,
+        scopes: new Set(["finances:read", "finances:write", "finances:maintain"]),
+      },
+    );
+    expect(manualRun.data.run).not.toBeNull();
+    expect(manualRun.data.conversationBatch).toBeNull();
+    expect(
+      await database.db
+        .select()
+        .from(financeConversationBatchMessages)
+        .where(eq(financeConversationBatchMessages.userId, manual.userId)),
+    ).toHaveLength(0);
+    const host = await hostFixture(false);
+    await host.questions.answerWork(host.answer, host.context);
+    const maintenance = intent();
+    const initial = await maintenance.maintainFinances(
+      {
+        operation: "start",
+        automationScheduleId: host.scheduleId,
+        scope: { type: "all_outstanding" },
+      },
+      host.agent,
+    );
+    expect(initial.data.conversationBatch).toBeNull();
+    if (!initial.data.run) throw new Error("run");
+    await host.verify();
+    const resumed = await maintenance.maintainFinances(
+      { operation: "resume", runId: initial.data.run.id },
+      host.agent,
+    );
+    const coalesced = await maintenance.maintainFinances(
+      {
+        operation: "start",
+        automationScheduleId: host.scheduleId,
+        scope: { type: "all_outstanding" },
+      },
+      host.agent,
+    );
+    expect(resumed.data.conversationBatch).toBeNull();
+    expect(coalesced.data.conversationBatch).toBeNull();
+    expect(
+      await database.db
+        .select()
+        .from(financeConversationBatchMessages)
+        .where(eq(financeConversationBatchMessages.userId, host.userId)),
+    ).toHaveLength(0);
+  });
+  it("real resolveRun verified concurrent starts capture once, and coalesced start/resume retain cutoff after later arrivals", async () => {
+    const f = await hostFixture();
+    const maintenance = intent();
+    const first = await f.conversation.send(f.principal, {
+      text: "before start",
+      idempotencyKey: "fixed-one",
+      caseId: null,
+      recordRefs: [],
+    });
+    const input = {
+      operation: "start" as const,
+      automationScheduleId: f.scheduleId,
+      scope: { type: "all_outstanding" as const },
+    };
+    const [started, concurrent] = await Promise.all([
+      maintenance.maintainFinances(input, f.agent),
+      maintenance.maintainFinances(input, f.agent),
+    ]);
+    expect(started.data.conversationBatch).not.toBeNull();
+    expect(concurrent.data.conversationBatch).toEqual(started.data.conversationBatch);
+    if (!started.data.run) throw new Error("run");
+    const later = await f.conversation.send(f.principal, {
+      text: "next run only",
+      idempotencyKey: "fixed-later",
+      caseId: null,
+      recordRefs: [],
+    });
+    const coalesced = await maintenance.maintainFinances(input, f.agent);
+    const resumed = await maintenance.maintainFinances(
+      { operation: "resume", runId: started.data.run.id },
+      f.agent,
+    );
+    expect(coalesced.data.conversationBatch).toEqual(started.data.conversationBatch);
+    expect(resumed.data.conversationBatch).toEqual(started.data.conversationBatch);
+    expect(started.data.conversationBatch?.cutoffSequence).toBe(first.sequence);
+    const page = await f.conversation.pageBatch(f.agent, started.data.run.id);
+    expect(page.messages.map((message) => message.id)).toEqual([first.id]);
+    expect(page.messages.some((message) => message.id === later.id)).toBe(false);
+    expect(
+      await database.db
+        .select()
+        .from(financeConversationBatches)
+        .where(eq(financeConversationBatches.userId, f.userId)),
+    ).toHaveLength(1);
   });
 });

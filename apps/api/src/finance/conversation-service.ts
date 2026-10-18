@@ -3,12 +3,21 @@ import {
   type Database,
   financeConversationBatches,
   financeConversationBatchMessages,
+  financeConversationCapabilities,
   financeConversationMessages,
   financeConversations,
+  type workspaceMaintenanceRuns,
 } from "@personal-os/database";
-import type { FinanceConversationBatch, FinanceConversationMessage } from "@personal-os/domain";
-import { and, eq, sql } from "drizzle-orm";
+import {
+  FINANCE_CONVERSATION_PROTOCOL_VERSION,
+  type FinanceConversationBatch,
+  type FinanceConversationMessage,
+} from "@personal-os/domain";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
+import type { Principal } from "../types.js";
+import { requireWorkspaceExecution } from "../workspace-execution.js";
+import { requireHostRunAuthority } from "./host-run-authority.js";
 
 export type ConversationBinding = {
   userId: string;
@@ -341,4 +350,43 @@ export async function recordFinanceConversationAcceptedAnswer(
   if (!message)
     throw new AppError("internal_error", "The canonical answer message was not recorded.");
   return message;
+}
+
+/** An ineligible run must never reserve or consume the owner's pending queue. */
+export async function hasUsableFinanceConversationConsumer(
+  tx: Transaction,
+  run: typeof workspaceMaintenanceRuns.$inferSelect,
+  principal: Principal,
+  now: Date,
+): Promise<boolean> {
+  if (
+    !run.automationScheduleId ||
+    !run.authorizationConnectionId ||
+    principal.actorType !== "agent"
+  )
+    return false;
+  try {
+    await requireHostRunAuthority(tx, run, principal, now);
+    await requireWorkspaceExecution(tx, principal, "finances", now);
+  } catch (error) {
+    if (error instanceof AppError && error.code === "forbidden") return false;
+    throw error;
+  }
+  const [proof] = await tx
+    .select({ id: financeConversationCapabilities.id })
+    .from(financeConversationCapabilities)
+    .where(
+      and(
+        eq(financeConversationCapabilities.userId, run.userId),
+        eq(financeConversationCapabilities.automationScheduleId, run.automationScheduleId),
+        eq(
+          financeConversationCapabilities.authorizationConnectionId,
+          run.authorizationConnectionId,
+        ),
+        eq(financeConversationCapabilities.protocolVersion, FINANCE_CONVERSATION_PROTOCOL_VERSION),
+        isNotNull(financeConversationCapabilities.verifiedAt),
+      ),
+    )
+    .limit(1);
+  return proof !== undefined;
 }

@@ -32,6 +32,7 @@ export const financeConversationReadinessSchema = z
       "challenge_required",
       "challenge_expired",
       "protocol_upgrade_required",
+      "execution_not_authorized",
     ]),
     recovery: z.enum([
       "none",
@@ -39,6 +40,7 @@ export const financeConversationReadinessSchema = z
       "resume_registration",
       "reconnect",
       "verify_message_protocol",
+      "authorize_execution",
     ]),
   })
   .strict();
@@ -98,9 +100,11 @@ export function projectFinanceConversationReadiness(input: {
   connectionState: FinanceConversationReadiness["connectionState"];
   messageCapability: FinanceConversationReadiness["messageCapability"];
   messageProtocolVersion?: string;
+  executionAuthorized: boolean;
 }): FinanceConversationReadiness {
+  const { executionAuthorized, ...state } = input;
   const base = {
-    ...input,
+    ...state,
     historyReadable: true as const,
     messageProtocolVersion: input.messageProtocolVersion ?? FINANCE_CONVERSATION_PROTOCOL_VERSION,
   };
@@ -118,6 +122,7 @@ export function projectFinanceConversationReadiness(input: {
   if (input.connectionState === "disconnected")
     return blocked("connection_disconnected", "reconnect");
   if (input.connectionState === "revoked") return blocked("connection_revoked", "reconnect");
+  if (!executionAuthorized) return blocked("execution_not_authorized", "authorize_execution");
   if (input.messageCapability === "expired")
     return blocked("challenge_expired", "verify_message_protocol");
   if (input.messageCapability === "protocol_upgrade_required")

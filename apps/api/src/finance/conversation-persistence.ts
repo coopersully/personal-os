@@ -106,6 +106,7 @@ export function createFinanceConversationService({
       .for("share");
     return {
       schedule,
+      tokens,
       liveGrant: tokens.some((token) => token.scopes.includes("finances:maintain")),
     };
   }
@@ -117,7 +118,29 @@ export function createFinanceConversationService({
       .orderBy(desc(automationHostSchedules.updatedAt));
     let fallback: FinanceConversationReadiness | null = null;
     for (const candidate of schedules) {
-      const { schedule, liveGrant } = await liveSchedule(tx, userId, candidate.id);
+      const { schedule, liveGrant, tokens } = await liveSchedule(tx, userId, candidate.id);
+      let executionAuthorized = false;
+      for (const token of tokens) {
+        if (!token.scopes.includes("finances:maintain")) continue;
+        try {
+          await requireWorkspaceExecution(
+            tx,
+            {
+              userId,
+              actorId: token.id,
+              actorType: "agent",
+              authorizationConnectionId: schedule.authorizationConnectionId,
+              scopes: new Set(token.scopes),
+            },
+            "finances",
+            now(),
+          );
+          executionAuthorized = true;
+          break;
+        } catch (error) {
+          if (!(error instanceof AppError) || error.code !== "forbidden") throw error;
+        }
+      }
       const [proof] = await tx
         .select()
         .from(financeConversationCapabilities)
@@ -143,6 +166,7 @@ export function createFinanceConversationService({
               : "revoked";
       const result = projectFinanceConversationReadiness({
         registrationState,
+        executionAuthorized,
         connectionState: liveGrant ? "live" : "disconnected",
         messageCapability: !proof
           ? "unverified"
@@ -161,6 +185,7 @@ export function createFinanceConversationService({
       fallback ??
       projectFinanceConversationReadiness({
         registrationState: "missing",
+        executionAuthorized: false,
         connectionState: "missing",
         messageCapability: "unverified",
       })

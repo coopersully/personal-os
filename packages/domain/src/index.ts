@@ -11,6 +11,7 @@ export * from "./desktop-release.js";
 export * from "./execution-policy.js";
 export * from "./feature-contracts.js";
 export * from "./finance/spending.js";
+export * from "./finance/baseline-qualification.js";
 export * from "./finance.js";
 export * from "./finance-maintenance.js";
 export * from "./goals.js";

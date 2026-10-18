@@ -39,6 +39,7 @@ export type FinanceCashflowSourceSnapshots = {
     direction: "income" | "expense" | "transfer";
     pending: boolean;
     transactionRevision: string;
+    reimbursementRelationshipRevision: string;
     incomeEligibility: { eligible: boolean; reasons: FinanceCashflowActualEligibilityReason[] };
     allocations: Array<{
       id: string;

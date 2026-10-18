@@ -9,6 +9,7 @@ import { Progress } from "@/components/ui/progress";
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
 import { formatMoney } from "./format.js";
+import { FinanceReimbursementJourney } from "./reimbursement-journey.js";
 
 function sectionFor(item: FinanceReimbursement) {
   if (["received", "cancelled"].includes(item.status)) return "Recently resolved";
@@ -68,6 +69,7 @@ export function FinanceReimbursementList() {
                       {item.matches.length} linked{" "}
                       {item.matches.length === 1 ? "credit" : "credits"} · {item.rationale}
                     </p>
+                    <FinanceReimbursementJourney reimbursement={item} />
                   </ItemContent>
                 </Item>
               );

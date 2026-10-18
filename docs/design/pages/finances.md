@@ -39,6 +39,20 @@ Ledger diagnostics disclose their individual evidence and recovery paths.
 Record counts from different checks are never added into a synthetic issue total because the
 underlying records may overlap.
 
+## Reimbursement receipt evidence
+
+Cash flow Reimbursements keeps one row per allocation-owned claim. Receipt history and evidence
+opens a labelled disclosure containing each recorded match's amount, rationale, recording time,
+and canonical credit transaction link. Claim, allocation and source references remain inspectable;
+provider remote identifiers are provenance rather than local transaction links. Local transaction
+source references link only when they contain a valid canonical transaction ID.
+
+Unknown due dates remain unknown, and cancelling an expected remainder retains its recorded
+receipts and cancellation evidence. Match recording time is not a settlement date. Receipt detail
+amounts carry no assumed currency because the current reimbursement read does not supply one;
+the existing summary totals are preserved. Original expense amounts and dates, currency-qualified
+journey totals, and receipt correction/unmatch remain outside this read-only disclosure.
+
 ## Complete Plan contract
 
 Plan displays the latest complete budget version, including proposed or active

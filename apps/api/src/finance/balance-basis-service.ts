@@ -307,6 +307,7 @@ export function basisValue(
     reflections: reflections.map((entry) => ({
       transactionId: entry.transactionId,
       transactionRevision: entry.transactionContextualRevision.toString(),
+      reimbursementRelationshipRevision: entry.reimbursementRelationshipRevision?.toString() ?? null,
       reflection: entry.reflection,
     })),
   });
@@ -451,6 +452,7 @@ export function createFinanceBalanceBasisService({
             direction: row.direction,
             pending: row.pending,
             transactionRevision: row.contextualRevision.toString(),
+            reimbursementRelationshipRevision: row.reimbursementRelationshipRevision.toString(),
             incomeEligibility: data.eligibility(row, "income"),
             allocations: data.allocations
               .filter(
@@ -571,7 +573,9 @@ export function createFinanceBalanceBasisService({
             transactions.some(
               (row) =>
                 input.reflections.find((ref) => ref.transactionId === row.id)
-                  ?.transactionRevision !== row.contextualRevision.toString(),
+                  ?.transactionRevision !== row.contextualRevision.toString() ||
+                input.reflections.find((ref) => ref.transactionId === row.id)
+                  ?.reimbursementRelationshipRevision !== row.reimbursementRelationshipRevision.toString(),
             )
           )
             throw new AppError(
@@ -606,6 +610,7 @@ export function createFinanceBalanceBasisService({
                     basisId: saved.id,
                     transactionId: ref.transactionId,
                     transactionContextualRevision: BigInt(ref.transactionRevision),
+                    reimbursementRelationshipRevision: BigInt(ref.reimbursementRelationshipRevision),
                     reflection: ref.reflection,
                   })),
                 )
@@ -680,27 +685,9 @@ export function createFinanceBalanceBasisService({
           });
           if (!timezone) return unavailable("balance_basis_unavailable");
           const today = localDateToIso(localDateAt(asOf, timezone.planningTimezone));
-          const visibleVersionIds = [
-            ...new Set(schedule.occurrences.map((row) => row.scheduleVersionId)),
-          ];
-          const successors = visibleVersionIds.length
-            ? await tx
-                .select({ previous: financeRecurringScheduleVersions.supersedesId })
-                .from(financeRecurringScheduleVersions)
-                .where(
-                  and(
-                    eq(financeRecurringScheduleVersions.userId, userId),
-                    inArray(financeRecurringScheduleVersions.supersedesId, visibleVersionIds),
-                    lte(financeRecurringScheduleVersions.effectiveFrom, today),
-                  ),
-                )
-                .limit(1001)
-            : [];
-          if (successors.length > 1000) return unavailable("unconfirmed_schedule");
-          const retiredVersions = new Set(successors.map((row) => row.previous));
-          const active = schedule.occurrences.filter(
-            (row) => row.inCurrentSchedule && !retiredVersions.has(row.scheduleVersionId),
-          );
+          // Reversal restores an occurrence's residual; it never cancels its commitment.
+          // Only the canonical effective interval determines whether history is forecastable.
+          const active = schedule.occurrences.filter((row) => row.inCurrentSchedule);
           const paydayRow = active
             .filter(
               (row) =>
@@ -749,7 +736,7 @@ export function createFinanceBalanceBasisService({
           )
             return unavailable("unconfirmed_schedule");
           const horizon = active.filter((row) => row.localDate <= paydayRow.localDate);
-          // Reversed historical/retired versions are retained for inspection, never forecast inputs.
+          // Out-of-effective-interval history remains inspectable, outside forecast inputs.
           if (
             horizon.some(
               (row) =>
@@ -782,7 +769,8 @@ export function createFinanceBalanceBasisService({
             const reflection = basis?.reflections.find(
               (ref) =>
                 ref.transactionId === row.id &&
-                ref.transactionRevision === row.contextualRevision.toString(),
+                ref.transactionRevision === row.contextualRevision.toString() &&
+                ref.reimbursementRelationshipRevision === row.reimbursementRelationshipRevision.toString(),
             );
             if (!reflection) return unavailable("actual_review_required");
             if (row.transactionDate < query.from) {
@@ -826,7 +814,7 @@ export function createFinanceBalanceBasisService({
                 movements.push({
                   ...common,
                   id: `allocation:${allocation.id}`,
-                  version: `${row.contextualRevision}:${allocation.revision}`,
+                  version: `${row.contextualRevision}:${row.reimbursementRelationshipRevision}:${allocation.revision}`,
                   amountMinorUnits: allocation.amount,
                 });
               }
@@ -834,7 +822,7 @@ export function createFinanceBalanceBasisService({
               movements.push({
                 ...common,
                 id: `transaction:${row.id}`,
-                version: row.contextualRevision.toString(),
+                version: `${row.contextualRevision}:${row.reimbursementRelationshipRevision}`,
                 amountMinorUnits: row.amount,
               });
           }

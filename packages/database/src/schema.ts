@@ -541,6 +541,45 @@ export const accessTokens = pgTable(
   (table) => [
     uniqueIndex("access_tokens_token_hash_idx").on(table.tokenHash),
     index("access_tokens_user_idx").on(table.userId),
+    uniqueIndex("access_tokens_owner_id_unique").on(table.userId, table.id),
+  ],
+);
+
+/** Immutable successful canonical OAuth rotations; contains identities, never credentials. */
+export const oauthAccessTokenRotations = pgTable(
+  "oauth_access_token_rotations",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    fromAccessTokenId: uuid("from_access_token_id").notNull(),
+    toAccessTokenId: uuid("to_access_token_id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    audience: text("audience").notNull(),
+    authorizationConnectionId: uuid("authorization_connection_id").notNull(),
+    predecessorScopes: jsonb("predecessor_scopes").$type<AccessScope[]>().notNull(),
+    successorScopes: jsonb("successor_scopes").$type<AccessScope[]>().notNull(),
+    rotatedAt: timestamp("rotated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("oauth_rotation_predecessor_unique").on(table.fromAccessTokenId),
+    index("oauth_rotation_owner_successor_idx").on(table.userId, table.toAccessTokenId),
+    check(
+      "oauth_rotation_distinct_actors",
+      sql`${table.fromAccessTokenId} <> ${table.toAccessTokenId}`,
+    ),
+    // SQL migration makes both endpoint NO ACTION FKs DEFERRABLE INITIALLY DEFERRED
+    // so owner cascade may remove tokens and evidence in either FK-trigger order.
+    foreignKey({
+      name: "oauth_rotation_predecessor_owner_fk",
+      columns: [table.userId, table.fromAccessTokenId],
+      foreignColumns: [accessTokens.userId, accessTokens.id],
+    }),
+    foreignKey({
+      name: "oauth_rotation_successor_owner_fk",
+      columns: [table.userId, table.toAccessTokenId],
+      foreignColumns: [accessTokens.userId, accessTokens.id],
+    }),
   ],
 );
 
@@ -2604,6 +2643,8 @@ export const financeTransactions = pgTable(
   "finance_transactions",
   {
     contextualRevision: bigint("contextual_revision", { mode: "bigint" }).notNull().default(1n),
+    reimbursementRelationshipRevision: bigint("reimbursement_relationship_revision", { mode: "bigint" }).notNull().default(1n),
+    reimbursementRelationshipState: jsonb("reimbursement_relationship_state").$type<unknown[]>().notNull().default([]),
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
@@ -2647,6 +2688,7 @@ export const financeTransactions = pgTable(
       table.id,
       table.accountId,
     ),
+    check("finance_transactions_reimbursement_relationship_revision_check", sql`${table.reimbursementRelationshipRevision} > 0`),
     check("finance_transactions_contextual_revision_check", sql`${table.contextualRevision} > 0`),
     uniqueIndex("finance_transactions_id_user_id_unique").on(table.id, table.userId),
     index("finance_transactions_user_date_idx").on(table.userId, table.transactionDate),
@@ -4126,9 +4168,11 @@ export const financeBalanceInclusions = pgTable(
     transactionContextualRevision: bigint("transaction_contextual_revision", {
       mode: "bigint",
     }).notNull(),
+    reimbursementRelationshipRevision: bigint("reimbursement_relationship_revision", { mode: "bigint" }),
     reflection: text("reflection").notNull(),
   },
   (table) => [
+    check("fin_balance_inclusion_relationship_revision_check", sql`${table.reimbursementRelationshipRevision} IS NULL OR ${table.reimbursementRelationshipRevision} > 0`),
     check("fin_balance_inclusion_revision_check", sql`${table.transactionContextualRevision} > 0`),
     check(
       "fin_balance_inclusion_reflection_check",

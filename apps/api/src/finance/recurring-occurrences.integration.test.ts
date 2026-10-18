@@ -4,6 +4,10 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   financeAccounts,
+  financeBalanceInclusions,
+  financeCashBalanceBases,
+  financeReimbursements,
+  financeReimbursementMatches,
   financeCategories,
   financeIncomeStreams,
   financeOccurrenceMatchEvents,
@@ -15,7 +19,7 @@ import {
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { createFinanceService } from "../finance-service.js";
 import type { FinanceMutationContext } from "./context.js";
 
@@ -170,6 +174,7 @@ describe.sequential("recurring schedule actual matching and explicit balance bas
       occurrence: { scheduleVersionId: cost.data.id, localDate: "2026-03-01", slot: 0 },
       transactionId: actual.id,
       expectedTransactionRevision: actual.contextualRevision.toString(),
+      expectedReimbursementRelationshipRevision: actual.reimbursementRelationshipRevision.toString(),
       allocationId: allocation.id,
       expectedAllocationRevision: allocation.revision,
       amountCents: 10000,
@@ -210,6 +215,7 @@ describe.sequential("recurring schedule actual matching and explicit balance bas
         reflections: sources.transactions.map((row) => ({
           transactionId: row.id,
           transactionRevision: row.transactionRevision,
+          reimbursementRelationshipRevision: row.reimbursementRelationshipRevision,
           reflection: "included" as const,
         })),
         idempotencyKey: randomUUID(),
@@ -250,6 +256,7 @@ describe.sequential("recurring schedule actual matching and explicit balance bas
         },
         transactionId: salary.id,
         expectedTransactionRevision: salary.contextualRevision.toString(),
+        expectedReimbursementRelationshipRevision: salary.reimbursementRelationshipRevision.toString(),
         amountCents: 300000,
         currencyCode: "USD",
         rationale: "Explicit previous salary",
@@ -303,6 +310,7 @@ describe.sequential("recurring schedule actual matching and explicit balance bas
             {
               transactionId: f.actual.id,
               transactionRevision: f.actual.contextualRevision.toString(),
+              reimbursementRelationshipRevision: f.actual.reimbursementRelationshipRevision.toString(),
               reflection: "included",
             },
           ],
@@ -387,7 +395,40 @@ describe.sequential("recurring schedule actual matching and explicit balance bas
     ).toMatchObject({ status: "estimated", endingBalanceMinorUnits: 360000 });
   });
 
-  it("uses today's next payday and excludes retired reversed variable history from a fixed successor forecast", async () => {
+  it("retains an unpaid fixed predecessor before its successor boundary and withholds the estimate", async () => {
+    const f = await fixture();
+    await f.service.confirmFinanceRecurringSchedule(
+      {
+        ...f.costInput,
+        expectedSourceRevision: 2,
+        supersedesId: f.cost.data.id,
+        effectiveFrom: "2026-03-01",
+        anchorLocalDate: "2026-03-01",
+        amountCents: 12000,
+        idempotencyKey: randomUUID(),
+      },
+      f.context,
+    );
+    await closePreviousPayday(f);
+    await statement(f);
+    const view = await f.service.getFinanceCashflowProjection(f.user.id, {
+      from: "2026-02-22",
+      to: "2026-03-31",
+      selectedIncomeStreamId: f.income.id,
+    });
+    expect(
+      view.schedule.occurrences.find(
+        (row) => row.scheduleVersionId === f.cost.data.id && row.localDate === "2026-02-22",
+      ),
+    ).toMatchObject({ inCurrentSchedule: true, remainingExpectedCents: 10000 });
+    expect(view.projection.status).toBe("unavailable");
+    expect(
+      view.projection.status === "unavailable" &&
+        view.projection.reasons.map((reason) => reason.code),
+    ).toContain("overdue_expected");
+  });
+
+  it("keeps a reversed unpaid variable predecessor unknown inside its original effective interval", async () => {
     const f = await fixture();
     const variable = await f.service.confirmFinanceRecurringSchedule(
       {
@@ -441,6 +482,77 @@ describe.sequential("recurring schedule actual matching and explicit balance bas
       ),
     ).toBe(true);
     expect(view.schedule.matchEvents.some((row) => row.kind === "reverse")).toBe(true);
+    expect(
+      view.schedule.occurrences.find(
+        (row) => row.scheduleVersionId === variable.data.id && row.localDate === "2026-02-22",
+      ),
+    ).toMatchObject({ inCurrentSchedule: true, remainingExpectedCents: 10000 });
+    expect(view.projection.status).toBe("unavailable");
+    expect(
+      view.projection.status === "unavailable" &&
+        view.projection.reasons.map((reason) => reason.code),
+    ).toContain("unknown_amount");
+  });
+
+  it("uses today's next payday while retaining reversed variable history outside its effective interval", async () => {
+    const f = await fixture();
+    const variable = await f.service.confirmFinanceRecurringSchedule(
+      {
+        ...f.costInput,
+        expectedSourceRevision: 2,
+        supersedesId: f.cost.data.id,
+        effectiveFrom: "2026-02-15",
+        anchorLocalDate: "2026-02-15",
+        amountBasis: "variable",
+        idempotencyKey: randomUUID(),
+      },
+      f.context,
+    );
+    const match = await f.service.manageFinanceOccurrenceMatch(
+      {
+        ...f.match,
+        occurrence: { scheduleVersionId: variable.data.id, localDate: "2026-03-01", slot: 0 },
+      },
+      f.context,
+    );
+    await f.service.manageFinanceOccurrenceMatch(
+      {
+        operation: "reverse",
+        matchId: match.data.id,
+        rationale: "Correct variable schedule",
+        idempotencyKey: randomUUID(),
+      },
+      f.context,
+    );
+    await f.service.confirmFinanceRecurringSchedule(
+      {
+        ...f.costInput,
+        expectedSourceRevision: 3,
+        supersedesId: variable.data.id,
+        effectiveFrom: "2026-03-01",
+        anchorLocalDate: "2026-03-01",
+        idempotencyKey: randomUUID(),
+      },
+      f.context,
+    );
+    await closePreviousPayday(f);
+    await statement(f);
+    const view = await f.service.getFinanceCashflowProjection(f.user.id, {
+      from: "2026-02-28",
+      to: "2026-04-30",
+      selectedIncomeStreamId: f.income.id,
+    });
+    expect(
+      view.schedule.occurrences.some(
+        (row) => row.scheduleVersionId === variable.data.id && row.amountBasis === "variable",
+      ),
+    ).toBe(true);
+    expect(view.schedule.matchEvents.some((row) => row.kind === "reverse")).toBe(true);
+    expect(
+      view.schedule.occurrences.find(
+        (row) => row.scheduleVersionId === variable.data.id && row.localDate === "2026-03-01",
+      ),
+    ).toMatchObject({ inCurrentSchedule: false, remainingExpectedCents: 0 });
     expect(view.projection).toMatchObject({ status: "estimated", endingBalanceMinorUnits: 350000 });
   });
 
@@ -528,11 +640,49 @@ describe.sequential("recurring schedule actual matching and explicit balance bas
     );
     await database.db
       .update(financeTransactions)
-      .set({ category: null, contextualRevision: sql`${financeTransactions.contextualRevision}+1` })
+      .set({ category: null })
       .where(eq(financeTransactions.id, f.actual.id));
     expect((await f.service.getFinanceCashflowProjection(f.user.id, query)).projection.status).toBe(
       "unavailable",
     );
+  });
+
+  it("binds both actual generations so a reimbursement graph ABA cannot resurrect an old match or replay stale input", async () => {
+    const f = await fixture();
+    const [credit] = await database.db.insert(financeTransactions).values({ userId: f.user.id, accountId: f.account.id, merchant: "Explicit synthetic income", amount: 10000, currencyCode: "USD", direction: "income", transactionDate: "2026-03-01", category: "Income", categorySource: "user" }).returning();
+    if (!credit) throw new Error("Missing credit");
+    const schedule = await f.service.listFinanceRecurringOccurrences(f.user.id, { from: "2026-03-31", to: "2026-03-31" });
+    const payday = schedule.occurrences.find(row => row.source.kind === "income");
+    if (!payday) throw new Error("Missing payday");
+    const input = { operation: "match_income" as const, occurrence: { scheduleVersionId: payday.scheduleVersionId, localDate: payday.localDate, slot: payday.slot }, transactionId: credit.id, expectedTransactionRevision: credit.contextualRevision.toString(), expectedReimbursementRelationshipRevision: credit.reimbursementRelationshipRevision.toString(), amountCents: 10000, currencyCode: "USD", rationale: "Explicit income before relationship change", idempotencyKey: randomUUID() };
+    const matched = await f.service.manageFinanceOccurrenceMatch(input, f.context);
+    expect(matched.data.reimbursementRelationshipRevision).toBe(credit.reimbursementRelationshipRevision.toString());
+    await statement(f);
+    await database.db.update(financeTransactionAllocations).set({ treatment: "reimbursable" }).where(eq(financeTransactionAllocations.id, f.allocation.id));
+    const [reimbursement] = await database.db.insert(financeReimbursements).values({ userId: f.user.id, allocationId: f.allocation.id, expectedAmount: 10000, rationale: "Synthetic reimbursement" }).returning();
+    if (!reimbursement) throw new Error("Missing reimbursement");
+    const [link] = await database.db.insert(financeReimbursementMatches).values({ userId: f.user.id, reimbursementId: reimbursement.id, creditTransactionId: credit.id, amount: 10000, rationale: "Synthetic graph transition" }).returning();
+    if (!link) throw new Error("Missing graph link");
+    await database.db.delete(financeReimbursementMatches).where(eq(financeReimbursementMatches.id, link.id));
+    const [current] = await database.db.select().from(financeTransactions).where(eq(financeTransactions.id, credit.id));
+    expect(current?.contextualRevision).toBe(credit.contextualRevision);
+    expect(current?.reimbursementRelationshipRevision).toBeGreaterThan(credit.reimbursementRelationshipRevision);
+    const view = await f.service.listFinanceRecurringOccurrences(f.user.id, { from: "2026-03-31", to: "2026-03-31" });
+    expect(view.occurrences.find(row => row.source.kind === "income")?.matchState).toBe("invalidated");
+    await expect(f.service.manageFinanceOccurrenceMatch({ ...input, idempotencyKey: randomUUID() }, f.context)).rejects.toMatchObject({ code: "conflict" });
+    expect((await f.service.getFinanceCashflowProjection(f.user.id, { from: "2026-03-01", to: "2026-03-31", selectedIncomeStreamId: f.income.id })).projection.status).toBe("unavailable");
+  });
+
+  it("keeps legacy NULL balance reflection generations unknown without inventing a current revision", async () => {
+    const f = await fixture();
+    // Seed a pre-generation legacy statement without mutating immutable history.
+    const [legacy] = await database.db.insert(financeCashBalanceBases).values({ userId: f.user.id, actorUserId: f.user.id, accountId: f.account.id, basisRevision: 1, accountContextualRevision: f.account.contextualRevision, kind: "current", amountCents: 100000, currencyCode: "USD", asOf: now(), validUntil: new Date("2026-05-01T00:00:00Z"), protectedFloorCents: 0 }).returning();
+    if (!legacy) throw new Error("Missing legacy basis");
+    await database.db.insert(financeBalanceInclusions).values({ userId: f.user.id, basisId: legacy.id, transactionId: f.actual.id, transactionContextualRevision: f.actual.contextualRevision, reflection: "included" });
+    const bases = await f.service.listFinanceBalanceBases(f.user.id, [f.account.id]);
+    expect(bases[0]?.reflections[0]?.reimbursementRelationshipRevision).toBeNull();
+    const view = await f.service.getFinanceCashflowProjection(f.user.id, { from: "2026-03-01", to: "2026-03-31", selectedIncomeStreamId: f.income.id });
+    expect(view.projection).toMatchObject({ status: "unavailable", reasons: [{ code: "actual_review_required" }] });
   });
 
   it("expands stable month-end identities without creating occurrence rows on reads", async () => {
@@ -708,6 +858,7 @@ describe.sequential("recurring schedule actual matching and explicit balance bas
           {
             transactionId: f.actual.id,
             transactionRevision: f.actual.contextualRevision.toString(),
+              reimbursementRelationshipRevision: f.actual.reimbursementRelationshipRevision.toString(),
             reflection: "included",
           },
         ],
@@ -746,7 +897,7 @@ describe.sequential("recurring schedule actual matching and explicit balance bas
     await f.service.manageFinanceOccurrenceMatch(f.match, f.context);
     await database.db
       .update(financeTransactions)
-      .set({ amount: 12000, contextualRevision: sql`${financeTransactions.contextualRevision}+1` })
+      .set({ amount: 12000 })
       .where(eq(financeTransactions.id, f.actual.id));
     expect(
       (
@@ -791,6 +942,7 @@ describe.sequential("recurring schedule actual matching and explicit balance bas
         },
         transactionId: actual.id,
         expectedTransactionRevision: actual.contextualRevision.toString(),
+      expectedReimbursementRelationshipRevision: actual.reimbursementRelationshipRevision.toString(),
         amountCents: 300000,
         currencyCode: "USD",
         rationale: "Explicit salary actual",

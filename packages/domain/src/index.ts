@@ -12,6 +12,7 @@ export * from "./execution-policy.js";
 export * from "./feature-contracts.js";
 export * from "./finance/baseline-qualification.js";
 export * from "./finance/cashflow-timeline.js";
+export * from "./finance/goal-scenario-projection.js";
 export * from "./finance/recurring-cost-projection.js";
 export * from "./finance/spending.js";
 export * from "./finance.js";

@@ -40,12 +40,6 @@ requires source references but does not authenticate their contents; inspect eac
       { "name": "Optional aggregate", "headSha": "<PR head SHA>", "appId": 57789, "status": "COMPLETED", "conclusion": "NEUTRAL", "required": false }
     ]
   },
-  "codeRabbit": {
-    "headSha": "<PR head SHA>",
-    "status": "SUCCESS",
-    "actionableFindings": 0,
-    "coverageVerified": true
-  },
   "feedback": {
     "headSha": "<PR head SHA>",
     "collectionComplete": true,
@@ -80,7 +74,6 @@ requires source references but does not authenticate their contents; inspect eac
     "base": ["github.json#baseSha", "ancestry.json"],
     "verification": ["verification.json"],
     "ci": ["github.json#sources/checks", "github.json#sources/rules", "selected-scope.json"],
-    "codeRabbit": ["coderabbit-coverage.json"],
     "feedback": ["feedback.json", "feedback-ledger.json"],
     "selfReview": ["independent-review.json"],
     "linear": ["linear-audit.json"],
@@ -91,13 +84,19 @@ requires source references but does not authenticate their contents; inspect eac
 ```
 
 Determine expected required checks from live branch protection/rulesets, not from the checks that
-happen to appear. Include every reported current-head CI check. Optional `NEUTRAL` or `SKIPPED`
+happen to appear. Retain the complete raw check/status inventory. Include every reported current-head
+CI/security execution check and every live-required or workflow-selected check in `ci.checks`.
+An authenticated optional advisory review lifecycle status (such as CodeRabbit coverage) belongs in
+feedback evidence, outside execution checks. Record provider/purpose and classification evidence;
+never classify by display name alone or omit a required/selected check. Unknown classification
+remains unresolved and blocks readiness. Advisory findings and threads
+remain in the complete feedback ledger. Optional `NEUTRAL` or `SKIPPED`
 checks may be marked `required: false`; a required check satisfies the gate only with `SUCCESS`.
 
-Set `codeRabbit.status` to `SUCCESS` only when the integration's current review/check covers the
-current diff and no actionable CodeRabbit item remains. A historical review on an earlier head is
-not enough by itself. Use `PENDING` while a requested current review is running and `MISSING` when
-the repository supplies no usable evidence.
+CodeRabbit is optional advisory review. Its absence, rate limit or skipped coverage does not block
+readiness. Collect and adjudicate actual bot feedback alongside all other review surfaces; unresolved
+threads and verified actionable findings still block. Preserve any check required by live GitHub rules.
+Independent deep-review acceptance below is mandatory regardless of bot status.
 
 Set `serverGatesVerified` only from live enforcement of up-to-date required checks, required
 approvals, and resolved conversations, for the normal protected merge path; never infer permission to bypass them. Set
@@ -123,13 +122,17 @@ Evidence references identify saved sanitized records or exact source URLs. Every
 must exist and support the assertion. Verification records include candidate, base, verifier inputs,
 command, exit status, and time; reviews include exact candidate, reviewer, findings and dispositions;
 Linear records include live Project ID, issue IDs, current eligibility and acceptance revision.
-CodeRabbit evidence includes verified integration identity, substantive coverage, candidate, review
-source, and finding dispositions. A green skipped check is insufficient. Pending coverage may be
-false while status is PENDING; missing review returns remediation to request it once.
-
 All counts are actual collected counts, including outdated unresolved threads. Zero actionable
 findings does not imply zero unresolved threads. Missing approvals return WAIT. Required approval
 policy comes from live rules; when no approval is required, explicitly record that evidence.
+
+## Independent acceptance
+
+The example above is the existing merge evidence envelope. It is not sufficient alone: add the
+current independent `acceptance` record from [acceptance state](acceptance-state.md). The evaluator
+requires every current CS ID, policy revision/digest, source head/base, independent identities and
+a reviewed production plan before MERGE. After merge, TERMINAL only prevents duplicate merging;
+use the production evaluator before completion.
 
 ## Hosted verification mode
 

@@ -12,7 +12,9 @@ Sync concrete Nohmi work to Linear in one auditable pass.
 - Read `linear-context` and its workspace conventions before using Linear.
 - This repository is hard-routed to the unique live `Nohmi` Project. Resolve it before every write.
   If it is missing or ambiguous, make no repository-derived Linear mutations.
-- Linear mutation requires explicit user authority or a calling skill that clearly grants a bounded
+- The standing repository instruction mandates and authorizes bounded Nohmi tracking for assigned
+  implementation/durable changes from intake through acceptance. Pure discussion remains read-only.
+- Other Linear mutation requires explicit user authority or a calling skill that clearly grants a bounded
   write scope. The repository `create-pr` skill grants PR-scoped authority to match or create direct
   Nohmi issues, update their active status, add the resulting structured PR links, add material
   progress comments, and audit those writes unless the user explicitly skips Linear. A request to

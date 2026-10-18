@@ -20,7 +20,8 @@ parallel worktree ownership. It complements the system boundary in
    append-only.
 4. A feature is complete only with its domain contract, API behavior, typed
    client surface, UI state handling, audit behavior for mutations, and tests.
-   `pnpm verify` is required before handoff.
+   Complete frozen-candidate verification is required before merge under
+   [delivery verification](delivery-verification.md); early handoffs identify remaining evidence.
 5. Provider material is a projection, not a local replacement. Provider
    failures, stale data, missing capability, and reconnect state must remain
    visible to the user and caller.

@@ -1,6 +1,7 @@
 import {
   auditEvents,
   type Database,
+  financeBudgetBaselineQualifications,
   financeBudgetPeriodBaselines,
   financeBudgetPolicies,
   financeBudgetPolicyPreviews,
@@ -17,6 +18,7 @@ import {
   type FinanceBudgetPolicyRevisionTuple,
   type FinanceBudgetPolicyTerms,
   type FinancePositionEvidence,
+  financeBudgetBaselineSnapshotSchema,
   financeBudgetEvaluationCheckpointSchema,
   financeBudgetPeriodBaselineRecordSchema,
   financeBudgetPolicyEvaluationSchema,
@@ -683,6 +685,20 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
             snapshot.allocations.reduce((n, a) => n + a.amountCents, 0) !== budget.allocatedTotal,
           "Baseline must be an exact, complete, human-approved budget for this plan and period.",
         );
+        const qualification = await tx.query.financeBudgetBaselineQualifications.findFirst({
+          where: and(
+            eq(financeBudgetBaselineQualifications.userId, context.userId),
+            eq(financeBudgetBaselineQualifications.periodMonth, input.period.from.slice(0, 7)),
+          ),
+        });
+        if (qualification) {
+          const qualified = financeBudgetBaselineSnapshotSchema.parse(qualification.snapshot);
+          conflict(
+            qualified.budgetVersionId !== input.budget.id ||
+              !samePolicyValue(qualified.period, input.period),
+            "This month's human-qualified comparison baseline cannot be replaced.",
+          );
+        }
         const existing = await tx.query.financeBudgetPeriodBaselines.findFirst({
           where: and(
             eq(financeBudgetPeriodBaselines.userId, context.userId),

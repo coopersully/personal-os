@@ -65,6 +65,7 @@ import {
 } from "@personal-os/domain";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { z } from "zod";
+import type { createFinanceBudgetBaselineQualificationService } from "../finance/baseline-qualification-service.js";
 import type { createFinanceBudgetPolicyService } from "../finance/budget-policy-service.js";
 import { loadFinanceAuthorization } from "../finance/context.js";
 import type { createFinanceContextualQuestionService } from "../finance/contextual-question-service.js";
@@ -84,6 +85,7 @@ import type { createFinanceService } from "../finance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
 import type { AppEnv, Principal } from "../types.js";
 import { requireWorkspaceExecutionRoute } from "../workspace-execution.js";
+import { registerFinanceBaselineQualificationRoutes } from "./finance-baseline-qualification.js";
 import { parseBody, requireFeatureAccess, requireHuman, requireScope } from "./support.js";
 
 type MutationContext = {
@@ -97,6 +99,7 @@ type FinanceRouteOptions = {
   actions?: ReturnType<typeof createFinanceActionService>;
   financeChallenges?: FinanceChallengeService;
   contextualQuestions?: ReturnType<typeof createFinanceContextualQuestionService>;
+  baselineQualification?: ReturnType<typeof createFinanceBudgetBaselineQualificationService>;
   financeBudgetPolicies?: ReturnType<typeof createFinanceBudgetPolicyService>;
   financeMaintenance: FinanceMaintenanceService;
   canonicalFinanceMaintenance?: ReturnType<typeof createFinanceMaintenanceIntentService>;
@@ -116,6 +119,7 @@ export function registerFinanceRoutes({
   financeChallenges,
   contextualQuestions,
   financeBudgetPolicies,
+  baselineQualification,
   canonicalFinanceMaintenance,
   financePeriodReviews,
   financePlaybook,
@@ -189,6 +193,11 @@ export function registerFinanceRoutes({
   };
   app.use("/v1/finances", requireFinanceAccess);
   app.use("/v1/finances/*", requireFinanceAccess);
+  registerFinanceBaselineQualificationRoutes({
+    app,
+    service: baselineQualification,
+    financeContext,
+  });
   const questions = () => {
     if (!contextualQuestions)
       throw new Error("Finance contextual question service is unavailable.");

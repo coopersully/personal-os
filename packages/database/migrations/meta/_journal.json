@@ -855,6 +855,13 @@
       "when": 1792353601000,
       "tag": "0114_finance_budget_baseline_qualifications",
       "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1792353602000,
+      "tag": "0115_finance_conversation_core",
+      "breakpoints": true
     }
   ]
 }

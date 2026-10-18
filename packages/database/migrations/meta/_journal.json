@@ -890,6 +890,13 @@
       "when": 1792353606000,
       "tag": "0119_finance_recurring_occurrences",
       "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1792353607000,
+      "tag": "0120_finance_legacy_access_erasure_guard",
+      "breakpoints": true
     }
   ]
 }

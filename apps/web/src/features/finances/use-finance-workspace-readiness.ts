@@ -7,6 +7,12 @@ import {
   sameSession,
   usePreferenceSession,
 } from "../workspace-settings/account-save-session";
+import {
+  captureFinanceOnboardingAccess,
+  confirmFinanceOnboardingRead,
+  denyFinanceOnboardingAccess,
+  useFinanceOnboardingAccess,
+} from "./onboarding-access";
 import { financeOnboardingApiAdapter } from "./onboarding-adapter";
 
 const registered = new WeakSet<QueryClient>();
@@ -20,6 +26,7 @@ export const financeWorkspaceReadinessKey = [
 export function useFinanceWorkspaceReadiness() {
   const cache = useQueryClient();
   const session = usePreferenceSession(cache);
+  const access = useFinanceOnboardingAccess(cache);
   useEffect(() => {
     if (!registered.has(cache)) {
       registered.add(cache);
@@ -30,29 +37,45 @@ export function useFinanceWorkspaceReadiness() {
   }, [cache]);
   const query = useQuery({
     queryKey: financeWorkspaceReadinessKey,
-    enabled: !!session.owner,
-    queryFn: async () => {
+    enabled: !!session.owner && !access.denied,
+    queryFn: async ({ signal }) => {
       const started = { ...preferenceSession(cache) };
       if (!started.owner) throw new Error("Load your account before reading Finance readiness.");
-      const snapshot = await financeOnboardingApiAdapter.getFinanceOnboarding();
-      if (!sameSession(cache, started))
-        throw new Error("Your account changed. Reload Finance readiness.");
-      return snapshot;
+      const captured = captureFinanceOnboardingAccess(cache);
+      try {
+        const snapshot = await financeOnboardingApiAdapter.getFinanceOnboarding();
+        if (
+          signal.aborted ||
+          !sameSession(cache, started) ||
+          !confirmFinanceOnboardingRead(cache, captured)
+        )
+          throw new Error("Your Finance access changed. Reload readiness.");
+        return snapshot;
+      } catch (error) {
+        if (!signal.aborted && sameSession(cache, started))
+          denyFinanceOnboardingAccess(cache, captured, error);
+        throw error;
+      }
     },
     staleTime: 30_000,
     retry: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
-  const snapshot = session.owner ? query.data : undefined;
+  const snapshot = session.owner && !access.denied ? query.data : undefined;
   const readiness = snapshot ? deriveFinanceOnboardingReadiness(snapshot) : undefined;
   return {
     snapshot,
     readiness,
-    isPending: query.isPending,
-    isError: query.isError,
-    error: query.error,
-    reload: () => query.refetch({ throwOnError: true }),
+    isPending: !access.denied && query.isPending,
+    isError: access.denied || query.isError,
+    error: access.denied ? access.error : query.error,
+    reload: async () => {
+      const result = await query.refetch({ throwOnError: true });
+      const current = captureFinanceOnboardingAccess(cache);
+      if (current.denied) throw current.error;
+      return result;
+    },
     manualCreationVisible: readiness?.manualCreationVisible,
   };
 }

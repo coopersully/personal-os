@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import { ApiClientError } from "@personal-os/api-client";
 import type { FinanceOnboardingAdapter, FinanceOnboardingSnapshot } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { financeOnboardingApiAdapter } from "./onboarding-adapter.js";
-import { FinanceOnboardingReview } from "./onboarding-review.js";
+import { FinanceOnboardingReview, financeOnboardingReviewKey } from "./onboarding-review.js";
 
 const defaultApi = vi.hoisted(() => ({
   getFinanceOnboarding: vi.fn(),
@@ -144,7 +145,7 @@ it("saves explicit unknown and manual later before durable completion", async ()
   expect(toast.success).toHaveBeenLastCalledWith("Setup complete", { id: "setup-review-toast" });
   expect(screen.queryByText("Finishing setup…")).not.toBeInTheDocument();
   expect(screen.queryByText("Setup complete", { exact: true })).not.toBeInTheDocument();
-  expect(client.getQueryData(["finance-onboarding", adapter])).toMatchObject({
+  expect(client.getQueryData(financeOnboardingReviewKey(adapter))).toMatchObject({
     revision: 3,
     completedAt: "2026-10-18T12:00:00Z",
   });
@@ -396,7 +397,7 @@ it("does not replay load feedback when mounting cached setup state", async () =>
     completeFinanceOnboarding: vi.fn(),
   };
   const client = new QueryClient();
-  client.setQueryData(["finance-onboarding", adapter], snapshot());
+  client.setQueryData(financeOnboardingReviewKey(adapter), snapshot());
   render(
     <QueryClientProvider client={client}>
       <FinanceOnboardingReview adapter={adapter} />
@@ -629,5 +630,221 @@ it("rejects the old read epoch even when the same account signs back in", async 
   expect(client.getQueryData(["finance-onboarding", financeOnboardingApiAdapter])).toEqual(current);
   expect(toast.success).not.toHaveBeenCalled();
   expect(toast.error).not.toHaveBeenCalled();
+  expect(toast.dismiss).not.toHaveBeenCalled();
+});
+
+function denial(status: 401 | 403 | 503) {
+  return new ApiClientError({
+    status,
+    code: status === 401 ? "unauthorized" : status === 403 ? "forbidden" : "service_unavailable",
+    message: "Private server diagnostic",
+  });
+}
+const privateSnapshot = () => ({
+  ...snapshot(),
+  source: { ...snapshot().source, summary: "Private owner source" },
+});
+it.each([
+  401, 403,
+] as const)("removes cached private source, questions, and dirty draft on default read %s", async (status) => {
+  defaultApi.getFinanceOnboarding.mockResolvedValue(privateSnapshot());
+  const { client } = defaultReview();
+  const user = userEvent.setup();
+  await user.selectOptions(await screen.findByLabelText("Income"), "unknown");
+  await chooseAutomation(user, "later");
+  defaultApi.getFinanceOnboarding.mockRejectedValueOnce(denial(status));
+  await user.click(screen.getByRole("button", { name: "Reload setup review" }));
+  await screen.findByRole("button", { name: "Retry setup review" });
+  expect(
+    client.getQueryData(financeOnboardingReviewKey(financeOnboardingApiAdapter)),
+  ).toBeUndefined();
+  expect(screen.queryByText("Private owner source")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Income")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Save review" })).not.toBeInTheDocument();
+  expect(screen.queryByText(/Finance setup access could not be confirmed/)).not.toBeInTheDocument();
+  expect(toast.error).toHaveBeenLastCalledWith(
+    "Finance setup access could not be confirmed. Retry to check your access.",
+    { id: "setup-review-toast" },
+  );
+  expect(defaultApi.getFinanceOnboarding).toHaveBeenCalledTimes(2);
+  await user.click(screen.getByRole("button", { name: "Retry setup review" }));
+  await screen.findByText("Private owner source");
+  expect(screen.getByLabelText("Income")).toHaveValue("unreviewed");
+});
+it.each([
+  ["save", 401],
+  ["save", 403],
+  ["complete", 401],
+  ["complete", 403],
+] as const)("unmounts private default review after %s is denied with %s", async (operation, status) => {
+  const initial =
+    operation === "complete"
+      ? {
+          ...privateSnapshot(),
+          questions: [],
+          displayPreferences: { reviewed: true, summary: [] },
+          automationChoice: "later" as const,
+        }
+      : privateSnapshot();
+  defaultApi.getFinanceOnboarding.mockResolvedValue(initial);
+  const mutation =
+    operation === "save"
+      ? defaultApi.saveFinanceOnboardingAnswers
+      : defaultApi.completeFinanceOnboarding;
+  mutation.mockRejectedValueOnce(denial(status));
+  const { client } = defaultReview();
+  const user = userEvent.setup();
+  if (operation === "save") {
+    await user.selectOptions(await screen.findByLabelText("Income"), "unknown");
+    await chooseAutomation(user, "later");
+    await user.click(screen.getByRole("button", { name: "Save review" }));
+  } else await user.click(await screen.findByRole("button", { name: "Finish setup" }));
+  await screen.findByRole("button", { name: "Retry setup review" });
+  expect(
+    client.getQueryData(financeOnboardingReviewKey(financeOnboardingApiAdapter)),
+  ).toBeUndefined();
+  expect(screen.queryByText("Private owner source")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Income")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Finish setup" })).not.toBeInTheDocument();
+  expect(toast.error).toHaveBeenLastCalledWith(
+    "Finance setup access could not be confirmed. Retry to check your access.",
+    { id: "setup-review-toast" },
+  );
+});
+it.each([
+  ["save", "resolve"],
+  ["save", "reject"],
+  ["complete", "resolve"],
+  ["complete", "reject"],
+] as const)("does not resurrect a pre-denial %s %s after fresh same-owner recovery", async (operation, outcome) => {
+  const initial =
+    operation === "complete"
+      ? {
+          ...privateSnapshot(),
+          questions: [],
+          displayPreferences: { reviewed: true, summary: [] },
+          automationChoice: "later" as const,
+        }
+      : privateSnapshot();
+  defaultApi.getFinanceOnboarding.mockResolvedValue(initial);
+  let resolveOld!: (value: FinanceOnboardingSnapshot) => void;
+  let rejectOld!: (error: Error) => void;
+  const held = new Promise<FinanceOnboardingSnapshot>((resolve, reject) => {
+    resolveOld = resolve;
+    rejectOld = reject;
+  });
+  const mutation =
+    operation === "save"
+      ? defaultApi.saveFinanceOnboardingAnswers
+      : defaultApi.completeFinanceOnboarding;
+  mutation.mockReturnValueOnce(held);
+  const { client } = defaultReview();
+  const user = userEvent.setup();
+  if (operation === "save") {
+    await user.selectOptions(await screen.findByLabelText("Income"), "unknown");
+    await chooseAutomation(user, "later");
+    await user.click(screen.getByRole("button", { name: "Save review" }));
+  } else await user.click(await screen.findByRole("button", { name: "Finish setup" }));
+  await waitFor(() => expect(mutation).toHaveBeenCalledTimes(1));
+  defaultApi.getFinanceOnboarding.mockRejectedValueOnce(denial(403));
+  await act(async () => {
+    await client.refetchQueries({
+      queryKey: financeOnboardingReviewKey(financeOnboardingApiAdapter),
+      exact: true,
+    });
+  });
+  await screen.findByRole("button", { name: "Retry setup review" });
+  const recovered = {
+    ...snapshot(),
+    source: { ...snapshot().source, summary: "Fresh authorized source" },
+  };
+  defaultApi.getFinanceOnboarding.mockResolvedValue(recovered);
+  await user.click(screen.getByRole("button", { name: "Retry setup review" }));
+  await screen.findByText("Fresh authorized source");
+  vi.clearAllMocks();
+  await act(async () => {
+    if (outcome === "resolve")
+      resolveOld({ ...initial, revision: 99, completedAt: "2026-10-18T12:00:00Z" });
+    else rejectOld(denial(401));
+  });
+  expect(client.getQueryData(financeOnboardingReviewKey(financeOnboardingApiAdapter))).toEqual(
+    recovered,
+  );
+  expect(screen.getByLabelText("Income")).toHaveValue("unreviewed");
+  expect(
+    screen.queryByText("Setup complete. Your workspace remains available."),
+  ).not.toBeInTheDocument();
+  expect(toast.success).not.toHaveBeenCalled();
+  expect(toast.error).not.toHaveBeenCalled();
+  expect(toast.dismiss).not.toHaveBeenCalled();
+});
+it("keeps a private draft after a transient default read failure without pretending it refreshed", async () => {
+  defaultApi.getFinanceOnboarding.mockResolvedValue(privateSnapshot());
+  const { client } = defaultReview();
+  const user = userEvent.setup();
+  await user.selectOptions(await screen.findByLabelText("Income"), "unknown");
+  await chooseAutomation(user, "later");
+  defaultApi.getFinanceOnboarding.mockRejectedValueOnce(denial(503));
+  await user.click(screen.getByRole("button", { name: "Reload setup review" }));
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "Setup review could not reload. Your edits are still here.",
+      { id: "setup-review-toast" },
+    ),
+  );
+  expect(screen.getByText("Private owner source")).toBeVisible();
+  expect(screen.getByLabelText("Income")).toHaveValue("unknown");
+  expect(client.getQueryData(financeOnboardingReviewKey(financeOnboardingApiAdapter))).toEqual(
+    privateSnapshot(),
+  );
+});
+it("does not expose the default account cache through an ownerless injected adapter", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(financeOnboardingReviewKey(financeOnboardingApiAdapter), privateSnapshot());
+  const adapter = {
+    getFinanceOnboarding: vi.fn().mockResolvedValue(snapshot()),
+    saveFinanceOnboardingAnswers: vi.fn(),
+    completeFinanceOnboarding: vi.fn(),
+  };
+  render(
+    <QueryClientProvider client={client}>
+      <FinanceOnboardingReview adapter={adapter} />
+    </QueryClientProvider>,
+  );
+  await screen.findByLabelText("Income");
+  expect(adapter.getFinanceOnboarding).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText("Private owner source")).not.toBeInTheDocument();
+  expect(client.getQueryData(financeOnboardingReviewKey(financeOnboardingApiAdapter))).toEqual(
+    privateSnapshot(),
+  );
+});
+
+it("ignores an aborted default read denial after a fresh same-owner mount", async () => {
+  let rejectOld!: (error: Error) => void;
+  const fresh = { ...snapshot(), source: { ...snapshot().source, summary: "Fresh current mount" } };
+  defaultApi.getFinanceOnboarding
+    .mockReturnValueOnce(
+      new Promise<FinanceOnboardingSnapshot>((_resolve, reject) => {
+        rejectOld = reject;
+      }),
+    )
+    .mockResolvedValue(fresh);
+  const { client, view } = defaultReview();
+  await waitFor(() => expect(defaultApi.getFinanceOnboarding).toHaveBeenCalledTimes(1));
+  view.unmount();
+  render(
+    <QueryClientProvider client={client}>
+      <FinanceOnboardingReview adapter={financeOnboardingApiAdapter} />
+    </QueryClientProvider>,
+  );
+  await screen.findByText("Fresh current mount");
+  vi.clearAllMocks();
+  await act(async () => rejectOld(denial(401)));
+  expect(screen.getByText("Fresh current mount")).toBeVisible();
+  expect(client.getQueryData(financeOnboardingReviewKey(financeOnboardingApiAdapter))).toEqual(
+    fresh,
+  );
+  expect(toast.error).not.toHaveBeenCalled();
+  expect(toast.success).not.toHaveBeenCalled();
   expect(toast.dismiss).not.toHaveBeenCalled();
 });

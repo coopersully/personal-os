@@ -1911,6 +1911,14 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             }),
           ]);
         if (
+          input.data.operation === "correct_expected" ||
+          input.data.operation === "unmatch_credit"
+        )
+          return missing(
+            "Reimbursement corrections require the person's explicit confirmation in Cash flow.",
+            [],
+          );
+        if (
           input.data.operation === "create" &&
           actorType === "agent" &&
           input.data.evidence.sourceRefs.length === 0

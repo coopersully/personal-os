@@ -2643,6 +2643,8 @@ export const financeTransactions = pgTable(
   "finance_transactions",
   {
     contextualRevision: bigint("contextual_revision", { mode: "bigint" }).notNull().default(1n),
+    reimbursementRelationshipRevision: bigint("reimbursement_relationship_revision", { mode: "bigint" }).notNull().default(1n),
+    reimbursementRelationshipState: jsonb("reimbursement_relationship_state").$type<unknown[]>().notNull().default([]),
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
@@ -2686,6 +2688,7 @@ export const financeTransactions = pgTable(
       table.id,
       table.accountId,
     ),
+    check("finance_transactions_reimbursement_relationship_revision_check", sql`${table.reimbursementRelationshipRevision} > 0`),
     check("finance_transactions_contextual_revision_check", sql`${table.contextualRevision} > 0`),
     uniqueIndex("finance_transactions_id_user_id_unique").on(table.id, table.userId),
     index("finance_transactions_user_date_idx").on(table.userId, table.transactionDate),
@@ -4165,9 +4168,11 @@ export const financeBalanceInclusions = pgTable(
     transactionContextualRevision: bigint("transaction_contextual_revision", {
       mode: "bigint",
     }).notNull(),
+    reimbursementRelationshipRevision: bigint("reimbursement_relationship_revision", { mode: "bigint" }),
     reflection: text("reflection").notNull(),
   },
   (table) => [
+    check("fin_balance_inclusion_relationship_revision_check", sql`${table.reimbursementRelationshipRevision} IS NULL OR ${table.reimbursementRelationshipRevision} > 0`),
     check("fin_balance_inclusion_revision_check", sql`${table.transactionContextualRevision} > 0`),
     check(
       "fin_balance_inclusion_reflection_check",

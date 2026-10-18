@@ -155,7 +155,7 @@ describe.sequential("canonical explicit user planning evidence", () => {
     ).toHaveLength(2);
     await expect(
       f.service.manageFinanceGoal({ ...f.progress, progressAmountCents: 5 }, f.context),
-    ).rejects.toMatchObject({ code: "conflict" });
+    ).rejects.toMatchObject({ code: "invalid_request" });
   });
 
   it("forbids agent replay of a completed human receipt with identical owner/key/payload", async () => {

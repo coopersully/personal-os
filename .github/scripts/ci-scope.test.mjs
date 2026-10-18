@@ -186,3 +186,85 @@ for (const [name, expected] of fixtureCases) {
     );
   });
 }
+
+test("explicit full verification overrides an otherwise omitted scope", () => {
+  assert.deepEqual(
+    classifyChanges(["docs/example.md"], { forceFull: true }),
+    scope({ full: true }),
+  );
+  assert.deepEqual(classifyChanges(["docs/example.md"], { forceFull: false }), scope());
+});
+
+test("CLI honors only the exact full-verification flag", () => {
+  const fixture = resolve(scriptDirectory, "fixtures", "ci-scope", "docs.txt");
+  for (const value of ["true", "false", "", "TRUE", "ci:full"]) {
+    const output = execFileSync(
+      process.execPath,
+      [resolve(scriptDirectory, "ci-scope.mjs"), "--files", fixture, "--json"],
+      { encoding: "utf8", env: { ...process.env, CI_FULL: value } },
+    );
+    assert.equal(JSON.parse(output).full, value === "true");
+  }
+});
+
+const fullScopeJobs = [
+  "infrastructure",
+  "repository",
+  "lint-and-format",
+  "quality",
+  "browser",
+  "desktop",
+];
+
+function workflowJobBlocks(workflow) {
+  return workflow.split(/(?=^ {2}[a-z][a-z0-9-]*:\r?$)/m);
+}
+
+function assertFullScopeJobGates(workflow) {
+  const blocks = workflowJobBlocks(workflow);
+  for (const job of fullScopeJobs) {
+    const block = blocks.find((candidate) => candidate.startsWith(`  ${job}:\n`));
+    assert.ok(block, `The ${job} job must exist.`);
+    assert.match(
+      block,
+      /^ {4}if: \$\{\{ needs.changes.outputs.full == 'true'/m,
+      `The ${job} job must keep its own full-scope gate.`,
+    );
+  }
+}
+
+test("full opt-in preserves PR events, provenance and all existing job gates", () => {
+  const workflow = readFileSync(resolve(scriptDirectory, "../workflows/ci.yml"), "utf8");
+  assert.match(workflow, /types: \[opened, reopened, synchronize\]/);
+  assert.doesNotMatch(
+    workflow,
+    /workflow_dispatch|pull_request_target|labeled|issues: write|contents: write/,
+  );
+  assert.match(
+    workflow,
+    /CI_FULL: \$\{\{ github.event_name == 'pull_request' && contains\(github.event.pull_request.labels.\*.name, 'ci:full'\) \}\}/,
+  );
+  assertFullScopeJobGates(workflow);
+  assert.match(workflow, /project: \[desktop-chromium, mobile-chromium\]/);
+  assert.match(workflow, /os: \[macos-14, windows-latest\]/);
+  assert.doesNotMatch(workflow, / {8}with:\n {10}ref:/);
+});
+
+test("full opt-in rejects a missing gate even when later jobs retain theirs", () => {
+  const workflow = readFileSync(resolve(scriptDirectory, "../workflows/ci.yml"), "utf8");
+  for (const job of fullScopeJobs) {
+    const withoutGate = workflowJobBlocks(workflow)
+      .map((block) =>
+        block.startsWith(`  ${job}:\n`) ? block.replace(/^ {4}if:.*\r?\n/m, "") : block,
+      )
+      .join("");
+    assert.notEqual(withoutGate, workflow, `The ${job} fixture must remove its own gate.`);
+    assert.throws(
+      () => assertFullScopeJobGates(withoutGate),
+      {
+        name: "AssertionError",
+      },
+      `A later job must not satisfy the missing ${job} gate.`,
+    );
+  }
+});

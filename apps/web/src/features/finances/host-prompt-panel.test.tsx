@@ -47,6 +47,7 @@ async function open(value = status()) {
 }
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(toast.loading).mockReturnValue("notice");
   api.getAutomationHostPromptHistory.mockResolvedValue({
     issues: [issue()],
     nextCursor: null,
@@ -81,6 +82,8 @@ it("keeps historical selection when another bounded page arrives", async () => {
     }),
   );
   expect(screen.getByLabelText("Host prompt")).toHaveValue(issue(2).text);
+  expect(toast.success).toHaveBeenCalledWith("Older instructions loaded.", { id: "notice" });
+  expect(screen.queryByText("Older instructions loaded.")).not.toBeInTheDocument();
 });
 it("issues only explicitly with the current schedule revision and selects returned text", async () => {
   api.issueAutomationHostPrompt.mockResolvedValue(issue(2));
@@ -146,4 +149,45 @@ it("reads and copies another schedule's own saved text", async () => {
   await user.click(screen.getByRole("button", { name: "Copy instructions" }));
   expect(write).toHaveBeenCalledWith(other.text);
   expect(api.getAutomationHostPromptHistory).toHaveBeenCalledWith("schedule-b", { limit: 10 });
+});
+it("confirms explicit history retry with one toast and retains text after a later page failure", async () => {
+  api.getAutomationHostPromptHistory
+    .mockRejectedValueOnce(new Error("History unavailable."))
+    .mockResolvedValueOnce({ issues: [issue()], nextCursor: 1 })
+    .mockRejectedValueOnce(new Error("Older history unavailable."));
+  const user = await open();
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith("History unavailable."));
+  vi.mocked(toast.loading).mockReturnValue("history-notice");
+  await user.click(screen.getByRole("button", { name: "Reload saved instructions" }));
+  await waitFor(() =>
+    expect(toast.success).toHaveBeenCalledWith("Saved instructions loaded.", {
+      id: "history-notice",
+    }),
+  );
+  await user.click(screen.getByRole("button", { name: "Load older versions" }));
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith("Older history unavailable.", {
+      id: "history-notice",
+    }),
+  );
+  expect(screen.getByLabelText("Host prompt")).toHaveValue(issue().text);
+  expect(screen.queryByText("Saved instructions loaded.")).not.toBeInTheDocument();
+  expect(screen.queryByText("Older history unavailable.")).not.toBeInTheDocument();
+});
+it("coalesces an unfinished history request across dialog close and reopen", async () => {
+  let finish!: (value: { issues: ReturnType<typeof issue>[]; nextCursor: null }) => void;
+  api.getAutomationHostPromptHistory.mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const user = await open();
+  await user.keyboard("{Escape}");
+  await user.click(screen.getByRole("button", { name: "Instructions" }));
+  expect(api.getAutomationHostPromptHistory).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("button", { name: "Save latest instructions" })).toBeDisabled();
+  finish({ issues: [issue()], nextCursor: null });
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Save latest instructions" })).toBeEnabled(),
+  );
 });

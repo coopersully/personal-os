@@ -1,6 +1,6 @@
 import type { AccessScope } from "@personal-os/domain";
 import { Hono } from "hono";
-import { errorResponse } from "../errors.js";
+import { AppError, errorResponse } from "../errors.js";
 import type { createFinanceConversationService } from "../finance/conversation-persistence.js";
 import type { AppEnv, Principal } from "../types.js";
 import { registerFinanceConversationRoutes } from "./finance-conversation.js";
@@ -18,6 +18,7 @@ function fixture() {
   const service = {
     getReadiness: vi.fn(async () => ({ canSend: false })),
     getHostReadiness: vi.fn(async () => ({ canSend: true })),
+    messageContext: vi.fn(async () => ({ targetMessageId: runId, messages: [] })),
     history: vi.fn(async () => ({ messages: [], nextCursor: null })),
     send: vi.fn(async () => ({ id: runId })),
     markRendered: vi.fn(async () => ({ readThroughSequence: "1" })),
@@ -155,4 +156,29 @@ it("reads only the selected host proof for the human owner", async () => {
     403,
   );
   expect(f.service.getHostReadiness).toHaveBeenCalledTimes(1);
+});
+
+it("binds exact source context to authenticated human owner, rejects overrides and blocks agents", async () => {
+  const f = fixture();
+  const path = `/v1/finances/conversation/messages/${runId}/context`;
+  const response = await f.app.request(path);
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(f.service.messageContext).toHaveBeenCalledWith(ownerId, runId);
+  expect((await f.app.request(`${path}?userId=foreign`)).status).toBe(400);
+  f.setPrincipal({ ...f.principal, actorType: "agent", actorId: runId });
+  expect((await f.app.request(path)).status).toBe(403);
+  expect(f.service.messageContext).toHaveBeenCalledTimes(1);
+  f.setPrincipal({ ...f.principal, scopes: new Set() });
+  expect((await f.app.request(path)).status).toBe(403);
+});
+
+it("returns the same not-found response for unavailable owner source IDs", async () => {
+  const f = fixture();
+  f.service.messageContext.mockRejectedValue(
+    new AppError("not_found", "The Finance source message was not found."),
+  );
+  const response = await f.app.request(`/v1/finances/conversation/messages/${runId}/context`);
+  expect(response.status).toBe(404);
+  expect(await response.text()).toContain("The Finance source message was not found.");
 });

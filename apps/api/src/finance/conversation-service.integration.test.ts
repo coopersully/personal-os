@@ -601,4 +601,37 @@ describe.sequential("durable Finance conversation intake", () => {
         .where(eq(financeConversationBatches.userId, f.userId)),
     ).toHaveLength(1);
   });
+  it("looks up an exact owner source beyond the first page with bounded surrounding context and hides foreign IDs", async () => {
+    const f = await fixture();
+    const foreign = await fixture();
+    const ids = Array.from({ length: 80 }, () => randomUUID());
+    await database.db.insert(financeConversationMessages).values(
+      ids.map((id, index) => ({
+        id,
+        userId: f.userId,
+        sequence: BigInt(index + 1),
+        authorKind: "user" as const,
+        text: `Source ${index + 1}`,
+        idempotencyKey: `target-${id}`,
+        createdAt: new Date("2026-10-18T12:00:00Z"),
+        recordRefs: [],
+        sourceMessageIds: [],
+      })),
+    );
+    const conversation = createFinanceConversationService({ db: database.db });
+    const targetId = ids[64];
+    if (!targetId) throw new Error("target");
+    const context = await conversation.messageContext(f.userId, targetId);
+    expect(context.targetMessageId).toBe(targetId);
+    expect(context.messages).toHaveLength(21);
+    expect(context.messages[0]?.sequence).toBe("55");
+    expect(context.messages.at(-1)?.sequence).toBe("75");
+    expect(context.messages[10]?.id).toBe(targetId);
+    await expect(conversation.messageContext(foreign.userId, targetId)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await expect(conversation.messageContext(f.userId, randomUUID())).rejects.toMatchObject({
+      code: "not_found",
+    });
+  });
 });

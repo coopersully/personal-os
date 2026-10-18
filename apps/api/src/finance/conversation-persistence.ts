@@ -23,9 +23,10 @@ import {
   type FinanceConversationSendInput,
   financeConversationSendInputSchema,
   financeConversationSequenceSchema,
+  idSchema,
   projectFinanceConversationReadiness,
 } from "@personal-os/domain";
-import { and, asc, desc, eq, gt, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import { activeHostConnectionGrant } from "../automation-host-grant.js";
 import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
@@ -374,6 +375,48 @@ export function createFinanceConversationService({
         messages,
         nextCursor: rows.length > limit ? (messages.at(-1)?.sequence ?? null) : null,
       };
+    },
+    async messageContext(userId: string, messageId: string) {
+      const id = idSchema.parse(messageId);
+      return db.transaction(async (tx) => {
+        const [target] = await tx
+          .select()
+          .from(financeConversationMessages)
+          .where(
+            and(
+              eq(financeConversationMessages.userId, userId),
+              eq(financeConversationMessages.id, id),
+            ),
+          )
+          .limit(1);
+        if (!target) throw new AppError("not_found", "The Finance source message was not found.");
+        const before = await tx
+          .select()
+          .from(financeConversationMessages)
+          .where(
+            and(
+              eq(financeConversationMessages.userId, userId),
+              lt(financeConversationMessages.sequence, target.sequence),
+            ),
+          )
+          .orderBy(desc(financeConversationMessages.sequence))
+          .limit(10);
+        const after = await tx
+          .select()
+          .from(financeConversationMessages)
+          .where(
+            and(
+              eq(financeConversationMessages.userId, userId),
+              gt(financeConversationMessages.sequence, target.sequence),
+            ),
+          )
+          .orderBy(asc(financeConversationMessages.sequence))
+          .limit(10);
+        return {
+          targetMessageId: target.id,
+          messages: [...before.reverse(), target, ...after].map(messageValue),
+        };
+      });
     },
     async markRendered(principal: Principal, throughSequence: string) {
       if (principal.actorType !== "user" || principal.actorId !== principal.userId)

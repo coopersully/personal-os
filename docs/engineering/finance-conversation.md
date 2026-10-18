@@ -55,3 +55,14 @@ a different token or replacement host is not silently adopted. Explicit authoriz
 claimed-run recovery remain separate acceptance work. The authored financial settlement and
 transport regressions require their own PostgreSQL evidence; earlier conversation delivery tests do
 not prove financial-effect settlement or complete browser acceptance.
+
+## Human source-message navigation
+
+Activity source links use `/finances/chat?message=<message-id>`. The authenticated human-only
+`GET /v1/finances/conversation/messages/:messageId/context` resolves that exact owner message and
+at most ten messages on each side (21 total, ascending). Missing and foreign-owner IDs both return
+not found. Every surrounding read also filters by owner; agents continue to use saved run batches.
+The Chat page focuses the source row while retaining other query context and locked-mode history.
+A context jump does not advance the contiguous fetched-history boundary or acknowledge an agent
+batch. Only actually visible rendered messages within the contiguous fetched boundary advance the
+human read cursor. Lookup failures use Sonner and a retry control; access denial clears private material.

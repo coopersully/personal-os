@@ -4,13 +4,15 @@ import { ApiClientError } from "@personal-os/api-client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { createAppQueryClient } from "../../lib/query-client.js";
+import { FinanceActivityEntry } from "./activity-entry.js";
 import { FinanceConversationPage } from "./conversation-page.js";
 
 const api = vi.hoisted(() => ({
   getFinanceConversationReadiness: vi.fn(),
   getFinanceConversationHistory: vi.fn(),
+  getFinanceConversationMessageContext: vi.fn(),
   sendFinanceConversationMessage: vi.fn(),
   markFinanceConversationRendered: vi.fn(),
   getFinanceContextualQuestion: vi.fn(),
@@ -358,4 +360,106 @@ it("reports background query failure and clears the real app cache on forbidden 
   await waitFor(() => expect(screen.queryByText(message.text)).not.toBeInTheDocument());
   expect(client.getQueryData(["finance-conversation-history", "owner"])).toBeUndefined();
   expect(toast.error).toHaveBeenCalledWith("Couldn’t load conversation. Try Refresh conversation.");
+});
+
+it("follows the actual Activity source link to a bounded message beyond the first 50 and focuses that row", async () => {
+  const target = {
+    ...message,
+    id: "11111111-1111-4111-8111-111111111111",
+    sequence: "9007199254741099",
+    text: "Exact later source",
+  };
+  api.getFinanceConversationReadiness.mockResolvedValue({
+    canSend: false,
+    reason: "registration_paused",
+  });
+  api.getFinanceConversationHistory.mockResolvedValue({
+    messages: Array.from({ length: 50 }, (_, i) => ({
+      ...message,
+      id: `old-${i}`,
+      sequence: (BigInt(message.sequence) + BigInt(i)).toString(),
+      text: `Earlier ${i}`,
+    })),
+    nextCursor: "9007199254741042",
+  });
+  api.getFinanceConversationMessageContext.mockResolvedValue({
+    targetMessageId: target.id,
+    messages: [target],
+  });
+  const scroll = vi.fn();
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    value: scroll,
+  });
+  render(
+    <QueryClientProvider client={createAppQueryClient({ queries: { retry: false } })}>
+      <MemoryRouter initialEntries={["/finances/activity"]}>
+        <Routes>
+          <Route
+            path="/finances/activity"
+            element={
+              <FinanceActivityEntry
+                entry={{
+                  id: "entry",
+                  occurredAt: message.createdAt,
+                  kind: "human_answer_decision",
+                  status: "accepted",
+                  actor: { type: "user", id: "owner" },
+                  action: "Answer accepted",
+                  explanation: "Source evidence",
+                  caseId: null,
+                  runId: null,
+                  actionId: null,
+                  sourceOperationId: "operation",
+                  auditEventIds: [],
+                  recordRefs: [],
+                  changes: [],
+                  targets: [],
+                  sourceMessages: [{ ...target, contentHash: "a".repeat(64), excerpt: null }],
+                }}
+              />
+            }
+          />
+          <Route path="/finances/chat" element={<FinanceConversationPage ownerId="owner" />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Inspect evidence" }));
+  await user.click(screen.getByRole("link", { name: "Open source message" }));
+  const row = await screen.findByRole("listitem", { name: "Source message" });
+  expect(row).toHaveTextContent(target.text);
+  await waitFor(() => expect(row).toHaveFocus());
+  expect(scroll).toHaveBeenCalledWith({ block: "center" });
+  expect(api.getFinanceConversationMessageContext).toHaveBeenCalledWith(target.id);
+  expect(api.getFinanceConversationHistory).toHaveBeenCalledTimes(1);
+  expect(api.markFinanceConversationRendered).not.toHaveBeenCalled();
+  act(() =>
+    intersect(
+      [{ isIntersecting: true, target: row } as unknown as IntersectionObserverEntry],
+      {} as IntersectionObserver,
+    ),
+  );
+  expect(api.markFinanceConversationRendered).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+});
+it.each([
+  404, 403,
+])("reports missing/foreign or denied source %s without fabricating target success", async (status) => {
+  api.getFinanceConversationMessageContext.mockRejectedValue(
+    new ApiClientError({
+      status,
+      code: status === 404 ? "not_found" : "forbidden",
+      message: "private detail",
+    }),
+  );
+  api.getFinanceContextualQuestion.mockResolvedValue({ state: "unavailable" });
+  show("/finances/chat?message=11111111-1111-4111-8111-111111111111&question=q");
+  await waitFor(() => expect(toast.error).toHaveBeenCalled());
+  expect(screen.getByRole("button", { name: "Retry source message" })).toBeInTheDocument();
+  expect(screen.queryByRole("listitem", { name: "Source message" })).not.toBeInTheDocument();
+  expect(toast.success).not.toHaveBeenCalledWith("Source message loaded", expect.anything());
+  expect(api.markFinanceConversationRendered).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("Answer")).toBeInTheDocument();
 });

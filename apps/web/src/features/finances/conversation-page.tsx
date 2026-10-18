@@ -37,6 +37,7 @@ function OwnerConversation({ ownerId }: { ownerId: string }) {
   const client = useQueryClient();
   const [params] = useSearchParams();
   const questionId = params.get("question");
+  const targetMessageId = params.get("message");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const draftKey = questionId ?? "conversation";
   const text = drafts[draftKey] ?? "";
@@ -72,6 +73,17 @@ function OwnerConversation({ ownerId }: { ownerId: string }) {
       setLoadedThrough("0");
       fetchedThrough.current = "0";
       readThrough.current = "0";
+      for (const query of client
+        .getQueryCache()
+        .findAll({ queryKey: ["finance-conversation-message-context", ownerId] }))
+        query.setState({
+          data: undefined,
+          dataUpdatedAt: 0,
+          error,
+          errorUpdatedAt: Date.now(),
+          status: "error",
+          fetchStatus: "idle",
+        });
       // Direct page requests do not pass through QueryCache's denial handler.
       client
         .getQueryCache()
@@ -138,12 +150,44 @@ function OwnerConversation({ ownerId }: { ownerId: string }) {
       }
     },
   });
+  const target = useQuery({
+    queryKey: ["finance-conversation-message-context", ownerId, targetMessageId],
+    enabled: Boolean(targetMessageId),
+    queryFn: async () => {
+      const id = toast.loading("Loading source message…");
+      const generation = accessGeneration.current;
+      try {
+        const context = await api.getFinanceConversationMessageContext(targetMessageId ?? "");
+        if (generation !== accessGeneration.current)
+          throw new ApiClientError({ status: 403, code: "forbidden", message: "Access changed" });
+        if (
+          context.targetMessageId !== targetMessageId ||
+          !context.messages.some((message) => message.id === targetMessageId)
+        )
+          throw new Error("Source message unavailable");
+        setAccessDenied(false);
+        toast.success("Source message loaded", { id });
+        return context;
+      } catch (error) {
+        clearDeniedHistory(error);
+        toast.error(
+          error instanceof ApiClientError && error.status === 404
+            ? "Source message not found."
+            : "Couldn’t load source message. Check access and try again.",
+          { id },
+        );
+        throw error;
+      }
+    },
+  });
   // Query data is rendered directly, including after a refresh failure; fetching never marks it read.
   const visible = accessDenied
     ? []
     : [
         ...new Map(
-          [...(initial.data?.messages ?? []), ...messages].map((message) => [message.id, message]),
+          [...(initial.data?.messages ?? []), ...messages, ...(target.data?.messages ?? [])].map(
+            (message) => [message.id, message],
+          ),
         ).values(),
       ].sort((a, b) =>
         BigInt(a.sequence) < BigInt(b.sequence)
@@ -329,7 +373,28 @@ function OwnerConversation({ ownerId }: { ownerId: string }) {
       {!accessDenied && !initial.isPending && !initial.isError && visible.length === 0 ? (
         <p className="text-sm text-muted-foreground">No messages yet.</p>
       ) : null}
-      <FinanceConversationThread messages={visible} onRendered={rendered} />
+      {targetMessageId && target.isError ? (
+        <Button
+          variant="outline"
+          disabled={target.isFetching}
+          onClick={() => void target.refetch()}
+        >
+          Retry source message
+        </Button>
+      ) : null}
+      {!accessDenied && target.data ? (
+        <p className="text-sm text-muted-foreground">
+          Showing the source message with nearby context. Other messages may be outside the loaded
+          pages.
+        </p>
+      ) : null}
+      <FinanceConversationThread
+        messages={visible}
+        onRendered={rendered}
+        targetMessageId={
+          accessDenied || initial.isPending ? null : (target.data?.targetMessageId ?? null)
+        }
+      />
       {!accessDenied && (cursor === undefined ? initial.data?.nextCursor : cursor) ? (
         <Button variant="outline" disabled={loadingHistory} onClick={() => void loadMore()}>
           Load more messages

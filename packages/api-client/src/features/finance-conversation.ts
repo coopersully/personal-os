@@ -4,6 +4,7 @@ import type {
   FinanceConversationChallenge,
   FinanceConversationHistoryPage,
   FinanceConversationMessage,
+  FinanceConversationMessageContext,
   FinanceConversationProofOperation,
   FinanceConversationProofResult,
   FinanceConversationReadiness,
@@ -34,6 +35,11 @@ export function createFinanceConversationApi(request: FinanceRequest) {
       if (query.limit !== undefined) params.set("limit", String(query.limit));
       return request<FinanceConversationHistoryPage>(
         `${root}/messages${params.size ? `?${params}` : ""}`,
+      );
+    },
+    getFinanceConversationMessageContext(messageId: string) {
+      return request<FinanceConversationMessageContext>(
+        `${root}/messages/${encodeURIComponent(messageId)}/context`,
       );
     },
     async sendFinanceConversationMessage(input: FinanceConversationSendInput) {

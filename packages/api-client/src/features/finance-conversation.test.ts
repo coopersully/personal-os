@@ -66,3 +66,10 @@ it("encodes the exact host for its own readiness projection", async () => {
   });
   expect(request).toHaveBeenCalledWith("/v1/finances/conversation/hosts/host%2Fid/readiness");
 });
+
+it("fetches exact human message context using the shared transport and encoded message ID", async () => {
+  const request = vi.fn(async () => ({ targetMessageId: "id", messages: [] }));
+  const api = createFinanceConversationApi(request as unknown as FinanceRequest);
+  await api.getFinanceConversationMessageContext("message/id");
+  expect(request).toHaveBeenCalledWith("/v1/finances/conversation/messages/message%2Fid/context");
+});

@@ -5,11 +5,32 @@ import { Link } from "react-router-dom";
 export function FinanceConversationThread({
   messages,
   onRendered,
+  targetMessageId = null,
 }: {
   messages: FinanceConversationMessage[];
   onRendered: (sequence: string) => void;
+  targetMessageId?: string | null;
 }) {
   const root = useRef<HTMLOListElement>(null);
+  const focusedTarget = useRef<string | null>(null);
+  useEffect(() => {
+    if (!targetMessageId) {
+      focusedTarget.current = null;
+      return;
+    }
+    if (
+      focusedTarget.current === targetMessageId ||
+      !messages.some((message) => message.id === targetMessageId)
+    )
+      return;
+    const element = Array.from(root.current?.children ?? []).find(
+      (child) => (child as HTMLElement).dataset.messageId === targetMessageId,
+    ) as HTMLElement | undefined;
+    if (!element) return;
+    element.scrollIntoView?.({ block: "center" });
+    element.focus({ preventScroll: true });
+    focusedTarget.current = targetMessageId;
+  }, [targetMessageId, messages]);
   useEffect(() => {
     if (!root.current || typeof IntersectionObserver === "undefined") return;
     const observer = new IntersectionObserver(
@@ -31,11 +52,22 @@ export function FinanceConversationThread({
   return (
     <ol ref={root} aria-label="Finance conversation" className="grid min-w-0 gap-6">
       {messages.map((message) => (
-        <li key={message.id} data-sequence={message.sequence} className="min-w-0">
+        <li
+          key={message.id}
+          data-message-id={message.id}
+          data-sequence={message.sequence}
+          tabIndex={-1}
+          aria-current={message.id === targetMessageId ? "true" : undefined}
+          aria-label={message.id === targetMessageId ? "Source message" : undefined}
+          className="min-w-0"
+        >
           <article
             aria-label={message.authorKind === "user" ? "Your message" : "Agent message"}
             className="grid gap-2"
           >
+            {message.id === targetMessageId ? (
+              <p className="text-sm font-medium">Source message</p>
+            ) : null}
             <header className="flex flex-wrap gap-2 text-sm text-muted-foreground">
               <span>{message.authorKind === "user" ? "You" : "Agent"}</span>
               <time dateTime={message.createdAt}>

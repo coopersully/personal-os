@@ -61,6 +61,21 @@ export function registerFinanceConversationRoutes({
       await conversation.history(context.get("principal").userId, query.after, query.limit),
     );
   });
+  app.get(
+    `${root}/messages/:messageId/context`,
+    requireScope("finances:read"),
+    requireHuman,
+    async (context) => {
+      // Missing and foreign IDs have the same owner-scoped not-found response.
+      z.object({}).strict().parse(context.req.query());
+      return context.json(
+        await conversation.messageContext(
+          context.get("principal").userId,
+          idSchema.parse(context.req.param("messageId")),
+        ),
+      );
+    },
+  );
   app.post(`${root}/messages`, requireScope("finances:write"), requireHuman, async (context) =>
     context.json(
       {

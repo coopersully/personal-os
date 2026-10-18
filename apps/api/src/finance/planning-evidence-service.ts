@@ -64,7 +64,7 @@ export function serializeFinancePlanningEvidence(row: StoredEvidence): FinancePl
   );
 }
 
-function requireExplicitUser(context: FinanceMutationContext) {
+export function requireExplicitUser(context: FinanceMutationContext) {
   requireFinanceMutation(context);
   if (context.actorType !== "user" || context.actorId !== context.userId)
     throw new AppError(

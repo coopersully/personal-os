@@ -104,7 +104,7 @@ function show(url = "/finances/setup", onboardingAdapter?: FinanceOnboardingAdap
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  client.setQueryData(["me"], { planningTimezone: "America/New_York" });
+  client.setQueryData(["me"], { id, planningTimezone: "America/New_York" });
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[url]}>

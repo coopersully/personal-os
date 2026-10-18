@@ -12,7 +12,16 @@ import { ChoiceCardGroup } from "@/components/choice-card-group";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { NativeSelect } from "@/components/ui/native-select";
+import {
+  preferenceSession,
+  registerSessionCleanup,
+  sameSession,
+  usePreferenceSession,
+} from "../workspace-settings/account-save-session";
+import { financeOnboardingApiAdapter } from "./onboarding-adapter.js";
 import { FinanceSetupAgentGuidance } from "./setup-agent-guidance.js";
+
+const sessionCleanups = new WeakSet<ReturnType<typeof useQueryClient>>();
 
 const blockerCopy: Record<FinanceOnboardingBlocker, string> = {
   source_required: "Add an account or import records to continue.",
@@ -34,6 +43,16 @@ export function FinanceOnboardingReview({
   continueTo?: string;
 }) {
   const client = useQueryClient();
+  const defaultAdapter = adapter === financeOnboardingApiAdapter;
+  const session = usePreferenceSession(client);
+  useEffect(() => {
+    if (defaultAdapter && !sessionCleanups.has(client)) {
+      sessionCleanups.add(client);
+      registerSessionCleanup(client, () =>
+        client.removeQueries({ queryKey: ["finance-onboarding"] }),
+      );
+    }
+  }, [client, defaultAdapter]);
   const [reload, setReload] = useState(0);
   const mounted = useRef(false);
   useEffect(() => {
@@ -44,7 +63,12 @@ export function FinanceOnboardingReview({
   }, []);
   const query = useQuery({
     queryKey: ["finance-onboarding", adapter],
+    enabled: !defaultAdapter || !!session.owner,
     queryFn: async ({ signal }) => {
+      const captured = { ...preferenceSession(client) };
+      if (defaultAdapter && !captured.owner)
+        throw new Error("Load your account before reading Finance setup.");
+      const current = () => !defaultAdapter || sameSession(client, captured);
       const refreshing = client.getQueryData(["finance-onboarding", adapter]) !== undefined;
       const id = toast.loading(refreshing ? "Reloading setup review…" : "Loading setup review…");
       const onAbort = () => toast.dismiss(id);
@@ -52,13 +76,14 @@ export function FinanceOnboardingReview({
       if (signal.aborted) onAbort();
       try {
         const next = await adapter.getFinanceOnboarding();
+        if (signal.aborted || !current()) throw new Error("Finance setup account changed.");
         if (!signal.aborted) {
           if (refreshing) toast.success("Setup review reloaded", { id });
           else toast.dismiss(id);
         }
         return next;
       } catch (error) {
-        if (!signal.aborted)
+        if (!signal.aborted && current())
           toast.error(
             refreshing
               ? "Setup review could not reload. Your edits are still here."
@@ -75,7 +100,7 @@ export function FinanceOnboardingReview({
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
-  if (!query.data)
+  if ((defaultAdapter && !session.owner) || !query.data)
     return (
       <section aria-label="Setup review" className="grid gap-4 rounded-lg bg-card p-4">
         <h2 className="font-medium">Review your setup</h2>
@@ -88,15 +113,22 @@ export function FinanceOnboardingReview({
     );
   return (
     <ReviewSnapshot
-      key={`${query.data.revision}:${reload}`}
+      key={`${defaultAdapter ? `${session.owner}:${session.epoch}:` : ""}${query.data.revision}:${reload}`}
       adapter={adapter}
       {...(continueTo === undefined ? {} : { continueTo })}
       snapshot={query.data}
       onSnapshot={(next) => client.setQueryData(["finance-onboarding", adapter], next)}
       reloading={query.isFetching}
       onReload={async () => {
+        const captured = { ...preferenceSession(client) };
+        if (defaultAdapter && !captured.owner) return;
         const result = await query.refetch();
-        if (!result.isError && mounted.current) setReload((value) => value + 1);
+        if (
+          !result.isError &&
+          mounted.current &&
+          (!defaultAdapter || sameSession(client, captured))
+        )
+          setReload((value) => value + 1);
       }}
     />
   );
@@ -117,6 +149,8 @@ function ReviewSnapshot({
   reloading: boolean;
   onSnapshot: (snapshot: FinanceOnboardingSnapshot) => void;
 }) {
+  const client = useQueryClient();
+  const defaultAdapter = adapter === financeOnboardingApiAdapter;
   const controlId = useId();
   const [snapshot, setSnapshot] = useState(initial);
   const [mustReload, setMustReload] = useState(false);
@@ -134,8 +168,21 @@ function ReviewSnapshot({
     snapshot.questions.some((q) => answers[q.questionId] !== q.disposition);
   const mutation = useMutation({
     mutationFn: async (operation: "save" | "complete") => {
+      const captured = { ...preferenceSession(client) };
+      if (defaultAdapter && !captured.owner) return null;
+      const current = () => !defaultAdapter || sameSession(client, captured);
       if (!choice) throw new Error("Choose when to set up automation.");
       const id = toast.loading(operation === "save" ? "Saving setup review…" : "Finishing setup…");
+      let dismissed = false;
+      const dismissStale = () => {
+        if (!dismissed && !current()) {
+          toast.dismiss(id);
+          dismissed = true;
+        }
+      };
+      const unsubscribe = defaultAdapter
+        ? client.getQueryCache().subscribe(dismissStale)
+        : () => {};
       try {
         const common = {
           expectedRevision: snapshot.revision,
@@ -155,6 +202,10 @@ function ReviewSnapshot({
                     : [];
                 }),
               });
+        if (!current()) {
+          dismissStale();
+          return null;
+        }
         toast.success(
           operation === "save"
             ? "Setup review saved"
@@ -163,17 +214,25 @@ function ReviewSnapshot({
               : "Setup is still pending",
           { id },
         );
-        return next;
+        return { snapshot: next, captured };
       } catch (error) {
+        if (!current()) {
+          dismissStale();
+          return null;
+        }
         setMustReload(true);
         toast.error(
           "Setup outcome unconfirmed. Your edits are still here. Reload the review before trying again.",
           { id },
         );
         throw error;
+      } finally {
+        unsubscribe();
       }
     },
-    onSuccess: (next) => {
+    onSuccess: (result) => {
+      if (!result || (defaultAdapter && !sameSession(client, result.captured))) return;
+      const next = result.snapshot;
       setSnapshot(next);
       setAnswers(Object.fromEntries(next.questions.map((q) => [q.questionId, q.disposition])));
       setDisplayReviewed(next.displayPreferences.reviewed);

@@ -4,8 +4,15 @@ import type { FinanceOnboardingAdapter, FinanceOnboardingSnapshot } from "@perso
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { financeOnboardingApiAdapter } from "./onboarding-adapter.js";
 import { FinanceOnboardingReview } from "./onboarding-review.js";
 
+const defaultApi = vi.hoisted(() => ({
+  getFinanceOnboarding: vi.fn(),
+  saveFinanceOnboardingAnswers: vi.fn(),
+  completeFinanceOnboarding: vi.fn(),
+}));
+vi.mock("../../api.js", () => ({ api: defaultApi }));
 const toast = vi.hoisted(() => ({
   loading: vi.fn(() => "setup-review-toast"),
   success: vi.fn(),
@@ -485,4 +492,142 @@ it("copies initial canonical tool guidance through Sonner with selectable text f
   ).not.toBeInTheDocument();
   expect(text).toHaveAttribute("readonly");
   expect(adapter.saveFinanceOnboardingAnswers).not.toHaveBeenCalled();
+});
+
+function defaultReview(owner: string | null = "owner-a") {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  if (owner) client.setQueryData(["me"], { id: owner });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <FinanceOnboardingReview adapter={financeOnboardingApiAdapter} />
+    </QueryClientProvider>,
+  );
+  return { client, view };
+}
+function ownerB() {
+  return { ...snapshot(), source: { ...snapshot().source, summary: "Owner B source" } };
+}
+it("does not initiate default setup reads without an authenticated owner", async () => {
+  defaultReview(null);
+  expect(screen.getByRole("heading", { name: "Review your setup" })).toBeVisible();
+  expect(defaultApi.getFinanceOnboarding).not.toHaveBeenCalled();
+  expect(toast.loading).not.toHaveBeenCalled();
+});
+it("discards a deferred prior-owner default read and loads the current owner's review", async () => {
+  let resolveOld!: (next: FinanceOnboardingSnapshot) => void;
+  defaultApi.getFinanceOnboarding
+    .mockReturnValueOnce(
+      new Promise<FinanceOnboardingSnapshot>((resolve) => {
+        resolveOld = resolve;
+      }),
+    )
+    .mockResolvedValue(ownerB());
+  const { client } = defaultReview();
+  await waitFor(() => expect(defaultApi.getFinanceOnboarding).toHaveBeenCalledTimes(1));
+  await act(async () => {
+    client.setQueryData(["me"], { id: "owner-b" });
+  });
+  await screen.findByText("Owner B source");
+  vi.clearAllMocks();
+  await act(async () =>
+    resolveOld({ ...snapshot(), source: { ...snapshot().source, summary: "Owner A secret" } }),
+  );
+  expect(client.getQueryData(["finance-onboarding", financeOnboardingApiAdapter])).toEqual(
+    ownerB(),
+  );
+  expect(screen.queryByText("Owner A secret")).not.toBeInTheDocument();
+  expect(toast.success).not.toHaveBeenCalled();
+  expect(toast.error).not.toHaveBeenCalled();
+  expect(toast.dismiss).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: "Reload setup review" }));
+  await waitFor(() => expect(defaultApi.getFinanceOnboarding).toHaveBeenCalledTimes(1));
+  expect(screen.getByText("Owner B source")).toBeVisible();
+});
+it.each([
+  ["save", "resolve"],
+  ["save", "reject"],
+  ["complete", "resolve"],
+  ["complete", "reject"],
+] as const)("suppresses a prior-owner default %s %s after account swap", async (operation, outcome) => {
+  const initial =
+    operation === "complete"
+      ? {
+          ...snapshot(),
+          questions: [],
+          displayPreferences: { reviewed: true, summary: [] },
+          automationChoice: "later" as const,
+        }
+      : snapshot();
+  defaultApi.getFinanceOnboarding.mockResolvedValueOnce(initial).mockResolvedValue(ownerB());
+  let resolveOld!: (next: FinanceOnboardingSnapshot) => void;
+  let rejectOld!: (error: Error) => void;
+  const pending = new Promise<FinanceOnboardingSnapshot>((resolve, reject) => {
+    resolveOld = resolve;
+    rejectOld = reject;
+  });
+  const mutation =
+    operation === "save"
+      ? defaultApi.saveFinanceOnboardingAnswers
+      : defaultApi.completeFinanceOnboarding;
+  mutation.mockReturnValue(pending);
+  const { client } = defaultReview();
+  const user = userEvent.setup();
+  await screen.findByRole("heading", { name: "Review your setup" });
+  if (operation === "save") {
+    await user.selectOptions(await screen.findByLabelText("Income"), "unknown");
+    await chooseAutomation(user, "later");
+    await user.click(screen.getByRole("button", { name: "Save review" }));
+  } else await user.click(await screen.findByRole("button", { name: "Finish setup" }));
+  await waitFor(() => expect(mutation).toHaveBeenCalledTimes(1));
+  await act(async () => {
+    client.setQueryData(["me"], { id: "owner-b" });
+  });
+  await screen.findByText("Owner B source");
+  vi.clearAllMocks();
+  await act(async () => {
+    if (outcome === "resolve")
+      resolveOld({ ...initial, revision: 99, completedAt: "2026-10-18T12:00:00Z" });
+    else rejectOld(new Error("Old owner denied"));
+  });
+  expect(client.getQueryData(["finance-onboarding", financeOnboardingApiAdapter])).toEqual(
+    ownerB(),
+  );
+  expect(
+    screen.queryByText("Setup complete. Your workspace remains available."),
+  ).not.toBeInTheDocument();
+  expect(toast.success).not.toHaveBeenCalled();
+  expect(toast.error).not.toHaveBeenCalled();
+  expect(toast.dismiss).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Reload setup review" }));
+  await waitFor(() => expect(defaultApi.getFinanceOnboarding).toHaveBeenCalledTimes(1));
+});
+
+it("rejects the old read epoch even when the same account signs back in", async () => {
+  let resolveOld!: (next: FinanceOnboardingSnapshot) => void;
+  const current = {
+    ...snapshot(),
+    source: { ...snapshot().source, summary: "New account session" },
+  };
+  defaultApi.getFinanceOnboarding
+    .mockReturnValueOnce(
+      new Promise<FinanceOnboardingSnapshot>((resolve) => {
+        resolveOld = resolve;
+      }),
+    )
+    .mockResolvedValue(current);
+  const { client } = defaultReview();
+  await waitFor(() => expect(defaultApi.getFinanceOnboarding).toHaveBeenCalledTimes(1));
+  await act(async () => {
+    client.removeQueries({ queryKey: ["me"], exact: true });
+    client.setQueryData(["me"], { id: "owner-a" });
+  });
+  await screen.findByText("New account session");
+  vi.clearAllMocks();
+  await act(async () => resolveOld({ ...snapshot(), revision: 90 }));
+  expect(client.getQueryData(["finance-onboarding", financeOnboardingApiAdapter])).toEqual(current);
+  expect(toast.success).not.toHaveBeenCalled();
+  expect(toast.error).not.toHaveBeenCalled();
+  expect(toast.dismiss).not.toHaveBeenCalled();
 });

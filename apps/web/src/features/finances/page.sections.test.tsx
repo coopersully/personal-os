@@ -5,8 +5,9 @@ import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter, useLocation } from "react-router-dom";
+import { toast } from "sonner";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   useSaveWorkspacePreferences,
   useWorkspacePreferences,
@@ -49,6 +50,7 @@ const api = vi.hoisted(() => ({
   listFinanceRecurringObligations: vi.fn(),
   listFinanceReimbursements: vi.fn(),
   listFinanceTransactions: vi.fn(),
+  listFinanceSpendingTransactions: vi.fn(),
   listFinanceMerchants: vi.fn(),
   resolveFinanceReview: vi.fn(),
   resolveFinanceAlert: vi.fn(),
@@ -80,7 +82,16 @@ function NonAccountPreferenceWriter() {
     </>
   );
 }
-function renderPage(path: string, nonAccountWriter = false) {
+function CurrentRoute() {
+  const location = useLocation();
+  return (
+    <output aria-label="Current route">
+      {location.pathname}
+      {location.search}
+    </output>
+  );
+}
+function renderPage(path: string, nonAccountWriter = false, showRoute = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["me"], { id: "owner" });
   return render(
@@ -88,12 +99,15 @@ function renderPage(path: string, nonAccountWriter = false) {
       <TooltipProvider>
         <MemoryRouter initialEntries={[path]}>
           {nonAccountWriter ? <NonAccountPreferenceWriter /> : null}
+          {showRoute ? <CurrentRoute /> : null}
           <FinancesPage />
         </MemoryRouter>
       </TooltipProvider>
     </QueryClientProvider>,
   );
 }
+
+afterEach(() => vi.restoreAllMocks());
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -702,6 +716,14 @@ describe("Finance section states", () => {
       renderPage("/finances/transactions");
       expect(await screen.findByText("Corner Bistro")).toBeVisible();
       expect(screen.getByLabelText("Merchant entity needs review")).toBeVisible();
+      const selectBistro = await screen.findByRole("checkbox", {
+        name: "Select Corner Bistro, 2026-08-20",
+      });
+      await waitFor(() => expect(selectBistro).toBeEnabled());
+      fireEvent.click(selectBistro);
+      expect(selectBistro).toBeChecked();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByText("1 selected · this page only")).toBeVisible();
       const [detailsButton] = screen.getAllByRole("row", { name: /Open .* transaction/ });
       if (!detailsButton) throw new Error("Transaction details button was not rendered.");
       fireEvent.click(detailsButton);
@@ -719,8 +741,14 @@ describe("Finance section states", () => {
         }),
       );
       fireEvent.click(screen.getByRole("button", { name: "Sort by amount" }));
+      expect(await screen.findByText("0 selected · this page only")).toBeVisible();
       fireEvent.click(await screen.findByRole("button", { name: "Sort by amount" }));
+      await waitFor(() =>
+        expect(screen.getByRole("checkbox", { name: "Select this page" })).toBeEnabled(),
+      );
+      fireEvent.click(screen.getByRole("checkbox", { name: "Select this page" }));
       fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+      expect(await screen.findByText("0 selected · this page only")).toBeVisible();
       await waitFor(() =>
         expect(api.listFinanceTransactions).toHaveBeenCalledWith(
           expect.objectContaining({ cursor: "next-page" }),
@@ -728,6 +756,10 @@ describe("Finance section states", () => {
       );
       fireEvent.click(await screen.findByRole("button", { name: "Previous" }));
       fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+      await waitFor(() =>
+        expect(screen.getByRole("checkbox", { name: "Select this page" })).toBeEnabled(),
+      );
+      fireEvent.click(screen.getByRole("checkbox", { name: "Select this page" }));
       fireEvent.click(screen.getByRole("button", { name: "Filters" }));
       const filters = screen.getByRole("dialog", { name: "Filter transactions" });
       fireEvent.change(within(filters).getByLabelText("Search"), {
@@ -742,6 +774,7 @@ describe("Finance section states", () => {
       );
       expect(api.listFinanceTransactions.mock.calls.every(([query]) => !query.cursor)).toBe(true);
       expect(await screen.findByRole("button", { name: "Previous" })).toBeDisabled();
+      expect(await screen.findByText("0 selected · this page only")).toBeVisible();
       return;
     }
   }, 10_000);
@@ -1644,6 +1677,13 @@ it.each([
   const trigger = await screen.findByRole(view === "cards" ? "button" : "row", {
     name: "Open Cafe transaction",
   });
+  const checkbox = await screen.findByRole("checkbox", { name: "Select Cafe, 2026-08-23" });
+  await waitFor(() => expect(checkbox).toBeEnabled());
+  checkbox.focus();
+  await user.keyboard(" ");
+  expect(checkbox).toBeChecked();
+  expect(checkbox).toHaveFocus();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   fireEvent.contextMenu(trigger);
   await user.click(screen.getByRole("menuitem", { name: "Add context" }));
   expect(await screen.findByRole("dialog", { name: "Add context" })).toBeVisible();
@@ -1789,4 +1829,259 @@ it("does not label another hook's transaction-view failure as an unsaved account
     screen.queryByRole("button", { name: "Review unsaved account selections" }),
   ).not.toBeInTheDocument();
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+it.each([
+  "pending_review",
+  "needs_input",
+])("keeps a legacy budget %s truthful and opens the exact review destination", async (status) => {
+  const notice = vi.spyOn(toast, "message").mockImplementation(() => "budget-notice");
+  const success = vi.spyOn(toast, "success").mockImplementation(() => "budget-notice");
+  const loading = vi.spyOn(toast, "loading").mockImplementation(() => "budget-notice");
+  api.createFinanceBudget.mockResolvedValue({
+    status,
+    review: { id: "approval/123" },
+    question: { id: "question/123" },
+  });
+  renderPage("/finances/budgets", false, true);
+  fireEvent.click(await screen.findByRole("button", { name: "Set a budget" }));
+  fireEvent.change(screen.getByLabelText("Category"), { target: { value: "Dining" } });
+  fireEvent.change(screen.getByLabelText("Monthly limit"), { target: { value: "125" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save budget" }));
+  await waitFor(() => expect(notice).toHaveBeenCalled());
+  expect(loading).toHaveBeenCalledOnce();
+  expect(success).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("Category")).toHaveValue("Dining");
+  expect(screen.getByLabelText("Monthly limit")).toHaveValue("125.00");
+  expect(screen.queryByText("Budget change needs approval")).not.toBeInTheDocument();
+  expect(screen.queryByText("Budget change needs more information")).not.toBeInTheDocument();
+  expect(notice.mock.lastCall?.[1]).toMatchObject({ id: "budget-notice" });
+  const options = notice.mock.lastCall?.[1];
+  if (!options?.action || typeof options.action !== "object" || !("onClick" in options.action))
+    throw new Error("Missing review action");
+  const action = options.action;
+  act(() => action.onClick?.({} as never));
+  expect(screen.getByLabelText("Current route")).toHaveTextContent(
+    status === "pending_review"
+      ? "/finances/review?approval=approval%2F123"
+      : "/finances/review?question=question%2F123",
+  );
+  notice.mockRestore();
+  success.mockRestore();
+  loading.mockRestore();
+});
+it.each([
+  "applied",
+  "legacy",
+])("closes the legacy budget form only for a confirmed %s result", async (status) => {
+  const success = vi.spyOn(toast, "success").mockImplementation(() => "budget-notice");
+  api.createFinanceBudget.mockResolvedValue(status === "applied" ? { status, result: {} } : {});
+  renderPage("/finances/budgets");
+  fireEvent.click(await screen.findByRole("button", { name: "Set a budget" }));
+  fireEvent.change(screen.getByLabelText("Category"), { target: { value: "Dining" } });
+  fireEvent.change(screen.getByLabelText("Monthly limit"), { target: { value: "125" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save budget" }));
+  await waitFor(() => expect(success).toHaveBeenCalledWith("Budget saved", expect.anything()));
+  expect(screen.queryByRole("button", { name: "Save budget" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Budget saved")).not.toBeInTheDocument();
+  success.mockRestore();
+});
+
+it("preserves the budget draft and announces a rejected save through Sonner", async () => {
+  const error = vi.spyOn(toast, "error").mockImplementation(() => "budget-error");
+  const success = vi.spyOn(toast, "success").mockImplementation(() => "budget-error");
+  api.createFinanceBudget.mockRejectedValue(new Error("private server details"));
+  renderPage("/finances/budgets");
+  fireEvent.click(await screen.findByRole("button", { name: "Set a budget" }));
+  fireEvent.change(screen.getByLabelText("Category"), { target: { value: "Dining" } });
+  fireEvent.change(screen.getByLabelText("Monthly limit"), { target: { value: "125" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save budget" }));
+  await waitFor(() => expect(error).toHaveBeenCalled());
+  const message = error.mock.lastCall?.[0];
+  expect(typeof message).toBe("string");
+  if (typeof message !== "string") throw new Error("Missing error feedback");
+  expect(screen.queryByText(message)).not.toBeInTheDocument();
+  expect(screen.queryByText("private server details")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Category")).toHaveValue("Dining");
+  expect(success).not.toHaveBeenCalled();
+});
+
+const exactSpendingFilter = {
+  query: {
+    scope: {
+      from: "2026-08-01",
+      through: "2026-08-31",
+      timezone: "America/New_York",
+      accountIds: ["checking"],
+      categoryIds: null,
+      basis: "personal_cost",
+      includePending: false,
+      subtractRefunds: true,
+    },
+    grouping: "categories",
+    includeUncategorized: true,
+  },
+  referenceRevision: "a".repeat(64),
+  groupId: "category:dining",
+  from: "2026-08-23",
+  through: "2026-08-23",
+};
+const exactSpendingPath = `/finances/transactions?${new URLSearchParams({ spending: JSON.stringify(exactSpendingFilter) })}`;
+
+it("fails closed for invalid Spending links and provides explicit ledger recovery", async () => {
+  renderPage("/finances/transactions?spending=bad");
+  expect(await screen.findByText(/This Spending link is invalid/)).toBeVisible();
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+  expect(api.listFinanceSpendingTransactions).not.toHaveBeenCalled();
+  expect(screen.queryByText("No transactions yet")).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Open Spending" })).toHaveAttribute(
+    "href",
+    "/finances/spending",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "View ledger" }));
+  await waitFor(() => expect(api.listFinanceTransactions).toHaveBeenCalled());
+});
+
+it("loads exact Spending references and keeps contribution totals separate from native amounts", async () => {
+  const transaction = {
+    id: "meal",
+    accountId: "checking",
+    amount: 18.5,
+    category: "Dining",
+    categoryId: "dining",
+    categoryConfidence: null,
+    categorySource: null,
+    merchant: "Source cafe",
+    merchantId: null,
+    createdAt: "2026-08-23T12:00:00.000Z",
+    updatedAt: "2026-08-23T12:00:00.000Z",
+    date: "2026-08-23",
+    direction: "expense",
+    needsReview: false,
+    notes: null,
+    pending: false,
+    rawMerchant: null,
+  };
+  api.listFinanceSpendingTransactions.mockResolvedValue({
+    items: [transaction],
+    nextCursor: "exact-next",
+    referenceRevision: exactSpendingFilter.referenceRevision,
+    totalTransactions: 2,
+    netCents: 1000,
+    scope: exactSpendingFilter.query.scope,
+    contributions: [],
+  });
+  renderPage(`${exactSpendingPath}&search=ignored`);
+  await screen.findByText("Source cafe");
+  expect(api.listFinanceSpendingTransactions).toHaveBeenCalledWith(
+    exactSpendingFilter,
+    undefined,
+    50,
+  );
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+  expect(screen.getByText(/\$10.00 Spending contribution · 2 source transactions/)).toBeVisible();
+  expect(screen.queryByRole("button", { name: /^Filters/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Sort by date/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await waitFor(() =>
+    expect(api.listFinanceSpendingTransactions).toHaveBeenCalledWith(
+      exactSpendingFilter,
+      "exact-next",
+      50,
+    ),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "View ledger" }));
+  await waitFor(() =>
+    expect(api.listFinanceTransactions).toHaveBeenCalledWith(
+      expect.objectContaining({ cursor: undefined, search: "ignored" }),
+    ),
+  );
+});
+
+it("keeps changed Spending revisions closed instead of showing unrelated transactions", async () => {
+  api.listFinanceSpendingTransactions.mockRejectedValue(
+    Object.assign(new Error("Spending changed"), { status: 409 }),
+  );
+  renderPage(exactSpendingPath);
+  await screen.findByText(/This Spending view could not be confirmed/);
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+  expect(screen.queryByText("No transactions yet")).not.toBeInTheDocument();
+  const href = screen.getByRole("link", { name: "Open Spending" }).getAttribute("href");
+  const recovery = new URL(href ?? "", "https://nohmi.example");
+  expect(recovery.pathname).toBe("/finances/spending");
+  expect(JSON.parse(recovery.searchParams.get("recoverSpending") ?? "{}")).toEqual(
+    exactSpendingFilter,
+  );
+  expect(recovery.searchParams.has("spending")).toBe(false);
+  expect(api.listFinanceSpendingTransactions).toHaveBeenCalledTimes(1);
+  expect(api.listFinanceSpendingTransactions).toHaveBeenCalledWith(
+    exactSpendingFilter,
+    undefined,
+    50,
+  );
+});
+
+it("shows an exact empty Spending view without suggesting the ledger is empty", async () => {
+  api.listFinanceSpendingTransactions.mockResolvedValue({
+    items: [],
+    nextCursor: null,
+    referenceRevision: exactSpendingFilter.referenceRevision,
+    totalTransactions: 0,
+    netCents: 0,
+    scope: exactSpendingFilter.query.scope,
+    contributions: [],
+  });
+  renderPage(exactSpendingPath);
+  expect(await screen.findByText("No source transactions in this Spending view")).toBeVisible();
+  expect(screen.queryByText("No transactions yet")).not.toBeInTheDocument();
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+});
+
+it("preserves the complete original historical scope and selected group/bin on stale recovery", async () => {
+  const filter = {
+    ...exactSpendingFilter,
+    query: {
+      scope: {
+        ...exactSpendingFilter.query.scope,
+        timezone: "America/Chicago",
+        accountIds: [],
+        categoryIds: [null, "food"],
+        basis: "full_outflow",
+        includePending: true,
+        subtractRefunds: false,
+      },
+      grouping: "buckets",
+      includeUncategorized: false,
+    },
+    groupId: "bucket:food",
+    from: "2026-08-08",
+    through: "2026-08-09",
+  };
+  api.listFinanceSpendingTransactions.mockRejectedValue(
+    Object.assign(new Error("Spending changed"), { status: 409 }),
+  );
+  renderPage(`/finances/transactions?${new URLSearchParams({ spending: JSON.stringify(filter) })}`);
+  await screen.findByText(/This Spending view could not be confirmed/);
+  const href = screen.getByRole("link", { name: "Open Spending" }).getAttribute("href");
+  const destination = new URL(href ?? "", "https://nohmi.example");
+  expect(destination.pathname).toBe("/finances/spending");
+  expect(JSON.parse(destination.searchParams.get("recoverSpending") ?? "{}")).toEqual(filter);
+  expect(destination.searchParams.has("spending")).toBe(false);
+  expect(api.listFinanceSpendingTransactions).toHaveBeenCalledOnce();
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+});
+
+it("does not replace an unrepresentable valid recovery selection with default Spending", async () => {
+  const descriptor = {
+    ...exactSpendingFilter,
+    query: { scope: { ...exactSpendingFilter.query.scope, accountIds: [""] } },
+  };
+  descriptor.query.scope.accountIds = ["a".repeat(16000 - JSON.stringify(descriptor).length)];
+  const serialized = JSON.stringify(descriptor);
+  expect(serialized).toHaveLength(16000);
+  api.listFinanceSpendingTransactions.mockRejectedValue(new Error("Spending changed"));
+  renderPage(`/finances/transactions?${new URLSearchParams({ spending: serialized })}`);
+  expect(await screen.findByText(/This selection cannot safely return to Spending/)).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Open Spending" })).not.toBeInTheDocument();
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
 });

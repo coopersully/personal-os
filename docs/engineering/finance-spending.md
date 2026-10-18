@@ -85,3 +85,21 @@ Debt targets and opaque resource IDs are not account-scope evidence. Neither sel
 all current accounts may stand in for all budget accounts. This slice does not claim the monthly-fill
 criterion or multicurrency experience complete. Exact Spending-owned contribution detail is an initial
 destination; full transaction-view drill-down and production/UI acceptance remain separate open gates.
+
+Trends and Rhythm consume the same dated snapshots. Current named-period comparisons cap the
+current period to elapsed local dates and compare the equivalent elapsed previous period, labeling
+shorter-month caps. Complete named months compare complete prior months; custom ranges use the
+preceding equal-length local-date interval. Daily/weekly/monthly bars and the accessible table
+share exact contribution references. Rhythm distinguishes observed positive and net-refund amounts,
+unknown/partial coverage, future dates and confirmed zero; it uses the person's saved week start.
+
+Exact transaction navigation uses a bounded `FinanceSpendingReferenceFilter`: the complete query,
+a canonical reference revision, optional group identity, and a contained date interval. It never
+serializes thousands of source IDs into the URL. The read-only POST
+`/v1/finances/spending/transactions` requires `finances:read`, recomputes owner-scoped references,
+and rejects stale revisions, mismatched groups and cursors from another filter. It returns full
+canonical transaction records plus page-specific contribution portions; the selected spending total
+and transaction count summarize the entire exact filter. Native transaction amounts retain their
+original meaning and may differ from selected split/personal-cost portions. Canonical row timestamps
+and account identities must still match the snapshot or the read fails with a conflict rather than
+silently mixing changed records. This endpoint performs no financial mutation or approval.

@@ -2,6 +2,11 @@
  * A missing ordinary operation must get an adapter; it cannot be waived by the inventory test.
  */
 export const workspaceApiExceptions = {
+  listFinanceActivity: {
+    kind: "owner_interaction",
+    reason:
+      "Private causal Activity history belongs to the human owner; agents receive only run-bound evidence and cannot inspect the live conversation through Activity.",
+  },
   getFinanceConversationHostReadiness: {
     kind: "owner_interaction",
     reason:

@@ -95,6 +95,7 @@ it("accounts for every typed workspace operation with an adapter or named semant
   for (const feature of [
     "finances",
     "finance-conversation",
+    "finance-activity",
     "mail",
     "mail-stewardship",
     "calendar",

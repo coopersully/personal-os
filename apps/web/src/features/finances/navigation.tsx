@@ -1,11 +1,15 @@
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import {
+  ActivityIcon,
+  AgentIcon,
   BankIcon,
   DollarIcon,
   GridIcon,
   type Icon,
   LockIcon,
   ReceiptIcon,
+  ReplyIcon,
   ShieldCheckIcon,
   TargetIcon,
   WalletIcon,
@@ -19,10 +23,14 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
+import { api } from "../../api.js";
 import { financeAccountNeedsAttention, financeProfileNeedsAttention } from "./attention";
 import { useFinanceConfiguration } from "./use-finance-configuration.js";
 
 export type FinanceSection =
+  | "chat"
+  | "automations"
+  | "activity"
   | "accounts"
   | "budgets"
   | "cashflow"
@@ -59,7 +67,15 @@ const navigation: Array<{
       { icon: TargetIcon, id: "wealth", label: "Wealth" },
     ],
   },
-  { label: "Manage", items: [{ icon: ShieldCheckIcon, id: "setup", label: "Financial profile" }] },
+  {
+    label: "Manage",
+    items: [
+      { icon: ReplyIcon, id: "chat", label: "Chat" },
+      { icon: AgentIcon, id: "automations", label: "Automations" },
+      { icon: ActivityIcon, id: "activity", label: "Activity" },
+      { icon: ShieldCheckIcon, id: "setup", label: "Financial profile" },
+    ],
+  },
 ];
 
 export function financeSectionFromPath(pathname: string): FinanceSection {
@@ -68,6 +84,9 @@ export function financeSectionFromPath(pathname: string): FinanceSection {
   if (section === "reviews") return "overview";
   return (
     [
+      "chat",
+      "automations",
+      "activity",
       "decisions",
       "accounts",
       "budgets",
@@ -98,14 +117,21 @@ function financeNavigationActive(section: FinanceSection, destination: FinanceSe
 
 export function FinanceSidebarNavigation({
   onNavigate,
+  ownerId,
   reviewCount,
   section,
 }: {
   onNavigate: () => void;
+  ownerId: string;
   reviewCount: number;
   section: FinanceSection;
 }) {
   const configuration = useFinanceConfiguration();
+  const readiness = useQuery({
+    queryKey: ["finance-conversation-readiness", ownerId],
+    queryFn: () => api.getFinanceConversationReadiness(),
+    refetchInterval: 30_000,
+  });
   const accounts =
     configuration.data?.accounts?.state === "loaded"
       ? configuration.data.accounts.value?.accounts
@@ -159,9 +185,14 @@ export function FinanceSidebarNavigation({
                           weight={financeNavigationActive(section, id) ? "Filled" : "Outline"}
                         />
                         <span>{label}</span>
-                        {id === "plan" && budgetNeedsInput ? (
+                        {(id === "plan" && budgetNeedsInput) ||
+                        (id === "chat" && readiness.data?.canSend !== true) ? (
                           <LockIcon
-                            aria-label="Prerequisites required"
+                            aria-label={
+                              id === "chat"
+                                ? "Chat verification required"
+                                : "Prerequisites required"
+                            }
                             className="ml-auto size-3.5 text-muted-foreground"
                           />
                         ) : null}

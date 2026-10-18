@@ -10,6 +10,7 @@ import { FinanceSidebarNavigation, financeSectionFromPath } from "./navigation.j
 
 vi.mock("../../api.js", () => ({
   api: {
+    getFinanceConversationReadiness: vi.fn().mockResolvedValue({ canSend: false }),
     getFinanceConfiguration: vi
       .fn()
       .mockResolvedValue({ capabilities: { budget: { state: "needs_input" } } }),
@@ -18,6 +19,9 @@ vi.mock("../../api.js", () => ({
 
 it("maps Finance paths and marks the active navigation item", async () => {
   expect(financeSectionFromPath("/finances")).toBe("overview");
+  for (const section of ["chat", "automations", "activity"] as const) {
+    expect(financeSectionFromPath(`/finances/${section}`)).toBe(section);
+  }
   expect(financeSectionFromPath("/finances/spending")).toBe("spending");
   expect(financeSectionFromPath("/finances/review")).toBe("review");
   expect(financeSectionFromPath("/finances/budgets")).toBe("plan");
@@ -30,13 +34,25 @@ it("maps Finance paths and marks the active navigation item", async () => {
       <MemoryRouter>
         <TooltipProvider>
           <SidebarProvider>
-            <FinanceSidebarNavigation onNavigate={onNavigate} reviewCount={3} section="review" />
+            <FinanceSidebarNavigation
+              ownerId="owner"
+              onNavigate={onNavigate}
+              reviewCount={3}
+              section="review"
+            />
           </SidebarProvider>
         </TooltipProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
   expect(screen.queryByRole("link", { name: /^Review/ })).not.toBeInTheDocument();
+  for (const label of ["Chat", "Automations", "Activity"]) {
+    expect(screen.getByRole("link", { name: label })).toHaveAttribute(
+      "href",
+      `/finances/${label.toLowerCase()}`,
+    );
+  }
+  expect(await screen.findByLabelText("Chat verification required")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute("href", "/finances");
   expect(screen.getByRole("link", { name: "Spending" })).toHaveAttribute(
     "href",
@@ -60,7 +76,12 @@ it("hides an empty review count", () => {
       <MemoryRouter>
         <TooltipProvider>
           <SidebarProvider>
-            <FinanceSidebarNavigation onNavigate={vi.fn()} reviewCount={0} section="overview" />
+            <FinanceSidebarNavigation
+              ownerId="owner"
+              onNavigate={vi.fn()}
+              reviewCount={0}
+              section="overview"
+            />
           </SidebarProvider>
         </TooltipProvider>
       </MemoryRouter>
@@ -106,7 +127,12 @@ it("shows connected accounts and separate attention for accounts, profile, and a
       <MemoryRouter>
         <TooltipProvider>
           <SidebarProvider>
-            <FinanceSidebarNavigation onNavigate={vi.fn()} reviewCount={0} section="accounts" />
+            <FinanceSidebarNavigation
+              ownerId="owner"
+              onNavigate={vi.fn()}
+              reviewCount={0}
+              section="accounts"
+            />
           </SidebarProvider>
         </TooltipProvider>
       </MemoryRouter>
@@ -135,7 +161,12 @@ it.each([
       <MemoryRouter>
         <TooltipProvider>
           <SidebarProvider>
-            <FinanceSidebarNavigation onNavigate={vi.fn()} reviewCount={0} section="plan" />
+            <FinanceSidebarNavigation
+              ownerId="owner"
+              onNavigate={vi.fn()}
+              reviewCount={0}
+              section="plan"
+            />
           </SidebarProvider>
         </TooltipProvider>
       </MemoryRouter>

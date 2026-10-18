@@ -506,6 +506,8 @@ describe("database schema contracts", () => {
       "0110_workspace_agent_approval_provenance",
       "0111_finance_hosted_link_state",
       "0112_connector_capability_health",
+      "0113_finance_host_prompt_issues",
+      "0114_finance_budget_baseline_qualifications",
     ]);
   });
 

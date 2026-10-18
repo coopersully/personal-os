@@ -33,7 +33,7 @@ import { projectFinanceSpending, type SpendingEvidenceInput } from "./spending-c
 
 type Metadata = {
   accounts: Array<{ id: string; label: string }>;
-  categories: Array<{ id: string; label: string }>;
+  categories: Array<{ id: string; label: string; color?: string | null }>;
   buckets: Array<{ id: string; label: string; categoryIds: string[] }>;
   transactions: FinanceSpendingDashboard["transactions"];
   source: FinanceSpendingDashboard["source"];
@@ -87,6 +87,16 @@ export function buildFinanceSpendingDashboard(
       id,
       label,
       kind,
+      visual: {
+        color:
+          kind === "category"
+            ? (() => {
+                const color = metadata.categories.find((row) => row.id === id)?.color;
+                return color && /^#[0-9a-fA-F]{6}$/.test(color) ? color : null;
+              })()
+            : null,
+        icon: id === "uncategorized" ? "uncategorized" : kind,
+      },
       categoryIds,
       netCents,
       positiveAreaCents: Math.max(0, netCents),
@@ -350,7 +360,11 @@ export function createFinanceSpendingService(input: {
             query,
             {
               accounts: accounts.map((row) => ({ id: row.id, label: row.name })),
-              categories: categories.map((row) => ({ id: row.id, label: row.name })),
+              categories: categories.map((row) => ({
+                id: row.id,
+                label: row.name,
+                color: row.color,
+              })),
               buckets: buckets
                 .filter((row) => row.taxonomyId === activeTaxonomy?.id)
                 .map((row) => ({

@@ -1,0 +1,210 @@
+import { randomUUID } from "node:crypto";
+import type { FinanceOnboardingSnapshot } from "@personal-os/domain";
+import { expect, test } from "@playwright/test";
+import {
+  addReviewedManualSource,
+  completeFinanceSetupViaApi,
+  createFinanceSetupPersona,
+} from "./finance-setup-fixtures.js";
+
+// Runs under both repository projects. Host pending/verified/revoked and actual
+// pre-0118 legacy migration require fixture bootstrap outside this browser file.
+// These gaps are deliberately not represented as skipped or mocked passing tests.
+test.describe("durable Finance manual setup", () => {
+  test("an incomplete Finance owner can repair setup while Tasks remains reachable", async ({
+    page,
+    baseURL,
+  }) => {
+    if (!baseURL) throw new Error("Browser runtime baseURL is required");
+    const { human } = await createFinanceSetupPersona(page, baseURL);
+    await human.updateAccountSetup({ action: "preferences", selectedWorkspaces: ["tasks"] });
+    await page.goto("/tasks");
+    await expect(page).toHaveURL(/\/tasks(?:[/?#]|$)/);
+    await expect(page.getByRole("region", { name: "Setup review", exact: true })).toHaveCount(0);
+    await page.goto("/finances/setup");
+    const review = page.getByRole("region", { name: "Setup review", exact: true });
+    await expect(review).toBeVisible();
+    await expect(review.getByRole("button", { name: "Finish setup", exact: true })).toBeDisabled();
+    await page.goto("/finances/accounts");
+    await expect(page).toHaveURL(/\/finances\/accounts(?:[/?#]|$)/);
+    expect((await human.getFinanceOnboarding()).completedAt).toBeNull();
+  });
+
+  test("source loss preserves completion and account corrections in every manual visibility mode", async ({
+    page,
+    baseURL,
+  }) => {
+    if (!baseURL) throw new Error("Browser runtime baseURL is required");
+    const { human } = await createFinanceSetupPersona(page, baseURL);
+    const account = await addReviewedManualSource(human);
+    const completed = await completeFinanceSetupViaApi(human);
+    await human.updateFinanceAccount(account.id, {
+      idempotencyKey: randomUUID(),
+      includeInPlanning: false,
+    });
+    for (const visibility of ["auto", "show", "hide"] as const) {
+      const settings = await human.getWorkspaceSettings("finances");
+      await human.updateWorkspaceSettings("finances", {
+        expectedRevision: settings.revision,
+        preferences: { financeManualVisibility: visibility },
+      });
+      await page.goto("/finances/accounts");
+      await page.reload();
+      const snapshot = await human.getFinanceOnboarding();
+      expect(snapshot.completedAt).toBe(completed.completedAt);
+      expect(snapshot.manualVisibility).toBe(visibility);
+      expect(snapshot.source.state).toBe("missing");
+      await expect(page.getByText("Setup checking", { exact: true })).toBeVisible();
+      const creation = page.getByRole("button", { name: "Add account", exact: true });
+      if (visibility === "hide") await expect(creation).toHaveCount(0);
+      else await expect(creation.first()).toBeVisible();
+      await page.getByRole("button", { name: "Edit Setup checking", exact: true }).click();
+      await expect(page.getByRole("dialog", { name: "Edit account", exact: true })).toBeVisible();
+      await page.keyboard.press("Escape");
+      // Canonical correction remains writable even while creation is hidden.
+      await human.updateFinanceAccount(account.id, {
+        idempotencyKey: randomUUID(),
+        ownershipType: "joint",
+        ownershipShare: 0.5,
+      });
+      expect(
+        (await human.listFinanceAccounts()).accounts.find((item) => item.id === account.id),
+      ).toMatchObject({ ownershipType: "joint", ownershipShare: 0.5, includeInPlanning: false });
+    }
+    await page.goto("/finances/setup");
+    await expect(page.getByText("Setup complete. Your workspace remains available.")).toBeVisible();
+  });
+
+  test("unknown and none persist separately; Later finishes only with server confirmation", async ({
+    page,
+    baseURL,
+  }, info) => {
+    if (!baseURL) throw new Error("Browser runtime baseURL is required");
+    const { human, email } = await createFinanceSetupPersona(page, baseURL);
+    const initial = await human.getFinanceOnboarding();
+    expect(initial.completedAt).toBeNull();
+    expect(initial.source.state).toBe("missing");
+    await addReviewedManualSource(human);
+    const source = await human.getFinanceOnboarding();
+    expect(source.source.state).toBe("usable");
+    await page.goto("/finances/setup");
+    const review = page.getByRole("region", { name: "Setup review", exact: true });
+    for (const question of source.questions) {
+      const field = review.getByLabel(question.label, { exact: true });
+      if (!question.allowsNone) await expect(field.locator('option[value="none"]')).toHaveCount(0);
+      await field.selectOption(question.allowsNone ? "none" : "unknown");
+    }
+    await review.getByLabel("I reviewed my display preferences").check();
+    await review.getByLabel("Automation", { exact: true }).selectOption("later");
+    await expect(review.getByRole("button", { name: "Finish setup", exact: true })).toBeDisabled();
+    await review.getByRole("button", { name: "Save review", exact: true }).click();
+    await expect(page.getByText("Setup review saved", { exact: true })).toBeVisible();
+    const saved = await human.getFinanceOnboarding();
+    expect(saved.revision).toBeGreaterThan(source.revision);
+    expect(saved.completedAt).toBeNull();
+    await page.reload();
+    for (const question of saved.questions) {
+      expect(question.disposition).toBe(question.allowsNone ? "none" : "unknown");
+      await expect(review.getByLabel(question.label, { exact: true })).toHaveValue(
+        question.disposition,
+      );
+    }
+    const finishedResponse = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/v1/finances/onboarding/complete") &&
+        response.request().method() === "POST",
+    );
+    await review.getByRole("button", { name: "Finish setup", exact: true }).click();
+    const response = await finishedResponse;
+    expect(response.ok()).toBe(true);
+    const completed = await human.getFinanceOnboarding();
+    expect(completed.completedAt).not.toBeNull();
+    expect(completed.revision).toBeGreaterThan(saved.revision);
+    expect(completed.automation.registrationCount).toBe(0);
+    expect(completed.automation.canSendChat).toBe(false);
+    await page.reload();
+    expect((await human.getFinanceOnboarding()).completedAt).toBe(completed.completedAt);
+    await expect(
+      review.getByText("Setup complete. Your workspace remains available."),
+    ).toBeVisible();
+    await page.goto("/finances/accounts");
+    await expect(page.getByText("Setup checking", { exact: true })).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await info.attach("durable-snapshots", {
+      body: JSON.stringify({ email, initial, source, saved, completed }),
+      contentType: "application/json",
+    });
+    await page.screenshot({ path: info.outputPath("manual-complete.png"), fullPage: true });
+  });
+
+  test("a concurrent save preserves the draft and requires explicit reload", async ({
+    page,
+    baseURL,
+  }) => {
+    if (!baseURL) throw new Error("Browser runtime baseURL is required");
+    const { human } = await createFinanceSetupPersona(page, baseURL);
+    await addReviewedManualSource(human);
+    await page.goto("/finances/setup");
+    const review = page.getByRole("region", { name: "Setup review", exact: true });
+    await expect(review.getByLabel("Automation", { exact: true })).toBeVisible();
+    const snapshot = await human.getFinanceOnboarding();
+    await review.getByLabel("Automation", { exact: true }).selectOption("now");
+    const concurrent = await human.saveFinanceOnboardingAnswers({
+      expectedRevision: snapshot.revision,
+      idempotencyKey: randomUUID(),
+      answers: [],
+      automationChoice: "later",
+      displayPreferencesReviewed: true,
+    });
+    await review.getByRole("button", { name: "Save review", exact: true }).click();
+    await expect(
+      page.getByText(
+        "Setup outcome unconfirmed. Your edits are still here. Reload the review before trying again.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(review.getByLabel("Automation", { exact: true })).toHaveValue("now");
+    await expect(review.getByRole("button", { name: "Save review", exact: true })).toBeDisabled();
+    expect((await human.getFinanceOnboarding()).revision).toBe(concurrent.revision);
+    await review.getByRole("button", { name: "Reload setup review", exact: true }).click();
+    await expect(review.getByLabel("Automation", { exact: true })).toHaveValue("later");
+    expect((await human.getFinanceOnboarding()).completedAt).toBeNull();
+  });
+
+  test("transport failure cannot save or complete and retry reloads real state", async ({
+    page,
+    baseURL,
+  }) => {
+    if (!baseURL) throw new Error("Browser runtime baseURL is required");
+    const { human } = await createFinanceSetupPersona(page, baseURL);
+    await addReviewedManualSource(human);
+    const before = await human.getFinanceOnboarding();
+    await page.route("**/v1/finances/onboarding", (route) => route.abort("failed"));
+    await page.goto("/finances/setup");
+    await expect(
+      page.getByText("Setup review could not load. Try again.", { exact: true }),
+    ).toBeVisible();
+    await page.unroute("**/v1/finances/onboarding");
+    await page.getByRole("button", { name: "Retry setup review", exact: true }).click();
+    const review = page.getByRole("region", { name: "Setup review", exact: true });
+    await review.getByLabel("Automation", { exact: true }).selectOption("later");
+    await page.route("**/v1/finances/onboarding/answers", (route) => route.abort("failed"));
+    await review.getByRole("button", { name: "Save review", exact: true }).click();
+    await expect(
+      page.getByText(
+        "Setup outcome unconfirmed. Your edits are still here. Reload the review before trying again.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(review.getByLabel("Automation", { exact: true })).toHaveValue("later");
+    await expect(review.getByRole("button", { name: "Save review", exact: true })).toBeDisabled();
+    const after: FinanceOnboardingSnapshot = await human.getFinanceOnboarding();
+    expect(after.revision).toBe(before.revision);
+    expect(after.completedAt).toBeNull();
+    await page.unroute("**/v1/finances/onboarding/answers");
+    await review.getByRole("button", { name: "Reload setup review", exact: true }).click();
+    await expect(review.getByLabel("Automation", { exact: true })).toHaveValue("");
+  });
+});

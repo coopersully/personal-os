@@ -1,9 +1,11 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
+import { createApiClient } from "@personal-os/api-client";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { loadQaFixtures } from "../apps/api/src/qa-fixtures.js";
+import { loadQaFixtures, qaFixtureAccounts } from "../apps/api/src/qa-fixtures.js";
 import { createDatabaseClient } from "../packages/database/src/index.js";
+import { completeFinanceSetupViaApi } from "./finance-setup-fixtures.js";
 
 const root = resolve(import.meta.dirname, "..");
 const apiPort = process.env.ILO_E2E_API_PORT ?? "8797";
@@ -86,6 +88,16 @@ try {
     await loadQaFixtures(fixtureDatabase.db);
   } finally {
     await fixtureDatabase.close();
+  }
+  // Post-migration records are not legacy access. Prepare populated browser
+  // personas through canonical ownership/review/completion HTTP writers instead.
+  // Empty and recovery personas retain their actual incomplete/recovery state.
+  for (const key of ["demo-full", "qa-loaded"]) {
+    const account = qaFixtureAccounts.find((candidate) => candidate.key === key);
+    if (!account) throw new Error(`Missing browser fixture ${key}`);
+    const human = createApiClient({ baseUrl: apiUrl });
+    await human.login({ email: account.email, password: account.password });
+    await completeFinanceSetupViaApi(human);
   }
   // Browser CI starts from a clean checkout without generated public HTML.
   await promisify(execFile)("pnpm", ["--filter", "@personal-os/web", "public:generate"], {

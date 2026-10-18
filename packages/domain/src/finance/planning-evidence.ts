@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "../common.js";
+
 // Kept in this leaf contract so root Finance DTOs can import evidence without a cycle.
 const financeCadenceSchema = z.enum([
   "biweekly",

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { FinanceOccurrenceMatchEvent } from "./occurrence-match.js";
 import { idSchema, isoDateTimeSchema } from "../common.js";
 import { addLocalDays, localDateToIso, parseLocalDate } from "../time.js";
 import {
@@ -125,6 +126,8 @@ export type FinanceRecurringOccurrencesView = {
   from: string;
   to: string;
   occurrences: FinanceRecurringOccurrence[];
+  /** Immutable originals and full reversal references for the requested occurrence range. */
+  matchEvents: FinanceOccurrenceMatchEvent[];
   unavailableSources: Array<{
     source: z.infer<typeof financeScheduleSourceSchema>;
     reason: "unconfirmed_schedule" | "source_changed" | "irregular_cadence" | "unknown_amount";

@@ -6,15 +6,15 @@ import {
   financeRecurringObligations,
   users,
 } from "@personal-os/database";
-import { createFinanceService } from "../finance-service.js";
-import { createProfileBudgetService } from "./profile-budget-service.js";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { expect, it, vi } from "vitest";
+import { createFinanceService } from "../finance-service.js";
 import type { FinanceMutationContext } from "./context.js";
 import {
   createFinancePlanningEvidenceService,
   serializeFinancePlanningEvidence,
 } from "./planning-evidence-service.js";
+import { createProfileBudgetService } from "./profile-budget-service.js";
 
 const userId = "f2000000-0000-4000-8000-000000000001";
 const sourceId = "f2000000-0000-4000-8000-000000000002";

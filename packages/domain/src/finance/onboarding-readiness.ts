@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 /** Stable reviews of canonical financial context; unknown never implies none or zero. */
 export type FinanceOnboardingDisposition = "unreviewed" | "answered" | "none" | "unknown";
 
@@ -142,3 +144,37 @@ export function deriveFinanceOnboardingReadiness(snapshot: FinanceOnboardingSnap
       (snapshot.manualVisibility === "auto" && snapshot.automation.registrationCount <= 0),
   };
 }
+
+/** Strict review-only mutation boundaries; financial values use the canonical profile writer. */
+export const financeOnboardingSaveInputSchema = z
+  .object({
+    expectedRevision: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(Number.MAX_SAFE_INTEGER - 1),
+    idempotencyKey: z.string().trim().min(1).max(200),
+    answers: z
+      .array(
+        z
+          .object({
+            questionId: z.string().min(1).max(160),
+            disposition: z.enum(["answered", "none", "unknown"]),
+          })
+          .strict(),
+      )
+      .max(100)
+      .refine(
+        (answers) => new Set(answers.map((answer) => answer.questionId)).size === answers.length,
+        {
+          message: "Each question may be reviewed only once per save.",
+        },
+      ),
+    displayPreferencesReviewed: z.boolean(),
+    automationChoice: z.enum(["later", "now"]),
+  })
+  .strict();
+
+export const financeOnboardingCompleteInputSchema = financeOnboardingSaveInputSchema
+  .pick({ expectedRevision: true, idempotencyKey: true, automationChoice: true })
+  .strict();

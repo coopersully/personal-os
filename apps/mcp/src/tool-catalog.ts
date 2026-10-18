@@ -473,6 +473,15 @@ export const iloToolCatalog = {
       stage: "prepare",
     },
   ),
+  get_finance_budget_baseline_qualification: read("finances", ["finances:read"], "inspect", {
+    openWorld: false,
+  }),
+  prepare_finance_budget_baseline_qualification: write("finances", ["finances:write"], {
+    policy: "preview",
+    stage: "prepare",
+    idempotent: true,
+    openWorld: false,
+  }),
   observe_finance_host_schedule: write("finances", ["finances:maintain"], {
     policy: "approved_rule",
   }),

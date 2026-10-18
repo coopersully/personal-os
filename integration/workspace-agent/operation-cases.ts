@@ -38,6 +38,11 @@ export const workspaceApiExceptions = {
       "Only the human initiates a capability challenge for the chosen host; an agent may exchange an issued challenge but cannot manufacture human intent.",
   },
 
+  confirmFinanceBudgetBaselineQualification: {
+    kind: "owner_consent",
+    reason:
+      "Only an authenticated human may confirm the exact reviewed baseline fingerprint; agent preparation cannot provide owner consent or activate a budget.",
+  },
   saveAutomationHostFireToken: {
     kind: "owner_consent",
     reason:

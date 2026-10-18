@@ -6,6 +6,9 @@ import { discoverToolDictionary, renderToolDictionary } from "./tool-dictionary.
 
 it("exposes domain input fields instead of silently narrowing workspace mutations", async () => {
   const mappings = {
+    get_finance_budget_baseline_qualification: domain.financeBudgetBaselineQualificationQuerySchema,
+    prepare_finance_budget_baseline_qualification:
+      domain.prepareFinanceBudgetBaselineQualificationInputSchema,
     acknowledge_finance_conversation_batch: domain.financeConversationAcknowledgmentInputSchema,
     reply_to_finance_conversation_batch: domain.financeConversationReplyInputSchema,
     list_events: domain.eventListQuerySchema,
@@ -217,4 +220,26 @@ it("gates every conversation delivery/proof tool by original execution grants an
   ] as const) {
     expect(workspaceApiExceptions[name].kind).toBe("owner_interaction");
   }
+});
+
+it("keeps baseline preparation discoverable only with write authority and human confirmation out of MCP", async () => {
+  const dictionary = new Map(
+    (await discoverToolDictionary()).map(({ tool, definition }) => [tool.name, definition]),
+  );
+  const read = dictionary.get("get_finance_budget_baseline_qualification");
+  const prepare = dictionary.get("prepare_finance_budget_baseline_qualification");
+  expect(read).toMatchObject({ readOnly: true, requiredScopes: ["finances:read"] });
+  expect(prepare).toMatchObject({
+    readOnly: false,
+    requiredScopes: ["finances:write"],
+    policy: "preview",
+    stage: "prepare",
+  });
+  if (!prepare) throw new Error("Missing baseline preparation tool.");
+  expect(canDiscoverTool(prepare, new Set(["finances:read"]), false)).toBe(false);
+  expect(canDiscoverTool(prepare, new Set(["finances:write"]), true)).toBe(false);
+  expect(dictionary.has("confirm_finance_budget_baseline_qualification")).toBe(false);
+  expect(workspaceApiExceptions.confirmFinanceBudgetBaselineQualification.kind).toBe(
+    "owner_consent",
+  );
 });

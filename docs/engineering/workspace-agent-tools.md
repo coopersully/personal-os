@@ -779,7 +779,7 @@ Execute the exact pending action after inspecting its evidence. The API revalida
 
 ## approve_finance_budget
 
-Activate the exact inspected proposal and profile revision. Agents must use approvalSource agent_self_approval and have finances:write, explicit finances:execute, and enabled review bypass. Claiming user_instruction is rejected.
+Budget activation requires exact authenticated human approval in nohmi. Agent calls cannot approve a budget, including with execution or review bypass; direct the user to review the proposal in nohmi.
 
 - Domain: finances; stage: commit; policy: approved_rule.
 - Grants (all): finances:write, finances:execute.
@@ -792,10 +792,7 @@ Activate the exact inspected proposal and profile revision. Agents must use appr
   "properties": {
     "approvalSource": {
       "type": "string",
-      "enum": [
-        "user_instruction",
-        "agent_self_approval"
-      ]
+      "const": "user_instruction"
     },
     "budgetVersionId": {
       "type": "string",
@@ -5339,6 +5336,31 @@ Read the latest complete budget version, all resources and allocations, its bala
 }
 ```
 
+## get_finance_budget_baseline_qualification
+
+Read the exact qualified monthly Finance budget baseline or why qualification is unavailable. Candidates are context for an explicit human decision; this read never confirms a baseline or approves a budget.
+
+- Domain: finances; stage: inspect; policy: read_only.
+- Grants (all): finances:read.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `getFinanceBudgetBaselineQualification`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "month": {
+      "type": "string",
+      "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+    }
+  },
+  "required": [
+    "month"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
+```
+
 ## get_finance_budget_pace
 
 Read budget pace for week, month, or year with actual spending and period boundaries. Requires finances:read.
@@ -8926,6 +8948,66 @@ Record the host's observed active or paused state. Only the originally bound Fin
     "observation"
   ],
   "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
+```
+
+## prepare_finance_budget_baseline_qualification
+
+Prepare a durable, exact monthly baseline review for the selected budget version, accounts, currency and timezone. Reuse the idempotency key only for the same selection. Return the server snapshot and fingerprint for explicit human confirmation in nohmi; preparation never qualifies a baseline, activates a budget or supplies human consent.
+
+- Domain: finances; stage: prepare; policy: preview.
+- Grants (all): finances:write.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `prepareFinanceBudgetBaselineQualification`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "accountIds": {
+      "minItems": 1,
+      "maxItems": 100,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+      }
+    },
+    "budgetVersionId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "month": {
+      "type": "string",
+      "pattern": "^\\d{4}-(0[1-9]|1[0-2])$"
+    },
+    "timezone": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    }
+  },
+  "required": [
+    "accountIds",
+    "budgetVersionId",
+    "currency",
+    "idempotencyKey",
+    "month",
+    "timezone"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
 }
 ```
 
@@ -12896,7 +12978,7 @@ Set the conversation disposition using the current version and cited evidence. R
 
 ## setup_finances
 
-Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, preserve unknowns or record an explicit skip, and show the first plan with its missing evidence. Budget activation binds the current profile and proposal. Agents require finances:execute, enabled review bypass and approvalSource agent_self_approval; never impersonate a user approval. Do not ask the user to name a tool.
+Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, preserve unknowns or record an explicit skip, and show the first plan with its missing evidence. Budget activation binds the current profile and proposal and requires exact authenticated human approval in nohmi. Agents can propose but cannot activate budgets, even with execution or review bypass. Do not ask the user to name a tool.
 
 - Domain: finances; stage: commit; policy: approved_rule.
 - Grants (all): finances:write.
@@ -13015,10 +13097,7 @@ Use this when the user asks to set up their finances, create or finish a financi
       "properties": {
         "approvalSource": {
           "type": "string",
-          "enum": [
-            "user_instruction",
-            "agent_self_approval"
-          ]
+          "const": "user_instruction"
         },
         "budgetVersionId": {
           "type": "string",

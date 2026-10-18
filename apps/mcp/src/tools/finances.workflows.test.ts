@@ -575,3 +575,87 @@ it("forwards bounded immutable host prompt reads/issuance and preserves API deni
     await server.close();
   }
 });
+
+it("reads and prepares exact baseline qualification without exposing human confirmation", async () => {
+  const getFinanceBudgetBaselineQualification = vi.fn(async () => ({
+    state: "unavailable",
+    reason: "qualification_required",
+    qualificationRequired: true,
+    candidates: [],
+  }));
+  const prepareFinanceBudgetBaselineQualification = vi.fn(async () => ({
+    id,
+    fingerprint: "a".repeat(64),
+    snapshot: { exact: "server evidence" },
+  }));
+  const server = new McpServer({ name: "baseline-qualification", version: "1" });
+  registerFinanceTools(server, {
+    getFinanceBudgetBaselineQualification,
+    prepareFinanceBudgetBaselineQualification,
+  } as unknown as PersonalOsApiClient);
+  const client = new Client({ name: "test", version: "1" });
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(st), client.connect(ct)]);
+  try {
+    const read = await client.callTool({
+      name: "get_finance_budget_baseline_qualification",
+      arguments: { month: "2026-10" },
+    });
+    expect(read.isError).not.toBe(true);
+    expect(getFinanceBudgetBaselineQualification).toHaveBeenCalledWith("2026-10");
+    const input = {
+      accountIds: [id],
+      budgetVersionId: id,
+      currency: "USD",
+      idempotencyKey: "exact-review",
+      month: "2026-10",
+      timezone: "America/New_York",
+    };
+    const prepared = await client.callTool({
+      name: "prepare_finance_budget_baseline_qualification",
+      arguments: input,
+    });
+    expect(prepared.isError).not.toBe(true);
+    expect(prepareFinanceBudgetBaselineQualification).toHaveBeenCalledWith(input);
+    expect(JSON.stringify(prepared)).toContain("server evidence");
+    prepareFinanceBudgetBaselineQualification.mockRejectedValueOnce(
+      new ApiClientError({
+        status: 409,
+        code: "conflict",
+        message: "Selected budget changed. Prepare again.",
+        details: { reason: "stale_budget" },
+        requestId: "baseline-stale",
+      }),
+    );
+    const denied = await client.callTool({
+      name: "prepare_finance_budget_baseline_qualification",
+      arguments: { ...input, idempotencyKey: "stale-review" },
+    });
+    expect(denied.isError).toBe(true);
+    expect(denied.structuredContent).toMatchObject({
+      error: {
+        status: 409,
+        code: "conflict",
+        details: { reason: "stale_budget" },
+        requestId: "baseline-stale",
+      },
+    });
+    const spoofed = await client.callTool({
+      name: "prepare_finance_budget_baseline_qualification",
+      arguments: { ...input, confirmedByActorId: id },
+    });
+    expect(spoofed.isError).toBe(true);
+    expect(prepareFinanceBudgetBaselineQualification).toHaveBeenCalledTimes(2);
+    const tools = await client.listTools();
+    expect(
+      tools.tools.some((tool) => tool.name === "confirm_finance_budget_baseline_qualification"),
+    ).toBe(false);
+    expect(
+      tools.tools.find((tool) => tool.name === "prepare_finance_budget_baseline_qualification")
+        ?.annotations?.readOnlyHint,
+    ).toBe(false);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});

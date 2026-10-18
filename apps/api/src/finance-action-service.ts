@@ -61,6 +61,7 @@ import {
 import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
+import { isActiveBudgetAction, requireHumanBudgetApproval } from "./finance/budget-authority.js";
 import {
   financeActionFingerprint,
   financeCandidateActionFingerprint,
@@ -834,27 +835,46 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             expectedAnswer("limit", "number"),
             expectedAnswer("month", "string", { example: "2026-08" }),
           ]);
-        const existing = await lockRead(
+        const plans = await lockRead(
+          executor
+            .select()
+            .from(financeBudgetPlans)
+            .where(
+              and(
+                eq(financeBudgetPlans.userId, userId),
+                eq(financeBudgetPlans.month, String(input.month)),
+              ),
+            )
+            .orderBy(financeBudgetPlans.id),
+        );
+        const allocations = await lockRead(
           executor
             .select()
             .from(financeBudgets)
             .where(
-              and(
-                eq(financeBudgets.userId, userId),
-                eq(financeBudgets.month, String(input.month)),
-                eq(financeBudgets.category, String(input.category)),
-              ),
+              and(eq(financeBudgets.userId, userId), eq(financeBudgets.month, String(input.month))),
             )
-            .orderBy(financeBudgets.id)
-            .limit(1),
+            .orderBy(financeBudgets.id),
         );
-        const revision = existing[0]?.updatedAt.toISOString() ?? "absent";
+        const existing = allocations.find((item) => item.category === String(input.category));
+        // A complete replacement can remove this category and leave it absent.
+        // Bind to the whole month so that absence cannot revive an old approval.
+        const revision = snapshotRevision({
+          plans: plans.map((item) => [item.id, item.version, item.updatedAt.toISOString()]),
+          allocations: allocations.map((item) => [
+            item.id,
+            item.category,
+            item.limit,
+            item.bucketId,
+            item.updatedAt.toISOString(),
+          ]),
+        });
         return prepared(
           input,
           revision,
           [
             {
-              entityId: existing[0]?.id ?? null,
+              entityId: existing?.id ?? null,
               entityType: "finance_budget",
               summary: `Set ${String(input.category)} budget to $${Number(input.limit).toFixed(2)} for ${String(input.month)}.`,
             },
@@ -2492,6 +2512,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     prepared: PreparedAction,
     context: MutationContext,
     executor?: FinanceExecutor,
+    humanApproval?: { principal: Principal; reviewId: string },
   ) {
     const input = prepared.input;
     const privilegedContext = { ...context, financePreparedAction: true };
@@ -2521,17 +2542,28 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         // corrected owned account in the private revision snapshot without
         // widening the public budget-plan writer contract or result.
         const { payAccountId: _payAccountId, ...budgetInput } = input;
+        const budgetContext = {
+          ...privilegedContext,
+          ...(humanApproval
+            ? {
+                financeBudgetApproval: {
+                  ...humanApproval,
+                  fingerprint: financeActionFingerprint("budget_plan", budgetInput),
+                },
+              }
+            : {}),
+        };
         return "allocations" in input
           ? invoke(
               finances.setBudgetPlan,
               budgetInput as never,
-              privilegedContext as never,
+              budgetContext as never,
               executor as never,
             )
           : invoke(
               finances.createBudget,
               budgetInput as never,
-              privilegedContext as never,
+              budgetContext as never,
               executor as never,
             );
       }
@@ -2779,6 +2811,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     executor: FinanceExecutor;
     mode: "apply" | "queue";
     reviewId?: string;
+    humanApproval?: { principal: Principal; reviewId: string };
   }) {
     const { candidateId, context, executor, expectedRevision } = input;
     const [candidate] = await executor
@@ -2898,7 +2931,16 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       return { candidateId, status: "superseded" as const };
     };
     if (!hasExpectedItems) return supersedeAndRebuild();
-    if (input.mode === "queue") {
+    const needsBudgetApproval = preparedItems.some((item) => {
+      const payload = item.privatePayload as {
+        actionKind?: string;
+        input?: Record<string, unknown>;
+      };
+      return payload.input && isActiveBudgetAction(payload.actionKind ?? "", payload.input);
+    });
+    if (needsBudgetApproval && input.reviewId)
+      requireHumanBudgetApproval(input.humanApproval?.principal ?? context.principal);
+    if (input.mode === "queue" || (needsBudgetApproval && !input.humanApproval)) {
       const fingerprint = `sha256:${createHash("sha256")
         .update(
           JSON.stringify({
@@ -3018,7 +3060,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         ),
       );
     for (const { item, prepared } of currentItems) {
-      await applyPrepared(prepared, context, executor);
+      await applyPrepared(prepared, context, executor, input.humanApproval);
       await executor
         .update(financeMaintenanceCandidateItems)
         .set({ disposition: "committed", updatedAt: now() })
@@ -3368,6 +3410,21 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         const payload = existing.privatePayload as { question: FinanceQuestion };
         return { question: { ...payload.question, id: existing.id }, status: "needs_input" };
       }
+      // Human legacy allocation submissions also need a durable review identity and
+      // source revision; authentication alone cannot make a delayed PUT fresh.
+      if (
+        context.principal.actorType === "user" &&
+        isActiveBudgetAction(prepared.actionKind, prepared.input)
+      ) {
+        return db.transaction(async (tx) => {
+          const current = await revalidate(prepared, context.principal.userId, tx, "user");
+          if ("status" in current) return current;
+          return {
+            review: (await queue(current, context, tx)) as FinancePendingActionReview,
+            status: "pending_review",
+          };
+        });
+      }
       // Lock and re-read immediately before the semantic writer. This closes
       // the setting TOCTOU window for agent actions without accepting token or
       // request-body bypass authority.
@@ -3378,7 +3435,10 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           // the same order while it revalidates or queues beside them.
           if (prepared.actionKind === "reimbursement")
             await lockReimbursementTopology(tx, context.principal.userId);
-          if (!(await readBypass(tx, context.principal.userId, true))) {
+          if (
+            isActiveBudgetAction(prepared.actionKind, prepared.input) ||
+            !(await readBypass(tx, context.principal.userId, true))
+          ) {
             const current = await revalidate(prepared, context.principal.userId, tx, "agent");
             if ("status" in current) return current;
             return {
@@ -3465,6 +3525,13 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           review.updatedAt.getTime() !== preview.updatedAt.getTime()
         )
           throw new AppError("conflict", "The Finance action review changed before approval.");
+        if (
+          isActiveBudgetAction(
+            review.actionKind,
+            (review.privatePayload as StoredPayload).input ?? {},
+          )
+        )
+          requireHumanBudgetApproval(context.principal);
         const payload = review.privatePayload as StoredPayload;
         if (review.status === "applied") {
           return { result: payload.result as T, status: "applied" };
@@ -3494,6 +3561,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             executor: tx,
             mode: "apply",
             reviewId: review.id,
+            ...(context.principal.actorType === "user"
+              ? { humanApproval: { principal: context.principal, reviewId: review.id } }
+              : {}),
           });
           if (settlement.status === "needs_input")
             return {
@@ -3556,7 +3626,14 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             .where(eq(financeAgentActionReviews.id, review.id));
           return current;
         }
-        const result = await applyPrepared(current, actionContext, tx);
+        const result = await applyPrepared(
+          current,
+          actionContext,
+          tx,
+          isActiveBudgetAction(current.actionKind, current.input)
+            ? { principal: context.principal, reviewId: review.id }
+            : undefined,
+        );
         await tx
           .update(financeAgentActionReviews)
           .set({ privatePayload: { ...payload, result }, status: "applied", updatedAt: now() })
@@ -3830,7 +3907,10 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             }),
           );
           return { question: nextQuestion, status: "needs_input" };
-        } else if (!(await readBypass(tx, context.principal.userId, true))) {
+        } else if (
+          isActiveBudgetAction(prepared.actionKind, prepared.input) ||
+          !(await readBypass(tx, context.principal.userId, true))
+        ) {
           outcome = {
             review: (await queue(prepared, actionContext, tx)) as FinancePendingActionReview,
             status: "pending_review",

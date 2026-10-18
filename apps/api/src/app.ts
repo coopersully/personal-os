@@ -52,6 +52,7 @@ import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
 import { createExecutionPolicyService } from "./execution-policy-service.js";
 import { createFinanceActivityService } from "./finance/activity-service.js";
+import { createFinanceBudgetBaselineQualificationService } from "./finance/baseline-qualification-service.js";
 import { createFinanceBudgetPolicyService } from "./finance/budget-policy-service.js";
 import { createFinanceContextualQuestionService } from "./finance/contextual-question-service.js";
 import {
@@ -470,6 +471,10 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     searchReceiptCandidates: mail.searchReceiptCandidates,
     ...(plaid ? { plaid } : {}),
     providerItems: financeProviderItems,
+  });
+  const baselineQualification = createFinanceBudgetBaselineQualificationService({
+    db: dependencies.db,
+    now,
   });
   const financeBudgetPolicies = createFinanceBudgetPolicyService({ db: dependencies.db, now });
   const financeContextualQuestions = createFinanceContextualQuestionService({
@@ -1456,6 +1461,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     db: dependencies.db,
     financeChallenges,
     financeBudgetPolicies,
+    baselineQualification,
     contextualQuestions: financeContextualQuestions,
     canonicalFinanceMaintenance,
     financeMaintenance,

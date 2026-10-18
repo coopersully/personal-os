@@ -7,6 +7,7 @@ import {
   automationHostScheduleObservationInputSchema,
   type FinanceReceiptReview,
   type FinanceToolResult,
+  financeBudgetBaselineQualificationQuerySchema,
   financeConversationAcknowledgmentInputSchema,
   financeConversationProofOperationSchema,
   financeConversationReplyInputSchema,
@@ -17,6 +18,7 @@ import {
   manageFinanceGoalInputSchema,
   manageFinanceRecurringItemInputSchema,
   manageFinanceRuleInputSchema,
+  prepareFinanceBudgetBaselineQualificationInputSchema,
   updateFinanceTransactionInputSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
@@ -272,6 +274,39 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
         api.exchangeFinanceConversationChallenge(
           challengeId,
           financeConversationProofOperationSchema.parse(operation),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "get_finance_budget_baseline_qualification",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the exact qualified monthly Finance budget baseline or why qualification is unavailable. Candidates are context for an explicit human decision; this read never confirms a baseline or approves a budget.",
+      inputSchema: financeBudgetBaselineQualificationQuerySchema,
+      title: "Read monthly baseline qualification",
+    },
+    async ({ month }) => apiResult(() => api.getFinanceBudgetBaselineQualification(month)),
+  );
+  server.registerTool(
+    "prepare_finance_budget_baseline_qualification",
+    {
+      annotations: {
+        idempotentHint: true,
+        openWorldHint: false,
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+      description:
+        "Prepare a durable, exact monthly baseline review for the selected budget version, accounts, currency and timezone. Reuse the idempotency key only for the same selection. Return the server snapshot and fingerprint for explicit human confirmation in nohmi; preparation never qualifies a baseline, activates a budget or supplies human consent.",
+      inputSchema: prepareFinanceBudgetBaselineQualificationInputSchema,
+      title: "Prepare monthly baseline review",
+    },
+    async (input) =>
+      apiResult(() =>
+        api.prepareFinanceBudgetBaselineQualification(
+          prepareFinanceBudgetBaselineQualificationInputSchema.parse(input),
         ),
       ),
   );

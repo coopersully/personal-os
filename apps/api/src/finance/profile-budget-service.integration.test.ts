@@ -474,6 +474,7 @@ describe.sequential("Finance profile and budget lifecycle", () => {
     await expect(
       service.approveFinanceBudget(
         {
+          // @ts-expect-error Legacy clients cannot grant new activation authority.
           approvalSource: "agent_self_approval",
           budgetVersionId: proposed.data.id,
           expectedVersion: proposed.data.version,
@@ -524,6 +525,7 @@ describe.sequential("Finance profile and budget lifecycle", () => {
     await expect(
       service.approveFinanceBudget(
         {
+          // @ts-expect-error Legacy clients cannot grant new activation authority.
           approvalSource: "agent_self_approval",
           budgetVersionId: revised.data.id,
           expectedVersion: revised.data.version,
@@ -729,8 +731,24 @@ describe.sequential("Finance profile and budget lifecycle", () => {
     ).rejects.toMatchObject({ code: "invalid_request" });
     await expect(
       service.approveFinanceBudget(
-        { ...currentDecision, idempotencyKey: "decision-other" },
+        { ...currentDecision, idempotencyKey: "decision-inconsistent-identity" },
         { ...context, userId },
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    const foreignContext = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: userId,
+        actorType: "user",
+        userId,
+        scopes: new Set(["finances:write"]),
+      },
+      requestId: "decision-other",
+    });
+    await expect(
+      service.approveFinanceBudget(
+        { ...currentDecision, idempotencyKey: "decision-other" },
+        foreignContext,
       ),
     ).rejects.toMatchObject({ code: "not_found" });
   });

@@ -5269,3 +5269,94 @@ export const automationHostPromptIssues = pgTable(
     check("automation_host_prompt_issues_text_check", sql`length(${table.text}) > 0`),
   ],
 );
+
+/** Durable review of the exact monthly budget scope; confirmation never activates allocations. */
+export const financeBudgetBaselineReviews = pgTable(
+  "finance_budget_baseline_reviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    periodMonth: text("period_month").notNull(),
+    planId: uuid("plan_id").notNull(),
+    budgetVersionId: uuid("budget_version_id").notNull(),
+    snapshot: jsonb("snapshot").$type<Record<string, unknown>>().notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    sourceFingerprint: text("source_fingerprint").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_budget_baseline_reviews_id_user_idx").on(table.id, table.userId),
+    foreignKey({
+      name: "finance_budget_baseline_reviews_version_fk",
+      columns: [table.budgetVersionId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetVersions.id,
+        financeBudgetVersions.planId,
+        financeBudgetVersions.userId,
+      ],
+    }),
+    check(
+      "finance_budget_baseline_reviews_month_check",
+      sql`${table.periodMonth} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`,
+    ),
+    check(
+      "finance_budget_baseline_reviews_snapshot_check",
+      sql`(jsonb_typeof(${table.snapshot}) = 'object' AND ${table.snapshot}->>'month' = ${table.periodMonth} AND ${table.snapshot}->>'budgetVersionId' = ${table.budgetVersionId}::text AND ${table.snapshot}->>'planId' = ${table.planId}::text) IS TRUE`,
+    ),
+    check(
+      "finance_budget_baseline_reviews_fingerprint_check",
+      sql`${table.fingerprint} ~ '^[a-f0-9]{64}$' AND ${table.sourceFingerprint} ~ '^[a-f0-9]{64}$'`,
+    ),
+  ],
+);
+
+/** One immutable, explicitly human-confirmed account universe and currency per month. */
+export const financeBudgetBaselineQualifications = pgTable(
+  "finance_budget_baseline_qualifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    periodMonth: text("period_month").notNull(),
+    reviewId: uuid("review_id").notNull(),
+    snapshot: jsonb("snapshot").$type<Record<string, unknown>>().notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    confirmedByActorId: text("confirmed_by_actor_id").notNull(),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }).notNull(),
+    qualificationKind: text("qualification_kind").$type<"current" | "retrospective">().notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_budget_baseline_qualifications_user_month_idx").on(
+      table.userId,
+      table.periodMonth,
+    ),
+    foreignKey({
+      name: "finance_budget_baseline_qualifications_review_fk",
+      columns: [table.reviewId, table.userId],
+      foreignColumns: [financeBudgetBaselineReviews.id, financeBudgetBaselineReviews.userId],
+    }),
+    check(
+      "finance_budget_baseline_qualifications_month_check",
+      sql`${table.periodMonth} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`,
+    ),
+    check(
+      "finance_budget_baseline_qualifications_snapshot_check",
+      sql`(jsonb_typeof(${table.snapshot}) = 'object' AND ${table.snapshot}->>'month' = ${table.periodMonth}) IS TRUE`,
+    ),
+    check(
+      "finance_budget_baseline_qualifications_fingerprint_check",
+      sql`${table.fingerprint} ~ '^[a-f0-9]{64}$'`,
+    ),
+    check(
+      "finance_budget_baseline_qualifications_kind_check",
+      sql`${table.qualificationKind} IN ('current', 'retrospective')`,
+    ),
+    check(
+      "finance_budget_baseline_qualifications_human_check",
+      sql`${table.confirmedByActorId} = ${table.userId}::text`,
+    ),
+  ],
+);

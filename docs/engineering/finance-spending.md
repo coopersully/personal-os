@@ -9,7 +9,7 @@ relationships outside the requested period. It must exclude deleted/tombstoned r
 storage boundary. A transaction page cannot substitute for that snapshot. `coverage` is supplied
 explicitly by the owning loader and is never inferred from record presence. Unknown or partial
 source coverage stays unknown or partial; unresolved recognition downgrades complete coverage to
-partial. A future date never represents confirmed zero. An eventual loader must establish source
+partial. A future date never represents confirmed zero. The owning loader must establish source
 coverage and freshness before claiming completeness.
 
 The existing recognition pass resolves pending replacement, trusted duplicate/split/transfer/refund
@@ -50,8 +50,8 @@ nets while preserving the same contributions. No negative bubble area is implied
 
 Historical monthly budget comparison is explicitly unavailable (`historical_budget_not_resolved`).
 This slice does not guess historical approvals, budget account scope, carry-forward limits or fills.
-The future budget adapter, complete authenticated loader, route, typed client, accessible views,
-and production observation remain separate delivery work.
+The qualified monthly budget adapter and production observation remain separate delivery work.
+The dashboard loader, route, typed client and views are described below.
 
 ## Dashboard loader and presentation
 

@@ -32,7 +32,10 @@ import {
   requireFinanceExecution,
   requireFinanceMutation,
 } from "./context.js";
-import { createFinancePlanningEvidenceService } from "./planning-evidence-service.js";
+import {
+  createFinancePlanningEvidenceService,
+  requireExplicitUser,
+} from "./planning-evidence-service.js";
 import { withFinanceBudgetPresentation } from "./presentation-service.js";
 import { lockFinanceProfileVersion } from "./profile-version-lock.js";
 import { appendFinanceProfile, profileValue } from "./profile-writer.js";
@@ -662,6 +665,7 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
     },
 
     async manageFinanceGoal(input: ManageFinanceGoalInput, context: FinanceMutationContext) {
+      if (input.operation === "confirm_progress") requireExplicitUser(context);
       return executeFinanceIdempotently(
         db,
         context,

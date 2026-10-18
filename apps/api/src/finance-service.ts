@@ -138,7 +138,10 @@ import { createFinanceLedgerService } from "./finance/ledger-service.js";
 import { supersedeFinanceMaintenanceLineage } from "./finance/maintenance-rebuild.js";
 import { normalizedMerchant, titleCaseMerchant } from "./finance/merchant-identity.js";
 import { createFinanceMerchantService } from "./finance/merchant-service.js";
-import { createFinancePlanningEvidenceService } from "./finance/planning-evidence-service.js";
+import {
+  createFinancePlanningEvidenceService,
+  requireExplicitUser,
+} from "./finance/planning-evidence-service.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import { appendFinanceProfile } from "./finance/profile-writer.js";
 import { issueMaintenanceReviewQuestion } from "./finance/review-action-service.js";
@@ -5539,6 +5542,7 @@ export function createFinanceService({
       input: ManageFinanceRecurringItemInput,
       context: FinanceMutationContext,
     ) {
+      if (input.operation === "confirm_cost") requireExplicitUser(context);
       return executeFinanceIdempotently(
         db,
         context,

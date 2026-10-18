@@ -2,6 +2,7 @@ import { ApiClientError } from "@personal-os/api-client";
 import type { FinanceReimbursement } from "@personal-os/domain";
 import { EmptyState, Spinner } from "@personal-os/ui";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { CircleCheckIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,11 +19,15 @@ function sectionFor(item: FinanceReimbursement) {
 }
 
 export function FinanceReimbursementList() {
+  const [mutationDenied, setMutationDenied] = useState(false);
   const query = useQuery({
     queryFn: api.listFinanceReimbursements,
     queryKey: ["finance-reimbursements"],
   });
-  if (query.error instanceof ApiClientError && [401, 403].includes(query.error.status))
+  if (
+    mutationDenied ||
+    (query.error instanceof ApiClientError && [401, 403].includes(query.error.status))
+  )
     return (
       <p role="status">
         Reimbursement access unavailable. Check your permissions before viewing receipt evidence.
@@ -107,7 +112,10 @@ export function FinanceReimbursementList() {
                       {item.matches.length} linked{" "}
                       {item.matches.length === 1 ? "credit" : "credits"} · {item.rationale}
                     </p>
-                    <FinanceReimbursementJourney reimbursement={item} />
+                    <FinanceReimbursementJourney
+                      reimbursement={item}
+                      onAccessDenied={() => setMutationDenied(true)}
+                    />
                   </ItemContent>
                 </Item>
               );

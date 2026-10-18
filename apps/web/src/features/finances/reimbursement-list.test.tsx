@@ -165,3 +165,94 @@ it("labels qualified personal cost as whole-expense material and never adds case
   ).toBeVisible();
   expect(screen.queryByText(/€100.00/)).not.toBeInTheDocument();
 });
+
+it.each([
+  401, 403,
+])("hides every cached private card after an actual correction mutation denies access %s", async (status) => {
+  const item = claim({
+    sourceExpense: {
+      transactionId: tx,
+      amount: 200,
+      allocationAmount: 120,
+      allocationRevision: 1,
+      allocationState: "active",
+      allocationTreatment: "reimbursable",
+      date: "2026-10-01",
+      merchant: "Private expense",
+      currency: "EUR",
+      pending: false,
+      personalCostToDate: {
+        state: "qualified",
+        amount: 150,
+        receivedAmount: 50,
+        currency: "EUR",
+        scope: "whole_expense",
+      },
+    },
+  });
+  const client = show(item);
+  expect(await screen.findByText("Casey")).toBeVisible();
+  await act(async () => {
+    client.setQueryData(["finance-reimbursements"], {
+      reimbursements: [
+        item,
+        {
+          ...claim(),
+          id: "33333333-3333-4333-8333-333333333333",
+          payer: "Robin private",
+          rationale: "Other private claim",
+        },
+      ],
+      unmatchedCredits: [],
+    });
+  });
+  const action = screen.getAllByRole("button", { name: "Correct expectation" })[0];
+  if (!action) throw new Error("Correction action missing");
+  fireEvent.click(action);
+  fireEvent.change(screen.getByLabelText("Reason for correction"), {
+    target: { value: "Correct shared amount" },
+  });
+  fireEvent.change(screen.getByLabelText("Supporting evidence"), {
+    target: { value: "Payer confirmed correction" },
+  });
+  fireEvent.click(screen.getByRole("checkbox"));
+  api.reconcileFinanceReimbursement.mockRejectedValue(
+    new ApiClientError({ status, code: "forbidden", message: "Denied" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Save correction" }));
+  expect(await screen.findByText(/Reimbursement access unavailable/)).toBeVisible();
+  expect(api.reconcileFinanceReimbursement).toHaveBeenCalledWith(
+    expect.objectContaining({
+      operation: "correct_expected",
+      reimbursementId: id,
+      expectedRevision: 2,
+    }),
+  );
+  expect(screen.queryByText("Casey")).not.toBeInTheDocument();
+  expect(screen.queryByText("Robin private")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Other private claim/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/€150.00/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/€40.00 received/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.queryByRole("list")).not.toBeInTheDocument();
+  expect(client.getQueryData(["finance-reimbursements"])).toMatchObject({
+    reimbursements: [{ id }, { payer: "Robin private" }],
+  });
+});
+it("retains the private list and exact retry controls after a transient correction failure", async () => {
+  show();
+  fireEvent.click(await screen.findByRole("button", { name: "Correct expectation" }));
+  fireEvent.change(screen.getByLabelText("Reason for correction"), {
+    target: { value: "Correct shared amount" },
+  });
+  fireEvent.change(screen.getByLabelText("Supporting evidence"), {
+    target: { value: "Payer confirmed correction" },
+  });
+  fireEvent.click(screen.getByRole("checkbox"));
+  api.reconcileFinanceReimbursement.mockRejectedValue(new Error("Network unavailable"));
+  fireEvent.click(screen.getByRole("button", { name: "Save correction" }));
+  expect(await screen.findByRole("button", { name: "Retry same correction" })).toBeEnabled();
+  expect(screen.getByText("Casey")).toBeVisible();
+  expect(screen.getByRole("dialog")).toBeVisible();
+  expect(screen.getByLabelText("Expected amount")).toBeDisabled();
+});

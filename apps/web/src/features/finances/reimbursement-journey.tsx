@@ -346,8 +346,10 @@ function ReceiptEvidence({
 /** Inspect and explicitly correct the existing allocation-owned claim and its receipt links. */
 export function FinanceReimbursementJourney({
   reimbursement,
+  onAccessDenied,
 }: {
   reimbursement: FinanceReimbursement;
+  onAccessDenied?: () => void;
 }) {
   const [selection, setSelection] = useState<{
     reimbursement: FinanceReimbursement;
@@ -400,6 +402,7 @@ export function FinanceReimbursementJourney({
           {...(selection.matchId ? { matchId: selection.matchId } : {})}
           onClose={() => setSelection(null)}
           onDenied={() => {
+            onAccessDenied?.();
             setDenied(true);
             setSelection(null);
           }}

@@ -12,6 +12,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from acceptance import evaluate_delivery
+
 
 def registry_root():
     common = subprocess.check_output(
@@ -84,11 +86,20 @@ def transition(record, owner, operation, payload):
     elif operation == "save":
         allowed = {"phase", "headSha", "baseSha", "evidence", "nextTrigger", "retryAt",
                    "failureFingerprint", "failedAttempts", "schedulerId", "authorization",
-                   "worktree", "worker", "acceptanceRevision", "policyVersion"}
+                   "worktree", "worker", "acceptanceRevision", "policyVersion", "delivery"}
         if set(payload) - allowed:
             raise ValueError("Unsupported checkpoint field")
-        if payload.get("phase") == "complete" and record.get("pending"):
+        prospective = {**record, **payload}
+        if prospective.get("phase") == "complete" and record.get("pending"):
             raise ValueError("Pending operations must be reconciled before completion")
+        if prospective.get("phase") == "complete":
+            delivery = prospective.get("delivery")
+            if evaluate_delivery(delivery)["decision"] not in {"SHIPPED", "COMPLETE_NO_DEPLOY"}:
+                raise ValueError("Verified production acceptance and reconciliation are required")
+            for field in ("headSha", "baseSha"):
+                expected = prospective.get(field)
+                if expected and delivery["pr"].get(field) != expected:
+                    raise ValueError("Delivery receipt does not match the owned candidate")
         record.update(payload)
     elif operation != "claim":
         raise ValueError("Unsupported transition")

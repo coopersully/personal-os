@@ -8,6 +8,10 @@ description: Use when reviewing one nohmi pull request for correctness, architec
 Review as a senior maintainer. This skill reviews; it does not implement fixes unless the user asks.
 Default to a read-only review draft. Post to GitHub only when the user explicitly authorizes posting.
 
+For deep or delivery-acceptance review, use the repository `deep-review` skill and preserve this
+skill's publication boundaries. Apply `docs/engineering/acceptance-contract.md` and code standards
+to ordinary reviews too; do not claim AC-03 from author self-review or a bot alone.
+
 ## Collect context
 
 1. Resolve the PR and fetch live metadata, files, commits, issue relationships, checks, reviews, and

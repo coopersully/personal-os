@@ -19,14 +19,14 @@ Cross-host operation requires a shared serialized owner; these host-local files 
 | --- | --- |
 | `claim` | Acquire a free PR/base key, or resume its existing owner. A different owner is rejected. |
 | `read` | Inspect persisted state without changing ownership. |
-| `save` | Store phase, headSha, baseSha, evidence references, nextTrigger, retryAt, schedulerId, authorization, worktree, worker, acceptanceRevision, policyVersion, failureFingerprint, failedAttempts. |
+| `save` | Store phase, headSha, baseSha, evidence references, nextTrigger, retryAt, schedulerId, authorization, worktree, worker, acceptanceRevision, policyVersion, failureFingerprint, failedAttempts, delivery. Completion validates the delivery snapshot. |
 | `begin` | Store unique id, action, headSha, baseSha, and intended result before an external mutation. Reject another mutation while pending. |
 | `finish` | Supply the pending id, observed result, and evidence after re-reading the affected service. Clears pending. |
 | `transfer` | Run as the current owner with nextOwner and stoppedEvidence after stopping execution. Preserve pending work for reconciliation. |
 | `release` | Release a reconciled claim while retaining its checkpoint. Pending mutations cannot be released. |
 
 Use phases `collect`, `repair`, `verify`, `review`, `wait`, `final_check`, `merge`, `reconcile`,
-`complete`, `blocked`, or `canceled`. Release the base claim on every reconciled non-merge exit or wait, and reacquire before final
+`deploy`, `observe`, `complete`, `blocked`, or `canceled`. Release the base claim on every reconciled non-merge exit or wait, and reacquire before final
 collection. A merged restart also releases a leftover base claim after reconciling its pending write.
 Claims never expire by age. A replacement task cannot take an active claim by submitting its own
 stop assertion. Resume the original stable owner to reconcile and release/transfer; if that owner
@@ -74,7 +74,7 @@ Productive remediation has no pass limit. Unchanged blocking/waiting stays quiet
 | Transient API/runner failure | Bounded retry with backoff; no repeated identical pushes. |
 | Baseline failure reproduced on clean base | Follow existing repair ownership; keep this PR blocked without expanding its scope. |
 | Missing approval authority, unresolved reviewer disagreement, ambiguous security/product decision | Record exact decision and eligible owner; continue independent useful work. |
-| PR already merged, tracker unavailable | Retry reconciliation only; do not merge again or report full completion. |
+| PR already merged, deployment or tracker unavailable | Resume production acceptance or reconciliation only; do not merge again or report full completion. |
 
 ## Evidence boundary
 

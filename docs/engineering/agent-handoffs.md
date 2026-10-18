@@ -134,3 +134,12 @@ compare the current instructions with those revisions before continuing. Honor c
 instructions and revocations immediately; do not restore an old snapshot to bypass them. A policy
 change is not implicit permission to broaden scope or relax gates. Reconcile it through a new packet
 and fresh acceptance before resuming affected actions.
+
+## Shipping handoff
+
+For a worktree-to-production handoff, use the repository handoff skill and the existing ship-it
+claim registry. Transfer only from the stopped current owner; receiver acknowledgement precedes
+writes. Retain uncommitted work and reconcile pending operations. Outcome-local acceptance IDs
+remain distinct from repository AC/CS IDs; map both into the evidence record. Independent review
+uses the repository deep-review skill and the [acceptance contract](acceptance-contract.md).
+Production acceptance and reconciliation, not the merge receipt alone, end delivery ownership.

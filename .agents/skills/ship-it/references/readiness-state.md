@@ -131,6 +131,14 @@ All counts are actual collected counts, including outdated unresolved threads. Z
 findings does not imply zero unresolved threads. Missing approvals return WAIT. Required approval
 policy comes from live rules; when no approval is required, explicitly record that evidence.
 
+## Independent acceptance
+
+The example above is the existing merge evidence envelope. It is not sufficient alone: add the
+current independent `acceptance` record from [acceptance state](acceptance-state.md). The evaluator
+requires every current CS ID, policy revision/digest, source head/base, independent identities and
+a reviewed production plan before MERGE. After merge, TERMINAL only prevents duplicate merging;
+use the production evaluator before completion.
+
 ## Hosted verification mode
 
 `verification.mode: "hosted"` may replace `pnpmVerify: SUCCESS` only under the canonical

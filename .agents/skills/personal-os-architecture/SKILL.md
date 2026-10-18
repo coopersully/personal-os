@@ -75,7 +75,8 @@ For workspace stewardship, also read `docs/product/workspace-stewardship.md` and
 4. Add web and MCP surfaces only where the product requires them.
 5. For mutations, preserve source references, apply the declared policy level,
    and emit an append-only audit record with redacted before/after state.
-6. Cover the public behavior and run `pnpm verify` before handoff.
+6. Cover public behavior with focused checks, then obtain complete frozen-candidate verification
+   before merge under `docs/engineering/delivery-verification.md`. Reuse valid evidence.
 
 ## Respect ownership seams
 

@@ -4,6 +4,8 @@ import re
 import sys
 from pathlib import Path
 
+from acceptance import review_problems
+
 PENDING = {"IN_PROGRESS", "PENDING", "QUEUED", "WAITING"}
 FAILED = {"ACTION_REQUIRED", "CANCELLED", "ERROR", "FAILURE", "STALE", "TIMED_OUT"}
 GITHUB_MERGE_STATES = {
@@ -394,6 +396,10 @@ def evaluate(state):
             ["mergeability_pending"],
             ["GitHub is still calculating mergeability"],
         )
+
+    acceptance_errors = review_problems(state)
+    if acceptance_errors:
+        return result("BLOCK", head, ["acceptance_incomplete"], acceptance_errors)
 
     if merge.get("normalMergeAllowed") is True:
         if pr.get("mergeStateStatus") != "CLEAN":

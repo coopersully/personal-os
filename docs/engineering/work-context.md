@@ -3,6 +3,15 @@
 Use the smallest durable artifact that owns each kind of information. A pull request is a review
 snapshot, not a replacement for product documentation or Linear.
 
+## Mandatory tracking lifecycle
+
+Every implementation or durable repository change has direct Nohmi issue coverage. The standing
+repository instruction grants bounded issue creation/reuse and material updates for assigned work.
+Resolve the live Project, deduplicate at intake, mark active work appropriately, record material
+scope/blockers, attach PRs and reconcile full acceptance before completion. Do not wait for PR
+creation to discover untracked work. Pure discussion/read-only inspection does not require issue churn.
+An unavailable or ambiguous tracker is a visible gap and merge blocker, not permission to omit tracking.
+
 ## Ownership model
 
 | Information | Durable owner |

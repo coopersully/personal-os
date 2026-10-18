@@ -8,6 +8,10 @@ Use [agent handoffs](agent-handoffs.md) for packet, evidence, and revision forma
 [research note](autonomous-development-research.md) explains the design precedents and deferred
 runtime work; it is background for maintainers, not required context for every worker.
 
+Use [epic planning and launch](epic-delivery.md) and the repository `oversight` skill for intake,
+admission and Codex section setup. Oversight is the common coordination procedure performed by
+these existing roles, not a fourth supervisor. Planning alone never activates the network.
+
 ## Three roles
 
 | Role | Owns | Delegates |
@@ -246,7 +250,9 @@ Immediately before merge, re-read PR head/base, all checks, review surfaces, Cod
 rules, and Linear eligibility, requirements, and links. Rebuild the decision if anything changed.
 Merge only the reviewed SHA using
 the provider's expected-head condition (for example `gh pr merge <PR> --squash
---match-head-commit <SHA>`). Serialize network merges into the same base. Head matching alone does
+--match-head-commit <SHA>`). Serialize all participating merges into the same base using ship-it checkpoint
+`<repository-url>#merge:<base>` in the shared Git common directory; a separate network lock is not
+equivalent. Reconcile legacy network merge claims before adopting that shared claim. Head matching alone does
 not atomically lock the base or reviews: rely on live branch protection to enforce up-to-date checks
 and conversation resolution where available, and pause unattended merging if an equivalent gate
 cannot be enforced. Do not claim Markdown role instructions create a credential-level boundary.
@@ -301,3 +307,12 @@ with focused checks, freeze/commit the candidate, then obtain complete local or 
 verification. This replaces duplicate full-suite invocations in the steps above; it does not waive
 any required check, unexplained failure, or issue-specific acceptance. Local `pnpm verify` uses the
 shared host runner. Metadata-only changes refresh metadata gates, not unchanged source verification.
+
+## Delivery handoff and acceptance
+
+The repository `handoff`/`ship-it` workflow preserves these roles. An assigned orchestrator retains
+acceptance, merge, production observation and reconciliation ownership; workers perform all repairs
+and never merge. Use repository `deep-review` for independent current-candidate standards coverage.
+Apply the [acceptance contract](acceptance-contract.md) and retain delivery ownership after merge
+until the reviewed production criteria and full issue scope are satisfied. A handoff does not
+convert a worker into an orchestrator or authorize new production effects.

@@ -5,6 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from evaluate_readiness import evaluate
+from acceptance_test import acceptance_record
 
 HEAD = "a" * 40
 BASE = "b" * 40
@@ -105,6 +106,7 @@ def ready_state(**overrides):
             "squashAllowed": True,
         },
     }
+    value["acceptance"] = acceptance_record()
     value["evidence"] = {name: [f"bundle.json#{name}"] for name in
                          ("base", "verification", "ci", "codeRabbit", "feedback",
                           "selfReview", "linear", "metadata", "merge")}
@@ -117,6 +119,12 @@ def ready_state(**overrides):
 
 
 class EvaluateReadinessTest(unittest.TestCase):
+    def test_missing_independent_acceptance_cannot_merge(self):
+        state = ready_state()
+        del state['acceptance']
+        self.assertEqual(evaluate(state)['decision'], 'BLOCK')
+
+
     def test_hosted_equivalence_requires_every_gate_and_diagnosed_local_failure(self):
         state = ready_state(verification={"mode": "hosted", "pnpmVerify": "FAILURE",
             "equivalenceVerified": True, "localOnlyComplete": True,

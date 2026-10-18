@@ -114,7 +114,9 @@ review summaries cannot be resolved as threads.
 ### 7. Verify the complete PR
 
 1. Run focused checks for affected behavior.
-2. Run `pnpm verify`.
+2. Reuse valid verification evidence. After review convergence, commit/freeze and obtain complete
+   local or equivalent hosted verification before merge under `delivery-verification.md`; do not
+   run the full suite after each feedback repair.
 3. Re-fetch feedback with `--include-resolved`.
 4. Re-audit every human item, including resolved threads, against current code.
 5. Confirm no actionable unresolved thread remains unless explicitly blocked/deferred.
@@ -140,7 +142,8 @@ post useful factual replies directly after verification. Return the resulting co
 - Every non-noise item has a ledger entry and source evidence.
 - Every acceptance criterion was checked against the pushed head.
 - Same-pattern occurrences were audited at the right level.
-- Focused checks and `pnpm verify` passed or the blocker is explicit.
+- Focused checks passed or the blocker is explicit; final verification remains pending until a
+  complete frozen-candidate set passes. Feedback handling alone does not establish merge readiness.
 - Inline threads were resolved only after adequate handling.
 - Linked issue state/context remains accurate.
 - The PR Work map and every linked Nohmi issue's structured backlink agree.

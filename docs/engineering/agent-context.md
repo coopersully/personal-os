@@ -7,7 +7,8 @@ four complete workspaces: Mail, Tasks, Calendar, and Finances. People and author
 the same domain-owned material. A workspace steward supplies expertise, maintains its ledger,
 asks questions that need human judgment, and produces an evidence-backed review.
 
-Read the root `AGENTS.md`, then use this map. Read the relevant sections, not the entire archive.
+Read the root `AGENTS.md`, then use the [development handbook](development-handbook.md) to
+select the next required step without replaying completed work. Use this map for relevant context. Read the relevant sections, not the entire archive.
 
 | Decision | Authority |
 | --- | --- |
@@ -21,6 +22,9 @@ Read the root `AGENTS.md`, then use this map. Read the relevant sections, not th
 | UI and interaction decisions | [Design foundations](../design/foundations.md), [system](../design/system.md), [governance](../design/governance.md) |
 | External systems and recovery | [External boundary reliability](external-boundary-reliability.md), [connector reliability](connector-reliability.md) |
 | Delivery identity and verification | [Work context](work-context.md), [PR rubric](pr-rubric.md) |
+| Engineering acceptance and adoption | [Acceptance contract](acceptance-contract.md), [code standards](code-standards.md), [code placement](code-placement.md) |
+| Fast verification and delivery ownership | [Verification efficiency](verification-efficiency.md), [handoff skill](../../.agents/skills/handoff/SKILL.md), [deep-review skill](../../.agents/skills/deep-review/SKILL.md) |
+| Epic planning, admission and launch | [Epic delivery](epic-delivery.md), [oversight skill](../../.agents/skills/oversight/SKILL.md) |
 | Development network roles and merge ownership | [Autonomous development](autonomous-development.md) |
 | Dispatch, checkpoints, and acceptance evidence | [Agent handoffs](agent-handoffs.md) |
 

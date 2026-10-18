@@ -9,6 +9,29 @@ from checkpoint import operate, locked
 
 
 class CheckpointTest(unittest.TestCase):
+    def test_completion_requires_production_acceptance(self):
+        self.call("claim")
+        with self.assertRaises(ValueError):
+            self.call("save", {"phase": "complete"})
+        from acceptance_test import delivery_state
+        state = delivery_state()
+        self.call("save", {"phase": "complete", "delivery": state})
+        self.assertEqual(self.call("read")["phase"], "complete")
+
+
+    def test_partial_updates_cannot_invalidate_completed_receipt(self):
+        from acceptance_test import delivery_state
+        state = delivery_state()
+        self.call("save", {"phase": "complete", "delivery": state})
+        with self.assertRaises(ValueError):
+            self.call("save", {"headSha": "d" * 40})
+        state['production']['health'] = 'FAILURE'
+        with self.assertRaises(ValueError):
+            self.call("save", {"delivery": state})
+        self.assertEqual(self.call("read")["delivery"]["production"]["health"], "SUCCESS")
+        self.call("save", {"phase": "observe", "delivery": state})
+        self.assertEqual(self.call("read")["phase"], "observe")
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)

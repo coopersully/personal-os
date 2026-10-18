@@ -30,7 +30,8 @@ Treat base synchronization as engineering work, not a mechanical Git operation.
    architecture, migration, or security decisions.
 7. Search for conflict markers and inspect semantic overlap even in automatically merged files.
 8. Update branch code, tests, and current docs when upstream invalidated an assumption.
-9. Run focused checks, `git diff --check`, then `pnpm verify`.
+9. Run focused checks and `git diff --check`. Invalidate affected receipts after integration changes;
+   complete verification runs after review convergence and commit under `delivery-verification.md`.
 10. Commit a merge when Git did not create one automatically; do not create an empty catch-up commit.
 11. Push without force, then re-read PR mergeability, head SHA, and checks.
 12. For a published PR, use the `create-pr` reconciliation phase to refresh the Work map and invoke

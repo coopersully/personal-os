@@ -1,0 +1,24 @@
+{
+  "revision": 3,
+  "standards": [
+    "CS-01",
+    "CS-02",
+    "CS-03",
+    "CS-04",
+    "CS-05",
+    "CS-06",
+    "CS-07",
+    "CS-08",
+    "CS-09",
+    "CS-10",
+    "CS-11",
+    "CS-12",
+    "CS-13",
+    "CS-14",
+    "CS-15",
+    "CS-16",
+    "CS-17",
+    "CS-18"
+  ],
+  "nonExceptionStandards": ["CS-05", "CS-06", "CS-09", "CS-10", "CS-11", "CS-14"]
+}

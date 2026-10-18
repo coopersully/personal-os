@@ -98,3 +98,13 @@ identity. PostgreSQL integration tests exercise migrations, owner foreign keys, 
 concurrent replay, immutable upgrades/history, stale versions, terminal registrations, authority
 failures and atomic registration rollback on prompt-audit failure. Required complete candidate
 verification and independent review remain release gates; written tests are not execution evidence.
+
+## Settings instructions panel
+
+Host settings display exact server-issued instructions in a labelled dialog for every registration
+state. Copying retains the stored bytes and does not issue a version. Bounded history pages preserve
+an explicitly selected older version. Legacy registrations without recorded instructions offer
+explicit issuance; missing API metadata is shown as unavailable. Issuance and upgrades send the
+current schedule revision, retain readable history on failure, and are hidden for terminal hosts or
+an unavailable connection. Stored instructions do not prove external installation or Chat capability.
+Copy, issue and host-setting action results use Sonner notifications without duplicate inline errors.

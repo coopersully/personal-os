@@ -16,7 +16,7 @@ export const financeActualRevisionSchema = z
   .string()
   .regex(/^[1-9][0-9]{0,18}$/)
   .refine(
-    (value) => BigInt(value) <= 9_223_372_036_854_775_807n,
+    (value) => /^[1-9][0-9]{0,18}$/.test(value) && BigInt(value) <= 9_223_372_036_854_775_807n,
     "Revision exceeds storage bounds.",
   );
 const common = {

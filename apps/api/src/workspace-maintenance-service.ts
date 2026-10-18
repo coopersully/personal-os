@@ -209,7 +209,7 @@ export function createWorkspaceMaintenanceService({
           eq(workspaceMaintenanceRuns.id, input.runId),
           eq(workspaceMaintenanceRuns.status, "running"),
           eq(workspaceMaintenanceRuns.leaseClaimId, input.claimId),
-          sql`${workspaceMaintenanceRuns.leaseExpiresAt} > NOW()`,
+          sql`${workspaceMaintenanceRuns.leaseExpiresAt} > clock_timestamp()`,
         ),
       )
       .returning();
@@ -515,7 +515,7 @@ export function createWorkspaceMaintenanceService({
             eq(workspaceMaintenanceRuns.id, input.runId),
             eq(workspaceMaintenanceRuns.status, "running"),
             eq(workspaceMaintenanceRuns.leaseClaimId, input.claimId),
-            sql`${workspaceMaintenanceRuns.leaseExpiresAt} > NOW()`,
+            sql`${workspaceMaintenanceRuns.leaseExpiresAt} > clock_timestamp()`,
           ),
         )
         .returning();
@@ -698,7 +698,7 @@ export function createWorkspaceMaintenanceService({
             eq(workspaceMaintenanceRuns.id, input.runId),
             eq(workspaceMaintenanceRuns.status, "running"),
             eq(workspaceMaintenanceRuns.leaseClaimId, input.claimId),
-            sql`${workspaceMaintenanceRuns.leaseExpiresAt} > NOW()`,
+            sql`${workspaceMaintenanceRuns.leaseExpiresAt} > clock_timestamp()`,
           ),
         )
         .returning();

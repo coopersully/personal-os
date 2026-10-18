@@ -251,6 +251,31 @@ describe.sequential("recurring schedule actual matching and explicit balance bas
     expect(view.projection).toMatchObject({ status: "estimated", endingBalanceMinorUnits: 350000 });
   });
 
+  it("retains historical irregular disclosure without blocking a fixed successor's current forecast", async () => {
+    const f = await fixture();
+    const irregular = await f.service.confirmFinanceRecurringSchedule({ ...f.costInput, expectedSourceRevision: 2, supersedesId: f.cost.data.id, effectiveFrom: "2026-02-15", cadence: "irregular", idempotencyKey: randomUUID() }, f.context);
+    await f.service.confirmFinanceRecurringSchedule({ ...f.costInput, expectedSourceRevision: 3, supersedesId: irregular.data.id, effectiveFrom: "2026-03-01", anchorLocalDate: "2026-03-01", idempotencyKey: randomUUID() }, f.context);
+    await closePreviousPayday(f);
+    await statement(f);
+    const view = await f.service.getFinanceCashflowProjection(f.user.id, { from: "2026-02-22", to: "2026-04-30", selectedIncomeStreamId: f.income.id });
+    expect(view.schedule.unavailableSources).toContainEqual({ source: f.costInput.source, reason: "irregular_cadence" });
+    expect(view.projection).toMatchObject({ status: "estimated", endingBalanceMinorUnits: 350000 });
+    const current = await f.service.listFinanceRecurringOccurrences(f.user.id, { from: "2026-03-01", to: "2026-03-31" });
+    expect(current.unavailableSources).not.toContainEqual({ source: f.costInput.source, reason: "irregular_cadence" });
+  });
+
+  it("does not classify out-of-scope cash or unexplained in-scope actuals as eligible projection cash", async () => {
+    const f = await fixture();
+    const other = await fixture();
+    await database.db.update(financeTransactions).set({ category: null }).where(eq(financeTransactions.id, other.actual.id));
+    await f.service.manageFinanceOccurrenceMatch(f.match, f.context);
+    await statement(f);
+    const query = { from: "2026-03-01", to: "2026-04-30", accountIds: [f.account.id], selectedIncomeStreamId: f.income.id };
+    expect((await f.service.getFinanceCashflowProjection(f.user.id, query)).projection.status).toBe("estimated");
+    await database.db.update(financeTransactions).set({ category: null, contextualRevision: sql`${financeTransactions.contextualRevision}+1` }).where(eq(financeTransactions.id, f.actual.id));
+    expect((await f.service.getFinanceCashflowProjection(f.user.id, query)).projection.status).toBe("unavailable");
+  });
+
   it("expands stable month-end identities without creating occurrence rows on reads", async () => {
     const f = await fixture();
     const broad = await f.service.listFinanceRecurringOccurrences(f.user.id, {

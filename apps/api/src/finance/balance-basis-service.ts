@@ -635,7 +635,8 @@ export function createFinanceBalanceBasisService({
             schedule,
             projection: { status: "unavailable", reasons: [{ code, evidenceId: null }] },
           });
-          if (schedule.unavailableSources.length) return unavailable("unconfirmed_schedule");
+          if (schedule.unavailableSources.some(source => source.reason !== "irregular_cadence"))
+            return unavailable("unconfirmed_schedule");
           const data = await readCashflowActuals(tx, userId, {
             ...query,
             from: "0001-01-01",
@@ -671,6 +672,12 @@ export function createFinanceBalanceBasisService({
           const paydayRow = active.filter(row => row.source.kind === "income" && row.source.id === query.selectedIncomeStreamId && row.localDate >= today && row.localDate >= query.from)
             .sort((a,b) => a.localDate.localeCompare(b.localDate) || a.key.localeCompare(b.key))[0];
           if (!paydayRow) return { schedule, projection: { status: "unavailable", reasons: [{ code: "next_payday_unavailable", evidenceId: null }] } } satisfies FinanceCashflowProjectionView;
+          // Historical irregular intervals remain visible in the schedule read. Only an
+          // interval overlapping the prospective payday horizon makes its forecast unknown.
+          const horizonVersions = await tx.select().from(financeRecurringScheduleVersions)
+            .where(and(eq(financeRecurringScheduleVersions.userId, userId), inArray(financeRecurringScheduleVersions.accountId, selected.map(account => account.id)), lte(financeRecurringScheduleVersions.effectiveFrom, paydayRow.localDate))).limit(1001);
+          if (horizonVersions.length > 1000 || horizonVersions.some(version => version.cadence === "irregular" && !horizonVersions.some(successor => successor.supersedesId === version.id && successor.effectiveFrom <= today)))
+            return unavailable("unconfirmed_schedule");
           const horizon = active.filter(row => row.localDate <= paydayRow.localDate);
           // Reversed historical/retired versions are retained for inspection, never forecast inputs.
           if (horizon.some(row => row.amountBasis !== "fixed" || row.matchState === "invalidated" || row.expectedAmountCents === null))

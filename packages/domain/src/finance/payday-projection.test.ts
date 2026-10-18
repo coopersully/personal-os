@@ -226,6 +226,13 @@ describe("projectPaydayCycle", () => {
     expect(reasons(input)).toContain("invalid_match");
   });
 
+  it("rejects duplicate references within one occurrence even when aggregate capacity remains", () => {
+    const input = fixture();
+    input.actualMovements = [actual()];
+    input.occurrences = [first(input.occurrences), occurrence({ id: "bill", localDate: "2026-10-20", direction: "outgoing", classification: "external_expense", amountMinorUnits: 200, remainingExpectedMinorUnits: 0, matches: [{ actualMovementId: "actual", replacedExpectedMinorUnits: 100 }, { actualMovementId: "actual", replacedExpectedMinorUnits: 100 }] })];
+    expect(reasons(input)).toContain("duplicate_identity");
+  });
+
   it("shares an actual capacity across distinct occurrences without counting its cash twice", () => {
     const input = fixture();
     input.occurrences = [first(input.occurrences), occurrence({ id: "bill-a", localDate: "2026-10-20", direction: "outgoing", classification: "external_expense", amountMinorUnits: 100, remainingExpectedMinorUnits: 0, matches: [{ actualMovementId: "actual", replacedExpectedMinorUnits: 100 }] }), occurrence({ id: "bill-b", localDate: "2026-10-21", direction: "outgoing", classification: "external_expense", amountMinorUnits: 100, remainingExpectedMinorUnits: 0, matches: [{ actualMovementId: "actual", replacedExpectedMinorUnits: 100 }] })];

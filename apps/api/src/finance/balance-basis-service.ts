@@ -649,7 +649,15 @@ export function createFinanceBalanceBasisService({
       const query = financeCashflowProjectionQuerySchema.parse(raw);
       return db.transaction(
         async (tx) => {
-          const schedule = await readOccurrences(userId, query, tx);
+          const schedule = await readOccurrences(
+            userId,
+            {
+              from: query.from,
+              to: query.to,
+              ...(query.accountIds !== undefined ? { accountIds: query.accountIds } : {}),
+            },
+            tx,
+          );
           const unavailable = (
             code:
               | "balance_basis_unavailable"

@@ -33,7 +33,7 @@ import { projectFinanceSpending, type SpendingEvidenceInput } from "./spending-c
 
 type Metadata = {
   accounts: Array<{ id: string; label: string }>;
-  categories: Array<{ id: string; label: string }>;
+  categories: Array<{ id: string; label: string; color?: string | null }>;
   buckets: Array<{ id: string; label: string; categoryIds: string[] }>;
   transactions: FinanceSpendingDashboard["transactions"];
   source: FinanceSpendingDashboard["source"];
@@ -87,6 +87,16 @@ export function buildFinanceSpendingDashboard(
       id,
       label,
       kind,
+      visual: {
+        color:
+          kind === "category"
+            ? (() => {
+                const color = metadata.categories.find((row) => row.id === id)?.color;
+                return color && /^#[0-9a-fA-F]{6}$/.test(color) ? color : null;
+              })()
+            : null,
+        icon: id === "uncategorized" ? "uncategorized" : kind,
+      },
       categoryIds,
       netCents,
       positiveAreaCents: Math.max(0, netCents),
@@ -105,7 +115,23 @@ export function buildFinanceSpendingDashboard(
     };
   };
   const categoryLabels = new Map(metadata.categories.map((row) => [row.id, row.label]));
-  const categoryIds = [...new Set(snapshot.contributions.map((row) => row.categoryId))];
+  const activeCategoryIds = new Set(snapshot.contributions.map((row) => row.categoryId));
+  // A qualified target remains inspectable when the selected day/account has no activity.
+  // Its selected-period group stays exactly zero, with empty source references.
+  const budgetCategories =
+    qualification?.state === "qualified"
+      ? qualification.qualification.allocations.filter(
+          (row) =>
+            row.categoryId !== null &&
+            (query.scope.categoryIds === null || query.scope.categoryIds.includes(row.categoryId)),
+        )
+      : [];
+  const categoryIds = [
+    ...new Set([...activeCategoryIds, ...budgetCategories.map((row) => row.categoryId)]),
+  ];
+  for (const row of budgetCategories)
+    if (row.categoryId !== null && !categoryLabels.has(row.categoryId))
+      categoryLabels.set(row.categoryId, row.label);
   const categoryGroups = categoryIds.map((id) =>
     group(
       id ?? "uncategorized",
@@ -116,7 +142,7 @@ export function buildFinanceSpendingDashboard(
   );
   const effectiveGrouping =
     query.grouping !== "categories" && metadata.buckets.length > 0 ? "buckets" : "categories";
-  const groups =
+  let groups =
     effectiveGrouping === "categories"
       ? categoryGroups.map((row) => ({ ...row, categories: [] }))
       : (() => {
@@ -152,19 +178,35 @@ export function buildFinanceSpendingDashboard(
     if (currency !== "USD")
       unsupported.set(currency, [...(unsupported.get(currency) ?? []), row.id]);
   }
+  const monthlyBudget = projectFinanceSpendingMonthlyBudget(
+    evidence,
+    query,
+    groups,
+    qualification ?? {
+      state: "unavailable",
+      reason: "qualification_required",
+      qualificationRequired: true,
+      candidates: [],
+    },
+  );
+  // Unavailable qualification cannot add unrelated empty categories to the selection.
+  if (monthlyBudget.state !== "qualified") {
+    groups = groups
+      .map((row) => ({
+        ...row,
+        categories: row.categories.filter((category) =>
+          category.categoryIds.some((id) => activeCategoryIds.has(id)),
+        ),
+      }))
+      .filter((row) =>
+        row.kind === "bucket"
+          ? row.categories.length > 0
+          : row.categoryIds.some((id) => activeCategoryIds.has(id)),
+      );
+  }
   const positiveAreaCents = groups.reduce((total, row) => total + row.positiveAreaCents, 0);
   return financeSpendingDashboardSchema.parse({
-    monthlyBudget: projectFinanceSpendingMonthlyBudget(
-      evidence,
-      query,
-      groups,
-      qualification ?? {
-        state: "unavailable",
-        reason: "qualification_required",
-        qualificationRequired: true,
-        candidates: [],
-      },
-    ),
+    monthlyBudget,
     referenceRevision: createHash("sha256")
       .update(
         JSON.stringify({
@@ -350,7 +392,11 @@ export function createFinanceSpendingService(input: {
             query,
             {
               accounts: accounts.map((row) => ({ id: row.id, label: row.name })),
-              categories: categories.map((row) => ({ id: row.id, label: row.name })),
+              categories: categories.map((row) => ({
+                id: row.id,
+                label: row.name,
+                color: row.color,
+              })),
               buckets: buckets
                 .filter((row) => row.taxonomyId === activeTaxonomy?.id)
                 .map((row) => ({

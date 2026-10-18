@@ -1,8 +1,7 @@
 # Spending contribution contract
 
 `projectFinanceSpending` in `apps/api/src/finance/spending-contributions.ts` is a pure API-owned
-projection. Its schemas live in `packages/domain/src/finance/spending.ts`. It is groundwork for
-Spending, Trends and Rhythm; this module does not expose a live aggregate endpoint or render a view.
+projection. Its schemas live in `packages/domain/src/finance/spending.ts`. The dashboard service and Spending views consume this projection without recomputing recognition.
 
 The caller supplies an owner-scoped, complete recognition evidence snapshot, including identity
 relationships outside the requested period. It must exclude deleted/tombstoned records at the
@@ -48,14 +47,14 @@ Daily-bin area instead represents the positive daily net; negative-net days reta
 negative adjustment. Consumers that regroup categories into buckets must recompute area from bucket
 nets while preserving the same contributions. No negative bubble area is implied.
 
-Historical monthly budget comparison is explicitly unavailable (`historical_budget_not_resolved`).
-This slice does not guess historical approvals, budget account scope, carry-forward limits or fills.
-The qualified monthly budget adapter and production observation remain separate delivery work.
+The v1 snapshot budget comparison remains explicitly unavailable (`historical_budget_not_resolved`).
+The separate dashboard `monthlyBudget` field reads immutable human-qualified monthly baselines. It
+never guesses historical approval or account scope. Production observation remains separate work.
 The dashboard loader, route, typed client and views are described below.
 
 ## Dashboard loader and presentation
 
-The next dashboard slice adds `GET /v1/finances/spending`, backed by a read-only repeatable-read
+The dashboard adds `GET /v1/finances/spending`, backed by a read-only repeatable-read
 snapshot of all authenticated-owner recognition evidence. It does not substitute transaction paging
 for the ledger. Requested foreign accounts/categories fail closed. The URL adapter preserves all,
 explicit no selection, and uncategorized selection; the typed client validates the response.
@@ -81,12 +80,10 @@ saved as a stale opening period. Durable persistence of these new fields require
 owned additive Finance settings storage migration and readback verification; domain defaults and
 UI hooks alone do not establish saved state.
 
-Monthly fills remain unavailable. A designated human-approved historical version can establish a
-baseline, but the canonical budget tables do not establish budget account scope or budget currency.
-Debt targets and opaque resource IDs are not account-scope evidence. Neither selected accounts nor
-all current accounts may stand in for all budget accounts. This slice does not claim the monthly-fill
-criterion or multicurrency experience complete. Exact Spending-owned contribution detail is an initial
-destination; full transaction-view drill-down and production/UI acceptance remain separate open gates.
+Monthly fills require the separate immutable qualification record described below. The original
+budget tables alone do not establish budget account scope or currency; debt targets, opaque resource
+IDs, selected display accounts, and all current accounts cannot substitute for explicit qualification.
+Full transaction-view integration and production/UI acceptance remain separate open gates.
 
 Trends and Rhythm consume the same dated snapshots. Current named-period comparisons cap the
 current period to elapsed local dates and compare the equivalent elapsed previous period, labeling
@@ -105,3 +102,60 @@ and transaction count summarize the entire exact filter. Native transaction amou
 original meaning and may differ from selected split/personal-cost portions. Canonical row timestamps
 and account identities must still match the snapshot or the read fails with a conflict rather than
 silently mixing changed records. This endpoint performs no financial mutation or approval.
+
+
+## Qualified monthly budget usage
+
+For a selection contained in one calendar month, the composition root supplies the budget authority's
+owner-scoped qualification reader. The adapter uses its immutable target cents, explicit account
+selection, currency, complete calendar month, and timezone. Monthly use is computed from the same
+canonical recognition projection over that whole account/month scope, independently of the selected
+bubble dates or accounts. Labels disclose the monthly scope, unknown or partial observed coverage,
+accounting choices, and later retrospective confirmation. Unresolved historical category identity,
+unsupported currency, unavailable accounts, or unresolved recognition withholds comparison. Multi-month
+selections do not display fills.
+
+Bubble area continues to represent selected-period spending. Translucent fill uses the inverse
+circular-segment area for monthly utilization; negative use clamps to zero and overspend fills the
+circle with explicit overspend text. List rows expose precise monthly target/use and utilization.
+
+When the authority reports that qualification is required, a contextual human review flow requires
+explicit budget version, accounts, and USD selection. Prepare returns the exact review and fingerprint;
+confirmation sends only that evidence and a stable idempotency key. Changing scope or account session
+invalidates the preview. This action qualifies historical comparison; it does not infer an original
+approval or complete onboarding.
+
+
+## Group visual identity
+
+The dashboard carries validated assigned category colors and semantic category, bucket, or
+uncategorized icon identities. Bubbles use the shared icon registry and neutral foreground text over
+a translucent tint. Unassigned categories and buckets use a stable identity-based palette fallback.
+The current bucket schema has no persisted color or icon fields; the fallback does not claim user
+assignment or persisted bucket color support. Visual metadata does not change contribution totals or
+exact transaction references.
+
+
+Qualified budget categories remain in List when the selected period has no activity, with exact
+zero selected-period amounts and empty source references. Monthly usage still covers the qualified
+whole month and accounts. Explicit category exclusions remain respected; unavailable qualification
+does not add unrelated empty rows. Zero-area groups do not create bubbles.
+
+Fill clip-path transitions use 300 ms and reduced motion uses zero duration. The Spending response
+contract can represent an explicit zero target separately from an absent target; defensive rendering
+shows positive usage as overspent without an infinite percentage and zero usage as no utilization.
+The integrated authority follow-on permits explicit zero allocations without manufacturing missing
+allocation rows. The exact authority dependency `939ff5ca` has independent source review and six focused PostgreSQL
+checks reported by its owner. Final integrated verification and browser acceptance remain separate
+gates; pure adapter tests alone do not establish persistence.
+
+
+Monthly comparison qualification gates are attributed to the explicitly qualified accounts and
+baseline-local calendar month after complete recognition. Unrelated catalog accounts, older dates,
+and their currency/ownership qualifications cannot invalidate a known USD budget scope. Attribution
+retains connected transfer events/counterparts, pending replacements, allocations, reimbursement
+claims and credits, including related evidence outside the selected accounts/month. Unmapped source
+uncertainty remains fail-closed. The complete recognition ledger, contributions, selected totals,
+original snapshot disclosures and honest coverage are preserved; genuine in-scope unknown money
+still withholds comparison. Live QA first exposed this at failed integration `bdfc951e`; its fixture
+and screenshot are retained separately from the repaired candidate's future verification.

@@ -24,7 +24,7 @@ export type SpendingEvidenceInput = Omit<
   coverage: "complete" | "partial" | "unknown";
 };
 
-function localDate(value: string, timezone: string): string {
+export function financeSpendingLocalDate(value: string, timezone: string): string {
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
   const parts = new Intl.DateTimeFormat("en", {
     timeZone: timezone,
@@ -163,7 +163,7 @@ export function projectFinanceSpending(
           evidence.replacedPendingIds.has(transaction.providerTransactionId)))
     )
       continue;
-    const date = localDate(transaction.transactionDate, scope.timezone);
+    const date = financeSpendingLocalDate(transaction.transactionDate, scope.timezone);
     if (date < scope.from || date > scope.through) continue;
     const direction = transaction.providerDirection ?? transaction.direction;
     const refund =
@@ -262,7 +262,7 @@ export function projectFinanceSpending(
       });
     }
   }
-  const today = localDate(input.asOf, scope.timezone);
+  const today = financeSpendingLocalDate(input.asOf, scope.timezone);
   const bins: FinanceSpendingSnapshot["bins"] = [];
   for (let date = scope.from; date <= scope.through; ) {
     const items = contributions.filter((item) => item.date === date);

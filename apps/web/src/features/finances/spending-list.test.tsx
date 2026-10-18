@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import type { FinanceSpendingDashboard } from "@personal-os/domain";
-import { render, screen, within } from "@testing-library/react";
+import type { FinanceSpendingDashboard, FinanceSpendingMonthlyBudget } from "@personal-os/domain";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { SpendingList } from "./spending-list";
 
 it("sorts exact amounts, exposes negative groups, and expands bucket categories", async () => {
@@ -30,4 +30,109 @@ it("sorts exact amounts, exposes negative groups, and expands bucket categories"
   await user.click(screen.getByRole("button", { name: "Rail" }));
   expect(select).toHaveBeenCalledWith(groups[0]?.categories[0]);
   expect(screen.getAllByText(/Budget unavailable/).length).toBeGreaterThan(0);
+});
+
+afterEach(() => cleanup());
+it("sorts qualified monthly utilization separately from selected-period spending", () => {
+  const groups = [
+    { id: "a", label: "Travel", netCents: 100, pendingCents: 0, categories: [] },
+    { id: "b", label: "Food", netCents: 900, pendingCents: 0, categories: [] },
+    { id: "c", label: "No limit", netCents: 0, pendingCents: 0, categories: [] },
+  ] as unknown as FinanceSpendingDashboard["groups"];
+  const monthlyBudget = {
+    state: "qualified",
+    coverage: "partial",
+    groups: [
+      { groupId: "a", budgetCents: 10000, usedCents: 11000, overspent: true },
+      { groupId: "b", budgetCents: 20000, usedCents: 5000, overspent: false },
+      { groupId: "c", budgetCents: null, usedCents: 0, overspent: false },
+    ],
+  } as FinanceSpendingMonthlyBudget;
+  render(<SpendingList groups={groups} monthlyBudget={monthlyBudget} onSelect={vi.fn()} />);
+  expect(
+    screen.getByText(/Observed monthly \$110.00 of \$100.00 · 110.0% · Over budget \$10.00/),
+  ).toBeVisible();
+  expect(screen.getByText("No budget limit")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: /Monthly budget used/ }));
+  const list = screen.getByRole("list");
+  expect(within(list).getAllByRole("button")[0]).toHaveTextContent("Travel");
+});
+it("defensively distinguishes zero targets, sorts positive usage first, and never prints infinite percentages", () => {
+  const groups = [
+    { id: "zero-positive", label: "Zero positive", netCents: 100, pendingCents: 0, categories: [] },
+    { id: "ordinary", label: "Ordinary", netCents: 100, pendingCents: 0, categories: [] },
+    { id: "zero-empty", label: "Zero empty", netCents: 0, pendingCents: 0, categories: [] },
+    {
+      id: "zero-negative",
+      label: "Zero negative",
+      netCents: -100,
+      pendingCents: 0,
+      categories: [],
+    },
+    { id: "null", label: "No limit", netCents: 0, pendingCents: 0, categories: [] },
+  ] as unknown as FinanceSpendingDashboard["groups"];
+  const monthlyBudget = {
+    state: "qualified",
+    coverage: "complete",
+    groups: [
+      { groupId: "zero-positive", budgetCents: 0, usedCents: 250, overspent: true },
+      { groupId: "ordinary", budgetCents: 100, usedCents: 200, overspent: true },
+      { groupId: "zero-empty", budgetCents: 0, usedCents: 0, overspent: false },
+      { groupId: "zero-negative", budgetCents: 0, usedCents: -100, overspent: false },
+      { groupId: "null", budgetCents: null, usedCents: 0, overspent: false },
+    ],
+  } as FinanceSpendingMonthlyBudget;
+  render(<SpendingList groups={groups} monthlyBudget={monthlyBudget} onSelect={vi.fn()} />);
+  expect(screen.getByText("Monthly $2.50 of $0.00 · Over budget $2.50")).toBeVisible();
+  expect(screen.getByText("Monthly $0.00 of $0.00 · No utilization")).toBeVisible();
+  expect(screen.getByText("Monthly -$1.00 of $0.00 · No utilization")).toBeVisible();
+  expect(screen.getByText("No budget limit")).toBeVisible();
+  expect(screen.queryByText(/Infinity|NaN/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: /Monthly budget used/ }));
+  const buttons = within(screen.getByRole("list")).getAllByRole("button");
+  expect(buttons[0]).toHaveTextContent("Zero positive");
+  expect(buttons[1]).toHaveTextContent("Ordinary");
+});
+it("keeps a zero-selected-activity qualified row visible and selects its own empty contribution scope", () => {
+  const scope = {
+    from: "2026-10-18",
+    through: "2026-10-18",
+    timezone: "America/New_York",
+    accountIds: null,
+    categoryIds: null,
+    basis: "personal_cost",
+    includePending: true,
+    subtractRefunds: true,
+  };
+  const group = {
+    id: "utilities",
+    label: "Utilities",
+    kind: "category",
+    categoryIds: ["utilities"],
+    netCents: 0,
+    positiveAreaCents: 0,
+    grossCents: 0,
+    reimbursementAdjustmentCents: 0,
+    reimbursementOutstandingCents: 0,
+    refundAdjustmentCents: 0,
+    pendingCents: 0,
+    categories: [],
+    drillDown: { scope, contributionIds: [], transactionIds: [] },
+  } as FinanceSpendingDashboard["groups"][number];
+  const monthlyBudget = {
+    state: "qualified",
+    coverage: "partial",
+    groups: [{ groupId: "utilities", budgetCents: 10000, usedCents: 1600, overspent: false }],
+  } as FinanceSpendingMonthlyBudget;
+  const select = vi.fn();
+  render(<SpendingList groups={[group]} monthlyBudget={monthlyBudget} onSelect={select} />);
+  expect(screen.getByText("$0.00")).toBeVisible();
+  expect(screen.getByText("Observed monthly $16.00 of $100.00 · 16.0%")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Utilities" }));
+  expect(select).toHaveBeenCalledWith(group);
+  expect(select.mock.calls[0]?.[0].drillDown).toEqual({
+    scope,
+    contributionIds: [],
+    transactionIds: [],
+  });
 });

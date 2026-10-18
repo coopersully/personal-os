@@ -636,7 +636,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     maintenance,
     now,
   });
-  const financeSpending = createFinanceSpendingService({ db: dependencies.db, now });
+  const financeSpending = createFinanceSpendingService({
+    db: dependencies.db,
+    now,
+    readBudgetQualification: baselineQualification.getQualification,
+  });
   const financeActivity = createFinanceActivityService({
     db: dependencies.db,
     cursorSecret: dependencies.config.encryptionKey,

@@ -108,6 +108,15 @@ export const financeSpendingGroupSchema = z.object({
   id: reference,
   label: reference,
   kind: z.enum(["bucket", "category"]),
+  visual: z
+    .object({
+      color: z
+        .string()
+        .regex(/^#[0-9a-fA-F]{6}$/)
+        .nullable(),
+      icon: z.enum(["category", "bucket", "uncategorized"]),
+    })
+    .optional(),
   categoryIds: z.array(reference.nullable()),
   netCents: cents,
   positiveAreaCents: cents.nonnegative(),
@@ -151,7 +160,7 @@ export const financeSpendingMonthlyBudgetSchema = z.discriminatedUnion("state", 
     groups: z.array(
       z.object({
         groupId: reference,
-        budgetCents: cents.positive().nullable(),
+        budgetCents: cents.nonnegative().nullable(),
         usedCents: cents,
         overspent: z.boolean(),
       }),

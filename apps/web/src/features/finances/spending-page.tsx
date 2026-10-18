@@ -21,6 +21,10 @@ import {
 import { WorkspacePreferenceRecovery } from "../workspace-settings/save-recovery";
 import { formatMoney } from "./format";
 import { SpendingBubbles } from "./spending-bubbles";
+import {
+  SpendingBudgetQualification,
+  SpendingMonthlyBudgetContext,
+} from "./spending-budget-qualification";
 import { SpendingChoice, SpendingPeriodControls } from "./spending-controls";
 import { SpendingDetail } from "./spending-detail";
 import { SpendingList } from "./spending-list";
@@ -498,10 +502,20 @@ export function FinanceSpendingPage() {
                 : " · Last sync unknown"}
             </p>
           </div>
-          <p className="text-sm text-muted-foreground">
-            Monthly budget comparison unavailable: budget account and currency scope is not
-            established.
-          </p>
+          <SpendingMonthlyBudgetContext budget={result.monthlyBudget} />
+          {result.monthlyBudget?.state === "unavailable" &&
+          result.monthlyBudget.qualificationRequired &&
+          result.snapshot.scope.from.slice(0, 7) === result.snapshot.scope.through.slice(0, 7) &&
+          timezone &&
+          user.data ? (
+            <SpendingBudgetQualification
+              key={`${user.data.id}:${result.snapshot.scope.from.slice(0, 7)}:${timezone}:${result.referenceRevision ?? result.snapshot.asOf}`}
+              ownerId={user.data.id}
+              month={result.snapshot.scope.from.slice(0, 7)}
+              timezone={timezone}
+              sourceRevision={result.referenceRevision ?? result.snapshot.asOf}
+            />
+          ) : null}
           {result.groupingFallback ? (
             <p>Buckets unavailable; showing categories. Your grouping preference is retained.</p>
           ) : null}
@@ -559,6 +573,7 @@ export function FinanceSpendingPage() {
                   groups={result.groups}
                   onSelect={selectGroup}
                   layoutKey={result.effectiveGrouping}
+                  {...(result.monthlyBudget ? { monthlyBudget: result.monthlyBudget } : {})}
                 />
               </div>
               {view === "trends" ? (
@@ -614,7 +629,11 @@ export function FinanceSpendingPage() {
                 />
               ) : null}
               <div hidden={view !== "list"}>
-                <SpendingList groups={result.groups} onSelect={selectGroup} />
+                <SpendingList
+                  groups={result.groups}
+                  onSelect={selectGroup}
+                  {...(result.monthlyBudget ? { monthlyBudget: result.monthlyBudget } : {})}
+                />
               </div>
             </>
           ) : (

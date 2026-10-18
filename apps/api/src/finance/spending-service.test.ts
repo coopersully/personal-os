@@ -106,6 +106,25 @@ describe("Spending dashboard canonical consumer", () => {
       expect(result.groups).toEqual([]);
     }
   });
+  it("preserves assigned category color and supplies explicit semantic visual fallbacks", () => {
+    const result = buildFinanceSpendingDashboard(evidence, query, {
+      ...metadata,
+      categories: [{ id: "food", label: "Food", color: "#12aB34" }],
+    });
+    expect(result.groups[0]?.visual).toEqual({ color: null, icon: "bucket" });
+    expect(result.groups[0]?.categories[0]?.visual).toEqual({ color: "#12aB34", icon: "category" });
+    const invalid = buildFinanceSpendingDashboard(
+      evidence,
+      { ...query, grouping: "categories" },
+      {
+        ...metadata,
+        categories: [{ id: "food", label: "Food", color: "url(https://invalid)" }],
+      },
+    );
+    expect(invalid.groups[0]?.visual).toEqual({ color: null, icon: "category" });
+    expect(invalid.snapshot).toEqual(result.snapshot);
+    expect(invalid.groups[0]?.drillDown).toEqual(result.groups[0]?.categories[0]?.drillDown);
+  });
   it("rejects requested foreign account/category IDs before projection", () => {
     for (const key of ["accountIds", "categoryIds"] as const)
       expect(() =>

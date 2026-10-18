@@ -1,9 +1,32 @@
-import type { FinanceSpendingDashboard, FinanceSpendingGroup } from "@personal-os/domain";
+import type {
+  FinanceSpendingDashboard,
+  FinanceSpendingGroup,
+  FinanceSpendingMonthlyBudget,
+} from "@personal-os/domain";
 import { type HTMLMotionProps, motion, useDragControls, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { formatMoney } from "./format";
+import { spendingGroupVisual } from "./spending-visual";
 
+/** Invert a circular segment area. The result is height from the bottom, not a linear percent. */
+export function spendingBudgetFillHeight(ratio: number) {
+  const target = Math.max(
+    0,
+    Math.min(1, Number.isFinite(ratio) ? ratio : ratio === Number.POSITIVE_INFINITY ? 1 : 0),
+  );
+  if (target === 0 || target === 1) return target;
+  let low = 0,
+    high = 1;
+  for (let iteration = 0; iteration < 40; iteration++) {
+    const height = (low + high) / 2;
+    const y = 1 - 2 * height;
+    const area = (Math.acos(y) - y * Math.sqrt(Math.max(0, 1 - y * y))) / Math.PI;
+    if (area < target) low = height;
+    else high = height;
+  }
+  return (low + high) / 2;
+}
 function SpendingBubble(props: HTMLMotionProps<"button">) {
   const controls = useDragControls();
   return (
@@ -57,10 +80,12 @@ export function SpendingBubbles({
   groups,
   onSelect,
   layoutKey = "categories",
+  monthlyBudget,
 }: {
   groups: FinanceSpendingDashboard["groups"];
   onSelect: (group: FinanceSpendingGroup) => void;
   layoutKey?: string;
+  monthlyBudget?: FinanceSpendingMonthlyBudget;
 }) {
   const reduced = useReducedMotion();
   const [arrange, setArrange] = useState(false);
@@ -127,6 +152,25 @@ export function SpendingBubbles({
           const node = nodes[index];
           if (!node) return null;
           const diameter = node.radius * width * 2;
+          const visual = spendingGroupVisual(group);
+          const VisualIcon = visual.Icon;
+          const budget =
+            monthlyBudget?.state === "qualified"
+              ? monthlyBudget.groups.find((item) => item.groupId === group.id)
+              : undefined;
+          const limit = budget?.budgetCents;
+          const hasLimit = budget !== undefined && limit !== null && limit !== undefined;
+          const fill = hasLimit
+            ? spendingBudgetFillHeight(
+                limit === 0 ? (budget.usedCents > 0 ? 1 : 0) : budget.usedCents / limit,
+              )
+            : null;
+          const overage = hasLimit ? Math.max(0, budget.usedCents - limit) : 0;
+          const budgetLabel = hasLimit
+            ? `Monthly budget used ${formatMoney(budget.usedCents / 100)} of ${formatMoney(limit / 100)}${monthlyBudget?.state === "qualified" && monthlyBudget.coverage !== "complete" ? "; observed usage, incomplete history" : ""}${limit === 0 && budget.usedCents <= 0 ? "; No utilization" : ""}${overage > 0 ? `; Over budget ${formatMoney(overage / 100)}` : ""}`
+            : budget
+              ? "No monthly budget limit"
+              : "Monthly budget comparison unavailable";
           return (
             <SpendingBubble
               key={group.id}
@@ -173,18 +217,50 @@ export function SpendingBubbles({
               onClick={() => {
                 if (!dragged.current) onSelect(group);
               }}
-              aria-label={`${group.label}: ${formatMoney(group.netCents / 100)}. Budget comparison unavailable.`}
-              title={`${group.label}: ${formatMoney(group.netCents / 100)}`}
-              style={{ width: diameter, height: diameter, touchAction: arrange ? "none" : "pan-y" }}
-              className="absolute left-0 top-0 flex items-center justify-center rounded-full bg-primary/15 p-0 text-primary hover:bg-primary/25 focus-visible:bg-primary/25"
+              aria-label={`${group.label}: ${formatMoney(group.netCents / 100)}. ${budgetLabel}.`}
+              title={`${group.label}: ${formatMoney(group.netCents / 100)}. ${budgetLabel}.`}
+              style={{
+                width: diameter,
+                height: diameter,
+                touchAction: arrange ? "none" : "pan-y",
+                backgroundColor: visual.backgroundColor,
+              }}
+              className={`group absolute left-0 top-0 flex flex-col items-center justify-center gap-1 overflow-hidden rounded-full p-0 text-foreground ${overage > 0 ? "border-2 border-(--status-warning-foreground)" : "border border-transparent hover:border-foreground/30 focus-visible:border-foreground/60"}`}
               transition={
                 reduced ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0.15 }
               }
             >
+              {fill !== null ? (
+                <motion.span
+                  aria-hidden="true"
+                  data-budget-fill="true"
+                  className="pointer-events-none absolute inset-0 rounded-full"
+                  initial={false}
+                  animate={{ clipPath: `inset(${(1 - fill) * 100}% 0 0 0)` }}
+                  transition={{ duration: reduced ? 0 : 0.3, ease: "easeOut" }}
+                  style={{ backgroundColor: visual.fillColor }}
+                />
+              ) : null}
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 rounded-full bg-foreground/0 group-hover:bg-foreground/5 group-focus-visible:bg-foreground/5"
+              />
+              {diameter >= 18 ? (
+                <span
+                  aria-hidden="true"
+                  data-spending-icon={visual.icon}
+                  className="relative size-4 shrink-0 [&>svg]:size-full"
+                >
+                  <VisualIcon />
+                </span>
+              ) : null}
               {diameter >= 92 ? (
-                <span className="max-w-full px-2 text-center text-xs">
+                <span className="relative max-w-full px-2 text-center text-xs">
                   <span className="block truncate">{group.label}</span>
                   {formatMoney(group.netCents / 100)}
+                  {overage > 0 ? (
+                    <span className="block">Over budget {formatMoney(overage / 100)}</span>
+                  ) : null}
                 </span>
               ) : null}
             </SpendingBubble>

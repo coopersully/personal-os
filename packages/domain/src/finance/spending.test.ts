@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   financeSpendingContributionSchema,
+  financeSpendingMonthlyBudgetSchema,
   financeSpendingQuerySchema,
   financeSpendingScopeSchema,
 } from "./spending.js";
@@ -76,4 +77,34 @@ it("preserves all versus explicit no accounts and query defaults", () => {
     financeSpendingQuerySchema.parse({ scope: { ...scope, accountIds: [], categoryIds: [] } })
       .scope,
   ).toMatchObject({ accountIds: [], categoryIds: [] });
+});
+
+it("distinguishes explicit zero monthly targets from absent targets in the consumer contract", () => {
+  const monthly = {
+    state: "qualified",
+    month: "2026-03",
+    period: { from: "2026-03-01", through: "2026-03-31", timezone: "UTC" },
+    currency: "USD",
+    accountIds: ["account"],
+    qualificationId: "qualification",
+    confirmedAt: "2026-03-01T00:00:00.000Z",
+    qualificationKind: "current",
+    coverage: "unknown",
+    includesPending: true,
+    basis: "personal_cost",
+    subtractsRefunds: true,
+    groups: [
+      { groupId: "explicit-zero", budgetCents: 0, usedCents: 100, overspent: true },
+      { groupId: "absent", budgetCents: null, usedCents: 100, overspent: false },
+    ],
+  };
+  const parsed = financeSpendingMonthlyBudgetSchema.parse(monthly);
+  if (parsed.state !== "qualified") throw new Error("Expected qualified monthly fixture");
+  expect(parsed.groups).toEqual(monthly.groups);
+  expect(
+    financeSpendingMonthlyBudgetSchema.safeParse({
+      ...monthly,
+      groups: [{ ...monthly.groups[0], budgetCents: -1 }],
+    }).success,
+  ).toBe(false);
 });

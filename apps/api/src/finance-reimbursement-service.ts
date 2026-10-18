@@ -14,7 +14,7 @@ import {
   type ReconcileFinanceReimbursementInput,
   toCents,
 } from "@personal-os/domain";
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import { executeFinanceIdempotently, loadFinanceAuthorization } from "./finance/context.js";
@@ -599,19 +599,6 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
                   eq(financeReimbursementMatches.userId, userId),
                 ),
               );
-            // A→B→A classification changes must invalidate old income/balance bindings.
-            await tx
-              .update(financeTransactions)
-              .set({
-                contextualRevision: sql`${financeTransactions.contextualRevision} + 1`,
-                updatedAt: now(),
-              })
-              .where(
-                and(
-                  eq(financeTransactions.id, match.creditTransactionId),
-                  eq(financeTransactions.userId, userId),
-                ),
-              );
             remainingMatches = matches.filter((item) => item.id !== match.id);
           }
           if (matches.reduce((sum, item) => sum + item.amount, 0) !== row.receivedAmount)
@@ -819,15 +806,6 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
           .returning();
         if (!updated || !match)
           throw new AppError("conflict", "The reimbursement could not be reconciled.");
-        await tx
-          .update(financeTransactions)
-          .set({
-            contextualRevision: sql`${financeTransactions.contextualRevision} + 1`,
-            updatedAt: now(),
-          })
-          .where(
-            and(eq(financeTransactions.id, credit.id), eq(financeTransactions.userId, userId)),
-          );
         await tx.insert(auditEvents).values(
           auditValues({
             action: "finance.reimbursement_reconciled",

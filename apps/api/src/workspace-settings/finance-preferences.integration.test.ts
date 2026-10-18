@@ -4,7 +4,12 @@ import { resolve } from "node:path";
 import {
   createDatabaseClient,
   type DatabaseClient,
+  financeAccounts,
+  financeBudgetPlans,
+  financeGoals,
   financeOnboardingLegacyAccess,
+  financeProfiles,
+  financeProfileVersions,
   financeSetupSessions,
   financesWorkspaceSettings,
   migrateDatabase,
@@ -21,6 +26,7 @@ describe.sequential("Finance preferences and migration-time access", () => {
   let staging: string;
   let legacyId: string;
   let emptyId: string;
+  let seededIds: string[];
   let settings: ReturnType<typeof createWorkspaceSettingsService>;
   const context = (userId: string) => ({
     principal: {
@@ -61,6 +67,45 @@ describe.sequential("Finance preferences and migration-time access", () => {
       VALUES (${legacyId},7,'table','none',ARRAY[]::uuid[])`);
     // A partially started Finance session is approved legacy access evidence, not completion.
     await database.db.insert(financeSetupSessions).values({ userId: legacyId });
+    const additional = await database.db
+      .insert(users)
+      .values(
+        ["account", "plan", "goal", "profile", "version", "provider"].map((kind) => ({
+          email: `finance-legacy-${kind}@example.com`,
+          displayName: kind,
+          passwordHash: "unused",
+        })),
+      )
+      .returning();
+    const owner = (index: number) => {
+      const row = additional[index];
+      if (!row) throw new Error("Missing source fixture owner");
+      return row.id;
+    };
+    await database.db
+      .insert(financeAccounts)
+      .values({ userId: owner(0), provider: "manual", institution: "Fixture", name: "Cash" });
+    await database.db.insert(financeBudgetPlans).values({ userId: owner(1), name: "Plan" });
+    await database.db
+      .insert(financeGoals)
+      .values({ userId: owner(2), name: "Goal", targetAmount: 10000, priority: "high" });
+    await database.db
+      .insert(financeProfiles)
+      .values({ userId: owner(3), effectiveDate: "2026-10-18" });
+    await database.db.insert(financeProfileVersions).values({
+      userId: owner(4),
+      version: 1,
+      debts: [],
+      incomeStability: "unknown",
+      insurance: [],
+      preferences: { notes: [] },
+      provenance: {},
+    });
+    // This evidence has no account or transaction, independently exercising provider-only access.
+    await database.db.execute(sql`INSERT INTO finance_provider_items
+      (user_id,provider,provider_item_id,encrypted_credentials)
+      VALUES (${owner(5)},'plaid','legacy-provider-only','{}'::jsonb)`);
+    seededIds = [legacyId, ...additional.map((row) => row.id)];
     await migrateDatabase(database.db, migrations);
     settings = createWorkspaceSettingsService(database.db);
   }, 120_000);
@@ -143,9 +188,9 @@ describe.sequential("Finance preferences and migration-time access", () => {
   });
 
   it("seeds only pre-migration Finance owners without completing onboarding or granting future records", async () => {
-    expect(await database.db.select().from(financeOnboardingLegacyAccess)).toEqual([
-      expect.objectContaining({ userId: legacyId, provenance: "finance_records_at_migration" }),
-    ]);
+    const grants = await database.db.select().from(financeOnboardingLegacyAccess);
+    expect(grants.map((row) => row.userId).sort()).toEqual([...seededIds].sort());
+    expect(grants.every((row) => row.provenance === "finance_records_at_migration")).toBe(true);
     const [session] = await database.db
       .select()
       .from(financeSetupSessions)

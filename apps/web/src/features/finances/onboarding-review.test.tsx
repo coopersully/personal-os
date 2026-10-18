@@ -466,6 +466,12 @@ it("copies initial canonical tool guidance through Sonner with selectable text f
   await chooseAutomation(user, "now");
   const text = screen.getByLabelText("Initial agent instructions");
   expect((text as HTMLTextAreaElement).value).toContain("get_finance_playbook");
+  for (const tool of [
+    "get_finance_onboarding",
+    "save_finance_onboarding_answers",
+    "complete_finance_onboarding",
+  ])
+    expect((text as HTMLTextAreaElement).value).toContain(tool);
   expect((text as HTMLTextAreaElement).value).toContain('setup_finances with operation "start"');
   const write = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
   toast.loading.mockClear();

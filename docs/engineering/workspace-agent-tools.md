@@ -1575,6 +1575,47 @@ Check provider-confirmed consent for a hosted bank connection and persist connec
 }
 ```
 
+## complete_finance_onboarding
+
+Complete the exact reviewed Finance setup revision after the server revalidates source, context, display review and automation choice. Later needs no host; now requires an actual authorized registration and cadence, while Chat proof remains separate. Only returned completedAt confirms completion. Requires current owner-authorized execution and never approves or activates a budget.
+
+- Domain: finances; stage: commit; policy: approved_rule.
+- Grants (all): finances:write, finances:execute.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `completeFinanceOnboarding`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "expectedRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740990
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "automationChoice": {
+      "type": "string",
+      "enum": [
+        "later",
+        "now"
+      ]
+    }
+  },
+  "required": [
+    "expectedRevision",
+    "idempotencyKey",
+    "automationChoice"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
 ## complete_reminder
 
 Mark one loaded reminder complete or reopen it. Pass expectedUpdatedAt from get_reminder so a concurrent change fails safely. This records an audit event even when the requested state matches the current state, so it is not idempotent. This is a direct, audited mutation. nohmi's API scopes and scoped-agent policy decision are authoritative; profile preferences and MCP annotations do not grant access.
@@ -2347,6 +2388,18 @@ Create a manually maintained financial account. Balance is a decimal currency am
 {
   "type": "object",
   "properties": {
+    "currencyCode": {
+      "default": null,
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "balance": {
       "default": null,
       "anyOf": [
@@ -5943,6 +5996,24 @@ Inspect a durable Finance maintenance run by its returned run ID; do not infer c
     "runId"
   ],
   "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
+```
+
+## get_finance_onboarding
+
+Read the current owner's durable Finance setup revision, actual source/context evidence and review blockers. Existing access and host registration do not mean setup is completed or Chat is verified. This read never inserts setup state.
+
+- Domain: finances; stage: inspect; policy: read_only.
+- Grants (all): finances:read.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `getFinanceOnboarding`.
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
 }
 ```
 
@@ -12658,6 +12729,79 @@ Save the policy preview for the exact proposal revision. This does not activate 
 }
 ```
 
+## save_finance_onboarding_answers
+
+Save reviewed Finance setup dispositions using exact question IDs and the current onboarding revision. Save canonical financial values through their owned operations first; answered requires actual stored evidence, none requires allowsNone, and unknown never means zero. Requires current owner-authorized Finance execution; this does not approve a budget or complete setup.
+
+- Domain: finances; stage: commit; policy: approved_rule.
+- Grants (all): finances:write, finances:execute.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `saveFinanceOnboardingAnswers`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "expectedRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740990
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "answers": {
+      "maxItems": 100,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "questionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "disposition": {
+            "type": "string",
+            "enum": [
+              "answered",
+              "none",
+              "unknown"
+            ]
+          }
+        },
+        "required": [
+          "questionId",
+          "disposition"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "displayPreferencesReviewed": {
+      "type": "boolean"
+    },
+    "automationChoice": {
+      "type": "string",
+      "enum": [
+        "later",
+        "now"
+      ]
+    }
+  },
+  "required": [
+    "expectedRevision",
+    "idempotencyKey",
+    "answers",
+    "displayPreferencesReviewed",
+    "automationChoice"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
 ## search_calendar
 
 Search owned calendar content and reviews. Follow returned pagination metadata; retain the same filters.
@@ -15031,6 +15175,14 @@ Patch only supplied finances preferences using the observed expectedRevision. Om
           "enum": [
             "table",
             "cards"
+          ]
+        },
+        "financeManualVisibility": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "show",
+            "hide"
           ]
         },
         "financeSpendingView": {

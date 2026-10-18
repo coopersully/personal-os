@@ -774,3 +774,73 @@ it("reads exact committed run evidence without replaying financial effects", asy
     await server.close();
   }
 });
+
+it("uses durable setup revisions and forwards current authority failures without inventing completion", async () => {
+  const getFinanceOnboarding = vi.fn(async () => ({
+    revision: 0,
+    completedAt: null,
+    existingAccess: true,
+  }));
+  const saveFinanceOnboardingAnswers = vi.fn(async () => ({ revision: 1, completedAt: null }));
+  const completeFinanceOnboarding = vi.fn(async () => {
+    throw new ApiClientError({
+      status: 403,
+      code: "forbidden",
+      message: "Current execution authority is required.",
+    });
+  });
+  const server = new McpServer({ name: "durable-onboarding", version: "1" });
+  registerFinanceTools(server, {
+    getFinanceOnboarding,
+    saveFinanceOnboardingAnswers,
+    completeFinanceOnboarding,
+  } as unknown as PersonalOsApiClient);
+  const client = new Client({ name: "test", version: "1" });
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(st), client.connect(ct)]);
+  const input = {
+    expectedRevision: 0,
+    idempotencyKey: "exact-review",
+    answers: [{ questionId: "rent", disposition: "unknown" }],
+    displayPreferencesReviewed: true,
+    automationChoice: "later",
+  };
+  try {
+    const read = await client.callTool({ name: "get_finance_onboarding", arguments: {} });
+    expect(read.structuredContent).toEqual({
+      result: { revision: 0, completedAt: null, existingAccess: true },
+    });
+    await client.callTool({ name: "save_finance_onboarding_answers", arguments: input });
+    expect(saveFinanceOnboardingAnswers).toHaveBeenCalledExactlyOnceWith(input);
+    const spoof = await client.callTool({
+      name: "save_finance_onboarding_answers",
+      arguments: { ...input, userId: id },
+    });
+    expect(spoof.isError).toBe(true);
+    expect(saveFinanceOnboardingAnswers).toHaveBeenCalledTimes(1);
+    const completion = {
+      expectedRevision: 1,
+      idempotencyKey: "exact-complete",
+      automationChoice: "later",
+    };
+    const denied = await client.callTool({
+      name: "complete_finance_onboarding",
+      arguments: completion,
+    });
+    expect(completeFinanceOnboarding).toHaveBeenCalledExactlyOnceWith(completion);
+    expect(denied.isError).toBe(true);
+    expect(denied.structuredContent).toMatchObject({ error: { status: 403, code: "forbidden" } });
+    expect(
+      (
+        await client.callTool({
+          name: "complete_finance_onboarding",
+          arguments: { ...completion, completedAt: "2026-10-18T00:00:00Z" },
+        })
+      ).isError,
+    ).toBe(true);
+    expect(completeFinanceOnboarding).toHaveBeenCalledTimes(1);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});

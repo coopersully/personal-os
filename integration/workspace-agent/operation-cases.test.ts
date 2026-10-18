@@ -6,6 +6,8 @@ import { discoverToolDictionary, renderToolDictionary } from "./tool-dictionary.
 
 it("exposes domain input fields instead of silently narrowing workspace mutations", async () => {
   const mappings = {
+    save_finance_onboarding_answers: domain.financeOnboardingSaveInputSchema,
+    complete_finance_onboarding: domain.financeOnboardingCompleteInputSchema,
     submit_finance_ledger_challenge: domain.submitFinanceLedgerChallengeInputSchema,
     get_finance_conversation_evidence: domain.financeConversationEvidenceReadInputSchema,
     get_finance_spending: domain.financeSpendingQuerySchema,
@@ -271,4 +273,20 @@ it("requires all original execution grants for read-only committed effect eviden
   });
   expect(entry?.tool.inputSchema.properties).toHaveProperty("candidateRevision");
   expect(entry?.tool.inputSchema.properties).not.toHaveProperty("userId");
+});
+
+it("keeps durable onboarding reads separate from current execution mutations", async () => {
+  const dictionary = new Map(
+    (await discoverToolDictionary()).map(({ tool, definition }) => [tool.name, definition]),
+  );
+  expect(dictionary.get("get_finance_onboarding")).toMatchObject({
+    readOnly: true,
+    requiredScopes: ["finances:read"],
+  });
+  for (const name of ["save_finance_onboarding_answers", "complete_finance_onboarding"])
+    expect(dictionary.get(name)).toMatchObject({
+      readOnly: false,
+      scopeMatch: "all",
+      requiredScopes: ["finances:write", "finances:execute"],
+    });
 });

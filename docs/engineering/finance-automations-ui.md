@@ -34,3 +34,25 @@ settings feedback context, with Sonner retry controls and no inline error duplic
 Focused coverage lives in `automations-page.test.tsx`; exact stored prompt behavior remains covered
 by `host-prompt-panel.test.tsx`. Browser inspection, integration authorization evidence, independent
 review, and complete candidate verification remain required before delivery acceptance.
+
+## Durable workspace setup through MCP
+
+Initial agent guidance retains `get_finance_playbook` and `setup_finances` for canonical financial
+values, then uses `get_finance_onboarding` to read the actual durable workspace review. The agent
+saves returned question IDs and the exact revision with `save_finance_onboarding_answers`, then
+calls `complete_finance_onboarding` using the saved revision when the server's blockers are resolved.
+Only the returned `completedAt` confirms completion; legacy access and registered hosts are not
+completion receipts or Chat proof.
+
+The read requires Finance read scope and creates no state. Both mutations require current Finance
+write and execution authority and standing owner execution permission for agents, rechecked before
+replay. Input schemas preserve actual revisions, bounded unique questions, explicit unknown/none
+semantics and actor-bound idempotency. No caller may supply an owner, actor, bypass, scope or
+completion timestamp. An answered disposition requires a current canonical answer, and none is
+accepted only where the returned question allows it.
+
+Choosing later requires no automation registration. Choosing now requires an actual authorized
+registration with cadence, while Chat verification remains an independent protocol. Onboarding
+completion neither requires nor grants budget approval; financial activation retains its separate
+exact human-approval boundary. The initial prompt and the server-issued host prompt serve distinct
+setup stages and never invent a registration identifier or verification result.

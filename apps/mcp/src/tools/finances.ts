@@ -13,6 +13,8 @@ import {
   financeConversationProofOperationSchema,
   financeConversationReplyInputSchema,
   financeMaintenanceInputSchema,
+  financeOnboardingCompleteInputSchema,
+  financeOnboardingSaveInputSchema,
   financeReceiptReviewInputSchema,
   financeSetupInputSchema,
   financeSpendingQuerySchema,
@@ -169,6 +171,46 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
         receiptReviewResult(await api.reviewFinanceReceipt(transactionId, input)),
       ),
   );
+  server.registerTool(
+    "get_finance_onboarding",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the current owner's durable Finance setup revision, actual source/context evidence and review blockers. Existing access and host registration do not mean setup is completed or Chat is verified. This read never inserts setup state.",
+      inputSchema: z.object({}).strict(),
+      title: "Read Finance setup readiness",
+    },
+    async () => apiResult(() => api.getFinanceOnboarding()),
+  );
+  server.registerTool(
+    "save_finance_onboarding_answers",
+    {
+      annotations: { openWorldHint: false, idempotentHint: true },
+      description:
+        "Save reviewed Finance setup dispositions using exact question IDs and the current onboarding revision. Save canonical financial values through their owned operations first; answered requires actual stored evidence, none requires allowsNone, and unknown never means zero. Requires current owner-authorized Finance execution; this does not approve a budget or complete setup.",
+      inputSchema: financeOnboardingSaveInputSchema,
+      title: "Save Finance setup review",
+    },
+    async (input) =>
+      apiResult(() =>
+        api.saveFinanceOnboardingAnswers(financeOnboardingSaveInputSchema.parse(input)),
+      ),
+  );
+  server.registerTool(
+    "complete_finance_onboarding",
+    {
+      annotations: { openWorldHint: false, idempotentHint: true },
+      description:
+        "Complete the exact reviewed Finance setup revision after the server revalidates source, context, display review and automation choice. Later needs no host; now requires an actual authorized registration and cadence, while Chat proof remains separate. Only returned completedAt confirms completion. Requires current owner-authorized execution and never approves or activates a budget.",
+      inputSchema: financeOnboardingCompleteInputSchema,
+      title: "Complete Finance setup",
+    },
+    async (input) =>
+      apiResult(() =>
+        api.completeFinanceOnboarding(financeOnboardingCompleteInputSchema.parse(input)),
+      ),
+  );
+
   server.registerTool(
     "setup_finances",
     {

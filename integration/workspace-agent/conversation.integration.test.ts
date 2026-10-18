@@ -70,6 +70,28 @@ describe("verified Finance conversation transport", () => {
       expect(response.isError, JSON.stringify(response)).not.toBe(true);
       return (response.structuredContent as { result: Record<string, unknown> }).result;
     }
+    const onboarding = await call("get_finance_onboarding", {});
+    if (typeof onboarding.revision !== "number") throw new Error("Missing onboarding revision.");
+    const reviewInput = {
+      expectedRevision: onboarding.revision,
+      idempotencyKey: "actual-onboarding-review",
+      answers: [],
+      displayPreferencesReviewed: false,
+      automationChoice: "later",
+    };
+    const reviewed = await call("save_finance_onboarding_answers", reviewInput);
+    expect(reviewed.completedAt).toBeNull();
+    expect(await call("save_finance_onboarding_answers", reviewInput)).toEqual(reviewed);
+    if (typeof reviewed.revision !== "number") throw new Error("Missing saved revision.");
+    const incomplete = await a.client.callTool({
+      name: "complete_finance_onboarding",
+      arguments: {
+        expectedRevision: reviewed.revision,
+        idempotencyKey: "incomplete-onboarding",
+        automationChoice: "later",
+      },
+    });
+    expect(incomplete.isError).toBe(true);
     const fetched = await call("exchange_finance_conversation_challenge", {
       challengeId: challenge.challengeId,
       operation: { kind: "fetch" },

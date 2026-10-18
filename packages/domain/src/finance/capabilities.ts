@@ -1,5 +1,26 @@
 export const financeCapabilityManifest = [
   {
+    apiOperation: "getFinanceOnboarding",
+    capability: "setup.durable_readiness",
+    mcpTool: "get_finance_onboarding",
+    mode: "read",
+    requiredScope: "finances:read",
+  },
+  {
+    apiOperation: "saveFinanceOnboardingAnswers",
+    capability: "setup.review_answers",
+    mcpTool: "save_finance_onboarding_answers",
+    mode: "write",
+    requiredScope: "finances:write",
+  },
+  {
+    apiOperation: "completeFinanceOnboarding",
+    capability: "setup.complete_review",
+    mcpTool: "complete_finance_onboarding",
+    mode: "write",
+    requiredScope: "finances:write",
+  },
+  {
     apiOperation: "getFinanceConversationEvidence",
     capability: "workflow.committed_effect_evidence",
     mcpTool: "get_finance_conversation_evidence",

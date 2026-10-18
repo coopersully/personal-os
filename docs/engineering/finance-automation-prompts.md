@@ -53,6 +53,14 @@ A subsequent UI increment will consume stored text for recopy and explicit upgra
 consumers retain schedule, health and continuation fields; shared domain exports already flow through
 the existing host-module wildcard export.
 
+The MCP surface exposes thin typed adapters `get_finance_host_prompt_history`,
+`get_finance_host_prompt` and `issue_finance_host_prompt`. Reads require `finances:maintain`;
+new issuance is offered with `finances:maintain`, `finances:write` and `finances:execute`, while the
+API still checks the original connection, live grant and owner's review-bypass policy. Historical
+replay does not expand those discovery grants. Read-only discovery omits issuance. API errors retain
+their structured code, message and repair details. These tools expose stored registration artifacts;
+they do not implement the future conversation protocol or change existing budget approval guards.
+
 ## Health semantics
 
 For an active interval registration, the approved grace is

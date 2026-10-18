@@ -211,6 +211,11 @@ function currentRelationships(
   );
 }
 
+/** Reuse canonical current/trusted relationship selection for qualification attribution. */
+export function resolveFinanceCurrentRelationships(input: Omit<RecognitionInput, "period">) {
+  return currentRelationships(input, new Map(input.transactions.map((row) => [row.id, row])));
+}
+
 function addCents(map: Map<string, number>, id: string, amount: number): void {
   map.set(id, (map.get(id) ?? 0) + amount);
 }

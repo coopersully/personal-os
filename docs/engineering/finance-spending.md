@@ -148,3 +148,14 @@ The integrated authority follow-on permits explicit zero allocations without man
 allocation rows. The exact authority dependency `939ff5ca` has independent source review and six focused PostgreSQL
 checks reported by its owner. Final integrated verification and browser acceptance remain separate
 gates; pure adapter tests alone do not establish persistence.
+
+
+Monthly comparison qualification gates are attributed to the explicitly qualified accounts and
+baseline-local calendar month after complete recognition. Unrelated catalog accounts, older dates,
+and their currency/ownership qualifications cannot invalidate a known USD budget scope. Attribution
+retains connected transfer events/counterparts, pending replacements, allocations, reimbursement
+claims and credits, including related evidence outside the selected accounts/month. Unmapped source
+uncertainty remains fail-closed. The complete recognition ledger, contributions, selected totals,
+original snapshot disclosures and honest coverage are preserved; genuine in-scope unknown money
+still withholds comparison. Live QA first exposed this at failed integration `bdfc951e`; its fixture
+and screenshot are retained separately from the repaired candidate's future verification.

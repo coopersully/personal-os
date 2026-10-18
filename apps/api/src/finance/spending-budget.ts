@@ -7,6 +7,7 @@ import {
   financeSpendingMonthlyBudgetSchema,
 } from "@personal-os/domain";
 import { projectFinanceSpending, type SpendingEvidenceInput } from "./spending-contributions.js";
+import { spendingQualificationsForScope } from "./spending-qualification-scope.js";
 
 /** Whole-month observed usage over explicit human-qualified budget accounts, never bubble scope. */
 export function projectFinanceSpendingMonthlyBudget(
@@ -55,9 +56,14 @@ export function projectFinanceSpendingMonthlyBudget(
     accountIds: baseline.accountIds,
     categoryIds: null,
   });
-  if (monthly.qualifications.some((row) => row.code === "unsupported_currency"))
+  const qualifications = spendingQualificationsForScope(
+    evidence,
+    monthly.scope,
+    monthly.qualifications,
+  );
+  if (qualifications.some((row) => row.code === "unsupported_currency"))
     return unavailable("unsupported_currency", false);
-  if (monthly.qualifications.length) return unavailable("recognition_unresolved", false);
+  if (qualifications.length) return unavailable("recognition_unresolved", false);
   const allGroups = groups.flatMap((row) => [row, ...row.categories]);
   return financeSpendingMonthlyBudgetSchema.parse({
     state: "qualified",

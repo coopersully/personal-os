@@ -310,6 +310,106 @@ describe("Whole-month budget usage independent from bubble selection", () => {
       groups: [{ groupId: id(3), budgetCents: null, usedCents: 1600, overspent: false }],
     });
   });
+  it("ignores unrelated catalog currency/ownership/transfer qualifications outside budget accounts", () => {
+    const input = {
+      ...evidence,
+      accounts: [
+        ...evidence.accounts,
+        { ...account(30), currencyCode: null, ownershipType: "unknown" as const },
+      ],
+      transactions: [
+        ...evidence.transactions,
+        {
+          ...transaction(31, 700, "2026-03-20", id(30)),
+          currencyCode: null,
+          direction: "transfer" as const,
+          reconciliationStatus: "matched" as const,
+          transferGroupId: "unrelated-transfer",
+        },
+      ],
+    };
+    expect(
+      buildFinanceSpendingDashboard(input, query, metadata, baseline).monthlyBudget,
+    ).toMatchObject({ state: "qualified", groups: [{ usedCents: 1600, budgetCents: 1000 }] });
+  });
+  it("attributes transaction currency qualifications to the baseline's local calendar month", () => {
+    for (const date of ["2026-02-28", "2026-03-01T06:30:00Z"])
+      expect(
+        projectFinanceSpendingMonthlyBudget(
+          {
+            ...evidence,
+            transactions: [
+              ...evidence.transactions,
+              { ...transaction(32, 700, date), currencyCode: "EUR" },
+            ],
+          },
+          query,
+          groups(),
+          baseline,
+        ),
+      ).toMatchObject({ state: "qualified" });
+    expect(
+      projectFinanceSpendingMonthlyBudget(
+        {
+          ...evidence,
+          transactions: [
+            ...evidence.transactions,
+            { ...transaction(32, 700, "2026-04-01T06:30:00Z"), currencyCode: "EUR" },
+          ],
+        },
+        query,
+        groups(),
+        baseline,
+      ),
+    ).toMatchObject({ state: "unavailable", reason: "unsupported_currency" });
+  });
+  it("retains a relevant cross-account transfer counterpart's uncertainty", () => {
+    const input = {
+      ...evidence,
+      accounts: [...evidence.accounts, { ...account(30), currencyCode: "EUR" }],
+      transactions: [
+        ...evidence.transactions,
+        {
+          ...transaction(33, 500, "2026-03-20"),
+          direction: "transfer" as const,
+          providerDirection: "expense" as const,
+        },
+        {
+          ...transaction(34, 500, "2026-03-21", id(30)),
+          direction: "transfer" as const,
+          providerDirection: "income" as const,
+          currencyCode: "EUR",
+        },
+      ],
+      relationships: [
+        {
+          id: "transfer-link",
+          eventId: "transfer-event",
+          eventUserId: "owner",
+          userId: "owner",
+          relationship: "transfer" as const,
+          transactionIds: [id(33), id(34)],
+          createdAt: "2026-03-22T00:00:00Z",
+          provenance: { actorType: "user" as const },
+          provenanceValidated: true,
+        },
+      ],
+    };
+    expect(projectFinanceSpendingMonthlyBudget(input, query, groups(), baseline)).toMatchObject({
+      state: "unavailable",
+      reason: "unsupported_currency",
+    });
+    const unresolved = {
+      ...input,
+      accounts: [...evidence.accounts, account(30)],
+      transactions: input.transactions.map((row) =>
+        row.id === id(34) ? { ...row, currencyCode: "USD", providerDirection: null } : row,
+      ),
+    };
+    expect(
+      projectFinanceSpendingMonthlyBudget(unresolved, query, groups(), baseline),
+    ).toMatchObject({ state: "unavailable", reason: "recognition_unresolved" });
+  });
   it("withholds unsupported transaction currency despite explicit baseline currency", () => {
     const input = {
       ...evidence,

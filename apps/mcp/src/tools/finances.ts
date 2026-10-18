@@ -2,6 +2,8 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { ApiClientError, type PersonalOsApiClient } from "@personal-os/api-client";
 import {
   answerFinanceReviewInputSchema,
+  automationHostPromptIssueInputSchema,
+  automationHostPromptPageInputSchema,
   automationHostScheduleObservationInputSchema,
   type FinanceReceiptReview,
   type FinanceToolResult,
@@ -182,6 +184,63 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "Read Finance continuations",
     },
     async (input) => apiResult(() => api.getFinanceContinuations(input.scheduleId, input.cursor)),
+  );
+  server.registerTool(
+    "get_finance_host_prompt_history",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read a bounded page of immutable prompts nohmi issued for this schedule under its original authorized connection. Use nextCursor as beforeVersion for older templates. Stored text does not prove the external host adopted it or verify Chat capability.",
+      inputSchema: z
+        .object({ scheduleId: id, ...automationHostPromptPageInputSchema.shape })
+        .strict(),
+      title: "Read Finance host prompt history",
+    },
+    async ({ scheduleId, ...input }) => {
+      const page = automationHostPromptPageInputSchema.parse(input);
+      return apiResult(() =>
+        api.getAutomationHostPromptHistory(scheduleId, {
+          limit: page.limit,
+          ...(page.beforeVersion === undefined ? {} : { beforeVersion: page.beforeVersion }),
+        }),
+      );
+    },
+  );
+  server.registerTool(
+    "get_finance_host_prompt",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read exact stored instructions for one schedule/template version using the original authorized connection. This never regenerates instructions or changes the external job. A schedule ID is not a credential.",
+      inputSchema: z.object({ scheduleId: id, templateVersion: z.int().positive() }).strict(),
+      title: "Read Finance host prompt",
+    },
+    async ({ scheduleId, templateVersion }) =>
+      apiResult(() => api.getAutomationHostPrompt(scheduleId, templateVersion)),
+  );
+  server.registerTool(
+    "issue_finance_host_prompt",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description:
+        "Persist the current server-issued prompt for an existing schedule with its original connection and explicit Finance execution authority. First issuance checks the schedule revision; repeating the same schedule/template returns the immutable original. This does not install instructions, change external scheduling, verify Chat, or grant financial authority.",
+      inputSchema: z
+        .object({
+          scheduleId: id,
+          templateVersion: z.int().positive(),
+          ...automationHostPromptIssueInputSchema.shape,
+        })
+        .strict(),
+      title: "Issue Finance host prompt",
+    },
+    async ({ scheduleId, templateVersion, ...input }) =>
+      apiResult(() =>
+        api.issueAutomationHostPrompt(
+          scheduleId,
+          templateVersion,
+          automationHostPromptIssueInputSchema.parse(input),
+        ),
+      ),
   );
   server.registerTool(
     "observe_finance_host_schedule",

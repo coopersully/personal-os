@@ -439,6 +439,20 @@ export const iloToolCatalog = {
     policy: "approve_each",
   }),
   get_finance_continuations: read("finances", ["finances:maintain"]),
+  get_finance_host_prompt_history: read("finances", ["finances:maintain"], "inspect", {
+    openWorld: false,
+  }),
+  get_finance_host_prompt: read("finances", ["finances:maintain"], "inspect", { openWorld: false }),
+  issue_finance_host_prompt: write(
+    "finances",
+    ["finances:maintain", "finances:write", "finances:execute"],
+    {
+      policy: "approved_rule",
+      idempotent: true,
+      openWorld: false,
+      stage: "prepare",
+    },
+  ),
   observe_finance_host_schedule: write("finances", ["finances:maintain"], {
     policy: "approved_rule",
   }),

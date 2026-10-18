@@ -7,6 +7,8 @@ import { discoverToolDictionary, renderToolDictionary } from "./tool-dictionary.
 it("exposes domain input fields instead of silently narrowing workspace mutations", async () => {
   const mappings = {
     list_events: domain.eventListQuerySchema,
+    get_finance_host_prompt_history: domain.automationHostPromptPageInputSchema,
+    issue_finance_host_prompt: domain.automationHostPromptIssueInputSchema,
     list_mail: domain.mailListQuerySchema,
     list_reminders: domain.reminderListQuerySchema,
     list_tasks: domain.taskListQuerySchema,
@@ -152,4 +154,34 @@ it("does not publish strict intersections that forbid their own sibling argument
       else inspect(value);
   }
   for (const { tool } of await discoverToolDictionary()) inspect(tool.inputSchema);
+});
+
+it("exposes prompt artifact adapters with original-connection maintenance grants and no consent exception", async () => {
+  const dictionary = new Map(
+    (await discoverToolDictionary()).map((entry) => [entry.tool.name, entry]),
+  );
+  for (const name of ["get_finance_host_prompt_history", "get_finance_host_prompt"]) {
+    const entry = dictionary.get(name);
+    expect(entry?.definition).toMatchObject({
+      readOnly: true,
+      requiredScopes: ["finances:maintain"],
+      scopeMatch: "all",
+    });
+    expect(entry?.tool.inputSchema.properties).toHaveProperty("scheduleId");
+  }
+  const issue = dictionary.get("issue_finance_host_prompt");
+  expect(issue?.definition).toMatchObject({
+    readOnly: false,
+    policy: "approved_rule",
+    scopeMatch: "all",
+    requiredScopes: ["finances:maintain", "finances:write", "finances:execute"],
+  });
+  expect(issue?.tool.inputSchema.properties).toHaveProperty("templateVersion");
+  expect(issue?.tool.inputSchema.properties).toHaveProperty("expectedScheduleVersion");
+  for (const method of [
+    "getAutomationHostPromptHistory",
+    "getAutomationHostPrompt",
+    "issueAutomationHostPrompt",
+  ])
+    expect(workspaceApiExceptions).not.toHaveProperty(method);
 });

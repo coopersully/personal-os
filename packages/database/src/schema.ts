@@ -88,6 +88,7 @@ import {
   jsonb,
   type PgTableExtraConfigValue,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -3483,7 +3484,10 @@ export const financeGoals = pgTable(
     version: integer("version").notNull().default(1),
     ...timestamps,
   },
-  (table) => [index("finance_goals_user_status_idx").on(table.userId, table.status)],
+  (table) => [
+    index("finance_goals_user_status_idx").on(table.userId, table.status),
+    uniqueIndex("finance_goals_owner_id_idx").on(table.userId, table.id),
+  ],
 );
 
 export const financeBudgetVersions = pgTable(
@@ -3771,11 +3775,78 @@ export const financeRecurringObligations = pgTable(
       .$type<"active" | "cancelled" | "needs_review" | "paused">()
       .notNull()
       .default("needs_review"),
+    revision: integer("revision").notNull().default(1),
     ...timestamps,
   },
   (table) => [
+    check("finance_recurring_revision_check", sql`${table.revision} > 0`),
+    uniqueIndex("finance_recurring_owner_id_idx").on(table.userId, table.id),
     index("finance_recurring_user_status_idx").on(table.userId, table.status),
     uniqueIndex("finance_recurring_user_merchant_idx").on(table.userId, table.merchant),
+  ],
+);
+
+/** Explicit user evidence, immutable except for owner-account erasure. No implicit backfill. */
+export const financePlanningEvidence = pgTable(
+  "finance_planning_evidence",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    goalId: uuid("goal_id"),
+    obligationId: uuid("obligation_id"),
+    sourceRevision: integer("source_revision").notNull(),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    currencyCode: text("currency_code").notNull(),
+    fixedness: text("fixedness").$type<"fixed" | "variable">(),
+    asOf: text("as_of").notNull(),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+    actorUserId: uuid("actor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Snapshot identity deliberately has no FK: deleting an account must not rewrite evidence.
+    boundAccountId: uuid("bound_account_id"),
+    boundCadence: text("bound_cadence").$type<
+      "weekly" | "biweekly" | "semimonthly" | "monthly" | "quarterly" | "yearly" | "irregular"
+    >(),
+  },
+  (table) => [
+    check(
+      "finance_planning_evidence_source_check",
+      sql`(${table.goalId} IS NOT NULL) <> (${table.obligationId} IS NOT NULL)`,
+    ),
+    check("finance_planning_evidence_revision_check", sql`${table.sourceRevision} > 0`),
+    check(
+      "finance_planning_evidence_amount_check",
+      sql`${table.amountCents} BETWEEN 0 AND 10000000000`,
+    ),
+    check("finance_planning_evidence_currency_check", sql`${table.currencyCode} ~ '^[A-Z]{3}$'`),
+    check("finance_planning_evidence_actor_check", sql`${table.actorUserId} = ${table.userId}`),
+    check(
+      "finance_planning_evidence_date_check",
+      sql`${table.asOf} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' AND to_char(${table.asOf}::date, 'YYYY-MM-DD') = ${table.asOf}`,
+    ),
+    check(
+      "finance_planning_evidence_binding_check",
+      sql`(${table.obligationId} IS NOT NULL AND ${table.fixedness} IS NOT NULL AND ${table.fixedness} IN ('fixed','variable') AND ${table.boundCadence} IS NOT NULL AND ${table.boundCadence} IN ('weekly','biweekly','semimonthly','monthly','quarterly','yearly','irregular')) OR (${table.goalId} IS NOT NULL AND ${table.fixedness} IS NULL AND ${table.boundAccountId} IS NULL AND ${table.boundCadence} IS NULL)`,
+    ),
+    foreignKey({
+      name: "finance_planning_evidence_goal_owner_fk",
+      columns: [table.userId, table.goalId],
+      foreignColumns: [financeGoals.userId, financeGoals.id],
+    }),
+    foreignKey({
+      name: "finance_planning_evidence_obligation_owner_fk",
+      columns: [table.userId, table.obligationId],
+      foreignColumns: [financeRecurringObligations.userId, financeRecurringObligations.id],
+    }),
+    index("finance_planning_evidence_goal_idx").on(table.userId, table.goalId, table.recordedAt),
+    index("finance_planning_evidence_obligation_idx").on(
+      table.userId,
+      table.obligationId,
+      table.recordedAt,
+    ),
   ],
 );
 
@@ -5233,6 +5304,433 @@ export const automationHostSchedules = pgTable(
     index("automation_host_schedules_connection_idx").on(
       table.userId,
       table.authorizationConnectionId,
+    ),
+  ],
+);
+
+export const automationHostPromptIssues = pgTable(
+  "automation_host_prompt_issues",
+  {
+    userId: uuid("user_id").notNull(),
+    scheduleId: uuid("schedule_id").notNull(),
+    templateVersion: integer("template_version").notNull(),
+    scheduleVersionAtIssue: integer("schedule_version_at_issue").notNull(),
+    text: text("text").notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({
+      name: "automation_host_prompt_issues_pkey",
+      columns: [table.userId, table.scheduleId, table.templateVersion],
+    }),
+    foreignKey({
+      name: "automation_host_prompt_issues_owner_fk",
+      columns: [table.userId, table.scheduleId],
+      foreignColumns: [automationHostSchedules.userId, automationHostSchedules.id],
+    }).onDelete("cascade"),
+    check(
+      "automation_host_prompt_issues_template_version_check",
+      sql`${table.templateVersion} > 0`,
+    ),
+    check(
+      "automation_host_prompt_issues_schedule_version_check",
+      sql`${table.scheduleVersionAtIssue} > 0`,
+    ),
+    check("automation_host_prompt_issues_text_check", sql`length(${table.text}) > 0`),
+  ],
+);
+
+/** Durable review of the exact monthly budget scope; confirmation never activates allocations. */
+export const financeBudgetBaselineReviews = pgTable(
+  "finance_budget_baseline_reviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    periodMonth: text("period_month").notNull(),
+    planId: uuid("plan_id").notNull(),
+    budgetVersionId: uuid("budget_version_id").notNull(),
+    snapshot: jsonb("snapshot").$type<Record<string, unknown>>().notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    sourceFingerprint: text("source_fingerprint").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_budget_baseline_reviews_id_user_idx").on(table.id, table.userId),
+    foreignKey({
+      name: "finance_budget_baseline_reviews_version_fk",
+      columns: [table.budgetVersionId, table.planId, table.userId],
+      foreignColumns: [
+        financeBudgetVersions.id,
+        financeBudgetVersions.planId,
+        financeBudgetVersions.userId,
+      ],
+    }),
+    check(
+      "finance_budget_baseline_reviews_month_check",
+      sql`${table.periodMonth} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`,
+    ),
+    check(
+      "finance_budget_baseline_reviews_snapshot_check",
+      sql`(jsonb_typeof(${table.snapshot}) = 'object' AND ${table.snapshot}->>'month' = ${table.periodMonth} AND ${table.snapshot}->>'budgetVersionId' = ${table.budgetVersionId}::text AND ${table.snapshot}->>'planId' = ${table.planId}::text) IS TRUE`,
+    ),
+    check(
+      "finance_budget_baseline_reviews_fingerprint_check",
+      sql`${table.fingerprint} ~ '^[a-f0-9]{64}$' AND ${table.sourceFingerprint} ~ '^[a-f0-9]{64}$'`,
+    ),
+  ],
+);
+
+/** One immutable, explicitly human-confirmed account universe and currency per month. */
+export const financeBudgetBaselineQualifications = pgTable(
+  "finance_budget_baseline_qualifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    periodMonth: text("period_month").notNull(),
+    reviewId: uuid("review_id").notNull(),
+    snapshot: jsonb("snapshot").$type<Record<string, unknown>>().notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    confirmedByActorId: text("confirmed_by_actor_id").notNull(),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }).notNull(),
+    qualificationKind: text("qualification_kind").$type<"current" | "retrospective">().notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_budget_baseline_qualifications_user_month_idx").on(
+      table.userId,
+      table.periodMonth,
+    ),
+    foreignKey({
+      name: "finance_budget_baseline_qualifications_review_fk",
+      columns: [table.reviewId, table.userId],
+      foreignColumns: [financeBudgetBaselineReviews.id, financeBudgetBaselineReviews.userId],
+    }),
+    check(
+      "finance_budget_baseline_qualifications_month_check",
+      sql`${table.periodMonth} ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'`,
+    ),
+    check(
+      "finance_budget_baseline_qualifications_snapshot_check",
+      sql`(jsonb_typeof(${table.snapshot}) = 'object' AND ${table.snapshot}->>'month' = ${table.periodMonth}) IS TRUE`,
+    ),
+    check(
+      "finance_budget_baseline_qualifications_fingerprint_check",
+      sql`${table.fingerprint} ~ '^[a-f0-9]{64}$'`,
+    ),
+    check(
+      "finance_budget_baseline_qualifications_kind_check",
+      sql`${table.qualificationKind} IN ('current', 'retrospective')`,
+    ),
+    check(
+      "finance_budget_baseline_qualifications_human_check",
+      sql`${table.confirmedByActorId} = ${table.userId}::text`,
+    ),
+  ],
+);
+
+/** Owner conversation sequences are allocated under the canonical Finance owner lock. */
+export const financeConversations = pgTable(
+  "finance_conversations",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    nextSequence: bigint("next_sequence", { mode: "bigint" }).notNull().default(0n),
+  },
+  (table) => [check("finance_conversations_sequence_check", sql`${table.nextSequence} >= 0`)],
+);
+
+export const financeConversationMessages = pgTable(
+  "finance_conversation_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sequence: bigint("sequence", { mode: "bigint" }).notNull(),
+    authorKind: text("author_kind").$type<"user" | "agent">().notNull(),
+    text: text("text").notNull(),
+    caseId: uuid("case_id"),
+    caseOwnerId: uuid("case_owner_id"),
+    recordRefs: jsonb("record_refs")
+      .$type<
+        Array<{
+          kind: "transaction" | "account" | "review_case" | "contextual_question";
+          id: string;
+        }>
+      >()
+      .notNull()
+      .default([]),
+    sourceMessageIds: jsonb("source_message_ids").$type<string[]>().notNull().default([]),
+    runId: uuid("run_id"),
+    sourceOperationId: uuid("source_operation_id"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_conversation_messages_owner_id_idx").on(table.userId, table.id),
+    uniqueIndex("finance_conversation_messages_sequence_idx").on(table.userId, table.sequence),
+    uniqueIndex("finance_conversation_messages_idempotency_idx").on(
+      table.userId,
+      table.authorKind,
+      table.idempotencyKey,
+    ),
+    foreignKey({
+      name: "finance_conversation_messages_case_fk",
+      columns: [table.caseOwnerId, table.caseId],
+      foreignColumns: [financeReviewCases.userId, financeReviewCases.id],
+    }).onDelete("set null"),
+    foreignKey({
+      name: "finance_conversation_messages_run_fk",
+      columns: [table.runId, table.userId],
+      foreignColumns: [workspaceMaintenanceRuns.id, workspaceMaintenanceRuns.userId],
+    }),
+    uniqueIndex("finance_conversation_messages_operation_idx").on(
+      table.userId,
+      table.sourceOperationId,
+    ),
+    check(
+      "finance_conversation_messages_case_owner_check",
+      sql`(${table.caseId} IS NULL AND ${table.caseOwnerId} IS NULL) OR (${table.caseId} IS NOT NULL AND ${table.caseOwnerId} IS NOT NULL AND ${table.caseOwnerId} = ${table.userId})`,
+    ),
+    check("finance_conversation_messages_sequence_check", sql`${table.sequence} > 0`),
+    check(
+      "finance_conversation_messages_author_check",
+      sql`${table.authorKind} IN ('user', 'agent')`,
+    ),
+    check(
+      "finance_conversation_messages_text_check",
+      sql`length(btrim(${table.text})) BETWEEN 1 AND 10000`,
+    ),
+  ],
+);
+
+export const financeConversationBatches = pgTable(
+  "finance_conversation_batches",
+  {
+    runId: uuid("run_id").primaryKey(),
+    userId: uuid("user_id").notNull(),
+    automationScheduleId: uuid("automation_schedule_id"),
+    authorizationConnectionId: uuid("authorization_connection_id"),
+    cursorKey: text("cursor_key").notNull(),
+    cutoffSequence: bigint("cutoff_sequence", { mode: "bigint" }).notNull(),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_conversation_batches_owner_run_idx").on(table.userId, table.runId),
+    foreignKey({
+      name: "finance_conversation_batches_run_fk",
+      columns: [table.runId, table.userId],
+      foreignColumns: [workspaceMaintenanceRuns.id, workspaceMaintenanceRuns.userId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_conversation_batches_schedule_fk",
+      columns: [table.userId, table.automationScheduleId],
+      foreignColumns: [automationHostSchedules.userId, automationHostSchedules.id],
+    }),
+    check("finance_conversation_batches_cutoff_check", sql`${table.cutoffSequence} >= 0`),
+    check(
+      "finance_conversation_batches_binding_check",
+      sql`(${table.automationScheduleId} IS NULL) = (${table.authorizationConnectionId} IS NULL)`,
+    ),
+  ],
+);
+
+export const financeConversationBatchMessages = pgTable(
+  "finance_conversation_batch_messages",
+  {
+    userId: uuid("user_id").notNull(),
+    runId: uuid("run_id").notNull(),
+    messageId: uuid("message_id").notNull(),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.runId, table.messageId] }),
+    uniqueIndex("finance_conversation_batch_messages_once_idx").on(table.userId, table.messageId),
+    foreignKey({
+      name: "finance_conversation_batch_messages_batch_fk",
+      columns: [table.userId, table.runId],
+      foreignColumns: [financeConversationBatches.userId, financeConversationBatches.runId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_conversation_batch_messages_message_fk",
+      columns: [table.userId, table.messageId],
+      foreignColumns: [financeConversationMessages.userId, financeConversationMessages.id],
+    }),
+    check(
+      "finance_conversation_batch_messages_ack_check",
+      sql`${table.acknowledgedAt} IS NULL OR (${table.deliveredAt} IS NOT NULL AND ${table.acknowledgedAt} >= ${table.deliveredAt})`,
+    ),
+  ],
+);
+
+/** Human rendered cursor is separate from host batch delivery and acknowledgment. */
+export const financeConversationReadCursors = pgTable(
+  "finance_conversation_read_cursors",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    readThroughSequence: bigint("read_through_sequence", { mode: "bigint" }).notNull().default(0n),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    check(
+      "finance_conversation_read_cursors_sequence_check",
+      sql`${table.readThroughSequence} >= 0`,
+    ),
+  ],
+);
+
+export const financeConversationCapabilities = pgTable(
+  "finance_conversation_capabilities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    automationScheduleId: uuid("automation_schedule_id").notNull(),
+    authorizationConnectionId: uuid("authorization_connection_id").notNull(),
+    protocolVersion: text("protocol_version").notNull(),
+    nonceDigest: text("nonce_digest").notNull(),
+    challengeText: text("challenge_text").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    response: text("response"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: "finance_conversation_capabilities_schedule_fk",
+      columns: [table.userId, table.automationScheduleId],
+      foreignColumns: [automationHostSchedules.userId, automationHostSchedules.id],
+    }).onDelete("cascade"),
+    index("finance_conversation_capabilities_binding_idx").on(
+      table.userId,
+      table.automationScheduleId,
+      table.authorizationConnectionId,
+      table.protocolVersion,
+    ),
+    check(
+      "finance_conversation_capabilities_proof_check",
+      sql`(${table.acknowledgedAt} IS NULL OR ${table.fetchedAt} IS NOT NULL) AND (${table.respondedAt} IS NULL OR ${table.acknowledgedAt} IS NOT NULL) AND (${table.verifiedAt} IS NULL OR (${table.respondedAt} IS NOT NULL AND ${table.response} IS NOT NULL))`,
+    ),
+  ],
+);
+
+/** Causal effect evidence, committed by the existing mutation owner transaction. */
+export const financeConversationEvidence = pgTable(
+  "finance_conversation_evidence",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    runId: uuid("run_id").notNull(),
+    caseId: uuid("case_id"),
+    caseOwnerId: uuid("case_owner_id"),
+    sourceContext: jsonb("source_context").$type<{ caseId: string | null }>().notNull(),
+    actionKey: text("action_key").notNull(),
+    sourceOperationId: uuid("source_operation_id"),
+    sourceMessageIds: jsonb("source_message_ids").$type<string[]>().notNull(),
+    explanation: text("explanation").notNull(),
+    effectRefs: jsonb("effect_refs").$type<Array<{ kind: string; id: string }>>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_conversation_evidence_action_idx").on(table.userId, table.actionKey),
+    uniqueIndex("finance_conversation_evidence_operation_idx").on(
+      table.userId,
+      table.sourceOperationId,
+    ),
+    foreignKey({
+      name: "finance_conversation_evidence_batch_fk",
+      columns: [table.userId, table.runId],
+      foreignColumns: [financeConversationBatches.userId, financeConversationBatches.runId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_conversation_evidence_case_fk",
+      columns: [table.caseOwnerId, table.caseId],
+      foreignColumns: [financeReviewCases.userId, financeReviewCases.id],
+    }).onDelete("set null"),
+    check(
+      "finance_conversation_evidence_case_owner_check",
+      sql`(${table.caseId} IS NULL AND ${table.caseOwnerId} IS NULL) OR (${table.caseId} IS NOT NULL AND ${table.caseOwnerId} IS NOT NULL AND ${table.caseOwnerId} = ${table.userId})`,
+    ),
+    check(
+      "finance_conversation_evidence_explanation_check",
+      sql`length(btrim(${table.explanation})) BETWEEN 1 AND 4000`,
+    ),
+  ],
+);
+
+/** Review receipts only; canonical financial values and messaging authority stay with their owners. */
+export const financeOnboardingStates = pgTable(
+  "finance_onboarding_states",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull().default(0),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    answers: jsonb("answers")
+      .$type<Array<{ questionId: string; disposition: "answered" | "none" | "unknown" }>>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    displayPreferencesReviewed: boolean("display_preferences_reviewed").notNull().default(false),
+    automationChoice: text("automation_choice").$type<"later" | "now">(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    check("finance_onboarding_states_revision_check", sql`${table.revision} >= 0`),
+    check(
+      "finance_onboarding_states_answers_check",
+      sql`jsonb_typeof(${table.answers}) = 'array' AND jsonb_array_length(${table.answers}) <= 100`,
+    ),
+    check(
+      "finance_onboarding_states_choice_check",
+      sql`${table.automationChoice} IS NULL OR ${table.automationChoice} IN ('later', 'now')`,
+    ),
+    check(
+      "finance_onboarding_states_completion_check",
+      sql`${table.completedAt} IS NULL OR (${table.revision} > 0 AND ${table.automationChoice} IS NOT NULL AND ${table.displayPreferencesReviewed})`,
+    ),
+  ],
+);
+
+/** Exact operation responses support owner-scoped replay in the same commit as the state revision. */
+export const financeOnboardingReceipts = pgTable(
+  "finance_onboarding_receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    operation: text("operation").$type<"save" | "complete">().notNull(),
+    requestHash: text("request_hash").notNull(),
+    result: jsonb("result").$type<Record<string, unknown>>().notNull(),
+    actorType: text("actor_type").$type<ActorType>().notNull(),
+    actorId: text("actor_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_onboarding_receipts_owner_key_idx").on(table.userId, table.idempotencyKey),
+    check(
+      "finance_onboarding_receipts_key_check",
+      sql`length(btrim(${table.idempotencyKey})) BETWEEN 1 AND 200`,
+    ),
+    check(
+      "finance_onboarding_receipts_operation_check",
+      sql`${table.operation} IN ('save', 'complete')`,
+    ),
+    check("finance_onboarding_receipts_hash_check", sql`${table.requestHash} ~ '^[a-f0-9]{64}$'`),
+    check(
+      "finance_onboarding_receipts_result_check",
+      sql`jsonb_typeof(${table.result}) = 'object'`,
     ),
   ],
 );

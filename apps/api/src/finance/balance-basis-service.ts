@@ -680,33 +680,9 @@ export function createFinanceBalanceBasisService({
           });
           if (!timezone) return unavailable("balance_basis_unavailable");
           const today = localDateToIso(localDateAt(asOf, timezone.planningTimezone));
-          const visibleVersionIds = [
-            ...new Set(schedule.occurrences.map((row) => row.scheduleVersionId)),
-          ];
-          const successors = visibleVersionIds.length
-            ? await tx
-                .select({ previous: financeRecurringScheduleVersions.supersedesId })
-                .from(financeRecurringScheduleVersions)
-                .where(
-                  and(
-                    eq(financeRecurringScheduleVersions.userId, userId),
-                    inArray(financeRecurringScheduleVersions.supersedesId, visibleVersionIds),
-                    lte(financeRecurringScheduleVersions.effectiveFrom, today),
-                  ),
-                )
-                .limit(1001)
-            : [];
-          if (successors.length > 1000) return unavailable("unconfirmed_schedule");
-          const retiredVersions = new Set(successors.map((row) => row.previous));
-          const reversedMatchIds = new Set(schedule.matchEvents.flatMap(event => event.reversesMatchId ? [event.reversesMatchId] : []));
-          const active = schedule.occurrences.filter(row => {
-            if (!row.inCurrentSchedule) return false;
-            // A successor does not settle a predecessor's unpaid fixed commitment.
-            // Only materialized, fully reversed variable correction history is excluded.
-            if (row.amountBasis !== "variable" || !retiredVersions.has(row.scheduleVersionId) || !row.occurrenceId) return true;
-            const originals = schedule.matchEvents.filter(event => event.occurrenceId === row.occurrenceId && event.kind === "match");
-            return !originals.length || !originals.every(event => reversedMatchIds.has(event.id));
-          });
+          // Reversal restores an occurrence's residual; it never cancels its commitment.
+          // Only the canonical effective interval determines whether history is forecastable.
+          const active = schedule.occurrences.filter(row => row.inCurrentSchedule);
           const paydayRow = active
             .filter(
               (row) =>
@@ -755,7 +731,7 @@ export function createFinanceBalanceBasisService({
           )
             return unavailable("unconfirmed_schedule");
           const horizon = active.filter((row) => row.localDate <= paydayRow.localDate);
-          // Reversed historical/retired versions are retained for inspection, never forecast inputs.
+          // Out-of-effective-interval history remains inspectable, outside forecast inputs.
           if (
             horizon.some(
               (row) =>

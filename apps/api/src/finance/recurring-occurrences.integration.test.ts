@@ -398,7 +398,7 @@ describe.sequential("recurring schedule actual matching and explicit balance bas
     expect(view.projection.status === "unavailable" && view.projection.reasons.map(reason => reason.code)).toContain("overdue_expected");
   });
 
-  it("uses today's next payday and excludes retired reversed variable history from a fixed successor forecast", async () => {
+  it("keeps a reversed unpaid variable predecessor unknown inside its original effective interval", async () => {
     const f = await fixture();
     const variable = await f.service.confirmFinanceRecurringSchedule(
       {
@@ -452,6 +452,66 @@ describe.sequential("recurring schedule actual matching and explicit balance bas
       ),
     ).toBe(true);
     expect(view.schedule.matchEvents.some((row) => row.kind === "reverse")).toBe(true);
+    expect(view.schedule.occurrences.find(row => row.scheduleVersionId === variable.data.id && row.localDate === "2026-02-22")).toMatchObject({ inCurrentSchedule: true, remainingExpectedCents: 10000 });
+    expect(view.projection.status).toBe("unavailable");
+    expect(view.projection.status === "unavailable" && view.projection.reasons.map(reason => reason.code)).toContain("unknown_amount");
+  });
+
+  it("uses today's next payday while retaining reversed variable history outside its effective interval", async () => {
+    const f = await fixture();
+    const variable = await f.service.confirmFinanceRecurringSchedule(
+      {
+        ...f.costInput,
+        expectedSourceRevision: 2,
+        supersedesId: f.cost.data.id,
+        effectiveFrom: "2026-02-15",
+        anchorLocalDate: "2026-02-15",
+        amountBasis: "variable",
+        idempotencyKey: randomUUID(),
+      },
+      f.context,
+    );
+    const match = await f.service.manageFinanceOccurrenceMatch(
+      {
+        ...f.match,
+        occurrence: { scheduleVersionId: variable.data.id, localDate: "2026-03-01", slot: 0 },
+      },
+      f.context,
+    );
+    await f.service.manageFinanceOccurrenceMatch(
+      {
+        operation: "reverse",
+        matchId: match.data.id,
+        rationale: "Correct variable schedule",
+        idempotencyKey: randomUUID(),
+      },
+      f.context,
+    );
+    await f.service.confirmFinanceRecurringSchedule(
+      {
+        ...f.costInput,
+        expectedSourceRevision: 3,
+        supersedesId: variable.data.id,
+        effectiveFrom: "2026-03-01",
+        anchorLocalDate: "2026-03-01",
+        idempotencyKey: randomUUID(),
+      },
+      f.context,
+    );
+    await closePreviousPayday(f);
+    await statement(f);
+    const view = await f.service.getFinanceCashflowProjection(f.user.id, {
+      from: "2026-02-22",
+      to: "2026-04-30",
+      selectedIncomeStreamId: f.income.id,
+    });
+    expect(
+      view.schedule.occurrences.some(
+        (row) => row.scheduleVersionId === variable.data.id && row.amountBasis === "variable",
+      ),
+    ).toBe(true);
+    expect(view.schedule.matchEvents.some((row) => row.kind === "reverse")).toBe(true);
+    expect(view.schedule.occurrences.find(row => row.scheduleVersionId === variable.data.id && row.localDate === "2026-03-01")).toMatchObject({ inCurrentSchedule: false, remainingExpectedCents: 0 });
     expect(view.projection).toMatchObject({ status: "estimated", endingBalanceMinorUnits: 350000 });
   });
 

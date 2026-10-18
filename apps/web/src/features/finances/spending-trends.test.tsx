@@ -9,6 +9,10 @@ import {
   spendingTrendBins,
 } from "./spending-trends";
 
+function required<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error("Expected fixture entry");
+  return value;
+}
 const scope: FinanceSpendingScope = {
   from: "2026-03-01",
   through: "2026-03-31",
@@ -126,7 +130,7 @@ describe("spending trends", () => {
     const value = dashboard();
     value.snapshot.scope.through = "2026-05-01";
     value.snapshot.bins.push({
-      ...value.snapshot.bins[0],
+      ...required(value.snapshot.bins[0]),
       date: "2026-03-02",
       netCents: -25,
       positiveAreaCents: 0,
@@ -134,8 +138,8 @@ describe("spending trends", () => {
     });
     const result = spendingTrendBins(value);
     expect(result.grain).toBe("Weekly");
-    expect(result.bins[0].netCents).toBe(76);
-    expect(result.bins[0].drillDown).toEqual({
+    expect(required(result.bins[0]).netCents).toBe(76);
+    expect(required(result.bins[0]).drillDown).toEqual({
       scope: { ...value.snapshot.scope, through: "2026-03-02" },
       contributionIds: ["c"],
       transactionIds: ["t"],
@@ -144,7 +148,7 @@ describe("spending trends", () => {
   it("labels partial coverage and pending amounts without confirming a missing zero", () => {
     const value = dashboard();
     value.snapshot.bins[0] = {
-      ...value.snapshot.bins[0],
+      ...required(value.snapshot.bins[0]),
       netCents: 0,
       coverage: "unknown",
       provisional: true,
@@ -165,6 +169,6 @@ describe("spending trends", () => {
     expect(screen.getByText(/Percentage unavailable/)).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "Spending trends data" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: /2026-03-01: \$1.01/ }));
-    expect(onSelect).toHaveBeenCalledWith(value.snapshot.bins[0].drillDown);
+    expect(onSelect).toHaveBeenCalledWith(required(value.snapshot.bins[0]).drillDown);
   });
 });

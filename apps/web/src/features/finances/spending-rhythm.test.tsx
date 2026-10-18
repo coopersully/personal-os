@@ -31,10 +31,10 @@ it("distinguishes missing, zero, negative and future days and navigates dates by
       transactionIds: [`t${index}`],
     },
   }));
-  const dashboard = {
+  const dashboard = completeDashboard({
     snapshot: { scope, bins },
     source: { freshness: "current" },
-  } as FinanceSpendingDashboard;
+  });
   const onSelect = vi.fn();
   render(<FinanceSpendingRhythm dashboard={dashboard} onSelect={onSelect} />);
   const zero = screen.getByRole("button", { name: /2026-03-01.*Confirmed zero/ });
@@ -42,7 +42,11 @@ it("distinguishes missing, zero, negative and future days and navigates dates by
   await userEvent.keyboard("{ArrowRight}");
   expect(screen.getByRole("button", { name: /2026-03-02.*Missing coverage/ })).toHaveFocus();
   await userEvent.keyboard("{ArrowRight}{Enter}");
-  expect(onSelect).toHaveBeenCalledWith(bins[2].drillDown);
+  expect(onSelect).toHaveBeenCalledWith({
+    scope: { ...scope, from: "2026-03-03", through: "2026-03-03" },
+    contributionIds: ["c2"],
+    transactionIds: ["t2"],
+  });
   expect(screen.getByRole("button", { name: /2026-03-03.*Net refund/ })).toHaveFocus();
   await userEvent.keyboard("{End}");
   expect(screen.getByRole("button", { name: /2026-03-04.*Future/ })).toHaveFocus();
@@ -63,7 +67,7 @@ function observedDashboard(): FinanceSpendingDashboard {
     includePending: false,
     subtractRefunds: true,
   };
-  return {
+  return completeDashboard({
     snapshot: {
       scope,
       bins: [100, 0, -50].map((netCents, index) => ({
@@ -72,14 +76,14 @@ function observedDashboard(): FinanceSpendingDashboard {
         positiveAreaCents: Math.max(0, netCents),
         negativeAdjustmentCents: Math.max(0, -netCents),
         pendingCents: 0,
-        coverage: index === 2 ? "partial" : "unknown",
+        coverage: index === 2 ? ("partial" as const) : ("unknown" as const),
         provisional: false,
         future: false,
         drillDown: { scope, contributionIds: [], transactionIds: [] },
       })),
     },
     source: { freshness: "unknown" },
-  } as FinanceSpendingDashboard;
+  });
 }
 it("preserves observed positive and refund tones independently of uncertain coverage", () => {
   render(<FinanceSpendingRhythm dashboard={observedDashboard()} onSelect={vi.fn()} />);
@@ -133,3 +137,35 @@ it("retains a calendar tabstop and focused detail when the range becomes shorter
   );
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });
+
+function completeDashboard(value: {
+  snapshot: Pick<FinanceSpendingDashboard["snapshot"], "scope" | "bins">;
+  source: Pick<FinanceSpendingDashboard["source"], "freshness">;
+}): FinanceSpendingDashboard {
+  return {
+    schemaVersion: 1,
+    snapshot: {
+      schemaVersion: 1,
+      asOf: "2026-03-04T12:00:00Z",
+      coverage: "unknown",
+      contributions: [],
+      netCents: 0,
+      positiveAreaCents: 0,
+      negativeAdjustmentCents: 0,
+      qualifications: [],
+      budgetComparison: { status: "unavailable", reason: "historical_budget_not_resolved" },
+      ...value.snapshot,
+    },
+    source: { lastSyncedAt: null, reasons: [], ...value.source },
+    effectiveGrouping: "categories",
+    groupingFallback: null,
+    groups: [],
+    positiveAreaCents: 0,
+    negativeAdjustmentCents: 0,
+    excludedUncategorizedCents: 0,
+    accounts: [],
+    categories: [],
+    transactions: [],
+    currency: { supported: "USD", unsupported: [] },
+  };
+}

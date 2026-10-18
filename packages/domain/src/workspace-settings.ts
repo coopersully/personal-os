@@ -73,7 +73,7 @@ export const workspacePreferenceSchemas = {
     .object({
       ...common,
       financeTransactionView: financeTransactionViewPreferenceSchema.default("table"),
-      financeSpendingView: z.enum(["bubbles", "list"]).default("bubbles"),
+      financeSpendingView: z.enum(["bubbles", "list", "trends", "rhythm"]).default("bubbles"),
       financeSpendingGrouping: z.enum(["auto", "buckets", "categories"]).default("auto"),
       financeSpendingIncludePending: z.boolean().default(true),
       financeSpendingIncludeUncategorized: z.boolean().default(true),

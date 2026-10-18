@@ -76,7 +76,9 @@ export function projectFinanceSpendingMonthlyBudget(
       const targets = baseline.allocations.filter((row) =>
         group.categoryIds.includes(row.categoryId),
       );
-      const budgetCents = targets.reduce((sum, row) => sum + row.amountCents, 0) || null;
+      const budgetCents = targets.length
+        ? targets.reduce((sum, row) => sum + row.amountCents, 0)
+        : null;
       const usedCents = monthly.contributions
         .filter((row) => group.categoryIds.includes(row.categoryId))
         .reduce((sum, row) => sum + row.netCents, 0);

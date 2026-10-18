@@ -160,7 +160,7 @@ export const financeSpendingMonthlyBudgetSchema = z.discriminatedUnion("state", 
     groups: z.array(
       z.object({
         groupId: reference,
-        budgetCents: cents.positive().nullable(),
+        budgetCents: cents.nonnegative().nullable(),
         usedCents: cents,
         overspent: z.boolean(),
       }),

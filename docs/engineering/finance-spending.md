@@ -134,3 +134,16 @@ a translucent tint. Unassigned categories and buckets use a stable identity-base
 The current bucket schema has no persisted color or icon fields; the fallback does not claim user
 assignment or persisted bucket color support. Visual metadata does not change contribution totals or
 exact transaction references.
+
+
+Qualified budget categories remain in List when the selected period has no activity, with exact
+zero selected-period amounts and empty source references. Monthly usage still covers the qualified
+whole month and accounts. Explicit category exclusions remain respected; unavailable qualification
+does not add unrelated empty rows. Zero-area groups do not create bubbles.
+
+Fill clip-path transitions use 300 ms and reduced motion uses zero duration. The Spending response
+contract can represent an explicit zero target separately from an absent target; defensive rendering
+shows positive usage as overspent without an infinite percentage and zero usage as no utilization.
+The currently integrated budget qualification authority still rejects zero allocations. Supporting
+explicit zero qualification remains an authority-owned contract dependency; consumer handling alone
+does not establish that producer capability.

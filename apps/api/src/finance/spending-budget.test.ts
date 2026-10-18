@@ -210,6 +210,64 @@ describe("Whole-month budget usage independent from bubble selection", () => {
       ).toMatchObject({ state: "unavailable", reason });
     }
   });
+  it("retains qualified zero-activity categories and buckets with truthful whole-month usage", () => {
+    const selected = {
+      ...query,
+      scope: { ...query.scope, from: "2026-03-09", through: "2026-03-09", categoryIds: null },
+    };
+    const before = buildFinanceSpendingDashboard(evidence, selected, metadata);
+    const dashboard = buildFinanceSpendingDashboard(evidence, selected, metadata, baseline);
+    expect(dashboard.snapshot).toEqual(before.snapshot);
+    expect(dashboard.snapshot.netCents).toBe(0);
+    expect(dashboard.transactions).toEqual([]);
+    expect(dashboard.groups).toHaveLength(1);
+    expect(dashboard.groups[0]).toMatchObject({
+      id: id(3),
+      netCents: 0,
+      positiveAreaCents: 0,
+      drillDown: { contributionIds: [], transactionIds: [] },
+    });
+    expect(dashboard.monthlyBudget).toMatchObject({
+      state: "qualified",
+      groups: [{ groupId: id(3), budgetCents: 1000, usedCents: 1600, overspent: true }],
+    });
+    const bucket = buildFinanceSpendingDashboard(
+      evidence,
+      { ...selected, grouping: "buckets" },
+      {
+        ...metadata,
+        buckets: [{ id: id(8), label: "Needs", categoryIds: [id(3)] }],
+      },
+      baseline,
+    );
+    expect(bucket.groups[0]).toMatchObject({
+      netCents: 0,
+      categories: [{ id: id(3), netCents: 0 }],
+    });
+    expect(bucket.monthlyBudget).toMatchObject({
+      state: "qualified",
+      groups: [
+        expect.objectContaining({ groupId: id(8), usedCents: 1600 }),
+        expect.objectContaining({ groupId: id(3), usedCents: 1600 }),
+      ],
+    });
+    expect(
+      buildFinanceSpendingDashboard(
+        evidence,
+        { ...selected, scope: { ...selected.scope, categoryIds: [] } },
+        metadata,
+        baseline,
+      ).groups,
+    ).toEqual([]);
+    expect(
+      buildFinanceSpendingDashboard(
+        evidence,
+        { ...selected, scope: { ...selected.scope, through: "2026-04-01" } },
+        metadata,
+        baseline,
+      ).groups,
+    ).toEqual([]);
+  });
   it("withholds unsupported transaction currency despite explicit baseline currency", () => {
     const input = {
       ...evidence,

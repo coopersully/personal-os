@@ -47,7 +47,7 @@ describe.sequential("Finance preferences and migration-time access", () => {
     const journalPath = resolve(staging, "meta/_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8"));
     journal.entries = journal.entries.filter(
-      (entry: { tag: string }) => entry.tag !== "0118_finance_preferences_legacy_access",
+      (entry: { tag: string }) => Number(entry.tag.slice(0, 4)) < 118,
     );
     await writeFile(journalPath, JSON.stringify(journal));
     await migrateDatabase(database.db, staging);
@@ -218,6 +218,17 @@ describe.sequential("Finance preferences and migration-time access", () => {
         .set({ financeSpendingView: "invalid" })
         .where(eq(financesWorkspaceSettings.userId, legacyId)),
     ).rejects.toThrow();
+    await expect(
+      database.db
+        .delete(financeOnboardingLegacyAccess)
+        .where(eq(financeOnboardingLegacyAccess.userId, legacyId)),
+    ).rejects.toThrow();
+    expect(
+      await database.db
+        .select()
+        .from(financeOnboardingLegacyAccess)
+        .where(eq(financeOnboardingLegacyAccess.userId, legacyId)),
+    ).toHaveLength(1);
     await database.db.delete(users).where(eq(users.id, legacyId));
     expect(
       await database.db

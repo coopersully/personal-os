@@ -1,8 +1,12 @@
-import type {
-  FinanceSpendingDashboard,
-  FinanceSpendingDrillDown,
-  FinanceSpendingGroup,
+import {
+  type FinanceSpendingDashboard,
+  type FinanceSpendingDrillDown,
+  type FinanceSpendingGroup,
+  type FinanceSpendingReferenceFilter,
+  financeSpendingReferenceFilterSchema,
+  financeSpendingScopeSchema,
 } from "@personal-os/domain";
+import { Link } from "react-router-dom";
 import {
   ResponsiveDialog,
   ResponsiveDialogContent,
@@ -12,6 +16,61 @@ import {
 } from "@/components/responsive-dialog";
 import { Button } from "@/components/ui/button";
 import { formatMoney } from "./format";
+/** Only bounded, reproducible selections can open the exact Transactions consumer. */
+export function spendingTransactionsDestination(
+  data: FinanceSpendingDashboard,
+  group: FinanceSpendingGroup | null,
+  selection: FinanceSpendingDrillDown | null | undefined,
+) {
+  if (!selection || !data.referenceRevision) return null;
+  const parsed = financeSpendingReferenceFilterSchema.safeParse({
+    query: {
+      scope: data.snapshot.scope,
+      grouping: data.effectiveGrouping,
+      includeUncategorized: true,
+    },
+    referenceRevision: data.referenceRevision,
+    groupId: group?.id ?? null,
+    from: selection.scope.from,
+    through: selection.scope.through,
+  });
+  if (!parsed.success) return null;
+  const normalized = financeSpendingScopeSchema.safeParse({
+    ...selection.scope,
+    from: data.snapshot.scope.from,
+    through: data.snapshot.scope.through,
+  });
+  if (
+    !normalized.success ||
+    JSON.stringify(normalized.data) !== JSON.stringify(parsed.data.query.scope)
+  )
+    return null;
+  const canonicalGroup = group
+    ? data.groups.flatMap((item) => [item, ...item.categories]).find((item) => item.id === group.id)
+    : null;
+  if (group && !canonicalGroup) return null;
+  const groupIds = canonicalGroup ? new Set(canonicalGroup.drillDown.contributionIds) : null;
+  const expected = data.snapshot.contributions.filter(
+    (item) =>
+      item.date >= parsed.data.from &&
+      item.date <= parsed.data.through &&
+      (!groupIds || groupIds.has(item.id)),
+  );
+  const sameIds = (left: string[], right: string[]) =>
+    JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
+  if (
+    !sameIds(
+      selection.contributionIds,
+      expected.map((item) => item.id),
+    ) ||
+    !sameIds(selection.transactionIds, [...new Set(expected.map((item) => item.transactionId))])
+  )
+    return null;
+  const filter: FinanceSpendingReferenceFilter = parsed.data;
+  const serialized = JSON.stringify(filter);
+  if (serialized.length > 16000) return null;
+  return `/finances/transactions?${new URLSearchParams({ spending: serialized })}`;
+}
 export function SpendingDetail({
   data,
   group,
@@ -30,6 +89,7 @@ export function SpendingDetail({
       item.id === group?.id || item.categories.some((category) => category.id === group?.id),
   );
   const selectedScope = group?.drillDown ?? drillDown;
+  const destination = spendingTransactionsDestination(data, group, selectedScope);
   const ids = new Set(selectedScope?.contributionIds);
   const contributions = data.snapshot.contributions.filter((item) => ids.has(item.id));
   const totals =
@@ -102,6 +162,16 @@ export function SpendingDetail({
           Monthly budget comparison unavailable: budget account and currency scope is not
           established.
         </p>
+        {destination ? (
+          <Button asChild variant="secondary">
+            <Link to={destination}>Open matching transactions</Link>
+          </Button>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Matching transactions are unavailable for this selection. Reload Spending to obtain a
+            current, exact reference.
+          </p>
+        )}
         <ul
           className="flex max-h-80 flex-col gap-3 overflow-auto"
           aria-label="Exact spending contributions"

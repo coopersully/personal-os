@@ -1,9 +1,16 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import type { FinanceSpendingDashboard, FinanceSpendingDrillDown } from "@personal-os/domain";
-import { render, screen } from "@testing-library/react";
-import { expect, it, vi } from "vitest";
-import { SpendingDetail } from "./spending-detail";
+import {
+  type FinanceSpendingDashboard,
+  type FinanceSpendingDrillDown,
+  financeSpendingReferenceFilterSchema,
+} from "@personal-os/domain";
+import { cleanup, render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+import { afterEach, expect, it, vi } from "vitest";
+import { SpendingDetail, spendingTransactionsDestination } from "./spending-detail";
+
+afterEach(() => cleanup());
 
 it("generalized day drilldown selects exact contribution IDs rather than all allocations of a transaction", () => {
   const drillDown = {
@@ -69,4 +76,142 @@ it("generalized day drilldown selects exact contribution IDs rather than all all
   expect(dialog).not.toHaveTextContent("$90.00");
   expect(screen.getAllByText("Mixed purchase")).toHaveLength(1);
   expect(dialog).toHaveTextContent("Split allocation");
+});
+
+function referenceFixture() {
+  const scope = {
+    from: "2026-10-01",
+    through: "2026-10-31",
+    timezone: "America/New_York",
+    accountIds: [] as string[] | null,
+    categoryIds: ["food", null],
+    basis: "full_outflow" as const,
+    includePending: false,
+    subtractRefunds: false,
+  };
+  const selected = {
+    id: "selected",
+    transactionId: "purchase",
+    date: "2026-10-08",
+    netCents: 700,
+    grossCents: 1000,
+    reimbursementAdjustmentCents: 200,
+    reimbursementOutstandingCents: 150,
+    refundAdjustmentCents: 100,
+    pending: false,
+  };
+  const other = { ...selected, id: "other", transactionId: "another-purchase", date: "2026-10-09" };
+  const drillDown = {
+    scope,
+    contributionIds: [selected.id],
+    transactionIds: [selected.transactionId],
+  };
+  const group = {
+    id: "category-food",
+    kind: "category",
+    label: "Groceries",
+    drillDown,
+    categories: [],
+    grossCents: 1000,
+    reimbursementAdjustmentCents: 200,
+    reimbursementOutstandingCents: 150,
+    refundAdjustmentCents: 100,
+    netCents: 700,
+    pendingCents: 0,
+  };
+  const data = {
+    referenceRevision: "a".repeat(64),
+    effectiveGrouping: "categories",
+    groups: [group],
+    snapshot: { scope, contributions: [selected, other] },
+    transactions: [{ id: "purchase", merchant: "Market" }],
+  } as unknown as FinanceSpendingDashboard;
+  const selectedGroup = data.groups[0];
+  if (!selectedGroup) throw new Error("No group");
+  return { data, group: selectedGroup, drillDown };
+}
+it("encodes a validated exact group destination with original scope and no raw membership lists", () => {
+  const { data, group, drillDown } = referenceFixture();
+  const destination = spendingTransactionsDestination(data, group, drillDown);
+  expect(destination).not.toBeNull();
+  const encoded = new URL(destination ?? "", "https://nohmi.example").searchParams.get("spending");
+  const filter = financeSpendingReferenceFilterSchema.parse(JSON.parse(encoded ?? "{}"));
+  expect(filter).toEqual({
+    query: { scope: data.snapshot.scope, grouping: "categories", includeUncategorized: true },
+    referenceRevision: "a".repeat(64),
+    groupId: "category-food",
+    from: "2026-10-01",
+    through: "2026-10-31",
+  });
+  expect(encoded).not.toContain("contributionIds");
+  expect(encoded).not.toContain("transactionIds");
+  render(
+    <MemoryRouter>
+      <SpendingDetail data={data} group={group} onClose={vi.fn()} onSelect={vi.fn()} />
+    </MemoryRouter>,
+  );
+  expect(screen.getByRole("link", { name: "Open matching transactions" })).toHaveAttribute(
+    "href",
+    destination,
+  );
+});
+it("keeps day/bin scope inside the original query and uses null group identity", () => {
+  const { data, drillDown } = referenceFixture();
+  data.snapshot.scope.accountIds = null;
+  const day = {
+    ...drillDown,
+    scope: { ...data.snapshot.scope, from: "2026-10-08", through: "2026-10-08" },
+  };
+  const destination = spendingTransactionsDestination(data, null, day);
+  const filter = financeSpendingReferenceFilterSchema.parse(
+    JSON.parse(
+      new URL(destination ?? "", "https://nohmi.example").searchParams.get("spending") ?? "{}",
+    ),
+  );
+  expect(filter.groupId).toBeNull();
+  expect(filter.query.scope.accountIds).toBeNull();
+  expect(filter.query.scope.from).toBe("2026-10-01");
+  expect(filter.query.scope.through).toBe("2026-10-31");
+  expect(filter.from).toBe("2026-10-08");
+  expect(filter.through).toBe("2026-10-08");
+  expect(filter.query.scope.categoryIds).toEqual(["food", null]);
+  expect(filter.query.scope).toMatchObject({
+    basis: "full_outflow",
+    includePending: false,
+    subtractRefunds: false,
+    timezone: "America/New_York",
+  });
+});
+it("fails closed for missing revisions, oversized filters, or ambiguous selected membership", () => {
+  const { data, group, drillDown } = referenceFixture();
+  const { referenceRevision: _, ...older } = data;
+  expect(spendingTransactionsDestination(older, group, drillDown)).toBeNull();
+  expect(
+    spendingTransactionsDestination(data, group, { ...drillDown, contributionIds: ["other"] }),
+  ).toBeNull();
+  expect(spendingTransactionsDestination(data, null, drillDown)).toBeNull();
+  const oversized = {
+    ...data,
+    snapshot: {
+      ...data.snapshot,
+      scope: {
+        ...data.snapshot.scope,
+        accountIds: Array.from(
+          { length: 1000 },
+          (_, index) => `account-with-a-long-reference-${index}`,
+        ),
+      },
+    },
+  };
+  expect(
+    spendingTransactionsDestination(oversized, group, {
+      ...drillDown,
+      scope: oversized.snapshot.scope,
+    }),
+  ).toBeNull();
+  render(<SpendingDetail data={older} group={group} onClose={vi.fn()} onSelect={vi.fn()} />);
+  expect(
+    screen.queryByRole("link", { name: "Open matching transactions" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByText(/Matching transactions are unavailable/)).toBeVisible();
 });

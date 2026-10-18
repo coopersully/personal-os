@@ -278,9 +278,55 @@ describe.sequential("durable Finance conversation intake", () => {
       caseId: null,
       recordRefs: [],
     });
+    const savedReplies = () =>
+      database.db
+        .select()
+        .from(financeConversationMessages)
+        .where(
+          and(
+            eq(financeConversationMessages.userId, f.userId),
+            eq(financeConversationMessages.authorKind, "agent"),
+          ),
+        );
+    await expect(
+      f.conversation.reply(f.agent, {
+        runId: run.id,
+        idempotencyKey: "before-fetch",
+        text: "Unseen answer",
+        sourceMessageIds: [first.id],
+      }),
+    ).rejects.toThrow("fixed");
+    expect(await savedReplies()).toHaveLength(0);
     const page = await f.conversation.pageBatch(f.agent, run.id, "0", 1);
     expect(page.messages.map((message) => message.id)).toEqual([first.id]);
     expect(await f.conversation.pageBatch(f.agent, run.id, "0", 1)).toEqual(page);
+    await expect(
+      f.conversation.reply(f.agent, {
+        runId: run.id,
+        idempotencyKey: "unseen-page",
+        text: "Unseen page answer",
+        sourceMessageIds: [second.id],
+      }),
+    ).rejects.toThrow("fixed");
+    await expect(
+      f.conversation.reply(f.agent, {
+        runId: run.id,
+        idempotencyKey: "mixed-page",
+        text: "Mixed source answer",
+        sourceMessageIds: [first.id, second.id],
+      }),
+    ).rejects.toThrow("fixed");
+    expect(await savedReplies()).toHaveLength(0);
+    const deliveredReply = {
+      runId: run.id,
+      idempotencyKey: "delivered-reply",
+      text: "Answer to the delivered source",
+      sourceMessageIds: [first.id],
+    };
+    const acceptedReply = await f.conversation.reply(f.agent, deliveredReply);
+    expect(acceptedReply.sourceMessageIds).toEqual([first.id]);
+    expect(await f.conversation.reply(f.agent, deliveredReply)).toEqual(acceptedReply);
+    expect(await savedReplies()).toHaveLength(1);
     await expect(f.conversation.acknowledgeBatch(f.agent, run.id, [second.id])).rejects.toThrow(
       "exact",
     );

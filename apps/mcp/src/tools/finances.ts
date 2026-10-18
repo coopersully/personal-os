@@ -14,6 +14,8 @@ import {
   financeMaintenanceInputSchema,
   financeReceiptReviewInputSchema,
   financeSetupInputSchema,
+  financeSpendingQuerySchema,
+  financeSpendingReferenceFilterSchema,
   maintenanceRunStatusSchema,
   manageFinanceGoalInputSchema,
   manageFinanceRecurringItemInputSchema,
@@ -274,6 +276,43 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
         api.exchangeFinanceConversationChallenge(
           challengeId,
           financeConversationProofOperationSchema.parse(operation),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "get_finance_spending",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the Finance Spending dashboard for the exact account/category selection, dates, timezone, basis and grouping. This read never approves or changes a budget.",
+      inputSchema: financeSpendingQuerySchema,
+      title: "Read Finance Spending",
+    },
+    async (query) =>
+      apiResult(() => api.getFinanceSpending(financeSpendingQuerySchema.parse(query))),
+  );
+  server.registerTool(
+    "list_finance_spending_transactions",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read transactions from an exact Spending reference revision and bounded group/date filter. Follow its returned cursor; stale references require a fresh Spending read. This POST-backed read does not mutate records.",
+      inputSchema: z
+        .object({
+          filter: financeSpendingReferenceFilterSchema,
+          cursor: z.string().max(100).optional(),
+          limit: z.number().int().min(1).max(100).default(50),
+        })
+        .strict(),
+      title: "Read Spending source transactions",
+    },
+    async ({ filter, cursor, limit }) =>
+      apiResult(() =>
+        api.listFinanceSpendingTransactions(
+          financeSpendingReferenceFilterSchema.parse(filter),
+          cursor,
+          limit,
         ),
       ),
   );

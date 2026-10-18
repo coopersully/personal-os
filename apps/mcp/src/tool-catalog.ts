@@ -438,6 +438,10 @@ export const iloToolCatalog = {
     destructive: true,
     policy: "approve_each",
   }),
+  get_finance_spending: read("finances", ["finances:read"], "inspect", { openWorld: false }),
+  list_finance_spending_transactions: read("finances", ["finances:read"], "inspect", {
+    openWorld: false,
+  }),
   get_finance_continuations: read("finances", ["finances:maintain"]),
   get_finance_conversation_batch: write(
     "finances",

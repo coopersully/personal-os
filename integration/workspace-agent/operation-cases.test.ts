@@ -6,6 +6,7 @@ import { discoverToolDictionary, renderToolDictionary } from "./tool-dictionary.
 
 it("exposes domain input fields instead of silently narrowing workspace mutations", async () => {
   const mappings = {
+    get_finance_spending: domain.financeSpendingQuerySchema,
     get_finance_budget_baseline_qualification: domain.financeBudgetBaselineQualificationQuerySchema,
     prepare_finance_budget_baseline_qualification:
       domain.prepareFinanceBudgetBaselineQualificationInputSchema,
@@ -242,4 +243,15 @@ it("keeps baseline preparation discoverable only with write authority and human 
   expect(workspaceApiExceptions.confirmFinanceBudgetBaselineQualification.kind).toBe(
     "owner_consent",
   );
+});
+
+it("keeps both Spending reads discoverable with only Finance read authority", async () => {
+  const dictionary = new Map(
+    (await discoverToolDictionary()).map(({ tool, definition }) => [tool.name, definition]),
+  );
+  for (const name of ["get_finance_spending", "list_finance_spending_transactions"])
+    expect(dictionary.get(name)).toMatchObject({
+      readOnly: true,
+      requiredScopes: ["finances:read"],
+    });
 });

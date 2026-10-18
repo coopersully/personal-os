@@ -779,7 +779,7 @@ Execute the exact pending action after inspecting its evidence. The API revalida
 
 ## approve_finance_budget
 
-Budget activation requires exact authenticated human approval in nohmi. Agent calls cannot approve a budget, including with execution or review bypass; direct the user to review the proposal in nohmi.
+Activate the exact inspected proposal and profile revision. Agents must use approvalSource agent_self_approval and have finances:write, explicit finances:execute, and enabled review bypass. Claiming user_instruction is rejected.
 
 - Domain: finances; stage: commit; policy: approved_rule.
 - Grants (all): finances:write, finances:execute.
@@ -792,7 +792,10 @@ Budget activation requires exact authenticated human approval in nohmi. Agent ca
   "properties": {
     "approvalSource": {
       "type": "string",
-      "const": "user_instruction"
+      "enum": [
+        "user_instruction",
+        "agent_self_approval"
+      ]
     },
     "budgetVersionId": {
       "type": "string",
@@ -6122,6 +6125,116 @@ Read the concise current Finance state. Lead with material issues, not internal 
 }
 ```
 
+## get_finance_spending
+
+Read the Finance Spending dashboard for the exact account/category selection, dates, timezone, basis and grouping. This read never approves or changes a budget.
+
+- Domain: finances; stage: inspect; policy: read_only.
+- Grants (all): finances:read.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `getFinanceSpending`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "scope": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+        },
+        "through": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+        },
+        "timezone": {
+          "type": "string"
+        },
+        "accountIds": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "categoryIds": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "basis": {
+          "type": "string",
+          "enum": [
+            "personal_cost",
+            "full_outflow"
+          ]
+        },
+        "includePending": {
+          "type": "boolean"
+        },
+        "subtractRefunds": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "from",
+        "through",
+        "timezone",
+        "accountIds",
+        "categoryIds",
+        "basis",
+        "includePending",
+        "subtractRefunds"
+      ]
+    },
+    "grouping": {
+      "default": "auto",
+      "type": "string",
+      "enum": [
+        "auto",
+        "buckets",
+        "categories"
+      ]
+    },
+    "includeUncategorized": {
+      "default": true,
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "scope"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
+```
+
 ## get_finance_status
 
 Preferred complete-workspace Finance status operation. Read readiness, freshness, outstanding work, active or recoverable maintenance, and open questions for the selected scope. With no arguments, inspect all outstanding work; questions and approvals remain pending rather than guessed.
@@ -7295,6 +7408,174 @@ List deterministic merchant categorization rules. Maintenance always applies the
   "type": "object",
   "properties": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
+```
+
+## list_finance_spending_transactions
+
+Read transactions from an exact Spending reference revision and bounded group/date filter. Follow its returned cursor; stale references require a fresh Spending read. This POST-backed read does not mutate records.
+
+- Domain: finances; stage: inspect; policy: read_only.
+- Grants (all): finances:read.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `listFinanceSpendingTransactions`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "filter": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string",
+                  "format": "date",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                },
+                "through": {
+                  "type": "string",
+                  "format": "date",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+                },
+                "timezone": {
+                  "type": "string"
+                },
+                "accountIds": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "categoryIds": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "basis": {
+                  "type": "string",
+                  "enum": [
+                    "personal_cost",
+                    "full_outflow"
+                  ]
+                },
+                "includePending": {
+                  "type": "boolean"
+                },
+                "subtractRefunds": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "from",
+                "through",
+                "timezone",
+                "accountIds",
+                "categoryIds",
+                "basis",
+                "includePending",
+                "subtractRefunds"
+              ]
+            },
+            "grouping": {
+              "default": "auto",
+              "type": "string",
+              "enum": [
+                "auto",
+                "buckets",
+                "categories"
+              ]
+            },
+            "includeUncategorized": {
+              "default": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "scope"
+          ]
+        },
+        "referenceRevision": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "groupId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "from": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+        },
+        "through": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+        }
+      },
+      "required": [
+        "query",
+        "referenceRevision",
+        "groupId",
+        "from",
+        "through"
+      ],
+      "additionalProperties": false
+    },
+    "cursor": {
+      "type": "string",
+      "maxLength": 100
+    },
+    "limit": {
+      "default": 50,
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    }
+  },
+  "required": [
+    "filter"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
 }
 ```
 
@@ -12978,7 +13259,7 @@ Set the conversation disposition using the current version and cited evidence. R
 
 ## setup_finances
 
-Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, preserve unknowns or record an explicit skip, and show the first plan with its missing evidence. Budget activation binds the current profile and proposal and requires exact authenticated human approval in nohmi. Agents can propose but cannot activate budgets, even with execution or review bypass. Do not ask the user to name a tool.
+Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, preserve unknowns or record an explicit skip, and show the first plan with its missing evidence. Budget activation binds the current profile and proposal. Agents require finances:execute, enabled review bypass and approvalSource agent_self_approval; never impersonate a user approval. Do not ask the user to name a tool.
 
 - Domain: finances; stage: commit; policy: approved_rule.
 - Grants (all): finances:write.
@@ -14684,6 +14965,48 @@ Patch only supplied finances preferences using the observed expectedRevision. Om
           "enum": [
             "table",
             "cards"
+          ]
+        },
+        "financeSpendingView": {
+          "type": "string",
+          "enum": [
+            "bubbles",
+            "list",
+            "trends",
+            "rhythm"
+          ]
+        },
+        "financeSpendingGrouping": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "buckets",
+            "categories"
+          ]
+        },
+        "financeSpendingIncludePending": {
+          "type": "boolean"
+        },
+        "financeSpendingIncludeUncategorized": {
+          "type": "boolean"
+        },
+        "financeSpendingBasis": {
+          "type": "string",
+          "enum": [
+            "personal_cost",
+            "full_outflow"
+          ]
+        },
+        "financeSpendingSubtractRefunds": {
+          "type": "boolean"
+        },
+        "financeSpendingPeriod": {
+          "type": "string",
+          "enum": [
+            "today",
+            "week",
+            "month",
+            "custom"
           ]
         },
         "financeTransactionGroup": {

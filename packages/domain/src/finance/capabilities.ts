@@ -1,5 +1,19 @@
 export const financeCapabilityManifest = [
   {
+    apiOperation: "getFinanceSpending",
+    capability: "ledger.spending_dashboard",
+    mcpTool: "get_finance_spending",
+    mode: "read",
+    requiredScope: "finances:read",
+  },
+  {
+    apiOperation: "listFinanceSpendingTransactions",
+    capability: "ledger.spending_sources",
+    mcpTool: "list_finance_spending_transactions",
+    mode: "read",
+    requiredScope: "finances:read",
+  },
+  {
     apiOperation: "getFinanceBudgetBaselineQualification",
     capability: "planning.baseline_qualification_read",
     mcpTool: "get_finance_budget_baseline_qualification",

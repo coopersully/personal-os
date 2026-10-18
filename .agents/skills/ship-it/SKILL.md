@@ -83,6 +83,8 @@ Do not report completion when merely waiting or after enabling some external ope
 
 ## Final gate and merge
 
+Save the independently reviewed `reviewedProductionPlan` in the PR checkpoint at phase `final_check`
+and read back its frozen snapshot before final collection. Preserve it through completion.
 Claim `<repository-url>#merge:<base>` before final collection, serializing merges into that base.
 On a failed final gate, wait, cancellation, or closed PR, reconcile any pending merge and release
 the base claim before yielding; reacquire it for the next final collection. On merged resumption,

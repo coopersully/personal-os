@@ -45,3 +45,15 @@ test("global scope preserves focused script tests in a mixed change", () => {
   assert.equal(plan.commands[0][0], "python3");
   assert.deepEqual(plan.commands[1], ["pnpm", "typecheck"]);
 });
+
+test("repository and Terraform changes select their focused checks", () => {
+  assert.ok(
+    planVerification([".codex/scripts/check.sh"]).commands.some(
+      (c) => c.join(" ") === "pnpm check:repo",
+    ),
+  );
+  const commands = planVerification(["infra/main.tf"]).commands;
+  assert.equal(commands.length, 5);
+  assert.deepEqual(commands[0], ["terraform", "fmt", "-check", "-recursive", "infra"]);
+  assert.ok(commands.some((c) => c.join(" ") === "terraform -chdir=infra validate"));
+});

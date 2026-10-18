@@ -1,6 +1,6 @@
 # Independent acceptance and delivery state
 
-Use the same sanitized state as readiness, adding `acceptance` below. The canonical inventory is
+Use the same sanitized state as readiness, adding `acceptance` and the separately retained `reviewedProductionPlan` below. The canonical inventory is
 `docs/engineering/acceptance-policy.json`. `acceptance.py` loads it once per CLI invocation and
 exports `POLICY_DIGEST`, a SHA-256 of the policy inventory, acceptance contract, code standards and
 placement rubric joined by NUL in that order. Record that digest when review begins. A changed
@@ -8,6 +8,12 @@ policy requires a new assessment; copying a new digest into old evidence is not 
 
 ```json
 {
+  "reviewedProductionPlan": {
+    "required": true,
+    "owner": "<delivery owner>",
+    "criteria": ["<stable criterion ID>"],
+    "evidence": ["production-plan.json"]
+  },
   "acceptance": {
     "policyRevision": 3,
     "policyDigest": "<POLICY_DIGEST from acceptance.py>",
@@ -46,6 +52,14 @@ productionPlan evidence defines each ID's expected result, safe probe, owner, ob
 required traffic and reset conditions where relevant. For independently reviewed non-runtime scope,
 use required=false, criteria=[], and a nonempty reason; record alternative distribution requirements
 in evidence. Do not remove criteria after merge to obtain a passing result.
+
+Before final collection, save the independently reviewed plan into the PR checkpoint's
+`reviewedProductionPlan` with phase `final_check`. The checkpoint freezes that snapshot and refuses
+replacement, including after reopening a phase. Read it back into readiness/delivery state; do not
+reconstruct it from a changed post-merge plan. Readiness and delivery evaluators require exact plan
+agreement. Completion also compares against the checkpoint's frozen snapshot. The freeze is a
+cooperative integrity check, not authentication. A material plan change after freeze is a blocker
+requiring explicit reviewed recovery; never overwrite/delete the checkpoint to bypass it.
 
 ## After merge
 

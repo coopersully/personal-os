@@ -107,6 +107,7 @@ def ready_state(**overrides):
         },
     }
     value["acceptance"] = acceptance_record()
+    value["reviewedProductionPlan"] = acceptance_record()["productionPlan"]
     value["evidence"] = {name: [f"bundle.json#{name}"] for name in
                          ("base", "verification", "ci", "codeRabbit", "feedback",
                           "selfReview", "linear", "metadata", "merge")}

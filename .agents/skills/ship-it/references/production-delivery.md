@@ -21,7 +21,8 @@ do not replace the reviewed source head with main and accidentally reuse review 
    acceptance-state.md. Run `python3 .agents/skills/ship-it/scripts/acceptance.py --state <state.json>`.
    `WAIT` retains ownership; `BLOCK` requires evidence/recovery. `SHIPPED` requires production proof
    and reconciliation. `COMPLETE_NO_DEPLOY` applies only to independently reviewed non-runtime scope.
-5. Save phase `complete` with the full `delivery` snapshot. checkpoint.py evaluates it before accepting
+5. Carry the checkpoint’s frozen `reviewedProductionPlan` unchanged into delivery state.
+   Save phase `complete` with the full `delivery` snapshot. checkpoint.py evaluates it before accepting
    completion. Release the PR claim and pause only its dedicated heartbeat afterwards. Retain the
    private evidence; cleanup remains separately authorized and must preserve other work.
 

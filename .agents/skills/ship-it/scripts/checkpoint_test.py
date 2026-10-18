@@ -15,6 +15,7 @@ class CheckpointTest(unittest.TestCase):
             self.call("save", {"phase": "complete"})
         from acceptance_test import delivery_state
         state = delivery_state()
+        self.call("save", {"phase": "final_check", "reviewedProductionPlan": state["reviewedProductionPlan"]})
         self.call("save", {"phase": "complete", "delivery": state})
         self.assertEqual(self.call("read")["phase"], "complete")
 
@@ -22,6 +23,7 @@ class CheckpointTest(unittest.TestCase):
     def test_partial_updates_cannot_invalidate_completed_receipt(self):
         from acceptance_test import delivery_state
         state = delivery_state()
+        self.call("save", {"phase": "final_check", "reviewedProductionPlan": state["reviewedProductionPlan"]})
         self.call("save", {"phase": "complete", "delivery": state})
         with self.assertRaises(ValueError):
             self.call("save", {"headSha": "d" * 40})
@@ -31,6 +33,19 @@ class CheckpointTest(unittest.TestCase):
         self.assertEqual(self.call("read")["delivery"]["production"]["health"], "SUCCESS")
         self.call("save", {"phase": "observe", "delivery": state})
         self.assertEqual(self.call("read")["phase"], "observe")
+
+    def test_frozen_production_plan_cannot_be_replaced_for_completion(self):
+        from acceptance_test import delivery_state
+        state = delivery_state()
+        self.call("save", {"phase": "final_check", "reviewedProductionPlan": state["reviewedProductionPlan"]})
+        alternative = {'required': False, 'owner': 'owner', 'criteria': [],
+                       'reason': 'Changed after review', 'evidence': ['changed.json']}
+        state['acceptance']['productionPlan'] = alternative
+        state['reviewedProductionPlan'] = alternative
+        with self.assertRaises(ValueError):
+            self.call("save", {"phase": "complete", "delivery": state})
+        with self.assertRaises(ValueError):
+            self.call("save", {"phase": "review", "reviewedProductionPlan": alternative})
 
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()

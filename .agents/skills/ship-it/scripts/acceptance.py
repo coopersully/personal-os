@@ -75,6 +75,8 @@ def review_problems(state):
         if row.get('exception') is not None and status != 'fail':
             errors.append('An exception must retain the underlying failed conformance result')
     plan = mapping(record.get('productionPlan'))
+    if not plan or state.get('reviewedProductionPlan') != plan:
+        errors.append('Production plan differs from the independently retained review snapshot')
     criteria = plan.get('criteria')
     if (type(plan.get('required')) is not bool or not isinstance(plan.get('owner'), str)
             or not plan['owner'].strip() or not strings(plan.get('evidence'))

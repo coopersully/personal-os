@@ -23,6 +23,7 @@ def acceptance_record():
 def delivery_state():
     return {'pr': {'state': 'MERGED', 'headSha': HEAD, 'baseSha': BASE},
             'acceptance': acceptance_record(),
+            'reviewedProductionPlan': copy.deepcopy(acceptance_record()['productionPlan']),
             'mergeReceipt': {'sourceHeadSha': HEAD, 'mergeSha': MERGE, 'evidence': ['merge.json']},
             'production': {'deployedSha': MERGE, 'containsMerge': True,
                            'changePresent': True, 'deployment': 'SUCCESS', 'health': 'SUCCESS',
@@ -71,6 +72,15 @@ class AcceptanceTest(unittest.TestCase):
         state['production']['criteria'][0]['status'] = 'FAILURE'
         self.assertEqual(evaluate_delivery(state)['decision'], 'BLOCK')
 
+    def test_delivery_cannot_rewrite_the_reviewed_production_plan(self):
+        state = delivery_state()
+        state['acceptance']['productionPlan'] = {'required': False, 'owner': 'owner',
+            'criteria': [], 'reason': 'Changed after merge', 'evidence': ['new-plan.json']}
+        self.assertEqual(evaluate_delivery(state)['decision'], 'BLOCK')
+        state = delivery_state()
+        state['acceptance']['productionPlan']['criteria'] = ['different-check']
+        self.assertTrue(review_problems(state))
+
     def test_merge_is_not_production_completion(self):
         state = delivery_state()
         self.assertEqual(evaluate_delivery(state)['decision'], 'SHIPPED')
@@ -93,6 +103,7 @@ class AcceptanceTest(unittest.TestCase):
         state = delivery_state()
         state['acceptance']['productionPlan'] = {'required': False, 'owner': 'owner',
             'criteria': [], 'reason': 'Documentation only', 'evidence': ['scope.json']}
+        state['reviewedProductionPlan'] = copy.deepcopy(state['acceptance']['productionPlan'])
         del state['production']
         self.assertEqual(evaluate_delivery(state)['decision'], 'COMPLETE_NO_DEPLOY')
         del state['acceptance']['productionPlan']['reason']

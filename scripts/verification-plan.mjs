@@ -38,6 +38,15 @@ export function planVerification(paths) {
     .map((dir) => ["python3", "-m", "unittest", "discover", "-s", dir, "-p", "*_test.py"]);
   if (remaining.length) {
     const scope = classifyChanges(remaining);
+    if (scope.repo) commands.push(["pnpm", "check:repo"]);
+    if (scope.terraform)
+      commands.push(
+        ["terraform", "fmt", "-check", "-recursive", "infra"],
+        ["terraform", "-chdir=infra/bootstrap", "init", "-backend=false", "-input=false"],
+        ["terraform", "-chdir=infra/bootstrap", "validate"],
+        ["terraform", "-chdir=infra", "init", "-backend=false", "-input=false"],
+        ["terraform", "-chdir=infra", "validate"],
+      );
     if (scope.full) return { ...broad, commands: [...commands, ...broad.commands] };
     if (scope.changed_packages.length)
       commands.push([

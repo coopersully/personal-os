@@ -19,7 +19,7 @@ Cross-host operation requires a shared serialized owner; these host-local files 
 | --- | --- |
 | `claim` | Acquire a free PR/base key, or resume its existing owner. A different owner is rejected. |
 | `read` | Inspect persisted state without changing ownership. |
-| `save` | Store phase, headSha, baseSha, evidence references, nextTrigger, retryAt, schedulerId, authorization, worktree, worker, acceptanceRevision, policyVersion, failureFingerprint, failedAttempts, delivery. Completion validates the delivery snapshot. |
+| `save` | Store phase, headSha, baseSha, evidence references, nextTrigger, retryAt, schedulerId, authorization, worktree, worker, acceptanceRevision, policyVersion, failureFingerprint, failedAttempts, delivery, reviewedProductionPlan. Final-check freezes the reviewed plan; completion validates it against the delivery snapshot. |
 | `begin` | Store unique id, action, headSha, baseSha, and intended result before an external mutation. Reject another mutation while pending. |
 | `finish` | Supply the pending id, observed result, and evidence after re-reading the affected service. Clears pending. |
 | `transfer` | Run as the current owner with nextOwner and stoppedEvidence after stopping execution. Preserve pending work for reconciliation. |

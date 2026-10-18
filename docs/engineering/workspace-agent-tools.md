@@ -5500,6 +5500,79 @@ Start Finance setup here. Read active guidance with its recorded user_instructio
 }
 ```
 
+## get_finance_host_prompt
+
+Read exact stored instructions for one schedule/template version using the original authorized connection. This never regenerates instructions or changes the external job. A schedule ID is not a credential.
+
+- Domain: finances; stage: inspect; policy: read_only.
+- Grants (all): finances:maintain.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `getAutomationHostPrompt`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "scheduleId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "description": "nohmi object identifier"
+    },
+    "templateVersion": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "scheduleId",
+    "templateVersion"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
+## get_finance_host_prompt_history
+
+Read a bounded page of immutable prompts nohmi issued for this schedule under its original authorized connection. Use nextCursor as beforeVersion for older templates. Stored text does not prove the external host adopted it or verify Chat capability.
+
+- Domain: finances; stage: inspect; policy: read_only.
+- Grants (all): finances:maintain.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `getAutomationHostPromptHistory`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "scheduleId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "description": "nohmi object identifier"
+    },
+    "beforeVersion": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "limit": {
+      "default": 20,
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    }
+  },
+  "required": [
+    "scheduleId"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
 ## get_finance_inbox
 
 Read highlighted transaction-backed review rows. Ask only communication.nextQuestion.prompt, one question at a time. Do not recite every case or invent a text question list.
@@ -6445,6 +6518,46 @@ Import a PayPal, Venmo, or Zelle CSV into its matching account. Stable source id
     "provider"
   ],
   "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
+```
+
+## issue_finance_host_prompt
+
+Persist the current server-issued prompt for an existing schedule with its original connection and explicit Finance execution authority. First issuance checks the schedule revision; repeating the same schedule/template returns the immutable original. This does not install instructions, change external scheduling, verify Chat, or grant financial authority.
+
+- Domain: finances; stage: prepare; policy: approved_rule.
+- Grants (all): finances:maintain, finances:write, finances:execute.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `issueAutomationHostPrompt`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "scheduleId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "description": "nohmi object identifier"
+    },
+    "templateVersion": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "expectedScheduleVersion": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "scheduleId",
+    "templateVersion",
+    "expectedScheduleVersion"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
 }
 ```
 

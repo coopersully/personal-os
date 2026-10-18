@@ -2,6 +2,9 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   type AutomationHostSchedule,
   type AutomationHostScheduleCreateInput,
+  automationHostPromptIssueInputSchema,
+  automationHostPromptIssueSchema,
+  automationHostPromptPageInputSchema,
   automationHostScheduleBindInputSchema,
   automationHostScheduleCancelInputSchema,
   automationHostScheduleCreateInputSchema,
@@ -429,6 +432,8 @@ describe("automation host schedule contract", () => {
       observeAutomationHostScheduleHealth(active, new Date("2026-09-15T12:01:59.000Z")),
     ).toEqual({
       state: "expected",
+      graceMilliseconds: 300000,
+      overdueAt: "2026-09-15T12:07:00.000Z",
       lastObservedAt: "2026-09-15T11:59:30.000Z",
       nextExpectedAt: "2026-09-15T12:02:00.000Z",
       observedAt: "2026-09-15T12:01:59.000Z",
@@ -437,13 +442,15 @@ describe("automation host schedule contract", () => {
     expect(
       observeAutomationHostScheduleHealth(
         { ...active, lastObservedAt: null },
-        new Date("2026-09-15T12:02:01.000Z"),
+        new Date("2026-09-15T12:07:01.000Z"),
       ),
     ).toEqual({
       state: "overdue",
+      graceMilliseconds: 300000,
+      overdueAt: "2026-09-15T12:07:00.000Z",
       lastObservedAt: null,
       nextExpectedAt: "2026-09-15T12:02:00.000Z",
-      observedAt: "2026-09-15T12:02:01.000Z",
+      observedAt: "2026-09-15T12:07:01.000Z",
       repairOwner: "host",
     });
   });
@@ -468,6 +475,8 @@ describe("automation host schedule contract", () => {
       observeAutomationHostScheduleHealth(event, new Date("2026-09-16T12:00:00.000Z")),
     ).toEqual({
       state: "observed",
+      graceMilliseconds: null,
+      overdueAt: null,
       lastObservedAt: "2026-09-15T12:00:00.000Z",
       nextExpectedAt: null,
       observedAt: "2026-09-16T12:00:00.000Z",
@@ -495,4 +504,82 @@ describe("automation host schedule contract", () => {
       observeAutomationHostScheduleHealth(revoked, new Date("2026-09-15T12:11:00.000Z")),
     ).toMatchObject({ state: "revoked", repairOwner: null });
   });
+});
+
+describe("Finance automation grace", () => {
+  const schedule = (everyMinutes: number) =>
+    automationHostScheduleSchema.parse({
+      id: "11111111-1111-4111-8111-111111111111",
+      tenantAuthorizationConnectionId: "22222222-2222-4222-8222-222222222222",
+      label: "Finance",
+      effectiveScopes: ["finances:maintain"],
+      hostSurface: "codex_desktop",
+      hostAutomationId: "job",
+      trigger: {
+        type: "recurring",
+        recurrence: { type: "interval", everyMinutes, timeZone: "America/New_York" },
+      },
+      state: "active",
+      nextExpectedAt: "2026-10-18T13:00:00.000Z",
+      lastObservedAt: null,
+      version: 1,
+      createdAt: "2026-10-18T12:00:00.000Z",
+      updatedAt: "2026-10-18T12:00:00.000Z",
+    });
+  it.each([
+    [1, 300000],
+    [51, 306000],
+    [1440, 3600000],
+    [10080, 3600000],
+  ])("uses the approved floor/fraction/cap for %i minutes", (interval, grace) => {
+    const deadline = Date.parse("2026-10-18T13:00:00.000Z") + grace;
+    for (const delta of [-1, 0, 1]) {
+      expect(
+        observeAutomationHostScheduleHealth(schedule(interval), new Date(deadline + delta)),
+      ).toMatchObject({
+        state: delta > 0 ? "overdue" : "expected",
+        graceMilliseconds: grace,
+        overdueAt: new Date(deadline).toISOString(),
+      });
+    }
+  });
+});
+
+it("validates exact immutable prompt identities and bounded history inputs", () => {
+  const issue = {
+    scheduleId,
+    templateVersion: 1,
+    scheduleVersionAtIssue: 2,
+    text: "Exact stored instructions",
+    issuedAt: "2026-10-18T15:00:00.000Z",
+  };
+  expect(automationHostPromptIssueSchema.parse(issue)).toEqual(issue);
+  for (const invalid of [
+    { templateVersion: 0 },
+    { scheduleId: "other" },
+    { text: "" },
+    { scheduleVersionAtIssue: 0 },
+  ])
+    expect(automationHostPromptIssueSchema.safeParse({ ...issue, ...invalid }).success).toBe(false);
+  expect(
+    automationHostPromptIssueInputSchema.safeParse({ expectedScheduleVersion: 0 }).success,
+  ).toBe(false);
+  expect(
+    automationHostPromptIssueInputSchema.safeParse({
+      expectedScheduleVersion: 1,
+      text: "client override",
+    }).success,
+  ).toBe(false);
+  expect(automationHostPromptPageInputSchema.parse({})).toEqual({ limit: 20 });
+  expect(automationHostPromptPageInputSchema.parse({ beforeVersion: "3", limit: "100" })).toEqual({
+    beforeVersion: 3,
+    limit: 100,
+  });
+  for (const invalid of [
+    { limit: 101 },
+    { limit: 0 },
+    { beforeVersion: 0 },
+    { beforeVersion: 1.5 },
+  ])
+    expect(automationHostPromptPageInputSchema.safeParse(invalid).success).toBe(false);
 });

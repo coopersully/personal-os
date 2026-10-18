@@ -88,6 +88,7 @@ import {
   jsonb,
   type PgTableExtraConfigValue,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -5234,5 +5235,37 @@ export const automationHostSchedules = pgTable(
       table.userId,
       table.authorizationConnectionId,
     ),
+  ],
+);
+
+export const automationHostPromptIssues = pgTable(
+  "automation_host_prompt_issues",
+  {
+    userId: uuid("user_id").notNull(),
+    scheduleId: uuid("schedule_id").notNull(),
+    templateVersion: integer("template_version").notNull(),
+    scheduleVersionAtIssue: integer("schedule_version_at_issue").notNull(),
+    text: text("text").notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({
+      name: "automation_host_prompt_issues_pkey",
+      columns: [table.userId, table.scheduleId, table.templateVersion],
+    }),
+    foreignKey({
+      name: "automation_host_prompt_issues_owner_fk",
+      columns: [table.userId, table.scheduleId],
+      foreignColumns: [automationHostSchedules.userId, automationHostSchedules.id],
+    }).onDelete("cascade"),
+    check(
+      "automation_host_prompt_issues_template_version_check",
+      sql`${table.templateVersion} > 0`,
+    ),
+    check(
+      "automation_host_prompt_issues_schedule_version_check",
+      sql`${table.scheduleVersionAtIssue} > 0`,
+    ),
+    check("automation_host_prompt_issues_text_check", sql`length(${table.text}) > 0`),
   ],
 );

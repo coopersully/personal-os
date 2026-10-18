@@ -1,10 +1,15 @@
 // @vitest-environment jsdom
+import { ApiClientError } from "@personal-os/api-client";
 import type { FinanceOnboardingSnapshot } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
-import { useFinanceWorkspaceReadiness } from "./use-finance-workspace-readiness";
+import { captureFinanceOnboardingAccess, denyFinanceOnboardingAccess } from "./onboarding-access";
+import {
+  financeWorkspaceReadinessKey,
+  useFinanceWorkspaceReadiness,
+} from "./use-finance-workspace-readiness";
 
 const read = vi.hoisted(() => vi.fn());
 vi.mock("./onboarding-adapter", () => ({
@@ -82,4 +87,73 @@ it("discards an in-flight response when the account changes", async () => {
   await act(async () => resolve({ ...snapshot(0), existingAccess: true }));
   await waitFor(() => expect(result.current.manualCreationVisible).toBe(false));
   expect(result.current.snapshot?.existingAccess).toBe(false);
+});
+
+it.each([
+  401, 403,
+])("suppresses same-owner cached access after authoritative %s and recovers only by fresh read", async (status) => {
+  read.mockResolvedValue({ ...snapshot(0), existingAccess: true });
+  const { wrapper, client } = fixture();
+  const { result } = renderHook(useFinanceWorkspaceReadiness, { wrapper });
+  await waitFor(() => expect(result.current.readiness?.workspaceAccessible).toBe(true));
+  read.mockRejectedValueOnce(new ApiClientError({ status, code: "forbidden", message: "Denied" }));
+  await act(async () => {
+    await result.current.reload().catch(() => undefined);
+  });
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(result.current.snapshot).toBeUndefined();
+  expect(result.current.readiness).toBeUndefined();
+  expect(result.current.manualCreationVisible).toBeUndefined();
+  expect(client.getQueryData(financeWorkspaceReadinessKey)).toBeUndefined();
+  expect(client.getQueryData(["me"])).toEqual({ id: "owner" });
+  read.mockResolvedValue({ ...snapshot(1), existingAccess: true });
+  await act(async () => {
+    await result.current.reload();
+  });
+  await waitFor(() => expect(result.current.readiness?.workspaceAccessible).toBe(true));
+  expect(result.current.manualCreationVisible).toBe(false);
+});
+it("preserves the last valid same-owner projection after a transient failure", async () => {
+  read.mockResolvedValue({ ...snapshot(0), existingAccess: true });
+  const { wrapper } = fixture();
+  const { result } = renderHook(useFinanceWorkspaceReadiness, { wrapper });
+  await waitFor(() => expect(result.current.readiness?.workspaceAccessible).toBe(true));
+  read.mockRejectedValueOnce(
+    new ApiClientError({ status: 503, code: "unavailable", message: "Offline" }),
+  );
+  await act(async () => {
+    await result.current.reload().catch(() => undefined);
+  });
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  expect(result.current.readiness?.workspaceAccessible).toBe(true);
+  expect(result.current.manualCreationVisible).toBe(true);
+});
+it("cannot restore a late read from before same-owner denial even after recovery", async () => {
+  let resolve!: (value: FinanceOnboardingSnapshot) => void;
+  read.mockReturnValueOnce(
+    new Promise<FinanceOnboardingSnapshot>((r) => {
+      resolve = r;
+    }),
+  );
+  const { wrapper, client } = fixture();
+  const { result } = renderHook(useFinanceWorkspaceReadiness, { wrapper });
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+  act(() => {
+    denyFinanceOnboardingAccess(
+      client,
+      captureFinanceOnboardingAccess(client),
+      new ApiClientError({ status: 403, code: "forbidden", message: "Denied" }),
+    );
+  });
+  await waitFor(() => expect(result.current.isError).toBe(true));
+  read.mockResolvedValue({ ...snapshot(1), existingAccess: false });
+  await act(async () => {
+    await result.current.reload();
+  });
+  await waitFor(() => expect(result.current.snapshot?.automation.registrationCount).toBe(1));
+  await act(async () => {
+    resolve({ ...snapshot(0), existingAccess: true });
+  });
+  expect(result.current.snapshot?.existingAccess).toBe(false);
+  expect(result.current.manualCreationVisible).toBe(false);
 });

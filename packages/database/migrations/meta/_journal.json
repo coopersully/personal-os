@@ -862,6 +862,13 @@
       "when": 1792353602000,
       "tag": "0115_finance_conversation_core",
       "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "7",
+      "when": 1792353603000,
+      "tag": "0116_finance_onboarding_receipts",
+      "breakpoints": true
     }
   ]
 }

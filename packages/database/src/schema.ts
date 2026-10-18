@@ -5596,3 +5596,71 @@ export const financeConversationEvidence = pgTable(
     ),
   ],
 );
+
+/** Review receipts only; canonical financial values and messaging authority stay with their owners. */
+export const financeOnboardingStates = pgTable(
+  "finance_onboarding_states",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull().default(0),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    answers: jsonb("answers")
+      .$type<Array<{ questionId: string; disposition: "answered" | "none" | "unknown" }>>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    displayPreferencesReviewed: boolean("display_preferences_reviewed").notNull().default(false),
+    automationChoice: text("automation_choice").$type<"later" | "now">(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    check("finance_onboarding_states_revision_check", sql`${table.revision} >= 0`),
+    check(
+      "finance_onboarding_states_answers_check",
+      sql`jsonb_typeof(${table.answers}) = 'array' AND jsonb_array_length(${table.answers}) <= 100`,
+    ),
+    check(
+      "finance_onboarding_states_choice_check",
+      sql`${table.automationChoice} IS NULL OR ${table.automationChoice} IN ('later', 'now')`,
+    ),
+    check(
+      "finance_onboarding_states_completion_check",
+      sql`${table.completedAt} IS NULL OR (${table.revision} > 0 AND ${table.automationChoice} IS NOT NULL AND ${table.displayPreferencesReviewed})`,
+    ),
+  ],
+);
+
+/** Exact operation responses support owner-scoped replay in the same commit as the state revision. */
+export const financeOnboardingReceipts = pgTable(
+  "finance_onboarding_receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    operation: text("operation").$type<"save" | "complete">().notNull(),
+    requestHash: text("request_hash").notNull(),
+    result: jsonb("result").$type<Record<string, unknown>>().notNull(),
+    actorType: text("actor_type").$type<ActorType>().notNull(),
+    actorId: text("actor_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_onboarding_receipts_owner_key_idx").on(table.userId, table.idempotencyKey),
+    check(
+      "finance_onboarding_receipts_key_check",
+      sql`length(btrim(${table.idempotencyKey})) BETWEEN 1 AND 200`,
+    ),
+    check(
+      "finance_onboarding_receipts_operation_check",
+      sql`${table.operation} IN ('save', 'complete')`,
+    ),
+    check("finance_onboarding_receipts_hash_check", sql`${table.requestHash} ~ '^[a-f0-9]{64}$'`),
+    check(
+      "finance_onboarding_receipts_result_check",
+      sql`jsonb_typeof(${table.result}) = 'object'`,
+    ),
+  ],
+);

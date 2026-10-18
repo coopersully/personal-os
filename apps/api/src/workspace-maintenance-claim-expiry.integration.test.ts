@@ -67,29 +67,34 @@ describe.sequential("workspace maintenance post-lock expiry", () => {
         "UPDATE workspace_maintenance_runs SET lease_expires_at=clock_timestamp()+interval '5 seconds' WHERE id=$1",
         [f.run.id],
       );
-      pending = (
-        method === "completeStep"
-          ? service.completeStep({
-              runId: f.run.id,
-              claimId: f.claimId,
-              step: "verify",
-              idempotencyKey: randomUUID(),
-              result: { verified: true },
-            })
-          : method === "settle"
-            ? service.settle({
-                runId: f.run.id,
-                claimId: f.claimId,
-                status: "completed",
-                result: {},
-              })
-            : service.releaseForRetry({
-                runId: f.run.id,
-                claimId: f.claimId,
-                code: "retry",
-                safeMessage: "Retry",
-              })
-      ).then(
+      const operations = {
+        completeStep: () =>
+          service.completeStep({
+            runId: f.run.id,
+            claimId: f.claimId,
+            step: "verify",
+            idempotencyKey: randomUUID(),
+            result: { verified: true },
+          }),
+        settle: () =>
+          service.settle({ runId: f.run.id, claimId: f.claimId, status: "completed", result: {} }),
+        releaseForRetry: () =>
+          service.releaseForRetry({
+            runId: f.run.id,
+            claimId: f.claimId,
+            code: "retry",
+            safeMessage: "Retry",
+          }),
+        checkpointAndRelease: () =>
+          service.checkpointAndRelease({
+            runId: f.run.id,
+            claimId: f.claimId,
+            checkpoint: { phase: "challenge" },
+            status: "awaiting_agent_challenge",
+          }),
+        renewClaim: () => service.renewClaim({ runId: f.run.id, claimId: f.claimId }),
+      };
+      pending = operations[method]().then(
         () => ({ ok: true }),
         (error) => ({ error }),
       );

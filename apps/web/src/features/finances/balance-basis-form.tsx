@@ -1,7 +1,7 @@
 import {
   confirmFinanceBalanceBasisInputSchema,
   type FinanceBalanceBasis,
-  type FinanceCashflowSourceSnapshots,
+  type FinanceBalanceBasisSourceSnapshots,
 } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { useId, useMemo, useRef, useState } from "react";
@@ -27,10 +27,10 @@ import {
 import { refreshFinancePosition } from "./position-material.js";
 
 export interface BalanceBasisFormProps {
-  account: FinanceCashflowSourceSnapshots["accounts"][number];
+  account: FinanceBalanceBasisSourceSnapshots["accounts"][number];
   previousBasis: FinanceBalanceBasis | null;
-  transactions: FinanceCashflowSourceSnapshots["transactions"];
-  coverage: FinanceCashflowSourceSnapshots["coverage"];
+  transactions: FinanceBalanceBasisSourceSnapshots["transactions"];
+  coverage: FinanceBalanceBasisSourceSnapshots["coverage"];
   onClose: () => void;
   onSaved?: () => void | Promise<void>;
 }
@@ -83,6 +83,10 @@ export function BalanceBasisForm(props: BalanceBasisFormProps) {
       success: "Balance basis confirmed.",
     },
     mutationFn: async () => {
+      if (coverage.complete !== true || coverage.truncated)
+        throw new Error(
+          "A complete account-history review is required before confirming reflections.",
+        );
       const parsed = statement();
       if (!parsed.success) throw parsed.error;
       const { idempotencyKey: _validation, ...changes } = parsed.data;
@@ -141,9 +145,9 @@ export function BalanceBasisForm(props: BalanceBasisFormProps) {
             movement's date or posting status.
           </DialogDescription>
         </DialogHeader>
-        {coverage.truncated ? (
+        {coverage.complete !== true || coverage.truncated ? (
           <p>
-            Source transaction coverage is incomplete. Narrow the account or date window and reload
+            Source transaction coverage is incomplete. Reload the complete account-history review
             before confirming.
           </p>
         ) : null}
@@ -168,9 +172,9 @@ export function BalanceBasisForm(props: BalanceBasisFormProps) {
               if (transaction.accountId !== account.id)
                 errors.amount = "Reload transactions for this account before confirming.";
             });
-            if (coverage.truncated)
+            if (coverage.complete !== true || coverage.truncated)
               errors.amount =
-                "Load a complete source transaction window before confirming reflections.";
+                "Load a complete account-history review before confirming reflections.";
             if (previousBasis && previousBasis.accountId !== account.id)
               errors.amount = "Reload the prior balance basis for this account.";
             if (draft.floor.trim() && cents(draft.floor) === null)

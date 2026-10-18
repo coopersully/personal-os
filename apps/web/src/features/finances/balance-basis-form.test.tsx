@@ -13,7 +13,7 @@ vi.mock("../../api.js", () => ({
 }));
 const accountId = "11111111-1111-4111-8111-111111111111";
 const transactionId = "22222222-2222-4222-8222-222222222222";
-function mount(truncated = false) {
+function mount(truncated = false, complete = true) {
   const close = vi.fn();
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
@@ -32,7 +32,7 @@ function mount(truncated = false) {
           accountRevision: "9007199254740993",
         }}
         previousBasis={null}
-        coverage={{ truncated, transactionLimit: 1000 }}
+        coverage={{ complete, truncated, transactionLimit: 1000 }}
         transactions={[
           {
             id: transactionId,
@@ -181,4 +181,13 @@ it("sends basis reflection revisions unchanged through the real client route", a
       { transactionId, transactionRevision: "9007199254740994", reflection: "included" },
     ],
   });
+});
+
+it("does not treat a nontruncated date window as a complete account-history review", () => {
+  mount(false, false);
+  statement();
+  fill("Balance reflection for Rent · 2026-10-01 · revision 9007199254740994", "included");
+  submit();
+  expect(api.confirmFinanceBalanceBasis).not.toHaveBeenCalled();
+  expect(screen.getByText(/Source transaction coverage is incomplete/)).toBeInTheDocument();
 });

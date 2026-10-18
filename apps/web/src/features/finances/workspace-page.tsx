@@ -65,7 +65,7 @@ function FinanceWorkspaceRoute({ ownerId }: { ownerId: string }) {
     case "imports":
       return <Navigate replace to="/finances/transactions?import=1" />;
     case "health":
-      return <Navigate replace to="/finances/transactions?checks=1" />;
+      return <Navigate replace to="/finances/transactions?checks=1&financeTask=correct" />;
     case "transactions":
       return <FinancesPage key={`${section}:${location.search}`} />;
     case "":

@@ -50,5 +50,6 @@ export function financeRouteNeedsSetup(pathname: string, search: string): boolea
     "review",
     "reviews",
     "exports",
+    "health",
   ].includes(section ?? "");
 }

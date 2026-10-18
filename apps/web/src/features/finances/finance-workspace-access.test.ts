@@ -43,6 +43,7 @@ describe("Finance setup navigation", () => {
       "review",
       "reviews/abc",
       "exports",
+      "health",
     ])
       expect(financeRouteNeedsSetup("/finances/" + section, "")).toBe(false);
   });

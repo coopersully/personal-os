@@ -541,6 +541,45 @@ export const accessTokens = pgTable(
   (table) => [
     uniqueIndex("access_tokens_token_hash_idx").on(table.tokenHash),
     index("access_tokens_user_idx").on(table.userId),
+    uniqueIndex("access_tokens_owner_id_unique").on(table.userId, table.id),
+  ],
+);
+
+/** Immutable successful canonical OAuth rotations; contains identities, never credentials. */
+export const oauthAccessTokenRotations = pgTable(
+  "oauth_access_token_rotations",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    fromAccessTokenId: uuid("from_access_token_id").notNull(),
+    toAccessTokenId: uuid("to_access_token_id").primaryKey(),
+    clientId: text("client_id").notNull(),
+    audience: text("audience").notNull(),
+    authorizationConnectionId: uuid("authorization_connection_id").notNull(),
+    predecessorScopes: jsonb("predecessor_scopes").$type<AccessScope[]>().notNull(),
+    successorScopes: jsonb("successor_scopes").$type<AccessScope[]>().notNull(),
+    rotatedAt: timestamp("rotated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("oauth_rotation_predecessor_unique").on(table.fromAccessTokenId),
+    index("oauth_rotation_owner_successor_idx").on(table.userId, table.toAccessTokenId),
+    check(
+      "oauth_rotation_distinct_actors",
+      sql`${table.fromAccessTokenId} <> ${table.toAccessTokenId}`,
+    ),
+    // SQL migration makes both endpoint NO ACTION FKs DEFERRABLE INITIALLY DEFERRED
+    // so owner cascade may remove tokens and evidence in either FK-trigger order.
+    foreignKey({
+      name: "oauth_rotation_predecessor_owner_fk",
+      columns: [table.userId, table.fromAccessTokenId],
+      foreignColumns: [accessTokens.userId, accessTokens.id],
+    }),
+    foreignKey({
+      name: "oauth_rotation_successor_owner_fk",
+      columns: [table.userId, table.toAccessTokenId],
+      foreignColumns: [accessTokens.userId, accessTokens.id],
+    }),
   ],
 );
 

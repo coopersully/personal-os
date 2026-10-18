@@ -77,6 +77,7 @@ function isDocumentation(path) {
 }
 
 export function classifyChanges(paths, options = {}) {
+  if (options.forceFull === true) return fullScope();
   if (options.diffError || !Array.isArray(paths) || paths.length === 0) return fullScope();
   if (paths.some((path) => !safePath(path))) return fullScope();
 
@@ -217,7 +218,7 @@ function runCli() {
   try {
     options = parseArguments(process.argv.slice(2));
     const paths = readFileSync(options.files, "utf8").split(/\r?\n/u).filter(Boolean);
-    scope = classifyChanges(paths);
+    scope = classifyChanges(paths, { forceFull: process.env.CI_FULL === "true" });
   } catch (error) {
     scope = fullScope();
     process.stderr.write(`CI scope classifier failed closed: ${error.message}\n`);

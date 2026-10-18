@@ -10,8 +10,12 @@ import {
 } from "@personal-os/database";
 import type { FinanceSpendingQuery } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createFinanceSpendingService } from "./spending-service.js";
+import {
+  createFinanceSpendingService,
+  selectFinanceSpendingReferences,
+} from "./spending-service.js";
 
 function required<T>(value: T | undefined): T {
   if (value === undefined) throw new Error("Missing Spending fixture");
@@ -177,5 +181,31 @@ describe.sequential("Spending owner-scoped complete storage snapshot", () => {
       (await service.readSpending(owner, { ...query, scope: { ...query.scope, accountIds: [] } }))
         .snapshot.netCents,
     ).toBe(0);
+  });
+  it("binds exact reference pages to the current persisted snapshot", async () => {
+    const service = createFinanceSpendingService({
+      db: database.db,
+      now: () => new Date("2026-03-11T12:00:00Z"),
+    });
+    const dashboard = await service.readSpending(owner, query);
+    const filter = {
+      query,
+      referenceRevision: dashboard.referenceRevision ?? "",
+      groupId: null,
+      from: query.scope.from,
+      through: query.scope.through,
+    };
+    const page = selectFinanceSpendingReferences(dashboard, filter, undefined, 50);
+    expect(page.totalTransactions).toBe(110);
+    expect(page.transactionIds).toHaveLength(50);
+    expect(page.netCents).toBe(110);
+    expect(page.contributions).toHaveLength(50);
+    const first = required(dashboard.transactions[0]);
+    await database.db
+      .update(financeTransactions)
+      .set({ amount: 2, updatedAt: new Date("2026-03-11T12:01:00Z") })
+      .where(and(eq(financeTransactions.userId, owner), eq(financeTransactions.id, first.id)));
+    const changed = await service.readSpending(owner, query);
+    expect(() => selectFinanceSpendingReferences(changed, filter)).toThrow("Spending changed");
   });
 });

@@ -41,7 +41,7 @@ export function projectFinanceSpendingMonthlyBudget(
   );
   for (const id of baseline.accountIds) {
     const account = accounts.get(id);
-    if (!account || !account.includeInPlanning) return unavailable("scope_unavailable");
+    if (!account?.includeInPlanning) return unavailable("scope_unavailable");
     if (account.currencyCode !== "USD") return unavailable("unsupported_currency", false);
   }
   // Legacy labels cannot prove historical category identity. Never match current display names.

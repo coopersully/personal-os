@@ -207,12 +207,17 @@ function OwnerConversation({ ownerId }: { ownerId: string }) {
       if (BigInt(sequence) <= BigInt(readThrough.current)) return;
       readThrough.current = sequence;
       if (accessDenied) return;
-      void api.markFinanceConversationRendered(sequence).catch((error) => {
-        clearDeniedHistory(error);
-        if (readThrough.current === sequence) readThrough.current = "0";
-      });
+      void api
+        .markFinanceConversationRendered(sequence)
+        .then(() => {
+          void client.invalidateQueries({ queryKey: ["finance-conversation-unread", ownerId] });
+        })
+        .catch((error) => {
+          clearDeniedHistory(error);
+          if (readThrough.current === sequence) readThrough.current = "0";
+        });
     },
-    [historyThrough, accessDenied, clearDeniedHistory],
+    [historyThrough, accessDenied, clearDeniedHistory, client, ownerId],
   );
   const loadMore = async (refresh = false) => {
     if (loadingHistory) return;

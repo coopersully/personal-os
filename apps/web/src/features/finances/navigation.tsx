@@ -4,6 +4,7 @@ import {
   ActivityIcon,
   AgentIcon,
   BankIcon,
+  CircleAlertIcon,
   DollarIcon,
   GridIcon,
   type Icon,
@@ -20,12 +21,14 @@ import {
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { api } from "../../api.js";
 import { financeAccountNeedsAttention, financeProfileNeedsAttention } from "./attention";
 import { useFinanceConfiguration } from "./use-finance-configuration.js";
+import { useFinanceConversationUnread } from "./use-finance-conversation-unread.js";
 
 export type FinanceSection =
   | "chat"
@@ -118,15 +121,19 @@ function financeNavigationActive(section: FinanceSection, destination: FinanceSe
 export function FinanceSidebarNavigation({
   onNavigate,
   ownerId,
+  sessionKey,
   reviewCount,
   section,
 }: {
   onNavigate: () => void;
   ownerId: string;
+  sessionKey: string;
   reviewCount: number;
   section: FinanceSection;
 }) {
   const configuration = useFinanceConfiguration();
+  const unread = useFinanceConversationUnread(ownerId, sessionKey);
+  const unreadCount = BigInt(unread?.unreadCount ?? "0");
   const readiness = useQuery({
     queryKey: ["finance-conversation-readiness", ownerId],
     queryFn: () => api.getFinanceConversationReadiness(),
@@ -166,7 +173,9 @@ export function FinanceSidebarNavigation({
                   <SidebarMenuItem key={id}>
                     <SidebarMenuButton
                       className={
-                        attention || count !== undefined ? "sidebar-item-with-meta" : undefined
+                        attention || count !== undefined || (id === "chat" && unreadCount > 0n)
+                          ? "sidebar-item-with-meta"
+                          : undefined
                       }
                       asChild
                       isActive={financeNavigationActive(section, id)}
@@ -198,6 +207,21 @@ export function FinanceSidebarNavigation({
                         ) : null}
                       </Link>
                     </SidebarMenuButton>
+                    {id === "chat" && unreadCount > 0n ? (
+                      <SidebarMenuBadge
+                        role="group"
+                        aria-label={`Chat: ${unreadCount} unread messages`}
+                        className="sidebar-item-meta"
+                      >
+                        <CircleAlertIcon
+                          aria-label="Unread messages need attention"
+                          className="size-3"
+                        />
+                        <span aria-hidden="true">
+                          {unreadCount > 99n ? "99+" : unreadCount.toString()}
+                        </span>
+                      </SidebarMenuBadge>
+                    ) : null}
                     <SidebarItemMeta label={label} attention={Boolean(attention)} count={count} />
                   </SidebarMenuItem>
                 );

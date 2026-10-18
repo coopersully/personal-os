@@ -2,6 +2,16 @@
  * A missing ordinary operation must get an adapter; it cannot be waived by the inventory test.
  */
 export const workspaceApiExceptions = {
+  getFinanceConversationUnread: {
+    kind: "owner_interaction",
+    reason:
+      "Only the human reads agent-message attention above their own rendered cursor; agent delivery ACK never marks messages read or exposes live private history.",
+  },
+  getFinanceActivityEvidence: {
+    kind: "owner_interaction",
+    reason:
+      "Bounded private Activity audit/source evidence belongs to the authenticated human; agent financial readback is separately bound to original run authority.",
+  },
   getFinanceConversationMessageContext: {
     kind: "owner_interaction",
     reason:

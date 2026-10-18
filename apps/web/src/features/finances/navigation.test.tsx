@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import { ApiClientError } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -10,6 +11,9 @@ import { FinanceSidebarNavigation, financeSectionFromPath } from "./navigation.j
 
 vi.mock("../../api.js", () => ({
   api: {
+    getFinanceConversationUnread: vi
+      .fn()
+      .mockResolvedValue({ unreadCount: "0", readThroughSequence: "0", latestAgentSequence: "0" }),
     getFinanceConversationReadiness: vi.fn().mockResolvedValue({ canSend: false }),
     getFinanceConfiguration: vi
       .fn()
@@ -35,6 +39,7 @@ it("maps Finance paths and marks the active navigation item", async () => {
         <TooltipProvider>
           <SidebarProvider>
             <FinanceSidebarNavigation
+              sessionKey="session"
               ownerId="owner"
               onNavigate={onNavigate}
               reviewCount={3}
@@ -77,6 +82,7 @@ it("hides an empty review count", () => {
         <TooltipProvider>
           <SidebarProvider>
             <FinanceSidebarNavigation
+              sessionKey="session"
               ownerId="owner"
               onNavigate={vi.fn()}
               reviewCount={0}
@@ -128,6 +134,7 @@ it("shows connected accounts and separate attention for accounts, profile, and a
         <TooltipProvider>
           <SidebarProvider>
             <FinanceSidebarNavigation
+              sessionKey="session"
               ownerId="owner"
               onNavigate={vi.fn()}
               reviewCount={0}
@@ -162,6 +169,7 @@ it.each([
         <TooltipProvider>
           <SidebarProvider>
             <FinanceSidebarNavigation
+              sessionKey="session"
               ownerId="owner"
               onNavigate={vi.fn()}
               reviewCount={0}
@@ -179,4 +187,98 @@ it.each([
     expect(
       screen.queryByRole("status", { name: "Budget: Action required" }),
     ).not.toBeInTheDocument();
+});
+
+it("shows canonical unread count and an attention icon while Chat remains locked", async () => {
+  const { api } = await import("../../api.js");
+  vi.mocked(api.getFinanceConversationUnread).mockResolvedValueOnce({
+    unreadCount: "9007199254740993",
+    readThroughSequence: "1",
+    latestAgentSequence: "9007199254740994",
+  });
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter>
+        <TooltipProvider>
+          <SidebarProvider>
+            <FinanceSidebarNavigation
+              ownerId="huge-owner"
+              sessionKey="new-session"
+              onNavigate={vi.fn()}
+              reviewCount={0}
+              section="chat"
+            />
+          </SidebarProvider>
+        </TooltipProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  expect(
+    await screen.findByRole("group", { name: "Chat: 9007199254740993 unread messages" }),
+  ).toBeInTheDocument();
+  expect(screen.getByText("99+")).toBeInTheDocument();
+  expect(screen.getByLabelText("Unread messages need attention")).toBeInTheDocument();
+  expect(screen.getByLabelText("Chat verification required")).toBeInTheDocument();
+});
+
+it("clears cached private unread attention on same-owner access denial", async () => {
+  const { api } = await import("../../api.js");
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const key = ["finance-conversation-unread", "denied-owner", "session"];
+  client.setQueryData(key, {
+    unreadCount: "3",
+    readThroughSequence: "1",
+    latestAgentSequence: "4",
+  });
+  vi.mocked(api.getFinanceConversationUnread).mockRejectedValueOnce(
+    new ApiClientError({ status: 403, code: "forbidden", message: "Denied" }),
+  );
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <TooltipProvider>
+          <SidebarProvider>
+            <FinanceSidebarNavigation
+              ownerId="denied-owner"
+              sessionKey="session"
+              onNavigate={vi.fn()}
+              reviewCount={0}
+              section="chat"
+            />
+          </SidebarProvider>
+        </TooltipProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  await waitFor(() => expect(client.getQueryData(key)).toBeUndefined());
+  expect(screen.queryByLabelText("Unread messages need attention")).not.toBeInTheDocument();
+});
+
+it("does not reuse a prior session's cached unread count", async () => {
+  const { api } = await import("../../api.js");
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["finance-conversation-unread", "same-owner", "old-session"], {
+    unreadCount: "8",
+    readThroughSequence: "0",
+    latestAgentSequence: "8",
+  });
+  vi.mocked(api.getFinanceConversationUnread).mockImplementationOnce(() => new Promise(() => {}));
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <TooltipProvider>
+          <SidebarProvider>
+            <FinanceSidebarNavigation
+              ownerId="same-owner"
+              sessionKey="new-session"
+              onNavigate={vi.fn()}
+              reviewCount={0}
+              section="chat"
+            />
+          </SidebarProvider>
+        </TooltipProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  expect(screen.queryByRole("group", { name: "Chat: 8 unread messages" })).not.toBeInTheDocument();
 });

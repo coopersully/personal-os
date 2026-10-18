@@ -23,7 +23,13 @@ export function FinanceWorkspacePage({ ownerId }: { ownerId: string }) {
     case "automations":
       return <FinanceAutomationsPage />;
     case "activity":
-      return <FinanceActivityPage ownerId={ownerId} readActivity={api.listFinanceActivity} />;
+      return (
+        <FinanceActivityPage
+          ownerId={ownerId}
+          readActivity={api.listFinanceActivity}
+          readEvidence={api.getFinanceActivityEvidence}
+        />
+      );
     case "spending":
       return <FinanceSpendingPage />;
     case "accounts":

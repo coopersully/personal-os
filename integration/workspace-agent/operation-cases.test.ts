@@ -101,6 +101,7 @@ it("accounts for every typed workspace operation with an adapter or named semant
   for (const feature of [
     "finances",
     "finance-conversation",
+    "finance-conversation-unread",
     "finance-conversation-evidence",
     "finance-activity",
     "mail",

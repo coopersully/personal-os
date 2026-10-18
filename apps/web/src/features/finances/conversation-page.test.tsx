@@ -72,7 +72,9 @@ it("retains history while locked and marks only actually visible rendered sequen
     canSend: false,
     reason: "challenge_required",
   });
-  show();
+  const client = createAppQueryClient({ queries: { retry: false } });
+  const invalidate = vi.spyOn(client, "invalidateQueries");
+  show("/finances/chat", "owner", client);
   const row = await screen.findByText(message.text);
   expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
   expect(api.markFinanceConversationRendered).not.toHaveBeenCalled();
@@ -84,6 +86,9 @@ it("retains history while locked and marks only actually visible rendered sequen
   );
   await waitFor(() =>
     expect(api.markFinanceConversationRendered).toHaveBeenCalledWith(message.sequence),
+  );
+  await waitFor(() =>
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["finance-conversation-unread", "owner"] }),
   );
   expect(screen.getByRole("link", { name: "Open Automations" })).toHaveAttribute(
     "href",

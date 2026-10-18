@@ -66,3 +66,32 @@ The Chat page focuses the source row while retaining other query context and loc
 A context jump does not advance the contiguous fetched-history boundary or acknowledge an agent
 batch. Only actually visible rendered messages within the contiguous fetched boundary advance the
 human read cursor. Lookup failures use Sonner and a retry control; access denial clears private material.
+
+## Human unread attention
+
+`GET /v1/finances/conversation/unread` is human-only and read-only. One owner-scoped SQL snapshot
+returns the decimal-string count of agent messages above the human rendered cursor, that cursor,
+and the latest agent sequence. Missing cursors start at zero. User notes, private challenge messages,
+agent delivery acknowledgments and deletion of a linked case do not change this definition.
+
+The Chat sidebar uses an owner-and-session-mount cache identity, shows a count and attention icon,
+and keeps the independent capability lock visible. An unread badge never unlocks sending. Only a
+successful human rendered-cursor receipt invalidates the unread projection; agent ACK does not.
+Authorization denial clears cached attention; transient read failure retains the last authorized
+projection. Large counts remain exact decimal strings in the contract and accessible label.
+
+## Activity financial scope
+
+Activity projects actual completed, applied candidate-effect receipts only after validating their
+owner, canonical operation/key, actor, audit membership and immutable message sources. No-change
+receipts do not become applied financial actions. Existing canonical human decisions remain visible.
+Other historical financial actions without this evidence are explicitly outside the current partial
+coverage; neither an agent reply nor a proposed or failed action is inferred to be applied.
+
+Routine actions may group by the exact run and single action family. Mixed-family actions and
+budget decisions remain individually inspectable, preserving explicit human-approval provenance.
+Unknown record kinds remain readable raw evidence and receive no invented routes. Per-action human
+`/v1/finances/activity/:id/evidence` reads at most 100 audit/change/reference items per page, with
+explicit completeness and an owner/receipt/revision-bound signed continuation. The list never
+silently truncates evidence or duplicates actions to represent overflow. PostgreSQL source-binding,
+browser and complete candidate verification are separate required evidence.

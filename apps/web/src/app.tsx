@@ -1214,6 +1214,7 @@ function SidebarCollapseHandle({
 }
 
 function AuthenticatedApp({ user }: { user: User }) {
+  const [financeUnreadSessionKey] = useState(() => crypto.randomUUID());
   const [editor, setEditor] = useState<Editor>(null);
   const desktopCapture = useCallback(
     (kind: "task" | "reminder" | "event") => setEditor({ kind }),
@@ -1467,6 +1468,7 @@ function AuthenticatedApp({ user }: { user: User }) {
               ) : sidebarMode === "finances" ? (
                 <FinanceSidebarNavigation
                   ownerId={user.id}
+                  sessionKey={financeUnreadSessionKey}
                   onNavigate={closeMobileMenu}
                   reviewCount={financeInbox.data?.remainingWork.count ?? 0}
                   section={activeFinanceSection}
@@ -1516,6 +1518,7 @@ function AuthenticatedApp({ user }: { user: User }) {
                       renderWorkspaceNavigation: (onNavigate: () => void) => (
                         <FinanceSidebarNavigation
                           ownerId={user.id}
+                          sessionKey={financeUnreadSessionKey}
                           onNavigate={onNavigate}
                           reviewCount={financeInbox.data?.remainingWork.count ?? 0}
                           section={activeFinanceSection}

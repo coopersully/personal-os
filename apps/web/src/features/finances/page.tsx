@@ -1,7 +1,7 @@
 import type {
-  FinanceAccount,
   FinanceBudgetPacePeriod,
   FinanceBudgetStatus,
+  FinanceCategory,
   FinanceForecast,
   FinanceLedgerHealth,
   FinancePlaybookResponse,
@@ -14,11 +14,12 @@ import type {
 } from "@personal-os/domain";
 import { addMonths, formatDateOnly, formatMonth } from "@personal-os/domain";
 import { EmptyState, Spinner } from "@personal-os/ui";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import { toast } from "sonner";
 import { ActionButton as ShadcnButton } from "@/components/action-button";
 import { CurrencyInput } from "@/components/currency-input";
 import {
@@ -111,6 +112,7 @@ import { InlineError, QueryFeedback } from "../../components/async-state.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
+import { classifyMutationError } from "../../lib/feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import {
   useSaveWorkspacePreferences,
@@ -123,6 +125,7 @@ import {
 import { financeAccountPreferenceKeys, selectedFinanceAccounts } from "./account-preferences";
 import { AccountScopeDialog } from "./account-scope-dialog";
 import { FinanceBudgetBucketManager } from "./bucket-manager.js";
+import { FinanceBulkCategorization, useFinanceBulkSelection } from "./bulk-categorization";
 import { FinanceCategoryDialog } from "./category-dialog";
 import { AddTransactionContext } from "./contextual-question.js";
 import { FinanceEntitySelector } from "./entity-selector";
@@ -404,21 +407,77 @@ export function FinancesPage() {
       return refresh();
     },
   });
-  const addBudget = useFeedbackMutation({
-    feedback: { action: "save this budget", form: true, safeToRetry: false },
+  const addBudget = useMutation({
+    retry: false,
+    onMutate: () => toast.loading("Submitting budget change…"),
     mutationFn: () =>
       api.createFinanceBudget({
         category: budgetCategory.trim(),
         limit: Number(budgetLimit),
         month: budgetMonth,
       }),
-    onSuccess: () => {
+    onError: (error, _variables, id) => {
+      toast.error(
+        classifyMutationError(error, { action: "save this budget", form: true, safeToRetry: false })
+          .message,
+        { ...(id === undefined ? {} : { id }), duration: Number.POSITIVE_INFINITY },
+      );
+    },
+    onSuccess: async (result, _variables, id) => {
+      if ("status" in result && result.status === "pending_review") {
+        toast.message("Budget change needs approval", {
+          id,
+          description: "Your active budget has not changed.",
+          duration: Number.POSITIVE_INFINITY,
+          action: {
+            label: "Review change",
+            onClick: () =>
+              navigate(`/finances/review?approval=${encodeURIComponent(result.review.id)}`),
+          },
+        });
+        return;
+      }
+      if ("status" in result && result.status === "needs_input") {
+        toast.message("Budget change needs more information", {
+          id,
+          duration: Number.POSITIVE_INFINITY,
+          action: {
+            label: "Answer question",
+            onClick: () =>
+              navigate(`/finances/review?question=${encodeURIComponent(result.question.id)}`),
+          },
+        });
+        return;
+      }
       setBudgetCategory("");
       setBudgetLimit("");
       setShowBudgetForm(false);
-      return refresh();
+      toast.success("Budget saved", { id });
+      try {
+        await refresh();
+      } catch {
+        toast.error(
+          "Budget saved, but the view could not refresh. Reload to see the latest budget.",
+          { id },
+        );
+      }
     },
   });
+  const budgetFeedback = useMemo(
+    () =>
+      addBudget.isError
+        ? {
+            ...classifyMutationError(addBudget.error, {
+              action: "save this budget",
+              form: true,
+              safeToRetry: false,
+            }),
+            // Keep field corrections while the discrete result is announced only by Sonner.
+            persistent: false,
+          }
+        : null,
+    [addBudget.error, addBudget.isError],
+  );
   const importHistory = useFeedbackMutation({
     feedback: { action: "import this history", form: true, safeToRetry: false },
     mutationFn: () =>
@@ -802,6 +861,15 @@ export function FinancesPage() {
                 : null}
               {section === "transactions" ? (
                 <FinanceTransactionsTable
+                  key={JSON.stringify([
+                    transactionFilterKey,
+                    currentTransactionCursor,
+                    transactionSort,
+                  ])}
+                  categories={categories.data ?? []}
+                  selectionDisabled={
+                    transactionList.isFetching || transactionList.isError || categories.isError
+                  }
                   hasPreviousPage={transactionCursorHistory.length > 0}
                   isCategorizing={categorize.isPending}
                   isLoading={transactionList.isPending}
@@ -1272,7 +1340,7 @@ export function FinancesPage() {
             </ShadcnCardHeader>
             <ShadcnCardContent>
               <FeedbackForm
-                feedback={addBudget.feedback}
+                feedback={budgetFeedback}
                 onSubmit={(event) => {
                   event.preventDefault();
                   addBudget.mutate();
@@ -2586,6 +2654,8 @@ function FinanceLedgerHealthCard({ health }: { health: FinanceLedgerHealth }) {
 }
 
 function FinanceTransactionsTable({
+  categories,
+  selectionDisabled = false,
   hasPreviousPage,
   isCategorizing,
   isLoading,
@@ -2598,6 +2668,8 @@ function FinanceTransactionsTable({
   sort,
   transactions,
 }: {
+  categories: FinanceCategory[];
+  selectionDisabled?: boolean;
   hasPreviousPage: boolean;
   isCategorizing: boolean;
   isLoading: boolean;
@@ -2613,6 +2685,7 @@ function FinanceTransactionsTable({
   };
   transactions: FinanceTransaction[];
 }) {
+  const selection = useFinanceBulkSelection(transactions, selectionDisabled || isCategorizing);
   const presentation = useFinancePresentationParams();
   const view = presentation.get("view") === "cards" ? "cards" : "table";
   const group = view === "cards" ? presentation.get("group") : null;
@@ -2761,6 +2834,7 @@ function FinanceTransactionsTable({
 
   return (
     <div className="flex flex-col gap-3">
+      <FinanceBulkCategorization selection={selection} categories={categories} />
       {groupHeadings.size > 0 && (hasPreviousPage || nextCursor) ? (
         <p className="text-xs text-muted-foreground">Grouped within this page</p>
       ) : null}
@@ -2777,7 +2851,10 @@ function FinanceTransactionsTable({
                 onContext={() => setContextTransaction(transaction)}
                 onCategorize={() => onCategorize(transaction)}
               >
-                <li className="min-w-0 list-none">
+                <li className="flex min-w-0 list-none items-center gap-3">
+                  <div className="flex min-h-11 min-w-11 items-center justify-center">
+                    {selection.control(transaction)}
+                  </div>
                   <button
                     type="button"
                     className="w-full rounded-lg text-left outline-none focus-visible:[&_[data-slot=item]]:border-foreground/50"
@@ -2804,6 +2881,7 @@ function FinanceTransactionsTable({
           <ShadcnTableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <ShadcnTableRow key={headerGroup.id}>
+                <ShadcnTableHead className="w-12">Select</ShadcnTableHead>
                 {headerGroup.headers.map((header) => (
                   <ShadcnTableHead
                     className={transactionTableColumnClass(header.column.id)}
@@ -2841,6 +2919,9 @@ function FinanceTransactionsTable({
                     }
                   }}
                 >
+                  <ShadcnTableCell className="w-12">
+                    {selection.control(row.original)}
+                  </ShadcnTableCell>
                   {row.getVisibleCells().map((cell) => (
                     <ShadcnTableCell
                       className={transactionTableColumnClass(cell.column.id)}

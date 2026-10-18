@@ -5,8 +5,9 @@ import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter, useLocation } from "react-router-dom";
+import { toast } from "sonner";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   useSaveWorkspacePreferences,
   useWorkspacePreferences,
@@ -80,7 +81,16 @@ function NonAccountPreferenceWriter() {
     </>
   );
 }
-function renderPage(path: string, nonAccountWriter = false) {
+function CurrentRoute() {
+  const location = useLocation();
+  return (
+    <output aria-label="Current route">
+      {location.pathname}
+      {location.search}
+    </output>
+  );
+}
+function renderPage(path: string, nonAccountWriter = false, showRoute = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["me"], { id: "owner" });
   return render(
@@ -88,12 +98,15 @@ function renderPage(path: string, nonAccountWriter = false) {
       <TooltipProvider>
         <MemoryRouter initialEntries={[path]}>
           {nonAccountWriter ? <NonAccountPreferenceWriter /> : null}
+          {showRoute ? <CurrentRoute /> : null}
           <FinancesPage />
         </MemoryRouter>
       </TooltipProvider>
     </QueryClientProvider>,
   );
 }
+
+afterEach(() => vi.restoreAllMocks());
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -702,6 +715,14 @@ describe("Finance section states", () => {
       renderPage("/finances/transactions");
       expect(await screen.findByText("Corner Bistro")).toBeVisible();
       expect(screen.getByLabelText("Merchant entity needs review")).toBeVisible();
+      const selectBistro = await screen.findByRole("checkbox", {
+        name: "Select Corner Bistro, 2026-08-20",
+      });
+      await waitFor(() => expect(selectBistro).toBeEnabled());
+      fireEvent.click(selectBistro);
+      expect(selectBistro).toBeChecked();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByText("1 selected · this page only")).toBeVisible();
       const [detailsButton] = screen.getAllByRole("row", { name: /Open .* transaction/ });
       if (!detailsButton) throw new Error("Transaction details button was not rendered.");
       fireEvent.click(detailsButton);
@@ -719,8 +740,14 @@ describe("Finance section states", () => {
         }),
       );
       fireEvent.click(screen.getByRole("button", { name: "Sort by amount" }));
+      expect(await screen.findByText("0 selected · this page only")).toBeVisible();
       fireEvent.click(await screen.findByRole("button", { name: "Sort by amount" }));
+      await waitFor(() =>
+        expect(screen.getByRole("checkbox", { name: "Select this page" })).toBeEnabled(),
+      );
+      fireEvent.click(screen.getByRole("checkbox", { name: "Select this page" }));
       fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+      expect(await screen.findByText("0 selected · this page only")).toBeVisible();
       await waitFor(() =>
         expect(api.listFinanceTransactions).toHaveBeenCalledWith(
           expect.objectContaining({ cursor: "next-page" }),
@@ -728,6 +755,10 @@ describe("Finance section states", () => {
       );
       fireEvent.click(await screen.findByRole("button", { name: "Previous" }));
       fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+      await waitFor(() =>
+        expect(screen.getByRole("checkbox", { name: "Select this page" })).toBeEnabled(),
+      );
+      fireEvent.click(screen.getByRole("checkbox", { name: "Select this page" }));
       fireEvent.click(screen.getByRole("button", { name: "Filters" }));
       const filters = screen.getByRole("dialog", { name: "Filter transactions" });
       fireEvent.change(within(filters).getByLabelText("Search"), {
@@ -742,6 +773,7 @@ describe("Finance section states", () => {
       );
       expect(api.listFinanceTransactions.mock.calls.every(([query]) => !query.cursor)).toBe(true);
       expect(await screen.findByRole("button", { name: "Previous" })).toBeDisabled();
+      expect(await screen.findByText("0 selected · this page only")).toBeVisible();
       return;
     }
   }, 10_000);
@@ -1644,6 +1676,13 @@ it.each([
   const trigger = await screen.findByRole(view === "cards" ? "button" : "row", {
     name: "Open Cafe transaction",
   });
+  const checkbox = await screen.findByRole("checkbox", { name: "Select Cafe, 2026-08-23" });
+  await waitFor(() => expect(checkbox).toBeEnabled());
+  checkbox.focus();
+  await user.keyboard(" ");
+  expect(checkbox).toBeChecked();
+  expect(checkbox).toHaveFocus();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   fireEvent.contextMenu(trigger);
   await user.click(screen.getByRole("menuitem", { name: "Add context" }));
   expect(await screen.findByRole("dialog", { name: "Add context" })).toBeVisible();
@@ -1789,4 +1828,79 @@ it("does not label another hook's transaction-view failure as an unsaved account
     screen.queryByRole("button", { name: "Review unsaved account selections" }),
   ).not.toBeInTheDocument();
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+it.each([
+  "pending_review",
+  "needs_input",
+])("keeps a legacy budget %s truthful and opens the exact review destination", async (status) => {
+  const notice = vi.spyOn(toast, "message").mockImplementation(() => "budget-notice");
+  const success = vi.spyOn(toast, "success").mockImplementation(() => "budget-notice");
+  const loading = vi.spyOn(toast, "loading").mockImplementation(() => "budget-notice");
+  api.createFinanceBudget.mockResolvedValue({
+    status,
+    review: { id: "approval/123" },
+    question: { id: "question/123" },
+  });
+  renderPage("/finances/budgets", false, true);
+  fireEvent.click(await screen.findByRole("button", { name: "Set a budget" }));
+  fireEvent.change(screen.getByLabelText("Category"), { target: { value: "Dining" } });
+  fireEvent.change(screen.getByLabelText("Monthly limit"), { target: { value: "125" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save budget" }));
+  await waitFor(() => expect(notice).toHaveBeenCalled());
+  expect(loading).toHaveBeenCalledOnce();
+  expect(success).not.toHaveBeenCalled();
+  expect(screen.getByLabelText("Category")).toHaveValue("Dining");
+  expect(screen.getByLabelText("Monthly limit")).toHaveValue("125.00");
+  expect(screen.queryByText("Budget change needs approval")).not.toBeInTheDocument();
+  expect(screen.queryByText("Budget change needs more information")).not.toBeInTheDocument();
+  expect(notice.mock.lastCall?.[1]).toMatchObject({ id: "budget-notice" });
+  const options = notice.mock.lastCall?.[1];
+  if (!options?.action || typeof options.action !== "object" || !("onClick" in options.action))
+    throw new Error("Missing review action");
+  const action = options.action;
+  act(() => action.onClick?.({} as never));
+  expect(screen.getByLabelText("Current route")).toHaveTextContent(
+    status === "pending_review"
+      ? "/finances/review?approval=approval%2F123"
+      : "/finances/review?question=question%2F123",
+  );
+  notice.mockRestore();
+  success.mockRestore();
+  loading.mockRestore();
+});
+it.each([
+  "applied",
+  "legacy",
+])("closes the legacy budget form only for a confirmed %s result", async (status) => {
+  const success = vi.spyOn(toast, "success").mockImplementation(() => "budget-notice");
+  api.createFinanceBudget.mockResolvedValue(status === "applied" ? { status, result: {} } : {});
+  renderPage("/finances/budgets");
+  fireEvent.click(await screen.findByRole("button", { name: "Set a budget" }));
+  fireEvent.change(screen.getByLabelText("Category"), { target: { value: "Dining" } });
+  fireEvent.change(screen.getByLabelText("Monthly limit"), { target: { value: "125" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save budget" }));
+  await waitFor(() => expect(success).toHaveBeenCalledWith("Budget saved", expect.anything()));
+  expect(screen.queryByRole("button", { name: "Save budget" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Budget saved")).not.toBeInTheDocument();
+  success.mockRestore();
+});
+
+it("preserves the budget draft and announces a rejected save through Sonner", async () => {
+  const error = vi.spyOn(toast, "error").mockImplementation(() => "budget-error");
+  const success = vi.spyOn(toast, "success").mockImplementation(() => "budget-error");
+  api.createFinanceBudget.mockRejectedValue(new Error("private server details"));
+  renderPage("/finances/budgets");
+  fireEvent.click(await screen.findByRole("button", { name: "Set a budget" }));
+  fireEvent.change(screen.getByLabelText("Category"), { target: { value: "Dining" } });
+  fireEvent.change(screen.getByLabelText("Monthly limit"), { target: { value: "125" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save budget" }));
+  await waitFor(() => expect(error).toHaveBeenCalled());
+  const message = error.mock.lastCall?.[0];
+  expect(typeof message).toBe("string");
+  if (typeof message !== "string") throw new Error("Missing error feedback");
+  expect(screen.queryByText(message)).not.toBeInTheDocument();
+  expect(screen.queryByText("private server details")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Category")).toHaveValue("Dining");
+  expect(success).not.toHaveBeenCalled();
 });

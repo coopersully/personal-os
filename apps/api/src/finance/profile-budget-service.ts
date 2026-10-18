@@ -32,6 +32,7 @@ import {
   requireFinanceExecution,
   requireFinanceMutation,
 } from "./context.js";
+import { createFinancePlanningEvidenceService } from "./planning-evidence-service.js";
 import { withFinanceBudgetPresentation } from "./presentation-service.js";
 import { lockFinanceProfileVersion } from "./profile-version-lock.js";
 import { appendFinanceProfile, profileValue } from "./profile-writer.js";
@@ -91,6 +92,7 @@ function goalValue(row: typeof financeGoals.$inferSelect): FinanceGoal {
 }
 
 export function createProfileBudgetService({ db, now, executor: transaction }: Options) {
+  const planningEvidence = createFinancePlanningEvidenceService({ db, now });
   async function latestProfile(userId: string) {
     return db.query.financeProfileVersions.findFirst({
       orderBy: [desc(financeProfileVersions.version)],
@@ -642,8 +644,19 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
         .from(financeGoals)
         .where(eq(financeGoals.userId, userId))
         .orderBy(desc(financeGoals.updatedAt));
+      const latest = await planningEvidence.listLatestEvidence(
+        userId,
+        { goalIds: rows.map((row) => row.id), obligationIds: [] },
+        transaction,
+      );
+      const evidenceById = new Map(
+        latest.flatMap((entry) => (entry.kind === "goal" ? [[entry.goalId, entry] as const] : [])),
+      );
       return result({
-        data: rows.map(goalValue),
+        data: rows.map((row) => ({
+          ...goalValue(row),
+          planningEvidence: evidenceById.get(row.id) ?? null,
+        })),
         headline: `Found ${rows.length} financial goals.`,
       });
     },
@@ -658,6 +671,21 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
           payload: input,
         },
         async (tx) => {
+          if (input.operation === "confirm_progress") {
+            const { operation: _operation, idempotencyKey: _key, ...statement } = input;
+            const { source, evidence } = await planningEvidence.confirmGoal({
+              tx,
+              context,
+              input: statement,
+            });
+            return result({
+              data: {
+                ...goalValue(source),
+                planningEvidence: evidence.kind === "goal" ? evidence : null,
+              },
+              headline: "Your stated goal progress was recorded.",
+            });
+          }
           if (input.operation === "create") {
             const [row] = await tx
               .insert(financeGoals)

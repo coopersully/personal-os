@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { manageFinanceGoalInputSchema } from "./budget.js";
+import { manageFinanceRecurringItemInputSchema } from "./ledger.js";
 import {
   type FinanceGoalPlanningEvidence,
   type FinanceGoalPlanningSource,
@@ -215,4 +217,60 @@ describe("explicit user planning evidence", () => {
       "applicable",
     );
   });
+});
+
+it("keeps prior recurring operations and requires an exact obligation statement for confirm_cost", () => {
+  expect(
+    manageFinanceRecurringItemInputSchema.safeParse({
+      operation: "pause",
+      itemId: id,
+      itemType: "income",
+      idempotencyKey: "old-pause",
+    }).success,
+  ).toBe(true);
+  const input = {
+    operation: "confirm_cost",
+    itemType: "obligation",
+    itemId: id,
+    expectedRevision: 3,
+    expectedAmountCents: 12345,
+    cadence: "monthly",
+    accountId: account,
+    currencyCode: "EUR",
+    fixedness: "fixed",
+    asOf: "2026-03-08",
+    idempotencyKey: "statement",
+  };
+  expect(manageFinanceRecurringItemInputSchema.safeParse(input).success).toBe(true);
+  expect(
+    manageFinanceRecurringItemInputSchema.safeParse({ ...input, itemType: "income" }).success,
+  ).toBe(false);
+  expect(
+    manageFinanceRecurringItemInputSchema.safeParse({ ...input, expectedRevision: undefined })
+      .success,
+  ).toBe(false);
+  expect(
+    manageFinanceRecurringItemInputSchema.safeParse({ ...input, today: "2027-01-01" }).success,
+  ).toBe(false);
+});
+
+it("validates canonical explicit goal progress without accepting provider freshness or overlarge compatibility amounts", () => {
+  const input = {
+    operation: "confirm_progress",
+    goalId: id,
+    expectedVersion: 1,
+    progressAmountCents: 0,
+    currencyCode: "EUR",
+    asOf: "2026-03-08",
+    idempotencyKey: "progress",
+  };
+  expect(manageFinanceGoalInputSchema.safeParse(input).success).toBe(true);
+  expect(
+    manageFinanceGoalInputSchema.safeParse({ ...input, progressAmountCents: 2_147_483_648 })
+      .success,
+  ).toBe(false);
+  expect(
+    manageFinanceGoalInputSchema.safeParse({ ...input, recordedAt: "2026-03-08T00:00:00Z" })
+      .success,
+  ).toBe(false);
 });

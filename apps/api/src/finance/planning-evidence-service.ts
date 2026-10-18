@@ -10,15 +10,14 @@ import {
 } from "@personal-os/database";
 import {
   type FinancePlanningEvidence,
-  financePlanningEvidenceCentsSchema,
-  financePlanningEvidenceCurrencySchema,
+  financeConfirmGoalPlanningEvidenceInputSchema,
+  financeConfirmObligationPlanningEvidenceInputSchema,
   financePlanningEvidenceSchema,
-  financeRecurringObligationSchema,
   idSchema,
   localDateAt,
   localDateToIso,
 } from "@personal-os/domain";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { z } from "zod";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
@@ -26,31 +25,8 @@ import { type FinanceMutationContext, requireFinanceMutation } from "./context.j
 
 type FinanceTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type StoredEvidence = typeof financePlanningEvidence.$inferSelect;
-const incrementableRevision = z.number().int().positive().max(2_147_483_646);
-const commonInput = {
-  asOf: z.iso.date(),
-  currencyCode: financePlanningEvidenceCurrencySchema,
-};
-const obligationInputSchema = z
-  .object({
-    ...commonInput,
-    obligationId: idSchema,
-    expectedRevision: incrementableRevision,
-    expectedAmountCents: financePlanningEvidenceCentsSchema,
-    cadence: financeRecurringObligationSchema.shape.cadence,
-    accountId: idSchema.nullable(),
-    fixedness: z.enum(["fixed", "variable"]),
-  })
-  .strict();
-const goalInputSchema = z
-  .object({
-    ...commonInput,
-    goalId: idSchema,
-    expectedVersion: incrementableRevision,
-    // The existing compatibility progress column is PostgreSQL integer, not bigint.
-    progressAmountCents: financePlanningEvidenceCentsSchema.max(2_147_483_647),
-  })
-  .strict();
+const obligationInputSchema = financeConfirmObligationPlanningEvidenceInputSchema;
+const goalInputSchema = financeConfirmGoalPlanningEvidenceInputSchema;
 export type ConfirmFinanceObligationEvidenceInput = z.infer<typeof obligationInputSchema>;
 export type ConfirmFinanceGoalEvidenceInput = z.infer<typeof goalInputSchema>;
 type Mutation<I> = { tx: FinanceTransaction; context: FinanceMutationContext; input: I };
@@ -305,13 +281,32 @@ export function createFinancePlanningEvidenceService({
       );
       return { source, evidence };
     },
-    async listEvidence(userId: string, tx?: FinanceTransaction) {
+    async listLatestEvidence(
+      userId: string,
+      sources: { goalIds: string[]; obligationIds: string[] },
+      tx?: FinanceTransaction,
+    ) {
       idSchema.parse(userId);
+      const goalIds = z.array(idSchema).parse(sources.goalIds);
+      const obligationIds = z.array(idSchema).parse(sources.obligationIds);
+      if (!goalIds.length && !obligationIds.length) return [];
       const rows = await (tx ?? db)
-        .select()
+        .selectDistinctOn([financePlanningEvidence.goalId, financePlanningEvidence.obligationId])
         .from(financePlanningEvidence)
-        .where(eq(financePlanningEvidence.userId, userId))
+        .where(
+          and(
+            eq(financePlanningEvidence.userId, userId),
+            or(
+              ...(goalIds.length ? [inArray(financePlanningEvidence.goalId, goalIds)] : []),
+              ...(obligationIds.length
+                ? [inArray(financePlanningEvidence.obligationId, obligationIds)]
+                : []),
+            ),
+          ),
+        )
         .orderBy(
+          financePlanningEvidence.goalId,
+          financePlanningEvidence.obligationId,
           desc(financePlanningEvidence.sourceRevision),
           desc(financePlanningEvidence.recordedAt),
           desc(financePlanningEvidence.id),

@@ -43,6 +43,29 @@ export const financePlanningEvidenceCurrencySchema = z.string().refine((currency
   return format.minimumFractionDigits === 2 && format.maximumFractionDigits === 2;
 }, "Choose a recognized currency with two minor-unit digits.");
 
+/** Public statement fields; identity and current revision remain mandatory stale-write guards. */
+export const financeConfirmObligationPlanningEvidenceInputSchema = z
+  .object({
+    obligationId: idSchema,
+    expectedRevision: z.number().int().positive().max(2_147_483_646),
+    expectedAmountCents: financePlanningEvidenceCentsSchema,
+    cadence: financeCadenceSchema,
+    accountId: idSchema.nullable(),
+    currencyCode: financePlanningEvidenceCurrencySchema,
+    fixedness: z.enum(["fixed", "variable"]),
+    asOf: z.iso.date(),
+  })
+  .strict();
+export const financeConfirmGoalPlanningEvidenceInputSchema = z
+  .object({
+    goalId: idSchema,
+    expectedVersion: z.number().int().positive().max(2_147_483_646),
+    progressAmountCents: financePlanningEvidenceCentsSchema.max(2_147_483_647),
+    currencyCode: financePlanningEvidenceCurrencySchema,
+    asOf: z.iso.date(),
+  })
+  .strict();
+
 const commonEvidenceShape = {
   evidenceId: idSchema,
   ownerUserId: idSchema,

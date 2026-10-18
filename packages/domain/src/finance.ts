@@ -1,6 +1,7 @@
 export * from "./finance/configuration.js";
 
 import { z } from "zod";
+import { financeObligationPlanningEvidenceSchema } from "./finance/planning-evidence.js";
 
 export * from "./finance/setup-planning.js";
 
@@ -590,6 +591,8 @@ export const financeIncomeStreamSchema = z.object({
 });
 export type FinanceIncomeStream = z.infer<typeof financeIncomeStreamSchema>;
 export const financeRecurringObligationSchema = z.object({
+  revision: z.number().int().positive().optional(),
+  planningEvidence: financeObligationPlanningEvidenceSchema.nullable().optional(),
   accountId: idSchema.nullable(),
   cadence: financeCadenceSchema,
   confidence: z.number().min(0).max(1),

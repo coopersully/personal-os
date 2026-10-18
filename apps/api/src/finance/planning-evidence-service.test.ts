@@ -143,6 +143,7 @@ function fixture(
       },
     })),
   } as unknown as Tx;
+  (tx as unknown as { selectDistinctOn: unknown }).selectDistinctOn = tx.select;
   return {
     tx,
     reads,
@@ -198,7 +199,11 @@ it.each([
 ] as const)("rejects %s confirmation before database access", async (actorType) => {
   const f = fixture();
   await expect(
-    f.service.confirmGoal({ tx: f.tx, context: { ...context, actorType }, input: progress }),
+    f.service.confirmGoal({
+      tx: f.tx,
+      context: { ...context, actorType } as FinanceMutationContext,
+      input: progress,
+    }),
   ).rejects.toMatchObject({ code: "forbidden" });
   expect(f.reads).toHaveLength(0);
   expect(f.inserts).toHaveLength(0);
@@ -340,6 +345,16 @@ it("lists only owner evidence and serializes immutable user provenance", async (
     recordedAt: now(),
   };
   const f = fixture({ evidenceRows: [stored] });
-  expect(await f.service.listEvidence(userId)).toEqual([serializeFinancePlanningEvidence(stored)]);
-  expect(f.reads[0]?.query.params).toEqual([userId]);
+  expect(
+    await f.service.listLatestEvidence(userId, { goalIds: [sourceId], obligationIds: [] }),
+  ).toEqual([serializeFinancePlanningEvidence(stored)]);
+  expect(f.reads[0]?.query.params).toEqual([userId, sourceId]);
+});
+
+it("does not query evidence history without requested source identities", async () => {
+  const f = fixture();
+  expect(await f.service.listLatestEvidence(userId, { goalIds: [], obligationIds: [] })).toEqual(
+    [],
+  );
+  expect(f.reads).toHaveLength(0);
 });

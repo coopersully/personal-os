@@ -5810,7 +5810,12 @@ describe.sequential("ilo API", () => {
       },
     );
     expect(budgetApprovalResponse.status).toBe(200);
-    expect(await payload(budgetApprovalResponse)).toMatchObject({ status: "applied" });
+    expect(await payload(budgetApprovalResponse)).toMatchObject({
+      outcome: {
+        status: "applied",
+        result: { category: "Groceries", limit: 400, month: "2026-07" },
+      },
+    });
     expect((await payload(await request("/v1/finances/budgets/status"))).budgets).toEqual([
       expect.objectContaining({ remaining: 381.5, spent: 18.5 }),
     ]);

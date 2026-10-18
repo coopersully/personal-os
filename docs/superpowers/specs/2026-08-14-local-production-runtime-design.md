@@ -110,7 +110,7 @@ redacted from all logs and errors.
 | --- | --- |
 | Capability and owner | The local API owns product behavior; the lifecycle script owns the worktree-to-production transport. |
 | Configuration and authority | A scoped assumed role reads exact SSM parameters and opens a session to one tagged tunnel instance. Database authority remains the existing production application role in `DATABASE_URL`. |
-| Transport | Loopback PostgreSQL → SSM encrypted session → no-ingress EC2 host → private RDS TCP 5432. The rewritten URL uses the pinned RDS CA with `sslmode=verify-ca`; SSM target validation replaces hostname verification after the connection host becomes loopback. |
+| Transport | Loopback TCP → SSM encrypted session → no-ingress EC2 host → private RDS TCP 5432. The logical PostgreSQL URL retains the exact RDS hostname while a database-client stream override selects loopback, preserving pinned-CA and hostname validation with `sslmode=verify-full`. |
 | Time and capacity | Instance readiness and SSM registration are bounded; tunnel and service readiness have explicit timeouts; each worktree uses one PostgreSQL forward. |
 | Commit point | Database and provider mutations use existing product commit points. Starting the tunnel creates no application data. |
 | Delivery semantics | The local API is an additional production writer and scheduler; existing database claims, optimistic concurrency, audit records, and connector reconciliation remain authoritative. |

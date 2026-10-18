@@ -240,7 +240,7 @@ function PlanDetails({ plan, relations }: { plan: FinanceBudgetVersion; relation
   );
 }
 
-export function FinancePlanPage() {
+export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boolean }) {
   const [params] = useSearchParams();
   const requestedPlanId = params.get("planId");
   const queryClient = useQueryClient();
@@ -337,6 +337,7 @@ export function FinancePlanPage() {
   const distinctActive = active?.status === "active" && active.id !== plan?.id;
   const loaded = !planQuery.isPending && !planQuery.isError;
   function openEditor() {
+    if (approvalTask) return;
     approve.reset();
     save.reset();
     setEditing({ plan: plan ?? null });
@@ -352,7 +353,7 @@ export function FinancePlanPage() {
   return (
     <>
       <WorkspaceHeaderControls label="Plan controls">
-        {plan && loaded ? (
+        {!approvalTask && plan && loaded ? (
           <Button
             size="icon-sm"
             variant="outline"
@@ -366,64 +367,66 @@ export function FinancePlanPage() {
         ) : null}
       </WorkspaceHeaderControls>
       <div className="grid min-w-0 gap-7">
-        <Card>
-          <CardHeader>
-            <CardTitle>Budget buckets</CardTitle>
-            <CardDescription>Group categories for your monthly plan.</CardDescription>
-            <CardAction>
-              <Dialog>
-                <DialogTrigger asChild>
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label="Budget buckets"
-                    title="Budget buckets"
-                  >
-                    <PlusIcon />
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-3xl">
-                  <DialogHeader>
-                    <DialogTitle>Organize budget categories</DialogTitle>
-                    <DialogDescription>
-                      Group transaction categories into planning buckets.
-                    </DialogDescription>
-                  </DialogHeader>
-                  {categoryQuery.isError ? (
-                    <InlineError
-                      error={categoryQuery.error}
-                      retry={() => categoryQuery.refetch()}
-                      stale={categoryQuery.data !== undefined}
-                    />
-                  ) : (
-                    <FinanceBudgetBucketManager categories={relations.categories} month={month} />
-                  )}
-                </DialogContent>
-              </Dialog>
-            </CardAction>
-          </CardHeader>
-          <CardContent>
-            {bucketQuery.isError ? (
-              <InlineError
-                error={bucketQuery.error}
-                retry={() => bucketQuery.refetch()}
-                stale={Boolean(bucketQuery.data)}
-              />
-            ) : null}
-            {bucketQuery.isPending ? (
-              <p role="status">Loading buckets…</p>
-            ) : !relations.buckets.length ? (
-              <p className="text-sm text-muted-foreground">No budget buckets yet.</p>
-            ) : null}
-            <div className="flex flex-wrap gap-2">
-              {relations.buckets.map((bucket) => (
-                <Badge key={bucket.id} variant="secondary">
-                  {bucket.name}
-                </Badge>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+        {!approvalTask ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Budget buckets</CardTitle>
+              <CardDescription>Group categories for your monthly plan.</CardDescription>
+              <CardAction>
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label="Budget buckets"
+                      title="Budget buckets"
+                    >
+                      <PlusIcon />
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-3xl">
+                    <DialogHeader>
+                      <DialogTitle>Organize budget categories</DialogTitle>
+                      <DialogDescription>
+                        Group transaction categories into planning buckets.
+                      </DialogDescription>
+                    </DialogHeader>
+                    {categoryQuery.isError ? (
+                      <InlineError
+                        error={categoryQuery.error}
+                        retry={() => categoryQuery.refetch()}
+                        stale={categoryQuery.data !== undefined}
+                      />
+                    ) : (
+                      <FinanceBudgetBucketManager categories={relations.categories} month={month} />
+                    )}
+                  </DialogContent>
+                </Dialog>
+              </CardAction>
+            </CardHeader>
+            <CardContent>
+              {bucketQuery.isError ? (
+                <InlineError
+                  error={bucketQuery.error}
+                  retry={() => bucketQuery.refetch()}
+                  stale={Boolean(bucketQuery.data)}
+                />
+              ) : null}
+              {bucketQuery.isPending ? (
+                <p role="status">Loading buckets…</p>
+              ) : !relations.buckets.length ? (
+                <p className="text-sm text-muted-foreground">No budget buckets yet.</p>
+              ) : null}
+              <div className="flex flex-wrap gap-2">
+                {relations.buckets.map((bucket) => (
+                  <Badge key={bucket.id} variant="secondary">
+                    {bucket.name}
+                  </Badge>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
         {planQuery.isPending ? <PageLoading workspace="finances" /> : null}
         {planQuery.isError ? (
           <Alert variant="destructive">
@@ -436,7 +439,10 @@ export function FinancePlanPage() {
             </AlertDescription>
           </Alert>
         ) : null}
-        {loaded && !plan ? (
+        {loaded && !plan && approvalTask ? (
+          <p>No budget proposal is available to approve.</p>
+        ) : null}
+        {loaded && !plan && !approvalTask ? (
           <FinancePrerequisiteScreen
             title="Set up your budget"
             readiness={financeConfigurationCapabilities({ state: "loaded", value: null }).budget}
@@ -599,7 +605,7 @@ export function FinancePlanPage() {
           </Collapsible>
         ) : null}
       </div>
-      {editing ? (
+      {!approvalTask && editing ? (
         <FinancePlanEditor
           plan={editing.plan}
           accounts={relations.accounts}

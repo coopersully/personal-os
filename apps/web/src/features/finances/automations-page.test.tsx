@@ -6,8 +6,10 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { FinanceAutomationsPage } from "./automations-page.js";
+import { useFinanceWorkspaceReadiness } from "./use-finance-workspace-readiness";
 
 const api = vi.hoisted(() => ({
+  getFinanceOnboarding: vi.fn(),
   listAutomationHostSchedules: vi.fn(),
   listAutomationHostConnections: vi.fn(),
   getFinanceConversationReadiness: vi.fn(),
@@ -62,11 +64,11 @@ function OwnerReadiness() {
   return <p>{query.data?.canSend ? "Owner Chat available" : "Owner Chat locked"}</p>;
 }
 function open(extra?: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["me"], { id: "owner-a" });
   const user = userEvent.setup();
   render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+    <QueryClientProvider client={client}>
       <FinanceAutomationsPage />
       {extra}
     </QueryClientProvider>,
@@ -305,4 +307,53 @@ it("keeps saved instructions neutral when the actual host is already verified", 
   expect(screen.getByRole("dialog", { name: "Finance host instructions" })).toBeInTheDocument();
   expect(screen.getByText(/Installation status is unknown/)).toBeInTheDocument();
   expect(screen.queryByText(/Chat verification is pending/)).not.toBeInTheDocument();
+});
+
+function ManualControlsReadiness() {
+  const state = useFinanceWorkspaceReadiness();
+  return (
+    <p>
+      {state.manualCreationVisible === true
+        ? "Manual capture visible"
+        : state.manualCreationVisible === false
+          ? "Manual capture hidden"
+          : "Manual capture unknown"}
+    </p>
+  );
+}
+it("refreshes actual onboarding projection only after a confirmed host mutation", async () => {
+  const snapshot = (count: number) => ({
+    revision: 0,
+    completedAt: null,
+    existingAccess: true,
+    source: { state: "usable", summary: "Source", recoveryHref: null },
+    contextReview: "needs_review",
+    questions: [],
+    displayPreferences: { reviewed: false, summary: [] },
+    automationChoice: null,
+    manualVisibility: "auto",
+    automation: {
+      registrationCount: count,
+      authorizedRegistrationWithCadence: false,
+      chatVerification: "pending",
+      canSendChat: false,
+      historyAvailable: false,
+    },
+  });
+  api.getFinanceOnboarding.mockResolvedValue(snapshot(1));
+  api.revokeAutomationHostSchedule.mockRejectedValueOnce(new Error("Not removed"));
+  const user = open(<ManualControlsReadiness />);
+  await screen.findByText("Manual capture hidden");
+  await user.click(await screen.findByRole("button", { name: "Remove registration" }));
+  await user.click(screen.getByRole("button", { name: "Confirm removal" }));
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Not removed", { id: "notice" }));
+  expect(api.getFinanceOnboarding).toHaveBeenCalledTimes(1);
+  expect(screen.getByText("Manual capture hidden")).toBeInTheDocument();
+  api.revokeAutomationHostSchedule.mockImplementationOnce(async () => {
+    api.getFinanceOnboarding.mockResolvedValue(snapshot(0));
+    return status("revoked");
+  });
+  await user.click(screen.getByRole("button", { name: "Confirm removal" }));
+  await screen.findByText("Manual capture visible");
+  expect(api.getFinanceOnboarding).toHaveBeenCalledTimes(2);
 });

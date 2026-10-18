@@ -49,6 +49,7 @@ export function FinanceAutomationsPage() {
       await action();
       await Promise.all([
         client.invalidateQueries({ queryKey: ["finance-host-schedules"] }),
+        client.invalidateQueries({ queryKey: ["finance-onboarding"] }),
         client.invalidateQueries({ queryKey: ["finance-conversation-readiness"] }),
         client.invalidateQueries({ queryKey: ["finance-conversation-host-readiness"] }),
       ]);

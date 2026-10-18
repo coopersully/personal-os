@@ -105,3 +105,13 @@ and transaction count summarize the entire exact filter. Native transaction amou
 original meaning and may differ from selected split/personal-cost portions. Canonical row timestamps
 and account identities must still match the snapshot or the read fails with a conflict rather than
 silently mixing changed records. This endpoint performs no financial mutation or approval.
+
+
+## Group visual identity
+
+The dashboard carries validated assigned category colors and semantic category, bucket, or
+uncategorized icon identities. Bubbles use the shared icon registry and neutral foreground text over
+a translucent tint. Unassigned categories and buckets use a stable identity-based palette fallback.
+The current bucket schema has no persisted color or icon fields; the fallback does not claim user
+assignment or persisted bucket color support. Visual metadata does not change contribution totals or
+exact transaction references.

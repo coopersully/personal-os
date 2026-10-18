@@ -487,11 +487,13 @@ export function ManualAccountEditor({ onClose }: { onClose: () => void }) {
   const [institution, setInstitution] = useState("");
   const [kind, setKind] = useState<FinanceAccountKind>("cash");
   const [balance, setBalance] = useState("");
+  const [currencyCode, setCurrencyCode] = useState("");
   const create = useFeedbackMutation({
     feedback: { action: "create this account", safeToRetry: false, form: true },
     mutationFn: () =>
       api.createFinanceAccount({
         balance: balance.trim() === "" ? null : Number(balance),
+        currencyCode: currencyCode.trim() || null,
         institution: institution.trim(),
         kind,
         name: name.trim(),
@@ -551,8 +553,24 @@ export function ManualAccountEditor({ onClose }: { onClose: () => void }) {
                 </Field>
                 <AccountKindField value={kind} onChange={setKind} />
                 <Field>
+                  <FieldLabel htmlFor="new-account-currency">Currency code</FieldLabel>
+                  <Input
+                    id="new-account-currency"
+                    name="currencyCode"
+                    value={currencyCode}
+                    maxLength={3}
+                    pattern="[A-Z]{3}"
+                    placeholder="EUR"
+                    onChange={(event) => setCurrencyCode(event.target.value.toUpperCase())}
+                  />
+                  <FieldDescription>
+                    Use a three-letter currency code. Leave blank if unknown.
+                  </FieldDescription>
+                </Field>
+                <Field>
                   <FieldLabel htmlFor="new-account-balance">Balance</FieldLabel>
                   <CurrencyInput
+                    currencyCode={/^[A-Z]{3}$/.test(currencyCode) ? currencyCode : null}
                     name="balance"
                     id="new-account-balance"
                     min={Number.NEGATIVE_INFINITY}

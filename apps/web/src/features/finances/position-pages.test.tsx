@@ -707,6 +707,7 @@ describe("Finance position pages", () => {
     await waitFor(() =>
       expect(api.createFinanceAccount).toHaveBeenCalledWith({
         name: "Cash reserve",
+        currencyCode: null,
         institution: "Personal records",
         provider: "manual",
         kind: "cash",
@@ -1188,4 +1189,24 @@ it.each([
     expect(within(metrics).getAllByText("Unavailable")).toHaveLength(3);
   }
   expect(entry).toBeVisible();
+});
+
+it.each([
+  "USD",
+  "EUR",
+])("passes explicitly stated %s manual currency without guessing", async (currencyCode) => {
+  mount(<FinanceCreateButton />);
+  fireEvent.click(screen.getByRole("button", { name: "Add in Finances" }));
+  fireEvent.click(screen.getByRole("button", { name: "Account" }));
+  fireEvent.click(screen.getByRole("button", { name: "Track account manually" }));
+  expect(screen.getByLabelText("Currency code")).toHaveValue("");
+  fireEvent.change(screen.getByLabelText("Account name"), { target: { value: "Travel cash" } });
+  fireEvent.change(screen.getByLabelText("Institution"), { target: { value: "Personal records" } });
+  fireEvent.change(screen.getByLabelText("Currency code"), { target: { value: currencyCode } });
+  fireEvent.click(screen.getByRole("button", { name: "Add account" }));
+  await waitFor(() =>
+    expect(api.createFinanceAccount).toHaveBeenCalledWith(
+      expect.objectContaining({ currencyCode, balance: null }),
+    ),
+  );
 });

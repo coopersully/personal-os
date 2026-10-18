@@ -4,7 +4,7 @@ import { FinanceCreateButton } from "./workspace-header";
 import "@testing-library/jest-dom/vitest";
 import { ApiClientError } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FinanceAccountsPage } from "./accounts-page.js";
@@ -1279,5 +1279,131 @@ it("withholds saved-goal confirmation when authenticated planning context cannot
   ).toBeDisabled();
   expect(screen.getByRole("button", { name: "Explore Emergency reserve" })).toBeDisabled();
   expect(screen.getByLabelText("Projection as-of local date")).toHaveValue("");
+  expect(api.manageFinanceGoal).not.toHaveBeenCalled();
+});
+
+it.each([
+  "goals",
+  "me",
+])("suppresses cached saved-goal evidence and dismisses confirmation after an authoritative %s denial", async (deniedRead) => {
+  const ownerUserId = "11111111-1111-4111-8111-111111111111";
+  const goalId = "22222222-2222-4222-8222-222222222222";
+  const confirmed = {
+    ...goal,
+    id: goalId,
+    currentAmount: 0,
+    planningEvidence: {
+      kind: "goal",
+      evidenceId: "33333333-3333-4333-8333-333333333333",
+      ownerUserId,
+      actor: { type: "user", userId: ownerUserId },
+      provenance: "explicit_user",
+      currencyCode: "EUR",
+      asOf: "2026-01-01",
+      recordedAt: "2026-01-01T12:00:00Z",
+      goalId,
+      goalVersion: 7,
+      progressAmountCents: 0,
+    },
+  };
+  api.listFinanceGoals.mockResolvedValue(envelope([confirmed]));
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <MemoryRouter>
+          <FinanceWealthPage />
+        </MemoryRouter>
+      </TooltipProvider>
+    </QueryClientProvider>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Explore Emergency reserve" }));
+  expect(screen.getByLabelText("Confirmed goal currency")).toHaveValue("EUR");
+  fireEvent.click(screen.getByRole("button", { name: "Reconfirm saved progress" }));
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+  const denial = new ApiClientError({ code: "forbidden", message: "Access revoked", status: 403 });
+  if (deniedRead === "goals") api.listFinanceGoals.mockRejectedValue(denial);
+  else api.getMe.mockRejectedValue(denial);
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: [deniedRead === "goals" ? "finance-goals" : "me"] });
+  });
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(
+    screen.queryByRole("button", { name: "Explore Emergency reserve" }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Confirmed goal progress")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Your statement as of/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Confirmed by you as of/)).not.toBeInTheDocument();
+  expect(api.manageFinanceGoal).not.toHaveBeenCalled();
+  api.listFinanceGoals.mockResolvedValue(envelope([confirmed]));
+  api.getMe.mockResolvedValue({ id: ownerUserId, planningTimezone: "America/New_York" });
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: [deniedRead === "goals" ? "finance-goals" : "me"] });
+  });
+  await screen.findByRole("button", { name: "Explore Emergency reserve" });
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Confirmed goal progress")).not.toBeInTheDocument();
+});
+
+it.each([
+  "goals",
+  "me",
+])("retains saved-goal evidence and confirmation draft after a transient %s read failure", async (failedRead) => {
+  const ownerUserId = "11111111-1111-4111-8111-111111111111";
+  const goalId = "22222222-2222-4222-8222-222222222222";
+  api.listFinanceGoals.mockResolvedValue(
+    envelope([
+      {
+        ...goal,
+        id: goalId,
+        currentAmount: 0,
+        planningEvidence: {
+          kind: "goal",
+          evidenceId: "33333333-3333-4333-8333-333333333333",
+          ownerUserId,
+          actor: { type: "user", userId: ownerUserId },
+          provenance: "explicit_user",
+          currencyCode: "EUR",
+          asOf: "2026-01-01",
+          recordedAt: "2026-01-01T12:00:00Z",
+          goalId,
+          goalVersion: 7,
+          progressAmountCents: 0,
+        },
+      },
+    ]),
+  );
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  render(
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <MemoryRouter>
+          <FinanceWealthPage />
+        </MemoryRouter>
+      </TooltipProvider>
+    </QueryClientProvider>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Explore Emergency reserve" }));
+  fireEvent.click(screen.getByRole("button", { name: "Reconfirm saved progress" }));
+  fireEvent.change(screen.getByLabelText("Current goal amount you confirm"), {
+    target: { value: "123" },
+  });
+  const failure = new ApiClientError({
+    code: "internal_error",
+    message: "Temporary service failure",
+    status: 503,
+  });
+  if (failedRead === "goals") api.listFinanceGoals.mockRejectedValue(failure);
+  else api.getMe.mockRejectedValue(failure);
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: [failedRead === "goals" ? "finance-goals" : "me"] });
+  });
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+  expect(screen.getByLabelText("Current goal amount you confirm")).toHaveValue("123");
+  expect(screen.getByLabelText("Confirmed goal currency")).toHaveValue("EUR");
   expect(api.manageFinanceGoal).not.toHaveBeenCalled();
 });

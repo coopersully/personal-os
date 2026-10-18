@@ -1,3 +1,4 @@
+import { ApiClientError } from "@personal-os/api-client";
 import {
   type FinanceGoal,
   localDateAt,
@@ -5,7 +6,7 @@ import {
   type ManageFinanceGoalInput,
 } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActionButton as Button } from "@/components/action-button";
 import { CurrencyInput } from "@/components/currency-input";
 import { BankIcon, DollarIcon, PlusIcon, TargetIcon, WalletIcon } from "@/components/icons";
@@ -103,7 +104,21 @@ export function FinanceWealthPage() {
       void refreshFinancePosition(client);
     },
   });
-  const visibleGoals = goals.data?.data.filter((goal) => goal.status !== "removed");
+  const accessDenied = [goals, me].some(
+    (query) =>
+      query.isError &&
+      query.error instanceof ApiClientError &&
+      [401, 403].includes(query.error.status),
+  );
+  useEffect(() => {
+    if (accessDenied) {
+      setProgressGoal(null);
+      setExploreGoalId(null);
+    }
+  }, [accessDenied]);
+  const visibleGoals = accessDenied
+    ? undefined
+    : goals.data?.data.filter((goal) => goal.status !== "removed");
   const exploredGoal = visibleGoals?.find((goal) => goal.id === exploreGoalId);
   return (
     <div className="flex flex-col gap-6">
@@ -264,7 +279,7 @@ export function FinanceWealthPage() {
                 );
               })}
             </ItemGroup>
-          ) : goals.isSuccess ? (
+          ) : goals.isSuccess && !accessDenied ? (
             <Empty>
               <EmptyHeader>
                 <EmptyTitle>No financial goals yet</EmptyTitle>
@@ -293,7 +308,7 @@ export function FinanceWealthPage() {
       ) : (
         <FinanceGoalScenarioExplorer />
       )}
-      {progressGoal && todayLocalDate ? (
+      {progressGoal && todayLocalDate && !accessDenied ? (
         <GoalProgressConfirmation
           goal={progressGoal}
           todayLocalDate={todayLocalDate}

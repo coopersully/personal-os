@@ -5,7 +5,7 @@ import {
   financePlanningEvidenceCurrencySchema,
 } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
-import { useId, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -108,6 +108,21 @@ export function GoalProgressConfirmation({
       void refreshFinancePosition(client);
     },
   });
+  const correctionFeedback = useMemo(
+    () =>
+      save.feedback
+        ? {
+            ...save.feedback,
+            persistent: false,
+            fields: Object.fromEntries(
+              Object.entries(save.feedback.fields).filter(([name]) =>
+                ["progressAmountCents", "currencyCode", "asOf"].includes(name),
+              ),
+            ),
+          }
+        : null,
+    [save.feedback],
+  );
   return (
     <Dialog
       open
@@ -125,7 +140,7 @@ export function GoalProgressConfirmation({
           </DialogDescription>
         </DialogHeader>
         <FeedbackForm
-          feedback={save.feedback}
+          feedback={correctionFeedback}
           fieldNames={{ progressAmountCents: "amount", currencyCode: "currency", asOf: "asOf" }}
           className="flex flex-col gap-4"
           validate={() => {

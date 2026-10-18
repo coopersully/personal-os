@@ -59,6 +59,7 @@ import {
   type ContextualPrincipal,
   contextualTransaction,
 } from "./finance/contextual-question-store.js";
+import { createFinanceConversationEvidenceService } from "./finance/conversation-evidence-service.js";
 import { createFinanceConversationService } from "./finance/conversation-persistence.js";
 import { createFinanceMaintenanceIntentService } from "./finance/maintenance-intent-service.js";
 import { createFinancePositionService } from "./finance/position-service.js";
@@ -100,6 +101,7 @@ import { registerAutomationHostRoutes } from "./routes/automation-hosts.js";
 import { registerCalendarRoutes } from "./routes/calendar.js";
 import { registerFinanceActivityRoutes } from "./routes/finance-activity.js";
 import { registerFinanceConversationRoutes } from "./routes/finance-conversation.js";
+import { registerFinanceConversationEvidenceRoutes } from "./routes/finance-conversation-evidence.js";
 import { registerFinanceRoutes } from "./routes/finances.js";
 import { registerGoalsRoutes } from "./routes/goals.js";
 import { registerMailRoutes } from "./routes/mail.js";
@@ -631,6 +633,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   const financeActivity = createFinanceActivityService({
     db: dependencies.db,
     cursorSecret: dependencies.config.encryptionKey,
+  });
+  const financeConversationEvidence = createFinanceConversationEvidenceService({
+    db: dependencies.db,
+    cursorSecret: dependencies.config.encryptionKey,
+    now,
   });
   const financeConversation = createFinanceConversationService({ db: dependencies.db, now });
   const financePosition = createFinancePositionService({ db: dependencies.db, now });
@@ -1475,6 +1482,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   });
 
   registerFinanceConversationRoutes({ app, conversation: financeConversation });
+  registerFinanceConversationEvidenceRoutes({ app, evidence: financeConversationEvidence });
   registerFinanceActivityRoutes({ app, activity: financeActivity });
 
   registerReminderRoutes({ app, mutationContext, reminders });

@@ -34,3 +34,24 @@ The effect-evidence helper is not yet integrated into financial mutation owners.
 not proof that a financial action occurred, and it never supplies human budget approval. Actual
 PostgreSQL migration, concurrency, rollback, privacy and deletion evidence, independent review,
 complete candidate verification and supported-host observation remain required release gates.
+
+## Committed financial-effect readback
+
+Candidate settlement stores its canonical `commit_finance_candidate_effect_v1` mutation receipt in
+the same transaction as the existing guarded financial effects and actual audit events. The
+candidate/revision key makes a lost response safe to read back without applying effects again.
+Optional conversation claims are validated against the original run's delivered fixed batch;
+conversation text never supplies budget approval or execution authority. A standalone reply is not
+financial-effect evidence.
+
+`get_finance_conversation_evidence` reads one exact run, candidate and revision through the typed
+readback route. Its original host must retain maintenance, write and execution grants, current
+protocol proof and policy authority. The read never starts a run, scans a live message queue or
+replays effects. Signed cursors retain owner/run/candidate scope and page audit and record references
+at 100 per response. Missing historical receipts are explicitly unavailable.
+
+Expired or revoked original submitting credentials fail closed with a recoverable reconnect state;
+a different token or replacement host is not silently adopted. Explicit authorization refresh and
+claimed-run recovery remain separate acceptance work. The authored financial settlement and
+transport regressions require their own PostgreSQL evidence; earlier conversation delivery tests do
+not prove financial-effect settlement or complete browser acceptance.

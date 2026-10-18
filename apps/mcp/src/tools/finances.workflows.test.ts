@@ -733,3 +733,44 @@ it("forwards exact Spending selections and source revisions without mutation aut
     await server.close();
   }
 });
+
+it("reads exact committed run evidence without replaying financial effects", async () => {
+  const getFinanceConversationEvidence = vi.fn(async () => ({
+    state: "unavailable",
+    reason: "no_committed_effect_receipt",
+  }));
+  const server = new McpServer({ name: "effect-evidence", version: "1" });
+  registerFinanceTools(server, {
+    getFinanceConversationEvidence,
+  } as unknown as PersonalOsApiClient);
+  const client = new Client({ name: "test", version: "1" });
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(st), client.connect(ct)]);
+  const input = {
+    candidateId: id,
+    candidateRevision: `sha256:${"b".repeat(64)}`,
+    cursor: "exact-signed-page",
+  };
+  try {
+    const response = await client.callTool({
+      name: "get_finance_conversation_evidence",
+      arguments: { runId: id, ...input },
+    });
+    expect(response.structuredContent).toEqual({
+      result: { state: "unavailable", reason: "no_committed_effect_receipt" },
+    });
+    expect(getFinanceConversationEvidence).toHaveBeenCalledExactlyOnceWith(id, input);
+    expect(
+      (
+        await client.callTool({
+          name: "get_finance_conversation_evidence",
+          arguments: { runId: id, ...input, userId: id },
+        })
+      ).isError,
+    ).toBe(true);
+    expect(getFinanceConversationEvidence).toHaveBeenCalledTimes(1);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});

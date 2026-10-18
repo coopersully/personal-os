@@ -443,6 +443,12 @@ export const iloToolCatalog = {
     openWorld: false,
   }),
   get_finance_continuations: read("finances", ["finances:maintain"]),
+  get_finance_conversation_evidence: read(
+    "finances",
+    ["finances:maintain", "finances:write", "finances:execute"],
+    "inspect",
+    { openWorld: false },
+  ),
   get_finance_conversation_batch: write(
     "finances",
     ["finances:maintain", "finances:write", "finances:execute"],

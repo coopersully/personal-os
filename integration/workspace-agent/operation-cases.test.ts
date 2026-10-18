@@ -99,6 +99,7 @@ it("accounts for every typed workspace operation with an adapter or named semant
   for (const feature of [
     "finances",
     "finance-conversation",
+    "finance-conversation-evidence",
     "finance-activity",
     "mail",
     "mail-stewardship",
@@ -254,4 +255,17 @@ it("keeps both Spending reads discoverable with only Finance read authority", as
       readOnly: true,
       requiredScopes: ["finances:read"],
     });
+});
+
+it("requires all original execution grants for read-only committed effect evidence", async () => {
+  const entry = (await discoverToolDictionary()).find(
+    ({ tool }) => tool.name === "get_finance_conversation_evidence",
+  );
+  expect(entry?.definition).toMatchObject({
+    readOnly: true,
+    scopeMatch: "all",
+    requiredScopes: ["finances:maintain", "finances:write", "finances:execute"],
+  });
+  expect(entry?.tool.inputSchema.properties).toHaveProperty("candidateRevision");
+  expect(entry?.tool.inputSchema.properties).not.toHaveProperty("userId");
 });

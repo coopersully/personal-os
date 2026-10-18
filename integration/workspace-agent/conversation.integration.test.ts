@@ -133,6 +133,22 @@ describe("verified Finance conversation transport", () => {
         now: new Date("2026-10-11T15:00:00Z"),
       });
     });
+    const evidenceInput = {
+      runId: run.id,
+      candidateId: first.id,
+      candidateRevision: `sha256:${"a".repeat(64)}`,
+    };
+    expect(await call("get_finance_conversation_evidence", evidenceInput)).toEqual({
+      state: "unavailable",
+      reason: "no_committed_effect_receipt",
+    });
+    for (const alien of [b, other]) {
+      const deniedEvidence = await alien.client.callTool({
+        name: "get_finance_conversation_evidence",
+        arguments: evidenceInput,
+      });
+      expect(deniedEvidence.isError).toBe(true);
+    }
     const later = await human.sendFinanceConversationMessage({
       text: "Next run only",
       idempotencyKey: "later-context",

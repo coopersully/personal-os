@@ -1,5 +1,12 @@
 export const financeCapabilityManifest = [
   {
+    apiOperation: "getFinanceConversationEvidence",
+    capability: "workflow.committed_effect_evidence",
+    mcpTool: "get_finance_conversation_evidence",
+    mode: "read",
+    requiredScope: "finances:execute",
+  },
+  {
     apiOperation: "getFinanceSpending",
     capability: "ledger.spending_dashboard",
     mcpTool: "get_finance_spending",

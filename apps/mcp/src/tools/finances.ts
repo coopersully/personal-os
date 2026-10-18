@@ -9,6 +9,7 @@ import {
   type FinanceToolResult,
   financeBudgetBaselineQualificationQuerySchema,
   financeConversationAcknowledgmentInputSchema,
+  financeConversationEvidenceReadInputSchema,
   financeConversationProofOperationSchema,
   financeConversationReplyInputSchema,
   financeMaintenanceInputSchema,
@@ -179,6 +180,26 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     },
     async (input) =>
       financeApiResult(() => api.setupFinances(financeSetupInputSchema.parse(input))),
+  );
+
+  server.registerTool(
+    "get_finance_conversation_evidence",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the committed financial-effect receipt for one exact existing Finance run, candidate and revision, using the original verified host with current execution authority. Follow nextCursor for bounded audit/record reference pages. This read never applies or retries effects and never reads a live conversation queue. Expired/revoked original credentials require explicit recovery.",
+      inputSchema: z
+        .object({ runId: id, ...financeConversationEvidenceReadInputSchema.shape })
+        .strict(),
+      title: "Read committed Finance run evidence",
+    },
+    async ({ runId, ...input }) =>
+      apiResult(() =>
+        api.getFinanceConversationEvidence(
+          runId,
+          financeConversationEvidenceReadInputSchema.parse(input),
+        ),
+      ),
   );
 
   server.registerTool(

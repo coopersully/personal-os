@@ -507,6 +507,11 @@ describe("database schema contracts", () => {
       "0111_finance_hosted_link_state",
       "0112_connector_capability_health",
       "0113_finance_host_prompt_issues",
+      "0114_finance_budget_baseline_qualifications",
+      "0115_finance_conversation_core",
+      "0116_finance_onboarding_receipts",
+      "0117_finance_planning_evidence",
+      "0118_finance_preferences_legacy_access",
     ]);
   });
 

@@ -1243,6 +1243,7 @@ export const financeBudgetPaceSchema = z.object({
 export type FinanceBudgetPace = z.infer<typeof financeBudgetPaceSchema>;
 
 export const createFinanceAccountInputSchema = z.object({
+  currencyCode: financeAccountSchema.shape.currencyCode.optional(),
   balance: z
     .number()
     .finite()

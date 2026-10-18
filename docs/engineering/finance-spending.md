@@ -80,12 +80,10 @@ saved as a stale opening period. Durable persistence of these new fields require
 owned additive Finance settings storage migration and readback verification; domain defaults and
 UI hooks alone do not establish saved state.
 
-Monthly fills remain unavailable. A designated human-approved historical version can establish a
-baseline, but the canonical budget tables do not establish budget account scope or budget currency.
-Debt targets and opaque resource IDs are not account-scope evidence. Neither selected accounts nor
-all current accounts may stand in for all budget accounts. This slice does not claim the monthly-fill
-criterion or multicurrency experience complete. Exact Spending-owned contribution detail is an initial
-destination; full transaction-view drill-down and production/UI acceptance remain separate open gates.
+Monthly fills require the separate immutable qualification record described below. The original
+budget tables alone do not establish budget account scope or currency; debt targets, opaque resource
+IDs, selected display accounts, and all current accounts cannot substitute for explicit qualification.
+Full transaction-view integration and production/UI acceptance remain separate open gates.
 
 Trends and Rhythm consume the same dated snapshots. Current named-period comparisons cap the
 current period to elapsed local dates and compare the equivalent elapsed previous period, labeling

@@ -577,6 +577,7 @@ const financeCadenceSchema = z.enum([
   "yearly",
 ]);
 export const financeIncomeStreamSchema = z.object({
+  revision: z.number().int().positive().optional(),
   accountId: idSchema.nullable(),
   cadence: financePayFrequencySchema,
   confidence: z.number().min(0).max(1),
@@ -1361,3 +1362,6 @@ export * from "./finance/recurring-schedule.js";
 export * from "./finance/occurrence-match.js";
 export * from "./finance/balance-basis.js";
 export * from "./finance/cashflow-sources.js";
+
+export * from "./finance/recurring-occurrences.js";
+export * from "./finance/payday-projection.js";

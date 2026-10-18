@@ -142,6 +142,9 @@ import {
   createFinancePlanningEvidenceService,
   requireExplicitUser,
 } from "./finance/planning-evidence-service.js";
+import { createFinanceRecurringScheduleService } from "./finance/recurring-schedule-service.js";
+import { createFinanceRecurringOccurrenceService } from "./finance/recurring-occurrence-service.js";
+import { createFinanceBalanceBasisService, assertCashflowAccountMayBeDeleted } from "./finance/balance-basis-service.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import { appendFinanceProfile } from "./finance/profile-writer.js";
 import { issueMaintenanceReviewQuestion } from "./finance/review-action-service.js";
@@ -759,6 +762,9 @@ export function createFinanceService({
   const inbox = createInboxService({ db, now });
   const canonicalLedger = createFinanceLedgerService({ db, now });
   const planning = createProfileBudgetService({ db, now });
+  const recurringSchedules = createFinanceRecurringScheduleService({ db, now });
+  const recurringOccurrences = createFinanceRecurringOccurrenceService({ db, now });
+  const balanceBases = createFinanceBalanceBasisService({ db, now, readOccurrences: recurringOccurrences.listFinanceRecurringOccurrences });
   const planningEvidence = createFinancePlanningEvidenceService({ db, now });
   const setup = createSetupService({ db, now, planning });
   function legacyMutationContext(context: FinanceMutationContext): MutationContext {
@@ -3313,6 +3319,7 @@ export function createFinanceService({
   const incomeStreamValue = (
     row: typeof financeIncomeStreams.$inferSelect,
   ): FinanceIncomeStream => ({
+    revision: row.revision,
     accountId: row.accountId,
     cadence: row.cadence,
     confidence: row.confidence / 10_000,
@@ -3493,7 +3500,7 @@ export function createFinanceService({
             ? [existing[0]]
             : await executor
                 .update(financeIncomeStreams)
-                .set({ ...values, updatedAt: now() })
+                .set({ ...values, revision: sql`${financeIncomeStreams.revision} + 1`, updatedAt: now() })
                 .where(eq(financeIncomeStreams.id, existing[0].id))
                 .returning()
           : await executor
@@ -3946,6 +3953,9 @@ export function createFinanceService({
     linkFinanceTransactions: canonicalLedger.linkTransactions,
     ...inbox,
     ...planning,
+    ...recurringSchedules,
+    ...recurringOccurrences,
+    ...balanceBases,
     ...setup,
     async getFinanceConfiguration(userId: string, requestId: string = randomUUID()) {
       const boundedRead = <T>(read: (executor: Database) => Promise<T>) =>
@@ -4563,7 +4573,7 @@ export function createFinanceService({
       if (!before) throw new AppError("not_found", "The income stream was not found.");
       const [row] = await executor
         .update(financeIncomeStreams)
-        .set({ source: "user", status: input.status, updatedAt: now() })
+        .set({ source: "user", status: input.status, revision: sql`${financeIncomeStreams.revision} + 1`, updatedAt: now() })
         .where(eq(financeIncomeStreams.id, id))
         .returning();
       const value = incomeStreamValue(
@@ -8134,6 +8144,7 @@ export function createFinanceService({
           )
           .orderBy(financeTransactions.id)
           .for("update");
+        await assertCashflowAccountMayBeDeleted(tx, context.principal.userId, before.id);
         await assertAccountMayBeDeleted(tx, context.principal.userId, before.id);
         for (let offset = 0; offset < ownedTransactions.length; offset += 1_000) {
           const transactionIds = ownedTransactions

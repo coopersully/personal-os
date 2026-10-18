@@ -117,6 +117,8 @@ export type FinanceRecurringOccurrence = {
   currencyCode: string;
   amountBasis: "fixed" | "variable";
   certainty: "expected";
+  /** False for retained matched/reversed history outside the effective schedule interval. */
+  inCurrentSchedule: boolean;
   matchState: "expected" | "partially_matched" | "matched" | "invalidated";
   matchedAmountCents: number;
   remainingExpectedCents: number | null;

@@ -52,6 +52,10 @@ import {
   useFinancePresentationParams,
   useSaveFinancePresentation,
 } from "./presentation-preferences";
+import {
+  type FinanceCategoryReadState,
+  financeTransactionCategoryLabel,
+} from "./transaction-category";
 import { transactionGroupingOptions } from "./transaction-groups";
 import { useFinanceWorkspaceReadiness } from "./use-finance-workspace-readiness";
 
@@ -429,10 +433,14 @@ function TransactionDate({
 
 export function FinanceLinkedTransaction({
   id,
+  categories = [],
+  categoryReadState = "unavailable",
   onBreakdown,
   onCategorize,
 }: {
   id: string;
+  categories?: FinanceCategory[];
+  categoryReadState?: FinanceCategoryReadState;
   onBreakdown: (transaction: FinanceTransaction) => void;
   onCategorize: (transaction: FinanceTransaction) => void;
 }) {
@@ -474,7 +482,7 @@ export function FinanceLinkedTransaction({
       <dl className="my-4 grid grid-cols-2 gap-3 text-sm">
         <div>
           <dt className="text-muted-foreground">Category</dt>
-          <dd>{item.category ?? "Uncategorized"}</dd>
+          <dd>{financeTransactionCategoryLabel(item, categories, categoryReadState)}</dd>
         </div>
         <div>
           <dt className="text-muted-foreground">Direction</dt>

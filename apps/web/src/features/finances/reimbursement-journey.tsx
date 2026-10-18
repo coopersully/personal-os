@@ -162,9 +162,37 @@ function ReceiptEvidence({
             </dd>
           </div>
         </dl>
-        <p className="text-muted-foreground">
-          Personal net cost unavailable: the canonical record does not supply it.
-        </p>
+        {item.sourceExpense?.personalCostToDate?.state === "qualified" ? (
+          <div>
+            <p>
+              Personal cost to date (whole expense):{" "}
+              {reimbursementAmount(
+                item.sourceExpense.personalCostToDate.amount,
+                item.sourceExpense.personalCostToDate.currency,
+              )}
+            </p>
+            <p className="text-muted-foreground">
+              Gross expense less{" "}
+              {reimbursementAmount(
+                item.sourceExpense.personalCostToDate.receivedAmount,
+                item.sourceExpense.personalCostToDate.currency,
+              )}{" "}
+              in qualifying received reimbursements. Expected recovery is not deducted.
+            </p>
+            <p className="text-muted-foreground">
+              This whole-expense amount can repeat across related claims. Do not add case cards
+              together.
+            </p>
+          </div>
+        ) : (
+          <p className="text-muted-foreground">
+            Personal net cost unavailable:{" "}
+            {item.sourceExpense?.personalCostToDate?.state === "unavailable"
+              ? item.sourceExpense.personalCostToDate.reason.replaceAll("_", " ")
+              : "the canonical record does not supply it"}
+            .
+          </p>
+        )}
       </section>
       <div className="flex flex-col gap-1">
         <p>{item.dueDate ? `Due date: ${item.dueDate}` : "Due date not recorded"}</p>

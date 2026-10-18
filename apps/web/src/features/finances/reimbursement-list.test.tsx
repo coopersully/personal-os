@@ -134,3 +134,34 @@ it("shows canonical source currency and warns about mismatched credit currency",
   expect(await screen.findByText(/€40.00 received of €120.00/)).toBeVisible();
   expect(screen.getByText(/Receipt currency differs from the source expense/)).toBeVisible();
 });
+
+it("labels qualified personal cost as whole-expense material and never adds case cards", async () => {
+  const item = claim({
+    sourceExpense: {
+      transactionId: tx,
+      amount: 200,
+      allocationAmount: 120,
+      allocationRevision: 1,
+      allocationState: "active",
+      allocationTreatment: "reimbursable",
+      date: "2026-10-01",
+      merchant: "Expense",
+      currency: "EUR",
+      pending: false,
+      personalCostToDate: {
+        state: "qualified",
+        amount: 150,
+        receivedAmount: 50,
+        currency: "EUR",
+        scope: "whole_expense",
+      },
+    },
+  });
+  show(item);
+  expect(
+    await screen.findByText(
+      /Personal cost to date \(whole expense\): €150.00. May repeat on related claims; do not add case cards together/,
+    ),
+  ).toBeVisible();
+  expect(screen.queryByText(/€100.00/)).not.toBeInTheDocument();
+});

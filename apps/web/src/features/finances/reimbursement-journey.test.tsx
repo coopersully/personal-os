@@ -317,3 +317,55 @@ it("renders audited removed receipts and keeps unmatch actions available after c
   );
   expect(screen.getByText("Remainder waived")).toBeVisible();
 });
+
+it("displays qualified actual whole-expense personal cost without subtracting expected recovery", async () => {
+  const item = claim({
+    sourceExpense: {
+      transactionId: sourceId,
+      amount: 200,
+      allocationAmount: 120,
+      allocationRevision: 1,
+      allocationState: "active",
+      allocationTreatment: "reimbursable",
+      currency: "EUR",
+      date: "2026-10-01",
+      merchant: "Meal",
+      pending: false,
+      personalCostToDate: {
+        state: "qualified",
+        amount: 150,
+        receivedAmount: 50,
+        currency: "EUR",
+        scope: "whole_expense",
+      },
+    },
+  });
+  mount(item);
+  await userEvent.click(screen.getByRole("button", { name: "Receipt history and evidence" }));
+  expect(screen.getByText("Personal cost to date (whole expense): €150.00")).toBeVisible();
+  expect(screen.getByText(/Gross expense less €50.00/)).toBeVisible();
+  expect(screen.getByText(/Expected recovery is not deducted/)).toBeVisible();
+  expect(screen.getByText(/Do not add case cards together/)).toBeVisible();
+  expect(screen.queryByText(/Personal net cost unavailable/)).not.toBeInTheDocument();
+});
+it("discloses a canonical unsupported qualification reason", async () => {
+  mount(
+    claim({
+      sourceExpense: {
+        transactionId: sourceId,
+        amount: 200,
+        allocationAmount: 120,
+        allocationRevision: 1,
+        allocationState: "active",
+        allocationTreatment: "reimbursable",
+        currency: "EUR",
+        date: "2026-10-01",
+        merchant: "Meal",
+        pending: false,
+        personalCostToDate: { state: "unavailable", reason: "incomplete_allocations" },
+      },
+    }),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Receipt history and evidence" }));
+  expect(screen.getByText("Personal net cost unavailable: incomplete allocations.")).toBeVisible();
+});

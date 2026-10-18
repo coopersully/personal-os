@@ -201,6 +201,78 @@ describe.sequential("Canonical reimbursement corrections", () => {
     });
     expect((await service.list(crypto.randomUUID())).reimbursements).toEqual([]);
   });
+  it("qualifies whole-expense EUR personal cost only after complete allocation and full ownership facts", async () => {
+    const f = await fixture();
+    await database.db
+      .update(financeAccounts)
+      .set({ ownershipType: "individual", ownershipShareBps: 10_000 })
+      .where(eq(financeAccounts.id, f.account.id));
+    expect(
+      (await service.list(f.owner.id)).reimbursements[0]?.sourceExpense?.personalCostToDate,
+    ).toEqual({ state: "unavailable", reason: "incomplete_allocations" });
+    await database.db
+      .insert(financeTransactionAllocations)
+      .values({
+        userId: f.owner.id,
+        transactionId: f.expense.id,
+        categoryId: f.allocation.categoryId,
+        amount: 8_000,
+        allocationOrder: 1,
+        treatment: "personal",
+      });
+    const item = (await service.list(f.owner.id)).reimbursements[0];
+    expect(item?.sourceExpense?.personalCostToDate).toEqual({
+      state: "qualified",
+      amount: 150,
+      receivedAmount: 50,
+      currency: "EUR",
+      scope: "whole_expense",
+    });
+    expect(financeReimbursementSchema.safeParse(item).success).toBe(true);
+    await database.db
+      .update(financeTransactions)
+      .set({ currencyCode: "USD" })
+      .where(eq(financeTransactions.id, f.credit.id));
+    expect(
+      (await service.list(f.owner.id)).reimbursements[0]?.sourceExpense?.personalCostToDate,
+    ).toEqual({ state: "unavailable", reason: "unsupported_currency" });
+  });
+  it("keeps pending and shared-owner expenses out of qualified personal cost", async () => {
+    const f = await fixture();
+    await database.db
+      .update(financeAccounts)
+      .set({ ownershipType: "individual", ownershipShareBps: 10_000 })
+      .where(eq(financeAccounts.id, f.account.id));
+    await database.db
+      .insert(financeTransactionAllocations)
+      .values({
+        userId: f.owner.id,
+        transactionId: f.expense.id,
+        categoryId: f.allocation.categoryId,
+        amount: 8_000,
+        allocationOrder: 1,
+        treatment: "personal",
+      });
+    await database.db
+      .update(financeTransactions)
+      .set({ pending: true })
+      .where(eq(financeTransactions.id, f.expense.id));
+    expect(
+      (await service.list(f.owner.id)).reimbursements[0]?.sourceExpense?.personalCostToDate,
+    ).toEqual({ state: "unavailable", reason: "pending_activity" });
+    await database.db
+      .update(financeTransactions)
+      .set({ pending: false })
+      .where(eq(financeTransactions.id, f.expense.id));
+    await database.db
+      .update(financeAccounts)
+      .set({ ownershipType: "joint", ownershipShareBps: 5_000 })
+      .where(eq(financeAccounts.id, f.account.id));
+    expect(
+      (await service.list(f.owner.id)).reimbursements[0]?.sourceExpense?.personalCostToDate,
+    ).toEqual({ state: "unavailable", reason: "unknown_ownership" });
+    expect((await service.list(crypto.randomUUID())).reimbursements).toEqual([]);
+  });
   it("corrects the existing expectation, preserves receipts and replays one receipt", async () => {
     const f = await fixture();
     const input = {

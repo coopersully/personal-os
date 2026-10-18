@@ -2,6 +2,9 @@
 
 Status: complete design for review; not implemented. October 18, 2026.
 
+Subsequent approval: Cooper explicitly approved the missed-run grace period, repeated-run candidate
+threshold, and session-only bubble-position persistence documented below.
+
 This consolidates Cooper's decisions in [discussion notes](../../product/finance-experience-discussion.md).
 The explicit defaults below resolve remaining implementation choices; they are reviewable design
 choices, not claims that Cooper individually selected every threshold. This document supersedes
@@ -9,6 +12,8 @@ conflicting earlier Finance UX targets for setup gates, budget self-approval, ch
 spending presentation. Existing implementation remains the authority for shipped behavior.
 
 ## 1. Outcome and scope
+
+This design implements the canonical [Finance intelligence and visual exploration principles](../../product/finance-workspace-plan.md#finance-intelligence-and-visual-exploration): automated maintenance turns authorized context into visual understanding, explanatory analysis, transparent forecasts, and hypothetical choices. Every view must name the user understanding it serves, its evidence needs, and its correction path. Extra data collection is purpose-bound and optional unless necessary for the requested capability.
 
 Finances is designed for automated maintenance with an agent. People inspect spending, answer
 irreducible questions, approve financial plans, and understand what changed. Manual mode remains
@@ -85,6 +90,13 @@ available in either mode. Explicit Show/Hide survives mode changes.
 
 ## 4. Spending data and historical budgets
 
+Spending has equal, discoverable Bubbles and List view options in the initial delivery. Remember the
+chosen presentation independently of bucket/category grouping. Both use exactly the same period,
+scope, accounting settings, totals, monthly comparison, and drill-down links. List is a first-class
+precise comparison view, not only an accessibility fallback: sortable name/spent/budget-used columns,
+exact amounts, pending breakdown, explicit no-budget state, and bucket expansion into categories.
+On narrow screens render readable labeled rows instead of forcing a wide table. Trends is a third approved Spending presentation, specified below.
+
 One API-owned aggregate powers bubbles, accessible list, totals, and transaction drill-down. Never
 aggregate only a loaded transaction page. Use exact cents, canonical recognition/allocation helpers,
 ownership shares, split allocations, and pending-replacement identities. Exclude tombstoned/duplicate
@@ -107,12 +119,12 @@ for the remaining category. Unsupported currencies appear separately and never s
 initial budget comparison follows the existing US/USD plan scope, with no invented exchange rates.
 
 Periods: Today, This week, This month, Custom; previous/next navigation for named periods. Use the
-saved user timezone and locale week start. Query with inclusive local dates converted to half-open
-UTC boundaries. Default to This month. A single-month slice uses that month's whole-month usage for
+saved user timezone and locale week start. Treat provider date-only transactions as local calendar dates, never fabricated UTC-midnight
+instants. Use half-open UTC boundaries only for genuinely timestamped events. Default to This month. A single-month slice uses that month's whole-month usage for
 fill, even if bubble size represents only one day. Label both scopes; historical future dates have
 only available recorded evidence and no fabricated forecast.
 
-For month M, resolve the latest human-approved budget version effective for M, excluding proposals,
+For month M, resolve the latest human-approved budget version whose effective month equals M, excluding proposals; do not carry a prior month forward implicitly,
 and disclose version/approval date. Historical display means the latest approved plan for that month,
 not a reconstruction of what the user knew on each day. Keep the original monthly baseline inspectable
 in detail; do not rewrite it. If legacy data cannot establish human approval or applicable month,
@@ -161,7 +173,10 @@ Finance maintenance automation is recommended; multiple registrations remain sup
 stable ID, label, connection, expected cadence/time/timezone, issued prompt version/text, verification,
 last start, last successful completion, next expectation, and active/paused/removed state.
 
-The prompt is a template with the registration ID injected. It directs the agent to authenticate with
+The prompt is a template with the internal schedule ID injected for every automation, always.
+Creating, editing, and recopying an automation must preserve the correct ID in its generated prompt;
+it is never an optional token or a new authentication credential. An optional separate copy-ID button
+is convenience only. The one-time profile interview prompt remains separate. It directs the agent to authenticate with
 its bound connection, report the real host schedule when available, fetch all pages of messages and
 continuations, maintain finances using the ID, and persist outcomes/replies with evidence. Explicitly
 forbid budget self-approval. IDs confer no authorization. Store what nohmi issued, not a claim that the
@@ -279,6 +294,26 @@ acceptance artifact, not a claim that the table above already works.
 
 ## 9. Architecture and contracts
 
+### Mode behavior matrix
+
+| State | Workspace behavior |
+| --- | --- |
+| Setup incomplete | Resumable setup gate; keep setup, connection, repair, and approval paths usable |
+| Manual / automation later | All financial pages available; Chat visible/locked; Auto manual creation/import visible; prominent uncategorized-review entry and recommended automation setup |
+| Registered, verification pending | Financial pages available; Chat visible/locked with verification state; Auto creation/import hidden; explicit Show remains available |
+| Verified active automation | Chat enabled; expected next run and unresolved questions clear; creation/import follows preference |
+| Verified but overdue | Automations needs attention; pages stay available; durable messages may queue with unknown timing; no automatic creation-control flip |
+| All capable automations paused/revoked/disconnected | Chat history readable, sending locked with recovery; corrections and ordinary review answers remain available; no workspace re-lock |
+| All registrations removed | Chat history readable/locked; Auto creation/import returns to visible; explicit preference retained |
+| Missing financial evidence | Restrict only dependent calculations/actions; do not turn missing forecasts into a disabled Cash flow page |
+
+Connect/reconnect, inspection, corrections, categorization, profile edits, and exact human budget
+approval remain available regardless of automation mode. Account connection loss and agent connection
+loss are separate conditions. Activity records financial effects; automation run history records
+execution health. Chat and Reviews project the same case identities and resolutions. Do not introduce
+a second queue or independently counted copy of outstanding work. Any focused input experience must
+be another presentation of the canonical Reviews flow, not a new sidebar destination by default.
+
 Domain owns schemas/semantics; API owns aggregation, state, authority, and durable side effects;
 MCP is a thin authenticated adapter; the web consumes typed API data. Reuse schedule registry,
 profile/budget stores, canonical Inbox, maintenance lifecycle, audit events, and notification policy.
@@ -303,7 +338,7 @@ New route/tool scopes cannot broaden the current grant just because a message ci
 
 ## 10. Verification and rollout
 
-Deliver sequential independently reviewable slices: authority, contracts/storage, spending, automation,
+Deliver maximally parallel independently reviewable slices with only actual dependency gates: authority, contracts/storage, spending, automation,
 conversation/evidence, activity, setup/manual parity, integration acceptance. User-facing features stay
 unexposed until their API and readiness contracts exist. Do not deploy a setup gate ahead of working
 manual completion and automation-later paths. No destructive backfill or removal of old records.
@@ -323,3 +358,271 @@ delivery, or polling reliability. If live evidence is unavailable, report that l
 Success means someone can finish setup manually or with an external agent, inspect accurate spending,
 understand monthly fills, answer naturally on the next registered run, and trace every resulting
 important action back to the evidence and human approval where required.
+
+
+## 11. Cash flow timeline and Spending Trends — accepted extension
+
+Cash flow Outlook becomes an upcoming-money timeline, defaulting to Agenda with Calendar available.
+Retain Income, Bills & subscriptions, Reimbursements, and Scenarios for underlying record management.
+Remember Agenda/Calendar choice. Default to the next 30 days; support range navigation and account
+scope. Agenda groups items by date; Calendar shows dated items and an accessible day detail list.
+Undated items appear in a separate Date unknown section in either presentation. Selecting an event
+opens its existing domain-owned detail/editor, not a copied calendar record.
+
+Compose expected income, obligations/subscriptions, and reimbursements with confirmed/estimated date
+and amount labels, account, source, and freshness. A matched actual transaction links to the expected
+occurrence and replaces its outstanding projection without double counting. Distinguish overdue,
+received/paid, estimated, and canceled occurrences. Unknown amounts never become zero. A missing or
+unsupported forecast does not hide known scheduled items. Manual users edit the same underlying
+records maintained by agents. Calendar is a Finance view, not a new Calendar-workspace integration.
+
+Credit-card payments are cash movements here, not new spending. Transfers affect individual accounts
+but net to zero across both included sides; one-sided scope shows its real movement. Do not subtract
+card purchases and their later payment twice from the same projected cash balance. Any projected
+balance is labeled Projected balance after known activity, includes its scope/as-of assumptions,
+and is withheld where account ownership, balances, or event evidence cannot support it. Never label
+this safe-to-spend. Keep uncertain reimbursements distinguishable from confirmed income.
+
+Spending Trends shares the exact accounting preferences, account scope, timezone, and drill-down
+semantics of Bubbles/List. Offer spending-over-time bars and a previous-period comparison, with
+bucket/category focus and a contribution breakdown explaining the overall difference. Grain defaults:
+daily through 31 days, weekly through 180 days, monthly thereafter; expose the selected grain.
+Partial bins and the current provisional day are labeled; do not claim time-of-day precision for date-only records. Zero denominators produce dollar changes with percentage unavailable.
+
+Compare complete named weeks/months with the previous equivalent period. For the current incomplete
+month/week, compare equal elapsed local calendar days with the preceding equivalent period, capped
+at that period's end and labeled when month lengths differ. Custom ranges compare the immediately
+preceding equal-length local-date interval. Never compare a partial current month to a full prior
+month silently. Flag missing source coverage and pending portions; partial data is not confirmed zero.
+Clicking a bar opens its transactions with all filters preserved. No trend forecast or advisory
+model is required. Provide an equivalent accessible data table and reduced-motion rendering.
+
+The focused Reviews reply interaction is accepted below. Its non-negotiable boundary is one canonical
+case identity, status, and resolution across Reviews and Chat; no independent queue or duplicate count.
+
+Accepted reply interaction: Reply in Chat on a review navigates to the ongoing Finance conversation
+and attaches the exact case/question and relevant records to the draft. Show removable context
+chips/cards above the composer, with links to inspect the source and clear labels. The user can see
+what the draft will reference before sending. Removing a chip detaches draft context only; it does
+not dismiss a case, resolve work, or rewrite previous activity evidence. Do not silently persist an
+inferred relationship as an explicit user selection. Manual corrections and exact approval actions
+can remain in Reviews; conversational answers are composed in Chat.
+
+## 12. Financial exploration views — approved follow-on scope
+
+Cooper approved all five views below as part of the larger delivery, implemented as soon as their
+specific prerequisites allow. They are not a prerequisite for shipping the core experience. Add
+views within existing destinations, avoiding five additional top-level sidebar items. They share
+owner scope, freshness, exact monetary semantics, accessible tabular equivalents, and record links.
+Optional context is requested when needed by the feature, reusing canonical profile/knowledge data;
+no new mandatory setup fields or speculative sensitive-data collection.
+
+### Spending rhythm — Spending
+
+Add Rhythm alongside Bubbles/List/Trends: a calendar heatmap of daily spending, defaulting to the last
+three calendar months including the current partial month. Share spending basis, pending/refund,
+account, currency, and category/bucket filters. Color intensity represents the magnitude of positive
+spending using a labeled scale; net refund days get a separate labeled treatment rather than a
+misleading zero. Missing coverage, future dates, and confirmed zero are distinguishable. Day focus
+shows exact amount and breakdown; selection opens matching transactions. Provide keyboard day
+navigation and a list alternative. This is descriptive pattern discovery, not a causal explanation
+of behavior or an inferred claim about the user's habits.
+
+### Recurring-cost ladder — Cash flow, Bills & subscriptions
+
+Show recurring commitments ranked by monthly equivalent, with a stacked total and annualized view.
+Keep original amount/cadence visible. Fixed weekly amounts annualize by 52, biweekly by 26,
+semimonthly by 24, monthly by 12, quarterly by 4, yearly by 1; monthly equivalent is annualized/12.
+Label these normalization estimates, not actual scheduled totals for a leap year or chosen calendar
+period. Irregular or variable commitments show ranges only when supported; otherwise exclude them
+from a precise total with a clear coverage count. Separate confirmed from suspected recurring items.
+Compare observed price changes only for comparable service/currency/cadence. Link to source charges
+and existing recurring-item editors. Do not infer usage, waste, or cancellation from payment data;
+changing a local recurring record does not cancel a provider subscription.
+
+### Payday-to-payday — Cash flow
+
+Show a selected reliable income stream's cycle from one payday to the next: received/expected income,
+actual cash movements, remaining dated commitments, and projected low balance where evidence permits.
+Let the user select a stream when there are several; do not invent one combined payroll cadence.
+Variable/unknown next paydays produce a dated-range view with unavailable cycle prediction. Future
+income remains expected until matched. Reuse the timeline's account scope, ownership, transfer/card
+payment handling, and expected-to-actual deduplication.
+
+Offer an optional user-confirmed protected cash floor and highlight when projected balance after
+known activity falls below it. Without a floor, show the projection without implying an agreed safety
+threshold. Missing balances or dates withhold precise projections while leaving known movements
+inspectable. Annual/irregular expenses can be entered as expected dated obligations in the existing
+profile/recurring models, not a separate private forecasting ledger. No safe-to-spend guarantee.
+
+### Reimbursement journey — Cash flow, Reimbursements
+
+Visualize each reimbursement case from original expense to expected recovery, partial receipts,
+remaining amount, overdue condition when a due date exists, and settlement. Show gross outlay,
+personal cost, reimbursable amount, and received amount distinctly. Multiple expenses/credits may
+belong to one case; render exact source links and preserve partial receipts, disputes/corrections,
+and historical changes. Unknown recovery date is unknown, not overdue. Expected recovery never
+becomes cash until received. Existing manual reconcile controls and agent actions update the same
+ledger and case; no new parallel reimbursement identity or second review queue.
+
+### Goal scenarios — Wealth, with links from Cash flow Scenarios
+
+Add an explicit hypothetical view for an existing goal: compare current recorded progress with
+alternative regular contributions and an optional target date. A slider and exact amount input
+update estimated completion and cumulative contribution curves without saving a budget change.
+For the initial model, use zero assumed investment growth/interest and fixed stated contributions,
+clearly labeled. Where a dated contribution schedule is known, use it; otherwise label the monthly
+assumption. A zero contribution with remaining target has no completion date; an achieved goal is
+already achieved; unknown current progress has no precise forecast.
+
+Allow at most three visible alternatives and a baseline to keep comparison understandable. Show
+remaining target, contribution assumption, estimated completion, and what would need to change to
+reach the selected date. Saving a scenario saves a hypothetical artifact only; Apply means prepare
+an exact budget proposal for human approval, never execute funding or update actual goal progress.
+Do not reuse simplified debt-payoff arithmetic as an interest-aware promise. Predictions beyond these
+transparent assumptions require a separately specified model and evidence.
+
+
+## 13. Independent plan review refinements
+
+These refinements resolve implementation ambiguity without changing the agreed product direction.
+
+### Spending recognition and budget comparison scope
+
+Compute a shared recognized-contribution snapshot before grouping into days/categories/buckets.
+Resolve pending-to-posted replacement using the same snapshot for aggregate, bins, and drill-down;
+never call a period-sensitive recognition function once per bin and sum results. Personal-cost view
+must explicitly project recorded expected reimbursements, while preserving existing received-only
+cash-exposure semantics for other consumers. Test expected, partial, canceled, and refunded claims.
+
+Return selected-account spending and whole-budget-account monthly utilization as separate measures.
+An account filter must not make a globally overspent category appear under budget. When account scope
+is narrower, label fill Monthly budget used · all budget accounts. Withhold comparison if the approved
+budget's account scope cannot be established; do not guess a numerator. All spending-basis preferences
+otherwise retain their documented semantics. Expose the positive bubble-area total and net adjustment
+explanation when negative groups make the headline net amount differ from summed positive bubbles.
+
+Historical selection uses exact effective month, then latest verified human approval timestamp,
+version, and stable ID as deterministic tie-breakers. Preserve original monthly baseline and immutable
+allocation references; renamed/deleted current categories do not erase historical evidence. If history
+cannot be resolved, no fill rather than invented carry-forward or fabricated approval provenance.
+
+### Timeline occurrences and projection basis
+
+Recurring records currently expose a next date, not a complete occurrence ledger. Add a shared dated
+occurrence contract before promising expected-to-actual matching: stable owner/source/schedule-version
+identity, original scheduled date, date certainty, matched transaction portions, and cancellation or
+supersession history. Monthly recurrence preserves anchor day with month-end clamping; semimonthly
+requires two anchor days. Generated dates are estimates unless actually confirmed; never infer holiday
+adjustments. Schedule edits cannot rewrite already matched occurrences. Partial/multiple payments
+must match allocated portions once, with duplicate refresh idempotency.
+
+A cash projection starts from explicit cash-account balance observations: balance basis (current or
+available), as-of timestamp, and which posted/pending movements are already reflected. Do not replay
+movements already included in starting balances, or subtract a pending debit again from an available
+balance that includes it. Unknown inclusion, missing snapshots, or incompatible ownership withholds
+precise projection while preserving events. Credit liabilities are not liquid cash. For same-day events
+without known order, use a labeled conservative order (outflows before inflows). A protected cash floor
+is scoped to account selection and currency; changing scope does not silently reuse the same floor.
+
+### Recurring, reimbursement, and goal model refinements
+
+Recurring cost currency must resolve from authoritative account/source evidence; unknown currency
+stays outside precise totals. Separate savings transfers from actual costs, exclude paused/canceled
+items, and keep suspected versus confirmed totals distinct. Price comparison requires service identity,
+not only merchant identity. Multiple services at one merchant and missing service identity must not
+produce a false price-change claim. Semimonthly support requires the shared cadence extension.
+
+Keep existing allocation-owned reimbursement identities. Build the journey per reimbursement with
+multiple matched receipts; related reimbursements may be visually grouped with distinct underlying
+case/expense links and reconciled totals. This fulfills the multi-expense view without inventing a
+second financial case. Shared credit allocations cannot exceed the credit amount. Add a guarded
+correction/unmatch or compensating-history operation for erroneous receipts, preserving previous
+matches and audit history. Canceling an expected remainder never erases actual receipts. Any future
+true multi-expense single-ledger identity requires an explicit migration, not a UI read-only shortcut.
+
+Legacy goal progress defaults to zero and is not automatically confirmed. Require progress provenance
+and as-of confirmation before projecting an unknown legacy zero; preserve confirmed zero as valid.
+Goal scenarios store assumptions, source revisions, and first-contribution date. Limit projections to
+1,200 monthly periods and return beyond-horizon rather than overflow or invent a completion date.
+Recompute against current goal/budget revisions before preparing a proposal from a saved scenario.
+Hypothetical viewing may ship before save/proposal handoff; those are separate verified capabilities.
+
+### External-host and conversation contracts
+
+Accepted after explicit discussion: Cooper approved generic-host enrollment, the automatic message
+capability test, and guarded interrupted-run recovery. Message timing is also settled: one fixed
+batch per run, later messages always follow up.
+
+Add a generic polling-host registration variant alongside existing Codex interval and Claude event
+variants. It records expected local cadence independent of actual scheduler authority. First check-in
+must prove the registration's original authenticated connection binding; the unique ID is not a secret
+or a bearer grant. Preserve existing host semantics and explicit host support/verification evidence.
+
+Chat verification uses a harmless server-issued exchange bound to registration, connection, and
+message protocol version: fetch the challenge, acknowledge exactly it, and persist a response.
+Self-reported capability alone cannot unlock chat. Keep handshake traffic out of unread conversation
+counts and financial Activity. An incompatible protocol upgrade requires new verification without
+rewriting old prompts or claiming old jobs adopted them.
+
+Unclaimed message work may reassign under the documented schedule policy. Claimed financial work
+freezes on loss of authority; revocation does not permit further effects merely to finish a run.
+Use the existing explicit guarded host-recovery operation (extended to supported polling hosts as
+needed) with no active lease, expected bindings/revision, live replacement grant, and audited host
+confirmation. Never silently resume a run under a different connection. Recovery after a committed
+effect but before its reply must verify the recorded effect and publish the missing reply, not repeat it.
+
+Accepted message timing: at the start of a run, capture a fixed server-side message-sequence cutoff
+and fetch the complete pending queue through that cutoff. Pagination retrieves that same snapshot;
+it does not admit later arrivals. Persist the cutoff across retries/resumes. The agent processes that
+batch and persists any replies/outcomes, then stops; it does not poll or re-fetch for new messages
+mid-run. Later messages always remain unread follow-up for the next run, even when the current action
+has not yet committed. They do not cancel or revise the current batch automatically.
+
+Keep expected financial-record revisions as a separate concurrency guard: an actual manual record
+correction may invalidate a stale mutation, but a new chat message alone does not. Current-batch
+completion resolves only its covered work; newly queued follow-up remains outstanding and cannot be
+marked read or resolved by that completion. Preserve its case/source linkage without inventing a
+second review queue. Compatible case claims use the existing owner-level maintenance lifecycle.
+An earlier action cannot cite a later message. UI copy explains that new messages will be picked up
+on the next run; it never implies immediate interruption or cancellation.
+
+Focused Reviews retains one canonical case with separate projections: actionable by user, waiting
+for agent, unavailable/failed, and resolved. A contextual Chat send moves work to waiting only after
+durable acceptance; waiting work remains inspectable. If no eligible automation can deliver it,
+return the case to attention with manual recovery. A missed run alone does not fabricate read state.
+F owns the evidence envelope; each mutation owner commits financial effects and required evidence
+atomically. Failed attempts may log separate truthful failure events, never applied-change events.
+
+### Onboarding compatibility and release independence
+
+Workspace onboarding completion is independent of budget-setup protocol completion. A later
+`setup_finances` call must not re-lock the workspace or repeatedly require an optional budget merely
+because the older protocol expects approval/maintenance. Persist explicit unknown context independently
+of version-scoped interview skip mechanics; unrelated profile edits do not restart onboarding questions.
+Capability readiness uses stable reasons and recovery actions shared by UI/MCP for spending reads,
+proposal preparation, activation, cash-flow projection, and chat sending.
+
+Existing users retain read/correction access even if all sources are disconnected at rollout. Present
+a prefilled completion review non-destructively and gate only source-dependent operations; do not
+strand historical records behind the new-source prerequisite intended for first-time setup.
+
+Setup release requires tested onboarding-critical manual paths (account creation/import, ownership,
+profile answers, completion and recovery) and a correct locked/verified chat capability projection,
+not all of Chat implementation or every manual-parity enhancement. Full manual parity remains a
+whole-program acceptance requirement. Trends/Rhythm require contribution/bin contracts and a route
+shell, not completed bubble rendering. Contract-family releases are independent, not sequential waves.
+
+
+### Maintenance-owned message intake — clarified integration
+
+`maintain_finances` owns conversation intake as part of its durable start/resume protocol. Starting
+new maintenance captures and persists the message cutoff and batch reference before reasoning work;
+resuming uses the same batch. Its typed result returns the batch or an explicit next action to page
+through that run-bound batch, then existing financial work and reply persistence. A message-read tool
+is only a bounded adapter for that batch, not an independent chat job, pre-start live queue scan, or
+mid-run polling loop. Compatible coalesced starts reuse the existing run/batch; later messages remain
+for a subsequent run. Legacy answer continuations and new message intake must share the canonical
+work identity and owner-level execution contract, so the same answer cannot execute twice. Test a
+retry of start, a coalesced start with newer messages, and a resumed run retaining its original cutoff.
+This is planned integration; the existing tool does not yet implement the new conversation batch.

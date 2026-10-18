@@ -304,6 +304,13 @@ Knowledge rather than a separate top-level workspace.
 
 ### 6.7 Finances
 
+Finances should turn the person's authorized financial data and context into visual understanding,
+useful predictions, and explorable choices, maintained through agent automation. Its analytical
+foundation must make evidence, assumptions, uncertainty, and correction paths inspectable. More
+collection or more charts is not the objective; useful understanding and less repetitive work are.
+The [Finance intelligence principles](finance-workspace-plan.md#finance-intelligence-and-visual-exploration)
+define this target alongside supported manual operation and exact human approval of budget changes.
+
 The first complete Finance release follows the [Finance MVP specification](finance-workspace-plan.md).
 It includes two-way day-to-day SMS with both Codex and Claude: durable questions and user context,
 safe continuation after an agent session ends, and the same manually editable results in the app.

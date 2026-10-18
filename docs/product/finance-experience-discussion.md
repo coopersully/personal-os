@@ -120,6 +120,13 @@ budget context, and categorization. Discuss every topic below before implementat
 
 ### Latest decisions from Cooper
 
+- Add the complete mode behavior matrix and first-class Spending List view to the design/plan.
+  Bubbles/List share filters and totals; List is part of the initial build. User anticipates separate
+  implementation workstreams; no agents or implementation workstreams have been launched here.
+- Next design discussion: upcoming money timeline within Cash flow and Trends within Spending.
+  Neither is yet approved as a fully specified implementation slice. A focused input experience
+  must reuse canonical Reviews cases and must not create a duplicate queue.
+
 - Confirmed: default spending to personal cost, with a setting to show full outflow. Preserve the
   distinction between reimbursable amounts and reimbursement actually received; use canonical
   ledger evidence and expose the breakdown rather than inventing receipt or recovery.
@@ -281,3 +288,83 @@ product discussions unless they introduce a substantive choice.
 
 Canonical contracts to reconcile after decisions: `workspaces.md`, `workspace-stewardship.md`,
 `finance-workspace-plan.md`, and `../design/pages/finances.md`.
+
+
+## Accepted timeline and trends extension
+
+Cooper selected Agenda as the default Cash flow timeline, with Calendar available, and approved
+Spending Trends alongside Bubbles and List. These are now specified in design §11 and implementation
+Tasks 12–13. Focused Reviews is the next discussion: refine the existing queue without new case
+identities, duplicate counts, or independent resolution state.
+
+## Focused Reviews: contextual Chat replies
+
+Cooper selected navigation into Chat for conversational replies from Reviews, rather than a separate
+inline conversational composer. The Chat composer visibly shows the case/question and financial
+records the draft refers to. Use removable context chips/cards, with inspectable links, so the user
+can understand and correct what the message will be linked to before sending. Removing draft context
+does not dismiss the review case or undo prior evidence links. Exact context-selection UX is being
+refined; do not silently attach an inferred record as if the user explicitly selected it.
+
+
+## Parallel delivery planning
+
+Cooper explicitly prioritizes maximum parallel execution and fastest independent shipping. Wave
+labels are not batch barriers; only actual dependencies and required verification constrain release.
+Do not keep asking whether sequencing feels right. This planning update does not launch workers.
+
+The [workstream map](../superpowers/plans/2026-10-18-finance-workstreams.md) now records dependencies,
+parallel waves, shared-file ownership, and independent release gates. This is planning only; no
+implementation workers have been launched or assigned merge authority.
+
+## Default approval and visualization exploration
+
+Cooper explicitly approved the documented missed-run grace period, repeat-observation threshold for
+automation candidates, and session-only persistence of dragged bubble positions. These are no longer
+pending product approval; measured implementation issues may still require revisiting them.
+
+Cooper requested exploration of useful visualizations/predictions based on existing financial context
+and optional additional information. Treat this as idea development, not blanket approval to expand
+implementation scope or collect new personal data. Distinguish schema availability from populated,
+fresh user data and distinguish descriptive analysis from uncertain forecasts.
+
+Candidate ideas, not yet implementation scope:
+- Spending rhythm heatmap: daily category/bucket spending, transaction drill-down, and incomplete
+  coverage labels. Existing transaction dates/amounts can support this without new personal inputs.
+- Recurring-cost ladder: monthly equivalents and annualized recurring commitments, separating
+  observed prices from projections; do not infer subscription usage or waste from charges alone.
+- Payday-to-payday view: spending and known commitments between reliable income dates, with an
+  estimated low-balance interval only when dated cash-flow evidence supports it.
+- Reimbursement journey: personal cost versus amounts owed/received over time; expected recovery
+  never presented as available cash.
+- Goal scenarios: compare hypothetical contribution amounts and timelines, showing assumptions and
+  uncertainty; no implied budget change or guaranteed date. Existing scenario code is simplified
+  arithmetic and does not establish calibrated forecasts or interest-aware debt predictions.
+- Optional high-value context, asked only for a feature that uses it: protected cash floor, expected
+  annual/irregular expenses and dates, goal target date/flexibility, reliable payday confirmation.
+  Reuse existing answers and keep inferred values separate from user-confirmed facts.
+
+Cooper subsequently approved all five exploration views as part of the larger implementation scope:
+Spending rhythm, Recurring-cost ladder, Payday-to-payday, Reimbursement journey, and Goal scenarios.
+They are follow-on workstreams K–O with explicit dependencies and independent shipping boundaries,
+not merely uncommitted ideas. Design §12 and implementation Tasks 14–18 now define their behavior.
+
+
+## Accepted run/message timing
+
+Cooper clarified that an agent fetches the queue once at run start, processes that batch, replies as
+needed, and stops. Messages arriving afterward always become follow-up for the next run. Use a fixed
+server cutoff across pagination/resume, not live polling. Do not automatically incorporate later chat
+into an in-flight action. Direct record edits retain ordinary optimistic-concurrency protection.
+
+
+Maintenance integration clarified: the pending conversation batch belongs to `maintain_finances`
+start/resume, not a separate scheduled chat job. Fixed cutoff persists across pagination/retries;
+new messages always follow up in a later run. Three review proposals still await explicit discussion:
+generic-host registration, the automatic chat test exchange, and interrupted-run recovery behavior.
+
+
+Cooper approved all three external-host proposals after discussion: generic registration, automatic
+chat capability test, and guarded interrupted-run recovery. Automation key means the internal schedule
+ID, always embedded in that automation's generated prompt, not a new access credential. Create/edit/
+recopy must preserve the correct ID. No product questions remain from the independent plan review.

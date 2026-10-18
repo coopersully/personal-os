@@ -1,6 +1,6 @@
 # Finance Experience Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Execution method is not selected; this document does not authorize implementation or merging.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Execution preference is maximum parallel implementation in isolated worktrees. This document does not itself start implementation or authorize merging.
 
 **Goal:** Deliver automated Finance setup, accurate interactive spending, asynchronous agent conversation, and traceable activity while preserving usable manual workflows.
 
@@ -31,6 +31,16 @@
 5. An existing user has stale sources and old budget approvals: preserve records and inspectability without fabricating setup or human provenance (Tasks 3, 9).
 
 ## Delivery units and dependency order
+
+Execution priority: maximize parallel work and ship independently verified slices as soon as their
+actual prerequisites are ready. Do not wait for whole waves. Freeze contracts early, develop producers
+and consumers concurrently in isolated worktrees, and integrate continuously. See the workstream
+map's delivery-priority section for shared-file coordination and release constraints.
+
+See the [parallel workstream map](2026-10-18-finance-workstreams.md) for the current delivery topology,
+file ownership, release gates, and parallel waves. It supersedes the coarse sequential order below;
+the numbered task acceptance criteria remain applicable.
+
 
 A: authority and contracts (1–2); B: spending (3–4); C: registered automation (5);
 D: conversation and evidence (6–7); E: activity (8); F: setup and manual parity (9–10);
@@ -136,10 +146,17 @@ range/group/account/basis settings; it resolves record matches server-side, incl
 nodes, viewport, anchors, and elapsed time and returns positions/velocities with a settled flag.
 Route `/finances/spending`; URL period/scope overrides account preferences.
 
+List is a first-class initial view, not only an accessibility fallback. Add a remembered Bubbles/List
+presentation preference independent of grouping; share query state and server totals. Support exact
+amounts, sorting by name/spent/budget-used, bucket expansion, no-budget states, pending detail, and
+responsive rows. Trends is included through Task 12 below.
+
 - [ ] Add tests: grouping fallback/explicit preference; 60% area fill; size ratio matches spending ratio;
   full versus overspent style; missing monthly limit; filter changes preserved in Transactions links.
 - [ ] Add interaction tests: 6px drag threshold, release does not navigate, bucket drill-down/action,
   small/zero/negative values available in list, reduced motion, touch Arrange, session Reset layout.
+- [ ] Test Bubbles/List switching preserves all filters and totals, remembers presentation separately
+  from grouping, supports list sorting/expansion, and retains identical transaction links on mobile.
 - [ ] Run `pnpm exec vitest run apps/web/src/features/finances/spending-fill.test.ts apps/web/src/features/finances/spending-layout.test.ts apps/web/src/features/finances/spending-page.test.tsx`; confirm intended failures.
 - [ ] Implement deterministic packing/center attraction, area-correct overlay, foreground contrast,
   350ms maximum settling transitions, suspend off-screen work, and semantic list/navigation equivalents.
@@ -199,6 +216,12 @@ validate every cited case/message/record belongs to the actor's owner and releva
 
 ### Task 7: Agent-style asynchronous Chat
 
+Accepted focused-review handoff: Reply in Chat navigates from the canonical case to the existing
+conversation with visible removable case/record context above the composer. Add tests that inspect
+context, detach it without dismissing the case, preserve an existing draft during navigation, and
+send the exact visible references. A detached reference must not be silently reattached on send.
+Keep explicit references distinct from inferred suggestions and never resolve a case on navigation.
+
 **Create:** `apps/web/src/features/finances/chat-page.tsx`, `chat-composer.tsx`, `chat-message.tsx`,
 `chat-case-card.tsx`, `chat-page.test.tsx`.
 **Modify:** Finance navigation/workspace routing, existing notification integration.
@@ -246,12 +269,20 @@ Activity details resolve evidence from Task 6; route `/finances/activity` suppor
 `completeFinanceOnboarding({expectedRevision, automationChoice})` return current readiness.
 Completion server validates spec §2; merely visiting a page never completes setup.
 
+Use the mode matrix in spec §9 as an exhaustive UI acceptance table. Keep agent connectivity,
+account-source freshness, onboarding completion, and financial calculation readiness independent.
+Manual mode includes a direct uncategorized-review entry and automation recommendation without
+repeated interruption. Do not add a competing review queue.
+
 - [ ] Test agent/manual switching, unknown versus none/zero, missing source block, Plaid sync pending,
   unresolved ownership excluded or clarified, budget optional, automation later finish, verification
   pending finish, and no API deadlock preventing setup itself.
 - [ ] Test existing-user prefill, preserved return links, later source failure does not re-lock workspace,
   explicit manual visibility survives mode changes, import hiding follows creation controls while
   corrections/questions remain visible, invalid saves use Sonner and retain input.
+- [ ] Add table-driven coverage for manual, pending verification, active, overdue, all paused/revoked,
+  removed registrations, and missing evidence. Assert Chat history/composer behavior, creation/import
+  visibility, recovery links, sidebar attention, and continued access to corrections and Reviews.
 - [ ] Run `pnpm exec vitest run apps/api/src/finance/onboarding-service.integration.test.ts apps/web/src/features/finances/onboarding-flow.test.tsx`; confirm failures.
 - [ ] Implement one-time setup prompt, shared preference controls and completion summary; route the
   ordinary workspace through the gate only after all finish/repair routes work. No new financial profile.
@@ -325,3 +356,232 @@ message delivery are required implementation checks. Do not silently remove a re
 is larger than expected: scope its owning task and preserve the contract. No product dependencies,
 new migrations, runtime changes, deployment, or tests claiming product behavior were performed to
 produce this plan.
+
+
+## Accepted extension: timeline and trends workstreams
+
+These tasks implement spec §11. They can be separate delivery workstreams after shared contracts
+are settled. Their shared route/client/schema edits must have one integration owner. Task 11 final
+acceptance must include both extensions before declaring the whole design complete.
+
+### Task 12: Spending Trends
+
+**Create:** `apps/api/src/finance/spending-trends-service.ts`, `spending-trends-service.test.ts`,
+`spending-trends-service.integration.test.ts`, and
+`apps/web/src/features/finances/spending-trends.tsx`, `spending-trends.test.tsx`.
+**Modify:** domain spending contracts, API routes/client, spending page/controls/preferences.
+**Depends on:** shared spending query/contribution/bin contracts and a minimal Spending route shell; not completed Bubbles/List UI.
+**Interfaces:** `getFinanceSpendingTrends(query: FinanceSpendingQuery)` returns dated bins, grain,
+comparison period, absolute/percentage deltas, category contributions, freshness and completeness.
+Reuse Task 3 recognition/aggregation; never create competing accounting calculations.
+
+- [ ] Add failing tests for identical totals across views, pending replacement, category focus,
+  equal-elapsed comparison, unequal month lengths, DST, zero denominator, partial bins, and missing coverage.
+- [ ] Run `pnpm exec vitest run apps/api/src/finance/spending-trends-service.test.ts apps/api/src/finance/spending-trends-service.integration.test.ts`; verify intended failures.
+- [ ] Implement shared aggregation, 31/180-day grain thresholds, labeled comparisons and contribution
+  deltas. Preserve personal/outflow/refund/pending/transfer settings and separate currency groups.
+- [ ] Build Trends as the third remembered Spending view, bars/comparison summary and accessible
+  table; test bar navigation preserves query scope and reduced-motion/keyboard/mobile behavior.
+- [ ] Run preceding tests plus `pnpm exec vitest run apps/web/src/features/finances/spending-trends.test.tsx`;
+  require PASS. Add Trends journeys to `e2e/finance-spending.spec.ts`. Commit the bounded slice.
+
+### Task 13: Cash flow Agenda and Calendar
+
+**Create:** `apps/api/src/finance/cashflow-timeline-service.ts`, `cashflow-timeline-service.integration.test.ts`,
+`packages/domain/src/finance/cashflow-timeline.ts`, and
+`apps/web/src/features/finances/cashflow-agenda.tsx`, `cashflow-calendar.tsx`, `cashflow-timeline.test.tsx`.
+**Modify:** `cashflow-page.tsx`, canonical cash-flow/recurring/reimbursement read services,
+API routes/client, shared Finance preferences.
+**Depends on:** Task 2; reuse accounting/ownership helpers from Task 3.
+**Interfaces:** `getFinanceCashflowTimeline({from, to, timezone, accountIds})` returns dated and undated
+occurrences with stable source references, expected/actual matching, uncertainty, freshness, and
+an explicitly available/unavailable projected-balance result. Preserve existing detail mutations.
+
+- [ ] Add failing integration cases for expected-to-actual matching, overdue/undated/unknown-amount
+  items, duplicate occurrences, uncertain reimbursement, ownership limitations, one/both-sided
+  transfer scope, card purchase/payment treatment, and no forecast despite available event records.
+- [ ] Run `pnpm exec vitest run apps/api/src/finance/cashflow-timeline-service.integration.test.ts`; verify intended failure.
+- [ ] Implement an API-owned timeline using existing recurring and reimbursement records; no synthetic
+  Calendar-workspace events or unsupported safe-to-spend amounts. Keep underlying source links stable.
+- [ ] Refine Outlook with Agenda default and remembered Calendar option, next-30-days default,
+  date navigation, account scope, undated section, day details, and existing source editors.
+- [ ] Test equivalent items in both views, accessible calendar navigation, timezone boundaries,
+  source failure isolation, mobile layout, and Sonner for discrete actions.
+- [ ] Run the integration test and `pnpm exec vitest run apps/web/src/features/finances/cashflow-timeline.test.tsx apps/web/src/features/finances/cashflow-page.test.tsx`; require PASS.
+- [ ] Add `e2e/finance-cashflow-timeline.spec.ts` to final desktop/mobile acceptance; commit the slice.
+
+Coverage extension: spec §11 is owned by Tasks 12–13. Task 11 verification follows Tasks 12–13 as
+well as the original tasks. Focused Reviews interaction changes need their own accepted design
+before extending implementation beyond the shared-case guarantees already specified.
+
+## Approved financial exploration extension
+
+Spec §12 and workstreams K–O are part of the larger delivery. They may ship separately after their
+own prerequisites; core acceptance does not wait for every follow-on. Whole-program completion does.
+
+### Task 14: Spending Rhythm
+
+**Depends on:** Task 3 recognized-contribution aggregate and shared dated-bin contract; not finished Trends UI, Chat, or setup gate.
+**Create:** `apps/web/src/features/finances/spending-rhythm.tsx`, `spending-rhythm.test.tsx`.
+**Modify:** spending controls/preferences and shared trends service if daily coverage is not exposed.
+**Interface:** reuse `getFinanceSpendingTrends` daily bins with date coverage state; no client ledger.
+
+- [ ] Test last-three-month calendar boundaries, timezone/DST, consistent filters/totals, positive
+  intensity, net-refund state, missing/future/zero distinction, and exact transaction drill-down.
+- [ ] Run `pnpm exec vitest run apps/web/src/features/finances/spending-rhythm.test.tsx`; verify intended failure.
+- [ ] Implement heatmap, legend, day detail, keyboard navigation, and accessible list using spec §12.
+- [ ] Rerun focused test and add Rhythm desktop/mobile journey to `e2e/finance-spending.spec.ts`;
+  require PASS before committing the independently reviewable view.
+
+### Task 15: Recurring-cost ladder
+
+**Depends on:** existing recurring-item reads and shared money/currency/ownership contract; Task 13
+is useful integration context but not a hard prerequisite if the existing source reads suffice.
+**Create:** `apps/api/src/finance/recurring-cost-projection.ts`, `recurring-cost-projection.test.ts`,
+`apps/web/src/features/finances/recurring-cost-ladder.tsx`, `recurring-cost-ladder.test.tsx`.
+**Modify:** typed Cash flow contract/client and Bills & subscriptions view.
+**Interface:** API-owned projection of original cadence/amount, normalized monthly/annual amounts,
+certainty, source references, comparable price changes, and excluded-variable-item coverage.
+
+- [ ] Test 52/26/24/12/4/1 annualization factors, rounding only at presentation, different currencies,
+  variable/irregular exclusions, suspect items, and no unsupported usage or cancellation inference.
+- [ ] Run `pnpm exec vitest run apps/api/src/finance/recurring-cost-projection.test.ts`; verify intended failure.
+- [ ] Implement projection and ranked/stacked accessible presentation with original cadence and labels.
+- [ ] Run preceding test plus `pnpm exec vitest run apps/web/src/features/finances/recurring-cost-ladder.test.tsx`;
+  require PASS and add Cash flow acceptance coverage before committing.
+
+### Task 16: Payday-to-payday
+
+**Depends on:** Task 13 timeline/expected-to-actual matching and reliable income dates; protected-floor
+profile extension integrates through the shared-contract owner without adding a setup requirement.
+**Create:** `apps/api/src/finance/payday-projection.ts`, `payday-projection.test.ts`,
+`payday-projection.integration.test.ts`, `apps/web/src/features/finances/payday-view.tsx`,
+`payday-view.test.tsx`.
+**Interface:** timeline-scoped cycle projection with selected income stream, start/end, known movements,
+optional protected floor, evidence-qualified lowest balance/date, and explicit unavailable reasons.
+
+- [ ] Test multiple-stream selection, variable payday fallback, missing balance/date, partial ownership,
+  actual replacement, internal transfers, card payments, and unknown floor versus zero floor.
+- [ ] Run `pnpm exec vitest run apps/api/src/finance/payday-projection.test.ts apps/api/src/finance/payday-projection.integration.test.ts`; verify intended failures.
+- [ ] Implement projection using the timeline ledger and optional user-confirmed floor; never return
+  a confident affordability amount from incomplete evidence.
+- [ ] Build cycle timeline and source details; run preceding tests plus
+  `pnpm exec vitest run apps/web/src/features/finances/payday-view.test.tsx`; require PASS.
+- [ ] Add multi-payday/missing-evidence E2E coverage and commit the slice.
+
+### Task 17: Reimbursement journey
+
+**Depends on:** existing reimbursement ledger/source contracts; Task 6 only for optional conversation
+provenance links. Does not wait for the whole timeline or Chat implementation to ship the core view.
+**Create:** `apps/web/src/features/finances/reimbursement-journey.tsx`, `reimbursement-journey.test.tsx`.
+**Modify:** existing reimbursement list/read projection only for missing timeline evidence; add
+`apps/api/src/finance/reimbursement-journey.integration.test.ts` for any extended read projection.
+**Interface:** existing reimbursement case ID, expense/receipt links and history; never a second case.
+
+- [ ] Test one/many expenses, partial/multiple receipts, remaining balance, unknown date versus overdue,
+  corrections, unmatched credits, personal-cost consistency, and cross-owner reference rejection.
+- [ ] Run `pnpm exec vitest run apps/web/src/features/finances/reimbursement-journey.test.tsx`; verify intended failure.
+- [ ] Implement inspectable journey in Reimbursements with existing manual reconcile actions, accurate
+  expected/received labels, and conversation/activity links only where real evidence exists.
+- [ ] Rerun focused UI/API tests and add partial-recovery E2E coverage; require PASS before commit.
+
+### Task 18: Goal scenarios
+
+**Depends on:** existing goal/profile data and scenario contract, plus Task 1 before exposing any
+prepare-for-approval action. Existing simplified scenario arithmetic must be reviewed, not assumed suitable.
+**Create:** `apps/api/src/finance/goal-scenario-projection.ts`, `goal-scenario-projection.test.ts`,
+`apps/web/src/features/finances/goal-scenarios.tsx`, `goal-scenarios.test.tsx`.
+**Modify:** domain scenario contracts, Wealth view, Cash flow Scenarios links, and hypothetical storage
+only if current saved-scenario support is absent; coordinate additive schema work through B.
+**Interface:** explicit goal progress/target, fixed contribution and optional schedule/date inputs;
+returns remaining amount, dated cumulative contribution series, estimated completion or unavailable
+reason, and assumptions. A proposal handoff uses the existing exact human approval contract.
+
+- [ ] Test achieved/unknown progress, zero contribution, month-end contribution dates, past target date,
+  exact cents, no assumed returns, three-alternative bound, and no mutation of budget/goal actuals.
+- [ ] Run `pnpm exec vitest run apps/api/src/finance/goal-scenario-projection.test.ts`; verify intended failure.
+- [ ] Implement transparent hypothetical projection and slider/exact-input comparison with assumptions.
+  Separate save-scenario from prepare-budget-proposal; neither transfers funds nor records contributions.
+- [ ] Run preceding test plus `pnpm exec vitest run apps/web/src/features/finances/goal-scenarios.test.tsx`;
+  require PASS and verify human approval cannot be bypassed through scenario application.
+- [ ] Add hypothetical-versus-actual E2E coverage and commit the slice.
+
+All five extension tasks inherit the original owner isolation, Sonner, reicon, accessible alternatives,
+current-source evidence, focused tests, and repository release verification gates. J tracks extension
+acceptance independently; update implementation documentation only as each view actually lands.
+
+
+## Review refinements: Spending contracts
+
+Task 3 must produce a shared recognized-contribution snapshot consumed by aggregate, bins, and
+transaction drill-down. Add cross-day/cross-month pending-replacement tests proving sum of bins equals
+aggregate and drill-down contributions. Add expected/partial/canceled reimbursement fixtures without
+changing existing cash-exposure callers. Compare selected-account spending separately from complete
+monthly budget-scope utilization, label differences, and withhold fill for unknowable budget scope.
+Test exact-month/no-carry-forward budget selection, deterministic approval ordering, preserved historic
+allocation references, date-only timezone behavior, and positive-bubble/net-refund reconciliation.
+Task 12 uses equal elapsed calendar days rather than invented intraday precision. Task 4 exposes the
+scope and negative-adjustment explanations beside the visualization. These are producer contract
+gates, not reasons to serialize independent visualization implementations.
+
+
+## Independent review refinements: required task additions
+
+These additions implement spec §13. The three external-host refinements (generic host,
+capability handshake, and interrupted-run recovery) were explicitly approved after discussion.
+Message timing is settled in the subsequent refinement. Implement these contracts before dependent
+features are exposed.
+Other engineering evidence gaps remain required acceptance work.
+
+| Task / owner | Required contract or implementation refinement | Required regression evidence |
+| --- | --- | --- |
+| 1 / A | Explicitly own active-budget `createBudget` and `setBudgetPlan` in `apps/api/src/finance-service.ts`, their HTTP/MCP routes, review replay and maintenance executors | Direct-service, HTTP and MCP agent rejection; authenticated human success; no active write on rejection |
+| 2, 9 / B/I | Separate workspace completion from budget-setup protocol; stable capability reason/recovery matrix; preserve unknowns across unrelated profile revisions | Manual/agent switching then subsequent setup invocation without optional-budget re-lock or repeated interrogation |
+| 9 / I | Existing-user read/correction grandfathering when all sources disconnected; onboarding-critical manual subset only | Populated migration/E2E with disconnected sources, historical records, old approvals, pending cases |
+| 5 / B/E | Generic polling-host registry/schema/migration and first authenticated binding alongside existing variants | Unbound job creation, wrong-connection rejection, preserved Codex/Claude behavior, actual supported-host round trip |
+| 5–7 / E/F | Server challenge fetch/ack/persist-response capability exchange, protocol-version bound | No self-report unlock, no handshake unread/activity, incompatible upgrade relocks only dependent capability |
+| 6 / F | Consumed message boundary and record revision; owner-level coalesced claims; explicit guarded recovery | Second reply during run, manual correction race, revoke before effect, revoke after effect before reply, two hosts/no duplicate effect |
+| 6–8 / F/G | Canonical focused-review projection states and atomic evidence production | Durable send/waiting, unavailable target/manual recovery, failed attempt distinct from applied, no future-message citation |
+| 13 / B/D | New versioned occurrence/match contract with calendar anchors and partial-payment allocations | Weekly repeats, semimonthly anchors, leap/month-end, schedule edits after match, partial/multiple payments, idempotent refresh |
+| 13,16 / D/M | Explicit cash snapshot basis/as-of/reflected movements and floor scope | Pending already in available balance not deducted twice; mismatched/missing snapshots; card/transfer scope; conservative same-day order |
+| 15 / L | Currency/service identity/commitment classification and cadence extension | Same merchant/two services, missing account currency, savings excluded, paused/suspected split, semimonthly support |
+| 17 / N/H | Existing allocation-owned journeys with grouping; guarded receipt correction/unmatch or compensating history | Partial receipt then cancel, incorrectly matched credit recovery, shared credit bounds, grouped totals/source links |
+| 18 / B/O | Goal-progress confirmation/as-of, legacy-zero handling, finite 1,200-month horizon, source-versioned scenarios | Unknown vs confirmed zero, changed goal after save, tiny contribution beyond horizon, fresh proposal approval |
+
+Add occurrence and goal-progress migrations through B rather than hiding persistence work inside UI
+tasks. D owns Cash flow shell integration; L/M/N each own their standalone view. G reads evidence;
+financial mutation owners integrate F's envelope at commit. Update the exact focused test files named
+in each task with the listed cases before declaring the task complete.
+
+Parallel release refinements: D can ship known-event Agenda/Calendar before a precise projection,
+with explicit coverage. N can ship existing per-case journeys before grouping/correction extensions;
+these remain required program scope. O can ship view-only hypotheses before save/proposal handoff.
+I can ship against a verified capability projection that correctly locks unavailable Chat, without
+waiting for all F. No slice may advertise an unavailable dependent capability as complete.
+
+
+## Accepted message-batch timing refinement
+
+Task 6 captures a server-side cutoff at run start and pages through only that fixed snapshot. Persist
+it across resumes. Do not poll/re-fetch newer messages during the run or fold them into an uncommitted
+action. Later arrivals always become unread follow-up for the next run. Test a new message arriving
+between pages, before mutation commit, after commit/before reply, and during resume: none joins the
+original batch or is marked consumed by its completion. Current-batch success leaves follow-up work
+pending under the existing case linkage. A direct manual record mutation still triggers normal
+revision/conflict checks; distinguish that from a new chat message. Task 7 states next-run handling
+near the composer. This supersedes the earlier draft suggesting incorporation before commit.
+
+
+Task 6 integration clarification: `maintain_finances` start owns creation of the fixed message batch.
+Its response carries batch data or the run-bound next action to fetch pages; resume retains that same
+batch. Remove any implication that the prompt independently drains a live queue before starting
+maintenance. Coordinate prompt templates with E. Add tests for start retries, compatible coalescing
+with newer messages, resume after failure, and legacy continuation overlap; prove one batch/answer
+cannot create duplicate financial effects. Task 5 registration must not claim this capability before
+the actual protocol path exists and verifies it.
+
+
+Task 5 prompt acceptance clarification: every generated recurring automation prompt includes that
+registration's internal schedule ID on create, edit, and recopy. Add tests for two registrations to
+prove their prompt IDs never cross, and verify template revisions retain the original schedule ID.
+The ID is mandatory attribution, not an optional credential. A separate copy-ID action is optional.

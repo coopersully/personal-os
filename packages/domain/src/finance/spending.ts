@@ -120,8 +120,49 @@ export const financeSpendingGroupSchema = z.object({
 });
 export type FinanceSpendingGroup = z.infer<typeof financeSpendingGroupSchema>;
 
+export const financeSpendingMonthlyBudgetSchema = z.discriminatedUnion("state", [
+  z.object({
+    state: z.literal("unavailable"),
+    reason: z.enum([
+      "multi_month_selection",
+      "qualification_required",
+      "baseline_missing",
+      "baseline_incomplete",
+      "scope_unavailable",
+      "unsupported_currency",
+      "category_identity_unresolved",
+      "recognition_unresolved",
+    ]),
+    qualificationRequired: z.boolean(),
+  }),
+  z.object({
+    state: z.literal("qualified"),
+    month: z.string(),
+    period: z.object({ from: z.iso.date(), through: z.iso.date(), timezone: z.string() }),
+    currency: z.literal("USD"),
+    accountIds: z.array(reference),
+    qualificationId: reference,
+    confirmedAt: z.iso.datetime(),
+    qualificationKind: z.enum(["current", "retrospective"]),
+    coverage: z.enum(["complete", "partial", "unknown"]),
+    includesPending: z.boolean(),
+    basis: z.enum(["personal_cost", "full_outflow"]),
+    subtractsRefunds: z.boolean(),
+    groups: z.array(
+      z.object({
+        groupId: reference,
+        budgetCents: cents.positive().nullable(),
+        usedCents: cents,
+        overspent: z.boolean(),
+      }),
+    ),
+  }),
+]);
+export type FinanceSpendingMonthlyBudget = z.infer<typeof financeSpendingMonthlyBudgetSchema>;
+
 export const financeSpendingDashboardSchema = z.object({
   referenceRevision: z.string().min(1).optional(),
+  monthlyBudget: financeSpendingMonthlyBudgetSchema.optional(),
   schemaVersion: z.literal(1),
   snapshot: financeSpendingSnapshotSchema,
   effectiveGrouping: z.enum(["buckets", "categories"]),

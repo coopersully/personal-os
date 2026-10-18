@@ -410,6 +410,19 @@ describe("finance routes", () => {
     expect(plan.status).toBe(202);
     await expect(plan.json()).resolves.toMatchObject({ status: "pending_review", review: { id } });
     expect(setBudgetPlan).not.toHaveBeenCalled();
+    const categoryInput = { category: "Food", limit: 100, month: "2026-08" };
+    const category = await app.request("/v1/finances/budgets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(categoryInput),
+    });
+    expect(category.status).toBe(202);
+    await expect(category.json()).resolves.toMatchObject({ status: "pending_review" });
+    expect(performDirect).toHaveBeenCalledWith(
+      "budget_plan",
+      expect.objectContaining(categoryInput),
+      expect.objectContaining({ requestId: "finance-plan" }),
+    );
     expect(performDirect).toHaveBeenCalledWith(
       "budget_plan",
       expect.objectContaining(input),

@@ -2439,6 +2439,95 @@ describe.sequential("finance action service", () => {
     ).toBe(writes);
   });
 
+  it("binds category approvals to the whole month and never replays a removed allocation", async () => {
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const actions = createFinanceActionService({ db: database.db, finances, now: () => now });
+    const categories = await finances.listCategories(userId);
+    const category = categories[0];
+    const replacementCategory = categories[1];
+    if (!category || !replacementCategory) throw new Error("Missing categories.");
+    const context = { principal: user(userId), requestId: "human-category-replay" };
+    const input = { category: category.name, limit: 10, month: "2027-03" };
+    const absentInput = { category: "Absent category", limit: 5, month: input.month };
+    const first = await actions.performDirect("budget_plan", input, context);
+    if (first.status !== "pending_review") throw new Error("Expected category review.");
+    await expect(actions.approve(first.review.id, context)).resolves.toMatchObject({
+      status: "applied",
+    });
+    await expect(actions.approve(first.review.id, context)).resolves.toMatchObject({
+      status: "applied",
+    });
+    expect(
+      await database.db.$count(
+        financeBudgets,
+        and(eq(financeBudgets.userId, userId), eq(financeBudgets.month, input.month)),
+      ),
+    ).toBe(1);
+    const pending = await actions.performDirect("budget_plan", absentInput, context);
+    if (pending.status !== "pending_review") throw new Error("Expected absent-category review.");
+    const beforeRevision = await actions.prepare("budget_plan", absentInput, userId);
+    const replacement = await actions.performDirect(
+      "budget_plan",
+      {
+        allocations: [{ categoryId: replacementCategory.id, limit: 20 }],
+        month: input.month,
+        rationale: "Replace A with B and leave absent category absent.",
+      },
+      context,
+    );
+    if (replacement.status !== "pending_review") throw new Error("Expected replacement review.");
+    await expect(actions.approve(replacement.review.id, context)).resolves.toMatchObject({
+      status: "applied",
+    });
+    const afterRevision = await actions.prepare("budget_plan", absentInput, userId);
+    if ("status" in beforeRevision || "status" in afterRevision)
+      throw new Error("Expected prepared category.");
+    expect(afterRevision.expectedRevision).not.toBe(beforeRevision.expectedRevision);
+    const snapshot = async () => ({
+      budgets: await database.db
+        .select()
+        .from(financeBudgets)
+        .where(and(eq(financeBudgets.userId, userId), eq(financeBudgets.month, input.month))),
+      plans: await database.db
+        .select()
+        .from(financeBudgetPlans)
+        .where(
+          and(eq(financeBudgetPlans.userId, userId), eq(financeBudgetPlans.month, input.month)),
+        ),
+      audits: await database.db.$count(
+        auditEvents,
+        and(
+          eq(auditEvents.userId, userId),
+          inArray(auditEvents.action, ["finance.budget_created", "finance.budget_plan_set"]),
+        ),
+      ),
+    });
+    const newer = await snapshot();
+    await expect(actions.approve(first.review.id, context)).resolves.toMatchObject({
+      status: "applied",
+    });
+    await expect(actions.approve(pending.review.id, context)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    const delayed = await actions.performDirect("budget_plan", input, context);
+    if (delayed.status !== "pending_review")
+      throw new Error("Delayed category must need fresh review.");
+    await expect(finances.createBudget(input, context)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    expect(await snapshot()).toEqual(newer);
+    await expect(actions.approve(delayed.review.id, context)).resolves.toMatchObject({
+      status: "applied",
+    });
+    const approved = await snapshot();
+    expect(approved.budgets).toHaveLength(2);
+    expect(approved.audits).toBe(newer.audits + 1);
+    await expect(actions.approve(delayed.review.id, context)).resolves.toMatchObject({
+      status: "applied",
+    });
+    expect(await snapshot()).toEqual(approved);
+  });
+
   it("disposes every Finance action family safely across bypass, evidence, and ownership states", async () => {
     const service = createFinanceActionService({
       db: database.db,

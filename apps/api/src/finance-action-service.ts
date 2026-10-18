@@ -835,27 +835,46 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             expectedAnswer("limit", "number"),
             expectedAnswer("month", "string", { example: "2026-08" }),
           ]);
-        const existing = await lockRead(
+        const plans = await lockRead(
+          executor
+            .select()
+            .from(financeBudgetPlans)
+            .where(
+              and(
+                eq(financeBudgetPlans.userId, userId),
+                eq(financeBudgetPlans.month, String(input.month)),
+              ),
+            )
+            .orderBy(financeBudgetPlans.id),
+        );
+        const allocations = await lockRead(
           executor
             .select()
             .from(financeBudgets)
             .where(
-              and(
-                eq(financeBudgets.userId, userId),
-                eq(financeBudgets.month, String(input.month)),
-                eq(financeBudgets.category, String(input.category)),
-              ),
+              and(eq(financeBudgets.userId, userId), eq(financeBudgets.month, String(input.month))),
             )
-            .orderBy(financeBudgets.id)
-            .limit(1),
+            .orderBy(financeBudgets.id),
         );
-        const revision = existing[0]?.updatedAt.toISOString() ?? "absent";
+        const existing = allocations.find((item) => item.category === String(input.category));
+        // A complete replacement can remove this category and leave it absent.
+        // Bind to the whole month so that absence cannot revive an old approval.
+        const revision = snapshotRevision({
+          plans: plans.map((item) => [item.id, item.version, item.updatedAt.toISOString()]),
+          allocations: allocations.map((item) => [
+            item.id,
+            item.category,
+            item.limit,
+            item.bucketId,
+            item.updatedAt.toISOString(),
+          ]),
+        });
         return prepared(
           input,
           revision,
           [
             {
-              entityId: existing[0]?.id ?? null,
+              entityId: existing?.id ?? null,
               entityType: "finance_budget",
               summary: `Set ${String(input.category)} budget to $${Number(input.limit).toFixed(2)} for ${String(input.month)}.`,
             },
@@ -3391,12 +3410,11 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         const payload = existing.privatePayload as { question: FinanceQuestion };
         return { question: { ...payload.question, id: existing.id }, status: "needs_input" };
       }
-      // Human legacy plan submissions also need a durable review identity and
+      // Human legacy allocation submissions also need a durable review identity and
       // source revision; authentication alone cannot make a delayed PUT fresh.
       if (
         context.principal.actorType === "user" &&
-        prepared.actionKind === "budget_plan" &&
-        "allocations" in prepared.input
+        isActiveBudgetAction(prepared.actionKind, prepared.input)
       ) {
         return db.transaction(async (tx) => {
           const current = await revalidate(prepared, context.principal.userId, tx, "user");

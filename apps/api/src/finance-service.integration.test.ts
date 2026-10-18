@@ -378,6 +378,26 @@ describe.sequential("finance service", () => {
       ),
     );
   }
+  function reviewedCreateBudget(
+    service: ReturnType<typeof createFinanceService>,
+    input: Parameters<typeof service.createBudget>[0],
+    context: Parameters<typeof service.createBudget>[1],
+  ) {
+    return database.db.transaction((tx) =>
+      service.createBudget(
+        input,
+        {
+          ...context,
+          financeBudgetApproval: {
+            principal: context.principal,
+            reviewId: context.requestId,
+            fingerprint: financeActionFingerprint("budget_plan", input),
+          },
+        },
+        tx,
+      ),
+    );
+  }
   let userId: string;
 
   it("keeps import errors useful even for non-Error throws", () => {
@@ -3241,7 +3261,11 @@ describe.sequential("finance service", () => {
     await expect(
       service.updateTransaction("00000000-0000-4000-8000-000000000000", { notes: "Nope" }, context),
     ).rejects.toThrow("transaction was not found");
-    await service.createBudget({ category: "Groceries", limit: 400, month: "2026-07" }, context);
+    await reviewedCreateBudget(
+      service,
+      { category: "Groceries", limit: 400, month: "2026-07" },
+      context,
+    );
     const overview = await service.listOverview(userId);
     expect(overview).toMatchObject({ reviewCount: 3, spendingThisMonth: 97.75 });
     expect(overview.budgets).toHaveLength(1);
@@ -3732,8 +3756,13 @@ describe.sequential("finance service", () => {
         context,
       ),
     ).rejects.toMatchObject({ code: "conflict" });
-    await service.createBudget({ category: "Health", limit: 100, month: "2026-07" }, context);
-    await service.createBudget(
+    await reviewedCreateBudget(
+      service,
+      { category: "Health", limit: 100, month: "2026-07" },
+      context,
+    );
+    await reviewedCreateBudget(
+      service,
       { category: "Personal Care", limit: 100, month: "2026-07" },
       context,
     );
@@ -5134,7 +5163,11 @@ describe.sequential("finance service", () => {
       },
       context,
     );
-    await service.createBudget({ category: "Shopping", limit: 90, month: "2026-07" }, context);
+    await reviewedCreateBudget(
+      service,
+      { category: "Shopping", limit: 90, month: "2026-07" },
+      context,
+    );
 
     await expect(service.getBudgetStatus(integrityId, "2026-07")).resolves.toEqual([
       expect.objectContaining({ remaining: 10, spent: 80 }),
@@ -5830,7 +5863,11 @@ describe.sequential("finance service", () => {
       { balance: 5_000, institution: "Bank", kind: "cash", name: "Checking", provider: "manual" },
       context,
     );
-    await service.createBudget({ category: "Dining", limit: 310, month: "2026-07" }, context);
+    await reviewedCreateBudget(
+      service,
+      { category: "Dining", limit: 310, month: "2026-07" },
+      context,
+    );
     for (const [date, amount] of [
       ["2026-07-01", 100],
       ["2026-07-19", 150],
@@ -6527,7 +6564,8 @@ describe.sequential("finance service", () => {
       },
       context,
     );
-    await service.createBudget(
+    await reviewedCreateBudget(
+      service,
       { category: firstCategory.name, limit: 100, month: "2026-07" },
       context,
     );

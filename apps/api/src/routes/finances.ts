@@ -1081,12 +1081,12 @@ export function registerFinanceRoutes({
   });
   app.post("/v1/finances/budgets", async (context) => {
     const input = await parseBody(context, createFinanceBudgetInputSchema);
-    return act(context, "budget_plan", input, async () =>
-      context.json(
-        { budget: await finances.createBudget(input, financeMutationContext(context)) },
-        201,
-      ),
+    const outcome = await requireActions().performDirect(
+      "budget_plan",
+      input,
+      financeMutationContext(context),
     );
+    return context.json(outcome, outcome.status === "pending_review" ? 202 : 200);
   });
   app.get("/v1/finances/budget-buckets", async (context) =>
     context.json(

@@ -482,9 +482,10 @@ compatibility alias only translates legacy categorization answers. Legacy action
 approval/dismissal is available to the signed-in owner or explicitly authorized Finance execution
 agents with enabled review bypass and exact current work references, except active budget changes:
 those always require the authenticated owner. Legacy category allocations and complete plan writes
-have the same human boundary. Legacy `PUT /v1/finances/budget-plan` submissions from humans
+have the same human boundary. Legacy `PUT /v1/finances/budget-plan` and `POST /v1/finances/budgets` submissions from humans
 also return a pending review; only approval of that durable review applies the plan. Approval
-revalidates its source revision, and replaying an applied review returns its recorded result
+revalidates the monthly plan and full allocation revision, including proposals for absent categories,
+and replaying an applied review returns its recorded result
 without replacing newer allocations. Bucket organization remains ordinary bookkeeping. Answering a budget
 evidence question queues the completed proposal; it does not approve it. Maintenance retains the
 exact reviewed candidate and human approval identity separately from its executing agent, and

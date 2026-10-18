@@ -7498,6 +7498,12 @@ export function createFinanceService({
       executor?: FinanceActionWriteExecutor,
     ) {
       const approval = requireActiveBudgetAuthority(input, context);
+      if (!context.financeBudgetApproval || !executor) {
+        throw new AppError(
+          "forbidden",
+          "Submit this budget allocation for revision-bound human review before applying it.",
+        );
+      }
       const write = async (tx: FinanceActionWriteExecutor) => {
         // A single category budget shares the monthly replacement/capacity
         // surface with a complete plan. Use the same transaction-scoped lock
@@ -7581,7 +7587,7 @@ export function createFinanceService({
         );
         return created;
       };
-      const row = executor ? await write(executor) : await db.transaction(write);
+      const row = await write(executor);
       return budget(row);
     },
     async setBudgetPlan(

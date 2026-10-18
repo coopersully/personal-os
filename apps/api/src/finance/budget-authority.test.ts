@@ -65,9 +65,12 @@ describe("active budget authority", () => {
     });
     expect(transaction).not.toHaveBeenCalled();
   });
-  it("rejects unreviewed human plan writes before opening a transaction", async () => {
+  it("rejects unreviewed human allocation and plan writes before opening a transaction", async () => {
     const transaction = vi.fn();
     const service = createFinanceService({ db: { transaction } as never, now: () => new Date() });
+    await expect(
+      service.createBudget(input, { principal, requestId: "delayed-category" }),
+    ).rejects.toMatchObject({ code: "forbidden" });
     await expect(
       service.setBudgetPlan({} as never, { principal, requestId: "delayed" }),
     ).rejects.toMatchObject({ code: "forbidden" });

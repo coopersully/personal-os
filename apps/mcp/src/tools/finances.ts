@@ -617,9 +617,9 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Activate the exact inspected proposal and profile revision. Agents must use approvalSource agent_self_approval and have finances:write, explicit finances:execute, and enabled review bypass. Claiming user_instruction is rejected.",
+        "Budget activation requires exact authenticated human approval in nohmi. Agent calls cannot approve a budget, including with execution or review bypass; direct the user to review the proposal in nohmi.",
       inputSchema: {
-        approvalSource: z.enum(["user_instruction", "agent_self_approval"]),
+        approvalSource: z.literal("user_instruction"),
         budgetVersionId: id,
         expectedProfileVersionId: id.nullable().optional(),
         expectedVersion: z.number().int().positive(),

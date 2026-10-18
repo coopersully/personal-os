@@ -779,7 +779,7 @@ Execute the exact pending action after inspecting its evidence. The API revalida
 
 ## approve_finance_budget
 
-Activate the exact inspected proposal and profile revision. Agents must use approvalSource agent_self_approval and have finances:write, explicit finances:execute, and enabled review bypass. Claiming user_instruction is rejected.
+Budget activation requires exact authenticated human approval in nohmi. Agent calls cannot approve a budget, including with execution or review bypass; direct the user to review the proposal in nohmi.
 
 - Domain: finances; stage: commit; policy: approved_rule.
 - Grants (all): finances:write, finances:execute.
@@ -792,10 +792,7 @@ Activate the exact inspected proposal and profile revision. Agents must use appr
   "properties": {
     "approvalSource": {
       "type": "string",
-      "enum": [
-        "user_instruction",
-        "agent_self_approval"
-      ]
+      "const": "user_instruction"
     },
     "budgetVersionId": {
       "type": "string",

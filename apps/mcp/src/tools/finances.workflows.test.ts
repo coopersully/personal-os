@@ -79,7 +79,7 @@ describe("Finance MCP workflows", () => {
     const tools = await client.listTools();
     expect(
       tools.tools.find((tool) => tool.name === "approve_finance_budget")?.description,
-    ).toContain("explicit finances:execute");
+    ).toContain("exact authenticated human approval");
     await client.close();
     await server.close();
   });

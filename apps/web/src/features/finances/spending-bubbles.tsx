@@ -3,6 +3,7 @@ import { type HTMLMotionProps, motion, useDragControls, useReducedMotion } from 
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { formatMoney } from "./format";
+import { spendingGroupVisual } from "./spending-visual";
 
 function SpendingBubble(props: HTMLMotionProps<"button">) {
   const controls = useDragControls();
@@ -127,6 +128,8 @@ export function SpendingBubbles({
           const node = nodes[index];
           if (!node) return null;
           const diameter = node.radius * width * 2;
+          const visual = spendingGroupVisual(group);
+          const VisualIcon = visual.Icon;
           return (
             <SpendingBubble
               key={group.id}
@@ -175,14 +178,32 @@ export function SpendingBubbles({
               }}
               aria-label={`${group.label}: ${formatMoney(group.netCents / 100)}. Budget comparison unavailable.`}
               title={`${group.label}: ${formatMoney(group.netCents / 100)}`}
-              style={{ width: diameter, height: diameter, touchAction: arrange ? "none" : "pan-y" }}
-              className="absolute left-0 top-0 flex items-center justify-center rounded-full bg-primary/15 p-0 text-primary hover:bg-primary/25 focus-visible:bg-primary/25"
+              style={{
+                width: diameter,
+                height: diameter,
+                touchAction: arrange ? "none" : "pan-y",
+                backgroundColor: visual.backgroundColor,
+              }}
+              className="group absolute left-0 top-0 flex flex-col items-center justify-center gap-1 overflow-hidden rounded-full border border-transparent p-0 text-foreground hover:border-foreground/30 focus-visible:border-foreground/60"
               transition={
                 reduced ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0.15 }
               }
             >
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 rounded-full bg-foreground/0 group-hover:bg-foreground/5 group-focus-visible:bg-foreground/5"
+              />
+              {diameter >= 18 ? (
+                <span
+                  aria-hidden="true"
+                  data-spending-icon={visual.icon}
+                  className="relative size-4 shrink-0 [&>svg]:size-full"
+                >
+                  <VisualIcon />
+                </span>
+              ) : null}
               {diameter >= 92 ? (
-                <span className="max-w-full px-2 text-center text-xs">
+                <span className="relative max-w-full px-2 text-center text-xs">
                   <span className="block truncate">{group.label}</span>
                   {formatMoney(group.netCents / 100)}
                 </span>

@@ -17,6 +17,7 @@ import {
 } from "@personal-os/database";
 import {
   type ConfirmFinanceBalanceBasisInput,
+  confirmFinanceBalanceBasisInputSchema,
   type FinanceBalanceBasis,
   type FinanceCashflowActualEligibilityReason,
   type FinanceCashflowProjectionQuery,
@@ -24,9 +25,6 @@ import {
   type FinanceCashflowSourceSnapshots,
   type FinanceRecurringOccurrencesQuery,
   type FinanceRecurringOccurrencesView,
-  type PaydayActualMovement,
-  type PaydayOccurrence,
-  confirmFinanceBalanceBasisInputSchema,
   financeBalanceBasisSchema,
   financeCashflowProjectionQuerySchema,
   financePlanningEvidenceCurrencySchema,
@@ -34,20 +32,19 @@ import {
   financeRecurringOccurrencesQuerySchema,
   localDateAt,
   localDateToIso,
+  type PaydayActualMovement,
+  type PaydayOccurrence,
+  projectPaydayCycle,
 } from "@personal-os/domain";
-import { projectPaydayCycle } from "@personal-os/domain";
-import { and, desc, eq, gte, inArray, lte, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
-import {
-  lockReimbursementCases,
-  lockReimbursementMatches,
-  lockReimbursementTopology,
-} from "../finance-reimbursement-locks.js";
+import { lockReimbursementTopology } from "../finance-reimbursement-locks.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
 import { requireExplicitUser } from "./planning-evidence-service.js";
 import { resolveFinanceSpendingEvidence } from "./recognition.js";
-import { cashflowResult, type CashflowTransaction } from "./recurring-schedule-service.js";
+import { type CashflowTransaction, cashflowResult } from "./recurring-schedule-service.js";
+
 type Executor = Database | CashflowTransaction;
 const LIMIT = 1000;
 export async function readCashflowActuals(
@@ -166,7 +163,7 @@ export async function readCashflowActuals(
   ) {
     const reasons: FinanceCashflowActualEligibilityReason[] = [];
     const account = accounts.find((row) => row.id === transaction.accountId);
-    if (!account || account.kind !== "cash") reasons.push("account_unavailable");
+    if (account?.kind !== "cash") reasons.push("account_unavailable");
     if (transaction.pending) reasons.push("pending");
     if ((transaction.providerDirection ?? transaction.direction) !== kind)
       reasons.push(kind === "income" ? "not_income" : "not_expense");
@@ -410,39 +407,35 @@ export function createFinanceBalanceBasisService({
               ownershipShare: row.ownershipShareBps === null ? null : row.ownershipShareBps / 10000,
               accountRevision: row.contextualRevision.toString(),
             })),
-            income: income
-              .slice(0, 1000)
-              .map((row) => ({
-                accountId: row.accountId,
-                cadence: row.cadence,
-                confidence: row.confidence / 10000,
-                displayName: row.displayName,
-                expectedAmount: row.expectedAmount / 100,
-                id: row.id,
-                lastObservedDate: row.lastObservedDate,
-                nextExpectedDate: row.nextExpectedDate,
-                payer: row.payer,
-                source: row.source,
-                status: row.status,
-                revision: row.revision,
-              })),
-            obligations: obligations
-              .slice(0, 1000)
-              .map((row) => ({
-                accountId: row.accountId,
-                cadence: row.cadence,
-                confidence: row.confidence / 10000,
-                displayName: row.displayName,
-                expectedAmount: row.expectedAmount / 100,
-                id: row.id,
-                lastObservedDate: row.lastObservedDate,
-                nextExpectedDate: row.nextExpectedDate,
-                merchant: row.merchant,
-                kind: row.kind,
-                source: row.source,
-                status: row.status,
-                revision: row.revision,
-              })),
+            income: income.slice(0, 1000).map((row) => ({
+              accountId: row.accountId,
+              cadence: row.cadence,
+              confidence: row.confidence / 10000,
+              displayName: row.displayName,
+              expectedAmount: row.expectedAmount / 100,
+              id: row.id,
+              lastObservedDate: row.lastObservedDate,
+              nextExpectedDate: row.nextExpectedDate,
+              payer: row.payer,
+              source: row.source,
+              status: row.status,
+              revision: row.revision,
+            })),
+            obligations: obligations.slice(0, 1000).map((row) => ({
+              accountId: row.accountId,
+              cadence: row.cadence,
+              confidence: row.confidence / 10000,
+              displayName: row.displayName,
+              expectedAmount: row.expectedAmount / 100,
+              id: row.id,
+              lastObservedDate: row.lastObservedDate,
+              nextExpectedDate: row.nextExpectedDate,
+              merchant: row.merchant,
+              kind: row.kind,
+              source: row.source,
+              status: row.status,
+              revision: row.revision,
+            })),
             transactions: data.transactions.map((row) => ({
               id: row.id,
               accountId: row.accountId,
@@ -476,7 +469,7 @@ export function createFinanceBalanceBasisService({
             },
           };
         },
-        { isolationLevel: "repeatable read", readOnly: true },
+        { isolationLevel: "repeatable read", accessMode: "read only" },
       );
     },
     async confirmFinanceBalanceBasis(
@@ -596,23 +589,21 @@ export function createFinanceBalanceBasisService({
                 )
                 .returning()
             : [];
-          await tx
-            .insert(auditEvents)
-            .values(
-              auditValues({
-                action: "finance.balance_basis.confirmed",
-                before: { basisRevision: previous?.basisRevision ?? 0 },
-                after: {
-                  basisId: saved.id,
-                  basisRevision: saved.basisRevision,
-                  reflectionCount: reflections.length,
-                },
-                entityId: account.id,
-                entityType: "finance_account",
-                principal: context,
-                requestId: context.requestId,
-              }),
-            );
+          await tx.insert(auditEvents).values(
+            auditValues({
+              action: "finance.balance_basis.confirmed",
+              before: { basisRevision: previous?.basisRevision ?? 0 },
+              after: {
+                basisId: saved.id,
+                basisRevision: saved.basisRevision,
+                reflectionCount: reflections.length,
+              },
+              entityId: account.id,
+              entityType: "finance_account",
+              principal: context,
+              requestId: context.requestId,
+            }),
+          );
           return cashflowResult(
             basisValue(saved, reflections),
             "Your balance statement and exact transaction reflections were recorded.",
@@ -790,7 +781,7 @@ export function createFinanceBalanceBasisService({
           });
           return { schedule, projection };
         },
-        { isolationLevel: "repeatable read", readOnly: true },
+        { isolationLevel: "repeatable read", accessMode: "read only" },
       );
     },
   };

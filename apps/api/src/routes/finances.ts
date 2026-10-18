@@ -1,4 +1,3 @@
-import { confirmFinanceRecurringScheduleInputSchema, financeRecurringOccurrencesQuerySchema, manageFinanceOccurrenceMatchInputSchema, confirmFinanceBalanceBasisInputSchema, financeCashflowProjectionQuerySchema } from "@personal-os/domain";
 import type { Database } from "@personal-os/database";
 import {
   answerFinanceReviewInputSchema,
@@ -6,6 +5,8 @@ import {
   approveFinanceBudgetInputSchema,
   cancelFinanceReimbursementInputSchema,
   classifyFinanceTransactionsInputSchema,
+  confirmFinanceBalanceBasisInputSchema,
+  confirmFinanceRecurringScheduleInputSchema,
   createFinanceAccountInputSchema,
   createFinanceBudgetBucketInputSchema,
   createFinanceBudgetInputSchema,
@@ -25,12 +26,14 @@ import {
   financeBudgetPolicyLifecycleSchema,
   financeBudgetPolicyListSchema,
   financeBudgetStatusQuerySchema,
+  financeCashflowProjectionQuerySchema,
   financeCsvImportInputSchema,
   financeMaintenanceHistoryQuerySchema,
   financeMaintenanceInputSchema,
   financeMerchantQuerySchema,
   financePositionReadScopeSchema,
   financeReceiptReviewInputSchema,
+  financeRecurringOccurrencesQuerySchema,
   financeReviewDecisionInputSchema,
   financeReviewHistoryQuerySchema,
   financeScenarioInputSchema,
@@ -40,6 +43,7 @@ import {
   linkFinanceTransactionsInputSchema,
   maintenanceScopeQuerySchema,
   manageFinanceGoalInputSchema,
+  manageFinanceOccurrenceMatchInputSchema,
   manageFinanceRecurringItemInputSchema,
   manageFinanceRuleInputSchema,
   mergeFinanceMerchantsInputSchema,
@@ -641,29 +645,82 @@ export function registerFinanceRoutes({
       ),
     ),
   );
-  app.get("/v1/finances/recurring-schedules", async (context) => context.json(await finances.listFinanceRecurringSchedules(context.get("principal").userId)));
-  app.post("/v1/finances/recurring-schedules", async (context) => context.json(await finances.confirmFinanceRecurringSchedule(await parseBody(context, confirmFinanceRecurringScheduleInputSchema), await financeContext(context)), 201));
+  app.get("/v1/finances/recurring-schedules", async (context) =>
+    context.json(await finances.listFinanceRecurringSchedules(context.get("principal").userId)),
+  );
+  app.post("/v1/finances/recurring-schedules", async (context) =>
+    context.json(
+      await finances.confirmFinanceRecurringSchedule(
+        await parseBody(context, confirmFinanceRecurringScheduleInputSchema),
+        await financeContext(context),
+      ),
+      201,
+    ),
+  );
   app.get("/v1/finances/recurring-occurrences", async (context) => {
     const accountIds = context.req.query("accountIds");
-    const query = financeRecurringOccurrencesQuerySchema.parse({ from: context.req.query("from"), to: context.req.query("to"), ...(accountIds !== undefined ? { accountIds: accountIds ? accountIds.split(",") : [] } : {}) });
-    return context.json(await finances.listFinanceRecurringOccurrences(context.get("principal").userId, query));
+    const query = financeRecurringOccurrencesQuerySchema.parse({
+      from: context.req.query("from"),
+      to: context.req.query("to"),
+      ...(accountIds !== undefined ? { accountIds: accountIds ? accountIds.split(",") : [] } : {}),
+    });
+    return context.json(
+      await finances.listFinanceRecurringOccurrences(context.get("principal").userId, query),
+    );
   });
-  app.post("/v1/finances/recurring-occurrence-matches", async (context) => context.json(await finances.manageFinanceOccurrenceMatch(await parseBody(context, manageFinanceOccurrenceMatchInputSchema), await financeContext(context)), 201));
+  app.post("/v1/finances/recurring-occurrence-matches", async (context) =>
+    context.json(
+      await finances.manageFinanceOccurrenceMatch(
+        await parseBody(context, manageFinanceOccurrenceMatchInputSchema),
+        await financeContext(context),
+      ),
+      201,
+    ),
+  );
   app.get("/v1/finances/balance-bases", async (context) => {
     const value = context.req.query("accountIds");
-    const accountIds = value === undefined ? undefined : z.array(z.uuid()).max(100).parse(value ? value.split(",") : []);
-    return context.json(await finances.listFinanceBalanceBases(context.get("principal").userId, accountIds));
+    const accountIds =
+      value === undefined
+        ? undefined
+        : z
+            .array(z.uuid())
+            .max(100)
+            .parse(value ? value.split(",") : []);
+    return context.json(
+      await finances.listFinanceBalanceBases(context.get("principal").userId, accountIds),
+    );
   });
-  app.post("/v1/finances/balance-bases", async (context) => context.json(await finances.confirmFinanceBalanceBasis(await parseBody(context, confirmFinanceBalanceBasisInputSchema), await financeContext(context)), 201));
+  app.post("/v1/finances/balance-bases", async (context) =>
+    context.json(
+      await finances.confirmFinanceBalanceBasis(
+        await parseBody(context, confirmFinanceBalanceBasisInputSchema),
+        await financeContext(context),
+      ),
+      201,
+    ),
+  );
   app.get("/v1/finances/cashflow-sources", async (context) => {
     const value = context.req.query("accountIds");
-    const query = financeRecurringOccurrencesQuerySchema.parse({ from: context.req.query("from"), to: context.req.query("to"), ...(value !== undefined ? { accountIds: value ? value.split(",") : [] } : {}) });
-    return context.json(await finances.listFinanceCashflowSources(context.get("principal").userId, query));
+    const query = financeRecurringOccurrencesQuerySchema.parse({
+      from: context.req.query("from"),
+      to: context.req.query("to"),
+      ...(value !== undefined ? { accountIds: value ? value.split(",") : [] } : {}),
+    });
+    return context.json(
+      await finances.listFinanceCashflowSources(context.get("principal").userId, query),
+    );
   });
   app.get("/v1/finances/cashflow-projection", async (context) => {
     const value = context.req.query("accountIds");
-    const query = financeCashflowProjectionQuerySchema.parse({ from: context.req.query("from"), to: context.req.query("to"), selectedIncomeStreamId: context.req.query("selectedIncomeStreamId") ?? null, ...(value !== undefined ? { accountIds: value ? value.split(",") : [] } : {}) });
-    return context.json(await finances.getFinanceCashflowProjection(context.get("principal").userId, query));
+    const query = financeCashflowProjectionQuerySchema.parse({
+      from: context.req.query("from"),
+      to: context.req.query("to"),
+      selectedIncomeStreamId: context.req.query("selectedIncomeStreamId") ?? null,
+      ...(value !== undefined ? { accountIds: value ? value.split(",") : [] } : {}),
+    });
+    return context.json(
+      await finances.getFinanceCashflowProjection(context.get("principal").userId, query),
+    );
   });
   app.get("/v1/finances/recurring-items", async (context) =>
     context.json(await finances.listFinanceRecurringItems(context.get("principal").userId)),

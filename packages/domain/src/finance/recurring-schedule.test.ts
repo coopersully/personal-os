@@ -1,10 +1,11 @@
 import { expect, it } from "vitest";
+import { confirmFinanceBalanceBasisInputSchema } from "./balance-basis.js";
+import { manageFinanceOccurrenceMatchInputSchema } from "./occurrence-match.js";
 import {
   confirmFinanceRecurringScheduleInputSchema,
   financeRecurringOccurrencesQuerySchema,
 } from "./recurring-schedule.js";
-import { manageFinanceOccurrenceMatchInputSchema } from "./occurrence-match.js";
-import { confirmFinanceBalanceBasisInputSchema } from "./balance-basis.js";
+
 const id = "f2000000-0000-4000-8000-000000000001";
 const schedule = {
   source: { kind: "income", id },

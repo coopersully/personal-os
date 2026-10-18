@@ -4,26 +4,25 @@ import {
   financeAccounts,
   financeIncomeStreams,
   financeOccurrenceMatchEvents,
-  financeRecurringOccurrences,
   financeRecurringObligations,
+  financeRecurringOccurrences,
   financeRecurringScheduleVersions,
-  financeReimbursements,
   financeReimbursementMatches,
+  financeReimbursements,
   financeTransactionAllocations,
   financeTransactions,
 } from "@personal-os/database";
 import {
+  expandRecurringOccurrences,
+  type FinanceOccurrenceMatchEvent,
   type FinanceRecurringOccurrencesQuery,
   type FinanceRecurringOccurrencesView,
-  type FinanceRecurringOccurrence,
-  type ManageFinanceOccurrenceMatchInput,
-  type FinanceOccurrenceMatchEvent,
   financeOccurrenceMatchEventSchema,
   financeRecurringOccurrencesQuerySchema,
+  type ManageFinanceOccurrenceMatchInput,
   manageFinanceOccurrenceMatchInputSchema,
 } from "@personal-os/domain";
-import { expandRecurringOccurrences } from "@personal-os/domain";
-import { and, desc, eq, gte, inArray, lte, or } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
 import {
@@ -34,7 +33,8 @@ import {
 import { readCashflowActuals } from "./balance-basis-service.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
 import { requireExplicitUser } from "./planning-evidence-service.js";
-import { cashflowResult, type CashflowTransaction } from "./recurring-schedule-service.js";
+import { type CashflowTransaction, cashflowResult } from "./recurring-schedule-service.js";
+
 type Executor = Database | CashflowTransaction;
 export function matchEventValue(
   row: typeof financeOccurrenceMatchEvents.$inferSelect,
@@ -349,7 +349,7 @@ export function createFinanceRecurringOccurrenceService({
       if (executor) return read(userId, query, executor);
       return db.transaction((tx) => read(userId, query, tx), {
         isolationLevel: "repeatable read",
-        readOnly: true,
+        accessMode: "read only",
       });
     },
     async manageFinanceOccurrenceMatch(
@@ -382,7 +382,7 @@ export function createFinanceRecurringOccurrenceService({
                   )
                   .limit(1)
               : [];
-          if (input.operation === "reverse" && (!original || original.kind !== "match"))
+          if (input.operation === "reverse" && original?.kind !== "match")
             throw new AppError("not_found", "Original occurrence match not found.");
           const [initialAllocation] = original?.allocationId
             ? await tx
@@ -506,7 +506,7 @@ export function createFinanceRecurringOccurrenceService({
                 ),
               )
               .limit(1);
-            if (!locked || locked.kind !== "match" || reversal)
+            if (locked?.kind !== "match" || reversal)
               throw new AppError(
                 "conflict",
                 "This original match is unavailable or already fully reversed.",
@@ -531,19 +531,17 @@ export function createFinanceRecurringOccurrenceService({
               })
               .returning();
             if (!saved) throw new AppError("internal_error", "Reversal could not be recorded.");
-            await tx
-              .insert(auditEvents)
-              .values(
-                auditValues({
-                  action: "finance.occurrence_match.reversed",
-                  before: { matchId: locked.id },
-                  after: { reversalId: saved.id },
-                  entityId: locked.occurrenceId,
-                  entityType: "finance_recurring_occurrence",
-                  principal: context,
-                  requestId: context.requestId,
-                }),
-              );
+            await tx.insert(auditEvents).values(
+              auditValues({
+                action: "finance.occurrence_match.reversed",
+                before: { matchId: locked.id },
+                after: { reversalId: saved.id },
+                entityId: locked.occurrenceId,
+                entityType: "finance_recurring_occurrence",
+                principal: context,
+                requestId: context.requestId,
+              }),
+            );
             return cashflowResult(
               matchEventValue(saved),
               "The original actual match was fully reversed.",
@@ -595,8 +593,7 @@ export function createFinanceRecurringOccurrenceService({
               : undefined;
           if (
             input.operation === "match_expense" &&
-            (!allocation ||
-              allocation.state !== "active" ||
+            (allocation?.state !== "active" ||
               allocation.revision !== input.expectedAllocationRevision)
           )
             throw new AppError(
@@ -726,23 +723,21 @@ export function createFinanceRecurringOccurrenceService({
             })
             .returning();
           if (!saved) throw new AppError("internal_error", "Actual match could not be recorded.");
-          await tx
-            .insert(auditEvents)
-            .values(
-              auditValues({
-                action: "finance.occurrence_match.confirmed",
-                before: null,
-                after: {
-                  matchId: saved.id,
-                  transactionId: actual.id,
-                  allocationId: allocation?.id ?? null,
-                },
-                entityId: existing.id,
-                entityType: "finance_recurring_occurrence",
-                principal: context,
-                requestId: context.requestId,
-              }),
-            );
+          await tx.insert(auditEvents).values(
+            auditValues({
+              action: "finance.occurrence_match.confirmed",
+              before: null,
+              after: {
+                matchId: saved.id,
+                transactionId: actual.id,
+                allocationId: allocation?.id ?? null,
+              },
+              entityId: existing.id,
+              entityType: "finance_recurring_occurrence",
+              principal: context,
+              requestId: context.requestId,
+            }),
+          );
           return cashflowResult(matchEventValue(saved), "Your explicit actual match was recorded.");
         },
       );

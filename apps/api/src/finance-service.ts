@@ -125,6 +125,10 @@ import {
   createFinanceAccountService,
   serializeFinanceAccountRows,
 } from "./finance/account-service.js";
+import {
+  assertCashflowAccountMayBeDeleted,
+  createFinanceBalanceBasisService,
+} from "./finance/balance-basis-service.js";
 import { createFinanceBudgetBucketService } from "./finance/budget-bucket-service.js";
 import { readFinanceConfiguration } from "./finance/configuration-service.js";
 import { createFinanceConnectionHandoffService } from "./finance/connection-handoff-service.js";
@@ -142,11 +146,10 @@ import {
   createFinancePlanningEvidenceService,
   requireExplicitUser,
 } from "./finance/planning-evidence-service.js";
-import { createFinanceRecurringScheduleService } from "./finance/recurring-schedule-service.js";
-import { createFinanceRecurringOccurrenceService } from "./finance/recurring-occurrence-service.js";
-import { createFinanceBalanceBasisService, assertCashflowAccountMayBeDeleted } from "./finance/balance-basis-service.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import { appendFinanceProfile } from "./finance/profile-writer.js";
+import { createFinanceRecurringOccurrenceService } from "./finance/recurring-occurrence-service.js";
+import { createFinanceRecurringScheduleService } from "./finance/recurring-schedule-service.js";
 import { issueMaintenanceReviewQuestion } from "./finance/review-action-service.js";
 import { createSetupService } from "./finance/setup-service.js";
 import {
@@ -764,7 +767,11 @@ export function createFinanceService({
   const planning = createProfileBudgetService({ db, now });
   const recurringSchedules = createFinanceRecurringScheduleService({ db, now });
   const recurringOccurrences = createFinanceRecurringOccurrenceService({ db, now });
-  const balanceBases = createFinanceBalanceBasisService({ db, now, readOccurrences: recurringOccurrences.listFinanceRecurringOccurrences });
+  const balanceBases = createFinanceBalanceBasisService({
+    db,
+    now,
+    readOccurrences: recurringOccurrences.listFinanceRecurringOccurrences,
+  });
   const planningEvidence = createFinancePlanningEvidenceService({ db, now });
   const setup = createSetupService({ db, now, planning });
   function legacyMutationContext(context: FinanceMutationContext): MutationContext {
@@ -3500,7 +3507,11 @@ export function createFinanceService({
             ? [existing[0]]
             : await executor
                 .update(financeIncomeStreams)
-                .set({ ...values, revision: sql`${financeIncomeStreams.revision} + 1`, updatedAt: now() })
+                .set({
+                  ...values,
+                  revision: sql`${financeIncomeStreams.revision} + 1`,
+                  updatedAt: now(),
+                })
                 .where(eq(financeIncomeStreams.id, existing[0].id))
                 .returning()
           : await executor
@@ -4573,7 +4584,12 @@ export function createFinanceService({
       if (!before) throw new AppError("not_found", "The income stream was not found.");
       const [row] = await executor
         .update(financeIncomeStreams)
-        .set({ source: "user", status: input.status, revision: sql`${financeIncomeStreams.revision} + 1`, updatedAt: now() })
+        .set({
+          source: "user",
+          status: input.status,
+          revision: sql`${financeIncomeStreams.revision} + 1`,
+          updatedAt: now(),
+        })
         .where(eq(financeIncomeStreams.id, id))
         .returning();
       const value = incomeStreamValue(

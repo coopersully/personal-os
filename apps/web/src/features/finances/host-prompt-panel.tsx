@@ -1,6 +1,6 @@
 import type { AutomationHostPromptIssue } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +26,7 @@ export function HostPromptPanel({ status }: { status: HostScheduleStatus }) {
   const [cursor, setCursor] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [pending, setPending] = useState(false);
+  const busy = useRef(false);
   const saved = [...issues, ...(prompt?.latestIssued ? [prompt.latestIssued] : [])]
     .filter(
       (issue, index, all) =>
@@ -33,8 +34,11 @@ export function HostPromptPanel({ status }: { status: HostScheduleStatus }) {
     )
     .sort((a, b) => b.templateVersion - a.templateVersion);
   const current = selected ?? saved[0] ?? null;
-  async function history(older = false) {
+  async function history(older = false, explicit = false) {
+    if (busy.current) return;
+    busy.current = true;
     setPending(true);
+    const notification = explicit ? toast.loading("Loading saved instructions…") : undefined;
     try {
       const page = await api.getAutomationHostPromptHistory(schedule.id, {
         limit: 10,
@@ -43,16 +47,23 @@ export function HostPromptPanel({ status }: { status: HostScheduleStatus }) {
       setIssues((previous) => (older ? [...previous, ...page.issues] : page.issues));
       setCursor(page.nextCursor);
       setLoaded(true);
+      if (notification !== undefined)
+        toast.success(older ? "Older instructions loaded." : "Saved instructions loaded.", {
+          id: notification,
+        });
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Instructions could not be loaded. Try again.",
-      );
+      const message =
+        error instanceof Error ? error.message : "Instructions could not be loaded. Try again.";
+      if (notification !== undefined) toast.error(message, { id: notification });
+      else toast.error(message);
     } finally {
+      busy.current = false;
       setPending(false);
     }
   }
   async function issue() {
-    if (!prompt) return;
+    if (!prompt || busy.current) return;
+    busy.current = true;
     setPending(true);
     const notification = toast.loading("Saving instructions…");
     try {
@@ -78,6 +89,7 @@ export function HostPromptPanel({ status }: { status: HostScheduleStatus }) {
         { id: notification },
       );
     } finally {
+      busy.current = false;
       setPending(false);
     }
   }
@@ -149,12 +161,16 @@ export function HostPromptPanel({ status }: { status: HostScheduleStatus }) {
               <p>No instructions have been recorded for this host.</p>
             )}
             {!loaded ? (
-              <Button variant="outline" disabled={pending} onClick={() => void history()}>
+              <Button
+                variant="outline"
+                disabled={pending}
+                onClick={() => void history(false, true)}
+              >
                 Reload saved instructions
               </Button>
             ) : null}
             {cursor !== null ? (
-              <Button variant="outline" disabled={pending} onClick={() => void history(true)}>
+              <Button variant="outline" disabled={pending} onClick={() => void history(true, true)}>
                 Load older versions
               </Button>
             ) : null}

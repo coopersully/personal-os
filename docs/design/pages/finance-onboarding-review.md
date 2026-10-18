@@ -4,8 +4,9 @@
 
 The setup page uses `financeOnboardingApiAdapter` by default and permits an explicit injected
 adapter for composition and tests. The existing profile, accounts and budget editors retain their
-canonical ownership. This implementation does not activate a global setup gate. Durable storage and
-API integration require PostgreSQL and browser acceptance before release readiness is claimed.
+canonical ownership. The follow-on candidate composes a server-readiness route gate, the initial
+manual/agent choice and manual-tool visibility. These candidate changes require independent review,
+complete verification and browser acceptance before release readiness is claimed.
 
 The leaf review loads a revisioned server snapshot. People can review a saved answer, explicitly
 choose unknown, or choose none where the question permits it. Display preferences require an
@@ -70,22 +71,57 @@ pending message challenge does not block automation-now completion. A failed opt
 rolls back its savepoint and projects unavailable sending while manual-later setup can proceed;
 a sanitized internal event records that failure. Essential storage failures do not manufacture state.
 
+## Workspace access and manual controls
+
+One shared server-snapshot query projects access and manual creation visibility. It is bound to the
+current account session; an older owner's in-flight response cannot become a new owner's readiness.
+Only an actual completion timestamp or the persisted migration-time existing-access grant permits
+ordinary workspace entry. Neither loading nor read failure implies an incomplete or completed setup.
+Previously recorded access is not revoked by later source, registration or Chat failure.
+
+New owners entering ordinary Finance destinations return to setup with a bounded local Finance
+return path. Setup, accounts/linking, Chat, Automations and question/review evidence stay reachable.
+Correction, import and budget-approval tasks have explicit route context and a visible return to setup;
+they expose their task material rather than an unrestricted ordinary workspace. A task marker is
+navigation context only: canonical record access, mutation policy and exact human approval remain
+server-enforced. Initial mode choice is saved through the existing review receipt; it does not
+create a second preference store. Manual later can finish without a host. Automation now uses real
+registration/cadence eligibility, while sending stays locked until actual current Chat proof.
+
+Initial copyable agent guidance starts with `get_finance_playbook` and `setup_finances`. After an
+actual registration, the Automations surface supplies the immutable server-issued instructions for
+that host. Initial guidance never fabricates a schedule identifier, verified connection or successful
+external job.
+
+The settings editor saves only `financeManualVisibility` through the existing owner-session,
+revision-CAS and queued workspace-preference hooks. Auto shows manual creation/import until a
+registration exists; stale host health does not re-enable them. Show/Hide are explicit overrides.
+Unknown or failed readiness reads do not expose new capture. The shared plus, manual account entry,
+transaction creation and import menus/query/hash entries consume this projection. Account linking,
+record corrections, categorization, questions, approval and export are retained. Confirmed host or
+preference changes refresh the server snapshot rather than deriving counts from local mutation results.
+
 ## Acceptance still required
 
-The actual frozen baseline and Chat migrations precede setup storage, with preferences/legacy access
-following it. Real PostgreSQL migration, owner isolation, revision races, rollback, privacy cascade
-and authority revocation tests remain required. A global gate stays inactive until manual-later,
-pending-verification, required-input, existing-user, resume and API/MCP compatibility paths pass
-integrated verification. Agent protocol integration, the initial agent/manual choice and one-time setup prompt, broad manual
-creation-control consumers, and live browser acceptance are separate evidence. This review does not
-claim those wider journeys complete.
+The durable setup candidate passed seven real-migration repository/composed HTTP tests at its frozen
+head, covering owner isolation, revision races, rollback, completion/cascade, authority revocation,
+receipt decoding and persisted legacy readback. That evidence does not establish the later integrated
+UI candidate. Initial mode, safe routing, scoped tasks and manual visibility have focused source tests;
+actual desktop/mobile journeys, full verification, API/MCP compatibility and current independent
+review remain release gates.
+
+Browser preparation uses disposable owners and real HTTP writers. Catalog data loaded after the
+legacy migration is not a legacy grant: demo/loaded fixtures complete through actual setup API
+receipts. Actual legacy eligibility requires records before the real migration. Pending/verified Chat
+requires a valid original connection, owner policy, cadence and actual MCP fetch/nonce acknowledgment/
+response; no direct verification flag or fixture grant substitutes for it. Authored browser scenarios
+are not passing browser evidence until executed under the reserved runtime.
 
 ## Verification
 
-Focused tests cover the pure readiness matrix, explicit unknown/manual-later save and completion,
-revision handoff, conflict draft retention/reload, pending completion, Chat history with locked
-sending, and completed setup during source failure. Existing setup-page tests cover the retained
-canonical editors. Pure/service/HTTP/client checks do not prove PostgreSQL constraints, live provider
-behavior or
-integrated browser acceptance. Repository integration tests exercise the actual migrations when the
-reserved database proof runs.
+Focused checks cover pure readiness, durable review, default-adapter feedback, session changes,
+loading/error routing, local return-path validation, task scoping, exact budget approval, manual
+visibility and actual-query refresh after confirmed host actions. Canonical financial editors retain
+their separate checks. Complete CI, coverage/builds and live acceptance remain required. External
+host scheduling and public MCP transport require their own evidence; a controlled local fixture and
+client checks do not establish production scheduling or provider reachability.

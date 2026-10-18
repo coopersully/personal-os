@@ -43,8 +43,11 @@ describe.sequential("Finance whole-candidate effect lineage", () => {
   }, 120_000);
 
   afterAll(async () => {
-    await database.close();
-    await container.stop();
+    try {
+      await database?.close();
+    } finally {
+      await container?.stop();
+    }
   });
 
   async function fixture() {

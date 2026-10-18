@@ -193,6 +193,32 @@ export async function validateFinanceConversationClaim(
       : [];
     const questionRef = answer.recordRefs.find((ref) => ref.kind === "contextual_question");
     if (questionRef) {
+      if (!answer.sourceOperationId)
+        throw new AppError("conflict", "A causal answer needs its canonical accepted operation.");
+      const [acceptedAudit] = await tx
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.userId, run.userId),
+            eq(
+              auditEvents.action,
+              questionRef ? "finance.contextual_answer.accepted" : "finance.review_answer.accepted",
+            ),
+            eq(auditEvents.entityId, questionRef?.id ?? caseId),
+            eq(auditEvents.actorType, "user"),
+            eq(auditEvents.actorId, run.userId),
+            sql`${auditEvents.after}->>'operationId' = ${answer.sourceOperationId}`,
+          ),
+        )
+        .limit(1);
+      if (!acceptedAudit)
+        throw new AppError(
+          "conflict",
+          "A causal answer must be an actual canonical accepted owner answer.",
+        );
+    }
+    if (questionRef) {
       const [question] = await tx
         .select({ id: financeContextualQuestions.id })
         .from(financeContextualQuestions)

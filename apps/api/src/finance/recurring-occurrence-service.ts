@@ -226,7 +226,11 @@ export function createFinanceRecurringOccurrenceService({
         { date: string; slot: number; inCurrentSchedule: boolean }
       >();
       if (version.cadence === "irregular") {
-        if (sourceValid && version.effectiveFrom <= query.to && (!successor || successor.effectiveFrom > query.from))
+        if (
+          sourceValid &&
+          version.effectiveFrom <= query.to &&
+          (!successor || successor.effectiveFrom > query.from)
+        )
           result.unavailableSources.push({ source, reason: "irregular_cadence" });
       } else {
         // Expansion enumerates dates; nullable amount remains null in every public/persisted row.

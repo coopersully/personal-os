@@ -19,9 +19,8 @@ import {
   type ConfirmFinanceBalanceBasisInput,
   confirmFinanceBalanceBasisInputSchema,
   type FinanceBalanceBasis,
-  type FinanceBalanceBasisSourcesQuery,
   type FinanceBalanceBasisSourceSnapshots,
-  financeBalanceBasisSourcesQuerySchema,
+  type FinanceBalanceBasisSourcesQuery,
   type FinanceCashflowActualEligibilityReason,
   type FinanceCashflowProjectionQuery,
   type FinanceCashflowProjectionView,
@@ -29,6 +28,7 @@ import {
   type FinanceRecurringOccurrencesQuery,
   type FinanceRecurringOccurrencesView,
   financeBalanceBasisSchema,
+  financeBalanceBasisSourcesQuerySchema,
   financeCashflowProjectionQuerySchema,
   financePlanningEvidenceCurrencySchema,
   financeProvenanceSchema,
@@ -364,125 +364,136 @@ export function createFinanceBalanceBasisService({
     );
   }
   async function readSourceSnapshots(
-      userId: string,
-      raw: FinanceRecurringOccurrencesQuery,
-      allHistory = false,
-    ): Promise<FinanceCashflowSourceSnapshots> {
-      const query = allHistory ? raw : financeRecurringOccurrencesQuerySchema.parse(raw);
-      return db.transaction(
-        async (tx) => {
-          const data = await readCashflowActuals(tx, userId, query);
-          const income = await tx
-            .select()
-            .from(financeIncomeStreams)
-            .where(
-              and(
-                eq(financeIncomeStreams.userId, userId),
-                ...(query.accountIds !== undefined
-                  ? [inArray(financeIncomeStreams.accountId, query.accountIds)]
-                  : []),
-              ),
-            )
-            .limit(1001);
-          const obligations = await tx
-            .select()
-            .from(financeRecurringObligations)
-            .where(
-              and(
-                eq(financeRecurringObligations.userId, userId),
-                ...(query.accountIds !== undefined
-                  ? [inArray(financeRecurringObligations.accountId, query.accountIds)]
-                  : []),
-              ),
-            )
-            .limit(1001);
-          return {
-            from: query.from,
-            to: query.to,
-            accounts: data.accounts.map((row) => ({
-              id: row.id,
-              name: row.name,
-              currencyCode: row.currencyCode,
-              kind: row.kind,
-              includeInPlanning: row.includeInPlanning,
-              ownershipType: row.ownershipType,
-              ownershipShare: row.ownershipShareBps === null ? null : row.ownershipShareBps / 10000,
-              accountRevision: row.contextualRevision.toString(),
-            })),
-            income: income.slice(0, 1000).map((row) => ({
-              accountId: row.accountId,
-              cadence: row.cadence,
-              confidence: row.confidence / 10000,
-              displayName: row.displayName,
-              expectedAmount: row.expectedAmount / 100,
-              id: row.id,
-              lastObservedDate: row.lastObservedDate,
-              nextExpectedDate: row.nextExpectedDate,
-              payer: row.payer,
-              source: row.source,
-              status: row.status,
-              revision: row.revision,
-            })),
-            obligations: obligations.slice(0, 1000).map((row) => ({
-              accountId: row.accountId,
-              cadence: row.cadence,
-              confidence: row.confidence / 10000,
-              displayName: row.displayName,
-              expectedAmount: row.expectedAmount / 100,
-              id: row.id,
-              lastObservedDate: row.lastObservedDate,
-              nextExpectedDate: row.nextExpectedDate,
-              merchant: row.merchant,
-              kind: row.kind,
-              source: row.source,
-              status: row.status,
-              revision: row.revision,
-            })),
-            transactions: data.transactions.map((row) => ({
-              id: row.id,
-              accountId: row.accountId,
-              merchant: row.merchant,
-              date: row.transactionDate,
-              amountCents: row.amount,
-              currencyCode:
-                row.currencyCode ??
-                data.accounts.find((account) => account.id === row.accountId)?.currencyCode ??
-                null,
-              direction: row.direction,
-              pending: row.pending,
-              transactionRevision: row.contextualRevision.toString(),
-              incomeEligibility: data.eligibility(row, "income"),
-              allocations: data.allocations
-                .filter(
-                  (allocation) =>
-                    allocation.transactionId === row.id && allocation.state === "active",
-                )
-                .map((allocation) => ({
-                  id: allocation.id,
-                  revision: allocation.revision,
-                  amountCents: allocation.amount,
-                  treatment: allocation.treatment,
-                  expenseEligibility: data.eligibility(row, "expense", allocation),
-                })),
-            })),
-            coverage: {
-              truncated: data.truncated || income.length > 1000 || obligations.length > 1000,
-              transactionLimit: LIMIT,
-            },
-          };
-        },
-        { isolationLevel: "repeatable read", accessMode: "read only" },
-      );
-    }
+    userId: string,
+    raw: FinanceRecurringOccurrencesQuery,
+    allHistory = false,
+  ): Promise<FinanceCashflowSourceSnapshots> {
+    const query = allHistory ? raw : financeRecurringOccurrencesQuerySchema.parse(raw);
+    return db.transaction(
+      async (tx) => {
+        const data = await readCashflowActuals(tx, userId, query);
+        const income = await tx
+          .select()
+          .from(financeIncomeStreams)
+          .where(
+            and(
+              eq(financeIncomeStreams.userId, userId),
+              ...(query.accountIds !== undefined
+                ? [inArray(financeIncomeStreams.accountId, query.accountIds)]
+                : []),
+            ),
+          )
+          .limit(1001);
+        const obligations = await tx
+          .select()
+          .from(financeRecurringObligations)
+          .where(
+            and(
+              eq(financeRecurringObligations.userId, userId),
+              ...(query.accountIds !== undefined
+                ? [inArray(financeRecurringObligations.accountId, query.accountIds)]
+                : []),
+            ),
+          )
+          .limit(1001);
+        return {
+          from: query.from,
+          to: query.to,
+          accounts: data.accounts.map((row) => ({
+            id: row.id,
+            name: row.name,
+            currencyCode: row.currencyCode,
+            kind: row.kind,
+            includeInPlanning: row.includeInPlanning,
+            ownershipType: row.ownershipType,
+            ownershipShare: row.ownershipShareBps === null ? null : row.ownershipShareBps / 10000,
+            accountRevision: row.contextualRevision.toString(),
+          })),
+          income: income.slice(0, 1000).map((row) => ({
+            accountId: row.accountId,
+            cadence: row.cadence,
+            confidence: row.confidence / 10000,
+            displayName: row.displayName,
+            expectedAmount: row.expectedAmount / 100,
+            id: row.id,
+            lastObservedDate: row.lastObservedDate,
+            nextExpectedDate: row.nextExpectedDate,
+            payer: row.payer,
+            source: row.source,
+            status: row.status,
+            revision: row.revision,
+          })),
+          obligations: obligations.slice(0, 1000).map((row) => ({
+            accountId: row.accountId,
+            cadence: row.cadence,
+            confidence: row.confidence / 10000,
+            displayName: row.displayName,
+            expectedAmount: row.expectedAmount / 100,
+            id: row.id,
+            lastObservedDate: row.lastObservedDate,
+            nextExpectedDate: row.nextExpectedDate,
+            merchant: row.merchant,
+            kind: row.kind,
+            source: row.source,
+            status: row.status,
+            revision: row.revision,
+          })),
+          transactions: data.transactions.map((row) => ({
+            id: row.id,
+            accountId: row.accountId,
+            merchant: row.merchant,
+            date: row.transactionDate,
+            amountCents: row.amount,
+            currencyCode:
+              row.currencyCode ??
+              data.accounts.find((account) => account.id === row.accountId)?.currencyCode ??
+              null,
+            direction: row.direction,
+            pending: row.pending,
+            transactionRevision: row.contextualRevision.toString(),
+            incomeEligibility: data.eligibility(row, "income"),
+            allocations: data.allocations
+              .filter(
+                (allocation) =>
+                  allocation.transactionId === row.id && allocation.state === "active",
+              )
+              .map((allocation) => ({
+                id: allocation.id,
+                revision: allocation.revision,
+                amountCents: allocation.amount,
+                treatment: allocation.treatment,
+                expenseEligibility: data.eligibility(row, "expense", allocation),
+              })),
+          })),
+          coverage: {
+            truncated: data.truncated || income.length > 1000 || obligations.length > 1000,
+            transactionLimit: LIMIT,
+          },
+        };
+      },
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
+  }
   return {
     listFinanceBalanceBases,
     listFinanceCashflowSources(userId: string, raw: FinanceRecurringOccurrencesQuery) {
       return readSourceSnapshots(userId, raw);
     },
-    async listFinanceBalanceBasisSources(userId: string, raw: FinanceBalanceBasisSourcesQuery = {}): Promise<FinanceBalanceBasisSourceSnapshots> {
+    async listFinanceBalanceBasisSources(
+      userId: string,
+      raw: FinanceBalanceBasisSourcesQuery = {},
+    ): Promise<FinanceBalanceBasisSourceSnapshots> {
       const query = financeBalanceBasisSourcesQuerySchema.parse(raw);
-      const snapshots = await readSourceSnapshots(userId, { from: "0001-01-01", to: "9999-12-31", ...query }, true);
-      return { accounts: snapshots.accounts, transactions: snapshots.transactions, coverage: { ...snapshots.coverage, complete: !snapshots.coverage.truncated } };
+      const snapshots = await readSourceSnapshots(
+        userId,
+        { from: "0001-01-01", to: "9999-12-31", ...query },
+        true,
+      );
+      return {
+        accounts: snapshots.accounts,
+        transactions: snapshots.transactions,
+        coverage: { ...snapshots.coverage, complete: !snapshots.coverage.truncated },
+      };
     },
     async confirmFinanceBalanceBasis(
       raw: ConfirmFinanceBalanceBasisInput,
@@ -545,7 +556,12 @@ export function createFinanceBalanceBasisService({
           const transactions = await tx
             .select()
             .from(financeTransactions)
-            .where(and(eq(financeTransactions.userId, context.userId), eq(financeTransactions.accountId, account.id)))
+            .where(
+              and(
+                eq(financeTransactions.userId, context.userId),
+                eq(financeTransactions.accountId, account.id),
+              ),
+            )
             .orderBy(financeTransactions.id)
             .limit(LIMIT + 1)
             .for("update");
@@ -635,7 +651,7 @@ export function createFinanceBalanceBasisService({
             schedule,
             projection: { status: "unavailable", reasons: [{ code, evidenceId: null }] },
           });
-          if (schedule.unavailableSources.some(source => source.reason !== "irregular_cadence"))
+          if (schedule.unavailableSources.some((source) => source.reason !== "irregular_cadence"))
             return unavailable("unconfirmed_schedule");
           const data = await readCashflowActuals(tx, userId, {
             ...query,
@@ -659,77 +675,198 @@ export function createFinanceBalanceBasisService({
             return unavailable("balance_basis_unavailable");
           const asOf = now();
           const timezone = await tx.query.users.findFirst({
-            where: (table, { eq }) => eq(table.id, userId), columns: { planningTimezone: true },
+            where: (table, { eq }) => eq(table.id, userId),
+            columns: { planningTimezone: true },
           });
           if (!timezone) return unavailable("balance_basis_unavailable");
           const today = localDateToIso(localDateAt(asOf, timezone.planningTimezone));
-          const visibleVersionIds = [...new Set(schedule.occurrences.map(row => row.scheduleVersionId))];
-          const successors = visibleVersionIds.length ? await tx.select({ previous: financeRecurringScheduleVersions.supersedesId }).from(financeRecurringScheduleVersions)
-            .where(and(eq(financeRecurringScheduleVersions.userId,userId), inArray(financeRecurringScheduleVersions.supersedesId,visibleVersionIds), lte(financeRecurringScheduleVersions.effectiveFrom,today))).limit(1001) : [];
+          const visibleVersionIds = [
+            ...new Set(schedule.occurrences.map((row) => row.scheduleVersionId)),
+          ];
+          const successors = visibleVersionIds.length
+            ? await tx
+                .select({ previous: financeRecurringScheduleVersions.supersedesId })
+                .from(financeRecurringScheduleVersions)
+                .where(
+                  and(
+                    eq(financeRecurringScheduleVersions.userId, userId),
+                    inArray(financeRecurringScheduleVersions.supersedesId, visibleVersionIds),
+                    lte(financeRecurringScheduleVersions.effectiveFrom, today),
+                  ),
+                )
+                .limit(1001)
+            : [];
           if (successors.length > 1000) return unavailable("unconfirmed_schedule");
-          const retiredVersions = new Set(successors.map(row => row.previous));
-          const active = schedule.occurrences.filter(row => row.inCurrentSchedule && !retiredVersions.has(row.scheduleVersionId));
-          const paydayRow = active.filter(row => row.source.kind === "income" && row.source.id === query.selectedIncomeStreamId && row.localDate >= today && row.localDate >= query.from)
-            .sort((a,b) => a.localDate.localeCompare(b.localDate) || a.key.localeCompare(b.key))[0];
-          if (!paydayRow) return { schedule, projection: { status: "unavailable", reasons: [{ code: "next_payday_unavailable", evidenceId: null }] } } satisfies FinanceCashflowProjectionView;
+          const retiredVersions = new Set(successors.map((row) => row.previous));
+          const active = schedule.occurrences.filter(
+            (row) => row.inCurrentSchedule && !retiredVersions.has(row.scheduleVersionId),
+          );
+          const paydayRow = active
+            .filter(
+              (row) =>
+                row.source.kind === "income" &&
+                row.source.id === query.selectedIncomeStreamId &&
+                row.localDate >= today &&
+                row.localDate >= query.from,
+            )
+            .sort(
+              (a, b) => a.localDate.localeCompare(b.localDate) || a.key.localeCompare(b.key),
+            )[0];
+          if (!paydayRow)
+            return {
+              schedule,
+              projection: {
+                status: "unavailable",
+                reasons: [{ code: "next_payday_unavailable", evidenceId: null }],
+              },
+            } satisfies FinanceCashflowProjectionView;
           // Historical irregular intervals remain visible in the schedule read. Only an
           // interval overlapping the prospective payday horizon makes its forecast unknown.
-          const horizonVersions = await tx.select().from(financeRecurringScheduleVersions)
-            .where(and(eq(financeRecurringScheduleVersions.userId, userId), inArray(financeRecurringScheduleVersions.accountId, selected.map(account => account.id)), lte(financeRecurringScheduleVersions.effectiveFrom, paydayRow.localDate))).limit(1001);
-          if (horizonVersions.length > 1000 || horizonVersions.some(version => version.cadence === "irregular" && !horizonVersions.some(successor => successor.supersedesId === version.id && successor.effectiveFrom <= today)))
+          const horizonVersions = await tx
+            .select()
+            .from(financeRecurringScheduleVersions)
+            .where(
+              and(
+                eq(financeRecurringScheduleVersions.userId, userId),
+                inArray(
+                  financeRecurringScheduleVersions.accountId,
+                  selected.map((account) => account.id),
+                ),
+                lte(financeRecurringScheduleVersions.effectiveFrom, paydayRow.localDate),
+              ),
+            )
+            .limit(1001);
+          if (
+            horizonVersions.length > 1000 ||
+            horizonVersions.some(
+              (version) =>
+                version.cadence === "irregular" &&
+                !horizonVersions.some(
+                  (successor) =>
+                    successor.supersedesId === version.id && successor.effectiveFrom <= today,
+                ),
+            )
+          )
             return unavailable("unconfirmed_schedule");
-          const horizon = active.filter(row => row.localDate <= paydayRow.localDate);
+          const horizon = active.filter((row) => row.localDate <= paydayRow.localDate);
           // Reversed historical/retired versions are retained for inspection, never forecast inputs.
-          if (horizon.some(row => row.amountBasis !== "fixed" || row.matchState === "invalidated" || row.expectedAmountCents === null))
+          if (
+            horizon.some(
+              (row) =>
+                row.amountBasis !== "fixed" ||
+                row.matchState === "invalidated" ||
+                row.expectedAmountCents === null,
+            )
+          )
             return unavailable("unknown_amount");
-          const horizonMatchIds = new Set(horizon.flatMap(row => row.matchIds));
-          const horizonEvents = schedule.matchEvents.filter(event => horizonMatchIds.has(event.id) && event.kind === "match");
-          const requiredActualIds = new Set(horizonEvents.flatMap(event => {
-            const id = event.incomeTransactionId ?? data.allocations.find(allocation => allocation.id === event.allocationId)?.transactionId;
-            return id ? [id] : [];
-          }));
+          const horizonMatchIds = new Set(horizon.flatMap((row) => row.matchIds));
+          const horizonEvents = schedule.matchEvents.filter(
+            (event) => horizonMatchIds.has(event.id) && event.kind === "match",
+          );
+          const requiredActualIds = new Set(
+            horizonEvents.flatMap((event) => {
+              const id =
+                event.incomeTransactionId ??
+                data.allocations.find((allocation) => allocation.id === event.allocationId)
+                  ?.transactionId;
+              return id ? [id] : [];
+            }),
+          );
           const movements: PaydayActualMovement[] = [];
           // Validate all known reflection revisions before filtering the calculation horizon.
           // Unexplained historical/new/changed actuals never disappear from the basis check.
-          for (const row of data.transactions.filter(entry => selected.some(account => account.id === entry.accountId))) {
-            const basis = bases.find(entry => entry.accountId === row.accountId);
-            const reflection = basis?.reflections.find(ref => ref.transactionId === row.id && ref.transactionRevision === row.contextualRevision.toString());
+          for (const row of data.transactions.filter((entry) =>
+            selected.some((account) => account.id === entry.accountId),
+          )) {
+            const basis = bases.find((entry) => entry.accountId === row.accountId);
+            const reflection = basis?.reflections.find(
+              (ref) =>
+                ref.transactionId === row.id &&
+                ref.transactionRevision === row.contextualRevision.toString(),
+            );
             if (!reflection) return unavailable("actual_review_required");
             if (row.transactionDate < query.from) {
-              if (reflection.reflection !== "included") return unavailable("actual_review_required");
+              if (reflection.reflection !== "included")
+                return unavailable("actual_review_required");
               if (!requiredActualIds.has(row.id)) continue;
             }
             if (row.transactionDate > paydayRow.localDate) {
               if (requiredActualIds.has(row.id)) return unavailable("actual_review_required");
               continue;
             }
-            const eligibility = data.eligibility(row, row.direction === "income" ? "income" : "expense");
+            const eligibility = data.eligibility(
+              row,
+              row.direction === "income" ? "income" : "expense",
+            );
             if (!eligibility.eligible) return unavailable("actual_review_required");
-            const common = { localDate: row.transactionDate, currencyCode: row.currencyCode ?? basis?.currencyCode ?? "", accountId: row.accountId,
-              direction: row.direction === "income" ? "incoming" as const : "outgoing" as const,
-              classification: row.direction === "income" ? "external_income" as const : "external_expense" as const,
-              pairedMovementId: null, postingStatus: row.pending ? "pending" as const : "posted" as const, balanceReflection: reflection.reflection };
-            const allocations = data.allocations.filter(allocation => allocation.transactionId === row.id && allocation.state === "active");
+            const common = {
+              localDate: row.transactionDate,
+              currencyCode: row.currencyCode ?? basis?.currencyCode ?? "",
+              accountId: row.accountId,
+              direction: row.direction === "income" ? ("incoming" as const) : ("outgoing" as const),
+              classification:
+                row.direction === "income"
+                  ? ("external_income" as const)
+                  : ("external_expense" as const),
+              pairedMovementId: null,
+              postingStatus: row.pending ? ("pending" as const) : ("posted" as const),
+              balanceReflection: reflection.reflection,
+            };
+            const allocations = data.allocations.filter(
+              (allocation) => allocation.transactionId === row.id && allocation.state === "active",
+            );
             if (row.direction === "expense" && allocations.length) {
-              if (allocations.reduce((sum,allocation) => sum + allocation.amount, 0) !== row.amount) return unavailable("actual_review_required");
+              if (
+                allocations.reduce((sum, allocation) => sum + allocation.amount, 0) !== row.amount
+              )
+                return unavailable("actual_review_required");
               for (const allocation of allocations) {
-                if (!data.eligibility(row,"expense",allocation).eligible) return unavailable("actual_review_required");
-                movements.push({ ...common, id: `allocation:${allocation.id}`, version: `${row.contextualRevision}:${allocation.revision}`, amountMinorUnits: allocation.amount });
+                if (!data.eligibility(row, "expense", allocation).eligible)
+                  return unavailable("actual_review_required");
+                movements.push({
+                  ...common,
+                  id: `allocation:${allocation.id}`,
+                  version: `${row.contextualRevision}:${allocation.revision}`,
+                  amountMinorUnits: allocation.amount,
+                });
               }
-            } else movements.push({ ...common, id: `transaction:${row.id}`, version: row.contextualRevision.toString(), amountMinorUnits: row.amount });
+            } else
+              movements.push({
+                ...common,
+                id: `transaction:${row.id}`,
+                version: row.contextualRevision.toString(),
+                amountMinorUnits: row.amount,
+              });
           }
-          const occurrences: PaydayOccurrence[] = horizon.map(row => {
-            const replacements = new Map<string,number>();
-            for (const event of horizonEvents.filter(entry => row.matchIds.includes(entry.id))) {
-              const actualId = event.allocationId ? `allocation:${event.allocationId}` : event.incomeTransactionId ? `transaction:${event.incomeTransactionId}` : "";
+          const occurrences: PaydayOccurrence[] = horizon.map((row) => {
+            const replacements = new Map<string, number>();
+            for (const event of horizonEvents.filter((entry) => row.matchIds.includes(entry.id))) {
+              const actualId = event.allocationId
+                ? `allocation:${event.allocationId}`
+                : event.incomeTransactionId
+                  ? `transaction:${event.incomeTransactionId}`
+                  : "";
               replacements.set(actualId, (replacements.get(actualId) ?? 0) + event.amountCents);
             }
-            return { id: row.key, version: row.scheduleVersionId, localDate: row.localDate, amountMinorUnits: row.expectedAmountCents, currencyCode: row.currencyCode, accountId: row.accountId ?? "",
-              direction: row.source.kind === "income" ? "incoming" : "outgoing", classification: row.source.kind === "income" ? "external_income" : "external_expense",
-              incomeStreamId: row.source.kind === "income" ? row.source.id : null, pairedOccurrenceId: null, remainingExpectedMinorUnits: row.remainingExpectedCents,
-              matches: [...replacements].map(([actualMovementId,replacedExpectedMinorUnits]) => ({actualMovementId,replacedExpectedMinorUnits})) };
+            return {
+              id: row.key,
+              version: row.scheduleVersionId,
+              localDate: row.localDate,
+              amountMinorUnits: row.expectedAmountCents,
+              currencyCode: row.currencyCode,
+              accountId: row.accountId ?? "",
+              direction: row.source.kind === "income" ? "incoming" : "outgoing",
+              classification: row.source.kind === "income" ? "external_income" : "external_expense",
+              incomeStreamId: row.source.kind === "income" ? row.source.id : null,
+              pairedOccurrenceId: null,
+              remainingExpectedMinorUnits: row.remainingExpectedCents,
+              matches: [...replacements].map(([actualMovementId, replacedExpectedMinorUnits]) => ({
+                actualMovementId,
+                replacedExpectedMinorUnits,
+              })),
+            };
           });
-          const payday = occurrences.find(row => row.id === paydayRow.key);
+          const payday = occurrences.find((row) => row.id === paydayRow.key);
           const chosen = bases.filter((basis) =>
             selected.some((account) => account.id === basis.accountId),
           );

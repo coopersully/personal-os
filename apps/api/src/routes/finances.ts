@@ -6,7 +6,6 @@ import {
   cancelFinanceReimbursementInputSchema,
   classifyFinanceTransactionsInputSchema,
   confirmFinanceBalanceBasisInputSchema,
-  financeBalanceBasisSourcesQuerySchema,
   confirmFinanceRecurringScheduleInputSchema,
   createFinanceAccountInputSchema,
   createFinanceBudgetBucketInputSchema,
@@ -22,6 +21,7 @@ import {
   exchangePlaidTokenInputSchema,
   financeAccountQuerySchema,
   financeAnswerSchema,
+  financeBalanceBasisSourcesQuerySchema,
   financeBudgetBucketQuerySchema,
   financeBudgetPaceQuerySchema,
   financeBudgetPolicyLifecycleSchema,
@@ -702,8 +702,12 @@ export function registerFinanceRoutes({
   );
   app.get("/v1/finances/balance-basis-sources", async (context) => {
     const value = context.req.query("accountIds");
-    const query = financeBalanceBasisSourcesQuerySchema.parse(value === undefined ? {} : { accountIds: value ? value.split(",") : [] });
-    return context.json(await finances.listFinanceBalanceBasisSources(context.get("principal").userId, query));
+    const query = financeBalanceBasisSourcesQuerySchema.parse(
+      value === undefined ? {} : { accountIds: value ? value.split(",") : [] },
+    );
+    return context.json(
+      await finances.listFinanceBalanceBasisSources(context.get("principal").userId, query),
+    );
   });
   app.get("/v1/finances/cashflow-sources", async (context) => {
     const value = context.req.query("accountIds");

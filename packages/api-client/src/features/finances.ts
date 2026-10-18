@@ -28,8 +28,8 @@ import type {
   FinanceAlert,
   FinanceAnswer,
   FinanceBalanceBasis,
-  FinanceBalanceBasisSourcesQuery,
   FinanceBalanceBasisSourceSnapshots,
+  FinanceBalanceBasisSourcesQuery,
   FinanceBudget,
   FinanceBudgetBaselineQualificationRead,
   FinanceBudgetBaselineReview,
@@ -229,7 +229,9 @@ export function createFinanceApi(request: FinanceRequest) {
     ): Promise<FinanceToolResult<FinanceBalanceBasis>> {
       return request("/v1/finances/balance-bases", { method: "POST", body: JSON.stringify(input) });
     },
-    async listFinanceBalanceBasisSources(query: FinanceBalanceBasisSourcesQuery = {}): Promise<FinanceBalanceBasisSourceSnapshots> {
+    async listFinanceBalanceBasisSources(
+      query: FinanceBalanceBasisSourcesQuery = {},
+    ): Promise<FinanceBalanceBasisSourceSnapshots> {
       const params = new URLSearchParams();
       if (query.accountIds !== undefined) params.set("accountIds", query.accountIds.join(","));
       return request(`/v1/finances/balance-basis-sources?${params}`);

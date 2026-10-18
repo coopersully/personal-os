@@ -250,7 +250,8 @@ export function projectPaydayCycle(input: PaydayProjectionInput): PaydayProjecti
     if (!date(record.localDate)) reject("invalid_date", record.id);
     else if (
       validPeriod &&
-      ((record.localDate < input.periodStartLocalDate && !historicalIncluded) || record.localDate > (end ?? ""))
+      ((record.localDate < input.periodStartLocalDate && !historicalIncluded) ||
+        record.localDate > (end ?? ""))
     )
       reject("invalid_period", record.id);
     if (!money(record.amountMinorUnits)) reject("invalid_money", record.id);

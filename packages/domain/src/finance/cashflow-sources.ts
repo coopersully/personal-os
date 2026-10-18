@@ -56,6 +56,9 @@ export const financeBalanceBasisSourcesQuerySchema = z.object({
   accountIds: z.array(z.uuid()).max(100).optional(),
 });
 export type FinanceBalanceBasisSourcesQuery = z.infer<typeof financeBalanceBasisSourcesQuerySchema>;
-export type FinanceBalanceBasisSourceSnapshots = Pick<FinanceCashflowSourceSnapshots, "accounts" | "transactions"> & {
+export type FinanceBalanceBasisSourceSnapshots = Pick<
+  FinanceCashflowSourceSnapshots,
+  "accounts" | "transactions"
+> & {
   coverage: { complete: boolean; truncated: boolean; transactionLimit: number };
 };

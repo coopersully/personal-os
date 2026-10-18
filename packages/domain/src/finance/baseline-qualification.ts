@@ -43,6 +43,7 @@ export const confirmFinanceBudgetBaselineQualificationInputSchema = z
 export const financeBudgetBaselineSnapshotSchema = z
   .object({
     accountIds: uniqueAccountsSchema,
+    // Spending allocations only; never debt, savings, goals or buffers.
     allocations: z
       .array(
         z

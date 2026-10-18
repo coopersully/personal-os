@@ -6,13 +6,13 @@ describe("budget approval identity", () => {
   it.each([
     false,
     true,
-  ])("rejects an agent claiming user_instruction with bypass=%s", async (bypassEnabled) => {
+  ])("rejects even an execution-authorized agent claiming user_instruction with bypass=%s", async (bypassEnabled) => {
     const context: FinanceMutationContext = {
       actorId: "agent",
       actorType: "agent",
       userId: "owner",
       canMutate: true,
-      canSelfApprove: false,
+      canSelfApprove: true,
       bypassEnabled,
       requestId: "forged-user-instruction",
     };

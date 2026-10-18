@@ -65,6 +65,7 @@ import {
 } from "@personal-os/domain";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { z } from "zod";
+import type { createFinanceBudgetBaselineQualificationService } from "../finance/baseline-qualification-service.js";
 import type { createFinanceBudgetPolicyService } from "../finance/budget-policy-service.js";
 import { loadFinanceAuthorization } from "../finance/context.js";
 import type { createFinanceContextualQuestionService } from "../finance/contextual-question-service.js";
@@ -85,6 +86,7 @@ import type { createFinanceService } from "../finance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
 import type { AppEnv, Principal } from "../types.js";
 import { requireWorkspaceExecutionRoute } from "../workspace-execution.js";
+import { registerFinanceBaselineQualificationRoutes } from "./finance-baseline-qualification.js";
 import { registerFinanceSpendingRoute } from "./finance-spending.js";
 import { parseBody, requireFeatureAccess, requireHuman, requireScope } from "./support.js";
 
@@ -100,6 +102,7 @@ type FinanceRouteOptions = {
   actions?: ReturnType<typeof createFinanceActionService>;
   financeChallenges?: FinanceChallengeService;
   contextualQuestions?: ReturnType<typeof createFinanceContextualQuestionService>;
+  baselineQualification?: ReturnType<typeof createFinanceBudgetBaselineQualificationService>;
   financeBudgetPolicies?: ReturnType<typeof createFinanceBudgetPolicyService>;
   financeMaintenance: FinanceMaintenanceService;
   canonicalFinanceMaintenance?: ReturnType<typeof createFinanceMaintenanceIntentService>;
@@ -119,6 +122,7 @@ export function registerFinanceRoutes({
   financeChallenges,
   contextualQuestions,
   financeBudgetPolicies,
+  baselineQualification,
   canonicalFinanceMaintenance,
   financePeriodReviews,
   financePlaybook,
@@ -194,6 +198,11 @@ export function registerFinanceRoutes({
   };
   app.use("/v1/finances", requireFinanceAccess);
   app.use("/v1/finances/*", requireFinanceAccess);
+  registerFinanceBaselineQualificationRoutes({
+    app,
+    service: baselineQualification,
+    financeContext,
+  });
   const questions = () => {
     if (!contextualQuestions)
       throw new Error("Finance contextual question service is unavailable.");
@@ -449,9 +458,12 @@ export function registerFinanceRoutes({
   );
   app.put("/v1/finances/budget-plan", async (context) => {
     const input = await parseBody(context, setFinanceBudgetPlanInputSchema);
-    return act(context, "budget_plan", input, async () =>
-      context.json({ plan: await finances.setBudgetPlan(input, financeMutationContext(context)) }),
+    const outcome = await requireActions().performDirect(
+      "budget_plan",
+      input,
+      financeMutationContext(context),
     );
+    return context.json(outcome, outcome.status === "pending_review" ? 202 : 200);
   });
   app.get("/v1/finances", async (context) => {
     const query = financeBudgetStatusQuerySchema.parse(context.req.query());
@@ -1088,12 +1100,12 @@ export function registerFinanceRoutes({
   });
   app.post("/v1/finances/budgets", async (context) => {
     const input = await parseBody(context, createFinanceBudgetInputSchema);
-    return act(context, "budget_plan", input, async () =>
-      context.json(
-        { budget: await finances.createBudget(input, financeMutationContext(context)) },
-        201,
-      ),
+    const outcome = await requireActions().performDirect(
+      "budget_plan",
+      input,
+      financeMutationContext(context),
     );
+    return context.json(outcome, outcome.status === "pending_review" ? 202 : 200);
   });
   app.get("/v1/finances/budget-buckets", async (context) =>
     context.json(

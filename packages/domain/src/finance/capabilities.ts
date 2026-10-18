@@ -1,5 +1,19 @@
 export const financeCapabilityManifest = [
   {
+    apiOperation: "getFinanceBudgetBaselineQualification",
+    capability: "planning.baseline_qualification_read",
+    mcpTool: "get_finance_budget_baseline_qualification",
+    mode: "read",
+    requiredScope: "finances:read",
+  },
+  {
+    apiOperation: "prepareFinanceBudgetBaselineQualification",
+    capability: "planning.baseline_qualification_prepare",
+    mcpTool: "prepare_finance_budget_baseline_qualification",
+    mode: "write",
+    requiredScope: "finances:write",
+  },
+  {
     apiOperation: "getFinanceContinuations",
     capability: "workflow.answer_continuations",
     mcpTool: "get_finance_continuations",

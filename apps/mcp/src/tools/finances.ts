@@ -5,6 +5,7 @@ import {
   automationHostScheduleObservationInputSchema,
   type FinanceReceiptReview,
   type FinanceToolResult,
+  financeBudgetBaselineQualificationQuerySchema,
   financeMaintenanceInputSchema,
   financeReceiptReviewInputSchema,
   financeSetupInputSchema,
@@ -12,6 +13,7 @@ import {
   manageFinanceGoalInputSchema,
   manageFinanceRecurringItemInputSchema,
   manageFinanceRuleInputSchema,
+  prepareFinanceBudgetBaselineQualificationInputSchema,
   updateFinanceTransactionInputSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
@@ -164,12 +166,45 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, preserve unknowns or record an explicit skip, and show the first plan with its missing evidence. Budget activation binds the current profile and proposal. Agents require finances:execute, enabled review bypass and approvalSource agent_self_approval; never impersonate a user approval. Do not ask the user to name a tool.",
+        "Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, preserve unknowns or record an explicit skip, and show the first plan with its missing evidence. Budget activation binds the current profile and proposal and requires exact authenticated human approval in nohmi. Agents can propose but cannot activate budgets, even with execution or review bypass. Do not ask the user to name a tool.",
       inputSchema: financeSetupInputSchema,
       title: "Set up finances",
     },
     async (input) =>
       financeApiResult(() => api.setupFinances(financeSetupInputSchema.parse(input))),
+  );
+
+  server.registerTool(
+    "get_finance_budget_baseline_qualification",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read the exact qualified monthly Finance budget baseline or why qualification is unavailable. Candidates are context for an explicit human decision; this read never confirms a baseline or approves a budget.",
+      inputSchema: financeBudgetBaselineQualificationQuerySchema,
+      title: "Read monthly baseline qualification",
+    },
+    async ({ month }) => apiResult(() => api.getFinanceBudgetBaselineQualification(month)),
+  );
+  server.registerTool(
+    "prepare_finance_budget_baseline_qualification",
+    {
+      annotations: {
+        idempotentHint: true,
+        openWorldHint: false,
+        readOnlyHint: false,
+        destructiveHint: false,
+      },
+      description:
+        "Prepare a durable, exact monthly baseline review for the selected budget version, accounts, currency and timezone. Reuse the idempotency key only for the same selection. Return the server snapshot and fingerprint for explicit human confirmation in nohmi; preparation never qualifies a baseline, activates a budget or supplies human consent.",
+      inputSchema: prepareFinanceBudgetBaselineQualificationInputSchema,
+      title: "Prepare monthly baseline review",
+    },
+    async (input) =>
+      apiResult(() =>
+        api.prepareFinanceBudgetBaselineQualification(
+          prepareFinanceBudgetBaselineQualificationInputSchema.parse(input),
+        ),
+      ),
   );
 
   server.registerTool(
@@ -382,9 +417,9 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Activate the exact inspected proposal and profile revision. Agents must use approvalSource agent_self_approval and have finances:write, explicit finances:execute, and enabled review bypass. Claiming user_instruction is rejected.",
+        "Budget activation requires exact authenticated human approval in nohmi. Agent calls cannot approve a budget, including with execution or review bypass; direct the user to review the proposal in nohmi.",
       inputSchema: {
-        approvalSource: z.enum(["user_instruction", "agent_self_approval"]),
+        approvalSource: z.literal("user_instruction"),
         budgetVersionId: id,
         expectedProfileVersionId: id.nullable().optional(),
         expectedVersion: z.number().int().positive(),

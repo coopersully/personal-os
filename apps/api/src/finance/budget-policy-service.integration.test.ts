@@ -856,6 +856,7 @@ describe.sequential("human budget policy management", () => {
   });
   it.each([
     "approved_by_actor_type = NULL",
+    "approved_by_actor_type = 'agent'",
     "approved_at = NULL",
     "status = 'proposed'",
     "status = 'incomplete', balance_delta_cents = 1, expected_resources_cents = 10001",
@@ -868,6 +869,34 @@ describe.sequential("human budget policy management", () => {
     await expect(service.designateBaseline(f.context, f.baselineInput)).rejects.toMatchObject({
       code: "conflict",
     });
+  });
+  it("keeps historical agent approval provenance readable without qualifying a new baseline", async () => {
+    const f = await fixture();
+    const { policy } = await f.ready();
+    await database.pool.query(
+      "UPDATE finance_budget_versions SET approved_by_actor_type='agent', approved_by_actor_id='historical-agent' WHERE id=$1",
+      [f.budgetId],
+    );
+    expect(await service.getPolicy(f.userId, policy.id)).toMatchObject({
+      id: policy.id,
+      executionAvailable: false,
+    });
+    expect(
+      (
+        await database.pool.query(
+          "SELECT approved_by_actor_type, approved_by_actor_id FROM finance_budget_versions WHERE id=$1",
+          [f.budgetId],
+        )
+      ).rows,
+    ).toEqual([{ approved_by_actor_type: "agent", approved_by_actor_id: "historical-agent" }]);
+    expect(
+      (
+        await database.pool.query(
+          "SELECT budget_version_id FROM finance_budget_period_baselines WHERE user_id=$1",
+          [f.userId],
+        )
+      ).rows,
+    ).toEqual([{ budget_version_id: f.budgetId }]);
   });
   it("rejects stale management refs and expired terms without blocking disable", async () => {
     const f = await fixture();

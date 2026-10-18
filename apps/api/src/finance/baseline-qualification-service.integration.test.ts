@@ -30,7 +30,7 @@ describe.sequential("immutable monthly budget qualification", () => {
     await database.close();
     await container.stop();
   });
-  async function fixture() {
+  async function fixture(zeroSpending = false) {
     const [owner] = await database.db
       .insert(users)
       .values({
@@ -76,7 +76,15 @@ describe.sequential("immutable monthly budget qualification", () => {
         name: "Monthly baseline",
         effectiveFrom: "2026-09",
         resources: [{ amount: 100, key: "income", kind: "income" }],
-        allocations: [{ amount: 100, key: "food", kind: "spending", categoryId: category.id }],
+        allocations: [
+          {
+            amount: zeroSpending ? 0 : 100,
+            key: "food",
+            kind: "spending",
+            categoryId: category.id,
+          },
+          ...(zeroSpending ? [{ amount: 100, key: "buffer", kind: "buffer" as const }] : []),
+        ],
         assumptions: [],
         rationale: "Historical fixture baseline",
         idempotencyKey: crypto.randomUUID(),
@@ -107,6 +115,36 @@ describe.sequential("immutable monthly budget qualification", () => {
     };
     return { owner, context, category, account, service, input, proposal, profile };
   }
+  it("qualifies an explicitly approved zero spending limit without replacing it with absence", async () => {
+    const f = await fixture(true);
+    const review = await f.service.prepare(f.input, f.context);
+    expect(review.snapshot.allocations).toEqual([
+      expect.objectContaining({ key: "food", categoryId: f.category.id, amountCents: 0 }),
+    ]);
+    await expect(
+      f.service.confirm(
+        {
+          reviewId: review.id,
+          expectedFingerprint: "0".repeat(64),
+          idempotencyKey: crypto.randomUUID(),
+        },
+        f.context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    const result = await f.service.confirm(
+      {
+        reviewId: review.id,
+        expectedFingerprint: review.fingerprint,
+        idempotencyKey: crypto.randomUUID(),
+      },
+      f.context,
+    );
+    expect(result).toMatchObject({
+      state: "qualified",
+      qualification: { allocations: review.snapshot.allocations, confirmedByActorId: f.owner.id },
+    });
+    expect(await f.service.getQualification(f.owner.id, f.input.month)).toEqual(result);
+  });
   it("requires exact human confirmation, replays once and retains immutable historical identity and account scope", async () => {
     const f = await fixture();
     await expect(f.service.getQualification(f.owner.id, f.input.month)).resolves.toMatchObject({

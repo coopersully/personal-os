@@ -108,3 +108,22 @@ it("shows an empty comparison when only savings exist", () => {
   expect(screen.getByText("No bills or subscriptions to compare")).toBeVisible();
   expect(screen.queryByRole("listitem")).not.toBeInTheDocument();
 });
+
+it("passes the original record to parent-owned accessible actions", () => {
+  const obligation = fixture();
+  const renderActions = vi.fn((item: FinanceRecurringObligation) => (
+    <button type="button">Pause {item.displayName}</button>
+  ));
+  render(
+    <MemoryRouter>
+      <RecurringCostLadder obligations={[obligation]} accounts={[]} renderActions={renderActions} />
+    </MemoryRouter>,
+  );
+  expect(renderActions).toHaveBeenCalledWith(obligation);
+  expect(renderActions.mock.calls[0]?.[0]).toBe(obligation);
+  expect(
+    within(screen.getByRole("listitem", { name: "Music" })).getByRole("button", {
+      name: "Pause Music",
+    }),
+  ).toBeVisible();
+});

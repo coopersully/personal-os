@@ -4,13 +4,22 @@ import {
   projectRecurringCosts,
   type RecurringCostExclusion,
 } from "@personal-os/domain";
+import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/components/ui/item";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@/components/ui/item";
 
 interface RecurringCostLadderProps {
   obligations: FinanceRecurringObligation[];
+  renderActions?: (item: FinanceRecurringObligation) => ReactNode;
   accounts: Pick<FinanceAccount, "id" | "name" | "currencyCode">[];
 }
 
@@ -46,7 +55,11 @@ function exactCents(value: number) {
     : Number.NaN;
 }
 
-export function RecurringCostLadder({ obligations, accounts }: RecurringCostLadderProps) {
+export function RecurringCostLadder({
+  obligations,
+  accounts,
+  renderActions,
+}: RecurringCostLadderProps) {
   const accountById = new Map(accounts.map((account) => [account.id, account]));
   const costs = obligations.filter((item) => item.kind !== "savings");
   const projection = projectRecurringCosts(
@@ -171,6 +184,7 @@ export function RecurringCostLadder({ obligations, accounts }: RecurringCostLadd
                           </Link>
                         ) : null}
                       </ItemContent>
+                      {renderActions ? <ItemActions>{renderActions(item)}</ItemActions> : null}
                     </Item>
                   );
                 })}

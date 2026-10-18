@@ -3,6 +3,7 @@ import {
   automationHostSchedules,
   type Database,
   financeGoals,
+  financeSetupSessions,
 } from "@personal-os/database";
 import {
   automationHostScheduleSchema,
@@ -12,7 +13,7 @@ import {
   type FinanceProfileVersion,
   type WorkspaceSettings,
 } from "@personal-os/domain";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { activeHostConnectionGrant } from "../automation-host-grant.js";
 import { AppError } from "../errors.js";
 import type { FinanceOnboardingEvidence } from "../finance-onboarding-service.js";
@@ -31,6 +32,7 @@ export interface FinanceOnboardingEvidenceInput {
   preferences: WorkspaceSettings<"finances">["preferences"];
   goals: Goal[];
   existingAccess: boolean;
+  legacyUnknownQuestionIds?: string[];
   registrationCount: number;
   authorizedRegistrationWithCadence: boolean;
   chat: FinanceConversationReadiness | null;
@@ -142,7 +144,15 @@ export function projectFinanceOnboardingEvidence(
       questionId: question.id,
       label: question.prompt,
       answerSummary,
-      disposition: answerSummary === null ? "unreviewed" : "answered",
+      disposition:
+        answerSummary !== null
+          ? "answered"
+          : input.legacyUnknownQuestionIds?.includes(question.id) ||
+              (question.id === "profile:income_stability" &&
+                input.profile?.incomeStability === "unknown" &&
+                input.profile.provenance.incomeStability)
+            ? "unknown"
+            : "unreviewed",
       allowsNone: question.id === "profile:debts" || question.id === "planning:obligations",
     };
   });
@@ -157,6 +167,29 @@ export function projectFinanceOnboardingEvidence(
     allowsNone: true,
   });
   const p = input.preferences;
+  const displayLabels: Record<string, string> = {
+    table: "Table",
+    cards: "Cards",
+    none: "None",
+    date: "Date",
+    category: "Category",
+    merchant: "Merchant",
+    direction: "Direction",
+    posting: "Posting status",
+    bubbles: "Bubbles",
+    list: "List",
+    trends: "Trends",
+    rhythm: "Rhythm",
+    auto: "Automatic",
+    buckets: "Buckets",
+    categories: "Categories",
+    today: "Today",
+    week: "This week",
+    month: "This month",
+    custom: "Custom range",
+  };
+  const label = (value: string) => displayLabels[value] ?? value;
+  const accountNames = new Map(input.accounts.map((account) => [account.id, account.name]));
   return {
     existingAccess: input.existingAccess,
     source: source(input.accounts),
@@ -164,11 +197,12 @@ export function projectFinanceOnboardingEvidence(
     questions,
     displayPreferences: {
       summary: [
-        `Transactions: ${p.financeTransactionView}; grouping: ${p.financeTransactionGroup}.`,
-        `Spending: ${p.financeSpendingView}; grouping: ${p.financeSpendingGrouping}; period: ${p.financeSpendingPeriod}.`,
+        `Transactions: ${label(p.financeTransactionView)}; grouping: ${label(p.financeTransactionGroup)}.`,
+        `Spending: ${label(p.financeSpendingView)}; grouping: ${label(p.financeSpendingGrouping)}; period: ${label(p.financeSpendingPeriod)}.`,
         `Pending: ${p.financeSpendingIncludePending ? "included" : "excluded"}; uncategorized: ${p.financeSpendingIncludeUncategorized ? "included" : "excluded"}.`,
-        `Basis: ${p.financeSpendingBasis}; refunds: ${p.financeSpendingSubtractRefunds ? "subtracted" : "included"}.`,
-        `Spending accounts: ${p.spendAccountIds === null ? "all eligible accounts" : p.spendAccountIds.length ? p.spendAccountIds.join(", ") : "none selected"}.`,
+        `Basis: ${p.financeSpendingBasis === "personal_cost" ? "Personal cost" : "Full outflow"}; refunds: ${p.financeSpendingSubtractRefunds ? "subtracted" : "not subtracted"}.`,
+        `Manual creation controls: ${p.financeManualVisibility === "auto" ? "Automatic" : p.financeManualVisibility === "show" ? "Always show" : "Always hide"}.`,
+        `Spending accounts: ${p.spendAccountIds === null ? "all eligible accounts" : p.spendAccountIds.length ? p.spendAccountIds.map((id) => accountNames.get(id) ?? "Unavailable account").join(", ") : "none selected"}.`,
       ],
     },
     manualVisibility: p.financeManualVisibility,
@@ -266,12 +300,21 @@ export function createFinanceOnboardingEvidenceLoader(options: {
       });
       chat = null;
     }
+    const [legacySession] = await executor
+      .select({ skippedQuestions: financeSetupSessions.skippedQuestions })
+      .from(financeSetupSessions)
+      .where(eq(financeSetupSessions.userId, userId))
+      .orderBy(desc(financeSetupSessions.updatedAt))
+      .limit(1);
     return projectFinanceOnboardingEvidence({
       profile: profile.data,
       accounts: accounts.accounts,
       preferences: preferences.preferences,
       goals,
       existingAccess: await options.hasLegacyAccess(executor, userId),
+      // Legacy skip is explicit unknown; unrelated profile revisions must not restart it.
+      legacyUnknownQuestionIds:
+        legacySession?.skippedQuestions.map((answer) => answer.questionId) ?? [],
       registrationCount: schedules.filter(
         (row) => row.schedule.state !== "cancelled" && row.schedule.state !== "revoked",
       ).length,

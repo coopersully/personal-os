@@ -6,19 +6,27 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   executionPolicySettings,
+  financeAccounts,
+  financeOnboardingLegacyAccess,
   financeOnboardingReceipts,
   financeOnboardingStates,
   migrateDatabase,
   users,
 } from "@personal-os/database";
+import type { FinanceOnboardingSnapshot } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq, sql } from "drizzle-orm";
+import { Hono } from "hono";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { errorResponse } from "../errors.js";
 import {
   createFinanceOnboardingService,
   type FinanceOnboardingEvidence,
 } from "../finance-onboarding-service.js";
+import { registerFinanceOnboardingRoutes } from "../routes/finance-onboarding.js";
+import type { AppEnv, Principal } from "../types.js";
 import { type FinanceMutationContext, loadFinanceAuthorization } from "./context.js";
+import { createFinanceOnboardingEvidenceLoader } from "./onboarding-evidence.js";
 import { createFinanceOnboardingRepository } from "./onboarding-repository.js";
 
 function evidence(): FinanceOnboardingEvidence {
@@ -281,5 +289,138 @@ describe.sequential("durable Finance onboarding repository with real migrations"
       sql`select count(*)::int as count from finance_onboarding_receipts where user_id=${f.user.id}`,
     );
     expect(count.rows[0]?.count).toBe(1);
+  });
+
+  it("composes real evidence and HTTP save/finish with stored access and no post-migration auto-grant", async () => {
+    const f = await fixture();
+    await database.db.insert(financeAccounts).values({
+      userId: f.user.id,
+      provider: "manual",
+      institution: "Manual",
+      name: "Owned checking",
+      ownershipType: "individual",
+      ownershipShareBps: 10000,
+      syncState: "current",
+      status: "manual",
+      balance: 0,
+      currencyCode: "USD",
+    });
+    const repository = createFinanceOnboardingRepository({
+      db: database.db,
+      loadEvidence: createFinanceOnboardingEvidenceLoader({
+        hasLegacyAccess: async (executor, userId) => {
+          const [grant] = await executor
+            .select()
+            .from(financeOnboardingLegacyAccess)
+            .where(eq(financeOnboardingLegacyAccess.userId, userId));
+          return grant !== undefined;
+        },
+      }),
+    });
+    const service = createFinanceOnboardingService({ repository });
+    let principal: Principal = {
+      userId: f.user.id,
+      actorId: f.user.id,
+      actorType: "user",
+      scopes: new Set(["finances:read", "finances:write"]),
+    };
+    const app = new Hono<AppEnv>();
+    app.use("*", async (context, next) => {
+      context.set("principal", principal);
+      context.set("requestId", "real-onboarding-flow");
+      await next();
+    });
+    app.onError(errorResponse);
+    registerFinanceOnboardingRoutes({
+      app,
+      onboarding: service,
+      authorize: (context) =>
+        loadFinanceAuthorization({
+          db: database.db,
+          principal: context.get("principal"),
+          requestId: context.get("requestId"),
+        }),
+    });
+    const initialResponse = await app.request("/v1/finances/onboarding");
+    expect(initialResponse.status).toBe(200);
+    const initial = (await initialResponse.json()) as FinanceOnboardingSnapshot;
+    expect(initial).toMatchObject({
+      revision: 0,
+      existingAccess: false,
+      completedAt: null,
+      source: { state: "usable" },
+      automation: { canSendChat: false },
+    });
+    expect(initial.questions).toHaveLength(8);
+    const post = (body: unknown): RequestInit => ({
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const savedResponse = await app.request(
+      "/v1/finances/onboarding/answers",
+      post({
+        expectedRevision: 0,
+        idempotencyKey: "real-save",
+        answers: initial.questions.map((question) => ({
+          questionId: question.questionId,
+          disposition: "unknown",
+        })),
+        displayPreferencesReviewed: true,
+        automationChoice: "later",
+      }),
+    );
+    expect(savedResponse.status).toBe(200);
+    expect(await savedResponse.json()).toMatchObject({
+      revision: 1,
+      completedAt: null,
+      automationChoice: "later",
+    });
+    const finishResponse = await app.request(
+      "/v1/finances/onboarding/complete",
+      post({ expectedRevision: 1, idempotencyKey: "real-finish", automationChoice: "later" }),
+    );
+    expect(finishResponse.status).toBe(200);
+    const completed = (await finishResponse.json()) as FinanceOnboardingSnapshot;
+    expect(completed.completedAt).not.toBeNull();
+    expect(completed.revision).toBe(2);
+    expect(
+      await database.db
+        .select()
+        .from(financeOnboardingReceipts)
+        .where(eq(financeOnboardingReceipts.userId, f.user.id)),
+    ).toHaveLength(2);
+    expect(
+      await database.db
+        .select()
+        .from(financeOnboardingLegacyAccess)
+        .where(eq(financeOnboardingLegacyAccess.userId, f.user.id)),
+    ).toHaveLength(0);
+    await database.db.delete(financeAccounts).where(eq(financeAccounts.userId, f.user.id));
+    expect(await (await app.request("/v1/finances/onboarding")).json()).toMatchObject({
+      revision: 2,
+      completedAt: completed.completedAt,
+      source: { state: "missing" },
+    });
+    const legacy = await fixture();
+    // Fixture represents a grant already seeded at migration; no application path creates grants.
+    await database.db
+      .insert(financeOnboardingLegacyAccess)
+      .values({ userId: legacy.user.id, provenance: "finance_records_at_migration" });
+    principal = { ...principal, userId: legacy.user.id, actorId: legacy.user.id };
+    const legacySnapshot = (await (
+      await app.request("/v1/finances/onboarding")
+    ).json()) as FinanceOnboardingSnapshot;
+    expect(legacySnapshot).toMatchObject({
+      existingAccess: true,
+      completedAt: null,
+      revision: 0,
+      source: { state: "missing" },
+      automation: { canSendChat: false },
+    });
+    expect(
+      legacySnapshot.questions.every((question) => question.disposition === "unreviewed"),
+    ).toBe(true);
+    expect(JSON.stringify(legacySnapshot)).not.toContain("Owned checking");
   });
 });

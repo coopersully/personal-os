@@ -89,6 +89,19 @@ function profile() {
   });
 }
 
+it("shows readable display choices and account names without storage keys", () => {
+  const value = input();
+  value.preferences.spendAccountIds = [id];
+  value.preferences.financeManualVisibility = "show";
+  const summary = projectFinanceOnboardingEvidence(value).displayPreferences.summary.join(" ");
+  expect(summary).toContain("Personal cost");
+  expect(summary).toContain("This month");
+  expect(summary).toContain("Checking");
+  expect(summary).toContain("Always show");
+  expect(summary).not.toContain("personal_cost");
+  expect(summary).not.toContain(id);
+});
+
 describe("Finance onboarding canonical evidence", () => {
   it("includes every essential stable question without imposing a budget and keeps missing facts unreviewed", () => {
     const result = projectFinanceOnboardingEvidence(input());
@@ -288,9 +301,47 @@ function schedule(
   };
 }
 function executor(results: unknown[][]) {
-  const where = vi.fn(async () => results.shift() ?? []);
+  const where = vi.fn(() => {
+    const rows = results.shift() ?? [];
+    return Object.assign(Promise.resolve(rows), { orderBy: () => ({ limit: async () => rows }) });
+  });
   return { select: () => ({ from: () => ({ where }) }) } as unknown as Database;
 }
+it("retains explicit legacy unknowns across unrelated profile versions without overwriting known facts", async () => {
+  const value = input();
+  value.profile = profile();
+  value.profile.version = 42;
+  value.legacyUnknownQuestionIds = [
+    "profile:location",
+    "profile:debts",
+    "planning:obligations",
+    "not-a-setup-question",
+  ];
+  value.profile.provenance.incomeStability = {
+    actorId: id,
+    actorType: "user",
+    confidence: 1,
+    evidence: {},
+    maintenanceRunId: null,
+    observedAt: at,
+    requestId: "explicit-unknown",
+    sourceId: null,
+  };
+  const questions = projectFinanceOnboardingEvidence(value).questions;
+  expect(questions.find((q) => q.questionId === "profile:debts")).toMatchObject({
+    disposition: "unknown",
+    answerSummary: null,
+  });
+  expect(questions.find((q) => q.questionId === "profile:income_stability")).toMatchObject({
+    disposition: "unknown",
+  });
+  expect(questions.find((q) => q.questionId === "profile:location")).toMatchObject({
+    disposition: "answered",
+    answerSummary: "US",
+  });
+  expect(questions).toHaveLength(8);
+});
+
 describe("Finance onboarding evidence loader", () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -318,6 +369,22 @@ describe("Finance onboarding evidence loader", () => {
       canSendChat: false,
     });
     expect(mocks.execution).not.toHaveBeenCalled();
+  });
+  it("reads the latest owner-scoped legacy skip receipts without binding them to the current profile version", async () => {
+    const result = await createFinanceOnboardingEvidenceLoader({
+      hasLegacyAccess: async () => true,
+    })(
+      executor([
+        [],
+        [],
+        [{ skippedQuestions: [{ questionId: "profile:location", profileVersion: 1 }] }],
+      ]),
+      id,
+    );
+    expect(result.questions.find((q) => q.questionId === "profile:location")).toMatchObject({
+      disposition: "unknown",
+      answerSummary: null,
+    });
   });
   it("requires live original token execution authority for cadence without requiring a Chat proof", async () => {
     const token = { id, scopes: ["finances:maintain", "finances:write", "finances:execute"] };

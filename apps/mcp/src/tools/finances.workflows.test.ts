@@ -846,13 +846,19 @@ it("uses durable setup revisions and forwards current authority failures without
 });
 
 it.each([
-  false,
-  true,
-])("reads qualified cash-flow window evidence only for an explicit window: %s", async (withWindow) => {
+  { withWindow: false, accountIds: undefined, expectedIds: [] },
+  { withWindow: true, accountIds: [id], expectedIds: ["scoped"] },
+  { withWindow: true, accountIds: [], expectedIds: [] },
+  { withWindow: true, accountIds: undefined, expectedIds: ["scoped", "other", "unknown"] },
+])("reads qualified cash-flow window evidence with exact optional account scope: %j", async ({
+  withWindow,
+  accountIds,
+  expectedIds,
+}) => {
   const window = {
     from: "2026-10-01",
     to: "2026-10-31",
-    accountIds: [id],
+    ...(accountIds === undefined ? {} : { accountIds }),
     selectedIncomeStreamId: null,
   };
   const qualified = {
@@ -915,7 +921,7 @@ it.each([
         data: {
           qualifiedCashflow: qualified,
           rawCashflowContext: {
-            recurringSchedules: [{ id: "scoped", accountId: id }],
+            recurringSchedules: expectedIds.map((id) => ({ id })),
             balanceBases: [],
             balanceStatementSources: {
               coverage: { complete: false, truncated: true, transactionLimit: 1000 },
@@ -928,14 +934,14 @@ it.each([
           },
         },
       });
-      expect(api.listFinanceBalanceBases).toHaveBeenCalledExactlyOnceWith([id]);
-      expect(api.listFinanceBalanceBasisSources).toHaveBeenCalledExactlyOnceWith({
-        accountIds: [id],
-      });
+      expect(api.listFinanceBalanceBases).toHaveBeenCalledExactlyOnceWith(accountIds);
+      expect(api.listFinanceBalanceBasisSources).toHaveBeenCalledExactlyOnceWith(
+        accountIds === undefined ? {} : { accountIds },
+      );
       expect(api.listFinanceCashflowSources).toHaveBeenCalledExactlyOnceWith({
         from: window.from,
         to: window.to,
-        accountIds: [id],
+        ...(accountIds === undefined ? {} : { accountIds }),
       });
     } else {
       expect(api.getFinanceCashflowProjection).not.toHaveBeenCalled();

@@ -54,3 +54,15 @@ describe("Finance conversation client leaf", () => {
     ]);
   });
 });
+
+it("encodes the exact host for its own readiness projection", async () => {
+  const request = vi.fn(async () => ({
+    readiness: { canSend: false, reason: "challenge_required" },
+  }));
+  const api = createFinanceConversationApi(request as FinanceRequest);
+  expect(await api.getFinanceConversationHostReadiness("host/id")).toEqual({
+    canSend: false,
+    reason: "challenge_required",
+  });
+  expect(request).toHaveBeenCalledWith("/v1/finances/conversation/hosts/host%2Fid/readiness");
+});

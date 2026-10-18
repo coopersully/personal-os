@@ -21,6 +21,13 @@ export function createFinanceConversationApi(request: FinanceRequest) {
       return (await request<{ readiness: FinanceConversationReadiness }>(`${root}/readiness`))
         .readiness;
     },
+    async getFinanceConversationHostReadiness(scheduleId: string) {
+      return (
+        await request<{ readiness: FinanceConversationReadiness }>(
+          `${root}/hosts/${encodeURIComponent(scheduleId)}/readiness`,
+        )
+      ).readiness;
+    },
     getFinanceConversationHistory(query: { after?: string; limit?: number } = {}) {
       const params = new URLSearchParams();
       if (query.after !== undefined) params.set("after", query.after);

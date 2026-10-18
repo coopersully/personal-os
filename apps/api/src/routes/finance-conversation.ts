@@ -42,6 +42,18 @@ export function registerFinanceConversationRoutes({
   app.get(`${root}/readiness`, requireScope("finances:read"), requireHuman, async (context) =>
     context.json({ readiness: await conversation.getReadiness(context.get("principal").userId) }),
   );
+  app.get(
+    `${root}/hosts/:scheduleId/readiness`,
+    requireScope("finances:read"),
+    requireHuman,
+    async (context) =>
+      context.json({
+        readiness: await conversation.getHostReadiness(
+          context.get("principal").userId,
+          idSchema.parse(context.req.param("scheduleId")),
+        ),
+      }),
+  );
   // Only the human owner can read live conversation history. Agents page a saved run batch.
   app.get(`${root}/messages`, requireScope("finances:read"), requireHuman, async (context) => {
     const query = querySchema.parse(context.req.query());

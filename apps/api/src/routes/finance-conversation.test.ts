@@ -17,6 +17,7 @@ function fixture() {
   };
   const service = {
     getReadiness: vi.fn(async () => ({ canSend: false })),
+    getHostReadiness: vi.fn(async () => ({ canSend: true })),
     history: vi.fn(async () => ({ messages: [], nextCursor: null })),
     send: vi.fn(async () => ({ id: runId })),
     markRendered: vi.fn(async () => ({ readThroughSequence: "1" })),
@@ -142,4 +143,16 @@ describe("Finance conversation leaf routes", () => {
     expect(f.service.acknowledgeBatch).not.toHaveBeenCalled();
     expect(f.service.markRendered).not.toHaveBeenCalled();
   });
+});
+
+it("reads only the selected host proof for the human owner", async () => {
+  const f = fixture();
+  const response = await f.app.request(`/v1/finances/conversation/hosts/${runId}/readiness`);
+  expect(response.status).toBe(200);
+  expect(f.service.getHostReadiness).toHaveBeenCalledWith(ownerId, runId);
+  f.setPrincipal({ ...f.principal, actorType: "agent", actorId: runId });
+  expect((await f.app.request(`/v1/finances/conversation/hosts/${runId}/readiness`)).status).toBe(
+    403,
+  );
+  expect(f.service.getHostReadiness).toHaveBeenCalledTimes(1);
 });

@@ -32,6 +32,11 @@ export async function createFinanceSetupPersona(page: Page, baseURL: string) {
     password: "Testing12345!",
     planningTimezone: "America/New_York",
   });
+  // register sets the same HttpOnly session cookie used by the browser app.
+  // A fresh client has no captured response token, so this checks cookie auth.
+  const cookieOnly = browserFinanceHuman(page, baseURL);
+  if ((await cookieOnly.getMe()).email !== email)
+    throw new Error("Registration did not establish the browser context session");
   await human.updateAccountSetup({ action: "dismiss" });
   return { human, email };
 }

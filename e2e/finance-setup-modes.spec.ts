@@ -56,8 +56,12 @@ test.describe("durable Finance manual setup", () => {
       expect(snapshot.source.state).toBe("missing");
       await expect(page.getByText("Setup checking", { exact: true })).toBeVisible();
       const creation = page.getByRole("button", { name: "Add account", exact: true });
-      if (visibility === "hide") await expect(creation).toHaveCount(0);
-      else await expect(creation.first()).toBeVisible();
+      await expect(creation.first()).toBeVisible();
+      await creation.first().click();
+      const manual = page.getByRole("button", { name: "Track account manually", exact: true });
+      if (visibility === "hide") await expect(manual).toHaveCount(0);
+      else await expect(manual).toBeVisible();
+      await page.keyboard.press("Escape");
       await page.getByRole("button", { name: "Edit Setup checking", exact: true }).click();
       await expect(page.getByRole("dialog", { name: "Edit account", exact: true })).toBeVisible();
       await page.keyboard.press("Escape");
@@ -87,7 +91,12 @@ test.describe("durable Finance manual setup", () => {
     await addReviewedManualSource(human);
     const source = await human.getFinanceOnboarding();
     expect(source.source.state).toBe("usable");
-    await page.goto("/finances/setup");
+    const intendedRoute = "/finances/spending?from=setup-browser#monthly";
+    await page.goto(intendedRoute);
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === "/finances/setup" && url.searchParams.get("returnTo") === intendedRoute,
+    );
     const review = page.getByRole("region", { name: "Setup review", exact: true });
     for (const question of source.questions) {
       const field = review.getByLabel(question.label, { exact: true });
@@ -95,7 +104,7 @@ test.describe("durable Finance manual setup", () => {
       await field.selectOption(question.allowsNone ? "none" : "unknown");
     }
     await review.getByLabel("I reviewed my display preferences").check();
-    await review.getByLabel("Automation", { exact: true }).selectOption("later");
+    await review.getByRole("radio", { name: "Use Finance manually", exact: true }).check();
     await expect(review.getByRole("button", { name: "Finish setup", exact: true })).toBeDisabled();
     await review.getByRole("button", { name: "Save review", exact: true }).click();
     await expect(page.getByText("Setup review saved", { exact: true })).toBeVisible();
@@ -109,6 +118,39 @@ test.describe("durable Finance manual setup", () => {
         question.disposition,
       );
     }
+    // Insurance is canonical profile material outside the essential setup answers.
+    // Advancing that profile version must not reinterpret explicit unknown as zero/none.
+    const profileBefore = (await human.getFinancialProfile()).data;
+    const profileAfter = await human.updateFinancialProfile({
+      expectedVersion: profileBefore?.version ?? 0,
+      idempotencyKey: randomUUID(),
+      changes: {
+        insurance: [
+          {
+            name: "Disposable coverage",
+            kind: "property",
+            status: "unknown",
+            annualPremium: null,
+            coverageAmount: null,
+          },
+        ],
+      },
+    });
+    expect(profileAfter.data.version).toBeGreaterThan(profileBefore?.version ?? 0);
+    await review.getByRole("button", { name: "Reload setup review", exact: true }).click();
+    const afterProfile = await human.getFinanceOnboarding();
+    expect(
+      afterProfile.questions.map(({ questionId, disposition }) => ({ questionId, disposition })),
+    ).toEqual(saved.questions.map(({ questionId, disposition }) => ({ questionId, disposition })));
+    for (const question of afterProfile.questions) {
+      await expect(review.getByLabel(question.label, { exact: true })).toHaveValue(
+        question.disposition,
+      );
+    }
+    await page.reload();
+    expect((await human.getFinanceOnboarding()).questions.map((q) => q.disposition)).toEqual(
+      saved.questions.map((q) => q.disposition),
+    );
     const finishedResponse = page.waitForResponse(
       (response) =>
         response.url().endsWith("/v1/finances/onboarding/complete") &&
@@ -127,6 +169,14 @@ test.describe("durable Finance manual setup", () => {
     await expect(
       review.getByText("Setup complete. Your workspace remains available."),
     ).toBeVisible();
+    await expect(review.getByRole("link", { name: "Continue", exact: true })).toHaveAttribute(
+      "href",
+      intendedRoute,
+    );
+    await review.getByRole("link", { name: "Continue", exact: true }).click();
+    await expect(page).toHaveURL(
+      (url) => `${url.pathname}${url.search}${url.hash}` === intendedRoute,
+    );
     await page.goto("/finances/accounts");
     await expect(page.getByText("Setup checking", { exact: true })).toBeVisible();
     expect(
@@ -148,9 +198,11 @@ test.describe("durable Finance manual setup", () => {
     await addReviewedManualSource(human);
     await page.goto("/finances/setup");
     const review = page.getByRole("region", { name: "Setup review", exact: true });
-    await expect(review.getByLabel("Automation", { exact: true })).toBeVisible();
+    await expect(
+      review.getByRole("radio", { name: "Set up with an agent", exact: true }),
+    ).toBeVisible();
     const snapshot = await human.getFinanceOnboarding();
-    await review.getByLabel("Automation", { exact: true }).selectOption("now");
+    await review.getByRole("radio", { name: "Set up with an agent", exact: true }).check();
     const concurrent = await human.saveFinanceOnboardingAnswers({
       expectedRevision: snapshot.revision,
       idempotencyKey: randomUUID(),
@@ -165,7 +217,9 @@ test.describe("durable Finance manual setup", () => {
         { exact: true },
       ),
     ).toBeVisible();
-    await expect(review.getByLabel("Automation", { exact: true })).toHaveValue("now");
+    await expect(
+      review.getByRole("radio", { name: "Set up with an agent", exact: true }),
+    ).toBeChecked();
     await expect(review.getByRole("button", { name: "Save review", exact: true })).toBeDisabled();
     expect((await human.getFinanceOnboarding()).revision).toBe(concurrent.revision);
     await review.getByRole("button", { name: "Reload setup review", exact: true }).click();
@@ -173,7 +227,51 @@ test.describe("durable Finance manual setup", () => {
     expect((await human.getFinanceOnboarding()).completedAt).toBeNull();
   });
 
-  test("transport failure cannot save or complete and retry reloads real state", async ({
+  test("Finish transport failure leaves completion unconfirmed until explicit recovery", async ({
+    page,
+    baseURL,
+  }) => {
+    if (!baseURL) throw new Error("Browser runtime baseURL is required");
+    const { human } = await createFinanceSetupPersona(page, baseURL);
+    await addReviewedManualSource(human);
+    const initial = await human.getFinanceOnboarding();
+    const saved = await human.saveFinanceOnboardingAnswers({
+      expectedRevision: initial.revision,
+      idempotencyKey: randomUUID(),
+      automationChoice: "later",
+      displayPreferencesReviewed: true,
+      answers: initial.questions.map(({ questionId }) => ({ questionId, disposition: "unknown" })),
+    });
+    await page.goto("/finances/setup");
+    const review = page.getByRole("region", { name: "Setup review", exact: true });
+    await page.route("**/v1/finances/onboarding/complete", (route) => route.abort("failed"));
+    await review.getByRole("button", { name: "Finish setup", exact: true }).click();
+    await expect(
+      page.getByText(
+        "Setup outcome unconfirmed. Your edits are still here. Reload the review before trying again.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await expect(review.getByRole("button", { name: "Finish setup", exact: true })).toBeDisabled();
+    expect(await human.getFinanceOnboarding()).toMatchObject({
+      revision: saved.revision,
+      completedAt: null,
+    });
+    await expect(review.getByText("Setup complete. Your workspace remains available.")).toHaveCount(
+      0,
+    );
+    await page.unroute("**/v1/finances/onboarding/complete");
+    await review.getByRole("button", { name: "Reload setup review", exact: true }).click();
+    await expect(page.getByText("Setup review reloaded", { exact: true })).toBeVisible();
+    await review.getByRole("button", { name: "Finish setup", exact: true }).click();
+    await expect(page.getByText("Setup complete", { exact: true })).toBeVisible();
+    const completed = await human.getFinanceOnboarding();
+    expect(completed.completedAt).not.toBeNull();
+    await page.reload();
+    expect((await human.getFinanceOnboarding()).completedAt).toBe(completed.completedAt);
+  });
+
+  test("load and save transport failures preserve draft and retry reloads real state", async ({
     page,
     baseURL,
   }) => {
@@ -184,12 +282,12 @@ test.describe("durable Finance manual setup", () => {
     await page.route("**/v1/finances/onboarding", (route) => route.abort("failed"));
     await page.goto("/finances/setup");
     await expect(
-      page.getByText("Setup review could not load. Try again.", { exact: true }),
+      page.getByText("Finance setup could not be checked. Try again.", { exact: true }),
     ).toBeVisible();
     await page.unroute("**/v1/finances/onboarding");
     await page.getByRole("button", { name: "Retry setup review", exact: true }).click();
     const review = page.getByRole("region", { name: "Setup review", exact: true });
-    await review.getByLabel("Automation", { exact: true }).selectOption("later");
+    await review.getByRole("radio", { name: "Use Finance manually", exact: true }).check();
     await page.route("**/v1/finances/onboarding/answers", (route) => route.abort("failed"));
     await review.getByRole("button", { name: "Save review", exact: true }).click();
     await expect(
@@ -198,13 +296,17 @@ test.describe("durable Finance manual setup", () => {
         { exact: true },
       ),
     ).toBeVisible();
-    await expect(review.getByLabel("Automation", { exact: true })).toHaveValue("later");
+    await expect(
+      review.getByRole("radio", { name: "Use Finance manually", exact: true }),
+    ).toBeChecked();
     await expect(review.getByRole("button", { name: "Save review", exact: true })).toBeDisabled();
     const after: FinanceOnboardingSnapshot = await human.getFinanceOnboarding();
     expect(after.revision).toBe(before.revision);
     expect(after.completedAt).toBeNull();
     await page.unroute("**/v1/finances/onboarding/answers");
     await review.getByRole("button", { name: "Reload setup review", exact: true }).click();
-    await expect(review.getByLabel("Automation", { exact: true })).toHaveValue("");
+    await expect(
+      review.getByRole("radio", { name: "Use Finance manually", exact: true }),
+    ).not.toBeChecked();
   });
 });

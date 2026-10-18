@@ -229,14 +229,14 @@ export function SpendingBubbles({
               }
             >
               {fill !== null ? (
-                <span
+                <motion.span
                   aria-hidden="true"
                   data-budget-fill="true"
                   className="pointer-events-none absolute inset-0 rounded-full"
-                  style={{
-                    clipPath: `inset(${(1 - fill) * 100}% 0 0 0)`,
-                    backgroundColor: visual.fillColor,
-                  }}
+                  initial={false}
+                  animate={{ clipPath: `inset(${(1 - fill) * 100}% 0 0 0)` }}
+                  transition={{ duration: reduced ? 0 : 0.3, ease: "easeOut" }}
+                  style={{ backgroundColor: visual.fillColor }}
                 />
               ) : null}
               <span

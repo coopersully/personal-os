@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import type { FinanceSpendingDashboard, FinanceSpendingMonthlyBudget } from "@personal-os/domain";
 import { cleanup, render, screen } from "@testing-library/react";
-import { createElement } from "react";
+import { type CSSProperties, createElement } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   SpendingBubbles,
@@ -11,6 +11,36 @@ import {
 } from "./spending-bubbles";
 import { spendingGroupVisual } from "./spending-visual";
 
+const fillAnimation = vi.hoisted(() => ({
+  reduced: false,
+  props: [] as Array<{ initial: unknown; animate: unknown; transition: unknown }>,
+}));
+vi.mock("motion/react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("motion/react")>();
+  return {
+    ...actual,
+    useReducedMotion: () => fillAnimation.reduced,
+    motion: {
+      button: actual.motion.button,
+      span: (props: Record<string, unknown>) => {
+        fillAnimation.props.push({
+          initial: props.initial,
+          animate: props.animate,
+          transition: props.transition,
+        });
+        return createElement("span", {
+          "aria-hidden": true,
+          "data-budget-fill": String(props["data-budget-fill"]),
+          className: props.className as string,
+          style: {
+            ...(props.style as CSSProperties),
+            clipPath: (props.animate as { clipPath: string }).clipPath,
+          },
+        });
+      },
+    },
+  };
+});
 it("settles colliding proportional circles inside the canvas deterministically", () => {
   const input = [
     { x: 0.5, y: 0.5, radius: 0.2 },
@@ -37,6 +67,8 @@ it("settles colliding proportional circles inside the canvas deterministically",
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  fillAnimation.reduced = false;
+  fillAnimation.props = [];
 });
 it("inverts bottom circular segment area and clamps nonpositive or saturated usage", () => {
   expect(spendingBudgetFillHeight(0.5)).toBeCloseTo(0.5, 8);
@@ -205,4 +237,68 @@ it("keeps ID-based fallback identity stable without inventing stored artwork", (
   expect(
     spendingGroupVisual({ ...bucket, visual: { color: "invalid", icon: "bucket" } }).color,
   ).toBe(spendingGroupVisual(bucket).color);
+});
+
+it("animates changing area-correct fill within300ms and disables animation for reduced motion", () => {
+  const groups = [
+    {
+      id: "food",
+      kind: "category",
+      label: "Food",
+      netCents: 100,
+      positiveAreaCents: 100,
+      categories: [],
+    },
+  ] as unknown as FinanceSpendingDashboard["groups"];
+  const budget: Extract<FinanceSpendingMonthlyBudget, { state: "qualified" }> = {
+    state: "qualified",
+    month: "2026-09",
+    period: { from: "2026-09-01", through: "2026-09-30", timezone: "America/New_York" },
+    currency: "USD",
+    accountIds: ["account"],
+    qualificationId: "qualification",
+    confirmedAt: "2026-10-18T00:00:00Z",
+    qualificationKind: "retrospective",
+    coverage: "partial",
+    includesPending: true,
+    basis: "personal_cost",
+    subtractsRefunds: true,
+    groups: [{ groupId: "food", budgetCents: 10000, usedCents: 2500, overspent: false }],
+  };
+  const props = { groups, onSelect: vi.fn(), monthlyBudget: budget };
+  const { rerender } = render(createElement(SpendingBubbles, props));
+  expect(fillAnimation.props.at(-1)).toEqual({
+    initial: false,
+    animate: { clipPath: `inset(${(1 - spendingBudgetFillHeight(0.25)) * 100}% 0 0 0)` },
+    transition: { duration: 0.3, ease: "easeOut" },
+  });
+  rerender(
+    createElement(SpendingBubbles, {
+      ...props,
+      monthlyBudget: {
+        ...budget,
+        groups: [{ groupId: "food", budgetCents: 10000, usedCents: 5000, overspent: false }],
+      },
+    }),
+  );
+  expect(fillAnimation.props.at(-1)).toEqual({
+    initial: false,
+    animate: { clipPath: `inset(${(1 - spendingBudgetFillHeight(0.5)) * 100}% 0 0 0)` },
+    transition: { duration: 0.3, ease: "easeOut" },
+  });
+  fillAnimation.reduced = true;
+  rerender(
+    createElement(SpendingBubbles, {
+      ...props,
+      monthlyBudget: {
+        ...budget,
+        groups: [{ groupId: "food", budgetCents: 10000, usedCents: 15000, overspent: true }],
+      },
+    }),
+  );
+  expect(fillAnimation.props.at(-1)).toEqual({
+    initial: false,
+    animate: { clipPath: "inset(0% 0 0 0)" },
+    transition: { duration: 0, ease: "easeOut" },
+  });
 });

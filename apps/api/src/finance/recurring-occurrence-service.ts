@@ -42,7 +42,10 @@ export function matchEventValue(
   return financeOccurrenceMatchEventSchema.parse({
     ...row,
     transactionRevision: row.transactionRevision.toString(),
-    reimbursementRelationshipRevision: typeof row.sourceEvidence.reimbursementRelationshipRevision === "string" ? row.sourceEvidence.reimbursementRelationshipRevision : null,
+    reimbursementRelationshipRevision:
+      typeof row.sourceEvidence.reimbursementRelationshipRevision === "string"
+        ? row.sourceEvidence.reimbursementRelationshipRevision
+        : null,
     recordedAt: row.recordedAt.toISOString(),
   });
 }
@@ -292,7 +295,8 @@ export function createFinanceRecurringOccurrenceService({
             actual &&
             !actual.pending &&
             actual.contextualRevision === event.transactionRevision &&
-            actual.reimbursementRelationshipRevision.toString() === event.sourceEvidence.reimbursementRelationshipRevision &&
+            actual.reimbursementRelationshipRevision.toString() ===
+              event.sourceEvidence.reimbursementRelationshipRevision &&
             actualContext?.eligibility(
               actual,
               event.incomeTransactionId ? "income" : "expense",
@@ -532,7 +536,11 @@ export function createFinanceRecurringOccurrenceService({
                 currencyCode: locked.currencyCode,
                 allocationRevision: null,
                 transactionRevision: locked.transactionRevision,
-                sourceEvidence: { originalMatchId: locked.id, reimbursementRelationshipRevision: locked.sourceEvidence.reimbursementRelationshipRevision ?? null },
+                sourceEvidence: {
+                  originalMatchId: locked.id,
+                  reimbursementRelationshipRevision:
+                    locked.sourceEvidence.reimbursementRelationshipRevision ?? null,
+                },
                 rationale: input.rationale,
                 reversesMatchId: locked.id,
               })
@@ -557,7 +565,8 @@ export function createFinanceRecurringOccurrenceService({
           if (
             actual.pending ||
             actual.contextualRevision.toString() !== input.expectedTransactionRevision ||
-            actual.reimbursementRelationshipRevision.toString() !== input.expectedReimbursementRelationshipRevision
+            actual.reimbursementRelationshipRevision.toString() !==
+              input.expectedReimbursementRelationshipRevision
           )
             throw new AppError(
               "conflict",
@@ -725,7 +734,8 @@ export function createFinanceRecurringOccurrenceService({
                 accountId: account.id,
                 scheduleVersionId: expected.scheduleVersionId,
                 recognitionFingerprint: data.recognitionFingerprint(actual.id),
-                reimbursementRelationshipRevision: actual.reimbursementRelationshipRevision.toString(),
+                reimbursementRelationshipRevision:
+                  actual.reimbursementRelationshipRevision.toString(),
               },
               rationale: input.rationale,
               reversesMatchId: null,

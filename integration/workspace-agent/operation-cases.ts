@@ -2,6 +2,11 @@
  * A missing ordinary operation must get an adapter; it cannot be waived by the inventory test.
  */
 export const workspaceApiExceptions = {
+  confirmFinanceBudgetBaselineQualification: {
+    kind: "owner_consent",
+    reason:
+      "Only an authenticated human may confirm the exact reviewed baseline fingerprint; agent preparation cannot provide owner consent or activate a budget.",
+  },
   saveAutomationHostFireToken: {
     kind: "owner_consent",
     reason:

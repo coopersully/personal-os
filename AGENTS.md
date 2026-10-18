@@ -65,7 +65,7 @@ own scoped work only with this explicit grant and independent review. No bypass 
 - A head or orchestrator never implements, and a worker never merges or enables auto-merge.
   These boundaries remain in force when invoking another skill, including `ship-it`.
 - Only an assigned orchestrator with user-authorized merge scope may merge after all documented
-  gates pass, including current CodeRabbit coverage and zero unresolved review threads.
+  gates pass, including current independent deep-review acceptance and zero unresolved review threads.
 - Ordinary contribution tasks retain their existing workflows unless assigned a network role.
 
 ## Codex Local Environment

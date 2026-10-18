@@ -1,7 +1,7 @@
 # nohmi acceptance contract
 
 - Status: Accepted policy
-- Policy revision: 3
+- Policy revision: 4
 - Adopted: 2026-10-18
 
 This contract defines how nohmi changes earn acceptance. It applies to human and agent authors
@@ -56,7 +56,7 @@ than manufacturing irrelevant work. Evidence depth follows risk, not changed-lin
 | AC-03 Independent assessment | A reviewer distinct from the implementer examines the candidate and applicable concerns, validates findings, and states coverage gaps. Author self-review and bot coverage alone do not satisfy independent acceptance. | Before merge |
 | AC-04 Verification | Focused behavior/negative-case evidence plus complete candidate verification under [delivery verification](delivery-verification.md). Required scoped/platform checks also pass. No unexplained failure or weakened check. | Before merge |
 | AC-05 Operational readiness | Relevant migration, external-boundary, release, recovery and production observation plans identify owners, safe actions and required evidence. Post-deploy-only evidence is explicitly pending. | Before merge |
-| AC-06 Protected merge | Current head/base, required checks, eligible approvals, substantive CodeRabbit coverage, resolved conversations and normal merge authority satisfy the existing ship-it gates. No bypass or self-approval. | Before merge |
+| AC-06 Protected merge | Current head/base, required checks, eligible approvals, current independent deep-review acceptance, resolved conversations and normal merge authority satisfy the existing ship-it gates. No bypass or self-approval. | Before merge |
 | AC-07 Production acceptance | Release provenance establishes that the deployed revision contains the accepted change; required deployment checks, health and change-specific smoke/observation evidence pass. | Before claiming shipped to production |
 | AC-08 Reconciliation | Issue status reflects its full acceptance scope; remaining work and ownership are explicit. Delivery evidence and authorized cleanup are reconciled. | Before closing delivery ownership |
 

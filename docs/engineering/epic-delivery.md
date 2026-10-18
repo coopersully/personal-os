@@ -89,7 +89,7 @@ and section links and blockers. Chat creation alone does not prove a successful 
 
 Use repository `deep-review`, [acceptance](acceptance-contract.md), and role-preserving `handoff`.
 Only the assigned authorized orchestrator merges after every current protected gate, including
-substantive CodeRabbit coverage and zero unresolved threads. Delegate every repair to workers.
+current independent deep-review acceptance and zero unresolved threads. Delegate every repair to workers.
 Preserve valid verification evidence; do not rerun full suites per reviewer or metadata edit.
 
 The Lead owns integrated acceptance and keeps delivery open through production observation and

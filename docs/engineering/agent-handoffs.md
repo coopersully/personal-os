@@ -58,7 +58,7 @@ At a meaningful handoff or before yielding an interrupted run, report:
 - Dispatch ID and packet revision; status; exact branch, pushed head, and observed base.
 - Acceptance rows: `criterion_id`, `result` (`pass`, `fail`, `not_run`, `blocked`), evidence location,
   and the tested head. Include observed behavior and a test/inspection artifact, not only a command.
-- Self-review findings and dispositions, current CodeRabbit/feedback state, and changed docs.
+- Self-review findings and dispositions, current feedback state (including advisory bots when present), and changed docs.
 - Remaining work, blocker, failed approaches worth avoiding, and the next concrete action.
 - Typed executor/reporting references, absolute worktree path, uncommitted/unpushed work, pending
   external operation, and next trigger needed to continue or safely replace the executor.
@@ -89,7 +89,8 @@ messages are useful during a run; they are not the sole durable record or a guar
 The orchestrator evaluates the current requirements, actual diff, and raw verification artifacts
 before consulting the worker's conclusions. Record `packet_revision`, head/base, criterion verdicts,
 remaining findings, and the disposition (`return_to_worker`, `wait`, `blocked`, `accepted_for_gate`).
-Worker self-review, CodeRabbit, independent acceptance, and merge readiness remain separate evidence.
+Worker self-review, independent deep-review acceptance, and merge readiness remain separate evidence.
+CodeRabbit is optional advisory input; actual findings still require disposition through the feedback gate.
 `accepted_for_gate` still requires every merge gate; it is not an instruction to merge immediately.
 
 ## Remediation identity and progress

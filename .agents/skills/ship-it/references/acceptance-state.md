@@ -15,7 +15,7 @@ policy requires a new assessment; copying a new digest into old evidence is not 
     "evidence": ["production-plan.json"]
   },
   "acceptance": {
-    "policyRevision": 3,
+    "policyRevision": 4,
     "policyDigest": "<POLICY_DIGEST from acceptance.py>",
     "headSha": "<reviewed source head>",
     "baseSha": "<reviewed base>",

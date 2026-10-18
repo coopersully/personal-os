@@ -36,7 +36,7 @@ acknowledgements and exact prerequisite milestones, and record a real next wakeu
 block the affected operation; keep independent authorized work moving.
 
 Use repository `deep-review` and `handoff` within the assigned role. Track merged, deployed and
-production-accepted separately. Preserve current substantive CodeRabbit coverage, zero unresolved
+production-accepted separately. Preserve current independent deep-review acceptance, zero unresolved
 threads and every protected merge gate. Route repairs to workers; never invoke a combined
 implementation workflow as head/orchestrator. Close the epic only after integrated acceptance and
 required production evidence pass, not merely when child PRs merge.

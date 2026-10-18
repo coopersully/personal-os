@@ -57,7 +57,9 @@ Do not report completion when merely waiting or after enabling some external ope
    do not start expensive final verification while review fixes are still changing the checkout.
 5. **Freeze and verify.** Commit and push the reviewed candidate after focused checks, changed-file formatting/lint,
    and affected contract checks. Full lint remains part of the single final verification set.
-   Request substantive CodeRabbit coverage once per candidate and collect eligible approvals.
+   Obtain current independent deep-review acceptance and collect eligible approvals. CodeRabbit is
+   optional advisory feedback; missing, skipped or rate-limited coverage does not block delivery.
+   Inspect its actual findings through the common feedback gate; preserve any live GitHub-required check.
    Obtain one complete verification set: `pnpm verify` through the shared runner, or evidenced
    equivalent current-candidate hosted stages under the delivery-verification contract. Diagnose
    any local failures; green CI never excuses an unexplained defect. Do not edit a running verifier’s
@@ -90,13 +92,13 @@ On a failed final gate, wait, cancellation, or closed PR, reconcile any pending 
 the base claim before yielding; reacquire it for the next final collection. On merged resumption,
 release a leftover base claim after reconciling the merge. Retain the PR claim while delivery is active.
 Freeze the candidate. Re-read PR head/base, rules, selected current check attempts, reviews, every
-thread, CodeRabbit coverage, Linear eligibility/acceptance, and dependencies. Rebuild the complete
+thread, independent deep-review acceptance, Linear eligibility/acceptance, and dependencies. Rebuild the complete
 state and evaluate it again; any changed input requires re-auditing the affected gate.
 
 Require normal actor authority and live server enforcement of up-to-date required checks and
 conversation resolution for the normal merge path. Never invoke an administrator bypass. Every selected scoped job must pass;
 missing jobs do not disappear from the expected inventory. Every thread must be resolved, including
-outdated threads. Substantive CodeRabbit coverage and independent acceptance remain separate gates.
+outdated threads. Independent deep-review acceptance is mandatory; bot review is optional and never substitutes for it.
 The evaluator checks supplied evidence; it cannot authenticate it or make this multi-service read
 atomic. If equivalent final enforcement is unavailable, block unattended merge.
 
@@ -125,7 +127,7 @@ completion comment. Complete the checkpoint only after production acceptance and
 release ownership and pause this PR's dedicated heartbeat. Never pause a shared network heartbeat.
 
 Use the PR workflow output contract: PR purpose/link, merge commit, verification, independent review,
-CodeRabbit, issue/backlink/status results, private evidence/checkpoint locations, and exact blockers.
+advisory bot feedback when present, issue/backlink/status results, private evidence/checkpoint locations, and exact blockers.
 Notify on meaningful changes or required action; unchanged waiting remains quiet. Merged is not
 production deployment evidence; the handoff remains active until the reviewed production plan is proven. Read [pressure scenarios](references/pressure-scenarios.md) when
 modifying this skill.

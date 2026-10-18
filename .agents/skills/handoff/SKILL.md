@@ -42,7 +42,7 @@ Do not adopt an automation-head/network role merely because this skill is invoke
 The receiving owner executes the ship-it convergence/final-merge gates unchanged, using repository
 deep-review for AC-02/03 and focused verification while repairing. Reuse valid evidence; run the
 complete final verification once per stable candidate. No admin bypass, deferred auto-merge,
-self-approval, waived CodeRabbit coverage, or relaxed conversation resolution.
+self-approval, waived independent deep-review acceptance, or relaxed conversation resolution.
 
 After verified merge, keep the claim and wakeup active. Follow
 `../ship-it/references/production-delivery.md` to verify deployed provenance, health and the

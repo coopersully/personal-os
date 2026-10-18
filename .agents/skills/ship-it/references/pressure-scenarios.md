@@ -5,8 +5,8 @@
 | Local `pnpm verify` passed but CI is pending | Wait; local verification is not remote CI evidence. |
 | Every visible check is green but a ruleset-required check is absent | Remediate or block; absence is not success. |
 | GitHub says mergeable but the base advanced | Catch up, verify, push, and restart every head-bound gate. |
-| A catch-up commit lands after approval and review | Treat approval, review, CI, CodeRabbit, and verification as stale until re-proven. |
-| CodeRabbit reviewed an earlier head | Request or wait for current-diff evidence and re-audit its open findings. |
+| A catch-up commit lands after approval and review | Treat approval, independent review, CI, and verification as stale until re-proven. |
+| Independent deep-review covers an earlier head | Rebind affected acceptance to the current candidate; retain valid unaffected review with an explicit rationale. |
 | A bot finding looks noisy | Validate it; suppress only evidence-backed noise, never by author type alone. |
 | A Linear PR URL exists only in a comment | Add the structured backlink before merge. |
 | A matching issue belongs to another Project | Fail closed; never adopt or update it from this repository. |
@@ -18,8 +18,8 @@
 | A prior executor left auto-merge enabled | Reconcile ownership and cancel the authorized PR’s deferred merge before continuing; never rely on it. |
 | A safe fix requires unrelated product or security judgment | Stop with the exact decision needed; autonomy does not broaden scope. |
 | Merge command succeeds | Re-read the PR and merge commit, verify production acceptance, then reconcile Nohmi issue completion truthfully. |
-| Pending CodeRabbit has not established coverage | WAIT; do not treat pending coverage as a terminal blocker. |
-| CodeRabbit reports an unknown or skipped status | Reject readiness; require substantive successful coverage. |
+| Optional CodeRabbit review is pending or rate-limited | Do not wait for coverage; require independent acceptance, actual feedback dispositions and live GitHub checks. |
+| Bot review is absent or skipped | Independent deep-review remains required; bot status never substitutes for acceptance. |
 | An outdated, nonactionable thread remains open | Resolve with evidence; zero actionable findings alone is insufficient. |
 | An older attempt failed and its evidenced rerun passed | Use the latest applicable attempt; preserve run/provider/trigger identity. |
 | The latest rerun is pending while an older run passed | WAIT; historical success cannot clear the latest attempt. |

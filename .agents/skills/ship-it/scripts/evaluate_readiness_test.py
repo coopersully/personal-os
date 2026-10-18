@@ -66,12 +66,6 @@ def ready_state(**overrides):
                 },
             ],
         },
-        "codeRabbit": {
-            "headSha": HEAD,
-            "status": "SUCCESS",
-            "actionableFindings": 0,
-            "coverageVerified": True,
-        },
         "feedback": {
             "headSha": HEAD,
             "collectionComplete": True,
@@ -109,7 +103,7 @@ def ready_state(**overrides):
     value["acceptance"] = acceptance_record()
     value["reviewedProductionPlan"] = acceptance_record()["productionPlan"]
     value["evidence"] = {name: [f"bundle.json#{name}"] for name in
-                         ("base", "verification", "ci", "codeRabbit", "feedback",
+                         ("base", "verification", "ci", "feedback",
                           "selfReview", "linear", "metadata", "merge")}
     for key, override in overrides.items():
         if isinstance(override, dict) and isinstance(value.get(key), dict):
@@ -212,16 +206,23 @@ class EvaluateReadinessTest(unittest.TestCase):
     def test_requires_server_enforced_gates(self):
         self.assertEqual(evaluate(ready_state(merge={"serverGatesVerified": False}))["decision"], "BLOCK")
 
-    def test_pending_rabbit_without_coverage_waits(self):
-        state = ready_state(codeRabbit={"status": "PENDING", "coverageVerified": False})
+    def test_optional_bot_status_never_replaces_independent_review(self):
+        for status in ("PENDING", "MISSING", "SKIPPED", "NEUTRAL", "FAILURE", "UNRECOGNIZED"):
+            state = ready_state(codeRabbit={"status": status, "coverageVerified": False})
+            self.assertEqual(evaluate(state)["decision"], "MERGE")
+            state["acceptance"]["reviewers"] = state["acceptance"]["implementers"]
+            self.assertEqual(evaluate(state)["decision"], "BLOCK")
+
+    def test_bot_check_required_by_github_still_blocks(self):
+        state = ready_state()
+        state["ci"]["expectedRequiredChecks"].append("CodeRabbit")
+        state["ci"]["expectedCheckApps"]["CodeRabbit"] = 12345
+        self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
+        state["ci"]["checks"].append({"name": "CodeRabbit", "appId": 12345,
+            "headSha": HEAD, "status": "IN_PROGRESS", "conclusion": ""})
         self.assertEqual(evaluate(state)["decision"], "WAIT")
-
-    def test_unknown_or_skipped_rabbit_cannot_merge(self):
-        for status in ("UNRECOGNIZED", "SKIPPED", "NEUTRAL"):
-            self.assertEqual(evaluate(ready_state(codeRabbit={"status": status}))["decision"], "BLOCK")
-
-    def test_missing_rabbit_requests_review(self):
-        self.assertEqual(evaluate(ready_state(codeRabbit={"status": "MISSING", "coverageVerified": False}))["decision"], "REMEDIATE")
+        state["ci"]["checks"][-1].update(status="COMPLETED", conclusion="FAILURE")
+        self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
 
     def test_every_thread_must_be_resolved(self):
         for count in (None, 1, -1, False):
@@ -284,13 +285,11 @@ class EvaluateReadinessTest(unittest.TestCase):
             with self.subTest(state=state):
                 self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
 
-    def test_waits_for_pending_ci_or_coderabbit(self):
+    def test_waits_for_pending_ci(self):
         pending_ci = ready_state()
         pending_ci["ci"]["checks"][0]["status"] = "IN_PROGRESS"
         pending_ci["ci"]["checks"][0]["conclusion"] = ""
-        pending_rabbit = ready_state(codeRabbit={"status": "PENDING"})
         self.assertEqual(evaluate(pending_ci)["decision"], "WAIT")
-        self.assertEqual(evaluate(pending_rabbit)["decision"], "WAIT")
 
     def test_waits_when_a_completed_named_check_has_no_conclusion(self):
         state = ready_state()
@@ -333,7 +332,6 @@ class EvaluateReadinessTest(unittest.TestCase):
     def test_blocks_when_collection_or_capability_provenance_is_unverified(self):
         cases = (
             ready_state(feedback={"collectionComplete": False}),
-            ready_state(codeRabbit={"coverageVerified": False}),
             ready_state(merge={"capabilitiesVerified": False}),
         )
         for state in cases:
@@ -347,9 +345,8 @@ class EvaluateReadinessTest(unittest.TestCase):
             with self.subTest(conclusion=conclusion):
                 self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
 
-    def test_remediates_coderabbit_findings_feedback_or_self_review_findings(self):
+    def test_remediates_feedback_or_self_review_findings(self):
         cases = (
-            ready_state(codeRabbit={"actionableFindings": 1}),
             ready_state(feedback={"unresolvedActionable": 1}),
             ready_state(selfReview={"newVerifiedFindings": 1}),
             ready_state(selfReview={"complete": False}),
@@ -383,7 +380,6 @@ class EvaluateReadinessTest(unittest.TestCase):
             "base",
             "verification",
             "ci",
-            "codeRabbit",
             "feedback",
             "selfReview",
             "linear",
@@ -396,16 +392,6 @@ class EvaluateReadinessTest(unittest.TestCase):
                 result = evaluate(state)
                 self.assertEqual(result["decision"], "REMEDIATE")
                 self.assertIn("stale_evidence", result["reasonCodes"])
-
-
-class PendingReviewTest(unittest.TestCase):
-    def test_pending_review_without_count_waits(self):
-        state = ready_state(codeRabbit={"status": "PENDING", "coverageVerified": False})
-        del state["codeRabbit"]["actionableFindings"]
-        self.assertEqual(evaluate(state)["decision"], "WAIT")
-        state["codeRabbit"]["status"] = "SUCCESS"
-        state["codeRabbit"]["coverageVerified"] = True
-        self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 # nohmi code standards
 
 - Status: Accepted policy
-- Policy revision: 3
+- Policy revision: 4
 - Adopted: 2026-10-18
 
 These standards give authors and reviewers a common engineering bar. Apply them through the

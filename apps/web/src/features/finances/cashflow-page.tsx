@@ -28,6 +28,7 @@ import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { formatMoney } from "./format";
 import { FinanceSourceState, requireFinanceResult } from "./position-material.js";
+import { RecurringCostLadder } from "./recurring-cost-ladder";
 import { FinanceReimbursementList } from "./reimbursement-list";
 import { FinanceScenarioComparison } from "./scenario-comparison.js";
 import { FinanceTransactionItem } from "./transaction-item";
@@ -132,6 +133,20 @@ export function FinanceCashflowPage() {
       operation: item.status === "active" ? "pause" : "resume",
       idempotencyKey: crypto.randomUUID(),
     });
+  const patternActions = (
+    item: FinanceIncomeStream | FinanceRecurringObligation,
+    itemType: "income" | "obligation",
+  ) => (
+    <Button
+      size="icon-sm"
+      variant="ghost"
+      disabled={update.isPending}
+      aria-label={`${item.status === "active" ? "Pause" : item.status === "needs_review" ? "Confirm" : "Resume"} ${item.displayName}`}
+      onClick={() => change(item, itemType)}
+    >
+      {item.status === "active" ? <PauseIcon /> : <PlayIcon />}
+    </Button>
+  );
   const patternRows = (
     items: Array<FinanceIncomeStream | FinanceRecurringObligation>,
     itemType: "income" | "obligation",
@@ -145,17 +160,7 @@ export function FinanceCashflowPage() {
           direction={itemType === "income" ? "income" : "expense"}
           status={item.status === "active" ? "expected" : undefined}
           description={`${cadence[item.cadence] ?? item.cadence}${item.nextExpectedDate ? ` · Next ${date(item.nextExpectedDate)}` : " · Date not established"}`}
-          actions={
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              disabled={update.isPending}
-              aria-label={`${item.status === "active" ? "Pause" : item.status === "needs_review" ? "Confirm" : "Resume"} ${item.displayName}`}
-              onClick={() => change(item, itemType)}
-            >
-              {item.status === "active" ? <PauseIcon /> : <PlayIcon />}
-            </Button>
-          }
+          actions={patternActions(item, itemType)}
         >
           <Badge variant="secondary">
             {item.status === "needs_review"
@@ -405,7 +410,19 @@ export function FinanceCashflowPage() {
               {recurring.isPending ? (
                 <Skeleton className="h-28 w-full" />
               ) : obligations.length ? (
-                patternRows(obligations, "obligation")
+                <>
+                  <RecurringCostLadder
+                    obligations={obligations}
+                    accounts={accounts.data?.accounts ?? []}
+                    renderActions={(item) => patternActions(item, "obligation")}
+                  />
+                  {obligations.some((item) => item.kind === "savings")
+                    ? patternRows(
+                        obligations.filter((item) => item.kind === "savings"),
+                        "obligation",
+                      )
+                    : null}
+                </>
               ) : recurring.isSuccess ? (
                 <Empty>
                   <EmptyHeader>

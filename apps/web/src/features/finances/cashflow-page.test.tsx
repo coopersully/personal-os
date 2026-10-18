@@ -157,7 +157,7 @@ it.each([
   expect(screen.queryByText("No income patterns yet")).not.toBeInTheDocument();
   expect(screen.queryByText("No bills or subscriptions yet")).not.toBeInTheDocument();
 });
-it("marks a subscription inactive only inside the forecast, with pending and failed state", async () => {
+it("keeps exact source management actions in the recurring-cost ladder with failed state", async () => {
   api.listFinanceRecurringItems.mockResolvedValue({
     data: {
       income: [],
@@ -178,7 +178,8 @@ it("marks a subscription inactive only inside the forecast, with pending and fai
   });
   api.manageFinanceRecurringItem.mockRejectedValue(new Error("Could not save"));
   renderPage("/finances/subscriptions");
-  expect(await screen.findByText("Music")).toBeVisible();
+  expect(await screen.findByRole("region", { name: "Recurring cost ladder" })).toBeVisible();
+  expect(screen.getByText("Music")).toBeVisible();
   await userEvent.setup().click(screen.getByRole("button", { name: "Pause Music" }));
   expect(
     await screen.findByText(/Couldn’t confirm whether we could save this recurring payment/),

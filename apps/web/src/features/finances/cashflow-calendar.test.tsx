@@ -47,9 +47,7 @@ function schedule(from = "2026-03-08", to = "2026-04-02"): FinanceCashflowSchedu
     },
   };
 }
-const renderItem = (value: FinanceCashflowScheduleItem) => (
-  <div role="listitem">{value.displayName}</div>
-);
+const renderItem = (value: FinanceCashflowScheduleItem) => <li>{value.displayName}</li>;
 
 it("keeps DST and month-end dates, counts and exact source rows together", async () => {
   const user = userEvent.setup();
@@ -140,4 +138,17 @@ it("can navigate the entire 366-date range without expanding recurrence", async 
     "aria-disabled",
     "true",
   );
+});
+
+it("marks today from the planning timezone rather than the browser clock", () => {
+  const { container } = render(
+    <FinanceCashflowCalendar
+      schedule={{ ...schedule(), today: "2026-03-09" }}
+      renderItem={renderItem}
+    />,
+  );
+  expect(container.querySelector('[data-today="true"]')).toHaveTextContent("9");
+  expect(
+    screen.getByRole("button", { name: /Monday, March 9, 2026/ }).closest('[data-today="true"]'),
+  ).not.toBeNull();
 });

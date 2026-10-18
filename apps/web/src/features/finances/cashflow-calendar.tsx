@@ -48,6 +48,7 @@ function CashflowCalendarRange({ schedule, renderItem }: Props) {
       <div className="w-full min-w-0 sm:max-w-sm">
         <Calendar
           aria-label="Next expected items calendar"
+          today={calendarDate(schedule.today)}
           mode="single"
           required
           selected={selected}

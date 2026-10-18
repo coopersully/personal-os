@@ -187,9 +187,20 @@ Review.
 - Canonical Review leads with its current bounded question. Older maintenance
   approvals disclose their individual prepared changes inside the labelled
   compatibility queue.
-- Cash flow withholds legacy forecasts when shared or excluded accounts cannot be
-  represented accurately. Scenario comparisons are explicit, hypothetical inputs and
-  never change a saved plan.
+- Cash flow Outlook presents Upcoming money as an agenda (default) or calendar of one
+  next expected date per active or review-needed recurring source. It preserves date-only
+  values in the user's planning timezone and keeps undated sources in a Date unknown section.
+  Range, presentation and account selection are URL-backed; omitted account scope includes
+  unassigned sources, while an explicit empty selection includes none. Source links open the
+  exact recurring record in Income or Bills & subscriptions, with an unavailable state if absent.
+- Upcoming money does not expand recurrence, match actual payments or establish a balance
+  basis. Past expected dates do not imply unpaid activity. The former compatibility forecast
+  metrics in Outlook are replaced by explicit projected-balance unavailability, even when the
+  legacy snapshot reports trustworthy totals. Other management views and API behavior remain.
+  Account currency is used only when resolved; unavailable currency never falls back to USD.
+  Last observed source dates are distinct from a fresh bank check. Cross-device preferences,
+  durable occurrences, actual matching and supported balance projections remain target scope.
+- Scenario comparisons are explicit hypothetical inputs and never change a saved plan.
 - Cash flow shows reimbursements as their own expected/received/remaining
   ledger, including overdue state and linked credits.
 - A mixed purchase is edited in one exact-cent breakdown dialog. Every cent

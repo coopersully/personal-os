@@ -1,6 +1,25 @@
+-- Match 0118's bounded deploy statement/lock budgets; restore caller settings.
+SELECT set_config('nohmi.reimbursement_migration_statement_timeout',current_setting('statement_timeout'),true),
+       set_config('nohmi.reimbursement_migration_lock_timeout',current_setting('lock_timeout'),true);
+--> statement-breakpoint
+SET LOCAL statement_timeout='30s';
+SET LOCAL lock_timeout='5s';
+--> statement-breakpoint
 -- Prevent relationship writes between the initial snapshot and trigger installation.
 -- Deployment must retry the entire migration if concurrent writers cause a lock deadlock.
 LOCK TABLE finance_reimbursement_matches IN SHARE ROW EXCLUSIVE MODE;
+LOCK TABLE finance_transactions IN ACCESS EXCLUSIVE MODE;
+--> statement-breakpoint
+-- Conservative admission cap (not a production timing claim): snapshot aggregation
+-- rewrites at most 10000 matched parents, stricter than 0118's 100000-owner cap.
+-- Counts are measured under locks and stop after cap+1, so oversized deployments
+-- abort atomically and require a separately reviewed operational backfill.
+DO $$ BEGIN
+  IF (SELECT count(*) FROM (SELECT 1 FROM public.finance_transactions LIMIT 10001) bounded_transactions)>10000
+    OR (SELECT count(*) FROM (SELECT 1 FROM public.finance_reimbursement_matches LIMIT 10001) bounded_matches)>10000 THEN
+    RAISE EXCEPTION 'Reimbursement generation migration exceeds 10000 transactions or matches; operational backfill required' USING ERRCODE='23514';
+  END IF;
+END; $$;
 --> statement-breakpoint
 -- Relationship state is derived by the database, never supplied by a writer.
 -- Baseline existing rows before installing the guard, in this migration transaction.
@@ -17,7 +36,8 @@ RETURNS jsonb LANGUAGE sql VOLATILE SET search_path=pg_catalog AS $$
 $$;
 --> statement-breakpoint
 UPDATE finance_transactions t
-SET reimbursement_relationship_state=finance_reimbursement_relationship_state(t.user_id,t.id);
+SET reimbursement_relationship_state=finance_reimbursement_relationship_state(t.user_id,t.id)
+WHERE EXISTS (SELECT 1 FROM finance_reimbursement_matches m WHERE m.user_id=t.user_id AND m.credit_transaction_id=t.id);
 --> statement-breakpoint
 CREATE FUNCTION finance_transactions_reimbursement_relationship_guard()
 RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$
@@ -47,6 +67,19 @@ $$;
 CREATE TRIGGER finance_transactions_reimbursement_relationship_guard
 BEFORE INSERT OR UPDATE ON finance_transactions FOR EACH ROW
 EXECUTE FUNCTION finance_transactions_reimbursement_relationship_guard();
+--> statement-breakpoint
+CREATE FUNCTION finance_reimbursement_match_owner_guard()
+RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+BEGIN
+  IF NEW.user_id IS DISTINCT FROM OLD.user_id THEN
+    RAISE EXCEPTION 'Reimbursement match owner is immutable' USING ERRCODE='23514';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER finance_reimbursement_match_owner_guard
+BEFORE UPDATE ON finance_reimbursement_matches FOR EACH ROW
+EXECUTE FUNCTION finance_reimbursement_match_owner_guard();
 --> statement-breakpoint
 -- Canonical writers must acquire topology locks before any row locks. A row
 -- trigger cannot establish this order retroactively for arbitrary raw UPDATE.
@@ -89,3 +122,7 @@ EXECUTE FUNCTION finance_reimbursement_relationship_reject_truncate();
 ALTER TABLE finance_balance_inclusions
   ADD COLUMN reimbursement_relationship_revision bigint
     CONSTRAINT fin_balance_inclusion_relationship_revision_check CHECK (reimbursement_relationship_revision IS NULL OR reimbursement_relationship_revision > 0);
+
+--> statement-breakpoint
+SELECT set_config('statement_timeout',current_setting('nohmi.reimbursement_migration_statement_timeout'),true),
+       set_config('lock_timeout',current_setting('nohmi.reimbursement_migration_lock_timeout'),true);

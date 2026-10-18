@@ -299,7 +299,7 @@ describe.sequential("Database-owned reimbursement relationship generations", () 
     )).rejects.toMatchObject({ code: "23514" });
     expect(await generations(f.credit.id)).toEqual({ contextual_revision: "1", reimbursement_relationship_revision: "1" });
   });
-  it("derives visible final state for a multirow statement and both ends of an ownership move", async () => {
+  it("derives visible final state for a multirow statement and rejects owner reassignment while preserving same-owner credit moves", async () => {
     const first = await fixture();
     const second = await fixture();
     await match(first);
@@ -319,22 +319,29 @@ describe.sequential("Database-owned reimbursement relationship generations", () 
     for (const f of [first, second]) {
       expect((await generations(f.credit.id)).reimbursement_relationship_revision).toBe("3");
     }
-    // Remove the destination match first, then move the source across both owner/case/credit identities.
+    await expect(database.pool.query(
+      "UPDATE finance_reimbursement_matches SET user_id=$2,reimbursement_id=$3,credit_transaction_id=$4 WHERE credit_transaction_id=$1",
+      [first.credit.id, second.owner.id, second.claim.id, second.credit.id],
+    )).rejects.toMatchObject({ code: "23514" });
+    expect((await generations(first.credit.id)).reimbursement_relationship_revision).toBe("3");
+    expect((await generations(second.credit.id)).reimbursement_relationship_revision).toBe("3");
+    const destination = required((await database.db.insert(financeTransactions).values({
+      userId: first.owner.id, accountId: first.account.id, amount: 5000,
+      currencyCode: "EUR", direction: "income", merchant: "Corrected receipt",
+      transactionDate: "2026-10-05",
+    }).returning())[0]);
     const move = await database.pool.connect();
     try {
       await move.query("BEGIN");
-      for (const ownerId of [first.owner.id, second.owner.id].sort()) {
-        await move.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`finance-reimbursement-topology:${ownerId}`]);
-      }
-      await move.query("SELECT id FROM finance_reimbursements WHERE id=ANY($1::uuid[]) ORDER BY id FOR UPDATE", [[first.claim.id, second.claim.id]]);
-      await move.query("SELECT id FROM finance_transactions WHERE id=ANY($1::uuid[]) ORDER BY user_id,id FOR UPDATE", [[first.credit.id, second.credit.id]]);
-      await move.query("DELETE FROM finance_reimbursement_matches WHERE credit_transaction_id=$1", [second.credit.id]);
-      await move.query("UPDATE finance_reimbursement_matches SET user_id=$2,reimbursement_id=$3,credit_transaction_id=$4 WHERE credit_transaction_id=$1", [first.credit.id, second.owner.id, second.claim.id, second.credit.id]);
+      await move.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`finance-reimbursement-topology:${first.owner.id}`]);
+      await move.query("SELECT id FROM finance_reimbursements WHERE id=$1 ORDER BY id FOR UPDATE", [first.claim.id]);
+      await move.query("SELECT id FROM finance_transactions WHERE id=ANY($1::uuid[]) ORDER BY user_id,id FOR UPDATE", [[first.credit.id, destination.id]]);
+      await move.query("UPDATE finance_reimbursement_matches SET credit_transaction_id=$2 WHERE credit_transaction_id=$1", [first.credit.id, destination.id]);
       await move.query("COMMIT");
     } catch (error) { await move.query("ROLLBACK"); throw error; }
     finally { move.release(); }
     expect((await generations(first.credit.id)).reimbursement_relationship_revision).toBe("4");
-    expect((await generations(second.credit.id)).reimbursement_relationship_revision).toBe("5");
+    expect((await generations(destination.id)).reimbursement_relationship_revision).toBe("2");
   });
   it("rejects fingerprint spoofing and TRUNCATE without losing matched rows", async () => {
     const f = await fixture();

@@ -39,6 +39,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import { api } from "../../api.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
+import { SettingsFeedbackContext } from "../../lib/settings-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { financeAccountNeedsConnectionAttention } from "./attention";
 import {
@@ -482,6 +483,14 @@ function AccountEditor({
 }
 
 export function ManualAccountEditor({ onClose }: { onClose: () => void }) {
+  return (
+    <SettingsFeedbackContext.Provider value={true}>
+      <ManualAccountForm onClose={onClose} />
+    </SettingsFeedbackContext.Provider>
+  );
+}
+
+function ManualAccountForm({ onClose }: { onClose: () => void }) {
   const client = useQueryClient();
   const [name, setName] = useState("");
   const [institution, setInstitution] = useState("");
@@ -489,7 +498,13 @@ export function ManualAccountEditor({ onClose }: { onClose: () => void }) {
   const [balance, setBalance] = useState("");
   const [currencyCode, setCurrencyCode] = useState("");
   const create = useFeedbackMutation({
-    feedback: { action: "create this account", safeToRetry: false, form: true },
+    feedback: {
+      action: "create this account",
+      safeToRetry: false,
+      form: true,
+      pending: "Adding account…",
+      success: "Account added",
+    },
     mutationFn: () =>
       api.createFinanceAccount({
         balance: balance.trim() === "" ? null : Number(balance),

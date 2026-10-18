@@ -388,3 +388,8 @@ non-USD source for USD-only planning.
 The existing account-update contract has no currency correction field. Correcting a previously
 created account's currency requires a separately reviewed canonical update contract; this creation
 change does not reinterpret historical accounts or transactions.
+
+The manual account form uses the same Sonner identifier from loading through the confirmed
+creation result or error. Field corrections stay with their controls; action-result notifications
+are not duplicated inline. This repairs the form's inherited feedback behavior while extending
+currency capture; it is not a currency regression.

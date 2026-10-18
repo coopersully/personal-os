@@ -34,6 +34,7 @@ import {
   spendingPeriod,
   spendingToday,
 } from "./spending-period";
+import { parseSpendingRecovery, spendingRecoveryControls } from "./spending-reference";
 import { FinanceSpendingRhythm } from "./spending-rhythm";
 import { FinanceSpendingTrends, spendingComparisonScopes } from "./spending-trends";
 
@@ -55,7 +56,17 @@ const qualificationCopy: Record<string, string> = {
     "Some reimbursements cannot be matched to their purchase allocation.",
 };
 export function FinanceSpendingPage() {
-  const [params, setParams] = useSearchParams();
+  const [urlParams, setParams] = useSearchParams();
+  const recovery = parseSpendingRecovery(urlParams.get("recoverSpending"));
+  const params =
+    recovery.state === "valid" ? spendingRecoveryControls(urlParams, recovery.filter) : urlParams;
+  function changeParams(next: URLSearchParams) {
+    next.delete("recoverSpending");
+    setParams(next);
+  }
+  function leaveRecovery() {
+    if (urlParams.has("recoverSpending")) changeParams(new URLSearchParams(params));
+  }
   const preferences = useWorkspacePreferences("finances");
   const calendar = useWorkspacePreferences("calendar");
   const save = useSaveWorkspacePreferences("finances");
@@ -80,8 +91,17 @@ export function FinanceSpendingPage() {
       ? requestedPeriod
       : defaults.financeSpendingPeriod
   ) as SpendingPeriod;
-  const timezone = user.data?.planningTimezone;
-  const today = timezone ? spendingToday(timezone) : "2000-01-01";
+  const timezone = params.get("timezone") ?? user.data?.planningTimezone;
+  const timezoneValid = (() => {
+    try {
+      if (!timezone) return false;
+      new Intl.DateTimeFormat("en", { timeZone: timezone });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  const today = timezone && timezoneValid ? spendingToday(timezone) : "2000-01-01";
   const requestedAnchor = params.get("from") ?? today;
   const validAnchor =
     /^\d{4}-\d{2}-\d{2}$/.test(requestedAnchor) &&
@@ -109,36 +129,51 @@ export function FinanceSpendingPage() {
       ? null
       : (params.get("accounts")?.split(",").filter(Boolean) ?? [])
     : defaults.spendAccountIds;
-  const parsed = financeSpendingQuerySchema.safeParse({
-    scope: {
-      ...range,
-      timezone,
-      accountIds,
-      categoryIds: params.has("categories")
-        ? params
-            .get("categories")
-            ?.split(",")
-            .filter(Boolean)
-            .map((id) => (id === "uncategorized" ? null : id))
-        : null,
-      basis: choice("basis", defaults.financeSpendingBasis),
-      includePending: bool("pending", defaults.financeSpendingIncludePending),
-      subtractRefunds: bool("refunds", defaults.financeSpendingSubtractRefunds),
-    },
-    grouping: choice("grouping", defaults.financeSpendingGrouping),
-    includeUncategorized: bool("uncategorized", defaults.financeSpendingIncludeUncategorized),
-  });
+  const parsed = financeSpendingQuerySchema.safeParse(
+    recovery.state === "valid"
+      ? recovery.filter.query
+      : {
+          scope: {
+            ...range,
+            timezone,
+            accountIds,
+            categoryIds: params.has("categories")
+              ? params
+                  .get("categories")
+                  ?.split(",")
+                  .filter(Boolean)
+                  .map((id) => (id === "uncategorized" ? null : id))
+              : null,
+            basis: choice("basis", defaults.financeSpendingBasis),
+            includePending: bool("pending", defaults.financeSpendingIncludePending),
+            subtractRefunds: bool("refunds", defaults.financeSpendingSubtractRefunds),
+          },
+          grouping: choice("grouping", defaults.financeSpendingGrouping),
+          includeUncategorized: bool("uncategorized", defaults.financeSpendingIncludeUncategorized),
+        },
+  );
   const comparisonScopes =
-    parsed.success && view === "trends"
+    parsed.success && view === "trends" && recovery.state !== "valid"
       ? spendingComparisonScopes(parsed.data.scope, period, openedAt)
       : null;
   const activeQuery = parsed.success
     ? { ...parsed.data, scope: comparisonScopes?.current ?? parsed.data.scope }
     : null;
   const queryEnabled =
-    !!timezone && preferences.isSuccess && calendar.isSuccess && !!activeQuery && validAnchor;
+    !!timezone &&
+    timezoneValid &&
+    recovery.state !== "invalid" &&
+    preferences.isSuccess &&
+    calendar.isSuccess &&
+    !!activeQuery &&
+    validAnchor;
   const data = useQuery({
-    queryKey: ["finance-spending", user.data?.id, activeQuery],
+    queryKey: [
+      "finance-spending",
+      user.data?.id,
+      activeQuery,
+      recovery.state === "valid" ? recovery.filter.referenceRevision : null,
+    ],
     enabled: queryEnabled,
     queryFn: () => {
       if (!activeQuery) throw new Error("Invalid spending filters");
@@ -165,15 +200,129 @@ export function FinanceSpendingPage() {
   ) {
     const next = new URLSearchParams(params);
     next.set(key, value);
-    setParams(next);
+    changeParams(next);
     if (preference) save.mutate({ [preference]: persisted });
     setSelected(null);
     setSelectedDrillDown(null);
   }
   const disabled = !preferences.isSuccess || save.isWorkspacePending || !!save.recovery;
-  const result = data.data;
+  const result =
+    recovery.state === "invalid" ||
+    (recovery.state === "valid" &&
+      (!data.isSuccess || data.isFetching || !data.isFetchedAfterMount))
+      ? undefined
+      : data.data;
+  const recoveredGroup =
+    recovery.state === "valid" && result && !data.isFetching && recovery.filter.groupId !== null
+      ? result.groups
+          .flatMap((item) => [item, ...item.categories])
+          .find((item) => item.id === recovery.filter.groupId)
+      : null;
+  const recoveredItems =
+    recovery.state === "valid" && result && !data.isFetching
+      ? result.snapshot.contributions.filter(
+          (item) =>
+            item.date >= recovery.filter.from &&
+            item.date <= recovery.filter.through &&
+            (recovery.filter.groupId === null ||
+              recoveredGroup?.drillDown.contributionIds.includes(item.id)),
+        )
+      : [];
+  const recoveredDrillDown: FinanceSpendingDrillDown | null =
+    recovery.state === "valid" &&
+    result &&
+    !data.isFetching &&
+    (recovery.filter.groupId === null || recoveredGroup)
+      ? {
+          scope: {
+            ...result.snapshot.scope,
+            from: recovery.filter.from,
+            through: recovery.filter.through,
+          },
+          contributionIds: recoveredItems.map((item) => item.id),
+          transactionIds: [...new Set(recoveredItems.map((item) => item.transactionId))],
+        }
+      : null;
+  const recoveredTotals = recoveredItems.reduce(
+    (sum, item) => ({
+      netCents: sum.netCents + item.netCents,
+      grossCents: sum.grossCents + item.grossCents,
+      reimbursementAdjustmentCents:
+        sum.reimbursementAdjustmentCents + item.reimbursementAdjustmentCents,
+      reimbursementOutstandingCents:
+        sum.reimbursementOutstandingCents + item.reimbursementOutstandingCents,
+      refundAdjustmentCents: sum.refundAdjustmentCents + item.refundAdjustmentCents,
+      pendingCents: sum.pendingCents + (item.pending ? item.netCents : 0),
+    }),
+    {
+      netCents: 0,
+      grossCents: 0,
+      reimbursementAdjustmentCents: 0,
+      reimbursementOutstandingCents: 0,
+      refundAdjustmentCents: 0,
+      pendingCents: 0,
+    },
+  );
+  const recoveredSelection: FinanceSpendingGroup | null =
+    recoveredGroup && recoveredDrillDown
+      ? {
+          ...recoveredGroup,
+          ...recoveredTotals,
+          positiveAreaCents: Math.max(0, recoveredTotals.netCents),
+          drillDown: recoveredDrillDown,
+        }
+      : null;
+  function selectGroup(group: FinanceSpendingGroup) {
+    leaveRecovery();
+    setSelected(group);
+    setSelectedDrillDown(null);
+  }
+  function selectDrillDown(drillDown: FinanceSpendingDrillDown) {
+    leaveRecovery();
+    setSelected(null);
+    setSelectedDrillDown(drillDown);
+  }
+
   return (
     <div className="flex flex-col gap-5">
+      {recovery.state === "invalid" ? (
+        <p>
+          The recovered Spending reference is invalid or too large. No spending query has been run.
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setParams(new URLSearchParams());
+              setSelected(null);
+              setSelectedDrillDown(null);
+            }}
+          >
+            Reset spending filters
+          </Button>
+        </p>
+      ) : null}
+      {recovery.state === "valid" ? (
+        <p className="text-sm text-muted-foreground">
+          Recovered selection · current Spending data · {recovery.filter.from} –{" "}
+          {recovery.filter.through}. The older transaction reference is provenance only; matching
+          Transactions have not been refreshed.
+        </p>
+      ) : null}
+      {recovery.state === "valid" &&
+      result &&
+      !data.isFetching &&
+      recovery.filter.groupId !== null &&
+      !recoveredGroup ? (
+        <p>
+          The recovered group is no longer available. Choose a current group or reset the filters; a
+          broader selection has not been opened.
+          <Button variant="ghost" onClick={leaveRecovery}>
+            Clear recovered selection
+          </Button>
+        </p>
+      ) : null}
+      {timezone ? (
+        <p className="text-sm text-muted-foreground">Effective time zone: {timezone}</p>
+      ) : null}
       <div className="flex flex-wrap gap-4">
         <SpendingChoice
           label="View"
@@ -208,7 +357,7 @@ export function FinanceSpendingPage() {
             next.set("period", value);
             next.delete("from");
             next.delete("through");
-            setParams(next);
+            changeParams(next);
             save.mutate({ financeSpendingPeriod: value as SpendingPeriod });
             setSelected(null);
             setSelectedDrillDown(null);
@@ -218,7 +367,7 @@ export function FinanceSpendingPage() {
             next.set("period", "custom");
             next.set("from", from);
             next.set("through", through);
-            setParams(next);
+            changeParams(next);
             save.mutate({ financeSpendingPeriod: "custom" });
             setSelected(null);
             setSelectedDrillDown(null);
@@ -422,7 +571,7 @@ export function FinanceSpendingPage() {
               <div hidden={view !== "bubbles"}>
                 <SpendingBubbles
                   groups={result.groups}
-                  onSelect={setSelected}
+                  onSelect={selectGroup}
                   layoutKey={result.effectiveGrouping}
                   {...(result.monthlyBudget ? { monthlyBudget: result.monthlyBudget } : {})}
                 />
@@ -437,7 +586,7 @@ export function FinanceSpendingPage() {
                         onClick={() => {
                           const next = new URLSearchParams(params);
                           next.delete("categories");
-                          setParams(next);
+                          changeParams(next);
                           setSelected(null);
                           setSelectedDrillDown(null);
                         }}
@@ -465,10 +614,7 @@ export function FinanceSpendingPage() {
                     dashboard={result}
                     {...(comparison.data ? { comparison: comparison.data } : {})}
                     comparisonLoading={comparison.isLoading}
-                    onSelect={(drillDown) => {
-                      setSelected(null);
-                      setSelectedDrillDown(drillDown);
-                    }}
+                    onSelect={selectDrillDown}
                   />
                 </>
               ) : null}
@@ -479,16 +625,13 @@ export function FinanceSpendingPage() {
                     calendar.data?.preferences.weekStartsOn ??
                     getDefaultWorkspacePreferences("calendar").weekStartsOn
                   }
-                  onSelect={(drillDown) => {
-                    setSelected(null);
-                    setSelectedDrillDown(drillDown);
-                  }}
+                  onSelect={selectDrillDown}
                 />
               ) : null}
               <div hidden={view !== "list"}>
                 <SpendingList
                   groups={result.groups}
-                  onSelect={setSelected}
+                  onSelect={selectGroup}
                   {...(result.monthlyBudget ? { monthlyBudget: result.monthlyBudget } : {})}
                 />
               </div>
@@ -507,15 +650,18 @@ export function FinanceSpendingPage() {
           <SpendingDetail
             data={result}
             group={
-              selected
-                ? (result.groups
-                    .flatMap((group) => [group, ...group.categories])
-                    .find((group) => group.id === selected.id) ?? null)
-                : null
+              recovery.state === "valid"
+                ? recoveredSelection
+                : selected
+                  ? (result.groups
+                      .flatMap((group) => [group, ...group.categories])
+                      .find((group) => group.id === selected.id) ?? null)
+                  : null
             }
-            onSelect={setSelected}
-            drillDown={selectedDrillDown}
+            onSelect={selectGroup}
+            drillDown={recovery.state === "valid" ? recoveredDrillDown : selectedDrillDown}
             onClose={() => {
+              leaveRecovery();
               setSelected(null);
               setSelectedDrillDown(null);
             }}

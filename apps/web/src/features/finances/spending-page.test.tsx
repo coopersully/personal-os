@@ -3,14 +3,21 @@ import "@testing-library/jest-dom/vitest";
 import {
   type FinanceSpendingDashboard,
   type FinanceSpendingQuery,
+  type FinanceSpendingReferenceFilter,
   resolveWorkspaceSettings,
 } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api } from "@/api";
 import { FinanceSpendingPage } from "./spending-page";
+import { spendingRecoveryDestination } from "./spending-reference";
+
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="location">{location.search}</output>;
+}
 
 const accountId = "00000000-0000-4000-8000-000000000123";
 function dashboard(query: FinanceSpendingQuery): FinanceSpendingDashboard {
@@ -141,6 +148,7 @@ function mount(search = "") {
     <QueryClientProvider client={cache}>
       <MemoryRouter initialEntries={[`/finances/spending${search}`]}>
         <FinanceSpendingPage />
+        <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -342,4 +350,103 @@ it("uses qualified whole-month usage alongside selected-day amounts without chan
   expect(detail).toHaveTextContent("Monthly usage: $25.00 of $100.00");
   expect(detail).toHaveTextContent("whole qualified month");
   expect(detail).toHaveTextContent("Observed usage · historical coverage unknown");
+});
+
+function recoveryFilter(groupId: string | null = "food"): FinanceSpendingReferenceFilter {
+  return {
+    query: {
+      scope: {
+        from: "2026-09-01",
+        through: "2026-09-30",
+        timezone: "America/Chicago",
+        accountIds: [],
+        categoryIds: ["food", null],
+        basis: "full_outflow",
+        includePending: false,
+        subtractRefunds: false,
+      },
+      grouping: "buckets",
+      includeUncategorized: false,
+    },
+    referenceRevision: "a".repeat(64),
+    groupId,
+    from: "2026-09-08",
+    through: "2026-09-09",
+  };
+}
+function recoverySearch(filter: FinanceSpendingReferenceFilter) {
+  const destination = spendingRecoveryDestination(filter);
+  if (!destination) throw new Error("Invalid recovery fixture");
+  return destination.slice(destination.indexOf("?"));
+}
+it("recovers the original full query and changed timezone, then opens a freshly recomputed exact group subset without autosave", async () => {
+  const filter = recoveryFilter();
+  vi.mocked(api.getFinanceSpending).mockImplementation(async (query) => {
+    const value = dashboard(query);
+    for (const item of value.snapshot.contributions) item.date = "2026-09-08";
+    value.referenceRevision = "b".repeat(64);
+    return value;
+  });
+  mount(recoverySearch(filter));
+  const dialog = await screen.findByRole("dialog");
+  expect(api.getFinanceSpending).toHaveBeenCalledTimes(1);
+  expect(api.getFinanceSpending).toHaveBeenLastCalledWith(filter.query);
+  expect(dialog).toHaveTextContent("Groceries");
+  expect(dialog).toHaveTextContent("2026-09-08 – 2026-09-09");
+  expect(dialog).toHaveTextContent("Market");
+  expect(dialog).toHaveTextContent("$9.00");
+  expect(screen.getByText("Effective time zone: America/Chicago")).toBeInTheDocument();
+  expect(screen.getByText(/Recovered selection · current Spending data/)).toBeInTheDocument();
+  expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
+  fireEvent.keyDown(dialog, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  const controls = new URLSearchParams(screen.getByTestId("location").textContent ?? "");
+  expect(controls.has("recoverSpending")).toBe(false);
+  expect(controls.get("timezone")).toBe("America/Chicago");
+  expect(controls.get("accounts")).toBe("");
+  expect(controls.get("categories")).toBe("food,uncategorized");
+  expect(controls.get("from")).toBe("2026-09-01");
+  expect(controls.get("through")).toBe("2026-09-30");
+  expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
+});
+it("recovers a date-bin subset with null group and all accounts without using old membership lists", async () => {
+  const filter = recoveryFilter(null);
+  filter.query.scope.accountIds = null;
+  vi.mocked(api.getFinanceSpending).mockImplementation(async (query) => {
+    const value = dashboard(query);
+    const first = value.snapshot.contributions[0];
+    if (first) first.date = "2026-09-08";
+    return value;
+  });
+  mount(recoverySearch(filter));
+  const dialog = await screen.findByRole("dialog");
+  expect(dialog).toHaveTextContent("Spending detail");
+  expect(dialog).toHaveTextContent("Market");
+  expect(dialog).toHaveTextContent("2026-09-08 – 2026-09-09");
+  expect(api.getFinanceSpending).toHaveBeenLastCalledWith(filter.query);
+  expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
+});
+it("fails closed for invalid and oversized recovery JSON and allows an explicit reset", async () => {
+  for (const raw of ["{", "x".repeat(16001)]) {
+    mount(`?recoverSpending=${encodeURIComponent(raw)}`);
+    await screen.findByText(/recovered Spending reference is invalid or too large/);
+    expect(api.getFinanceSpending).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    cleanup();
+  }
+  mount("?recoverSpending=%7B");
+  fireEvent.click(await screen.findByRole("button", { name: "Reset spending filters" }));
+  await screen.findByRole("button", { name: "Groceries" });
+  expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
+});
+it("never replaces a missing recovered group with a broader selection", async () => {
+  mount(recoverySearch(recoveryFilter("deleted-group")));
+  await screen.findByText(/recovered group is no longer available/);
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Categories" }));
+  await waitFor(() =>
+    expect(screen.getByTestId("location")).not.toHaveTextContent("recoverSpending"),
+  );
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });

@@ -35,7 +35,8 @@ export type FinanceSection =
   | "decisions"
   | "review"
   | "subscriptions"
-  | "transactions";
+  | "transactions"
+  | "spending";
 
 const navigation: Array<{
   items: Array<{ icon: Icon; id: FinanceSection; label: string }>;
@@ -46,6 +47,7 @@ const navigation: Array<{
     items: [
       { icon: GridIcon, id: "overview", label: "Overview" },
       { icon: ReceiptIcon, id: "transactions", label: "Transactions" },
+      { icon: DollarIcon, id: "spending", label: "Spending" },
       { icon: BankIcon, id: "accounts", label: "Accounts" },
     ],
   },
@@ -79,6 +81,7 @@ export function financeSectionFromPath(pathname: string): FinanceSection {
       "review",
       "subscriptions",
       "transactions",
+      "spending",
     ] as const
   ).some((item) => item === section)
     ? (section as FinanceSection)

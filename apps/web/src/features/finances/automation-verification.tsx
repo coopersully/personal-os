@@ -94,9 +94,23 @@ export function AutomationVerification({
           ? "Checking Chat readiness…"
           : "Copying verification instructions…",
     );
+    let issued = false;
     try {
       if (kind === "issue") {
         setChallenge(await api.issueFinanceConversationChallenge(scheduleId));
+        issued = true;
+        // A replacement challenge supersedes proof. Clear stale verified projections
+        // before refetching, including owner-qualified Chat readiness queries.
+        await Promise.all([
+          client.resetQueries(
+            { queryKey: ["finance-conversation-readiness"] },
+            { throwOnError: true },
+          ),
+          client.resetQueries(
+            { queryKey: ["finance-conversation-host-readiness", scheduleId] },
+            { throwOnError: true },
+          ),
+        ]);
         toast.success("Verification challenge prepared.", { id: notice });
       } else if (kind === "copy") {
         await navigator.clipboard.writeText(instructions);
@@ -117,7 +131,11 @@ export function AutomationVerification({
       }
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Verification could not be completed. Try again.",
+        issued
+          ? "Challenge prepared, but readiness could not be refreshed. Check Chat readiness again."
+          : error instanceof Error
+            ? error.message
+            : "Verification could not be completed. Try again.",
         { id: notice },
       );
     } finally {

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { FinanceAutomationsPage } from "./automations-page.js";
 
@@ -20,9 +21,6 @@ const api = vi.hoisted(() => ({
   cancelAutomationHostSchedule: vi.fn(),
 }));
 vi.mock("../../api.js", () => ({ api }));
-vi.mock("./host-prompt-panel.js", () => ({
-  HostPromptPanel: () => <button type="button">Instructions</button>,
-}));
 vi.mock("sonner", () => ({
   toast: { loading: vi.fn(() => "notice"), success: vi.fn(), error: vi.fn(), dismiss: vi.fn() },
 }));
@@ -56,13 +54,21 @@ function status(state = "active", event = false) {
     },
   };
 }
-function open() {
+function OwnerReadiness() {
+  const query = useQuery({
+    queryKey: ["finance-conversation-readiness", "owner-a"],
+    queryFn: api.getFinanceConversationReadiness,
+  });
+  return <p>{query.data?.canSend ? "Owner Chat available" : "Owner Chat locked"}</p>;
+}
+function open(extra?: ReactNode) {
   const user = userEvent.setup();
   render(
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
     >
       <FinanceAutomationsPage />
+      {extra}
     </QueryClientProvider>,
   );
   return user;
@@ -228,4 +234,75 @@ it("announces load failures through Sonner without an inline error", async () =>
     expect(toast.error).toHaveBeenCalledWith("Automations could not be loaded", expect.any(Object)),
   );
   expect(screen.queryByText("Automations could not be loaded")).not.toBeInTheDocument();
+});
+
+it("refreshes host and owner-qualified Chat readiness after replacement verification", async () => {
+  const verified = { ...readiness, canSend: true, messageCapability: "verified" };
+  api.getFinanceConversationReadiness.mockResolvedValue(verified);
+  api.getFinanceConversationHostReadiness.mockResolvedValue(verified);
+  api.issueFinanceConversationChallenge.mockResolvedValue({
+    challengeId: "replacement-challenge",
+    nonce: "actual-nonce",
+    protocolVersion: "1",
+    expiresAt: "2026-10-18T23:00:00Z",
+  });
+  const user = open(<OwnerReadiness />);
+  await screen.findByText("Owner Chat available");
+  await screen.findByText(/Message access for this host: verified/);
+  api.getFinanceConversationReadiness.mockResolvedValue(readiness);
+  api.getFinanceConversationHostReadiness.mockResolvedValue(readiness);
+  await user.click(screen.getByRole("button", { name: "Verify message access" }));
+  await user.click(screen.getByRole("button", { name: "Prepare verification challenge" }));
+  await waitFor(() =>
+    expect(toast.success).toHaveBeenCalledWith("Verification challenge prepared.", {
+      id: "notice",
+    }),
+  );
+  expect(screen.getByText("Owner Chat locked")).toBeInTheDocument();
+  expect(screen.getByText(/Message access for this host: unverified/)).toBeInTheDocument();
+  expect(screen.queryByText(/Chat is available through/)).not.toBeInTheDocument();
+  expect(api.exchangeFinanceConversationChallenge).not.toHaveBeenCalled();
+});
+it("preserves an issued replacement challenge when readiness refresh fails without stale verified claims", async () => {
+  const verified = { ...readiness, canSend: true, messageCapability: "verified" };
+  api.getFinanceConversationReadiness.mockResolvedValue(verified);
+  api.getFinanceConversationHostReadiness.mockResolvedValue(verified);
+  api.issueFinanceConversationChallenge.mockResolvedValue({
+    challengeId: "replacement-challenge",
+    nonce: "actual-nonce",
+    protocolVersion: "1",
+    expiresAt: "2026-10-18T23:00:00Z",
+  });
+  const user = open(<OwnerReadiness />);
+  await screen.findByText("Owner Chat available");
+  await screen.findByText(/Message access for this host: verified/);
+  api.getFinanceConversationReadiness.mockRejectedValue(new Error("Readiness offline"));
+  api.getFinanceConversationHostReadiness.mockRejectedValue(new Error("Readiness offline"));
+  await user.click(screen.getByRole("button", { name: "Verify message access" }));
+  await user.click(screen.getByRole("button", { name: "Prepare verification challenge" }));
+  const message =
+    "Challenge prepared, but readiness could not be refreshed. Check Chat readiness again.";
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith(message, { id: "notice" }));
+  expect(
+    (screen.getByLabelText("Instructions for your original host") as HTMLTextAreaElement).value,
+  ).toContain("replacement-challenge");
+  expect(screen.getByText("Owner Chat locked")).toBeInTheDocument();
+  expect(screen.queryByText(/Message access for this host: verified/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Chat is available through/)).not.toBeInTheDocument();
+  expect(screen.queryByText(message)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Copy verification instructions" })).toBeEnabled();
+});
+
+it("keeps saved instructions neutral when the actual host is already verified", async () => {
+  api.getFinanceConversationHostReadiness.mockResolvedValue({
+    ...readiness,
+    canSend: true,
+    messageCapability: "verified",
+  });
+  const user = open();
+  await screen.findByText(/Message access for this host: verified/);
+  await user.click(screen.getByRole("button", { name: "Instructions" }));
+  expect(screen.getByRole("dialog", { name: "Finance host instructions" })).toBeInTheDocument();
+  expect(screen.getByText(/Installation status is unknown/)).toBeInTheDocument();
+  expect(screen.queryByText(/Chat verification is pending/)).not.toBeInTheDocument();
 });

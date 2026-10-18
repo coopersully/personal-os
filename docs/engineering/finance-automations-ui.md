@@ -20,7 +20,11 @@ Owner-level readiness describes overall Chat availability. The host readiness en
 only the selected registration's actual message proof and current authority. Verification issues
 a real server challenge and gives the original authorized host the MCP exchange instructions.
 The human UI never performs that exchange, and copying cannot establish proof. Manual readiness
-checks reread both projections without background polling. Verified message capability remains
+checks reread both projections without background polling. Issuing a replacement challenge resets
+and refetches host and aggregate readiness, including owner-qualified Chat caches, because the new
+challenge supersedes earlier proof. A failed readiness refresh preserves the issued instructions
+and clears stale verified claims. Saved instruction descriptions make no Chat proof claim.
+Verified message capability remains
 separate from execution authorization and maintenance success.
 
 Discrete actions update one Sonner toast from pending to the confirmed result or failure. Failed

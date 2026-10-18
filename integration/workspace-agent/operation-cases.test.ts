@@ -6,6 +6,8 @@ import { discoverToolDictionary, renderToolDictionary } from "./tool-dictionary.
 
 it("exposes domain input fields instead of silently narrowing workspace mutations", async () => {
   const mappings = {
+    submit_finance_ledger_challenge: domain.submitFinanceLedgerChallengeInputSchema,
+    get_finance_conversation_evidence: domain.financeConversationEvidenceReadInputSchema,
     get_finance_spending: domain.financeSpendingQuerySchema,
     get_finance_budget_baseline_qualification: domain.financeBudgetBaselineQualificationQuerySchema,
     prepare_finance_budget_baseline_qualification:

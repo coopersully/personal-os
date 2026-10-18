@@ -123,8 +123,7 @@ export function HostPromptPanel({ status }: { status: HostScheduleStatus }) {
         <DialogHeader>
           <DialogTitle>{schedule.label} instructions</DialogTitle>
           <DialogDescription>
-            Saved setup text for this host. Installation status is unknown. Chat verification is
-            pending.
+            Saved setup text for this host. Installation status is unknown.
           </DialogDescription>
         </DialogHeader>
         {!prompt ? (

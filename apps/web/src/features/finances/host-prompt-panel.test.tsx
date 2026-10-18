@@ -63,6 +63,7 @@ it("copies exact stored text without issuing or claiming installation", async ()
   expect(api.issueAutomationHostPrompt).not.toHaveBeenCalled();
   expect(toast.success).toHaveBeenCalledWith("Instructions copied.", expect.any(Object));
   expect(screen.getByText(/Installation status is unknown/)).toBeInTheDocument();
+  expect(screen.queryByText(/Chat verification is pending/)).not.toBeInTheDocument();
 });
 it("keeps historical selection when another bounded page arrives", async () => {
   api.getAutomationHostPromptHistory

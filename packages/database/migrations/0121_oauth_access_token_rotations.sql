@@ -20,7 +20,7 @@ CREATE UNIQUE INDEX oauth_rotation_predecessor_unique ON oauth_access_token_rota
 CREATE INDEX oauth_rotation_owner_successor_idx ON oauth_access_token_rotations(user_id,to_access_token_id);
 --> statement-breakpoint
 CREATE FUNCTION enforce_oauth_rotation_evidence() RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE predecessor access_tokens%ROWTYPE; successor access_tokens%ROWTYPE; current_xid bigint;
+DECLARE predecessor access_tokens%ROWTYPE; successor access_tokens%ROWTYPE;
 BEGIN
  IF TG_OP = 'DELETE' AND NOT EXISTS (SELECT 1 FROM users WHERE id=OLD.user_id) THEN RETURN OLD; END IF;
  IF TG_OP <> 'INSERT' THEN RAISE EXCEPTION 'OAuth rotation evidence is immutable except for owner erasure' USING ERRCODE='23514'; END IF;
@@ -35,13 +35,9 @@ BEGIN
  OR NOT (NEW.successor_scopes <@ NEW.predecessor_scopes) OR predecessor.revoked_at IS NOT NULL OR successor.revoked_at IS NOT NULL THEN
   RAISE EXCEPTION 'OAuth rotation identities do not match canonical issuance' USING ERRCODE='23514';
  END IF;
- -- A committed predecessor and fresh transaction-local successor prevent fabricated
- -- historical edges/cycles. Compare the 32-bit xmin to the current xid modulo wrap.
- current_xid := (pg_current_xact_id()::text::numeric % 4294967296)::bigint;
- IF (SELECT xmin::text::bigint FROM access_tokens WHERE id=NEW.to_access_token_id) <> current_xid
- OR (SELECT xmin::text::bigint FROM access_tokens WHERE id=NEW.from_access_token_id) = current_xid THEN
-  RAISE EXCEPTION 'OAuth rotation requires a fresh successor and committed predecessor' USING ERRCODE='23514';
- END IF;
+ -- Fresh INSERT provenance is enforced by the private canonical issuer, not
+ -- inferred from tuple xmin (which also changes on ordinary UPDATE).
+ -- This guard validates immutable identity evidence, not arbitrary SQL authority.
  RETURN NEW;
 END;
 $$;

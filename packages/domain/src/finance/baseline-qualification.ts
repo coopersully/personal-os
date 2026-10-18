@@ -52,7 +52,7 @@ export const financeBudgetBaselineSnapshotSchema = z
             categoryId: idSchema.nullable(),
             legacyCategory: z.string().nullable(),
             label: z.string().min(1),
-            amountCents: z.number().int().positive(),
+            amountCents: z.number().int().nonnegative(),
           })
           .strict(),
       )

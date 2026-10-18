@@ -147,3 +147,32 @@ it("reads Finance configuration without a mutation or tenant parameter", async (
   await createFinanceApi(request as FinanceRequest).getFinanceConfiguration();
   expect(request).toHaveBeenCalledExactlyOnceWith("/v1/finances/configuration");
 });
+
+it("encodes exact Spending all/none/uncategorized scopes and validates response", async () => {
+  const request = vi.fn().mockResolvedValue({ spending: { invalid: true } });
+  const api = createFinanceApi(request as FinanceRequest);
+  const base = {
+    scope: {
+      from: "2026-03-07",
+      through: "2026-03-09",
+      timezone: "America/New_York",
+      accountIds: [] as string[] | null,
+      categoryIds: [null, "food"],
+      basis: "personal_cost" as const,
+      includePending: false,
+      subtractRefunds: true,
+    },
+    grouping: "auto" as const,
+    includeUncategorized: true,
+  };
+  await expect(api.getFinanceSpending(base)).rejects.toThrow();
+  let params = new URL(request.mock.calls[0]?.[0] as string, "http://localhost").searchParams;
+  expect(params.get("accountIdsSelection")).toBe("none");
+  expect(params.getAll("categoryIds")).toEqual(["uncategorized", "food"]);
+  expect(params.has("userId")).toBe(false);
+  await expect(
+    api.getFinanceSpending({ ...base, scope: { ...base.scope, accountIds: null } }),
+  ).rejects.toThrow();
+  params = new URL(request.mock.calls[1]?.[0] as string, "http://localhost").searchParams;
+  expect(params.get("accountIdsSelection")).toBe("all");
+});

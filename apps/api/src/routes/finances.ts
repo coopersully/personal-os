@@ -74,6 +74,7 @@ import {
   buildFinancePeriodReviewResult,
   buildFinanceSnapshotResult,
 } from "../finance/presentation-service.js";
+import type { createFinanceSpendingService } from "../finance/spending-service.js";
 import type { createFinanceActionService, SupportedActionKind } from "../finance-action-service.js";
 import type { FinanceChallengeService } from "../finance-challenge-service.js";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
@@ -84,6 +85,7 @@ import type { createFinanceService } from "../finance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
 import type { AppEnv, Principal } from "../types.js";
 import { requireWorkspaceExecutionRoute } from "../workspace-execution.js";
+import { registerFinanceSpendingRoute } from "./finance-spending.js";
 import { parseBody, requireFeatureAccess, requireHuman, requireScope } from "./support.js";
 
 type MutationContext = {
@@ -92,6 +94,7 @@ type MutationContext = {
 };
 
 type FinanceRouteOptions = {
+  financeSpending?: ReturnType<typeof createFinanceSpendingService>;
   app: Hono<AppEnv>;
   db?: Database;
   actions?: ReturnType<typeof createFinanceActionService>;
@@ -120,6 +123,7 @@ export function registerFinanceRoutes({
   financePeriodReviews,
   financePlaybook,
   financePosition,
+  financeSpending,
   financeStatus,
   finances,
   mutationContext,
@@ -198,6 +202,7 @@ export function registerFinanceRoutes({
     if (!financePosition) throw new Error("Finance position service is unavailable.");
     return financePosition;
   };
+  registerFinanceSpendingRoute({ app, spending: financeSpending });
   app.get("/v1/finances/position", async (context) => {
     const accountIds = context.req.query("accountIds");
     const scope = financePositionReadScopeSchema.parse({

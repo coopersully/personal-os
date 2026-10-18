@@ -52,3 +52,36 @@ Historical monthly budget comparison is explicitly unavailable (`historical_budg
 This slice does not guess historical approvals, budget account scope, carry-forward limits or fills.
 The future budget adapter, complete authenticated loader, route, typed client, accessible views,
 and production observation remain separate delivery work.
+
+## Dashboard loader and presentation
+
+The next dashboard slice adds `GET /v1/finances/spending`, backed by a read-only repeatable-read
+snapshot of all authenticated-owner recognition evidence. It does not substitute transaction paging
+for the ledger. Requested foreign accounts/categories fail closed. The URL adapter preserves all,
+explicit no selection, and uncategorized selection; the typed client validates the response.
+Provider-removed posted records are deleted by the existing sync owner; removed pending records
+bearing the canonical self-reference marker are excluded before recognition. Relationships outside
+the selected dates remain available to resolve posted replacement identities.
+
+`buildFinanceSpendingDashboard` groups canonical contributions into current taxonomy buckets or
+categories, retaining exact contribution/allocation drill-down and separate positive area/negative
+adjustments. Categories outside configured buckets appear in Other spending. Hiding uncategorized
+spending discloses its excluded net amount. Unsupported currencies are disclosed by source-history
+IDs for selected accounts and never converted or summed into USD.
+
+Sync freshness and historical coverage are separate. Current sync is not proof of complete history;
+the current source schema has no certified coverage interval. The dashboard therefore reports unknown
+history, or partial history with unavailable/stale source evidence, even though it loads the complete
+stored snapshot. It does not claim an empty stored day is confirmed zero.
+
+Spending display defaults extend the existing revisioned workspace preference API, preserving omitted
+fields and conflicts. URL overrides do not silently rewrite saved defaults. View/grouping, pending,
+uncategorized, basis, refunds, and period kind are saved independently; custom calendar dates are not
+saved as a stale opening period.
+
+Monthly fills remain unavailable. A designated human-approved historical version can establish a
+baseline, but the canonical budget tables do not establish budget account scope or budget currency.
+Debt targets and opaque resource IDs are not account-scope evidence. Neither selected accounts nor
+all current accounts may stand in for all budget accounts. This slice does not claim the monthly-fill
+criterion or multicurrency experience complete. Exact Spending-owned contribution detail is an initial
+destination; full transaction-view drill-down and production/UI acceptance remain separate open gates.

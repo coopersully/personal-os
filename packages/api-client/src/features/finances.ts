@@ -83,6 +83,8 @@ import type {
   FinanceSetupInput,
   FinanceSetupPayload,
   FinanceSnapshot,
+  FinanceSpendingDashboard,
+  FinanceSpendingQuery,
   FinanceStatus,
   FinanceToolResult,
   FinanceTransaction,
@@ -121,6 +123,7 @@ import {
   financeLedgerChallengePageSchema,
   financeLedgerChallengeSchema,
   financePeriodReviewSchema,
+  financeSpendingDashboardSchema,
   financeStatusSchema,
 } from "@personal-os/domain";
 
@@ -165,6 +168,30 @@ export function createFinanceApi(request: FinanceRequest) {
   }
 
   return {
+    async getFinanceSpending(query: FinanceSpendingQuery): Promise<FinanceSpendingDashboard> {
+      const search = new URLSearchParams({
+        from: query.scope.from,
+        through: query.scope.through,
+        timezone: query.scope.timezone,
+        basis: query.scope.basis,
+        includePending: String(query.scope.includePending),
+        subtractRefunds: String(query.scope.subtractRefunds),
+        grouping: query.grouping,
+        includeUncategorized: String(query.includeUncategorized),
+      });
+      for (const key of ["accountIds", "categoryIds"] as const) {
+        const values = query.scope[key];
+        search.set(
+          `${key}Selection`,
+          values === null ? "all" : values.length ? "selected" : "none",
+        );
+        for (const id of values ?? []) search.append(key, id ?? "uncategorized");
+      }
+      const response = await request<{ spending: FinanceSpendingDashboard }>(
+        `/v1/finances/spending?${search}`,
+      );
+      return financeSpendingDashboardSchema.parse(response.spending);
+    },
     async getFinancePosition(scope: FinancePositionReadScope): Promise<FinancePositionEvidence> {
       const search = new URLSearchParams({ from: scope.from, through: scope.through });
       if (scope.accountIds !== undefined) search.set("accountIds", scope.accountIds.join(","));

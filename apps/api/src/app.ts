@@ -62,6 +62,7 @@ import { createFinancePositionService } from "./finance/position-service.js";
 import { createFinanceSmsPort } from "./finance/sms-answer-port.js";
 import { createFinanceSmsApprovalService } from "./finance/sms-approval-service.js";
 import { createFinanceSmsContextDispatcher } from "./finance/sms-context-dispatcher.js";
+import { createFinanceSpendingService } from "./finance/spending-service.js";
 import { resolveFinanceWorks } from "./finance/work-resolver.js";
 import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceChallengeService } from "./finance-challenge-service.js";
@@ -617,6 +618,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     maintenance,
     now,
   });
+  const financeSpending = createFinanceSpendingService({ db: dependencies.db, now });
   const financePosition = createFinancePositionService({ db: dependencies.db, now });
   const financeChallenges = createFinanceChallengeService({
     actions: financeActions,
@@ -1451,6 +1453,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     financePeriodReviews,
     financePlaybook,
     financePosition,
+    financeSpending,
     financeStatus,
     finances,
     mutationContext,

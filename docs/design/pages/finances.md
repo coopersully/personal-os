@@ -383,9 +383,25 @@ records. Savings movements stay outside recurring-cost comparisons and retain th
 controls. Each payment retains its existing exact-record pause, confirm or resume action.
 
 Monthly and annual equivalents require a demonstrated fixed amount and supported currency units.
-Current recurring records do not establish fixedness, so their equivalents remain unavailable with
-an explicit reason; a user-supplied source alone does not confirm a fixed cost. Missing currency
-never becomes USD, and inferred, review-needed and inactive records remain distinct. The pure
-normalization contract supports exact factors 52/26/24/12/4/1 with currency-separated totals, but the
-adapter must supply applicable evidence before it can expose them. Service identity and price
-history remain unknown until independently established; merchant names prove neither.
+Legacy recurring records do not establish fixedness. Confirm cost records a person's fixed/variable
+statement, currency and as-of date against the exact current obligation revision, amount, cadence
+and account. Only applicable owner-scoped evidence qualifies a fixed equivalent; stale, variable,
+unknown-currency and unsupported-unit records remain excluded with an explicit reason. Annual
+factors are 52/26/24/12/4/1; monthly equivalents show their rounding assumption. Currency-separated
+confirmed and suspected totals describe only their disclosed eligible subset. Missing currency
+never becomes USD. Service identity and price history remain unknown; merchant names prove neither.
+
+### Goal progress and hypothetical scenarios
+
+Wealth distinguishes legacy progress from a person's confirmed progress, including an explicitly
+confirmed zero. Confirmation records currency and as-of date against the current goal version;
+a changed version requires reconfirmation before precise saved-goal projections. Owner identity
+and planning timezone come from the authenticated read. Authoritative access denials hide cached
+private cost/goal evidence and dismiss its confirmation state; transient read failures retain data.
+
+The saved-goal explorer and separate session-only hypothetical explorer compare a baseline with up
+to three alternatives, anchored monthly contributions and zero assumed growth. Curves are bounded
+at 1,200 periods and paginated. Achieved goals, nonpositive contributions, missing evidence and
+beyond-horizon estimates stay explicit. Exploring changes never saves a budget or actual progress.
+Confirmation writes retain their exact request/key on uncertain results, refresh canonical reads,
+and use Sonner for loading and outcomes; field correction guidance stays beside the relevant input.

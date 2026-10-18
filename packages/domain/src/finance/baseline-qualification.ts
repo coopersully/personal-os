@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { idSchema, isoDateTimeSchema } from "../common.js";
+import { actorTypeSchema, idSchema, isoDateTimeSchema } from "../common.js";
 import { financeMonthSchema } from "./budget.js";
 
 const currencySchema = z.string().regex(/^[A-Z]{3}$/);
@@ -70,7 +70,7 @@ export const financeBudgetBaselineSnapshotSchema = z
       .object({
         approvedAt: isoDateTimeSchema.nullable(),
         actorId: z.string().nullable(),
-        actorType: z.enum(["agent", "system", "user"]).nullable(),
+        actorType: actorTypeSchema.nullable(),
       })
       .strict(),
   })
@@ -116,7 +116,7 @@ export const financeBudgetBaselineQualificationReadSchema = z.discriminatedUnion
               planId: idSchema,
               budgetVersion: z.number().int().positive(),
               approvedAt: isoDateTimeSchema,
-              originalActorType: z.enum(["user", "agent", "system"]).nullable(),
+              originalActorType: actorTypeSchema.nullable(),
               period: z
                 .object({ from: z.iso.date(), through: z.iso.date(), timezone: timezoneSchema })
                 .nullable(),

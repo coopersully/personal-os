@@ -1352,3 +1352,4 @@ export const createFinanceCategoryInputSchema = z.strictObject({
 export type CreateFinanceCategoryInput = z.infer<typeof createFinanceCategoryInputSchema>;
 
 export * from "./finance/onboarding-readiness.js";
+export * from "./finance/conversation.js";

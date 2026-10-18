@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import { ApiClientError } from "@personal-os/api-client";
 import type { FinanceActivityEntry, FinanceActivityPage as Page } from "@personal-os/domain";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -193,4 +194,88 @@ it.each([
   render(view(vi.fn().mockResolvedValue(page([{ ...entry, kind: "financial_action", status }]))));
   expect(await screen.findByText(status)).toBeVisible();
   expect(screen.queryByText(/Answer accepted. This record/)).not.toBeInTheDocument();
+});
+
+it.each([
+  401, 403,
+])("clears same-owner private results and pagination after authoritative %s refresh denial", async (status) => {
+  const read = vi
+    .fn()
+    .mockResolvedValueOnce(page([entry], "private-cursor"))
+    .mockRejectedValueOnce(new ApiClientError({ status, code: "denied", message: "Denied" }))
+    .mockResolvedValueOnce(page([]));
+  render(view(read));
+  await screen.findByText(entry.explanation);
+  fireEvent.click(screen.getByRole("button", { name: "Refresh activity" }));
+  await waitFor(() => expect(screen.queryByText(entry.explanation)).not.toBeInTheDocument());
+  expect(screen.queryByRole("button", { name: "Load more activity" })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Activity coverage")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Retry activity" }));
+  await screen.findByText(/No recorded activity/);
+  expect(read.mock.calls[2]?.[0]).toEqual({ limit: 50 });
+});
+it.each([401, 403])("clears same-owner evidence on direct pagination %s denial", async (status) => {
+  const read = vi
+    .fn()
+    .mockResolvedValueOnce(page([entry], "private-cursor"))
+    .mockRejectedValueOnce(new ApiClientError({ status, code: "denied", message: "Denied" }));
+  render(view(read));
+  await screen.findByText(entry.explanation);
+  fireEvent.click(screen.getByRole("button", { name: "Load more activity" }));
+  await screen.findByRole("button", { name: "Retry activity" });
+  expect(read.mock.calls[1]?.[0]).toMatchObject({ cursor: "private-cursor" });
+  expect(screen.queryByText(entry.explanation)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Load more activity" })).not.toBeInTheDocument();
+  expect(toast.error).toHaveBeenCalledWith(expect.any(String), { id: "toast-id" });
+});
+it.each([
+  "Retry activity",
+  "Refresh activity",
+])("uses only Sonner pending feedback for explicit %s without a page", async (action) => {
+  let resolve!: (value: Page) => void;
+  const read = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("Transient"))
+    .mockImplementationOnce(
+      () =>
+        new Promise<Page>((done) => {
+          resolve = done;
+        }),
+    );
+  render(view(read));
+  await screen.findByRole("button", { name: "Retry activity" });
+  fireEvent.click(screen.getByRole("button", { name: action }));
+  expect(toast.loading).toHaveBeenCalledWith("Loading activity…");
+  expect(screen.queryByText("Loading activity…")).not.toBeInTheDocument();
+  resolve(page([]));
+  await screen.findByText(/No recorded activity/);
+  expect(toast.success).toHaveBeenCalledWith("Activity loaded", { id: "toast-id" });
+});
+
+it("cannot restore denied evidence from an older in-flight response", async () => {
+  let resolve!: (value: Page) => void;
+  const read = vi
+    .fn()
+    .mockResolvedValueOnce(page([entry], "old-cursor"))
+    .mockImplementationOnce(
+      () =>
+        new Promise<Page>((done) => {
+          resolve = done;
+        }),
+    )
+    .mockRejectedValueOnce(
+      new ApiClientError({ status: 403, code: "forbidden", message: "Denied" }),
+    );
+  const rendered = render(view(read));
+  await screen.findByText(entry.explanation);
+  fireEvent.click(screen.getByRole("button", { name: "Refresh activity" }));
+  // Exercise overlapping request settlement independent of the disabled control affordance.
+  const form = rendered.container.querySelector("form");
+  if (!form) throw new Error("Activity filter form missing");
+  fireEvent.submit(form);
+  await screen.findByRole("button", { name: "Retry activity" });
+  resolve(page([entry], "old-cursor"));
+  await waitFor(() => expect(toast.dismiss).toHaveBeenCalledWith("toast-id"));
+  expect(screen.queryByText(entry.explanation)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Load more activity" })).not.toBeInTheDocument();
 });

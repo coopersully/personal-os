@@ -1,3 +1,4 @@
+import { ApiClientError } from "@personal-os/api-client";
 import {
   type FinanceActivityPage as FinanceActivityPageData,
   type FinanceActivityQuery,
@@ -25,6 +26,7 @@ function Activity({ readActivity }: Props) {
   const [page, setPage] = useState<FinanceActivityPageData>();
   const [query, setQuery] = useState<FinanceActivityQuery>({ limit: 50 });
   const [pending, setPending] = useState(false);
+  const [passiveLoading, setPassiveLoading] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const alive = useRef(true);
   const generation = useRef(0);
@@ -36,6 +38,7 @@ function Activity({ readActivity }: Props) {
     async (next: FinanceActivityQuery, append: boolean, explicit: boolean) => {
       const request = ++generation.current;
       setPending(true);
+      setPassiveLoading(!explicit);
       const toastId = explicit
         ? toast.loading(append ? "Loading more activity…" : "Loading activity…")
         : undefined;
@@ -61,19 +64,34 @@ function Activity({ readActivity }: Props) {
         );
         setQuery({ ...next, cursor: undefined });
         if (toastId !== undefined) toast.success("Activity loaded", { id: toastId });
-      } catch {
+      } catch (error) {
         if (!alive.current || generation.current !== request) {
           if (toastId !== undefined) toast.dismiss(toastId);
           return;
         }
+        const accessDenied =
+          error instanceof ApiClientError && (error.status === 401 || error.status === 403);
+        if (accessDenied) {
+          // A retained page is no longer authorized, even when owner identity has not changed.
+          setPage(undefined);
+          setQuery({ limit: 50 });
+          setPending(false);
+          setPassiveLoading(false);
+          setAttempted(true);
+          actionToast.current = undefined;
+          generation.current += 1;
+        }
         toast.error(
-          "Could not load activity. Try again.",
+          accessDenied
+            ? "Activity access is unavailable. Sign in or check your permissions."
+            : "Could not load activity. Try again.",
           toastId === undefined ? undefined : { id: toastId },
         );
       } finally {
         if (alive.current && generation.current === request) {
           actionToast.current = undefined;
           setPending(false);
+          setPassiveLoading(false);
           setAttempted(true);
         }
       }
@@ -173,7 +191,7 @@ function Activity({ readActivity }: Props) {
           ) : null}
         </section>
       ) : null}
-      {pending && !page ? <p>Loading activity…</p> : null}
+      {passiveLoading && !page ? <p>Loading activity…</p> : null}
       {page?.entries.length === 0 ? (
         <p>No recorded activity matches these filters. Coverage is partial.</p>
       ) : null}

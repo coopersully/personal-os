@@ -74,10 +74,12 @@ the current source schema has no certified coverage interval. The dashboard ther
 history, or partial history with unavailable/stale source evidence, even though it loads the complete
 stored snapshot. It does not claim an empty stored day is confirmed zero.
 
-Spending display defaults extend the existing revisioned workspace preference API, preserving omitted
-fields and conflicts. URL overrides do not silently rewrite saved defaults. View/grouping, pending,
-uncategorized, basis, refunds, and period kind are saved independently; custom calendar dates are not
-saved as a stale opening period.
+Spending display contracts extend the existing revisioned workspace preference API, preserving
+omitted fields and conflicts. URL overrides do not silently rewrite defaults. View/grouping, pending,
+uncategorized, basis, refunds, and period kind have separate fields; custom calendar dates are not
+saved as a stale opening period. Durable persistence of these new fields requires the separately
+owned additive Finance settings storage migration and readback verification; domain defaults and
+UI hooks alone do not establish saved state.
 
 Monthly fills remain unavailable. A designated human-approved historical version can establish a
 baseline, but the canonical budget tables do not establish budget account scope or budget currency.

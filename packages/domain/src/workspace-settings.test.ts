@@ -79,3 +79,31 @@ describe("workspace settings contracts", () => {
     ).toBe(false);
   });
 });
+
+it("adds Spending defaults without resetting existing account/transaction preferences or PATCH omissions", () => {
+  const legacy = resolveWorkspaceSettings("finances", {
+    revision: 7,
+    spendAccountIds: [],
+    financeTransactionView: "cards",
+    financeTransactionGroup: "category",
+  });
+  expect(legacy.preferences).toMatchObject({
+    spendAccountIds: [],
+    financeTransactionView: "cards",
+    financeTransactionGroup: "category",
+    financeSpendingView: "bubbles",
+    financeSpendingGrouping: "auto",
+    financeSpendingIncludePending: true,
+  });
+  const update = workspaceSettingsUpdateSchemas.finances.parse({
+    expectedRevision: 7,
+    preferences: { financeSpendingIncludePending: false },
+  });
+  expect(update.preferences).toEqual({ financeSpendingIncludePending: false });
+  expect(
+    workspaceSettingsUpdateSchemas.finances.safeParse({
+      expectedRevision: 7,
+      preferences: { financeSpendingView: "rhythm" },
+    }).success,
+  ).toBe(true);
+});

@@ -6,7 +6,7 @@ import {
   type FinanceOnboardingSnapshot,
 } from "@personal-os/domain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -27,21 +27,56 @@ const blockerCopy: Record<FinanceOnboardingBlocker, string> = {
 export function FinanceOnboardingReview({ adapter }: { adapter: FinanceOnboardingAdapter }) {
   const client = useQueryClient();
   const [reload, setReload] = useState(0);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const query = useQuery({
     queryKey: ["finance-onboarding", adapter],
-    queryFn: () => adapter.getFinanceOnboarding(),
+    queryFn: async ({ signal }) => {
+      const refreshing = client.getQueryData(["finance-onboarding", adapter]) !== undefined;
+      const id = toast.loading(refreshing ? "Reloading setup review…" : "Loading setup review…");
+      const onAbort = () => toast.dismiss(id);
+      signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) onAbort();
+      try {
+        const next = await adapter.getFinanceOnboarding();
+        if (!signal.aborted) {
+          if (refreshing) toast.success("Setup review reloaded", { id });
+          else toast.dismiss(id);
+        }
+        return next;
+      } catch (error) {
+        if (!signal.aborted)
+          toast.error(
+            refreshing
+              ? "Setup review could not reload. Your edits are still here."
+              : "Setup review could not load. Try again.",
+            { id },
+          );
+        throw error;
+      } finally {
+        signal.removeEventListener("abort", onAbort);
+      }
+    },
     retry: false,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
-  if (query.isPending) return <p role="status">Loading setup review…</p>;
-  if (query.isError && !query.data)
+  if (!query.data)
     return (
-      <div role="alert">
-        Setup review could not load.{" "}
-        <Button onClick={() => void query.refetch()}>Retry setup review</Button>
-      </div>
+      <section aria-label="Setup review" className="grid gap-4 rounded-lg bg-card p-4">
+        <h2 className="font-medium">Review your setup</h2>
+        {query.isError ? (
+          <Button disabled={query.isFetching} onClick={() => void query.refetch()}>
+            Retry setup review
+          </Button>
+        ) : null}
+      </section>
     );
   return (
     <ReviewSnapshot
@@ -51,14 +86,8 @@ export function FinanceOnboardingReview({ adapter }: { adapter: FinanceOnboardin
       onSnapshot={(next) => client.setQueryData(["finance-onboarding", adapter], next)}
       reloading={query.isFetching}
       onReload={async () => {
-        const id = toast.loading("Reloading setup review…");
         const result = await query.refetch();
-        if (result.isError)
-          toast.error("Setup review could not reload. Your edits are still here.", { id });
-        else {
-          toast.success("Setup review reloaded", { id });
-          setReload((value) => value + 1);
-        }
+        if (!result.isError && mounted.current) setReload((value) => value + 1);
       }}
     />
   );

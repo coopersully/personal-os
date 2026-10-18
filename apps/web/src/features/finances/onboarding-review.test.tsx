@@ -10,6 +10,7 @@ const toast = vi.hoisted(() => ({
   loading: vi.fn(() => "setup-review-toast"),
   success: vi.fn(),
   error: vi.fn(),
+  dismiss: vi.fn(),
 }));
 vi.mock("sonner", () => ({ toast }));
 beforeEach(() => vi.clearAllMocks());
@@ -68,6 +69,7 @@ it("saves explicit unknown and manual later before durable completion", async ()
   const client = new QueryClient();
   const adapter = show(snapshot(), client);
   await screen.findByLabelText("Income");
+  vi.clearAllMocks();
   expect(screen.queryByRole("option", { name: /^None$/ })).not.toBeInTheDocument();
   await user.selectOptions(screen.getByLabelText("Income"), "unknown");
   await user.click(screen.getByRole("checkbox"));
@@ -130,6 +132,7 @@ it("retains edits after a conflict and requires explicit reload before another w
   const user = userEvent.setup();
   const adapter = show();
   await screen.findByLabelText("Income");
+  vi.clearAllMocks();
   await user.selectOptions(screen.getByLabelText("Income"), "unknown");
   await user.selectOptions(screen.getByLabelText("Automation"), "later");
   adapter.saveFinanceOnboardingAnswers.mockRejectedValue(new Error("Revision conflict"));
@@ -209,6 +212,7 @@ it("keeps failed explicit reload feedback in Sonner and preserves the locked dra
   const user = userEvent.setup();
   const adapter = show();
   await screen.findByLabelText("Income");
+  vi.clearAllMocks();
   await user.selectOptions(screen.getByLabelText("Income"), "unknown");
   await user.click(screen.getByRole("checkbox"));
   await user.selectOptions(screen.getByLabelText("Automation"), "later");
@@ -310,4 +314,103 @@ it("explicitly reloads saved profile facts and replaces unsaved review choices o
   expect(adapter.completeFinanceOnboarding).not.toHaveBeenCalled();
   expect(toast.success).toHaveBeenCalledWith("Setup review reloaded", { id: "setup-review-toast" });
   expect(screen.queryByText("Setup review reloaded")).not.toBeInTheDocument();
+});
+
+it("announces initial and retry load failures through one toast lifecycle without inline result copy", async () => {
+  const get = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("Initial transport failure"))
+    .mockRejectedValueOnce(new Error("Retry transport failure"))
+    .mockResolvedValueOnce(snapshot());
+  const adapter = {
+    getFinanceOnboarding: get,
+    saveFinanceOnboardingAnswers: vi.fn(),
+    completeFinanceOnboarding: vi.fn(),
+  };
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <FinanceOnboardingReview adapter={adapter} />
+    </QueryClientProvider>,
+  );
+  const retry = await screen.findByRole("button", { name: "Retry setup review" });
+  expect(toast.loading).toHaveBeenCalledExactlyOnceWith("Loading setup review…");
+  expect(toast.error).toHaveBeenCalledExactlyOnceWith("Setup review could not load. Try again.", {
+    id: "setup-review-toast",
+  });
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Setup review could not load/)).not.toBeInTheDocument();
+  expect(screen.queryByText("Loading setup review…")).not.toBeInTheDocument();
+  expect(screen.queryByText(/transport failure/)).not.toBeInTheDocument();
+  await userEvent.click(retry);
+  await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(2));
+  expect(toast.loading).toHaveBeenCalledTimes(2);
+  expect(toast.error).toHaveBeenLastCalledWith("Setup review could not load. Try again.", {
+    id: "setup-review-toast",
+  });
+  expect(toast.success).not.toHaveBeenCalled();
+  expect(toast.dismiss).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: "Retry setup review" }));
+  await screen.findByLabelText("Income");
+  expect(toast.loading).toHaveBeenCalledTimes(3);
+  expect(toast.dismiss).toHaveBeenCalledExactlyOnceWith("setup-review-toast");
+  expect(toast.success).not.toHaveBeenCalled();
+  expect(toast.error).toHaveBeenCalledTimes(2);
+  expect(get).toHaveBeenCalledTimes(3);
+  expect(screen.queryByText(/Setup review could not load/)).not.toBeInTheDocument();
+});
+
+it("does not replay load feedback when mounting cached setup state", async () => {
+  const adapter = {
+    getFinanceOnboarding: vi.fn(),
+    saveFinanceOnboardingAnswers: vi.fn(),
+    completeFinanceOnboarding: vi.fn(),
+  };
+  const client = new QueryClient();
+  client.setQueryData(["finance-onboarding", adapter], snapshot());
+  render(
+    <QueryClientProvider client={client}>
+      <FinanceOnboardingReview adapter={adapter} />
+    </QueryClientProvider>,
+  );
+  await screen.findByLabelText("Income");
+  expect(adapter.getFinanceOnboarding).not.toHaveBeenCalled();
+  expect(toast.loading).not.toHaveBeenCalled();
+  expect(toast.success).not.toHaveBeenCalled();
+  expect(toast.dismiss).not.toHaveBeenCalled();
+});
+
+it.each([
+  "resolve",
+  "reject",
+] as const)("dismisses a held load immediately on unmount and suppresses its later %s outcome", async (outcome) => {
+  let resolveLoad!: (next: FinanceOnboardingSnapshot) => void;
+  let rejectLoad!: (error: Error) => void;
+  const held = new Promise<FinanceOnboardingSnapshot>((resolve, reject) => {
+    resolveLoad = resolve;
+    rejectLoad = reject;
+  });
+  const adapter = {
+    getFinanceOnboarding: vi.fn().mockReturnValue(held),
+    saveFinanceOnboardingAnswers: vi.fn(),
+    completeFinanceOnboarding: vi.fn(),
+  };
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <FinanceOnboardingReview adapter={adapter} />
+    </QueryClientProvider>,
+  );
+  await waitFor(() =>
+    expect(toast.loading).toHaveBeenCalledExactlyOnceWith("Loading setup review…"),
+  );
+  view.unmount();
+  expect(toast.dismiss).toHaveBeenCalledExactlyOnceWith("setup-review-toast");
+  await act(async () => {
+    if (outcome === "resolve") resolveLoad(snapshot());
+    else rejectLoad(new Error("Late failed request"));
+  });
+  expect(toast.dismiss).toHaveBeenCalledTimes(1);
+  expect(toast.success).not.toHaveBeenCalled();
+  expect(toast.error).not.toHaveBeenCalled();
 });

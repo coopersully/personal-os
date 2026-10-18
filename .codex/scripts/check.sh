@@ -14,6 +14,11 @@ required_files=(
   ".agents/skills/ship-it/scripts/evaluate_readiness_test.py"
   ".github/pull_request_template.md"
   "docs/engineering/pr-rubric.md"
+  "docs/engineering/acceptance-contract.md"
+  "docs/engineering/acceptance-policy.json"
+  "docs/engineering/code-standards.md"
+  ".agents/skills/deep-review/SKILL.md"
+  ".agents/skills/handoff/SKILL.md"
   "docs/engineering/work-context.md"
   ".codex/runtime/Dockerfile.dev"
   ".codex/runtime/compose.yaml"
@@ -59,5 +64,5 @@ grep -Fq 'types: [edited, opened, ready_for_review, reopened, synchronize]' .git
   exit 1
 }
 
-node --test .github/scripts/wait-source-ci.test.mjs
+node --test .github/scripts/wait-source-ci.test.mjs scripts/verification-plan.test.mjs scripts/development-plan.test.mjs
 echo "Codex repository check passed."

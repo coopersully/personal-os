@@ -39,7 +39,7 @@ uses this exact policy.
 5. **Reconcile live intent.** Cancellations and material requirement changes affect running work and
    invalidate acceptance even when the code did not change. Instruction revisions are recorded;
    editing a skill cannot silently increase a running agent's authority.
-6. **Preserve independent review.** Worker self-review and CodeRabbit are inputs. The orchestrator
+6. **Preserve independent review.** Worker self-review and optional bot feedback are inputs. The orchestrator
    also examines requirements, diff, and raw evidence. Copying old conclusions into a new task does
    not constitute fresh review; independence requires a new assessment.
 7. **Measure the pilot before scaling.** Start with one orchestrator and at most two workers. Watch
@@ -96,7 +96,7 @@ Worker edits must not be able to change the controller policy that evaluates the
 
 Such a backend can run under the existing task oversight model. Evaluate Symphony or Agent
 Orchestrator against those requirements before building custom infrastructure. A new backend must
-retain the current Linear source of truth, role separation, CodeRabbit requirement, and exact-head
+retain the current Linear source of truth, role separation, mandatory independent deep-review, and exact-head
 merge checks. It needs real integration/recovery tests; Markdown validation is insufficient.
 
 The first live pilot should demonstrate one complete issue-to-merge outcome plus an interrupted

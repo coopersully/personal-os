@@ -1,10 +1,15 @@
 # Delivery verification
 
-Ship one frozen candidate with complete evidence. This contract applies to ship-it and its
+Ship one frozen candidate with complete evidence. Use [verification efficiency](verification-efficiency.md)
+for focused iteration and [acceptance](acceptance-contract.md) for review/production gates. This contract applies to ship-it and its
 create-pr, catchup, review-remediation, and network callers. Focused checks run during implementation;
 full verification runs after review findings converge. A full run against a changing checkout is
 not acceptance evidence. Stage and commit the candidate before starting it; keep external metadata
 and private evidence outside the source tree.
+
+Draft publication and early review require focused evidence, not a separate full run. This sequencing
+applies to ordinary contributions as well as handoff/network callers; see the
+[development handbook](development-handbook.md). Final acceptance still requires every stage below.
 
 ## Verification equivalence
 
@@ -95,3 +100,12 @@ must additionally prove GitHub Actions read permission, source-run discovery, bo
 required-check publication. Scheduler creation must be verified on its host; a checkpoint alone
 cannot wake a chat. A provider outage, inaccessible fork run, or exhausted review quota can still
 block delivery despite green local tests. Persist the exact gap and next trigger, never infer success.
+
+## Ownership through production
+
+The repository handoff skill owns delivery through production acceptance and reconciliation;
+ship-it is its protected-merge engine and compatibility entrypoint. Keep all existing merge gates.
+Use repository deep-review instead of the retired personal refine-pr workflow. A readiness verdict
+of TERMINAL after merge ends only the merge operation. Retain the owner and dedicated wakeup until
+the reviewed production plan is verified or explicitly blocked. Offline acceptance and checkpoint
+validation do not authenticate provider evidence; inspect the recorded receipts.

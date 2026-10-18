@@ -682,7 +682,7 @@ export function createFinanceBalanceBasisService({
           const today = localDateToIso(localDateAt(asOf, timezone.planningTimezone));
           // Reversal restores an occurrence's residual; it never cancels its commitment.
           // Only the canonical effective interval determines whether history is forecastable.
-          const active = schedule.occurrences.filter(row => row.inCurrentSchedule);
+          const active = schedule.occurrences.filter((row) => row.inCurrentSchedule);
           const paydayRow = active
             .filter(
               (row) =>

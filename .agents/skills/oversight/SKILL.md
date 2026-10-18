@@ -25,6 +25,12 @@ role contract and report missing launch/recovery capabilities. Oversight is a co
 for those roles, not another agent above them. Neither head nor orchestrator implements; only an
 authorized orchestrator merges. Workers never merge.
 
+For new or replacement implementation worker chats, default to **GPT-6.1-Sol Light**: explicitly set
+`model="gpt-6.1-sol"` and reasoning `low` (`thinking="low"` in chat tools), unless the user explicitly
+overrides it. Record and preserve this preference when resuming workers. This default applies only
+to implementation workers; preserve Lead and independent reviewer settings. If the requested model
+or reasoning setting is unavailable, report the dispatch blocker instead of silently choosing a fallback.
+
 Prepare the epic admission record before dispatch. Preserve existing explicit grants; ask only for
 missing decisions or authority after making the plan concrete. New user-owned chats require explicit
 task-creation authorization. Messaging, Linear writes, sidebar organization, recurring follow-ups

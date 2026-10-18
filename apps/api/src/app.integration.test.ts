@@ -5792,13 +5792,25 @@ describe.sequential("ilo API", () => {
         })
       ).status,
     ).toBe(200);
-    expect(
-      (
-        await request("/v1/finances/budgets", {
-          body: { category: "Groceries", limit: 400, month: "2026-07" },
-        })
-      ).status,
-    ).toBe(201);
+    const budgetProposalResponse = await request("/v1/finances/budgets", {
+      body: { category: "Groceries", limit: 400, month: "2026-07" },
+    });
+    expect(budgetProposalResponse.status).toBe(202);
+    const budgetProposal = await payload(budgetProposalResponse);
+    expect(budgetProposal).toMatchObject({
+      status: "pending_review",
+      review: { id: expect.any(String) },
+    });
+    expect((await payload(await request("/v1/finances/budgets/status"))).budgets).toEqual([]);
+    const budgetApprovalResponse = await request(
+      `/v1/finances/action-reviews/${budgetProposal.review.id}/approve`,
+      {
+        auth: "session",
+        method: "POST",
+      },
+    );
+    expect(budgetApprovalResponse.status).toBe(200);
+    expect(await payload(budgetApprovalResponse)).toMatchObject({ status: "applied" });
     expect((await payload(await request("/v1/finances/budgets/status"))).budgets).toEqual([
       expect.objectContaining({ remaining: 381.5, spent: 18.5 }),
     ]);

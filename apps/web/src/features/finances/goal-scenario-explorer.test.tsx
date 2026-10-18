@@ -146,3 +146,61 @@ it("lazily renders at most 24 curve points and preserves access to the final hor
     within(baseline).getByText("Contributions 1153–1176 of 1200 · Page 49 of 50"),
   ).toBeInTheDocument();
 });
+
+it("uses only applicable saved evidence, preserves provenance and never asks for redundant session confirmation", async () => {
+  const ownerUserId = "11111111-1111-4111-8111-111111111111";
+  const goal = {
+    id: "22222222-2222-4222-8222-222222222222",
+    name: "Saved reserve",
+    version: 3,
+    currentAmount: 0,
+    targetAmount: 10,
+    status: "active" as const,
+    priority: "high" as const,
+    deadline: null,
+    createdAt: "2027-01-30T12:00:00Z",
+    updatedAt: "2027-01-30T12:00:00Z",
+    planningEvidence: {
+      kind: "goal" as const,
+      evidenceId: "33333333-3333-4333-8333-333333333333",
+      ownerUserId,
+      actor: { type: "user" as const, userId: ownerUserId },
+      provenance: "explicit_user" as const,
+      currencyCode: "EUR",
+      asOf: "2027-01-30",
+      recordedAt: "2027-01-30T12:00:00Z",
+      goalId: "22222222-2222-4222-8222-222222222222",
+      goalVersion: 3,
+      progressAmountCents: 0,
+    },
+  };
+  const reconfirm = vi.fn();
+  const { rerender } = render(
+    <FinanceGoalScenarioExplorer
+      connectedGoal={{ goal, ownerUserId, todayLocalDate: "2027-01-31" }}
+      onConfirmProgress={reconfirm}
+    />,
+  );
+  expect(
+    screen.getByText(/Confirmed by you as of 2027-01-30 · EUR · Goal version 3/),
+  ).toBeInTheDocument();
+  expect(screen.getByLabelText("Confirmed goal progress")).toHaveValue("0");
+  expect(screen.getByLabelText("Confirmed goal currency")).toHaveValue("EUR");
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  fill("Baseline monthly contribution", "4");
+  compare();
+  expect(screen.getByText("Hypothetical completion: 2027-03-31")).toBeInTheDocument();
+  rerender(
+    <FinanceGoalScenarioExplorer
+      connectedGoal={{ goal: { ...goal, version: 4 }, ownerUserId, todayLocalDate: "2027-01-31" }}
+      onConfirmProgress={reconfirm}
+    />,
+  );
+  expect(
+    screen.getByText(/Current progress and currency are unknown for this goal version/),
+  ).toBeInTheDocument();
+  expect(screen.queryByLabelText("Hypothetical goal results")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Compare hypothetical contributions" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Confirm saved progress" }));
+  expect(reconfirm).toHaveBeenCalledOnce();
+});

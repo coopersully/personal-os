@@ -1,4 +1,8 @@
-import { type GoalScenarioInput, projectGoalScenarios } from "@personal-os/domain";
+import {
+  type FinanceGoal,
+  type GoalScenarioInput,
+  projectGoalScenarios,
+} from "@personal-os/domain";
 import { useId, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -13,6 +17,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+
+import { goalProgressApplicability } from "./goal-progress-confirmation.js";
 
 type Alternative = { id: string; name: string; amount: string };
 type Projection = ReturnType<typeof projectGoalScenarios>;
@@ -126,15 +132,34 @@ function ContributionCurve({
 }
 
 /** View-only session state. Saved goal values never establish confirmed progress or currency. */
-export function FinanceGoalScenarioExplorer({ asOfLocalDate = "" }: { asOfLocalDate?: string }) {
+export function FinanceGoalScenarioExplorer({
+  asOfLocalDate = "",
+  connectedGoal,
+  onConfirmProgress,
+}: {
+  asOfLocalDate?: string;
+  connectedGoal?: { goal: FinanceGoal; ownerUserId: string; todayLocalDate: string };
+  onConfirmProgress?: () => void;
+}) {
+  const applicability = connectedGoal
+    ? goalProgressApplicability(
+        connectedGoal.goal,
+        connectedGoal.ownerUserId,
+        connectedGoal.todayLocalDate,
+      )
+    : null;
+  const evidence =
+    applicability?.state === "applicable" && applicability.evidence.kind === "goal"
+      ? applicability.evidence
+      : null;
   const id = useId();
   const [draft, setDraft] = useState({
-    target: "",
-    currency: "",
-    progress: "",
+    target: connectedGoal ? String(connectedGoal.goal.targetAmount) : "",
+    currency: evidence?.currencyCode ?? "",
+    progress: evidence ? String(evidence.progressAmountCents / 100) : "",
     baseline: "",
-    asOf: asOfLocalDate,
-    firstDate: asOfLocalDate,
+    asOf: connectedGoal?.todayLocalDate ?? asOfLocalDate,
+    firstDate: connectedGoal?.todayLocalDate ?? asOfLocalDate,
     targetDate: "",
   });
   const [confirmed, setConfirmed] = useState(false);
@@ -153,12 +178,26 @@ export function FinanceGoalScenarioExplorer({ asOfLocalDate = "" }: { asOfLocalD
   return (
     <section aria-labelledby={`${id}-title`} className="flex flex-col gap-4">
       <h2 id={`${id}-title`} className="font-semibold">
-        Explore a hypothetical goal
+        {connectedGoal ? `Explore ${connectedGoal.goal.name}` : "Explore a hypothetical goal"}
       </h2>
       <p className="text-muted-foreground text-sm">
         Compare fixed monthly contributions with zero interest or growth. These inputs stay in this
         session and do not change goals, budgets, or allocations.
       </p>
+      {connectedGoal ? (
+        <div className="flex flex-col gap-2">
+          <p className="text-sm">
+            {evidence
+              ? `Confirmed by you as of ${evidence.asOf} · ${evidence.currencyCode} · Goal version ${evidence.goalVersion}. This statement is not bank verification.`
+              : "Current progress and currency are unknown for this goal version. Confirm them before using saved goal progress."}
+          </p>
+          {onConfirmProgress ? (
+            <Button type="button" variant="secondary" onClick={onConfirmProgress}>
+              {evidence ? "Reconfirm saved progress" : "Confirm saved progress"}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       <form
         className="flex flex-col gap-4"
         onSubmit={(event) => {
@@ -166,18 +205,33 @@ export function FinanceGoalScenarioExplorer({ asOfLocalDate = "" }: { asOfLocalD
           try {
             const revision = `hypothetical-session:${crypto.randomUUID()}`;
             const input: GoalScenarioInput = {
-              target: { amountCents: cents(draft.target), currency: draft.currency.trim() },
-              sourceGoalRevision: revision,
+              target: {
+                amountCents: cents(
+                  connectedGoal ? String(connectedGoal.goal.targetAmount) : draft.target,
+                ),
+                currency: evidence?.currencyCode ?? draft.currency.trim(),
+              },
+              sourceGoalRevision: connectedGoal
+                ? `${connectedGoal.goal.id}:v${connectedGoal.goal.version}`
+                : revision,
               asOfLocalDate: draft.asOf,
               progress: {
-                amountCents: draft.progress.trim() ? cents(draft.progress) : null,
-                currency: draft.currency.trim(),
-                confirmed,
-                provenance: confirmed
-                  ? "Explicit user confirmation for this hypothetical session"
-                  : null,
-                asOfLocalDate: draft.asOf,
-                sourceRevision: revision,
+                amountCents: connectedGoal
+                  ? (evidence?.progressAmountCents ?? null)
+                  : draft.progress.trim()
+                    ? cents(draft.progress)
+                    : null,
+                currency: evidence?.currencyCode ?? draft.currency.trim(),
+                confirmed: connectedGoal ? evidence !== null : confirmed,
+                provenance: connectedGoal
+                  ? evidence
+                    ? "explicit_user"
+                    : null
+                  : confirmed
+                    ? "Explicit user confirmation for this hypothetical session"
+                    : null,
+                asOfLocalDate: connectedGoal ? (evidence?.asOf ?? null) : draft.asOf,
+                sourceRevision: connectedGoal ? (evidence?.evidenceId ?? null) : revision,
               },
               baseline: { name: "Baseline", monthlyContributionCents: cents(draft.baseline) },
               alternatives: alternatives.map((row) => ({
@@ -217,30 +271,53 @@ export function FinanceGoalScenarioExplorer({ asOfLocalDate = "" }: { asOfLocalD
               ] as const
             ).map(([key, label, type]) => (
               <Field key={key}>
-                <FieldLabel htmlFor={`${id}-${key}`}>{label}</FieldLabel>
+                <FieldLabel htmlFor={`${id}-${key}`}>
+                  {connectedGoal && key === "target"
+                    ? "Saved target amount"
+                    : connectedGoal && key === "currency"
+                      ? "Confirmed goal currency"
+                      : connectedGoal && key === "progress"
+                        ? "Confirmed goal progress"
+                        : label}
+                </FieldLabel>
                 <Input
                   id={`${id}-${key}`}
                   type={type}
-                  value={draft[key]}
+                  value={
+                    connectedGoal && key === "target"
+                      ? String(connectedGoal.goal.targetAmount)
+                      : connectedGoal && key === "currency"
+                        ? (evidence?.currencyCode ?? "")
+                        : connectedGoal && key === "progress"
+                          ? evidence
+                            ? String(evidence.progressAmountCents / 100)
+                            : ""
+                          : draft[key]
+                  }
+                  disabled={Boolean(
+                    connectedGoal && ["target", "currency", "progress"].includes(key),
+                  )}
                   onChange={(event) => update(key, event.target.value)}
                   inputMode={type === "text" && key !== "currency" ? "decimal" : undefined}
                 />
               </Field>
             ))}
           </FieldGroup>
-          <Field orientation="horizontal">
-            <Checkbox
-              id={`${id}-confirmed`}
-              checked={confirmed}
-              onCheckedChange={(value) => {
-                setConfirmed(value === true);
-                clearDraftFeedback();
-              }}
-            />
-            <FieldLabel htmlFor={`${id}-confirmed`}>
-              I confirm this current amount and currency for this hypothetical exploration.
-            </FieldLabel>
-          </Field>
+          {!connectedGoal ? (
+            <Field orientation="horizontal">
+              <Checkbox
+                id={`${id}-confirmed`}
+                checked={confirmed}
+                onCheckedChange={(value) => {
+                  setConfirmed(value === true);
+                  clearDraftFeedback();
+                }}
+              />
+              <FieldLabel htmlFor={`${id}-confirmed`}>
+                I confirm this current amount and currency for this hypothetical exploration.
+              </FieldLabel>
+            </Field>
+          ) : null}
         </FieldSet>
         {alternatives.map((row, index) => (
           <FieldSet key={row.id}>
@@ -309,10 +386,17 @@ export function FinanceGoalScenarioExplorer({ asOfLocalDate = "" }: { asOfLocalD
           >
             Add hypothetical alternative
           </Button>
-          <Button type="submit">Compare hypothetical contributions</Button>
+          <Button type="submit" disabled={Boolean(connectedGoal && !evidence)}>
+            Compare hypothetical contributions
+          </Button>
         </div>
       </form>
-      {projection ? (
+      {projection &&
+      (!connectedGoal ||
+        (evidence &&
+          projection.progress.sourceRevision === evidence.evidenceId &&
+          projection.sourceGoalRevision ===
+            `${connectedGoal.goal.id}:v${connectedGoal.goal.version}`)) ? (
         <section className="flex flex-col gap-4" aria-label="Hypothetical goal results">
           <p className="text-sm">
             As of {projection.asOfLocalDate}; first contribution{" "}

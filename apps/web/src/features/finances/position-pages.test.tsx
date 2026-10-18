@@ -30,6 +30,7 @@ vi.stubGlobal(
 );
 
 const api = vi.hoisted(() => ({
+  getMe: vi.fn(),
   createFinanceAccount: vi.fn(),
   getFinanceConfiguration: vi.fn(),
   getWorkspaceSettings: vi.fn(),
@@ -112,6 +113,10 @@ function mount(page: React.ReactNode) {
 afterEach(cleanup);
 beforeEach(() => {
   vi.resetAllMocks();
+  api.getMe.mockResolvedValue({
+    id: "11111111-1111-4111-8111-111111111111",
+    planningTimezone: "America/New_York",
+  });
   api.getFinanceLedgerHealth.mockResolvedValue({ balanceOnlyAccounts: 0 });
   api.getFinanceSnapshot.mockResolvedValue(
     envelope({
@@ -249,10 +254,10 @@ describe("Finance position pages", () => {
       "",
     );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Emergency reserve" }));
-    fireEvent.change(screen.getByLabelText("Target amount (USD)"), { target: { value: "6500" } });
+    fireEvent.change(screen.getByLabelText("Target amount"), { target: { value: "6500" } });
     fireEvent.click(screen.getByRole("button", { name: "Save goal" }));
     await screen.findByText(/Couldn’t confirm whether we could save this goal/);
-    expect(screen.getByLabelText("Target amount (USD)")).toHaveValue("6,500.00");
+    expect(screen.getByLabelText("Target amount")).toHaveValue("6,500.00");
     fireEvent.click(screen.getByRole("button", { name: "Save goal" }));
     await waitFor(() => expect(api.manageFinanceGoal).toHaveBeenCalledTimes(2));
     const first = api.manageFinanceGoal.mock.calls[0]?.[0];
@@ -834,7 +839,7 @@ describe("Finance position pages", () => {
     fireEvent.change(within(dialog).getByLabelText("Goal name"), {
       target: { value: "Home deposit" },
     });
-    fireEvent.change(within(dialog).getByLabelText("Target amount (USD)"), {
+    fireEvent.change(within(dialog).getByLabelText("Target amount"), {
       target: { value: "12500.50" },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Create goal" }));
@@ -854,10 +859,10 @@ describe("Finance position pages", () => {
     api.manageFinanceGoal.mockRejectedValue(new Error("Goal changed. Reload it."));
     mount(<FinanceWealthPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit Emergency reserve" }));
-    fireEvent.change(screen.getByLabelText("Target amount (USD)"), { target: { value: "6500" } });
+    fireEvent.change(screen.getByLabelText("Target amount"), { target: { value: "6500" } });
     fireEvent.click(screen.getByRole("button", { name: "Save goal" }));
     await screen.findByText(/Couldn’t confirm whether we could save this goal/);
-    expect(screen.getByLabelText("Target amount (USD)")).toHaveValue("6,500.00");
+    expect(screen.getByLabelText("Target amount")).toHaveValue("6,500.00");
     fireEvent.click(screen.getByRole("button", { name: "Save goal" }));
     await waitFor(() => expect(api.manageFinanceGoal).toHaveBeenCalledTimes(2));
     expect(api.manageFinanceGoal.mock.calls[1]?.[0]).toEqual(
@@ -1194,4 +1199,85 @@ it.each([
     expect(within(metrics).getAllByText("Unavailable")).toHaveLength(3);
   }
   expect(entry).toBeVisible();
+});
+
+it("confirms previously unknown goal progress and consumes refreshed canonical evidence in the connected explorer", async () => {
+  const goalId = "22222222-2222-4222-8222-222222222222";
+  const ownerUserId = "11111111-1111-4111-8111-111111111111";
+  const legacy = { ...goal, id: goalId, currentAmount: 0 };
+  const confirmed = {
+    ...legacy,
+    version: 8,
+    planningEvidence: {
+      kind: "goal",
+      evidenceId: "33333333-3333-4333-8333-333333333333",
+      ownerUserId,
+      actor: { type: "user", userId: ownerUserId },
+      provenance: "explicit_user",
+      currencyCode: "EUR",
+      asOf: "2026-01-01",
+      recordedAt: "2026-01-01T12:00:00Z",
+      goalId,
+      goalVersion: 8,
+      progressAmountCents: 0,
+    },
+  };
+  api.listFinanceGoals.mockResolvedValue(envelope([legacy]));
+  api.manageFinanceGoal.mockImplementation(async () => {
+    api.listFinanceGoals.mockResolvedValue(envelope([confirmed]));
+    return envelope(confirmed);
+  });
+  mount(<FinanceWealthPage />);
+  expect(
+    await screen.findByText(/Progress and currency unknown · Recorded target 5000/),
+  ).toBeInTheDocument();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Confirm progress for Emergency reserve" }),
+  );
+  fireEvent.change(screen.getByLabelText("Current goal amount you confirm"), {
+    target: { value: "0" },
+  });
+  fireEvent.change(screen.getByLabelText("Currency for the whole goal"), {
+    target: { value: "EUR" },
+  });
+  fireEvent.change(screen.getByLabelText("Progress statement as-of date"), {
+    target: { value: "2026-01-01" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Confirm my progress statement" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(api.manageFinanceGoal).toHaveBeenCalledWith(
+    expect.objectContaining({
+      operation: "confirm_progress",
+      goalId,
+      expectedVersion: 7,
+      progressAmountCents: 0,
+      currencyCode: "EUR",
+      asOf: "2026-01-01",
+    }),
+  );
+  expect(
+    await screen.findByText("Your statement as of 2026-01-01 · Version 8"),
+  ).toBeInTheDocument();
+  expect(api.listFinanceGoals.mock.calls.length).toBeGreaterThan(1);
+  fireEvent.click(screen.getByRole("button", { name: "Explore Emergency reserve" }));
+  expect(screen.getByLabelText("Confirmed goal progress")).toHaveValue("0");
+  expect(screen.getByLabelText("Confirmed goal currency")).toHaveValue("EUR");
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Explore a separate hypothetical goal" }));
+  expect(screen.getByLabelText("Hypothetical current amount (blank means unknown)")).toHaveValue(
+    "",
+  );
+  expect(api.manageFinanceGoal).toHaveBeenCalledTimes(1);
+});
+
+it("withholds saved-goal confirmation when authenticated planning context cannot be loaded", async () => {
+  api.getMe.mockRejectedValue(new Error("Session unavailable"));
+  mount(<FinanceWealthPage />);
+  expect(await screen.findByText("Goal confirmation context unavailable")).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Confirm progress for Emergency reserve" }),
+  ).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Explore Emergency reserve" })).toBeDisabled();
+  expect(screen.getByLabelText("Projection as-of local date")).toHaveValue("");
+  expect(api.manageFinanceGoal).not.toHaveBeenCalled();
 });

@@ -1,7 +1,7 @@
 import {
+  type FinanceCashflowSourceSnapshots,
   type FinanceOccurrenceMatchEvent,
   type FinanceRecurringOccurrence,
-  type FinanceCashflowSourceSnapshots,
   manageFinanceOccurrenceMatchInputSchema,
 } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";

@@ -10,6 +10,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { OccurrenceMatchDialog } from "./occurrence-match-dialog.js";
+
 const api = vi.hoisted(() => ({ manageFinanceOccurrenceMatch: vi.fn() }));
 vi.mock("../../api.js", () => ({
   api,

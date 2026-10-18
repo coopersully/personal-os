@@ -4,6 +4,7 @@ import type { FinanceCashflowProjectionView } from "@personal-os/domain";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { PaydayView } from "./payday-view.js";
+
 const actions = () => ({
   onIncomeStreamChange: vi.fn(),
   onConfirmSchedule: vi.fn(),

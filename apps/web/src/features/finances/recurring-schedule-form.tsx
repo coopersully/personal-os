@@ -1,8 +1,8 @@
 import {
   type ConfirmFinanceRecurringScheduleInput,
+  confirmFinanceRecurringScheduleInputSchema,
   type FinanceAccount,
   type FinanceRecurringSchedule,
-  confirmFinanceRecurringScheduleInputSchema,
 } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { useId, useMemo, useRef, useState } from "react";

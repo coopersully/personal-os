@@ -10,6 +10,7 @@ import { useSearchParams } from "react-router-dom";
 import { api } from "@/api";
 import { QueryFeedback } from "@/components/async-state";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -136,27 +137,29 @@ export function FinanceSpendingPage() {
           onChange={(value) => update("grouping", value, "financeSpendingGrouping")}
         />
       </div>
-      <SpendingPeriodControls
-        period={period}
-        {...range}
-        onPeriod={(value) => {
-          const next = new URLSearchParams(params);
-          next.set("period", value);
-          next.delete("from");
-          next.delete("through");
-          setParams(next);
-          save.mutate({ financeSpendingPeriod: value as SpendingPeriod });
-          setSelected(null);
-        }}
-        onDates={(from, through) => {
-          const next = new URLSearchParams(params);
-          next.set("from", from);
-          next.set("through", through);
-          setParams(next);
-          setSelected(null);
-        }}
-        onMove={(direction) => update("from", moveSpendingPeriod(period, range.from, direction))}
-      />
+      <fieldset disabled={disabled}>
+        <SpendingPeriodControls
+          period={period}
+          {...range}
+          onPeriod={(value) => {
+            const next = new URLSearchParams(params);
+            next.set("period", value);
+            next.delete("from");
+            next.delete("through");
+            setParams(next);
+            save.mutate({ financeSpendingPeriod: value as SpendingPeriod });
+            setSelected(null);
+          }}
+          onDates={(from, through) => {
+            const next = new URLSearchParams(params);
+            next.set("from", from);
+            next.set("through", through);
+            setParams(next);
+            setSelected(null);
+          }}
+          onMove={(direction) => update("from", moveSpendingPeriod(period, range.from, direction))}
+        />
+      </fieldset>
       <details>
         <summary className="cursor-pointer text-sm">Spending options</summary>
         <div className="flex flex-wrap gap-4 py-3">
@@ -177,13 +180,17 @@ export function FinanceSpendingPage() {
               ["uncategorized", "Include uncategorized", "financeSpendingIncludeUncategorized"],
             ] as const
           ).map(([key, label, pref]) => (
-            <label key={key} className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
+            <label
+              key={key}
+              htmlFor={`spending-${key}`}
+              className="flex items-center gap-2 text-sm"
+            >
+              <Checkbox
+                id={`spending-${key}`}
                 disabled={disabled}
                 checked={bool(key, defaults[pref])}
-                onChange={(event) =>
-                  update(key, event.target.checked ? "1" : "0", pref, event.target.checked)
+                onCheckedChange={(checked) =>
+                  update(key, checked === true ? "1" : "0", pref, checked === true)
                 }
               />
               {label}
@@ -208,16 +215,21 @@ export function FinanceSpendingPage() {
               Select none
             </Button>
             {result.accounts.map((account) => (
-              <label key={account.id} className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
+              <label
+                key={account.id}
+                htmlFor={`spending-account-${account.id}`}
+                className="flex items-center gap-2 text-sm"
+              >
+                <Checkbox
+                  id={`spending-account-${account.id}`}
                   disabled={disabled}
                   checked={accountIds === null || accountIds.includes(account.id)}
-                  onChange={(event) => {
+                  onCheckedChange={(checked) => {
                     const ids = accountIds ?? result.accounts.map((item) => item.id);
-                    const next = event.target.checked
-                      ? [...ids, account.id]
-                      : ids.filter((id) => id !== account.id);
+                    const next =
+                      checked === true
+                        ? [...ids, account.id]
+                        : ids.filter((id) => id !== account.id);
                     update("accounts", next.join(","), "spendAccountIds", next);
                   }}
                 />

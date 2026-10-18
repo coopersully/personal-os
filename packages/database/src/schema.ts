@@ -5360,3 +5360,239 @@ export const financeBudgetBaselineQualifications = pgTable(
     ),
   ],
 );
+
+/** Owner conversation sequences are allocated under the canonical Finance owner lock. */
+export const financeConversations = pgTable(
+  "finance_conversations",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    nextSequence: bigint("next_sequence", { mode: "bigint" }).notNull().default(0n),
+  },
+  (table) => [check("finance_conversations_sequence_check", sql`${table.nextSequence} >= 0`)],
+);
+
+export const financeConversationMessages = pgTable(
+  "finance_conversation_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sequence: bigint("sequence", { mode: "bigint" }).notNull(),
+    authorKind: text("author_kind").$type<"user" | "agent">().notNull(),
+    text: text("text").notNull(),
+    caseId: uuid("case_id"),
+    caseOwnerId: uuid("case_owner_id"),
+    recordRefs: jsonb("record_refs")
+      .$type<
+        Array<{
+          kind: "transaction" | "account" | "review_case" | "contextual_question";
+          id: string;
+        }>
+      >()
+      .notNull()
+      .default([]),
+    sourceMessageIds: jsonb("source_message_ids").$type<string[]>().notNull().default([]),
+    runId: uuid("run_id"),
+    sourceOperationId: uuid("source_operation_id"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_conversation_messages_owner_id_idx").on(table.userId, table.id),
+    uniqueIndex("finance_conversation_messages_sequence_idx").on(table.userId, table.sequence),
+    uniqueIndex("finance_conversation_messages_idempotency_idx").on(
+      table.userId,
+      table.authorKind,
+      table.idempotencyKey,
+    ),
+    foreignKey({
+      name: "finance_conversation_messages_case_fk",
+      columns: [table.caseOwnerId, table.caseId],
+      foreignColumns: [financeReviewCases.userId, financeReviewCases.id],
+    }).onDelete("set null"),
+    foreignKey({
+      name: "finance_conversation_messages_run_fk",
+      columns: [table.runId, table.userId],
+      foreignColumns: [workspaceMaintenanceRuns.id, workspaceMaintenanceRuns.userId],
+    }),
+    uniqueIndex("finance_conversation_messages_operation_idx").on(
+      table.userId,
+      table.sourceOperationId,
+    ),
+    check(
+      "finance_conversation_messages_case_owner_check",
+      sql`(${table.caseId} IS NULL AND ${table.caseOwnerId} IS NULL) OR (${table.caseId} IS NOT NULL AND ${table.caseOwnerId} IS NOT NULL AND ${table.caseOwnerId} = ${table.userId})`,
+    ),
+    check("finance_conversation_messages_sequence_check", sql`${table.sequence} > 0`),
+    check(
+      "finance_conversation_messages_author_check",
+      sql`${table.authorKind} IN ('user', 'agent')`,
+    ),
+    check(
+      "finance_conversation_messages_text_check",
+      sql`length(btrim(${table.text})) BETWEEN 1 AND 10000`,
+    ),
+  ],
+);
+
+export const financeConversationBatches = pgTable(
+  "finance_conversation_batches",
+  {
+    runId: uuid("run_id").primaryKey(),
+    userId: uuid("user_id").notNull(),
+    automationScheduleId: uuid("automation_schedule_id"),
+    authorizationConnectionId: uuid("authorization_connection_id"),
+    cursorKey: text("cursor_key").notNull(),
+    cutoffSequence: bigint("cutoff_sequence", { mode: "bigint" }).notNull(),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_conversation_batches_owner_run_idx").on(table.userId, table.runId),
+    foreignKey({
+      name: "finance_conversation_batches_run_fk",
+      columns: [table.runId, table.userId],
+      foreignColumns: [workspaceMaintenanceRuns.id, workspaceMaintenanceRuns.userId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_conversation_batches_schedule_fk",
+      columns: [table.userId, table.automationScheduleId],
+      foreignColumns: [automationHostSchedules.userId, automationHostSchedules.id],
+    }),
+    check("finance_conversation_batches_cutoff_check", sql`${table.cutoffSequence} >= 0`),
+    check(
+      "finance_conversation_batches_binding_check",
+      sql`(${table.automationScheduleId} IS NULL) = (${table.authorizationConnectionId} IS NULL)`,
+    ),
+  ],
+);
+
+export const financeConversationBatchMessages = pgTable(
+  "finance_conversation_batch_messages",
+  {
+    userId: uuid("user_id").notNull(),
+    runId: uuid("run_id").notNull(),
+    messageId: uuid("message_id").notNull(),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.runId, table.messageId] }),
+    uniqueIndex("finance_conversation_batch_messages_once_idx").on(table.userId, table.messageId),
+    foreignKey({
+      name: "finance_conversation_batch_messages_batch_fk",
+      columns: [table.userId, table.runId],
+      foreignColumns: [financeConversationBatches.userId, financeConversationBatches.runId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_conversation_batch_messages_message_fk",
+      columns: [table.userId, table.messageId],
+      foreignColumns: [financeConversationMessages.userId, financeConversationMessages.id],
+    }),
+    check(
+      "finance_conversation_batch_messages_ack_check",
+      sql`${table.acknowledgedAt} IS NULL OR (${table.deliveredAt} IS NOT NULL AND ${table.acknowledgedAt} >= ${table.deliveredAt})`,
+    ),
+  ],
+);
+
+/** Human rendered cursor is separate from host batch delivery and acknowledgment. */
+export const financeConversationReadCursors = pgTable(
+  "finance_conversation_read_cursors",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    readThroughSequence: bigint("read_through_sequence", { mode: "bigint" }).notNull().default(0n),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    check(
+      "finance_conversation_read_cursors_sequence_check",
+      sql`${table.readThroughSequence} >= 0`,
+    ),
+  ],
+);
+
+export const financeConversationCapabilities = pgTable(
+  "finance_conversation_capabilities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    automationScheduleId: uuid("automation_schedule_id").notNull(),
+    authorizationConnectionId: uuid("authorization_connection_id").notNull(),
+    protocolVersion: text("protocol_version").notNull(),
+    nonceDigest: text("nonce_digest").notNull(),
+    challengeText: text("challenge_text").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+    respondedAt: timestamp("responded_at", { withTimezone: true }),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    response: text("response"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: "finance_conversation_capabilities_schedule_fk",
+      columns: [table.userId, table.automationScheduleId],
+      foreignColumns: [automationHostSchedules.userId, automationHostSchedules.id],
+    }).onDelete("cascade"),
+    index("finance_conversation_capabilities_binding_idx").on(
+      table.userId,
+      table.automationScheduleId,
+      table.authorizationConnectionId,
+      table.protocolVersion,
+    ),
+    check(
+      "finance_conversation_capabilities_proof_check",
+      sql`(${table.acknowledgedAt} IS NULL OR ${table.fetchedAt} IS NOT NULL) AND (${table.respondedAt} IS NULL OR ${table.acknowledgedAt} IS NOT NULL) AND (${table.verifiedAt} IS NULL OR (${table.respondedAt} IS NOT NULL AND ${table.response} IS NOT NULL))`,
+    ),
+  ],
+);
+
+/** Causal effect evidence, committed by the existing mutation owner transaction. */
+export const financeConversationEvidence = pgTable(
+  "finance_conversation_evidence",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    runId: uuid("run_id").notNull(),
+    caseId: uuid("case_id"),
+    caseOwnerId: uuid("case_owner_id"),
+    sourceContext: jsonb("source_context").$type<{ caseId: string | null }>().notNull(),
+    actionKey: text("action_key").notNull(),
+    sourceOperationId: uuid("source_operation_id"),
+    sourceMessageIds: jsonb("source_message_ids").$type<string[]>().notNull(),
+    explanation: text("explanation").notNull(),
+    effectRefs: jsonb("effect_refs").$type<Array<{ kind: string; id: string }>>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_conversation_evidence_action_idx").on(table.userId, table.actionKey),
+    uniqueIndex("finance_conversation_evidence_operation_idx").on(
+      table.userId,
+      table.sourceOperationId,
+    ),
+    foreignKey({
+      name: "finance_conversation_evidence_batch_fk",
+      columns: [table.userId, table.runId],
+      foreignColumns: [financeConversationBatches.userId, financeConversationBatches.runId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "finance_conversation_evidence_case_fk",
+      columns: [table.caseOwnerId, table.caseId],
+      foreignColumns: [financeReviewCases.userId, financeReviewCases.id],
+    }).onDelete("set null"),
+    check(
+      "finance_conversation_evidence_case_owner_check",
+      sql`(${table.caseId} IS NULL AND ${table.caseOwnerId} IS NULL) OR (${table.caseId} IS NOT NULL AND ${table.caseOwnerId} IS NOT NULL AND ${table.caseOwnerId} = ${table.userId})`,
+    ),
+    check(
+      "finance_conversation_evidence_explanation_check",
+      sql`length(btrim(${table.explanation})) BETWEEN 1 AND 4000`,
+    ),
+  ],
+);

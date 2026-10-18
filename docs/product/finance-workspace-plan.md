@@ -1,5 +1,11 @@
 # Finance MVP specification
 
+> October 18 Finance experience revision: the consolidated [design](../superpowers/specs/2026-10-18-finance-experience-design.md)
+> and [implementation plan](../superpowers/plans/2026-10-18-finance-experience.md) define the target for setup,
+> Spending, Chat, Automations, Activity, and manual workflow coverage. They supersede conflicting
+> earlier targets below, including ungated setup and agent budget self-approval. This is not a
+> declaration that the redesigned experience has shipped.
+
 - Status: Approved by Cooper on 2026-09-14 ("It looks good, proceed."). Approval authorizes the planned rollout; it does not establish shipped capability.
 - Baseline inspected: `origin/main` at `3d3306608c4b6f729d0c93e4e887dae2ba930d2d`, 2026-09-13.
 - Planning owner: the Finance orchestration task; implementation belongs to separate workstream tasks.
@@ -123,24 +129,24 @@ Maintenance reconciles sources, applies authorized bookkeeping, evaluates the pl
 questions, and verifies its result. It can cover outstanding work, a bounded period or an exact
 owned target. Repeated invocation resumes compatible work; it never duplicates economic effects.
 
-An automatic budget revision requires an active, explicitly approved policy: eligible categories,
-protected allocations, permitted direction, per-change and cumulative monthly limits. The baseline
-stays immutable; the active plan and forecast can differ. Validate current evidence and policy/plan
-revisions under lock. Concurrent small revisions cannot exceed an aggregate cap. Crossing a
-boundary creates a proposal without silently normalizing overspending by changing the baseline.
+Budget activation and changes to the active budget always require the person's explicit approval
+of the exact proposal. This October 18 decision supersedes the earlier optional automatic budget
+revision allowance. Agents may prepare proposals, but confidence, global bypass, or a previously
+approved adjustment policy cannot substitute for approval of this change. Preserve the baseline
+and do not silently normalize overspending by changing it. Existing policy records remain history;
+the runtime enforcement of this revised target must be verified before claiming it is shipped.
 
 The person explicitly designates one complete, human-approved baseline for each calendar month.
 Changing a policy, replacing a plan, or changing timezone cannot create a second baseline for that
 month. Policy terms and saved preview evidence remain immutable history; edits append versions,
 and disable/withdraw remain available even when evidence is missing or a preview has expired.
-Draft management and saving a hypothetical preview confer no execution authority. Until a reviewed
-authority path, cumulative usage producer, and commit-time position fence exist, execution stays
-unavailable; missing usage must never be treated as zero allowance consumed.
+Draft management and saving a hypothetical preview confer no execution authority. Historical
+policy limits and previews do not authorize automatic budget changes.
 
 A rule stays inactive until an exact preview exposes matches, non-matches, consequences, conflicts,
 authority and disable/recovery. A factual answer, setup completion or global bypass never activates
 it. Read-only agents may explain/propose; mutation execution follows the same domain authority
-through every channel. Default new users to no automatic budget revisions until they approve limits.
+through every channel. Budget changes require per-proposal human approval through every channel.
 
 ### F5 — Resolve outstanding work once
 

@@ -28,6 +28,7 @@ const match = {
   occurrence: financeOccurrenceReferenceSchema,
   transactionId: idSchema,
   expectedTransactionRevision: financeActualRevisionSchema,
+  expectedReimbursementRelationshipRevision: financeActualRevisionSchema,
   amountCents: financePlanningEvidenceCentsSchema.min(1),
   currencyCode: financePlanningEvidenceCurrencySchema,
 };
@@ -56,6 +57,7 @@ export const financeOccurrenceMatchEventSchema = z.object({
   currencyCode: financePlanningEvidenceCurrencySchema,
   allocationRevision: z.number().int().positive().nullable(),
   transactionRevision: financeActualRevisionSchema,
+  reimbursementRelationshipRevision: financeActualRevisionSchema.nullable(),
   reversesMatchId: idSchema.nullable(),
   actorUserId: idSchema,
   recordedAt: isoDateTimeSchema,

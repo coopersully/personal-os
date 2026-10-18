@@ -101,6 +101,12 @@ describe("verified Finance conversation transport", () => {
       caseId: null,
       recordRefs: [],
     });
+    const second = await human.sendFinanceConversationMessage({
+      text: "Undelivered second page",
+      idempotencyKey: "second-context",
+      caseId: null,
+      recordRefs: [],
+    });
     const [run] = await f.db
       .insert(workspaceMaintenanceRuns)
       .values({
@@ -133,8 +139,32 @@ describe("verified Finance conversation transport", () => {
       caseId: null,
       recordRefs: [],
     });
+    const premature = await a.client.callTool({
+      name: "reply_to_finance_conversation_batch",
+      arguments: {
+        runId: run.id,
+        text: "Not delivered yet",
+        idempotencyKey: "premature-reply",
+        sourceMessageIds: [first.id],
+        caseId: null,
+      },
+    });
+    expect(premature.isError).toBe(true);
+    expect((await human.getFinanceConversationHistory()).messages).toHaveLength(3);
     const page = await call("get_finance_conversation_batch", { runId: run.id, limit: 1 });
-    expect(page).toMatchObject({ messages: [{ id: first.id }], nextCursor: null });
+    expect(page).toMatchObject({ messages: [{ id: first.id }], nextCursor: expect.any(String) });
+    const undelivered = await a.client.callTool({
+      name: "reply_to_finance_conversation_batch",
+      arguments: {
+        runId: run.id,
+        text: "Second page not delivered",
+        idempotencyKey: "undelivered-page",
+        sourceMessageIds: [second.id],
+        caseId: null,
+      },
+    });
+    expect(undelivered.isError).toBe(true);
+    expect((await human.getFinanceConversationHistory()).messages).toHaveLength(3);
     await call("acknowledge_finance_conversation_batch", { runId: run.id, messageIds: [first.id] });
     expect(
       await f.db
@@ -189,6 +219,11 @@ describe("verified Finance conversation transport", () => {
     ).toBe(true);
     expect(await human.getFinanceConversationReadiness()).toMatchObject({ canSend: false });
     const history = await human.getFinanceConversationHistory();
-    expect(history.messages.map((message) => message.id)).toEqual([first.id, later.id, reply.id]);
+    expect(history.messages.map((message) => message.id)).toEqual([
+      first.id,
+      second.id,
+      later.id,
+      reply.id,
+    ]);
   });
 });

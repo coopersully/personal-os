@@ -242,6 +242,12 @@ describe("Finance position pages", () => {
       );
     else api.manageFinanceGoal.mockResolvedValueOnce({ ...envelope(goal), outcome: "failed" });
     mount(<FinanceWealthPage />);
+    expect(
+      screen.getByRole("heading", { name: "Explore a hypothetical goal" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Hypothetical current amount (blank means unknown)")).toHaveValue(
+      "",
+    );
     fireEvent.click(await screen.findByRole("button", { name: "Edit Emergency reserve" }));
     fireEvent.change(screen.getByLabelText("Target amount (USD)"), { target: { value: "6500" } });
     fireEvent.click(screen.getByRole("button", { name: "Save goal" }));

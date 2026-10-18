@@ -32,6 +32,7 @@ import { api } from "../../api.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { formatCompactMoney } from "./format";
+import { FinanceGoalScenarioExplorer } from "./goal-scenario-explorer.js";
 import {
   isConfirmedFinanceMutationFailure,
   requireFinanceMutationResult,
@@ -224,6 +225,7 @@ export function FinanceWealthPage() {
           ) : null}
         </CardContent>
       </Card>
+      <FinanceGoalScenarioExplorer />
       {editor ? (
         <GoalEditor
           key={editor === "new" ? "new" : `${editor.id}:${editor.version}`}

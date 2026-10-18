@@ -145,7 +145,7 @@ import { FinanceReimbursementList } from "./reimbursement-list.js";
 import { FinanceAgentReviewQueue } from "./review-queue.js";
 import { TransactionBreakdownDialog } from "./transaction-breakdown-dialog.js";
 import { FinanceLinkedTransaction, FinanceTransactionControls } from "./transaction-controls.js";
-import { financeTransactionFilters } from "./transaction-query.js";
+import { financeSpendingReferenceFilter, financeTransactionFilters } from "./transaction-query.js";
 
 export function FinancesPage() {
   const location = useLocation();
@@ -160,6 +160,8 @@ export function FinancesPage() {
   );
   const transactionParams = new URLSearchParams(location.search);
   const transactionFilters = financeTransactionFilters(transactionParams);
+  const spendingReference = financeSpendingReferenceFilter(transactionParams);
+  const exactSpending = spendingReference.status !== "absent";
   const linkedTransactionId = transactionParams.get("transactionId");
   const linkedReviewId = transactionParams.get("item") ?? undefined;
   const queryClient = useQueryClient();
@@ -301,7 +303,9 @@ export function FinancesPage() {
   const [transactionCursorHistory, setTransactionCursorHistory] = useState<Array<string | null>>(
     [],
   );
-  const transactionFilterKey = JSON.stringify(transactionFilters);
+  const transactionFilterKey = JSON.stringify(
+    exactSpending ? spendingReference : transactionFilters,
+  );
   const [cursorFilterKey, setCursorFilterKey] = useState(transactionFilterKey);
   const currentTransactionCursor =
     cursorFilterKey === transactionFilterKey ? transactionCursor : null;
@@ -321,8 +325,8 @@ export function FinancesPage() {
         String(query.queryKey[0]).startsWith("finance-") ||
         query.queryKey[0] === "agent-access-work-items",
     });
-  const transactionList = useQuery({
-    enabled: section === "transactions",
+  const ordinaryTransactionList = useQuery({
+    enabled: section === "transactions" && !exactSpending,
     queryFn: () =>
       api.listFinanceTransactions({
         ...transactionFilters,
@@ -338,6 +342,20 @@ export function FinancesPage() {
       transactionFilters,
     ],
   });
+  const spendingTransactionList = useQuery({
+    enabled: section === "transactions" && spendingReference.status === "valid",
+    queryKey: ["finance-spending-transactions", spendingReference, currentTransactionCursor],
+    queryFn: () => {
+      if (spendingReference.status !== "valid") throw new Error("Invalid Spending reference");
+      return api.listFinanceSpendingTransactions(
+        spendingReference.filter,
+        currentTransactionCursor ?? undefined,
+        50,
+      );
+    },
+    retry: false,
+  });
+  const transactionList = exactSpending ? spendingTransactionList : ordinaryTransactionList;
   const syncAccount = useFeedbackMutation({
     feedback: { action: "sync this bank account", safeToRetry: true },
     mutationFn: (id: string) => api.syncFinanceAccount(id),
@@ -702,7 +720,7 @@ export function FinancesPage() {
           </ShadcnButton>
         </WorkspaceHeaderControls>
       ) : null}
-      {section === "transactions" ? (
+      {section === "transactions" && !exactSpending ? (
         <FinanceTransactionControls
           onImport={() => setImportOpen(true)}
           onAddCategory={() => setCategoryOpen(true)}
@@ -721,8 +739,45 @@ export function FinancesPage() {
           categories={categories.data ?? []}
         />
       ) : null}
+      {section === "transactions" && exactSpending ? (
+        <section
+          aria-label="Spending source view"
+          className="flex flex-wrap items-center justify-between gap-3"
+        >
+          <div>
+            <h2 className="font-medium">Spending source transactions</h2>
+            {spendingReference.status === "invalid" ? (
+              <p>This Spending link is invalid. Open Spending to choose the source again.</p>
+            ) : transactionList.isError ? (
+              <p>This Spending view could not be confirmed. Open Spending to refresh its source.</p>
+            ) : spendingTransactionList.data ? (
+              <p>
+                {formatMoney(spendingTransactionList.data.netCents / 100)} Spending contribution ·{" "}
+                {spendingTransactionList.data.totalTransactions} source transactions. Transaction
+                amounts show the full native records.
+              </p>
+            ) : null}
+          </div>
+          <div className="flex gap-2">
+            <ShadcnButton asChild variant="outline" size="sm">
+              <Link to="/finances/spending">Open Spending</Link>
+            </ShadcnButton>
+            <ShadcnButton
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                const next = new URLSearchParams(location.search);
+                next.delete("spending");
+                navigate({ pathname: location.pathname, search: next.toString() });
+              }}
+            >
+              View ledger
+            </ShadcnButton>
+          </div>
+        </section>
+      ) : null}
       {categoryOpen ? <FinanceCategoryDialog onClose={() => setCategoryOpen(false)} /> : null}
-      {section === "transactions" && linkedTransactionId ? (
+      {section === "transactions" && !exactSpending && linkedTransactionId ? (
         <FinanceLinkedTransaction
           id={linkedTransactionId}
           onBreakdown={setBreakdownTransaction}
@@ -856,10 +911,19 @@ export function FinancesPage() {
               </ShadcnCardHeader>
             ) : null}
             <div className={section === "review" ? "px-4 pb-4" : "min-w-0"}>
-              {section === "transactions" && transactionList.isError && !transactionList.data
-                ? null
-                : null}
-              {section === "transactions" ? (
+              {section === "transactions" &&
+              exactSpending &&
+              (spendingReference.status === "invalid" ||
+                transactionList.isError) ? null : section === "transactions" &&
+                exactSpending &&
+                spendingTransactionList.data?.items.length === 0 ? (
+                <EmptyState
+                  icon={<CircleCheckIcon />}
+                  title="No source transactions in this Spending view"
+                >
+                  Open Spending to choose another period or group.
+                </EmptyState>
+              ) : section === "transactions" ? (
                 <FinanceTransactionsTable
                   key={JSON.stringify([
                     transactionFilterKey,
@@ -878,7 +942,7 @@ export function FinancesPage() {
                   onCategorize={openCategorize}
                   onNextPage={nextTransactionPage}
                   onPreviousPage={previousTransactionPage}
-                  onSort={sortTransactions}
+                  onSort={exactSpending ? undefined : sortTransactions}
                   sort={transactionSort}
                   transactions={transactionList.data?.items ?? []}
                 />
@@ -2678,7 +2742,7 @@ function FinanceTransactionsTable({
   onCategorize: (transaction: FinanceTransaction) => void;
   onNextPage: () => void;
   onPreviousPage: () => void;
-  onSort: (sortBy: FinanceTransactionQuery["sortBy"]) => void;
+  onSort?: ((sortBy: FinanceTransactionQuery["sortBy"]) => void) | undefined;
   sort: {
     sortBy: FinanceTransactionQuery["sortBy"];
     sortDirection: FinanceTransactionQuery["sortDirection"];
@@ -3037,13 +3101,14 @@ function TransactionSortButton({
 }: {
   align?: "right";
   label: string;
-  onSort: (sortBy: FinanceTransactionQuery["sortBy"]) => void;
+  onSort?: ((sortBy: FinanceTransactionQuery["sortBy"]) => void) | undefined;
   sort: {
     sortBy: FinanceTransactionQuery["sortBy"];
     sortDirection: FinanceTransactionQuery["sortDirection"];
   };
   sortBy: FinanceTransactionQuery["sortBy"];
 }) {
+  if (!onSort) return <span>{label}</span>;
   const isActive = sort.sortBy === sortBy;
   const Icon = !isActive ? SortIcon : sort.sortDirection === "asc" ? ArrowUpIcon : ArrowDownIcon;
   return (

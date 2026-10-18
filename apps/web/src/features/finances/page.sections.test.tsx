@@ -50,6 +50,7 @@ const api = vi.hoisted(() => ({
   listFinanceRecurringObligations: vi.fn(),
   listFinanceReimbursements: vi.fn(),
   listFinanceTransactions: vi.fn(),
+  listFinanceSpendingTransactions: vi.fn(),
   listFinanceMerchants: vi.fn(),
   resolveFinanceReview: vi.fn(),
   resolveFinanceAlert: vi.fn(),
@@ -1903,4 +1904,122 @@ it("preserves the budget draft and announces a rejected save through Sonner", as
   expect(screen.queryByText("private server details")).not.toBeInTheDocument();
   expect(screen.getByLabelText("Category")).toHaveValue("Dining");
   expect(success).not.toHaveBeenCalled();
+});
+
+const exactSpendingFilter = {
+  query: {
+    scope: {
+      from: "2026-08-01",
+      through: "2026-08-31",
+      timezone: "America/New_York",
+      accountIds: ["checking"],
+      categoryIds: null,
+      basis: "personal_cost",
+      includePending: false,
+      subtractRefunds: true,
+    },
+    grouping: "categories",
+    includeUncategorized: true,
+  },
+  referenceRevision: "a".repeat(64),
+  groupId: "category:dining",
+  from: "2026-08-23",
+  through: "2026-08-23",
+};
+const exactSpendingPath = `/finances/transactions?${new URLSearchParams({ spending: JSON.stringify(exactSpendingFilter) })}`;
+
+it("fails closed for invalid Spending links and provides explicit ledger recovery", async () => {
+  renderPage("/finances/transactions?spending=bad");
+  expect(await screen.findByText(/This Spending link is invalid/)).toBeVisible();
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+  expect(api.listFinanceSpendingTransactions).not.toHaveBeenCalled();
+  expect(screen.queryByText("No transactions yet")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "View ledger" }));
+  await waitFor(() => expect(api.listFinanceTransactions).toHaveBeenCalled());
+});
+
+it("loads exact Spending references and keeps contribution totals separate from native amounts", async () => {
+  const transaction = {
+    id: "meal",
+    accountId: "checking",
+    amount: 18.5,
+    category: "Dining",
+    categoryId: "dining",
+    categoryConfidence: null,
+    categorySource: null,
+    merchant: "Source cafe",
+    merchantId: null,
+    createdAt: "2026-08-23T12:00:00.000Z",
+    updatedAt: "2026-08-23T12:00:00.000Z",
+    date: "2026-08-23",
+    direction: "expense",
+    needsReview: false,
+    notes: null,
+    pending: false,
+    rawMerchant: null,
+  };
+  api.listFinanceSpendingTransactions.mockResolvedValue({
+    items: [transaction],
+    nextCursor: "exact-next",
+    referenceRevision: exactSpendingFilter.referenceRevision,
+    totalTransactions: 2,
+    netCents: 1000,
+    scope: exactSpendingFilter.query.scope,
+    contributions: [],
+  });
+  renderPage(`${exactSpendingPath}&search=ignored`);
+  await screen.findByText("Source cafe");
+  expect(api.listFinanceSpendingTransactions).toHaveBeenCalledWith(
+    exactSpendingFilter,
+    undefined,
+    50,
+  );
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+  expect(screen.getByText(/\$10.00 Spending contribution · 2 source transactions/)).toBeVisible();
+  expect(screen.queryByRole("button", { name: /^Filters/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Sort by date/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await waitFor(() =>
+    expect(api.listFinanceSpendingTransactions).toHaveBeenCalledWith(
+      exactSpendingFilter,
+      "exact-next",
+      50,
+    ),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "View ledger" }));
+  await waitFor(() =>
+    expect(api.listFinanceTransactions).toHaveBeenCalledWith(
+      expect.objectContaining({ cursor: undefined, search: "ignored" }),
+    ),
+  );
+});
+
+it("keeps changed Spending revisions closed instead of showing unrelated transactions", async () => {
+  api.listFinanceSpendingTransactions.mockRejectedValue(
+    Object.assign(new Error("Spending changed"), { status: 409 }),
+  );
+  renderPage(exactSpendingPath);
+  await screen.findByText(/This Spending view could not be confirmed/);
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+  expect(screen.queryByText("No transactions yet")).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Open Spending" })).toHaveAttribute(
+    "href",
+    "/finances/spending",
+  );
+});
+
+it("shows an exact empty Spending view without suggesting the ledger is empty", async () => {
+  api.listFinanceSpendingTransactions.mockResolvedValue({
+    items: [],
+    nextCursor: null,
+    referenceRevision: exactSpendingFilter.referenceRevision,
+    totalTransactions: 0,
+    netCents: 0,
+    scope: exactSpendingFilter.query.scope,
+    contributions: [],
+  });
+  renderPage(exactSpendingPath);
+  expect(await screen.findByText("No source transactions in this Spending view")).toBeVisible();
+  expect(screen.queryByText("No transactions yet")).not.toBeInTheDocument();
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
 });

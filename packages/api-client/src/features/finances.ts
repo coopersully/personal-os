@@ -83,6 +83,8 @@ import type {
   FinanceSetupInput,
   FinanceSetupPayload,
   FinanceSnapshot,
+  FinanceSpendingReferenceFilter,
+  FinanceSpendingReferencePage,
   FinanceStatus,
   FinanceToolResult,
   FinanceTransaction,
@@ -121,6 +123,7 @@ import {
   financeLedgerChallengePageSchema,
   financeLedgerChallengeSchema,
   financePeriodReviewSchema,
+  financeSpendingReferencePageSchema,
   financeStatusSchema,
 } from "@personal-os/domain";
 
@@ -165,6 +168,18 @@ export function createFinanceApi(request: FinanceRequest) {
   }
 
   return {
+    async listFinanceSpendingTransactions(
+      filter: FinanceSpendingReferenceFilter,
+      cursor?: string,
+      limit = 50,
+    ): Promise<FinanceSpendingReferencePage> {
+      return financeSpendingReferencePageSchema.parse(
+        await request("/v1/finances/spending/transactions", {
+          method: "POST",
+          body: JSON.stringify({ filter, ...(cursor ? { cursor } : {}), limit }),
+        }),
+      );
+    },
     async getFinancePosition(scope: FinancePositionReadScope): Promise<FinancePositionEvidence> {
       const search = new URLSearchParams({ from: scope.from, through: scope.through });
       if (scope.accountIds !== undefined) search.set("accountIds", scope.accountIds.join(","));

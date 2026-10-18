@@ -232,9 +232,14 @@ it("keeps incomplete collection rows local across section navigation", async () 
 it("opens independent sections without mutations and retains a safe return link", async () => {
   show("/finances/setup?section=budget&returnTo=%2Ffinances%2Fplan");
   expect(await screen.findByRole("button", { name: "Prepare budget" })).toBeEnabled();
-  expect(screen.getByRole("link", { name: "Return to previous page" })).toHaveAttribute(
+  expect(screen.queryByRole("link", { name: "Continue" })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Correct existing records" })).toHaveAttribute(
     "href",
-    "/finances/plan",
+    "/finances/transactions?financeTask=correct",
+  );
+  expect(screen.getByRole("link", { name: "Import records" })).toHaveAttribute(
+    "href",
+    "/finances/transactions?financeTask=import",
   );
   expect(api.setupFinances).not.toHaveBeenCalled();
 });
@@ -668,7 +673,7 @@ it("renders account connection states and links an existing budget", async () =>
   await userEvent.click(screen.getByRole("button", { name: /Budget Draft/ }));
   expect(screen.getByRole("link", { name: "Open budget" })).toHaveAttribute(
     "href",
-    "/finances/plan",
+    "/finances/plan?financeTask=approve",
   );
 });
 it("retries a rejected payroll change without losing the draft", async () => {
@@ -714,7 +719,7 @@ it("uses the real onboarding API adapter by default and advances only on server 
   const user = userEvent.setup();
   await user.selectOptions(await screen.findByLabelText("Review saved income"), "unknown");
   await user.click(screen.getByRole("checkbox", { name: "I reviewed my display preferences" }));
-  await user.selectOptions(screen.getByLabelText("Automation"), "later");
+  await user.click(screen.getByRole("radio", { name: "Use Finance manually" }));
   const saved = {
     ...onboarding(),
     revision: 2,
@@ -770,4 +775,24 @@ it("allows explicit null only when a composition stages setup review separately"
   await screen.findByLabelText("Household size");
   expect(screen.queryByRole("region", { name: "Setup review" })).not.toBeInTheDocument();
   expect(api.getFinanceOnboarding).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["/finances/plan?financeTask=approve", "/finances/plan?financeTask=approve"],
+  ["https://evil.test", "/finances"],
+  ["/finances/setup", "/finances"],
+])("continues to a validated destination only after durable completion: %s", async (returnTo, expected) => {
+  api.getFinanceOnboarding.mockResolvedValue({
+    ...onboarding(),
+    completedAt: "2026-10-18T12:00:00Z",
+    automationChoice: "later",
+  });
+  show(`/finances/setup?returnTo=${encodeURIComponent(returnTo)}`);
+  expect(await screen.findByRole("link", { name: "Continue" })).toHaveAttribute("href", expected);
+});
+it("keeps grandfathered access distinct from completed setup navigation", async () => {
+  api.getFinanceOnboarding.mockResolvedValue({ ...onboarding(), existingAccess: true });
+  show("/finances/setup?returnTo=%2Ffinances%2Fplan");
+  await screen.findByRole("radiogroup", { name: "Initial Finance mode" });
+  expect(screen.queryByRole("link", { name: "Continue" })).not.toBeInTheDocument();
 });

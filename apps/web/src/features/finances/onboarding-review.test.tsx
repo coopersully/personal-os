@@ -64,6 +64,25 @@ function show(
   );
   return adapter;
 }
+async function chooseAutomation(user: ReturnType<typeof userEvent.setup>, value: "later" | "now") {
+  const radio = screen.queryByRole("radio", {
+    name: value === "later" ? "Use Finance manually" : "Set up with an agent",
+  });
+  if (radio) await user.click(radio);
+  else await user.selectOptions(screen.getByLabelText("Automation"), value);
+}
+function expectAutomation(value: string) {
+  const group = screen.queryByRole("radiogroup", { name: "Initial Finance mode" });
+  if (group) {
+    if (!value) expect(group.querySelector('[aria-checked="true"]')).toBeNull();
+    else
+      expect(
+        screen.getByRole("radio", {
+          name: value === "later" ? "Use Finance manually" : "Set up with an agent",
+        }),
+      ).toBeChecked();
+  } else expect(screen.getByLabelText("Automation")).toHaveValue(value);
+}
 it("saves explicit unknown and manual later before durable completion", async () => {
   const user = userEvent.setup();
   const client = new QueryClient();
@@ -73,7 +92,7 @@ it("saves explicit unknown and manual later before durable completion", async ()
   expect(screen.queryByRole("option", { name: /^None$/ })).not.toBeInTheDocument();
   await user.selectOptions(screen.getByLabelText("Income"), "unknown");
   await user.click(screen.getByRole("checkbox"));
-  await user.selectOptions(screen.getByLabelText("Automation"), "later");
+  await chooseAutomation(user, "later");
   const saved = {
     ...snapshot(),
     revision: 2,
@@ -88,6 +107,9 @@ it("saves explicit unknown and manual later before durable completion", async ()
   expect(screen.getByRole("button", { name: "Finish setup" })).toBeDisabled();
   await user.click(screen.getByRole("button", { name: "Save review" }));
   await waitFor(() => expect(screen.getByRole("button", { name: "Finish setup" })).toBeEnabled());
+  expect(
+    screen.queryByRole("radiogroup", { name: "Initial Finance mode" }),
+  ).not.toBeInTheDocument();
   expect(toast.loading).toHaveBeenCalledWith("Saving setup review…");
   expect(toast.success).toHaveBeenCalledWith("Setup review saved", { id: "setup-review-toast" });
   expect(toast.loading.mock.invocationCallOrder[0]).toBeLessThan(
@@ -134,7 +156,7 @@ it("retains edits after a conflict and requires explicit reload before another w
   await screen.findByLabelText("Income");
   vi.clearAllMocks();
   await user.selectOptions(screen.getByLabelText("Income"), "unknown");
-  await user.selectOptions(screen.getByLabelText("Automation"), "later");
+  await chooseAutomation(user, "later");
   adapter.saveFinanceOnboardingAnswers.mockRejectedValue(new Error("Revision conflict"));
   await user.click(screen.getByRole("button", { name: "Save review" }));
   await screen.findByRole("button", { name: "Reload setup review" });
@@ -151,7 +173,7 @@ it("retains edits after a conflict and requires explicit reload before another w
   expect(screen.queryByText(/Setup outcome unconfirmed/)).not.toBeInTheDocument();
   expect(screen.queryByText("Revision conflict")).not.toBeInTheDocument();
   expect(screen.getByLabelText("Income")).toHaveValue("unknown");
-  expect(screen.getByLabelText("Automation")).toHaveValue("later");
+  expectAutomation("later");
   expect(screen.getByRole("button", { name: "Save review" })).toBeDisabled();
   toast.loading.mockClear();
   toast.error.mockClear();
@@ -215,7 +237,7 @@ it("keeps failed explicit reload feedback in Sonner and preserves the locked dra
   vi.clearAllMocks();
   await user.selectOptions(screen.getByLabelText("Income"), "unknown");
   await user.click(screen.getByRole("checkbox"));
-  await user.selectOptions(screen.getByLabelText("Automation"), "later");
+  await chooseAutomation(user, "later");
   adapter.saveFinanceOnboardingAnswers.mockRejectedValue(new Error("Revision conflict"));
   await user.click(screen.getByRole("button", { name: "Save review" }));
   await screen.findByRole("button", { name: "Reload setup review" });
@@ -241,7 +263,7 @@ it("keeps failed explicit reload feedback in Sonner and preserves the locked dra
   ).not.toBeInTheDocument();
   expect(screen.queryByText("Offline")).not.toBeInTheDocument();
   expect(screen.getByLabelText("Income")).toHaveValue("unknown");
-  expect(screen.getByLabelText("Automation")).toHaveValue("later");
+  expectAutomation("later");
   expect(screen.getByRole("checkbox")).toBeChecked();
   expect(screen.getByRole("button", { name: "Save review" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Finish setup" })).toBeDisabled();
@@ -274,7 +296,7 @@ it("announces a failed Finish through the same toast and requires reload without
   expect(
     screen.queryByText("Setup complete. Your workspace remains available."),
   ).not.toBeInTheDocument();
-  expect(screen.getByLabelText("Automation")).toHaveValue("later");
+  expectAutomation("later");
   expect(screen.getByRole("button", { name: "Save review" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Finish setup" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "Reload setup review" })).toBeEnabled();
@@ -284,7 +306,7 @@ it("explicitly reloads saved profile facts and replaces unsaved review choices o
   const adapter = show();
   const user = userEvent.setup();
   await user.selectOptions(await screen.findByLabelText("Income"), "unknown");
-  await user.selectOptions(screen.getByLabelText("Automation"), "later");
+  await chooseAutomation(user, "later");
   expect(screen.getByText(/replaces any unsaved review choices/)).toBeVisible();
   let resolveReload!: (next: FinanceOnboardingSnapshot) => void;
   adapter.getFinanceOnboarding.mockReturnValueOnce(
@@ -309,7 +331,7 @@ it("explicitly reloads saved profile facts and replaces unsaved review choices o
   await act(async () => resolveReload(refreshed));
   expect(await screen.findByText("$1,234.56 saved income")).toBeVisible();
   expect(screen.getByLabelText("Income")).toHaveValue("answered");
-  expect(screen.getByLabelText("Automation")).toHaveValue("");
+  expectAutomation("");
   expect(adapter.saveFinanceOnboardingAnswers).not.toHaveBeenCalled();
   expect(adapter.completeFinanceOnboarding).not.toHaveBeenCalled();
   expect(toast.success).toHaveBeenCalledWith("Setup review reloaded", { id: "setup-review-toast" });
@@ -413,4 +435,54 @@ it.each([
   expect(toast.dismiss).toHaveBeenCalledTimes(1);
   expect(toast.success).not.toHaveBeenCalled();
   expect(toast.error).not.toHaveBeenCalled();
+});
+
+it("offers the initial manual/agent chooser without autosaving its selection", async () => {
+  const adapter = show();
+  const user = userEvent.setup();
+  await screen.findByRole("radiogroup", { name: "Initial Finance mode" });
+  await chooseAutomation(user, "later");
+  expect(adapter.saveFinanceOnboardingAnswers).not.toHaveBeenCalled();
+  expect(adapter.completeFinanceOnboarding).not.toHaveBeenCalled();
+  expect(screen.queryByRole("region", { name: "Initial agent guidance" })).not.toBeInTheDocument();
+  await chooseAutomation(user, "now");
+  expect(screen.getByRole("region", { name: "Initial agent guidance" })).toBeVisible();
+  expect(
+    screen.getByRole("link", { name: "Connect an agent and get host instructions" }),
+  ).toHaveAttribute("href", "/finances/automations");
+  expect(adapter.saveFinanceOnboardingAnswers).not.toHaveBeenCalled();
+});
+it("copies initial canonical tool guidance through Sonner with selectable text fallback", async () => {
+  const adapter = show();
+  const user = userEvent.setup();
+  await screen.findByLabelText("Income");
+  await chooseAutomation(user, "now");
+  const text = screen.getByLabelText("Initial agent instructions");
+  expect((text as HTMLTextAreaElement).value).toContain("get_finance_playbook");
+  expect((text as HTMLTextAreaElement).value).toContain('setup_finances with operation "start"');
+  const write = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+  toast.loading.mockClear();
+  toast.success.mockClear();
+  expect(write).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Copy initial instructions" }));
+  await waitFor(() =>
+    expect(toast.success).toHaveBeenCalledWith("Initial agent instructions copied", {
+      id: "setup-review-toast",
+    }),
+  );
+  expect(toast.loading).toHaveBeenCalledExactlyOnceWith("Copying initial agent instructions…");
+  expect(screen.queryByText("Initial agent instructions copied")).not.toBeInTheDocument();
+  write.mockRejectedValueOnce(new Error("Clipboard unavailable"));
+  await user.click(screen.getByRole("button", { name: "Copy initial instructions" }));
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "Instructions could not be copied. Select and copy the text below.",
+      { id: "setup-review-toast" },
+    ),
+  );
+  expect(
+    screen.queryByText("Instructions could not be copied. Select and copy the text below."),
+  ).not.toBeInTheDocument();
+  expect(text).toHaveAttribute("readonly");
+  expect(adapter.saveFinanceOnboardingAnswers).not.toHaveBeenCalled();
 });

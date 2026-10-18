@@ -8,9 +8,11 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
+import { ChoiceCardGroup } from "@/components/choice-card-group";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { NativeSelect } from "@/components/ui/native-select";
+import { FinanceSetupAgentGuidance } from "./setup-agent-guidance.js";
 
 const blockerCopy: Record<FinanceOnboardingBlocker, string> = {
   source_required: "Add an account or import records to continue.",
@@ -24,7 +26,13 @@ const blockerCopy: Record<FinanceOnboardingBlocker, string> = {
 };
 
 /** Mount only with a durable server adapter; local drafts never unlock the workspace. */
-export function FinanceOnboardingReview({ adapter }: { adapter: FinanceOnboardingAdapter }) {
+export function FinanceOnboardingReview({
+  adapter,
+  continueTo,
+}: {
+  adapter: FinanceOnboardingAdapter;
+  continueTo?: string;
+}) {
   const client = useQueryClient();
   const [reload, setReload] = useState(0);
   const mounted = useRef(false);
@@ -82,6 +90,7 @@ export function FinanceOnboardingReview({ adapter }: { adapter: FinanceOnboardin
     <ReviewSnapshot
       key={`${query.data.revision}:${reload}`}
       adapter={adapter}
+      {...(continueTo === undefined ? {} : { continueTo })}
       snapshot={query.data}
       onSnapshot={(next) => client.setQueryData(["finance-onboarding", adapter], next)}
       reloading={query.isFetching}
@@ -99,8 +108,10 @@ function ReviewSnapshot({
   onReload,
   onSnapshot,
   reloading,
+  continueTo,
 }: {
   adapter: FinanceOnboardingAdapter;
+  continueTo?: string;
   snapshot: FinanceOnboardingSnapshot;
   onReload: () => Promise<void>;
   reloading: boolean;
@@ -229,24 +240,59 @@ function ReviewSnapshot({
           I reviewed my display preferences
         </label>
       </div>
-      <label htmlFor={`${controlId}-automation`} className="grid gap-1">
-        Automation
-        <NativeSelect
-          id={`${controlId}-automation`}
-          aria-label="Automation"
-          value={choice ?? ""}
-          disabled={locked}
-          onChange={(event) => setChoice(event.target.value as "later" | "now")}
-        >
-          <option value="" disabled>
-            Choose when
-          </option>
-          <option value="later">Later — use Finance manually</option>
-          <option value="now">Set up automation now</option>
-        </NativeSelect>
-      </label>
+      {snapshot.automationChoice === null && snapshot.completedAt === null ? (
+        <div className="grid gap-2">
+          <h3 className="font-medium">How would you like to use Finance?</h3>
+          <ChoiceCardGroup
+            aria-label="Initial Finance mode"
+            value={choice ?? ""}
+            disabled={locked}
+            onValueChange={(value) => setChoice(value as "later" | "now")}
+            options={[
+              {
+                value: "later",
+                label: "Use Finance manually",
+                preview: "Review your records yourself. Connect an agent later.",
+              },
+              {
+                value: "now",
+                label: "Set up with an agent",
+                preview: "Get initial guidance, connect a host, and choose its cadence.",
+              },
+            ]}
+          />
+          <p className="text-sm text-muted-foreground">
+            Your mode choice is saved with Save review.
+          </p>
+        </div>
+      ) : (
+        <label htmlFor={`${controlId}-automation`} className="grid gap-1">
+          Automation
+          <NativeSelect
+            id={`${controlId}-automation`}
+            aria-label="Automation"
+            value={choice ?? ""}
+            disabled={locked}
+            onChange={(event) => setChoice(event.target.value as "later" | "now")}
+          >
+            <option value="" disabled>
+              Choose when
+            </option>
+            <option value="later">Later — use Finance manually</option>
+            <option value="now">Set up automation now</option>
+          </NativeSelect>
+        </label>
+      )}
+      {choice === "now" && snapshot.completedAt === null ? <FinanceSetupAgentGuidance /> : null}
       {snapshot.completedAt ? (
-        <p role="status">Setup complete. Your workspace remains available.</p>
+        <div className="grid gap-2">
+          <p role="status">Setup complete. Your workspace remains available.</p>
+          {continueTo ? (
+            <Button asChild>
+              <a href={continueTo}>Continue</a>
+            </Button>
+          ) : null}
+        </div>
       ) : (
         <>
           {readiness.blockers.length ? (

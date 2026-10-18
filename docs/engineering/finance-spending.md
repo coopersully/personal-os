@@ -144,6 +144,7 @@ does not add unrelated empty rows. Zero-area groups do not create bubbles.
 Fill clip-path transitions use 300 ms and reduced motion uses zero duration. The Spending response
 contract can represent an explicit zero target separately from an absent target; defensive rendering
 shows positive usage as overspent without an infinite percentage and zero usage as no utilization.
-The currently integrated budget qualification authority still rejects zero allocations. Supporting
-explicit zero qualification remains an authority-owned contract dependency; consumer handling alone
-does not establish that producer capability.
+The integrated authority follow-on permits explicit zero allocations without manufacturing missing
+allocation rows. The exact authority dependency `939ff5ca` has independent source review and six focused PostgreSQL
+checks reported by its owner. Final integrated verification and browser acceptance remain separate
+gates; pure adapter tests alone do not establish persistence.

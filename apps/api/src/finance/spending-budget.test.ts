@@ -268,6 +268,48 @@ describe("Whole-month budget usage independent from bubble selection", () => {
       ).groups,
     ).toEqual([]);
   });
+  it("preserves explicit qualified zero targets, absent targets, and empty-month use", () => {
+    const original = qualified(baseline);
+    const zero = {
+      state: "qualified" as const,
+      qualification: {
+        ...original,
+        allocations: original.allocations.map((row) => ({ ...row, amountCents: 0 })),
+      },
+    };
+    const spent = buildFinanceSpendingDashboard(evidence, query, metadata, zero);
+    expect(spent.monthlyBudget).toMatchObject({
+      state: "qualified",
+      groups: [{ groupId: id(3), budgetCents: 0, usedCents: 1600, overspent: true }],
+    });
+    const empty = buildFinanceSpendingDashboard(
+      { ...evidence, transactions: [] },
+      query,
+      metadata,
+      zero,
+    );
+    expect(empty.groups[0]).toMatchObject({
+      id: id(3),
+      netCents: 0,
+      positiveAreaCents: 0,
+      drillDown: { transactionIds: [], contributionIds: [] },
+    });
+    expect(empty.monthlyBudget).toMatchObject({
+      state: "qualified",
+      groups: [{ groupId: id(3), budgetCents: 0, usedCents: 0, overspent: false }],
+    });
+    const absent = buildFinanceSpendingDashboard(evidence, query, metadata, {
+      state: "qualified",
+      qualification: {
+        ...original,
+        allocations: original.allocations.map((row) => ({ ...row, categoryId: id(4) })),
+      },
+    });
+    expect(absent.monthlyBudget).toMatchObject({
+      state: "qualified",
+      groups: [{ groupId: id(3), budgetCents: null, usedCents: 1600, overspent: false }],
+    });
+  });
   it("withholds unsupported transaction currency despite explicit baseline currency", () => {
     const input = {
       ...evidence,

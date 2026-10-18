@@ -1,5 +1,34 @@
 export const financeCapabilityManifest = [
   {
+    apiOperation: "getFinanceConversationBatch",
+    capability: "workflow.conversation_batch_delivery",
+    mcpTool: "get_finance_conversation_batch",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+  {
+    apiOperation: "acknowledgeFinanceConversationBatch",
+    capability: "workflow.conversation_batch_acknowledgment",
+    mcpTool: "acknowledge_finance_conversation_batch",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+  {
+    apiOperation: "replyToFinanceConversationBatch",
+    capability: "workflow.conversation_batch_reply",
+    mcpTool: "reply_to_finance_conversation_batch",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+  {
+    apiOperation: "exchangeFinanceConversationChallenge",
+    capability: "workflow.conversation_protocol_verification",
+    mcpTool: "exchange_finance_conversation_challenge",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+
+  {
     apiOperation: "getAutomationHostPromptHistory",
     capability: "workflow.host_prompt_history",
     mcpTool: "get_finance_host_prompt_history",

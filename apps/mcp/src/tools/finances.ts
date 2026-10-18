@@ -7,6 +7,9 @@ import {
   automationHostScheduleObservationInputSchema,
   type FinanceReceiptReview,
   type FinanceToolResult,
+  financeConversationAcknowledgmentInputSchema,
+  financeConversationProofOperationSchema,
+  financeConversationReplyInputSchema,
   financeMaintenanceInputSchema,
   financeReceiptReviewInputSchema,
   financeSetupInputSchema,
@@ -172,6 +175,105 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     },
     async (input) =>
       financeApiResult(() => api.setupFinances(financeSetupInputSchema.parse(input))),
+  );
+
+  server.registerTool(
+    "get_finance_conversation_batch",
+    {
+      annotations: {
+        openWorldHint: false,
+        readOnlyHint: false,
+        idempotentHint: true,
+        destructiveHint: false,
+      },
+      description:
+        "Page only the immutable message batch captured by the existing maintain_finances run, using its original verified host connection. Follow the returned signed cursor; never scan a live queue or start another Chat job. Reading persists exact delivery receipts but does not acknowledge messages or mark them read by the human. Later messages belong to a later run.",
+      inputSchema: z
+        .object({
+          runId: id,
+          cursor: z.string().min(1).max(2000).optional(),
+          limit: z.int().min(1).max(100).optional(),
+        })
+        .strict(),
+      title: "Read fixed Finance conversation batch",
+    },
+    async ({ runId, cursor, limit }) =>
+      apiResult(() =>
+        api.getFinanceConversationBatch(runId, {
+          ...(cursor === undefined ? {} : { cursor }),
+          ...(limit === undefined ? {} : { limit }),
+        }),
+      ),
+  );
+  server.registerTool(
+    "acknowledge_finance_conversation_batch",
+    {
+      annotations: {
+        openWorldHint: false,
+        readOnlyHint: false,
+        idempotentHint: true,
+        destructiveHint: false,
+      },
+      description:
+        "Acknowledge only the exact delivered message IDs from this existing Finance run's fixed batch. The server validates original host authority and delivery receipts. This does not move the human rendered/read cursor, approve a financial change or consume later messages.",
+      inputSchema: z
+        .object({ runId: id, ...financeConversationAcknowledgmentInputSchema.shape })
+        .strict(),
+      title: "Acknowledge delivered Finance messages",
+    },
+    async ({ runId, ...input }) =>
+      apiResult(() =>
+        api.acknowledgeFinanceConversationBatch(
+          runId,
+          financeConversationAcknowledgmentInputSchema.parse(input),
+        ),
+      ),
+  );
+  server.registerTool(
+    "reply_to_finance_conversation_batch",
+    {
+      annotations: {
+        openWorldHint: false,
+        readOnlyHint: false,
+        idempotentHint: true,
+        destructiveHint: false,
+      },
+      description:
+        "Persist a contextual reply to exact source messages delivered within this existing Finance run's fixed cutoff. Reuse the idempotency key only for the same reply. Read committed effect evidence before recovering a lost reply; publishing text never authorizes or repeats a financial effect and cannot approve a budget.",
+      inputSchema: z.object({ runId: id, ...financeConversationReplyInputSchema.shape }).strict(),
+      title: "Reply to fixed Finance conversation batch",
+    },
+    async ({ runId, ...input }) =>
+      apiResult(() =>
+        api.replyToFinanceConversationBatch(
+          runId,
+          financeConversationReplyInputSchema.parse(input),
+        ),
+      ),
+  );
+  server.registerTool(
+    "exchange_finance_conversation_challenge",
+    {
+      annotations: {
+        openWorldHint: false,
+        readOnlyHint: false,
+        idempotentHint: true,
+        destructiveHint: false,
+      },
+      description:
+        "Complete a human-issued Finance message-protocol challenge with the original authorized host connection: fetch the actual challenge, acknowledge its exact nonce and ID, then persist a harmless response. Verification is server-owned; registration, check-in and self-reported verified flags cannot unlock Chat. Challenge traffic stays outside conversation history and unread counts.",
+      inputSchema: z
+        .object({ challengeId: id, operation: financeConversationProofOperationSchema })
+        .strict(),
+      title: "Verify Finance message protocol",
+    },
+    async ({ challengeId, operation }) =>
+      apiResult(() =>
+        api.exchangeFinanceConversationChallenge(
+          challengeId,
+          financeConversationProofOperationSchema.parse(operation),
+        ),
+      ),
   );
 
   server.registerTool(

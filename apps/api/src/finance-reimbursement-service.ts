@@ -15,7 +15,7 @@ import {
   type ReconcileFinanceReimbursementInput,
   toCents,
 } from "@personal-os/domain";
-import { and, desc, eq, gte, inArray } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import { executeFinanceIdempotently, loadFinanceAuthorization } from "./finance/context.js";

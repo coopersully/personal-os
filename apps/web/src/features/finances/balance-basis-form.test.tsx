@@ -40,6 +40,7 @@ function mount(truncated = false, complete = true) {
             merchant: "Rent",
             date: "2026-10-01",
             transactionRevision: "9007199254740994",
+            reimbursementRelationshipRevision: "9007199254740997",
             amountCents: 1000,
             currencyCode: "USD",
             direction: "expense",
@@ -94,7 +95,12 @@ it("requires explicit per-movement reflection and preserves exact bigint revisio
     validUntil: "2026-10-18T11:00:00-04:00",
     protectedFloorCents: null,
     reflections: [
-      { transactionId, transactionRevision: "9007199254740994", reflection: "not_included" },
+      {
+        transactionId,
+        transactionRevision: "9007199254740994",
+        reimbursementRelationshipRevision: "9007199254740997",
+        reflection: "not_included",
+      },
     ],
     idempotencyKey: expect.any(String),
   });
@@ -114,7 +120,12 @@ it("rejects inverted validity and distinguishes an optional explicit zero floor"
     expect.objectContaining({
       protectedFloorCents: 0,
       reflections: [
-        { transactionId, transactionRevision: "9007199254740994", reflection: "included" },
+        {
+          transactionId,
+          transactionRevision: "9007199254740994",
+          reimbursementRelationshipRevision: "9007199254740997",
+          reflection: "included",
+        },
       ],
     }),
   );
@@ -178,7 +189,12 @@ it("sends basis reflection revisions unchanged through the real client route", a
     expectedAccountRevision: "9007199254740993",
     protectedFloorCents: null,
     reflections: [
-      { transactionId, transactionRevision: "9007199254740994", reflection: "included" },
+      {
+        transactionId,
+        transactionRevision: "9007199254740994",
+        reimbursementRelationshipRevision: "9007199254740997",
+        reflection: "included",
+      },
     ],
   });
 });

@@ -93,6 +93,8 @@ export function OccurrenceMatchDialog(props: OccurrenceMatchDialogProps) {
             },
             transactionId,
             expectedTransactionRevision: selected?.transactionRevision ?? "",
+            expectedReimbursementRelationshipRevision:
+              selected?.reimbursementRelationshipRevision ?? "",
             amountCents: cents(amount),
             currencyCode: occurrence.currencyCode,
             rationale: rationale.trim(),

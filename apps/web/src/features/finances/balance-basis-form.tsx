@@ -70,6 +70,7 @@ export function BalanceBasisForm(props: BalanceBasisFormProps) {
       reflections: transactions.map((transaction) => ({
         transactionId: transaction.id,
         transactionRevision: transaction.transactionRevision,
+        reimbursementRelationshipRevision: transaction.reimbursementRelationshipRevision,
         reflection: reflections[transaction.id] ?? "unknown",
       })),
       idempotencyKey: "validation",

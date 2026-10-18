@@ -223,8 +223,19 @@ Review.
   existing context with an honest retry state. These are implementation contracts; database,
   browser and integrated acceptance evidence is recorded separately from production claims.
 - Scenario comparisons are explicit hypothetical inputs and never change a saved plan.
-- Cash flow shows reimbursements as their own expected/received/remaining
-  ledger, including overdue state and linked credits.
+- Cash flow reimbursement journeys keep the original expense, active allocation, expectation,
+  received cash and remaining claim distinct. Human corrections revise the existing claim;
+  receipt removal retains immutable audit evidence and releases actual credit capacity. Unknown
+  retries retain the exact request and key. A correction denied with 401/403 hides the entire
+  cached reimbursement list and dismisses dialogs; transient failures retain context.
+- Personal cost to date subtracts received reimbursements only. It is shown only for a posted,
+  fully allocated expense with complete owned-source, receipt, currency and capacity evidence.
+  Pending, shared or ambiguous evidence remains unavailable. The result covers the whole expense,
+  can repeat across its claim cards and must never be added across those cards. Original outlay,
+  expectation and received amounts remain separately labelled.
+- Match and balance confirmations bind both transaction content and reimbursement relationship
+  generations. Match, unmatch and rematch cannot revive old evidence. Legacy statements without a
+  relationship generation remain unknown until reviewed again.
 - A mixed purchase is edited in one exact-cent breakdown dialog. Every cent
   must be assigned, reimbursement treatment is explicit, and a future merchant
   rule is unavailable for mixed allocations.

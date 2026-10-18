@@ -32,6 +32,7 @@ const event: FinanceOccurrenceMatchEvent = {
   currencyCode: "USD",
   allocationRevision: 7,
   transactionRevision: "9007199254740993",
+  reimbursementRelationshipRevision: "9007199254740997",
   reversesMatchId: null,
   actorUserId: accountId,
   recordedAt: "2026-10-18T12:00:00Z",
@@ -68,6 +69,7 @@ function mount(kind: "income" | "obligation" = "obligation") {
     currencyCode: "USD",
     amountCents: 1000,
     transactionRevision: "9007199254740993",
+    reimbursementRelationshipRevision: "9007199254740997",
     incomeEligibility: { eligible: kind === "income", reasons: [] },
     allocations: [
       {
@@ -143,6 +145,7 @@ it("matches a partial canonical expense allocation with exact current revisions 
     occurrence: { scheduleVersionId: scheduleId, localDate: "2026-10-18", slot: 0 },
     transactionId,
     expectedTransactionRevision: "9007199254740993",
+    expectedReimbursementRelationshipRevision: "9007199254740997",
     allocationId,
     expectedAllocationRevision: 7,
     amountCents: 250,
@@ -224,6 +227,7 @@ it("sends canonical income matching through the real client without an allocatio
     operation: "match_income",
     transactionId,
     expectedTransactionRevision: "9007199254740993",
+    expectedReimbursementRelationshipRevision: "9007199254740997",
     amountCents: 250,
   });
   expect(body).not.toHaveProperty("allocationId");

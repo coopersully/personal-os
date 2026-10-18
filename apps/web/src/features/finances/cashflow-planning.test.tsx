@@ -143,6 +143,7 @@ const sources = {
       direction: "income",
       pending: false,
       transactionRevision: "9007199254740995",
+      reimbursementRelationshipRevision: "9007199254740997",
       incomeEligibility: { eligible: true, reasons: [] },
       allocations: [],
     },
@@ -292,6 +293,7 @@ it("passes canonical candidates and immutable match events to occurrence inspect
       {
         id: transaction,
         transactionRevision: "9007199254740995",
+        reimbursementRelationshipRevision: "9007199254740997",
         incomeEligibility: { eligible: true },
       },
     ],

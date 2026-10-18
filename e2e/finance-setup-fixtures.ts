@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { createApiClient } from "@personal-os/api-client";
 import type { Page } from "@playwright/test";
+import { createPersonalOsMcpServer } from "../apps/mcp/src/server.js";
 
 export type FinanceSetupHuman = ReturnType<typeof createApiClient>;
 
@@ -14,12 +16,127 @@ export function browserFinanceHuman(page: Page, baseURL: string): FinanceSetupHu
         headers: Object.fromEntries(new Headers(init?.headers)),
         ...(typeof init?.body === "string" ? { data: init.body } : {}),
       });
-      return new Response(await response.text(), {
+      return new Response(response.status() === 204 ? null : await response.text(), {
         status: response.status(),
         headers: response.headers(),
       });
     },
   });
+}
+
+/** Public API authorization + real SDK protocol over linked transports.
+ * This is not a public MCP HTTP transport or external scheduler smoke test.
+ */
+export async function createFinanceSetupHost(human: FinanceSetupHuman, baseURL: string) {
+  const origin = new URL(baseURL);
+  if (!["127.0.0.1", "localhost", "[::1]"].includes(origin.hostname))
+    throw new Error("Finance host browser fixtures require a disposable loopback runtime");
+  const originalPolicy = await human.getExecutionPolicySettings();
+  const credential = await human.createAccessToken({
+    name: "Disposable Finance setup original host",
+    scopes: ["finances:read", "finances:maintain", "finances:write", "finances:execute"],
+  });
+  const agent = createApiClient({ baseUrl: baseURL, token: credential.token });
+  let scheduleId: string | undefined;
+  let revoked = false;
+  let server: ReturnType<typeof createPersonalOsMcpServer> | undefined;
+  let client: Client | undefined;
+  const revokeOriginalToken = async () => {
+    if (!revoked) {
+      await human.deleteAccessToken(credential.id);
+      revoked = true;
+    }
+  };
+  const close = async () => {
+    const outcomes = await Promise.allSettled([
+      (async () => {
+        if (!scheduleId) return;
+        const current = (await human.listAutomationHostSchedules()).find(
+          (item) => item.schedule.id === scheduleId,
+        )?.schedule;
+        if (current?.state === "setup_pending")
+          await human.cancelAutomationHostSchedule(current.id, {
+            expectedVersion: current.version,
+            expectedState: "setup_pending",
+          });
+        else if (current?.state === "active" || current?.state === "paused")
+          await human.revokeAutomationHostSchedule(current.id, {
+            expectedVersion: current.version,
+            expectedState: current.state,
+          });
+      })(),
+      client?.close(),
+      server?.close(),
+    ]);
+    const remaining = await Promise.allSettled([
+      revokeOriginalToken(),
+      (async () => {
+        const current = await human.getExecutionPolicySettings();
+        if (current.reviewBypassEnabled !== originalPolicy.reviewBypassEnabled)
+          await human.updateExecutionPolicySettings({
+            expectedVersion: current.version,
+            reviewBypassEnabled: originalPolicy.reviewBypassEnabled,
+          });
+      })(),
+    ]);
+    const failures = [...outcomes, ...remaining].filter((outcome) => outcome.status === "rejected");
+    if (failures.length)
+      throw new AggregateError(
+        failures.map((outcome) => outcome.reason),
+        "Host fixture cleanup failed",
+      );
+  };
+  try {
+    const context = await agent.getIloContext();
+    await human.updateExecutionPolicySettings({
+      expectedVersion: originalPolicy.version,
+      reviewBypassEnabled: true,
+    });
+    const connections = await agent.listAutomationHostConnections();
+    if (connections.length !== 1 || !connections[0])
+      throw new Error("Expected exactly the new token's original authorization connection");
+    const connection = connections[0];
+    const created = await agent.createAutomationHostSchedule({
+      tenantAuthorizationConnectionId: connection.id,
+      label: "Disposable local Finance setup host",
+      requestedScopes: ["finances:maintain"],
+      hostSurface: "codex_desktop",
+      trigger: {
+        type: "recurring",
+        recurrence: {
+          type: "interval",
+          everyMinutes: 5,
+          timeZone: "America/New_York",
+        },
+      },
+    });
+    scheduleId = created.schedule.id;
+    // Controlled fixture binding only: no native scheduler is created or fired.
+    await agent.bindAutomationHostSchedule(scheduleId, {
+      expectedVersion: created.schedule.version,
+      expectedState: "setup_pending",
+      hostSurface: "codex_desktop",
+      hostAutomationId: `browser-fixture-${randomUUID()}`,
+      nextExpectedAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+    });
+    server = createPersonalOsMcpServer({
+      api: agent,
+      scopes: new Set(context.access.grantedScopes),
+      readOnly: false,
+      timeZone: "America/New_York",
+    });
+    client = new Client({ name: "finance-setup-browser-fixture", version: "1" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
+    return { agent, client, scheduleId, connectionId: connection.id, revokeOriginalToken, close };
+  } catch (error) {
+    try {
+      await close();
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Host fixture setup and cleanup failed");
+    }
+    throw error;
+  }
 }
 
 /** Each desktop/mobile attempt gets a new named disposable owner, never a shared catalog mutation. */
@@ -95,7 +212,7 @@ export async function completeFinanceSetupViaApi(human: FinanceSetupHuman) {
 
 export interface OriginalAgentMcp {
   callTool(input: { name: string; arguments: Record<string, unknown> }): Promise<{
-    isError?: boolean;
+    isError?: boolean | undefined;
     structuredContent?: unknown;
   }>;
 }

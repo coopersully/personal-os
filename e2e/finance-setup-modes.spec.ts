@@ -4,13 +4,104 @@ import { expect, test } from "@playwright/test";
 import {
   addReviewedManualSource,
   completeFinanceSetupViaApi,
+  createFinanceSetupHost,
   createFinanceSetupPersona,
+  verifyFinanceChatThroughOriginalAgent,
 } from "./finance-setup-fixtures.js";
 
-// Runs under both repository projects. Host pending/verified/revoked and actual
-// pre-0118 legacy migration require fixture bootstrap outside this browser file.
-// These gaps are deliberately not represented as skipped or mocked passing tests.
+// Runs under both repository projects. Actual pre-0118 legacy migration remains
+// integration evidence; it is never represented by an inserted browser grant.
 test.describe("durable Finance manual setup", () => {
+  test("registered Now can finish while Chat waits for original-agent proof, then revocation locks only sending", async ({
+    page,
+    baseURL,
+  }, info) => {
+    if (!baseURL) throw new Error("Browser runtime baseURL is required");
+    const { human, email } = await createFinanceSetupPersona(page, baseURL);
+    await addReviewedManualSource(human);
+    const host = await createFinanceSetupHost(human, baseURL);
+    try {
+      const pending = await human.getFinanceOnboarding();
+      expect(pending.automation).toMatchObject({
+        registrationCount: 1,
+        authorizedRegistrationWithCadence: true,
+        chatVerification: "pending",
+        canSendChat: false,
+      });
+      const saved = await human.saveFinanceOnboardingAnswers({
+        expectedRevision: pending.revision,
+        idempotencyKey: randomUUID(),
+        automationChoice: "now",
+        displayPreferencesReviewed: true,
+        answers: pending.questions.map(({ questionId }) => ({
+          questionId,
+          disposition: "unknown",
+        })),
+      });
+      await page.goto("/finances/setup");
+      const review = page.getByRole("region", { name: "Setup review", exact: true });
+      await review.getByRole("button", { name: "Finish setup", exact: true }).click();
+      await expect(page.getByText("Setup complete", { exact: true })).toBeVisible();
+      const completed = await human.getFinanceOnboarding();
+      expect(completed.revision).toBeGreaterThan(saved.revision);
+      expect(completed.completedAt).not.toBeNull();
+      expect(completed.automation.canSendChat).toBe(false);
+      await page.goto("/finances/chat");
+      const chat = page.getByRole("region", { name: "Finance chat", exact: true });
+      await chat.getByLabel("Message", { exact: true }).fill("Pending fixture draft");
+      await expect(chat.getByRole("button", { name: "Send message", exact: true })).toBeDisabled();
+      await expect(chat.getByText(/Chat sending is locked\./)).toBeVisible();
+      expect((await human.getFinanceConversationHistory()).messages).toHaveLength(0);
+      await verifyFinanceChatThroughOriginalAgent(human, host.client, host.scheduleId);
+      const verified = await human.getFinanceOnboarding();
+      expect(verified.automation).toMatchObject({
+        chatVerification: "verified",
+        canSendChat: true,
+      });
+      expect(verified.completedAt).toBe(completed.completedAt);
+      await page.reload();
+      const message = `Disposable original host browser message ${randomUUID()}`;
+      await chat.getByLabel("Message", { exact: true }).fill(message);
+      await expect(chat.getByRole("button", { name: "Send message", exact: true })).toBeEnabled();
+      await chat.getByRole("button", { name: "Send message", exact: true }).click();
+      await expect(chat.getByText(message, { exact: true })).toBeVisible();
+      const history = await human.getFinanceConversationHistory();
+      expect(history.messages.map((item) => item.text)).toContain(message);
+      await page.reload();
+      await expect(chat.getByText(message, { exact: true })).toBeVisible();
+      await host.revokeOriginalToken();
+      expect(await human.getFinanceConversationReadiness()).toMatchObject({ canSend: false });
+      await page.reload();
+      await chat.getByLabel("Message", { exact: true }).fill("Revoked fixture draft");
+      await expect(chat.getByRole("button", { name: "Send message", exact: true })).toBeDisabled();
+      await expect(chat.getByText(/Chat sending is locked\./)).toBeVisible();
+      await expect(chat.getByText(message, { exact: true })).toBeVisible();
+      expect((await human.getFinanceConversationHistory()).messages.map((item) => item.id)).toEqual(
+        history.messages.map((item) => item.id),
+      );
+      const revoked = await human.getFinanceOnboarding();
+      expect(revoked.completedAt).toBe(completed.completedAt);
+      expect(revoked.automation.canSendChat).toBe(false);
+      await info.attach("host-setup-snapshots", {
+        body: JSON.stringify({
+          email,
+          scheduleId: host.scheduleId,
+          connectionId: host.connectionId,
+          pending,
+          saved,
+          completed,
+          verified,
+          revoked,
+          transport:
+            "SDK linked MCP transports with actual authenticated loopback HTTP API; controlled schedule binding; no external scheduler or public MCP HTTP smoke",
+        }),
+        contentType: "application/json",
+      });
+    } finally {
+      await host.close();
+    }
+  });
+
   test("an incomplete Finance owner can repair setup while Tasks remains reachable", async ({
     page,
     baseURL,

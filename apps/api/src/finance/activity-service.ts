@@ -8,9 +8,11 @@ import {
 } from "@personal-os/database";
 import {
   type FinanceActivityEntry,
+  type FinanceActivityEvidenceQuery,
   type FinanceActivityPage,
   type FinanceActivityQuery,
   financeActivityEntrySchema,
+  financeActivityEvidenceQuerySchema,
   financeActivityQuerySchema,
   idSchema,
   isoDateTimeSchema,
@@ -18,6 +20,10 @@ import {
 import { and, desc, eq, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { AppError } from "../errors.js";
+import {
+  listFinanceActivityEffects,
+  readFinanceActivityEvidence,
+} from "./activity-effect-store.js";
 
 type Audit = typeof auditEvents.$inferSelect;
 type Message = typeof financeConversationMessages.$inferSelect;
@@ -35,6 +41,7 @@ const cursorSchema = z
     filtersHash: z.string().regex(/^[a-f0-9]{64}$/u),
     at: isoDateTimeSchema,
     id: idSchema,
+    kind: z.enum(["human_answer_decision", "financial_action"]).default("human_answer_decision"),
   })
   .strict();
 type Cursor = z.infer<typeof cursorSchema>;
@@ -54,7 +61,7 @@ function filterHash(query: FinanceActivityQuery) {
 export function encodeFinanceActivityCursor(
   userId: string,
   query: FinanceActivityQuery,
-  position: { at: string; id: string },
+  position: { at: string; id: string; kind?: "human_answer_decision" | "financial_action" },
   secret: string,
 ): string {
   const payload = Buffer.from(
@@ -176,19 +183,26 @@ export function projectFinanceActivityDecision(
     ],
   });
 }
-function page(entries: FinanceActivityEntry[], nextCursor: string | null): FinanceActivityPage {
+function page(
+  entries: FinanceActivityEntry[],
+  nextCursor: string | null,
+  incompleteEvidence = false,
+): FinanceActivityPage {
   return {
     entries,
     nextCursor,
     capabilities: {
-      financialActions: { state: "unavailable", reason: "mutation_evidence_not_integrated" },
+      financialActions: { state: "available", scope: "committed_candidate_effects" },
       humanDecisions: { state: "available" },
     },
     coverage: {
       state: "partial",
       reasons: [
-        "financial_mutation_evidence_not_integrated",
+        "financial_actions_outside_committed_candidate_receipts_not_projected",
         "historical_decisions_without_causal_message_not_projected",
+        ...(incompleteEvidence
+          ? ["committed_receipts_with_incomplete_evidence_not_projected" as const]
+          : []),
       ],
     },
   };
@@ -205,98 +219,134 @@ export function createFinanceActivityService({
   if (!cursorSecret)
     throw new AppError("internal_error", "The existing server cursor secret is required.");
   return {
+    async readEvidence(userId: string, id: string, raw: FinanceActivityEvidenceQuery = {}) {
+      const query = financeActivityEvidenceQuerySchema.parse(raw);
+      return readFinanceActivityEvidence(
+        db,
+        userId,
+        idSchema.parse(id),
+        query.cursor,
+        cursorSecret,
+      );
+    },
     async listActivity(userId: string, raw: FinanceActivityQuery): Promise<FinanceActivityPage> {
       const query = financeActivityQuerySchema.parse(raw);
       const cursor = decodeFinanceActivityCursor(userId, query, cursorSecret);
-      if (query.type === "financial_action" || (query.actor && query.actor !== "user"))
-        return page([], null);
+      const effects =
+        query.type !== "human_answer_decision"
+          ? await listFinanceActivityEffects(db, userId, query, cursor, cursorSecret)
+          : [];
       // Canonical receipt and audit remain after live question/answer deletion.
-      const rows = await db
-        .select({
-          audit: auditEvents,
-          message: financeConversationMessages,
-          receipt: financeMutationRecords,
-          answer: financeContextualAnswers,
-          cursorAt: sql<string>`to_char(${auditEvents.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
-        })
-        .from(auditEvents)
-        .innerJoin(
-          financeConversationMessages,
-          and(
-            eq(financeConversationMessages.userId, auditEvents.userId),
-            eq(financeConversationMessages.authorKind, "user"),
-            sql`${financeConversationMessages.sourceOperationId}::text = ${auditEvents.after}->>'operationId'`,
-            sql`${financeConversationMessages.idempotencyKey} = 'answer:' || (${auditEvents.after}->>'operationId')`,
-            sql`${financeConversationMessages.recordRefs} @> jsonb_build_array(jsonb_build_object('kind','contextual_question','id',${auditEvents.entityId}::text))`,
-          ),
-        )
-        .innerJoin(
-          financeMutationRecords,
-          and(
-            eq(financeMutationRecords.userId, auditEvents.userId),
-            sql`${financeMutationRecords.idempotencyKey} = ${auditEvents.after}->>'operationId'`,
-            eq(financeMutationRecords.operation, "answer_contextual_question_v1"),
-            eq(financeMutationRecords.actorType, "user"),
-            eq(financeMutationRecords.actorId, userId),
-            eq(financeMutationRecords.status, "completed"),
-            sql`${financeMutationRecords.response}->>'state' = 'accepted'`,
-            sql`${financeMutationRecords.response}->>'operationId' = ${auditEvents.after}->>'operationId'`,
-            sql`${financeMutationRecords.response}->>'resultRevision' = ${auditEvents.after}->>'revision'`,
-          ),
-        )
-        .leftJoin(
-          financeContextualAnswers,
-          and(
-            eq(financeContextualAnswers.userId, auditEvents.userId),
-            sql`${financeContextualAnswers.id}::text = ${auditEvents.after}->>'answerId'`,
-          ),
-        )
-        .where(
-          and(
-            eq(auditEvents.userId, userId),
-            eq(auditEvents.action, "finance.contextual_answer.accepted"),
-            eq(auditEvents.entityType, "finance_contextual_question"),
-            eq(auditEvents.actorType, "user"),
-            eq(auditEvents.actorId, userId),
-            sql`length(${auditEvents.requestId}) > 0`,
-            sql`${auditEvents.after}->>'state' = 'accepted'`,
-            sql`${auditEvents.after}->>'answerId' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'`,
-            sql`(${financeContextualAnswers.id} IS NULL OR (${financeContextualAnswers.operationId}::text = ${auditEvents.after}->>'operationId' AND ${financeContextualAnswers.questionId} = ${auditEvents.entityId} AND ${financeContextualAnswers.actorType} = 'user' AND ${financeContextualAnswers.actorId} = ${userId} AND ${financeContextualAnswers.requestId} = ${auditEvents.requestId} AND ${financeContextualAnswers.text} = ${financeConversationMessages.text} AND ${financeContextualAnswers.resultingWorkRevision}::text = ${auditEvents.after}->>'revision'))`,
-            query.recordId
-              ? sql`${financeConversationMessages.recordRefs} @> jsonb_build_array(jsonb_build_object('id',${query.recordId}::text))`
-              : undefined,
-            query.from ? sql`${auditEvents.createdAt} >= ${query.from}::timestamptz` : undefined,
-            query.through
-              ? sql`${auditEvents.createdAt} <= ${query.through}::timestamptz`
-              : undefined,
-            cursor
-              ? or(
-                  sql`${auditEvents.createdAt} < ${cursor.at}::timestamptz`,
-                  and(
-                    sql`${auditEvents.createdAt} = ${cursor.at}::timestamptz`,
-                    lt(auditEvents.id, cursor.id),
-                  ),
-                )
-              : undefined,
-          ),
-        )
-        .orderBy(desc(auditEvents.createdAt), desc(auditEvents.id))
-        .limit(query.limit + 1);
-      const entries = rows
-        .slice(0, query.limit)
-        .map((source) => projectFinanceActivityDecision(userId, source))
+      const rows =
+        query.type !== "financial_action" && (!query.actor || query.actor === "user")
+          ? await db
+              .select({
+                audit: auditEvents,
+                message: financeConversationMessages,
+                receipt: financeMutationRecords,
+                answer: financeContextualAnswers,
+                cursorAt: sql<string>`to_char(${auditEvents.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+              })
+              .from(auditEvents)
+              .innerJoin(
+                financeConversationMessages,
+                and(
+                  eq(financeConversationMessages.userId, auditEvents.userId),
+                  eq(financeConversationMessages.authorKind, "user"),
+                  sql`${financeConversationMessages.sourceOperationId}::text = ${auditEvents.after}->>'operationId'`,
+                  sql`${financeConversationMessages.idempotencyKey} = 'answer:' || (${auditEvents.after}->>'operationId')`,
+                  sql`${financeConversationMessages.recordRefs} @> jsonb_build_array(jsonb_build_object('kind','contextual_question','id',${auditEvents.entityId}::text))`,
+                ),
+              )
+              .innerJoin(
+                financeMutationRecords,
+                and(
+                  eq(financeMutationRecords.userId, auditEvents.userId),
+                  sql`${financeMutationRecords.idempotencyKey} = ${auditEvents.after}->>'operationId'`,
+                  eq(financeMutationRecords.operation, "answer_contextual_question_v1"),
+                  eq(financeMutationRecords.actorType, "user"),
+                  eq(financeMutationRecords.actorId, userId),
+                  eq(financeMutationRecords.status, "completed"),
+                  sql`${financeMutationRecords.response}->>'state' = 'accepted'`,
+                  sql`${financeMutationRecords.response}->>'operationId' = ${auditEvents.after}->>'operationId'`,
+                  sql`${financeMutationRecords.response}->>'resultRevision' = ${auditEvents.after}->>'revision'`,
+                ),
+              )
+              .leftJoin(
+                financeContextualAnswers,
+                and(
+                  eq(financeContextualAnswers.userId, auditEvents.userId),
+                  sql`${financeContextualAnswers.id}::text = ${auditEvents.after}->>'answerId'`,
+                ),
+              )
+              .where(
+                and(
+                  eq(auditEvents.userId, userId),
+                  eq(auditEvents.action, "finance.contextual_answer.accepted"),
+                  eq(auditEvents.entityType, "finance_contextual_question"),
+                  eq(auditEvents.actorType, "user"),
+                  eq(auditEvents.actorId, userId),
+                  sql`length(${auditEvents.requestId}) > 0`,
+                  sql`${auditEvents.after}->>'state' = 'accepted'`,
+                  sql`${auditEvents.after}->>'answerId' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'`,
+                  sql`(${financeContextualAnswers.id} IS NULL OR (${financeContextualAnswers.operationId}::text = ${auditEvents.after}->>'operationId' AND ${financeContextualAnswers.questionId} = ${auditEvents.entityId} AND ${financeContextualAnswers.actorType} = 'user' AND ${financeContextualAnswers.actorId} = ${userId} AND ${financeContextualAnswers.requestId} = ${auditEvents.requestId} AND ${financeContextualAnswers.text} = ${financeConversationMessages.text} AND ${financeContextualAnswers.resultingWorkRevision}::text = ${auditEvents.after}->>'revision'))`,
+                  query.recordId
+                    ? sql`${financeConversationMessages.recordRefs} @> jsonb_build_array(jsonb_build_object('id',${query.recordId}::text))`
+                    : undefined,
+                  query.from
+                    ? sql`${auditEvents.createdAt} >= ${query.from}::timestamptz`
+                    : undefined,
+                  query.through
+                    ? sql`${auditEvents.createdAt} <= ${query.through}::timestamptz`
+                    : undefined,
+                  cursor
+                    ? or(
+                        sql`${auditEvents.createdAt} < ${cursor.at}::timestamptz`,
+                        and(
+                          sql`${auditEvents.createdAt} = ${cursor.at}::timestamptz`,
+                          lt(auditEvents.id, cursor.id),
+                        ),
+                      )
+                    : undefined,
+                ),
+              )
+              .orderBy(desc(auditEvents.createdAt), desc(auditEvents.id))
+              .limit(query.limit + 1)
+          : [];
+      const candidates = [
+        ...rows.map((source) => ({
+          entry: projectFinanceActivityDecision(userId, source),
+          cursorAt: source.cursorAt,
+          id: source.audit.id,
+          kind: "human_answer_decision" as const,
+        })),
+        ...effects,
+      ];
+      // PostgreSQL microseconds remain in the cursor; do not collapse their order to JS milliseconds.
+      const orderTime = (at: string) =>
+        at.replace(/\.(\d+)Z$/u, (_match, fraction: string) => `.${fraction.padEnd(6, "0")}Z`);
+      candidates.sort(
+        (left, right) =>
+          orderTime(right.cursorAt).localeCompare(orderTime(left.cursorAt)) ||
+          right.id.localeCompare(left.id) ||
+          right.kind.localeCompare(left.kind),
+      );
+      const selected = candidates.slice(0, query.limit);
+      const entries = selected
+        .map((source) => source.entry)
         .filter((entry): entry is FinanceActivityEntry => entry !== null);
-      const last = rows.slice(0, query.limit).at(-1);
+      const last = selected.at(-1);
       return page(
         entries,
-        rows.length > query.limit && last
+        candidates.length > query.limit && last
           ? encodeFinanceActivityCursor(
               userId,
               query,
-              { at: last.cursorAt, id: last.audit.id },
+              { at: last.cursorAt, id: last.id, kind: last.kind },
               cursorSecret,
             )
           : null,
+        candidates.some((source) => source.kind === "financial_action" && source.entry === null),
       );
     },
   };

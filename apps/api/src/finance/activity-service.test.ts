@@ -194,17 +194,25 @@ describe("Finance Activity causal read projection", () => {
       "exact filters",
     );
   });
-  it("returns honest unavailable effects without querying messages, pending queues or model replies", async () => {
+  it("exposes only committed candidate-effect scope with honest partial coverage", async () => {
+    const chain = {
+      from: () => chain,
+      where: () => chain,
+      orderBy: () => chain,
+      limit: async () => [],
+    };
     const service = createFinanceActivityService({
-      db: {} as Database,
+      db: { select: () => chain } as unknown as Database,
       cursorSecret: "server-key",
     });
     const result = await service.listActivity(owner, { limit: 50, type: "financial_action" });
     expect(result.entries).toEqual([]);
     expect(result.capabilities.financialActions).toEqual({
-      state: "unavailable",
-      reason: "mutation_evidence_not_integrated",
+      state: "available",
+      scope: "committed_candidate_effects",
     });
-    expect(result.coverage.state).toBe("partial");
+    expect(result.coverage.reasons).toContain(
+      "financial_actions_outside_committed_candidate_receipts_not_projected",
+    );
   });
 });

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { financeActivityPageSchema, financeActivityQuerySchema } from "./activity.js";
+import {
+  financeActivityEvidencePageSchema,
+  financeActivityEvidenceQuerySchema,
+  financeActivityEvidenceStateSchema,
+  financeActivityPageSchema,
+  financeActivityQuerySchema,
+} from "./activity.js";
 
 describe("Finance Activity read contract", () => {
   it("bounds pages and rejects authority, owner and malformed filters", () => {
@@ -14,6 +20,51 @@ describe("Finance Activity read contract", () => {
     ]) {
       expect(financeActivityQuerySchema.safeParse(query).success).toBe(false);
     }
+  });
+  it("bounds exact evidence and rejects hidden overflow/completeness or authority overrides", () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    const change = {
+      id,
+      recordRef: { kind: "finance_budget_plan", id },
+      sourceRecordRef: { kind: "finance_budget_plan", id },
+      before: null,
+      after: { amount: "12.00" },
+      auditEventIds: [id],
+    };
+    const page = {
+      entryId: id,
+      changes: [change],
+      auditEventIds: [id],
+      recordRefs: [change.recordRef],
+      offset: 100,
+      totalChanges: 101,
+      nextCursor: null,
+    };
+    expect(financeActivityEvidencePageSchema.parse(page)).toEqual(page);
+    expect(
+      financeActivityEvidencePageSchema.safeParse({ ...page, nextCursor: "misleading" }).success,
+    ).toBe(false);
+    expect(
+      financeActivityEvidencePageSchema.safeParse({
+        ...page,
+        changes: Array.from({ length: 101 }, () => change),
+      }).success,
+    ).toBe(false);
+    expect(financeActivityEvidenceQuerySchema.safeParse({ owner: id }).success).toBe(false);
+    expect(
+      financeActivityEvidenceStateSchema.safeParse({
+        totalChanges: 101,
+        loadedChanges: 100,
+        nextCursor: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      financeActivityEvidenceStateSchema.safeParse({
+        totalChanges: 100,
+        loadedChanges: 100,
+        nextCursor: "false-continuation",
+      }).success,
+    ).toBe(false);
   });
   it("honestly exposes unavailable financial effects and partial historical coverage", () => {
     const page = {

@@ -1,5 +1,6 @@
 import { ApiClientError } from "@personal-os/api-client";
 import {
+  type FinanceActivityEntry as ActivityEntry,
   type FinanceActivityPage as FinanceActivityPageData,
   type FinanceActivityQuery,
   financeActivityQuerySchema,
@@ -7,22 +8,46 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
-import { ItemGroup } from "@/components/ui/item";
+import { Item, ItemContent, ItemGroup } from "@/components/ui/item";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import { FinanceActivityEntry } from "./activity-entry";
+import { FinanceActivityEntry, type ReadFinanceActivityEvidence } from "./activity-entry";
 
 type Props = {
   ownerId: string;
   readActivity: (query: FinanceActivityQuery) => Promise<FinanceActivityPageData>;
+  readEvidence?: ReadFinanceActivityEvidence;
 };
+export function groupFinanceActivity(entries: ActivityEntry[]) {
+  const result: Array<{
+    key: string;
+    entries: ActivityEntry[];
+    family: string | null;
+    runId: string | null;
+  }> = [];
+  for (const entry of entries) {
+    const grouped =
+      entry.kind === "financial_action" &&
+      entry.actor.type === "agent" &&
+      entry.runId &&
+      entry.effect?.significance === "routine" &&
+      entry.effect.actionFamilies.length === 1;
+    const family = grouped ? (entry.effect?.actionFamilies[0] ?? null) : null;
+    const key = grouped ? `run:${entry.runId}:${family}` : entry.id;
+    const existing = grouped ? result.find((group) => group.key === key) : undefined;
+    if (existing) existing.entries.push(entry);
+    else result.push({ key, entries: [entry], family, runId: entry.runId });
+  }
+  return result;
+}
 
 // Remount on ownership changes so neither old results nor in-flight reads cross owners.
 export function FinanceActivityPage(props: Props) {
   return <Activity key={props.ownerId} {...props} />;
 }
 
-function Activity({ readActivity }: Props) {
+function Activity({ readActivity, readEvidence }: Props) {
   const [page, setPage] = useState<FinanceActivityPageData>();
   const [query, setQuery] = useState<FinanceActivityQuery>({ limit: 50 });
   const [pending, setPending] = useState(false);
@@ -34,6 +59,15 @@ function Activity({ readActivity }: Props) {
   const reader = useRef(readActivity);
   reader.current = readActivity;
 
+  const clearAccess = useCallback(() => {
+    setPage(undefined);
+    setQuery({ limit: 50 });
+    setPending(false);
+    setPassiveLoading(false);
+    setAttempted(true);
+    actionToast.current = undefined;
+    generation.current += 1;
+  }, []);
   const load = useCallback(
     async (next: FinanceActivityQuery, append: boolean, explicit: boolean) => {
       const request = ++generation.current;
@@ -73,13 +107,7 @@ function Activity({ readActivity }: Props) {
           error instanceof ApiClientError && (error.status === 401 || error.status === 403);
         if (accessDenied) {
           // A retained page is no longer authorized, even when owner identity has not changed.
-          setPage(undefined);
-          setQuery({ limit: 50 });
-          setPending(false);
-          setPassiveLoading(false);
-          setAttempted(true);
-          actionToast.current = undefined;
-          generation.current += 1;
+          clearAccess();
         }
         toast.error(
           accessDenied
@@ -96,7 +124,7 @@ function Activity({ readActivity }: Props) {
         }
       }
     },
-    [],
+    [clearAccess],
   );
 
   useEffect(() => {
@@ -181,9 +209,15 @@ function Activity({ readActivity }: Props) {
           className="grid gap-1 text-sm text-muted-foreground"
         >
           <p>
-            Partial history · Financial action evidence is not integrated. Applied money changes are
-            not covered here.
+            {page.capabilities.financialActions.state === "available"
+              ? "Partial history · Includes applied changes with committed candidate receipts. Other financial actions and no-change runs are not covered."
+              : "Partial history · Financial action evidence is not integrated. Applied money changes are not covered here."}
           </p>
+          {page.coverage.reasons.includes(
+            "committed_receipts_with_incomplete_evidence_not_projected",
+          ) ? (
+            <p>Some committed receipts have incomplete supporting evidence and are omitted.</p>
+          ) : null}
           {page.coverage.reasons.includes(
             "historical_decisions_without_causal_message_not_projected",
           ) ? (
@@ -196,9 +230,43 @@ function Activity({ readActivity }: Props) {
         <p>No recorded activity matches these filters. Coverage is partial.</p>
       ) : null}
       <ItemGroup aria-label="Financial activity">
-        {page?.entries.map((entry) => (
-          <FinanceActivityEntry key={entry.id} entry={entry} />
-        ))}
+        {groupFinanceActivity(page?.entries ?? []).map((group) =>
+          group.family && group.entries.length > 1 ? (
+            <Item key={group.key} role="listitem">
+              <ItemContent>
+                <Collapsible>
+                  <CollapsibleTrigger asChild>
+                    <Button variant="ghost">
+                      {group.family.replaceAll("_", " ")} · {group.entries.length} actions
+                    </Button>
+                  </CollapsibleTrigger>
+                  <p className="text-xs text-muted-foreground break-all">Run · {group.runId}</p>
+                  <CollapsibleContent>
+                    <ItemGroup>
+                      {group.entries.map((entry) => (
+                        <FinanceActivityEntry
+                          key={`${entry.id}:${entry.evidence?.nextCursor ?? entry.occurredAt}`}
+                          entry={entry}
+                          readEvidence={readEvidence}
+                          onAccessDenied={clearAccess}
+                        />
+                      ))}
+                    </ItemGroup>
+                  </CollapsibleContent>
+                </Collapsible>
+              </ItemContent>
+            </Item>
+          ) : (
+            group.entries.map((entry) => (
+              <FinanceActivityEntry
+                key={`${entry.id}:${entry.evidence?.nextCursor ?? entry.occurredAt}`}
+                entry={entry}
+                readEvidence={readEvidence}
+                onAccessDenied={clearAccess}
+              />
+            ))
+          ),
+        )}
       </ItemGroup>
       {page?.nextCursor ? (
         <Button

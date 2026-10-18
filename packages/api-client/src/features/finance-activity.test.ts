@@ -3,6 +3,16 @@ import { createFinanceActivityApi } from "./finance-activity.js";
 import type { FinanceRequest } from "./finances.js";
 
 describe("Finance Activity client", () => {
+  it("encodes exact activity evidence identity and continuation without owner overrides", async () => {
+    const request = vi.fn(async () => ({})) as unknown as FinanceRequest;
+    const api = createFinanceActivityApi(request);
+    await api.getFinanceActivityEvidence("receipt/id");
+    await api.getFinanceActivityEvidence("receipt/id", { cursor: "signed+cursor/==" });
+    expect(vi.mocked(request).mock.calls).toEqual([
+      ["/v1/finances/activity/receipt%2Fid/evidence"],
+      ["/v1/finances/activity/receipt%2Fid/evidence?cursor=signed%2Bcursor%2F%3D%3D"],
+    ]);
+  });
   it("preserves bounded filter/cursor values and forwards honest capability state", async () => {
     const page = {
       entries: [],

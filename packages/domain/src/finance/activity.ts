@@ -1,9 +1,6 @@
 import { z } from "zod";
 import { actorTypeSchema, idSchema, isoDateTimeSchema } from "../common.js";
-import {
-  financeConversationRecordReferenceSchema,
-  financeConversationSequenceSchema,
-} from "./conversation.js";
+import { financeConversationSequenceSchema } from "./conversation.js";
 
 export const financeActivityKindSchema = z.enum(["human_answer_decision", "financial_action"]);
 export const financeActivityStatusSchema = z.enum([
@@ -38,10 +35,55 @@ export const financeActivitySourceMessageSchema = z
       .nullable(),
   })
   .strict();
+/** Activity preserves arbitrary canonical audit entity kinds; only known kinds get navigation. */
+export const financeActivityRecordReferenceSchema = z
+  .object({
+    kind: z.string().min(1).max(100),
+    id: idSchema,
+    sourceKind: z.string().min(1).max(100).optional(),
+  })
+  .strict();
+export const financeActivityEvidenceQuerySchema = z
+  .object({
+    cursor: z.string().min(1).max(3000).optional(),
+  })
+  .strict();
+export type FinanceActivityEvidenceQuery = z.infer<typeof financeActivityEvidenceQuerySchema>;
+export const financeActivityEvidenceStateSchema = z
+  .object({
+    totalChanges: z.number().int().min(1).max(10000),
+    loadedChanges: z.number().int().min(1).max(100),
+    nextCursor: z.string().min(1).max(3000).nullable(),
+  })
+  .strict()
+  .refine(
+    (state) =>
+      state.loadedChanges <= state.totalChanges &&
+      (state.nextCursor === null) === (state.loadedChanges === state.totalChanges),
+    "Evidence completeness must match the loaded change count.",
+  );
+export const financeActivityEffectSchema = z
+  .object({
+    candidateId: idSchema,
+    candidateRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+    authorityBasis: z.enum([
+      "original_live_grant",
+      "authenticated_owner",
+      "legacy_unbound_context",
+    ]),
+    actionFamilies: z.array(z.string().min(1).max(100)).max(100),
+    significance: z.enum(["routine", "budget_decision"]),
+    humanApproval: z.object({ actorId: idSchema, reviewId: idSchema }).strict().nullable(),
+  })
+  .strict();
 export const financeActivityChangeSchema = z
   .object({
     id: idSchema,
-    recordRef: financeConversationRecordReferenceSchema,
+    recordRef: financeActivityRecordReferenceSchema,
+    sourceRecordRef: financeActivityRecordReferenceSchema.optional(),
+    actor: z.object({ type: actorTypeSchema, id: z.string().nullable() }).strict().optional(),
+    occurredAt: isoDateTimeSchema.optional(),
+    action: z.string().min(1).max(160).optional(),
     before: z.record(z.string(), z.unknown()).nullable(),
     after: z.record(z.string(), z.unknown()).nullable(),
     auditEventIds: z.array(idSchema).max(100),
@@ -62,12 +104,36 @@ export const financeActivityEntrySchema = z
     sourceOperationId: idSchema.nullable(),
     auditEventIds: z.array(idSchema).min(1).max(100),
     sourceMessages: z.array(financeActivitySourceMessageSchema).max(100),
-    recordRefs: z.array(financeConversationRecordReferenceSchema).max(100),
+    recordRefs: z.array(financeActivityRecordReferenceSchema).max(100),
     changes: z.array(financeActivityChangeSchema).max(100),
     targets: z.array(financeActivityTargetSchema).max(100),
+    effect: financeActivityEffectSchema.optional(),
+    evidence: financeActivityEvidenceStateSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (entry) => !entry.evidence || entry.evidence.loadedChanges === entry.changes.length,
+    "The entry must contain exactly its stated loaded evidence.",
+  );
 export type FinanceActivityEntry = z.infer<typeof financeActivityEntrySchema>;
+export const financeActivityEvidencePageSchema = z
+  .object({
+    entryId: idSchema,
+    changes: z.array(financeActivityChangeSchema).min(1).max(100),
+    auditEventIds: z.array(idSchema).min(1).max(100),
+    recordRefs: z.array(financeActivityRecordReferenceSchema).max(100),
+    offset: z.number().int().min(0).max(9999),
+    totalChanges: z.number().int().min(1).max(10000),
+    nextCursor: z.string().min(1).max(3000).nullable(),
+  })
+  .strict()
+  .refine(
+    (page) =>
+      page.offset + page.changes.length <= page.totalChanges &&
+      (page.nextCursor === null) === (page.offset + page.changes.length === page.totalChanges),
+    "Evidence continuation must match the exact bounded change count.",
+  );
+export type FinanceActivityEvidencePage = z.infer<typeof financeActivityEvidencePageSchema>;
 export const financeActivityQuerySchema = z
   .object({
     cursor: z.string().min(1).max(3000).optional(),
@@ -90,12 +156,20 @@ export const financeActivityPageSchema = z
     nextCursor: z.string().min(1).max(3000).nullable(),
     capabilities: z
       .object({
-        financialActions: z
-          .object({
-            state: z.literal("unavailable"),
-            reason: z.literal("mutation_evidence_not_integrated"),
-          })
-          .strict(),
+        financialActions: z.discriminatedUnion("state", [
+          z
+            .object({
+              state: z.literal("unavailable"),
+              reason: z.literal("mutation_evidence_not_integrated"),
+            })
+            .strict(),
+          z
+            .object({
+              state: z.literal("available"),
+              scope: z.literal("committed_candidate_effects"),
+            })
+            .strict(),
+        ]),
         humanDecisions: z.object({ state: z.literal("available") }).strict(),
       })
       .strict(),
@@ -107,10 +181,12 @@ export const financeActivityPageSchema = z
             z.enum([
               "financial_mutation_evidence_not_integrated",
               "historical_decisions_without_causal_message_not_projected",
+              "financial_actions_outside_committed_candidate_receipts_not_projected",
+              "committed_receipts_with_incomplete_evidence_not_projected",
             ]),
           )
           .min(1)
-          .max(2),
+          .max(4),
       })
       .strict(),
   })

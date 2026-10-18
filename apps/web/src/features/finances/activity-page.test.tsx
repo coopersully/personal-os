@@ -5,7 +5,7 @@ import type { FinanceActivityEntry, FinanceActivityPage as Page } from "@persona
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { FinanceActivityPage } from "./activity-page";
+import { FinanceActivityPage, groupFinanceActivity } from "./activity-page";
 
 const toast = vi.hoisted(() => ({
   loading: vi.fn(() => "toast-id"),
@@ -278,4 +278,189 @@ it("cannot restore denied evidence from an older in-flight response", async () =
   await waitFor(() => expect(toast.dismiss).toHaveBeenCalledWith("toast-id"));
   expect(screen.queryByText(entry.explanation)).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Load more activity" })).not.toBeInTheDocument();
+});
+
+function financialEntry(): FinanceActivityEntry {
+  const changes = Array.from({ length: 100 }, (_, i) => ({
+    id: `audit-${i}`,
+    recordRef: { kind: "transaction", id: `record-${i}` },
+    before: { category: "Uncategorized" },
+    after: { category: `Food ${i}` },
+    auditEventIds: [`audit-${i}`],
+  }));
+  return {
+    ...entry,
+    kind: "financial_action",
+    status: "applied",
+    action: "Classified transactions",
+    actor: { type: "agent", id: "agent" },
+    runId: "run",
+    sourceMessages: [],
+    changes,
+    effect: {
+      candidateId: "candidate",
+      candidateRevision: `sha256:${"a".repeat(64)}`,
+      authorityBasis: "original_live_grant",
+      actionFamilies: ["transaction"],
+      significance: "routine",
+      humanApproval: null,
+    },
+    evidence: { totalChanges: 101, loadedChanges: 100, nextCursor: "evidence-cursor" },
+  };
+}
+it("loads exact remaining evidence without a second activity row and retains it on transient failure", async () => {
+  const financial = financialEntry();
+  const readEvidence = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("Temporary"))
+    .mockResolvedValueOnce({
+      entryId: financial.id,
+      offset: 100,
+      totalChanges: 101,
+      nextCursor: null,
+      auditEventIds: ["last-audit"],
+      recordRefs: [{ kind: "transaction", id: "last-record" }],
+      changes: [
+        {
+          id: "last-audit",
+          recordRef: { kind: "transaction", id: "last-record" },
+          before: { category: "Uncategorized" },
+          after: { category: "Final classification" },
+          auditEventIds: ["last-audit"],
+        },
+      ],
+    });
+  render(
+    <MemoryRouter>
+      <FinanceActivityPage
+        ownerId="one"
+        readActivity={vi.fn().mockResolvedValue(page([financial]))}
+        readEvidence={readEvidence}
+      />
+    </MemoryRouter>,
+  );
+  await screen.findByText("Classified transactions");
+  fireEvent.click(screen.getByRole("button", { name: "Inspect evidence" }));
+  expect(
+    await screen.findByText("100 of 101 audited changes loaded · Evidence incomplete"),
+  ).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Load more evidence" }));
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith("Could not load evidence. Try again.", {
+      id: "toast-id",
+    }),
+  );
+  expect(screen.getByText(/100 of 101/)).toBeVisible();
+  expect(screen.queryByText("Could not load evidence. Try again.")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Load more evidence" }));
+  expect(await screen.findByText("101 of 101 audited changes loaded · Complete")).toBeVisible();
+  expect(screen.getByText(/Final classification/)).toBeVisible();
+  expect(screen.getAllByText("Classified transactions")).toHaveLength(1);
+  expect(screen.getByRole("link", { name: "transaction · last-record" })).toHaveAttribute(
+    "href",
+    "/finances/transactions?transactionId=last-record",
+  );
+  expect(toast.success).toHaveBeenCalledWith("Evidence loaded", { id: "toast-id" });
+  expect(readEvidence.mock.calls[1]).toEqual([financial.id, { cursor: "evidence-cursor" }]);
+});
+it.each([
+  401, 403, 404,
+])("clears private action evidence on evidence read %s access loss", async (status) => {
+  const financial = financialEntry();
+  render(
+    <MemoryRouter>
+      <FinanceActivityPage
+        ownerId="one"
+        readActivity={vi.fn().mockResolvedValue(page([financial]))}
+        readEvidence={vi
+          .fn()
+          .mockRejectedValue(
+            new ApiClientError({ status, code: "denied", message: "Unavailable" }),
+          )}
+      />
+    </MemoryRouter>,
+  );
+  await screen.findByText("Classified transactions");
+  fireEvent.click(screen.getByRole("button", { name: "Inspect evidence" }));
+  fireEvent.click(screen.getByRole("button", { name: "Load more evidence" }));
+  await screen.findByRole("button", { name: "Retry activity" });
+  expect(screen.queryByText("Classified transactions")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Uncategorized/)).not.toBeInTheDocument();
+});
+it("groups only exact routine automated run/single-family entries, leaving mixed and budget decisions individual", () => {
+  const financial = financialEntry();
+  const effect = financial.effect;
+  if (!effect) throw new Error("Missing effect fixture");
+  const groups = groupFinanceActivity([
+    financial,
+    { ...financial, id: "second" },
+    {
+      ...financial,
+      id: "budget",
+      effect: {
+        ...effect,
+        significance: "budget_decision",
+        humanApproval: { actorId: "human", reviewId: "review" },
+      },
+    },
+    {
+      ...financial,
+      id: "mixed",
+      effect: { ...effect, actionFamilies: ["transaction", "category"] },
+    },
+    { ...financial, id: "manual", actor: { type: "user", id: "human" } },
+    entry,
+  ]);
+  expect(groups.map((group) => group.entries.map((item) => item.id))).toEqual([
+    ["entry", "second"],
+    ["budget"],
+    ["mixed"],
+    ["manual"],
+    ["entry"],
+  ]);
+});
+
+it("keeps in-flight evidence isolated when the owner changes", async () => {
+  const financial = financialEntry();
+  let resolve!: (value: unknown) => void;
+  const readEvidence = vi.fn().mockImplementation(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  const first = vi.fn().mockResolvedValue(page([financial]));
+  const rendered = render(
+    <MemoryRouter>
+      <FinanceActivityPage ownerId="one" readActivity={first} readEvidence={readEvidence} />
+    </MemoryRouter>,
+  );
+  await screen.findByText("Classified transactions");
+  fireEvent.click(screen.getByRole("button", { name: "Inspect evidence" }));
+  fireEvent.click(screen.getByRole("button", { name: "Load more evidence" }));
+  expect(toast.loading).toHaveBeenCalledWith("Loading more evidence…");
+  expect(screen.queryByText("Loading more evidence…")).not.toBeInTheDocument();
+  rendered.rerender(
+    <MemoryRouter>
+      <FinanceActivityPage
+        ownerId="two"
+        readActivity={vi.fn().mockResolvedValue(page([]))}
+        readEvidence={readEvidence}
+      />
+    </MemoryRouter>,
+  );
+  await screen.findByText(/No recorded activity/);
+  expect(toast.dismiss).toHaveBeenCalledWith("toast-id");
+  resolve({
+    entryId: financial.id,
+    offset: 100,
+    totalChanges: 101,
+    nextCursor: null,
+    changes: [],
+    recordRefs: [],
+    auditEventIds: [],
+  });
+  await waitFor(() =>
+    expect(screen.queryByText("Classified transactions")).not.toBeInTheDocument(),
+  );
 });

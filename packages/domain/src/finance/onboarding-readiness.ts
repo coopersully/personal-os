@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 /** Stable reviews of canonical financial context; unknown never implies none or zero. */
 export type FinanceOnboardingDisposition = "unreviewed" | "answered" | "none" | "unknown";
 
@@ -142,3 +144,79 @@ export function deriveFinanceOnboardingReadiness(snapshot: FinanceOnboardingSnap
       (snapshot.manualVisibility === "auto" && snapshot.automation.registrationCount <= 0),
   };
 }
+
+/** Strict review-only mutation boundaries; financial values use the canonical profile writer. */
+export const financeOnboardingSaveInputSchema = z
+  .object({
+    expectedRevision: z
+      .number()
+      .int()
+      .nonnegative()
+      .max(Number.MAX_SAFE_INTEGER - 1),
+    idempotencyKey: z.string().trim().min(1).max(200),
+    answers: z
+      .array(
+        z
+          .object({
+            questionId: z.string().min(1).max(160),
+            disposition: z.enum(["answered", "none", "unknown"]),
+          })
+          .strict(),
+      )
+      .max(100)
+      .refine(
+        (answers) => new Set(answers.map((answer) => answer.questionId)).size === answers.length,
+        {
+          message: "Each question may be reviewed only once per save.",
+        },
+      ),
+    displayPreferencesReviewed: z.boolean(),
+    automationChoice: z.enum(["later", "now"]),
+  })
+  .strict();
+
+export const financeOnboardingCompleteInputSchema = financeOnboardingSaveInputSchema
+  .pick({ expectedRevision: true, idempotencyKey: true, automationChoice: true })
+  .strict();
+
+/** Validate HTTP responses and immutable replay receipts without granting capability. */
+export const financeOnboardingSnapshotSchema = z
+  .object({
+    revision: z.number().int().nonnegative(),
+    completedAt: z.iso.datetime().nullable(),
+    existingAccess: z.boolean(),
+    source: z
+      .object({
+        state: z.enum(["usable", "syncing", "missing", "ownership_required", "unavailable"]),
+        summary: z.string(),
+        recoveryHref: z.string().nullable(),
+      })
+      .strict(),
+    contextReview: z.enum(["reviewed", "needs_review", "unavailable"]),
+    questions: z
+      .array(
+        z
+          .object({
+            questionId: z.string(),
+            label: z.string(),
+            disposition: z.enum(["unreviewed", "answered", "none", "unknown"]),
+            answerSummary: z.string().nullable(),
+            allowsNone: z.boolean(),
+          })
+          .strict(),
+      )
+      .max(100),
+    displayPreferences: z.object({ reviewed: z.boolean(), summary: z.array(z.string()) }).strict(),
+    automationChoice: z.enum(["later", "now"]).nullable(),
+    manualVisibility: z.enum(["auto", "show", "hide"]),
+    automation: z
+      .object({
+        registrationCount: z.number().int().nonnegative(),
+        authorizedRegistrationWithCadence: z.boolean(),
+        chatVerification: z.enum(["pending", "verified", "unavailable"]),
+        canSendChat: z.boolean(),
+        historyAvailable: z.boolean(),
+      })
+      .strict(),
+  })
+  .strict();

@@ -22,6 +22,11 @@ import {
   TransactionDetails,
 } from "./page.js";
 
+const workspaceReadiness = vi.hoisted(() => vi.fn());
+vi.mock("./use-finance-workspace-readiness", () => ({
+  useFinanceWorkspaceReadiness: workspaceReadiness,
+}));
+
 const api = vi.hoisted(() => ({
   getWorkspaceSettings: vi.fn(),
   updateWorkspaceSettings: vi.fn(),
@@ -111,6 +116,14 @@ afterEach(() => vi.restoreAllMocks());
 
 beforeEach(() => {
   vi.resetAllMocks();
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: true,
+    readiness: { workspaceAccessible: true },
+    isPending: false,
+    isError: false,
+    error: null,
+    reload: vi.fn(),
+  });
   let savedPreferences = resolveWorkspaceSettings("finances");
   api.getWorkspaceSettings.mockImplementation(async () => savedPreferences);
   api.updateWorkspaceSettings.mockImplementation(async (_workspace, input) => {
@@ -1832,6 +1845,125 @@ it("does not label another hook's transaction-view failure as an unsaved account
 });
 
 it.each([
+  false,
+  undefined,
+])("blocks direct transaction creation and import entries when manual visibility is %s", async (manualCreationVisible) => {
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible,
+    readiness: { workspaceAccessible: true },
+    isPending: false,
+    isError: false,
+    reload: vi.fn(),
+  });
+  renderPage("/finances/transactions?import=1#finance-add-transaction");
+  await screen.findByRole("button", { name: "Filters" });
+  expect(screen.queryByRole("dialog", { name: "Add a transaction" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Import transactions" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Add in Transactions" })).not.toBeInTheDocument();
+});
+it("limits the import setup task to the permitted import form", async () => {
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: true,
+    readiness: { workspaceAccessible: false },
+    isPending: false,
+    isError: false,
+    reload: vi.fn(),
+  });
+  renderPage(
+    `/finances/transactions?financeTask=import&import=1&spending=${encodeURIComponent(JSON.stringify(exactSpendingFilter))}#finance-add-transaction`,
+  );
+  expect(await screen.findByRole("dialog", { name: "Import transactions" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Filters" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Add a transaction" })).not.toBeInTheDocument();
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+  expect(api.listFinanceSpendingTransactions).not.toHaveBeenCalled();
+});
+it.each([
+  {
+    manualCreationVisible: undefined,
+    isPending: true,
+    isError: false,
+    copy: "Loading manual import availability…",
+  },
+  {
+    manualCreationVisible: undefined,
+    isPending: false,
+    isError: true,
+    copy: "Couldn’t check manual import availability.",
+  },
+  {
+    manualCreationVisible: false,
+    isPending: false,
+    isError: false,
+    copy: "Manual import is hidden.",
+  },
+])("keeps import task availability honest: $copy", async (state) => {
+  workspaceReadiness.mockReturnValue({
+    ...state,
+    error: new Error("Unavailable"),
+    readiness: undefined,
+    reload: vi.fn(),
+  });
+  renderPage("/finances/transactions?financeTask=import&import=1");
+  expect(await screen.findByText(state.copy, { exact: false })).toBeVisible();
+  expect(screen.queryByRole("dialog", { name: "Import transactions" })).not.toBeInTheDocument();
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+});
+it("retains correction records and categorization while hiding unrelated creation in correction tasks", async () => {
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: true,
+    readiness: { workspaceAccessible: false },
+    isPending: false,
+    isError: false,
+    reload: vi.fn(),
+  });
+  api.listFinanceTransactions.mockResolvedValue({
+    items: [
+      {
+        id: "meal",
+        accountId: "checking",
+        amount: 18.5,
+        category: null,
+        categoryId: null,
+        categoryConfidence: null,
+        categorySource: null,
+        merchant: "Correction cafe",
+        merchantId: null,
+        createdAt: "2026-08-23T12:00:00Z",
+        updatedAt: "2026-08-23T12:00:00Z",
+        date: "2026-08-23",
+        direction: "expense",
+        needsReview: true,
+        pending: false,
+        notes: null,
+        rawMerchant: null,
+      },
+    ],
+    nextCursor: null,
+  });
+  renderPage("/finances/transactions?financeTask=correct&import=1#finance-add-transaction");
+  expect(await screen.findByText("Correction cafe")).toBeVisible();
+  fireEvent.click(screen.getByRole("row", { name: "Open Correction cafe transaction" }));
+  expect(await screen.findByRole("button", { name: "Categorize" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Add in Transactions" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Add a transaction" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Import transactions" })).not.toBeInTheDocument();
+});
+
+it("does not treat an import marker on another route as permission to open source setup", async () => {
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: true,
+    readiness: { workspaceAccessible: false },
+    isPending: false,
+    isError: false,
+    reload: vi.fn(),
+  });
+  renderPage("/finances/review/legacy?financeTask=import&import=1");
+  expect(await screen.findByText("Everything is categorized")).toBeVisible();
+  expect(screen.queryByRole("dialog", { name: "Import transactions" })).not.toBeInTheDocument();
+});
+
+it.each([
   "pending_review",
   "needs_input",
 ])("keeps a legacy budget %s truthful and opens the exact review destination", async (status) => {
@@ -1943,6 +2075,13 @@ it("fails closed for invalid Spending links and provides explicit ledger recover
 });
 
 it("loads exact Spending references and keeps contribution totals separate from native amounts", async () => {
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: false,
+    readiness: { workspaceAccessible: true },
+    isPending: false,
+    isError: false,
+    reload: vi.fn(),
+  });
   const transaction = {
     id: "meal",
     accountId: "checking",
@@ -2084,4 +2223,118 @@ it("does not replace an unrepresentable valid recovery selection with default Sp
   expect(await screen.findByText(/This selection cannot safely return to Spending/)).toBeVisible();
   expect(screen.queryByRole("link", { name: "Open Spending" })).not.toBeInTheDocument();
   expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+});
+
+const canonicalCategories = [
+  {
+    id: "food",
+    name: "Meals & groceries",
+    color: null,
+    group: "Spending",
+    isSystem: false,
+    slug: "food",
+  },
+];
+const canonicalTransaction = {
+  id: "canonical-meal",
+  accountId: "checking",
+  amount: 18.5,
+  category: null,
+  categoryId: "food",
+  categoryConfidence: 1,
+  categorySource: "user",
+  merchant: "Canonical cafe",
+  merchantId: null,
+  createdAt: "2026-08-23T12:00:00.000Z",
+  updatedAt: "2026-08-23T12:00:00.000Z",
+  date: "2026-08-23",
+  direction: "expense",
+  needsReview: false,
+  notes: null,
+  pending: false,
+  rawMerchant: null,
+};
+it.each([
+  ["ordinary", "table"],
+  ["ordinary", "cards"],
+  ["exact", "table"],
+  ["exact", "cards"],
+])("resolves canonical taxonomy in %s %s rows, grouping and details without changing native amounts", async (source, view) => {
+  api.getFinanceCategories.mockResolvedValue(canonicalCategories);
+  const transaction = {
+    ...canonicalTransaction,
+    category: source === "exact" ? "GENERAL_MERCHANDISE" : null,
+  };
+  api.listFinanceTransactions.mockResolvedValue({ items: [transaction], nextCursor: null });
+  api.listFinanceSpendingTransactions.mockResolvedValue({
+    items: [transaction],
+    nextCursor: null,
+    referenceRevision: exactSpendingFilter.referenceRevision,
+    totalTransactions: 1,
+    netCents: 1000,
+    scope: exactSpendingFilter.query.scope,
+    contributions: [{ transactionId: transaction.id, netCents: 1000 }],
+  });
+  const params = new URLSearchParams({ view: view ?? "table", group: "category" });
+  if (source === "exact") params.set("spending", JSON.stringify(exactSpendingFilter));
+  renderPage(`/finances/transactions?${params}`);
+  expect((await screen.findAllByText("Meals & groceries")).length).toBeGreaterThan(0);
+  expect(screen.queryByText("Shopping")).not.toBeInTheDocument();
+  if (view === "cards") expect(screen.getByText("Meals & groceries (1)")).toBeVisible();
+  if (source === "exact") {
+    expect(screen.getByText(/\$10.00 Spending contribution/)).toBeVisible();
+    expect(api.listFinanceSpendingTransactions).toHaveBeenCalledWith(
+      exactSpendingFilter,
+      undefined,
+      50,
+    );
+    expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+    const href = screen.getByRole("link", { name: "Open Spending" }).getAttribute("href");
+    expect(
+      JSON.parse(
+        new URL(href ?? "", "https://nohmi.example").searchParams.get("recoverSpending") ?? "{}",
+      ),
+    ).toEqual(exactSpendingFilter);
+  }
+  fireEvent.click(screen.getByLabelText("Open Canonical cafe transaction"));
+  const detail = await screen.findByRole("dialog", { name: "Canonical cafe" });
+  expect(within(detail).getByText(/Meals & groceries/)).toBeVisible();
+  expect(within(detail).getByText("−$18.50")).toBeVisible();
+  expect(transaction.amount).toBe(18.5);
+  expect(transaction.category).toBe(source === "exact" ? "GENERAL_MERCHANDISE" : null);
+});
+it.each([
+  "loading",
+  "missing",
+  "failed",
+] as const)("keeps %s canonical taxonomy distinct from an uncategorized transaction", async (state) => {
+  let resolveTaxonomy: ((value: typeof canonicalCategories) => void) | undefined;
+  if (state === "loading")
+    api.getFinanceCategories.mockReturnValue(
+      new Promise((resolve) => {
+        resolveTaxonomy = resolve;
+      }),
+    );
+  else if (state === "failed")
+    api.getFinanceCategories.mockRejectedValue(new Error("Taxonomy unavailable"));
+  else api.getFinanceCategories.mockResolvedValue([]);
+  api.listFinanceTransactions.mockResolvedValue({
+    items: [{ ...canonicalTransaction, category: "GENERAL_MERCHANDISE" }],
+    nextCursor: null,
+  });
+  renderPage("/finances/transactions");
+  expect(
+    await screen.findByText(state === "loading" ? "Loading category…" : "Category unavailable"),
+  ).toBeVisible();
+  expect(screen.queryByText("Shopping")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText("Open Canonical cafe transaction"));
+  const detail = await screen.findByRole("dialog", { name: "Canonical cafe" });
+  expect(
+    within(detail).getByText(state === "loading" ? /Loading category…/ : /Category unavailable/),
+  ).toBeVisible();
+  if (state === "loading") {
+    await act(async () => resolveTaxonomy?.(canonicalCategories));
+    expect(await within(detail).findByText(/Meals & groceries/)).toBeVisible();
+    expect(within(detail).queryByText(/Loading category…/)).not.toBeInTheDocument();
+  }
 });

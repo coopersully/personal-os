@@ -708,6 +708,7 @@ function budget(row: typeof financeBudgets.$inferSelect): FinanceBudget {
 }
 function accountAuditSnapshot(value: FinanceAccount) {
   return {
+    currencyCode: value.currencyCode,
     id: value.id,
     kind: value.kind,
     provider: value.provider,
@@ -7463,6 +7464,7 @@ export function createFinanceService({
               .insert(financeAccounts)
               .values({
                 balance: input.balance === null ? null : toCents(input.balance),
+                currencyCode: input.currencyCode ?? null,
                 institution: input.institution,
                 kind: input.kind ?? "cash",
                 kindSource: "user",

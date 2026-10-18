@@ -6,6 +6,7 @@ import { ApiClientError } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FinanceAccountsPage } from "./accounts-page.js";
 import { FinanceOverviewPage } from "./overview-page.js";
@@ -19,6 +20,10 @@ import {
 } from "./position-material.js";
 import { FinanceWealthPage } from "./wealth-page.js";
 
+vi.spyOn(toast, "loading");
+vi.spyOn(toast, "success");
+vi.spyOn(toast, "error");
+
 // JSDOM has no viewport intersection observations; carousel layout is verified in the browser.
 vi.stubGlobal(
   "IntersectionObserver",
@@ -28,6 +33,11 @@ vi.stubGlobal(
     disconnect() {}
   },
 );
+
+const workspaceReadiness = vi.hoisted(() => vi.fn());
+vi.mock("./use-finance-workspace-readiness", () => ({
+  useFinanceWorkspaceReadiness: workspaceReadiness,
+}));
 
 const api = vi.hoisted(() => ({
   createFinanceAccount: vi.fn(),
@@ -112,6 +122,14 @@ function mount(page: React.ReactNode) {
 afterEach(cleanup);
 beforeEach(() => {
   vi.resetAllMocks();
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: true,
+    readiness: { workspaceAccessible: true },
+    isPending: false,
+    isError: false,
+    error: null,
+    reload: vi.fn(),
+  });
   api.getFinanceLedgerHealth.mockResolvedValue({ balanceOnlyAccounts: 0 });
   api.getFinanceSnapshot.mockResolvedValue(
     envelope({
@@ -707,6 +725,7 @@ describe("Finance position pages", () => {
     await waitFor(() =>
       expect(api.createFinanceAccount).toHaveBeenCalledWith({
         name: "Cash reserve",
+        currencyCode: null,
         institution: "Personal records",
         provider: "manual",
         kind: "cash",
@@ -739,10 +758,18 @@ describe("Finance position pages", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add account" }));
     expect(await screen.findByRole("button", { name: "Adding account…" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    const pendingNotice = vi
+      .mocked(toast.loading)
+      .mock.calls.find(([message]) => message === "Adding account…")?.[1]?.id;
+    expect(pendingNotice).toEqual(expect.any(String));
     finishCreate?.({ ...account, id: "manual-pending", provider: "manual" });
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: "Adding account…" })).not.toBeInTheDocument(),
     );
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("Account added", { id: pendingNotice }),
+    );
+    expect(screen.queryByText("Account added")).not.toBeInTheDocument();
   });
 
   it("edits manual account semantics and keeps failed account creation recoverable", async () => {
@@ -799,9 +826,15 @@ describe("Finance position pages", () => {
     fireEvent.change(screen.getByLabelText("Institution"), { target: { value: "Household" } });
     fireEvent.change(screen.getByLabelText("Balance"), { target: { value: "42" } });
     fireEvent.click(screen.getByRole("button", { name: "Add account" }));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        expect.stringMatching(/Couldn’t confirm whether we could create this account/),
+        expect.objectContaining({ id: expect.any(String) }),
+      ),
+    );
     expect(
-      await screen.findByText(/Couldn’t confirm whether we could create this account/),
-    ).toBeVisible();
+      screen.queryByText(/Couldn’t confirm whether we could create this account/),
+    ).not.toBeInTheDocument();
     expect(api.createFinanceAccount).toHaveBeenCalledWith(expect.objectContaining({ balance: 42 }));
   });
 
@@ -1188,4 +1221,39 @@ it.each([
     expect(within(metrics).getAllByText("Unavailable")).toHaveLength(3);
   }
   expect(entry).toBeVisible();
+});
+
+it("retains account correction and bank linking while manual capture and imports are hidden", async () => {
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: false,
+    readiness: { workspaceAccessible: true },
+    isPending: false,
+    isError: false,
+    reload: vi.fn(),
+  });
+  mount(<FinanceAccountsPage />);
+  expect(await screen.findByRole("button", { name: "Edit Shared checking" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Import records" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Edit Shared checking" }));
+  expect(screen.getByLabelText("Ownership")).toBeEnabled();
+});
+
+it.each([
+  "USD",
+  "EUR",
+])("passes explicitly stated %s manual currency without guessing", async (currencyCode) => {
+  mount(<FinanceCreateButton />);
+  fireEvent.click(screen.getByRole("button", { name: "Add in Finances" }));
+  fireEvent.click(screen.getByRole("button", { name: "Account" }));
+  fireEvent.click(screen.getByRole("button", { name: "Track account manually" }));
+  expect(screen.getByLabelText("Currency code")).toHaveValue("");
+  fireEvent.change(screen.getByLabelText("Account name"), { target: { value: "Travel cash" } });
+  fireEvent.change(screen.getByLabelText("Institution"), { target: { value: "Personal records" } });
+  fireEvent.change(screen.getByLabelText("Currency code"), { target: { value: currencyCode } });
+  fireEvent.click(screen.getByRole("button", { name: "Add account" }));
+  await waitFor(() =>
+    expect(api.createFinanceAccount).toHaveBeenCalledWith(
+      expect.objectContaining({ currencyCode, balance: null }),
+    ),
+  );
 });

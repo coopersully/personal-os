@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   deriveFinanceOnboardingReadiness,
   type FinanceOnboardingSnapshot,
+  financeOnboardingCompleteInputSchema,
+  financeOnboardingSaveInputSchema,
 } from "./onboarding-readiness.js";
 
 function ready(): FinanceOnboardingSnapshot {
@@ -163,5 +165,38 @@ describe("Finance onboarding readiness", () => {
     expect(deriveFinanceOnboardingReadiness(snapshot).manualCreationVisible).toBe(true);
     snapshot.manualVisibility = "hide";
     expect(deriveFinanceOnboardingReadiness(snapshot).manualCreationVisible).toBe(false);
+  });
+});
+
+describe("onboarding input boundaries", () => {
+  const input = {
+    expectedRevision: 0,
+    idempotencyKey: "save",
+    answers: [{ questionId: "profile:income", disposition: "unknown" }],
+    displayPreferencesReviewed: true,
+    automationChoice: "later",
+  };
+  it("accepts review receipts while rejecting values, duplicate questions, and invalid revisions", () => {
+    expect(financeOnboardingSaveInputSchema.safeParse(input).success).toBe(true);
+    for (const changes of [
+      { answers: [...input.answers, ...input.answers] },
+      { expectedRevision: -1 },
+      { expectedRevision: 0.5 },
+      { expectedRevision: Number.MAX_SAFE_INTEGER },
+      { idempotencyKey: " " },
+      { profile: { income: 0 } },
+      { answers: [{ questionId: "profile:income", disposition: "unreviewed" }] },
+    ])
+      expect(financeOnboardingSaveInputSchema.safeParse({ ...input, ...changes }).success).toBe(
+        false,
+      );
+    expect(
+      financeOnboardingCompleteInputSchema.safeParse({
+        expectedRevision: 1,
+        idempotencyKey: "complete",
+        automationChoice: "now",
+      }).success,
+    ).toBe(true);
+    expect(financeOnboardingCompleteInputSchema.safeParse(input).success).toBe(false);
   });
 });

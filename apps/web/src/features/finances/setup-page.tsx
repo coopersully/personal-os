@@ -9,15 +9,18 @@ import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { SettingsSection } from "../settings/settings-layout.js";
 import { FinanceConfigurationEditor } from "./configuration-editor.js";
+import { safeFinanceReturnTo } from "./finance-workspace-access.js";
+import { financeOnboardingApiAdapter } from "./onboarding-adapter.js";
 import { FinanceOnboardingReview } from "./onboarding-review.js";
 import { requireFinanceResult } from "./position-material.js";
 import { SetupMaintenance } from "./setup-maintenance.js";
 import { financeConfigurationKey, useFinanceConfiguration } from "./use-finance-configuration.js";
 
 export function FinanceSetupPage({
-  onboardingAdapter,
+  onboardingAdapter = financeOnboardingApiAdapter,
 }: {
-  onboardingAdapter?: FinanceOnboardingAdapter;
+  /** Explicit null is reserved for compositions that intentionally stage the review separately. */
+  onboardingAdapter?: FinanceOnboardingAdapter | null;
 } = {}) {
   const query = useFinanceConfiguration();
   const client = useQueryClient();
@@ -25,7 +28,7 @@ export function FinanceSetupPage({
   const selected = params.get("section") ?? "profile";
   const section = ["profile", "accounts", "budget"].includes(selected) ? selected : "profile";
   const returnTo = params.get("returnTo");
-  const safeReturn = returnTo && /^\/finances(?:[/?#]|$)/.test(returnTo) ? returnTo : null;
+  const safeReturn = safeFinanceReturnTo(returnTo);
   const pendingSaves = useMutationState({
     filters: { status: "pending" },
     select: (mutation) => mutation.options.scope?.id === "finance-profile-configuration",
@@ -78,7 +81,9 @@ export function FinanceSetupPage({
     );
   return (
     <section className="grid gap-4" aria-label="Financial profile">
-      {onboardingAdapter ? <FinanceOnboardingReview adapter={onboardingAdapter} /> : null}
+      {onboardingAdapter ? (
+        <FinanceOnboardingReview adapter={onboardingAdapter} continueTo={safeReturn} />
+      ) : null}
       <nav aria-label="Financial profile sections" className="grid gap-2 sm:grid-cols-3">
         {(
           [
@@ -150,7 +155,7 @@ export function FinanceSetupPage({
                   </p>
                 )}
                 <Button asChild variant="ghost">
-                  <Link to="/finances/imports">Import history</Link>
+                  <Link to="/finances/transactions?financeTask=import">Import history</Link>
                 </Button>
               </SettingsSection>
               <SettingsSection title="Check records">
@@ -198,7 +203,7 @@ export function FinanceSetupPage({
                     approve or activate a revised budget.
                   </p>
                   <Button asChild className="self-start">
-                    <Link to="/finances/plan">Open budget</Link>
+                    <Link to="/finances/plan?financeTask=approve">Open budget</Link>
                   </Button>
                 </>
               ) : (
@@ -226,11 +231,19 @@ export function FinanceSetupPage({
           ) : null}
         </>
       )}
-      {safeReturn ? (
-        <Button asChild variant="ghost" className="justify-self-start">
-          <Link to={safeReturn}>Return to previous page</Link>
+      <nav aria-label="Finance setup repair tasks" className="flex flex-wrap gap-2">
+        <Button asChild variant="ghost">
+          <Link to="/finances/transactions?financeTask=correct">Correct existing records</Link>
         </Button>
-      ) : null}
+        <Button asChild variant="ghost">
+          <Link to="/finances/transactions?financeTask=import">Import records</Link>
+        </Button>
+        {budget?.state === "loaded" && budget.value ? (
+          <Button asChild variant="ghost">
+            <Link to="/finances/plan?financeTask=approve">Review budget approval</Link>
+          </Button>
+        ) : null}
+      </nav>
     </section>
   );
 }

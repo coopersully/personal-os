@@ -31,4 +31,3 @@ export * from "./time.js";
 export * from "./weather.js";
 export * from "./workspace-search.js";
 export * from "./workspace-settings.js";
-export * from "./finance/spending.js";

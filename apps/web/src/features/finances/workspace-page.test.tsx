@@ -4,6 +4,15 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { FinanceWorkspacePage } from "./workspace-page";
 
+vi.mock("./use-finance-workspace-readiness", () => ({
+  useFinanceWorkspaceReadiness: () => ({
+    snapshot: { existingAccess: true, completedAt: null },
+    readiness: { workspaceAccessible: true },
+    isPending: false,
+    isError: false,
+  }),
+}));
+
 vi.mock("../../api.js", () => ({ api: { listFinanceActivity: vi.fn() } }));
 vi.mock("./conversation-page.js", () => ({
   FinanceConversationPage: ({ ownerId }: { ownerId: string }) => <p>Chat for {ownerId}</p>,

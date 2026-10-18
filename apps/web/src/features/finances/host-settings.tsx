@@ -41,6 +41,7 @@ export function FinanceHostSettings() {
       await action();
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["finance-host-schedules"] }),
+        queryClient.invalidateQueries({ queryKey: ["finance-onboarding"] }),
         queryClient.invalidateQueries({ queryKey: ["finance-answer-continuations"] }),
         queryClient.invalidateQueries({ queryKey: ["finance-host-runs"] }),
       ]);

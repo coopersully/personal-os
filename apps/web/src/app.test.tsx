@@ -555,6 +555,7 @@ const mocks = vi.hoisted(() => ({
   getExecutionPolicySettings: vi.fn(),
   getFinanceBudgetPace: vi.fn(),
   getFinanceLedgerHealth: vi.fn(),
+  getFinanceOnboarding: vi.fn(),
   getFinanceGuidedSetup: vi.fn(),
   getFinanceStatus: vi.fn(),
   getFinanceProfile: vi.fn(),
@@ -926,6 +927,24 @@ function defaults() {
     possibleDuplicates: 0,
     staleAccounts: 0,
     unresolvedReviews: 0,
+  });
+  mocks.getFinanceOnboarding.mockResolvedValue({
+    revision: 0,
+    completedAt: null,
+    existingAccess: true,
+    source: { state: "usable", summary: "Existing source", recoveryHref: "/finances/accounts" },
+    contextReview: "needs_review",
+    questions: [],
+    displayPreferences: { reviewed: false, summary: [] },
+    automationChoice: null,
+    manualVisibility: "auto",
+    automation: {
+      registrationCount: 0,
+      authorizedRegistrationWithCadence: false,
+      chatVerification: "pending",
+      canSendChat: false,
+      historyAvailable: false,
+    },
   });
   mocks.getFinanceGuidedSetup.mockResolvedValue({
     accountSources: [],

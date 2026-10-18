@@ -2224,3 +2224,117 @@ it("does not replace an unrepresentable valid recovery selection with default Sp
   expect(screen.queryByRole("link", { name: "Open Spending" })).not.toBeInTheDocument();
   expect(api.listFinanceTransactions).not.toHaveBeenCalled();
 });
+
+const canonicalCategories = [
+  {
+    id: "food",
+    name: "Meals & groceries",
+    color: null,
+    group: "Spending",
+    isSystem: false,
+    slug: "food",
+  },
+];
+const canonicalTransaction = {
+  id: "canonical-meal",
+  accountId: "checking",
+  amount: 18.5,
+  category: null,
+  categoryId: "food",
+  categoryConfidence: 1,
+  categorySource: "user",
+  merchant: "Canonical cafe",
+  merchantId: null,
+  createdAt: "2026-08-23T12:00:00.000Z",
+  updatedAt: "2026-08-23T12:00:00.000Z",
+  date: "2026-08-23",
+  direction: "expense",
+  needsReview: false,
+  notes: null,
+  pending: false,
+  rawMerchant: null,
+};
+it.each([
+  ["ordinary", "table"],
+  ["ordinary", "cards"],
+  ["exact", "table"],
+  ["exact", "cards"],
+])("resolves canonical taxonomy in %s %s rows, grouping and details without changing native amounts", async (source, view) => {
+  api.getFinanceCategories.mockResolvedValue(canonicalCategories);
+  const transaction = {
+    ...canonicalTransaction,
+    category: source === "exact" ? "GENERAL_MERCHANDISE" : null,
+  };
+  api.listFinanceTransactions.mockResolvedValue({ items: [transaction], nextCursor: null });
+  api.listFinanceSpendingTransactions.mockResolvedValue({
+    items: [transaction],
+    nextCursor: null,
+    referenceRevision: exactSpendingFilter.referenceRevision,
+    totalTransactions: 1,
+    netCents: 1000,
+    scope: exactSpendingFilter.query.scope,
+    contributions: [{ transactionId: transaction.id, netCents: 1000 }],
+  });
+  const params = new URLSearchParams({ view: view ?? "table", group: "category" });
+  if (source === "exact") params.set("spending", JSON.stringify(exactSpendingFilter));
+  renderPage(`/finances/transactions?${params}`);
+  expect((await screen.findAllByText("Meals & groceries")).length).toBeGreaterThan(0);
+  expect(screen.queryByText("Shopping")).not.toBeInTheDocument();
+  if (view === "cards") expect(screen.getByText("Meals & groceries (1)")).toBeVisible();
+  if (source === "exact") {
+    expect(screen.getByText(/\$10.00 Spending contribution/)).toBeVisible();
+    expect(api.listFinanceSpendingTransactions).toHaveBeenCalledWith(
+      exactSpendingFilter,
+      undefined,
+      50,
+    );
+    expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+    const href = screen.getByRole("link", { name: "Open Spending" }).getAttribute("href");
+    expect(
+      JSON.parse(
+        new URL(href ?? "", "https://nohmi.example").searchParams.get("recoverSpending") ?? "{}",
+      ),
+    ).toEqual(exactSpendingFilter);
+  }
+  fireEvent.click(screen.getByLabelText("Open Canonical cafe transaction"));
+  const detail = await screen.findByRole("dialog", { name: "Canonical cafe" });
+  expect(within(detail).getByText(/Meals & groceries/)).toBeVisible();
+  expect(within(detail).getByText("−$18.50")).toBeVisible();
+  expect(transaction.amount).toBe(18.5);
+  expect(transaction.category).toBe(source === "exact" ? "GENERAL_MERCHANDISE" : null);
+});
+it.each([
+  "loading",
+  "missing",
+  "failed",
+] as const)("keeps %s canonical taxonomy distinct from an uncategorized transaction", async (state) => {
+  let resolveTaxonomy: ((value: typeof canonicalCategories) => void) | undefined;
+  if (state === "loading")
+    api.getFinanceCategories.mockReturnValue(
+      new Promise((resolve) => {
+        resolveTaxonomy = resolve;
+      }),
+    );
+  else if (state === "failed")
+    api.getFinanceCategories.mockRejectedValue(new Error("Taxonomy unavailable"));
+  else api.getFinanceCategories.mockResolvedValue([]);
+  api.listFinanceTransactions.mockResolvedValue({
+    items: [{ ...canonicalTransaction, category: "GENERAL_MERCHANDISE" }],
+    nextCursor: null,
+  });
+  renderPage("/finances/transactions");
+  expect(
+    await screen.findByText(state === "loading" ? "Loading category…" : "Category unavailable"),
+  ).toBeVisible();
+  expect(screen.queryByText("Shopping")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText("Open Canonical cafe transaction"));
+  const detail = await screen.findByRole("dialog", { name: "Canonical cafe" });
+  expect(
+    within(detail).getByText(state === "loading" ? /Loading category…/ : /Category unavailable/),
+  ).toBeVisible();
+  if (state === "loading") {
+    await act(async () => resolveTaxonomy?.(canonicalCategories));
+    expect(await within(detail).findByText(/Meals & groceries/)).toBeVisible();
+    expect(within(detail).queryByText(/Loading category…/)).not.toBeInTheDocument();
+  }
+});

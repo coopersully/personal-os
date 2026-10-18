@@ -146,6 +146,12 @@ import { FinanceReimbursementList } from "./reimbursement-list.js";
 import { FinanceAgentReviewQueue } from "./review-queue.js";
 import { spendingRecoveryDestination } from "./spending-reference";
 import { TransactionBreakdownDialog } from "./transaction-breakdown-dialog.js";
+import {
+  type FinanceCategoryReadState,
+  financeTransactionCategoryLabel,
+  groupFinanceTransactionsByCategory,
+  legacyFinanceCategoryLabel as transactionCategoryLabel,
+} from "./transaction-category";
 import { FinanceLinkedTransaction, FinanceTransactionControls } from "./transaction-controls.js";
 import { financeSpendingReferenceFilter, financeTransactionFilters } from "./transaction-query.js";
 import { useFinanceWorkspaceReadiness } from "./use-finance-workspace-readiness";
@@ -942,6 +948,10 @@ export function FinancesPage() {
       {section === "transactions" && !exactSpending && linkedTransactionId ? (
         <FinanceLinkedTransaction
           id={linkedTransactionId}
+          categories={categories.data ?? []}
+          categoryReadState={
+            categories.isPending ? "loading" : categories.isError ? "unavailable" : "ready"
+          }
           onBreakdown={setBreakdownTransaction}
           onCategorize={openCategorize}
         />
@@ -1093,6 +1103,9 @@ export function FinancesPage() {
                     transactionSort,
                   ])}
                   categories={categories.data ?? []}
+                  categoryReadState={
+                    categories.isPending ? "loading" : categories.isError ? "unavailable" : "ready"
+                  }
                   selectionDisabled={
                     transactionList.isFetching || transactionList.isError || categories.isError
                   }
@@ -2788,6 +2801,7 @@ function FinanceLedgerHealthCard({ health }: { health: FinanceLedgerHealth }) {
 
 function FinanceTransactionsTable({
   categories,
+  categoryReadState,
   selectionDisabled = false,
   reloadQueryKey,
   hasPreviousPage,
@@ -2803,6 +2817,7 @@ function FinanceTransactionsTable({
   transactions,
 }: {
   categories: FinanceCategory[];
+  categoryReadState: FinanceCategoryReadState;
   selectionDisabled?: boolean;
   reloadQueryKey?: QueryKey | undefined;
   hasPreviousPage: boolean;
@@ -2824,7 +2839,13 @@ function FinanceTransactionsTable({
   const presentation = useFinancePresentationParams();
   const view = presentation.get("view") === "cards" ? "cards" : "table";
   const group = view === "cards" ? presentation.get("group") : null;
-  const groups = useMemo(() => groupTransactions(transactions, group), [transactions, group]);
+  const groups = useMemo(
+    () =>
+      group === "category"
+        ? groupFinanceTransactionsByCategory(transactions, categories, categoryReadState)
+        : groupTransactions(transactions, group),
+    [transactions, group, categories, categoryReadState],
+  );
   const groupedTransactions = useMemo(() => groups.flatMap((entry) => entry.items), [groups]);
   const groupHeadings = new Map(
     groups
@@ -2893,7 +2914,7 @@ function FinanceTransactionsTable({
         ),
       },
       {
-        accessorFn: (item) => transactionCategoryLabel(item.category),
+        accessorFn: (item) => financeTransactionCategoryLabel(item, categories, categoryReadState),
         id: "category",
         cell: ({ getValue }) => (
           <ShadcnBadge className="max-w-full truncate" title={getValue<string>()} variant="outline">
@@ -2943,7 +2964,7 @@ function FinanceTransactionsTable({
         ),
       },
     ],
-    [onSort, sort],
+    [onSort, sort, categories, categoryReadState],
   );
   const table = useReactTable({
     columns,
@@ -3006,7 +3027,11 @@ function FinanceTransactionsTable({
                       amount={transaction.amount}
                       direction={transaction.direction}
                       description={formatTransactionDate(transaction.date)}
-                      category={transactionCategoryLabel(transaction.category)}
+                      category={financeTransactionCategoryLabel(
+                        transaction,
+                        categories,
+                        categoryReadState,
+                      )}
                       status={transaction.pending ? "pending" : undefined}
                     />
                   </button>
@@ -3089,8 +3114,12 @@ function FinanceTransactionsTable({
               </p>
               <p className="text-sm text-muted-foreground">
                 {formatTransactionDate(selectedTransaction.date)} ·{" "}
-                {transactionCategoryLabel(selectedTransaction.category)} ·{" "}
-                {selectedTransaction.pending ? "Pending" : "Posted"}
+                {financeTransactionCategoryLabel(
+                  selectedTransaction,
+                  categories,
+                  categoryReadState,
+                )}{" "}
+                · {selectedTransaction.pending ? "Pending" : "Posted"}
               </p>
               <TransactionDetails
                 transaction={selectedTransaction}
@@ -3445,22 +3474,6 @@ function formatTransactionDate(value: string) {
     month: "short",
     year: "numeric",
   });
-}
-
-function transactionCategoryLabel(category: string | null) {
-  if (category === null) return "Uncategorized";
-  const providerLabels: Record<string, string> = {
-    FOOD_AND_DRINK: "Food & Drink",
-    GENERAL_MERCHANDISE: "Shopping",
-    TRANSFER_IN: "Transfers",
-    TRANSFER_OUT: "Transfers",
-  };
-  if (providerLabels[category]) return providerLabels[category];
-  return category
-    .toLowerCase()
-    .split(/[_-]+/)
-    .map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`)
-    .join(" ");
 }
 
 function directionLabel(direction: FinanceTransaction["direction"]) {

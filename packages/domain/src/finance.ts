@@ -1355,3 +1355,4 @@ export * from "./finance/activity.js";
 export * from "./finance/conversation.js";
 
 export * from "./finance/conversation-message-context.js";
+export * from "./finance/conversation-unread.js";

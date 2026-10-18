@@ -501,7 +501,7 @@ describe.sequential("recurring schedule actual matching and explicit balance bas
     await closePreviousPayday(f);
     await statement(f);
     const view = await f.service.getFinanceCashflowProjection(f.user.id, {
-      from: "2026-02-22",
+      from: "2026-02-28",
       to: "2026-04-30",
       selectedIncomeStreamId: f.income.id,
     });

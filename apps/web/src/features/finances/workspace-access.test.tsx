@@ -78,7 +78,7 @@ it.each([
   "review",
   "activity",
 ])("keeps %s repair/evidence reachable without access evidence", (section) => {
-  show("/finances/" + section);
+  show(`/finances/${section}`);
   expect(screen.getByText("Domain task")).toBeTruthy();
 });
 it.each([

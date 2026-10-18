@@ -1,8 +1,12 @@
 /** Navigation context only. Domain authorization is always enforced by the server. */
 export type FinanceSetupTask = "correct" | "import" | "approve";
 
+const hasUnsafeCharacters = (value: string) =>
+  [...value].some((character) => character.charCodeAt(0) <= 32 || character.charCodeAt(0) === 127);
+
 export function safeFinanceReturnTo(raw: string | null | undefined): string {
-  if (!raw || raw.length > 2048 || /[\\\u0000-\u0020\u007f]/.test(raw)) return "/finances";
+  if (!raw || raw.length > 2048 || raw.includes("\\") || hasUnsafeCharacters(raw))
+    return "/finances";
   try {
     const url = new URL(raw, "https://finance.invalid");
     if (
@@ -17,7 +21,7 @@ export function safeFinanceReturnTo(raw: string | null | undefined): string {
     if (
       path.includes("\\") ||
       path.includes("//") ||
-      /[\u0000-\u0020\u007f]/.test(path) ||
+      hasUnsafeCharacters(path) ||
       path === "/finances/setup"
     )
       return "/finances";

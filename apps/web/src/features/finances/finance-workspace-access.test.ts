@@ -45,6 +45,6 @@ describe("Finance setup navigation", () => {
       "exports",
       "health",
     ])
-      expect(financeRouteNeedsSetup("/finances/" + section, "")).toBe(false);
+      expect(financeRouteNeedsSetup(`/finances/${section}`, "")).toBe(false);
   });
 });

@@ -61,7 +61,7 @@ export function FinanceWorkspaceAccess({ children }: { children: ReactNode }) {
   if (!state.readiness?.workspaceAccessible && task)
     return (
       <div className="grid gap-4">
-        <div className="flex flex-wrap items-center gap-3" aria-label="Setup task">
+        <section className="flex flex-wrap items-center gap-3" aria-label="Setup task">
           <span>
             {task === "correct"
               ? "Correct your records"
@@ -72,7 +72,7 @@ export function FinanceWorkspaceAccess({ children }: { children: ReactNode }) {
           <Button asChild variant="secondary">
             <Link to="/finances/setup">Return to setup</Link>
           </Button>
-        </div>
+        </section>
         {children}
       </div>
     );

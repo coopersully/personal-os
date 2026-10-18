@@ -103,41 +103,46 @@ export function spendingTrendBins(dashboard: FinanceSpendingDashboard) {
   }
   return {
     grain,
-    bins: [...groups.values()].map((bins) => {
+    bins: [...groups.values()].flatMap((bins) => {
       const first = bins[0];
       const last = bins[bins.length - 1];
+      if (!first || !last) return [];
       const from = first.date;
       const through = last.date;
-      return {
-        ...first,
-        date: from,
-        label: from === through ? from : `${from} – ${through}`,
-        netCents: bins.reduce((sum, bin) => sum + bin.netCents, 0),
-        positiveAreaCents: bins.reduce((sum, bin) => sum + bin.positiveAreaCents, 0),
-        negativeAdjustmentCents: bins.reduce((sum, bin) => sum + bin.negativeAdjustmentCents, 0),
-        pendingCents: bins.reduce((sum, bin) => sum + bin.pendingCents, 0),
-        coverage: bins.every((bin) => bin.coverage === "complete")
-          ? ("complete" as const)
-          : bins.every((bin) => bin.coverage === "unknown")
-            ? ("unknown" as const)
-            : ("partial" as const),
-        provisional: bins.some((bin) => bin.provisional),
-        future: bins.every((bin) => bin.future),
-        partial:
-          grain === "Weekly"
-            ? bins.length < 7
-            : grain === "Monthly"
-              ? from.slice(8) !== "01" || shift(through, 1).slice(8) !== "01"
-              : false,
-        drillDown:
-          grain === "Daily"
-            ? first.drillDown
-            : {
-                scope: { ...snapshot.scope, from, through },
-                contributionIds: [...new Set(bins.flatMap((bin) => bin.drillDown.contributionIds))],
-                transactionIds: [...new Set(bins.flatMap((bin) => bin.drillDown.transactionIds))],
-              },
-      };
+      return [
+        {
+          ...first,
+          date: from,
+          label: from === through ? from : `${from} – ${through}`,
+          netCents: bins.reduce((sum, bin) => sum + bin.netCents, 0),
+          positiveAreaCents: bins.reduce((sum, bin) => sum + bin.positiveAreaCents, 0),
+          negativeAdjustmentCents: bins.reduce((sum, bin) => sum + bin.negativeAdjustmentCents, 0),
+          pendingCents: bins.reduce((sum, bin) => sum + bin.pendingCents, 0),
+          coverage: bins.every((bin) => bin.coverage === "complete")
+            ? ("complete" as const)
+            : bins.every((bin) => bin.coverage === "unknown")
+              ? ("unknown" as const)
+              : ("partial" as const),
+          provisional: bins.some((bin) => bin.provisional),
+          future: bins.every((bin) => bin.future),
+          partial:
+            grain === "Weekly"
+              ? bins.length < 7
+              : grain === "Monthly"
+                ? from.slice(8) !== "01" || shift(through, 1).slice(8) !== "01"
+                : false,
+          drillDown:
+            grain === "Daily"
+              ? first.drillDown
+              : {
+                  scope: { ...snapshot.scope, from, through },
+                  contributionIds: [
+                    ...new Set(bins.flatMap((bin) => bin.drillDown.contributionIds)),
+                  ],
+                  transactionIds: [...new Set(bins.flatMap((bin) => bin.drillDown.transactionIds))],
+                },
+        },
+      ];
     }),
   };
 }

@@ -51,3 +51,85 @@ it("distinguishes missing, zero, negative and future days and navigates dates by
   await userEvent.click(screen.getByText("Daily spending list"));
   expect(screen.getByRole("button", { name: "2026-03-03: -$0.50" })).toBeInTheDocument();
 });
+
+function observedDashboard(): FinanceSpendingDashboard {
+  const scope = {
+    from: "2026-03-01",
+    through: "2026-03-03",
+    timezone: "UTC",
+    accountIds: null,
+    categoryIds: null,
+    basis: "personal_cost" as const,
+    includePending: false,
+    subtractRefunds: true,
+  };
+  return {
+    snapshot: {
+      scope,
+      bins: [100, 0, -50].map((netCents, index) => ({
+        date: `2026-03-0${index + 1}`,
+        netCents,
+        positiveAreaCents: Math.max(0, netCents),
+        negativeAdjustmentCents: Math.max(0, -netCents),
+        pendingCents: 0,
+        coverage: index === 2 ? "partial" : "unknown",
+        provisional: false,
+        future: false,
+        drillDown: { scope, contributionIds: [], transactionIds: [] },
+      })),
+    },
+    source: { freshness: "unknown" },
+  } as FinanceSpendingDashboard;
+}
+it("preserves observed positive and refund tones independently of uncertain coverage", () => {
+  render(<FinanceSpendingRhythm dashboard={observedDashboard()} onSelect={vi.fn()} />);
+  const positive = screen.getByRole("button", { name: /2026-03-01.*Missing coverage/ });
+  const zero = screen.getByRole("button", { name: /2026-03-02.*Missing coverage/ });
+  const refund = screen.getByRole("button", { name: /2026-03-03.*Partial coverage/ });
+  expect(positive).toHaveClass("bg-primary");
+  expect(zero).toHaveClass("bg-muted");
+  expect(refund).toHaveClass("bg-accent");
+  expect(refund).toHaveTextContent("Refund · Partial");
+  expect(zero).not.toHaveTextContent("Zero");
+});
+it("rotates calendar labels and leading offsets for Monday", () => {
+  const { container, rerender } = render(
+    <FinanceSpendingRhythm
+      dashboard={observedDashboard()}
+      onSelect={vi.fn()}
+      weekStartsOn="monday"
+    />,
+  );
+  expect(container.querySelector("fieldset .grid")?.firstElementChild).toHaveTextContent("Mon");
+  expect(container.querySelectorAll("[data-calendar-padding]")).toHaveLength(6);
+  rerender(<FinanceSpendingRhythm dashboard={observedDashboard()} onSelect={vi.fn()} />);
+  expect(container.querySelector("fieldset .grid")?.firstElementChild).toHaveTextContent("Sun");
+  expect(container.querySelectorAll("[data-calendar-padding]")).toHaveLength(0);
+});
+it("retains a calendar tabstop and focused detail when the range becomes shorter or empty", async () => {
+  const dashboard = observedDashboard();
+  const { rerender } = render(<FinanceSpendingRhythm dashboard={dashboard} onSelect={vi.fn()} />);
+  screen.getByRole("button", { name: /2026-03-01.*Missing coverage/ }).focus();
+  await userEvent.keyboard("{End}");
+  rerender(
+    <FinanceSpendingRhythm
+      dashboard={{
+        ...dashboard,
+        snapshot: { ...dashboard.snapshot, bins: dashboard.snapshot.bins.slice(0, 1) },
+      }}
+      onSelect={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole("button", { name: /2026-03-01.*Missing coverage/ })).toHaveAttribute(
+    "tabindex",
+    "0",
+  );
+  expect(screen.getByText(/2026-03-01:.*Positive spending/)).toBeInTheDocument();
+  rerender(
+    <FinanceSpendingRhythm
+      dashboard={{ ...dashboard, snapshot: { ...dashboard.snapshot, bins: [] } }}
+      onSelect={vi.fn()}
+    />,
+  );
+  expect(screen.queryByRole("button")).not.toBeInTheDocument();
+});

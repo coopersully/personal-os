@@ -6,6 +6,8 @@ import {
   financeRecurringObligations,
   users,
 } from "@personal-os/database";
+import { createFinanceService } from "../finance-service.js";
+import { createProfileBudgetService } from "./profile-budget-service.js";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { expect, it, vi } from "vitest";
 import type { FinanceMutationContext } from "./context.js";
@@ -357,4 +359,30 @@ it("does not query evidence history without requested source identities", async 
     [],
   );
   expect(f.reads).toHaveLength(0);
+});
+
+it("guards canonical confirmation before idempotency can read or replay a receipt", async () => {
+  const db = {} as Database;
+  const agent = { ...context, actorType: "agent" as const, actorId: "synthetic-agent" };
+  const planning = createProfileBudgetService({ db, now });
+  await expect(
+    planning.manageFinanceGoal(
+      { operation: "confirm_progress", idempotencyKey: "completed-human-key", ...progress },
+      agent,
+    ),
+  ).rejects.toMatchObject({ code: "forbidden" });
+  const finances = createFinanceService({ db, now });
+  const { obligationId, ...statement } = cost;
+  await expect(
+    finances.manageFinanceRecurringItem(
+      {
+        operation: "confirm_cost",
+        itemType: "obligation",
+        itemId: obligationId,
+        idempotencyKey: "completed-human-key",
+        ...statement,
+      },
+      agent,
+    ),
+  ).rejects.toMatchObject({ code: "forbidden" });
 });

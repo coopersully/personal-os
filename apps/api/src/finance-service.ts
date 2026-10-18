@@ -7590,6 +7590,12 @@ export function createFinanceService({
       executor?: FinanceActionWriteExecutor,
     ): Promise<FinanceBudgetPlan> {
       const approval = requireActiveBudgetAuthority(input, context);
+      if (!context.financeBudgetApproval || !executor) {
+        throw new AppError(
+          "forbidden",
+          "Submit this budget plan for revision-bound human review before applying it.",
+        );
+      }
       const write = async (tx: FinanceActionWriteExecutor) => {
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`finance-budget-plan:${context.principal.userId}:${input.month}`}, 0))`,
@@ -7765,8 +7771,7 @@ export function createFinanceService({
           }),
         );
       };
-      if (executor) await write(executor);
-      else await db.transaction(write);
+      await write(executor);
       return input;
     },
     async createTransaction(

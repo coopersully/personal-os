@@ -8,6 +8,7 @@ import {
   financeAccounts,
   financeAgentActionReviews,
   financeAlerts,
+  financeBudgetPlans,
   financeBudgets,
   financeCategories,
   financeCategoryRules,
@@ -2374,6 +2375,68 @@ describe.sequential("finance action service", () => {
         where: eq(auditEvents.requestId, "exact-budget-stale"),
       }),
     ).toEqual([]);
+  });
+
+  it("keeps newer human plans intact after delayed proposals, stale approvals, and approval replay", async () => {
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const actions = createFinanceActionService({ db: database.db, finances, now: () => now });
+    const budgetCase = (
+      await seedActionCases(database, userId, `Human replay ${crypto.randomUUID()}`)
+    ).find((item) => item.actionKind === "budget_plan");
+    if (!budgetCase) throw new Error("Missing budget fixture.");
+    const context = { principal: user(userId), requestId: "human-plan" };
+    const submit = (input: Record<string, unknown>) =>
+      actions.performDirect("budget_plan", input, context);
+    const first = await submit(budgetCase.input);
+    if (first.status !== "pending_review") throw new Error("Human plan must queue.");
+    await expect(actions.approve(first.review.id, context)).resolves.toMatchObject({
+      status: "applied",
+    });
+    const delayed = await submit({ ...budgetCase.input, rationale: "Delayed A" });
+    const next = await submit({
+      ...budgetCase.input,
+      allocations: (budgetCase.input.allocations as { categoryId: string; limit: number }[]).map(
+        (allocation) => ({ ...allocation, limit: 20 }),
+      ),
+      rationale: "Newer B",
+    });
+    if (delayed.status !== "pending_review" || next.status !== "pending_review")
+      throw new Error("Expected human reviews.");
+    await expect(actions.approve(next.review.id, context)).resolves.toMatchObject({
+      status: "applied",
+    });
+    const snapshot = async () => ({
+      budgets: await database.db
+        .select()
+        .from(financeBudgets)
+        .where(eq(financeBudgets.userId, userId)),
+      plans: await database.db
+        .select()
+        .from(financeBudgetPlans)
+        .where(eq(financeBudgetPlans.userId, userId)),
+    });
+    const newer = await snapshot();
+    const writes = await database.db.$count(
+      auditEvents,
+      and(eq(auditEvents.userId, userId), eq(auditEvents.action, "finance.budget_plan_set")),
+    );
+    await expect(actions.approve(delayed.review.id, context)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    await expect(actions.approve(first.review.id, context)).resolves.toMatchObject({
+      status: "applied",
+    });
+    await expect(submit(budgetCase.input)).resolves.toMatchObject({ status: "pending_review" });
+    await expect(finances.setBudgetPlan(budgetCase.input as never, context)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    expect(await snapshot()).toEqual(newer);
+    expect(
+      await database.db.$count(
+        auditEvents,
+        and(eq(auditEvents.userId, userId), eq(auditEvents.action, "finance.budget_plan_set")),
+      ),
+    ).toBe(writes);
   });
 
   it("disposes every Finance action family safely across bypass, evidence, and ownership states", async () => {

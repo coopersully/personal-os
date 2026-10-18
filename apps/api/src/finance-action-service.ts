@@ -3391,6 +3391,22 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         const payload = existing.privatePayload as { question: FinanceQuestion };
         return { question: { ...payload.question, id: existing.id }, status: "needs_input" };
       }
+      // Human legacy plan submissions also need a durable review identity and
+      // source revision; authentication alone cannot make a delayed PUT fresh.
+      if (
+        context.principal.actorType === "user" &&
+        prepared.actionKind === "budget_plan" &&
+        "allocations" in prepared.input
+      ) {
+        return db.transaction(async (tx) => {
+          const current = await revalidate(prepared, context.principal.userId, tx, "user");
+          if ("status" in current) return current;
+          return {
+            review: (await queue(current, context, tx)) as FinancePendingActionReview,
+            status: "pending_review",
+          };
+        });
+      }
       // Lock and re-read immediately before the semantic writer. This closes
       // the setting TOCTOU window for agent actions without accepting token or
       // request-body bypass authority.
@@ -3592,7 +3608,14 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             .where(eq(financeAgentActionReviews.id, review.id));
           return current;
         }
-        const result = await applyPrepared(current, actionContext, tx);
+        const result = await applyPrepared(
+          current,
+          actionContext,
+          tx,
+          isActiveBudgetAction(current.actionKind, current.input)
+            ? { principal: context.principal, reviewId: review.id }
+            : undefined,
+        );
         await tx
           .update(financeAgentActionReviews)
           .set({ privatePayload: { ...payload, result }, status: "applied", updatedAt: now() })

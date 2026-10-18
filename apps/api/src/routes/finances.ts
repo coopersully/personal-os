@@ -439,9 +439,12 @@ export function registerFinanceRoutes({
   );
   app.put("/v1/finances/budget-plan", async (context) => {
     const input = await parseBody(context, setFinanceBudgetPlanInputSchema);
-    return act(context, "budget_plan", input, async () =>
-      context.json({ plan: await finances.setBudgetPlan(input, financeMutationContext(context)) }),
+    const outcome = await requireActions().performDirect(
+      "budget_plan",
+      input,
+      financeMutationContext(context),
     );
+    return context.json(outcome, outcome.status === "pending_review" ? 202 : 200);
   });
   app.get("/v1/finances", async (context) => {
     const query = financeBudgetStatusQuerySchema.parse(context.req.query());

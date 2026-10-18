@@ -41,6 +41,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { createExecutionPolicyService } from "./execution-policy-service.js";
 import { loadFinanceAuthorization } from "./finance/context.js";
+import { financeActionFingerprint } from "./finance-action-identity.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
@@ -354,6 +355,29 @@ function plaidFetch(): typeof globalThis.fetch {
 describe.sequential("finance service", () => {
   let container: StartedPostgreSqlContainer;
   let database: DatabaseClient;
+
+  // These persistence tests exercise the semantic writer inside the already-reviewed
+  // transaction. Public review/revision/replay behavior is covered by action-service tests.
+  function reviewedSetBudgetPlan(
+    service: ReturnType<typeof createFinanceService>,
+    input: Parameters<typeof service.setBudgetPlan>[0],
+    context: Parameters<typeof service.setBudgetPlan>[1],
+  ) {
+    return database.db.transaction((tx) =>
+      service.setBudgetPlan(
+        input,
+        {
+          ...context,
+          financeBudgetApproval: {
+            principal: context.principal,
+            reviewId: context.requestId,
+            fingerprint: financeActionFingerprint("budget_plan", input),
+          },
+        },
+        tx,
+      ),
+    );
+  }
   let userId: string;
 
   it("keeps import errors useful even for non-Error throws", () => {
@@ -1040,7 +1064,7 @@ describe.sequential("finance service", () => {
       scenarioFingerprint: `sha256:${"a".repeat(64)}`,
     };
 
-    await expect(service.setBudgetPlan(input, context)).resolves.toEqual(input);
+    await expect(reviewedSetBudgetPlan(service, input, context)).resolves.toEqual(input);
     await expect(
       database.db
         .select({ category: financeBudgets.category, limit: financeBudgets.limit })
@@ -1062,7 +1086,8 @@ describe.sequential("finance service", () => {
       },
     ]);
     await expect(
-      service.setBudgetPlan(
+      reviewedSetBudgetPlan(
+        service,
         { ...input, allocations: [{ categoryId: category.id, limit: 6_000 }] },
         context,
       ),
@@ -1113,7 +1138,7 @@ describe.sequential("finance service", () => {
     };
     const context = { principal: financePrincipal(owner.id), requestId: "budget-plan-metadata" };
 
-    await expect(service.setBudgetPlan(input, context)).resolves.toEqual(input);
+    await expect(reviewedSetBudgetPlan(service, input, context)).resolves.toEqual(input);
     await expect(
       database.db
         .select({
@@ -1151,7 +1176,7 @@ describe.sequential("finance service", () => {
         .where(eq(auditEvents.requestId, context.requestId)),
     ).resolves.toEqual([
       {
-        after: {
+        after: expect.objectContaining({
           allocationCount: 1,
           assumptionsCount: 2,
           goalCount: 1,
@@ -1159,8 +1184,13 @@ describe.sequential("finance service", () => {
           planVersion: 1,
           rationaleProvided: true,
           scenarioFingerprint: input.scenarioFingerprint,
+        }),
+        before: {
+          allocations: [],
+          allocationCount: 0,
+          month: input.month,
+          priorAllocationCount: 0,
         },
-        before: { allocationCount: 0, month: input.month, priorAllocationCount: 0 },
       },
     ]);
 
@@ -1177,13 +1207,15 @@ describe.sequential("finance service", () => {
     const auditCount = await database.db.$count(auditEvents, eq(auditEvents.userId, owner.id));
 
     await expect(
-      service.setBudgetPlan(
+      reviewedSetBudgetPlan(
+        service,
         { ...input, allocations: [{ categoryId: foreignCategory.id, limit: 100 }] },
         { ...context, requestId: "budget-plan-foreign-category" },
       ),
     ).rejects.toMatchObject({ code: "not_found" });
     await expect(
-      service.setBudgetPlan(
+      reviewedSetBudgetPlan(
+        service,
         { ...input, goalIds: [foreignGoal.id] },
         { ...context, requestId: "budget-plan-foreign-goal" },
       ),
@@ -1225,7 +1257,8 @@ describe.sequential("finance service", () => {
     try {
       let allocationFailure: unknown;
       try {
-        await service.setBudgetPlan(
+        await reviewedSetBudgetPlan(
+          service,
           {
             ...input,
             allocations: [
@@ -1317,13 +1350,13 @@ describe.sequential("finance service", () => {
     let first: ReturnType<ReturnType<typeof createFinanceService>["setBudgetPlan"]> | undefined;
     let second: ReturnType<ReturnType<typeof createFinanceService>["setBudgetPlan"]> | undefined;
     try {
-      first = service.setBudgetPlan(firstPlan, {
+      first = reviewedSetBudgetPlan(service, firstPlan, {
         principal: financePrincipal(owner.id),
         requestId: "concurrent-budget-plan-first",
       });
       void first.catch(() => undefined);
       await waitForPostgresSleep(database.pool);
-      second = service.setBudgetPlan(secondPlan, {
+      second = reviewedSetBudgetPlan(service, secondPlan, {
         principal: financePrincipal(owner.id),
         requestId: "concurrent-budget-plan-second",
       });

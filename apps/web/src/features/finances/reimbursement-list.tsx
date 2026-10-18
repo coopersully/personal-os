@@ -1,6 +1,8 @@
+import { ApiClientError } from "@personal-os/api-client";
 import type { FinanceReimbursement } from "@personal-os/domain";
 import { EmptyState, Spinner } from "@personal-os/ui";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { CircleCheckIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,8 +10,7 @@ import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/comp
 import { Progress } from "@/components/ui/progress";
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
-import { formatMoney } from "./format.js";
-import { FinanceReimbursementJourney } from "./reimbursement-journey.js";
+import { FinanceReimbursementJourney, reimbursementAmount } from "./reimbursement-journey.js";
 
 function sectionFor(item: FinanceReimbursement) {
   if (["received", "cancelled"].includes(item.status)) return "Recently resolved";
@@ -18,10 +19,20 @@ function sectionFor(item: FinanceReimbursement) {
 }
 
 export function FinanceReimbursementList() {
+  const [mutationDenied, setMutationDenied] = useState(false);
   const query = useQuery({
     queryFn: api.listFinanceReimbursements,
     queryKey: ["finance-reimbursements"],
   });
+  if (
+    mutationDenied ||
+    (query.error instanceof ApiClientError && [401, 403].includes(query.error.status))
+  )
+    return (
+      <p role="status">
+        Reimbursement access unavailable. Check your permissions before viewing receipt evidence.
+      </p>
+    );
   if (query.isPending) return <Spinner label="Loading reimbursements" />;
   if (query.error && !query.data)
     return <InlineError error={query.error} retry={() => query.refetch()} />;
@@ -57,10 +68,42 @@ export function FinanceReimbursementList() {
                       </Badge>
                     </div>
                     <ItemDescription>
-                      {formatMoney(item.receivedAmount)} received of{" "}
-                      {formatMoney(item.expectedAmount)} · {formatMoney(remaining)} remaining
+                      {reimbursementAmount(item.receivedAmount, item.sourceExpense?.currency)}{" "}
+                      received of{" "}
+                      {reimbursementAmount(item.expectedAmount, item.sourceExpense?.currency)} ·{" "}
+                      {reimbursementAmount(remaining, item.sourceExpense?.currency)}{" "}
+                      {item.status === "cancelled" ? "cancelled remainder" : "remaining"}
                       {item.dueDate ? ` · due ${item.dueDate}` : ""}
                     </ItemDescription>
+                    {item.sourceExpense?.currency &&
+                    item.matches.some(
+                      (match) =>
+                        match.creditTransaction?.currency &&
+                        match.creditTransaction.currency !== item.sourceExpense?.currency,
+                    ) ? (
+                      <p className="text-sm text-muted-foreground">
+                        Receipt currency differs from the source expense. These amounts are not
+                        comparable across currencies.
+                      </p>
+                    ) : null}
+                    {item.sourceExpense?.personalCostToDate?.state === "qualified" ? (
+                      <p className="text-sm">
+                        Personal cost to date (whole expense):{" "}
+                        {reimbursementAmount(
+                          item.sourceExpense.personalCostToDate.amount,
+                          item.sourceExpense.personalCostToDate.currency,
+                        )}
+                        . May repeat on related claims; do not add case cards together.
+                      </p>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        Personal cost to date unavailable
+                        {item.sourceExpense?.personalCostToDate?.state === "unavailable"
+                          ? `: ${item.sourceExpense.personalCostToDate.reason.replaceAll("_", " ")}`
+                          : ""}
+                        .
+                      </p>
+                    )}
                     <Progress
                       aria-label={`Reimbursement from ${item.payer ?? "unknown payer"}`}
                       value={progress}
@@ -69,7 +112,10 @@ export function FinanceReimbursementList() {
                       {item.matches.length} linked{" "}
                       {item.matches.length === 1 ? "credit" : "credits"} · {item.rationale}
                     </p>
-                    <FinanceReimbursementJourney reimbursement={item} />
+                    <FinanceReimbursementJourney
+                      reimbursement={item}
+                      onAccessDenied={() => setMutationDenied(true)}
+                    />
                   </ItemContent>
                 </Item>
               );

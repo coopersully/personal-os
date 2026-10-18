@@ -53,6 +53,7 @@ import { createWorkspaceMaintenanceService } from "../workspace-maintenance-serv
 import { reconcileFinanceContinuations } from "./continuation-reconciliation.js";
 import {
   captureFinanceConversationBatch,
+  hasUsableFinanceConversationConsumer,
   postgresConversationBatchStore,
 } from "./conversation-service.js";
 import { requireHostRunAuthority } from "./host-run-authority.js";
@@ -359,21 +360,27 @@ export function createFinanceMaintenanceIntentService({
       async function bindConversation(
         run: MaintenanceRun | null,
         recovery: FinanceMaintenanceRecovery | null,
+        captureNew = false,
       ) {
         if (run) {
           const row = await ownedRun(tx, userId, run.id);
           if (!row)
             throw new AppError("conflict", "The Finance run changed before message capture.");
           await requireHostRunAuthority(tx, row, principal, now());
-          await captureFinanceConversationBatch({
-            tx,
-            store: postgresConversationBatchStore,
-            userId,
-            runId: row.id,
-            automationScheduleId: row.automationScheduleId,
-            authorizationConnectionId: row.authorizationConnectionId,
-            now: now(),
-          });
+          const existingBatch = await postgresConversationBatchStore.findBatch(tx, userId, row.id);
+          if (
+            existingBatch ||
+            (captureNew && (await hasUsableFinanceConversationConsumer(tx, row, principal, now())))
+          )
+            await captureFinanceConversationBatch({
+              tx,
+              store: postgresConversationBatchStore,
+              userId,
+              runId: row.id,
+              automationScheduleId: row.automationScheduleId,
+              authorizationConnectionId: row.authorizationConnectionId,
+              now: now(),
+            });
           return { run: runValue(row), recovery };
         }
         return { run, recovery };
@@ -566,7 +573,7 @@ export function createFinanceMaintenanceIntentService({
           .update(financeAnswerContinuations)
           .set({ state: "accepted", maintenanceRunId: run.id, updatedAt: now() })
           .where(eq(financeAnswerContinuations.id, continuation.id));
-        return bindConversation(run, null);
+        return bindConversation(run, null, !previousRun);
       }
       if (input.operation === "start") {
         const observed = await status.getFinanceStatus(userId, input.scope, tx);
@@ -594,7 +601,7 @@ export function createFinanceMaintenanceIntentService({
         }
         const resumed = await resumeBlocked(tx, row);
         await reconcileSetup(tx, resumed, true);
-        return bindConversation(runValue(resumed), null);
+        return bindConversation(runValue(resumed), null, !previousRun);
       }
       const current = await ownedRun(tx, userId, input.runId);
       if (current) {
@@ -708,7 +715,7 @@ export function createFinanceMaintenanceIntentService({
           await reconcileSetup(tx, resumed, true);
         }
       }
-      return bindConversation(run, recovery);
+      return bindConversation(run, recovery, !previousRun);
     });
   }
   return {

@@ -35,6 +35,7 @@ describe("Finance conversation contracts", () => {
             registrationState,
             connectionState,
             messageCapability,
+            executionAuthorized: true,
           });
           expect(result.historyReadable).toBe(true);
           expect(result.canSend).toBe(
@@ -46,5 +47,20 @@ describe("Finance conversation contracts", () => {
         }
       }
     }
+  });
+  it("fails closed on execution grant or owner policy loss without suggesting reconnect", () => {
+    expect(
+      projectFinanceConversationReadiness({
+        registrationState: "active",
+        connectionState: "live",
+        messageCapability: "verified",
+        executionAuthorized: false,
+      }),
+    ).toMatchObject({
+      canSend: false,
+      historyReadable: true,
+      reason: "execution_not_authorized",
+      recovery: "authorize_execution",
+    });
   });
 });

@@ -210,16 +210,14 @@ describe.sequential("Canonical reimbursement corrections", () => {
     expect(
       (await service.list(f.owner.id)).reimbursements[0]?.sourceExpense?.personalCostToDate,
     ).toEqual({ state: "unavailable", reason: "incomplete_allocations" });
-    await database.db
-      .insert(financeTransactionAllocations)
-      .values({
-        userId: f.owner.id,
-        transactionId: f.expense.id,
-        categoryId: f.allocation.categoryId,
-        amount: 8_000,
-        allocationOrder: 1,
-        treatment: "personal",
-      });
+    await database.db.insert(financeTransactionAllocations).values({
+      userId: f.owner.id,
+      transactionId: f.expense.id,
+      categoryId: f.allocation.categoryId,
+      amount: 8_000,
+      allocationOrder: 1,
+      treatment: "personal",
+    });
     const item = (await service.list(f.owner.id)).reimbursements[0];
     expect(item?.sourceExpense?.personalCostToDate).toEqual({
       state: "qualified",
@@ -243,16 +241,14 @@ describe.sequential("Canonical reimbursement corrections", () => {
       .update(financeAccounts)
       .set({ ownershipType: "individual", ownershipShareBps: 10_000 })
       .where(eq(financeAccounts.id, f.account.id));
-    await database.db
-      .insert(financeTransactionAllocations)
-      .values({
-        userId: f.owner.id,
-        transactionId: f.expense.id,
-        categoryId: f.allocation.categoryId,
-        amount: 8_000,
-        allocationOrder: 1,
-        treatment: "personal",
-      });
+    await database.db.insert(financeTransactionAllocations).values({
+      userId: f.owner.id,
+      transactionId: f.expense.id,
+      categoryId: f.allocation.categoryId,
+      amount: 8_000,
+      allocationOrder: 1,
+      treatment: "personal",
+    });
     await database.db
       .update(financeTransactions)
       .set({ pending: true })

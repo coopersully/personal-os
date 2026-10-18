@@ -1,4 +1,3 @@
-import { financePlanningEvidenceCurrencySchema } from "@personal-os/domain";
 import { personalAllocationCents } from "./finance-allocation-projections.js";
 
 type Owned = { id: string; userId: string };
@@ -46,6 +45,32 @@ export type ReimbursementCostQualification =
     }
   | { state: "unavailable"; reason: ReimbursementCostReason };
 
+/** Same explicit two-minor-unit policy as planning evidence; ISO metal/fund units have no cents. */
+function supportedCurrency(currency: string | null): boolean {
+  if (
+    currency === null ||
+    !Intl.supportedValuesOf("currency").includes(currency) ||
+    [
+      "XAG",
+      "XAU",
+      "XBA",
+      "XBB",
+      "XBC",
+      "XBD",
+      "XDR",
+      "XPD",
+      "XPT",
+      "XSU",
+      "XTS",
+      "XUA",
+      "XXX",
+    ].includes(currency)
+  )
+    return false;
+  const units = new Intl.NumberFormat("en", { style: "currency", currency }).resolvedOptions();
+  return units.minimumFractionDigits === 2 && units.maximumFractionDigits === 2;
+}
+
 /** Facts must be read together from one owner-scoped, repeatable-read snapshot. No expected recovery is deducted. */
 export function qualifyReimbursementPersonalCost(input: {
   ownerUserId: string;
@@ -83,10 +108,7 @@ export function qualifyReimbursementPersonalCost(input: {
   const money = (amount: number) =>
     Number.isSafeInteger(amount) && amount >= 0 && amount <= 10_000_000_000;
   if (!money(expense.amount)) return unavailable("invalid_money");
-  if (
-    !financePlanningEvidenceCurrencySchema.safeParse(expense.currencyCode).success ||
-    expense.currencyCode === null
-  )
+  if (!supportedCurrency(expense.currencyCode) || expense.currencyCode === null)
     return unavailable("unsupported_currency");
   const fullyOwned = (transaction: Transaction) => {
     const account = accounts.get(transaction.accountId);

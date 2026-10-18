@@ -1,6 +1,7 @@
 import {
   type FinanceAccount,
   type FinanceRecurringObligation,
+  financePlanningEvidenceApplicability,
   projectRecurringCosts,
   type RecurringCostExclusion,
 } from "@personal-os/domain";
@@ -19,6 +20,8 @@ import {
 
 interface RecurringCostLadderProps {
   obligations: FinanceRecurringObligation[];
+  evidenceContext?: { ownerUserId: string; today: string };
+  renderConfirmation?: (item: FinanceRecurringObligation, applicable: boolean) => ReactNode;
   renderActions?: (item: FinanceRecurringObligation) => ReactNode;
   accounts: Pick<FinanceAccount, "id" | "name" | "currencyCode">[];
 }
@@ -59,27 +62,68 @@ export function RecurringCostLadder({
   obligations,
   accounts,
   renderActions,
+  evidenceContext,
+  renderConfirmation,
 }: RecurringCostLadderProps) {
   const accountById = new Map(accounts.map((account) => [account.id, account]));
   const costs = obligations.filter((item) => item.kind !== "savings");
-  const projection = projectRecurringCosts(
-    costs.map((item) => ({
-      id: item.id,
-      serviceId: null,
-      kind: item.kind,
-      status: item.status,
-      cadence: item.cadence,
-      amountCents: exactCents(item.expectedAmount),
-      amountBasis: "unknown" as const,
-      currencyCode: item.accountId ? (accountById.get(item.accountId)?.currencyCode ?? null) : null,
-      confirmation:
-        item.source === "user" && item.status === "active"
-          ? ("confirmed" as const)
-          : ("suspected" as const),
-      sourceReferences: [item.id],
-      ...(item.lastObservedDate ? { asOf: item.lastObservedDate } : {}),
-    })),
+  const qualifications = costs.map((item) =>
+    evidenceContext
+      ? financePlanningEvidenceApplicability({
+          ...evidenceContext,
+          source: {
+            kind: "obligation",
+            id: item.id,
+            ownerUserId: evidenceContext.ownerUserId,
+            revision: item.revision ?? 0,
+            expectedAmountCents: exactCents(item.expectedAmount),
+            cadence: item.cadence,
+            accountId: item.accountId,
+            currencyCode: item.accountId
+              ? (accountById.get(item.accountId)?.currencyCode ?? null)
+              : null,
+            obligationKind: item.kind,
+            status: item.status,
+          },
+          evidence: item.planningEvidence,
+        })
+      : { state: "unknown" as const, reason: "Account identity or planning date unavailable" },
   );
+  const projection = projectRecurringCosts(
+    costs.map((item, index) => {
+      const qualification = qualifications[index];
+      const evidence =
+        qualification?.state === "applicable" && qualification.evidence.kind === "obligation"
+          ? qualification.evidence
+          : null;
+      return {
+        id: item.id,
+        serviceId: null,
+        kind: item.kind,
+        status: item.status,
+        cadence: item.cadence,
+        amountCents: exactCents(item.expectedAmount),
+        amountBasis: evidence?.fixedness ?? "unknown",
+        currencyCode:
+          evidence?.currencyCode ??
+          (item.accountId ? (accountById.get(item.accountId)?.currencyCode ?? null) : null),
+        confirmation: evidence ? ("confirmed" as const) : ("suspected" as const),
+        sourceReferences: evidence ? [item.id, evidence.evidenceId] : [item.id],
+        ...(evidence ? { asOf: evidence.asOf } : {}),
+      };
+    }),
+  );
+  const money = (cents: number, currency: string) =>
+    new Intl.NumberFormat(undefined, { style: "currency", currency }).format(cents / 100);
+  const factors = {
+    weekly: 52,
+    biweekly: 26,
+    semimonthly: 24,
+    monthly: 12,
+    quarterly: 4,
+    yearly: 1,
+    irregular: null,
+  };
   const groups = ["Active", "Inferred", "Needs review", "Inactive"] as const;
   const groupFor = (item: FinanceRecurringObligation) =>
     item.status === "paused" || item.status === "cancelled"
@@ -109,7 +153,11 @@ export function RecurringCostLadder({
       ) : (
         groups.map((group) => {
           const rows = costs
-            .map((item, index) => ({ item, record: projection.records[index] }))
+            .map((item, index) => ({
+              item,
+              record: projection.records[index],
+              qualification: qualifications[index],
+            }))
             .filter(({ item }) => groupFor(item) === group);
           return rows.length ? (
             <section
@@ -121,9 +169,9 @@ export function RecurringCostLadder({
                 {group} · {rows.length}
               </h3>
               <ItemGroup>
-                {rows.map(({ item, record }) => {
+                {rows.map(({ item, record, qualification }) => {
                   const account = item.accountId ? accountById.get(item.accountId) : undefined;
-                  const currency = account?.currencyCode;
+                  const currency = record?.source.currencyCode;
                   const supportedCurrency =
                     currency && Intl.supportedValuesOf("currency").includes(currency);
                   const expected = supportedCurrency
@@ -151,13 +199,41 @@ export function RecurringCostLadder({
                           </div>
                           <div>
                             <dt className="text-muted-foreground">Monthly equivalent</dt>
-                            <dd>Unavailable</dd>
+                            <dd>
+                              {record?.normalized && currency
+                                ? `${money(record.normalized.monthlyCents.numerator / 12, currency)} (rounded)`
+                                : "Unavailable"}
+                            </dd>
                           </div>
                           <div>
                             <dt className="text-muted-foreground">Annual equivalent</dt>
-                            <dd>Unavailable</dd>
+                            <dd>
+                              {record?.normalized && currency
+                                ? money(record.normalized.annualCents, currency)
+                                : "Unavailable"}
+                            </dd>
                           </div>
                         </dl>
+                        {record?.normalized ? (
+                          <p className="text-sm text-muted-foreground">
+                            {factors[item.cadence]} payments per year · Monthly equivalent is annual
+                            cost ÷ 12. Fixed amount assumed unchanged.
+                          </p>
+                        ) : null}
+                        {qualification?.state === "unknown" && item.planningEvidence ? (
+                          <p className="text-sm text-muted-foreground">
+                            Statement unavailable: {qualification.reason.replaceAll("_", " ")}.
+                          </p>
+                        ) : null}
+                        {qualification?.state === "applicable" ? (
+                          <p className="text-sm text-muted-foreground">
+                            Your{" "}
+                            {qualification.evidence.kind === "obligation"
+                              ? qualification.evidence.fixedness
+                              : ""}{" "}
+                            statement as of {qualification.evidence.asOf}.
+                          </p>
+                        ) : null}
                         <p className="text-sm text-muted-foreground">
                           {record?.exclusionReasons.map((reason) => reasons[reason]).join(" · ")}
                         </p>
@@ -184,7 +260,12 @@ export function RecurringCostLadder({
                           </Link>
                         ) : null}
                       </ItemContent>
-                      {renderActions ? <ItemActions>{renderActions(item)}</ItemActions> : null}
+                      {renderActions || renderConfirmation ? (
+                        <ItemActions>
+                          {renderConfirmation?.(item, qualification?.state === "applicable")}
+                          {renderActions?.(item)}
+                        </ItemActions>
+                      ) : null}
                     </Item>
                   );
                 })}
@@ -193,6 +274,52 @@ export function RecurringCostLadder({
           ) : null;
         })
       )}
+      {costs.length ? (
+        <section aria-label="Known recurring cost subset" className="flex flex-col gap-2">
+          <h3 className="font-medium">Known recurring cost subset</h3>
+          <p className="text-sm text-muted-foreground">
+            {projection.coverage.normalizedRecords} of {projection.coverage.totalRecords} records
+            included; {projection.coverage.excludedRecords} excluded. These totals cover only
+            supported fixed-cost statements.
+          </p>
+          {projection.totals.map((total) => (
+            <dl key={total.currencyCode} className="grid gap-2 text-sm sm:grid-cols-2">
+              <div>
+                <dt>Confirmed {total.currencyCode} annual subset</dt>
+                <dd>
+                  {total.confirmed
+                    ? money(total.confirmed.annualCents, total.currencyCode)
+                    : "Unavailable: precision limit"}
+                </dd>
+              </div>
+              <div>
+                <dt>Suspected {total.currencyCode} annual subset</dt>
+                <dd>
+                  {total.suspected
+                    ? money(total.suspected.annualCents, total.currencyCode)
+                    : "Unavailable: precision limit"}
+                </dd>
+              </div>
+              <div>
+                <dt>Confirmed {total.currencyCode} monthly subset (rounded)</dt>
+                <dd>
+                  {total.confirmed
+                    ? money(total.confirmed.monthlyCents.numerator / 12, total.currencyCode)
+                    : "Unavailable: precision limit"}
+                </dd>
+              </div>
+              <div>
+                <dt>Suspected {total.currencyCode} monthly subset (rounded)</dt>
+                <dd>
+                  {total.suspected
+                    ? money(total.suspected.monthlyCents.numerator / 12, total.currencyCode)
+                    : "Unavailable: precision limit"}
+                </dd>
+              </div>
+            </dl>
+          ))}
+        </section>
+      ) : null}
       {obligations.some((item) => item.kind === "savings") ? (
         <p className="text-sm text-muted-foreground">Savings contributions excluded.</p>
       ) : null}

@@ -7,6 +7,7 @@ import { MemoryRouter } from "react-router-dom";
 import { FinanceCashflowPage } from "./cashflow-page";
 
 const api = vi.hoisted(() => ({
+  getMe: vi.fn(),
   getFinanceSnapshot: vi.fn(),
   getFinanceForecast: vi.fn(),
   listFinanceAccounts: vi.fn(),
@@ -28,6 +29,10 @@ function renderPage(path = "/finances/cashflow") {
 }
 beforeEach(() => {
   vi.resetAllMocks();
+  api.getMe.mockResolvedValue({
+    id: "00000000-0000-4000-8000-000000000001",
+    planningTimezone: "America/New_York",
+  });
   api.getFinanceSnapshot.mockResolvedValue({
     data: { ledger: { trustworthy: false } },
     communication: { requiredDisclosures: [{ message: "Confirm account ownership." }] },

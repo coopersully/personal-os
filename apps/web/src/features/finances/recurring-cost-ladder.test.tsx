@@ -127,3 +127,79 @@ it("passes the original record to parent-owned accessible actions", () => {
     }),
   ).toBeVisible();
 });
+
+const ownerId = "00000000-0000-4000-8000-000000000001";
+function evidenced(changes: Partial<FinanceRecurringObligation> = {}): FinanceRecurringObligation {
+  const record = fixture({
+    id: "00000000-0000-4000-8000-000000000002",
+    accountId: null,
+    revision: 2,
+    cadence: "weekly",
+    expectedAmount: 1.01,
+    ...changes,
+  });
+  return {
+    ...record,
+    planningEvidence: {
+      evidenceId: "00000000-0000-4000-8000-000000000004",
+      kind: "obligation",
+      ownerUserId: ownerId,
+      actor: { type: "user", userId: ownerId },
+      provenance: "explicit_user",
+      sourceId: record.id,
+      sourceRevision: 2,
+      expectedAmountCents: 101,
+      cadence: "weekly",
+      accountId: null,
+      fixedness: "fixed",
+      currencyCode: "USD",
+      asOf: "2026-10-01",
+      recordedAt: "2026-10-01T00:00:00Z",
+    },
+  };
+}
+function qualified(items: FinanceRecurringObligation[]) {
+  return render(
+    <MemoryRouter>
+      <RecurringCostLadder
+        obligations={items}
+        accounts={[]}
+        evidenceContext={{ ownerUserId: ownerId, today: "2026-10-18" }}
+      />
+    </MemoryRouter>,
+  );
+}
+it("normalizes only current explicit fixed evidence, with rounded monthly labels and subset coverage", () => {
+  qualified([evidenced(), fixture({ id: "missing", displayName: "Missing" })]);
+  const row = within(screen.getByRole("listitem", { name: "Music" }));
+  expect(row.getByText("$52.52")).toBeVisible();
+  expect(row.getByText("$4.38 (rounded)")).toBeVisible();
+  expect(row.getByText(/52 payments per year/)).toBeVisible();
+  expect(screen.getByText(/1 of 2 records included; 1 excluded/)).toBeVisible();
+});
+it.each(["stale", "variable", "foreign", "future"])("excludes %s statements honestly", (kind) => {
+  const record = evidenced();
+  const evidence = record.planningEvidence;
+  if (!evidence) throw new Error("Fixture evidence absent");
+  if (kind === "stale") evidence.sourceRevision = 1;
+  if (kind === "variable") evidence.fixedness = "variable";
+  if (kind === "foreign") evidence.ownerUserId = "00000000-0000-4000-8000-000000000099";
+  if (kind === "future") evidence.asOf = "2026-10-19";
+  qualified([record]);
+  expect(screen.getAllByText("Unavailable")).toHaveLength(2);
+  expect(screen.getByText(/0 of 1 records included; 1 excluded/)).toBeVisible();
+});
+it("keeps currencies separate and review evidence in the suspected subset", () => {
+  const euro = evidenced({
+    id: "00000000-0000-4000-8000-000000000005",
+    displayName: "Euro",
+    status: "needs_review",
+  });
+  if (euro.planningEvidence) euro.planningEvidence.currencyCode = "EUR";
+  qualified([evidenced(), euro]);
+  const subset = within(screen.getByRole("region", { name: "Known recurring cost subset" }));
+  expect(subset.getByText("Confirmed USD annual subset")).toBeVisible();
+  expect(subset.getByText("Suspected EUR annual subset")).toBeVisible();
+  expect(subset.getByText("$52.52")).toBeVisible();
+  expect(subset.getByText("€52.52")).toBeVisible();
+});

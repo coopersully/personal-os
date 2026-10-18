@@ -28,7 +28,7 @@ import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { formatMoney } from "./format";
 import { FinanceSourceState, requireFinanceResult } from "./position-material.js";
-import { RecurringCostLadder } from "./recurring-cost-ladder";
+import { RecurringCostSection } from "./recurring-cost-section";
 import { FinanceReimbursementList } from "./reimbursement-list";
 import { FinanceScenarioComparison } from "./scenario-comparison.js";
 import { FinanceTransactionItem } from "./transaction-item";
@@ -411,7 +411,7 @@ export function FinanceCashflowPage() {
                 <Skeleton className="h-28 w-full" />
               ) : obligations.length ? (
                 <>
-                  <RecurringCostLadder
+                  <RecurringCostSection
                     obligations={obligations}
                     accounts={accounts.data?.accounts ?? []}
                     renderActions={(item) => patternActions(item, "obligation")}

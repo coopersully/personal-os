@@ -104,7 +104,14 @@ it("requires a bounded explicit balance statement with unique exact transaction 
     asOf: "2026-03-01T00:00:00Z",
     validUntil: "2026-03-02T00:00:00Z",
     protectedFloorCents: null,
-    reflections: [{ transactionId: id, transactionRevision: "3", reimbursementRelationshipRevision: "2", reflection: "included" }],
+    reflections: [
+      {
+        transactionId: id,
+        transactionRevision: "3",
+        reimbursementRelationshipRevision: "2",
+        reflection: "included",
+      },
+    ],
     idempotencyKey: "basis",
   };
   expect(confirmFinanceBalanceBasisInputSchema.safeParse(input).success).toBe(true);
@@ -126,8 +133,27 @@ it("requires a bounded explicit balance statement with unique exact transaction 
 });
 
 it("requires independent relationship revisions and never treats a legacy missing generation as confirmation", () => {
-  const input = { operation: "match_income", occurrence: { scheduleVersionId: id, localDate: "2026-03-31", slot: 0 }, transactionId: id, expectedTransactionRevision: "3", amountCents: 100, currencyCode: "USD", rationale: "Explicit actual", idempotencyKey: "relation" };
+  const input = {
+    operation: "match_income",
+    occurrence: { scheduleVersionId: id, localDate: "2026-03-31", slot: 0 },
+    transactionId: id,
+    expectedTransactionRevision: "3",
+    amountCents: 100,
+    currencyCode: "USD",
+    rationale: "Explicit actual",
+    idempotencyKey: "relation",
+  };
   expect(manageFinanceOccurrenceMatchInputSchema.safeParse(input).success).toBe(false);
-  expect(manageFinanceOccurrenceMatchInputSchema.safeParse({ ...input, expectedReimbursementRelationshipRevision: "1" }).success).toBe(true);
-  expect(manageFinanceOccurrenceMatchInputSchema.safeParse({ ...input, expectedReimbursementRelationshipRevision: "0" }).success).toBe(false);
+  expect(
+    manageFinanceOccurrenceMatchInputSchema.safeParse({
+      ...input,
+      expectedReimbursementRelationshipRevision: "1",
+    }).success,
+  ).toBe(true);
+  expect(
+    manageFinanceOccurrenceMatchInputSchema.safeParse({
+      ...input,
+      expectedReimbursementRelationshipRevision: "0",
+    }).success,
+  ).toBe(false);
 });

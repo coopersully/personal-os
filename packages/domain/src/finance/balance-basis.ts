@@ -61,9 +61,13 @@ export type ConfirmFinanceBalanceBasisInput = z.infer<typeof confirmFinanceBalan
 export const financeBalanceBasisSchema = z
   .object({
     ...fields,
-    reflections: z.array(financeBalanceReflectionSchema.extend({
-      reimbursementRelationshipRevision: financeActualRevisionSchema.nullable(),
-    })).max(1000),
+    reflections: z
+      .array(
+        financeBalanceReflectionSchema.extend({
+          reimbursementRelationshipRevision: financeActualRevisionSchema.nullable(),
+        }),
+      )
+      .max(1000),
     id: idSchema,
     basisRevision: z.number().int().positive(),
     accountRevision: financeActualRevisionSchema,

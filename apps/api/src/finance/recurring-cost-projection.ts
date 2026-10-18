@@ -1,4 +1,4 @@
-/** Explicit evidence supplied by an adapter; expected amounts alone are insufficient. */
+/** Explicit evidence supplied by an adapter; cents require a currency with two minor-unit digits. */
 export interface RecurringCostEvidence {
   id: string;
   serviceId: string | null;
@@ -33,6 +33,7 @@ export type RecurringCostExclusion =
   | "unknown_cadence"
   | "missing_currency"
   | "invalid_currency"
+  | "unsupported_currency"
   | "annual_amount_overflow";
 
 export interface RecurringCostAmount {
@@ -80,7 +81,18 @@ export function projectRecurringCosts(evidence: readonly RecurringCostEvidence[]
     if (source.cadence === "irregular") exclusionReasons.push("irregular_cadence");
     if (source.cadence === "unknown") exclusionReasons.push("unknown_cadence");
     if (source.currencyCode === null) exclusionReasons.push("missing_currency");
-    else if (!/^[A-Z]{3}$/.test(source.currencyCode)) exclusionReasons.push("invalid_currency");
+    else if (
+      !/^[A-Z]{3}$/.test(source.currencyCode) ||
+      !Intl.supportedValuesOf("currency").includes(source.currencyCode)
+    )
+      exclusionReasons.push("invalid_currency");
+    else if (
+      new Intl.NumberFormat("en", {
+        style: "currency",
+        currency: source.currencyCode,
+      }).resolvedOptions().maximumFractionDigits !== 2
+    )
+      exclusionReasons.push("unsupported_currency");
     let normalized: RecurringCostAmount | null = null;
     if (
       exclusionReasons.length === 0 &&

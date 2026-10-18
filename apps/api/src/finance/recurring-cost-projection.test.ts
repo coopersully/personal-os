@@ -162,6 +162,25 @@ describe("projectRecurringCosts", () => {
     expect(result.records[0]?.priceComparison.reason).toBe("missing_service_identity");
   });
 
+  it.each(["USD", "EUR"])("accepts recognized two-minor-digit currency %s", (currencyCode) => {
+    const result = projectRecurringCosts([fixture({ currencyCode })]);
+    expect(result.records[0]?.exclusionReasons).toEqual([]);
+    expect(result.totals[0]?.currencyCode).toBe(currencyCode);
+    expect(result.totals[0]?.confirmed?.annualCents).toBe(1212);
+  });
+
+  it.each([
+    ["ZZZ", "invalid_currency"],
+    ["JPY", "unsupported_currency"],
+    ["KWD", "unsupported_currency"],
+  ])("excludes currency %s without inventing its minor units", (currencyCode, reason) => {
+    const result = projectRecurringCosts([fixture({ currencyCode })]);
+    expect(result.records[0]?.exclusionReasons).toEqual([reason]);
+    expect(result.records[0]?.normalized).toBeNull();
+    expect(result.totals).toEqual([]);
+    expect(result.records[0]?.source.currencyCode).toBe(currencyCode);
+  });
+
   it("handles an empty collection", () => {
     expect(projectRecurringCosts([])).toEqual({
       records: [],

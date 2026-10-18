@@ -40,6 +40,7 @@ import {
   type FinanceSafeChange,
   financeActionKindSchema,
   financeActionReviewSchema,
+  financeConversationCausalClaimSchema,
   financeMaintenanceCandidateItemDraftSchema,
   financeQuestionSchema,
   financeReimbursementQuestionAnswerSchema,
@@ -62,6 +63,11 @@ import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import { isActiveBudgetAction, requireHumanBudgetApproval } from "./finance/budget-authority.js";
+import { commitFinanceCandidateEffects } from "./finance/candidate-effect-receipt.js";
+import {
+  loadFinanceEffectPrincipal,
+  lockFinanceEffectOwner,
+} from "./finance/conversation-causality.js";
 import {
   financeActionFingerprint,
   financeCandidateActionFingerprint,
@@ -2813,7 +2819,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     reviewId?: string;
     humanApproval?: { principal: Principal; reviewId: string };
   }) {
-    const { candidateId, context, executor, expectedRevision } = input;
+    const { candidateId, executor, expectedRevision } = input;
+    let context = input.context;
+    await lockFinanceEffectOwner(executor as ActionTransaction, context.principal.userId);
     const [candidate] = await executor
       .select()
       .from(financeMaintenanceCandidates)
@@ -2827,7 +2835,33 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       .limit(1);
     if (!candidate)
       throw new AppError("not_found", "The Finance maintenance candidate is not available.");
-    if (candidate.state === "committed") return { candidateId, status: "committed" as const };
+    if (candidate.state === "committed") {
+      if (
+        candidate.revision !== expectedRevision ||
+        (input.expectedRunId && input.expectedRunId !== candidate.runId)
+      )
+        throw new AppError("conflict", "The committed candidate has a different exact revision.");
+      const [committedRun] = await executor
+        .select()
+        .from(workspaceMaintenanceRuns)
+        .where(
+          and(
+            eq(workspaceMaintenanceRuns.id, candidate.runId),
+            eq(workspaceMaintenanceRuns.userId, context.principal.userId),
+          ),
+        )
+        .for("update");
+      if (!committedRun)
+        throw new AppError("conflict", "The committed Finance run is unavailable.");
+      await loadFinanceEffectPrincipal(
+        executor as ActionTransaction,
+        committedRun,
+        context.principal,
+        now(),
+        input.mode === "apply" && !input.humanApproval,
+      );
+      return { candidateId, status: "committed" as const };
+    }
     const acceptsState =
       candidate.state === input.expectedState ||
       (input.mode === "queue" && candidate.state === "awaiting_approval");
@@ -2849,12 +2883,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       );
     }
     const [run] = await executor
-      .select({
-        checkpoint: workspaceMaintenanceRuns.checkpoint,
-        id: workspaceMaintenanceRuns.id,
-        scope: workspaceMaintenanceRuns.scope,
-        status: workspaceMaintenanceRuns.status,
-      })
+      .select()
       .from(workspaceMaintenanceRuns)
       .where(
         and(
@@ -2865,6 +2894,16 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       .for("update")
       .limit(1);
     if (!run) throw new AppError("conflict", "The Finance maintenance run is no longer available.");
+    context = {
+      ...context,
+      principal: await loadFinanceEffectPrincipal(
+        executor as ActionTransaction,
+        run,
+        context.principal,
+        now(),
+        input.mode === "apply" && !input.humanApproval,
+      ),
+    };
     const checkpoint = run.checkpoint as {
       candidateId?: string;
       phase?: string;
@@ -3059,13 +3098,43 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           eq(financeMaintenanceCandidates.revision, expectedRevision),
         ),
       );
-    for (const { item, prepared } of currentItems) {
-      await applyPrepared(prepared, context, executor, input.humanApproval);
-      await executor
-        .update(financeMaintenanceCandidateItems)
-        .set({ disposition: "committed", updatedAt: now() })
-        .where(eq(financeMaintenanceCandidateItems.id, item.id));
-    }
+    const [sourceChallenge] = await executor
+      .select({ coverage: financeLedgerChallenges.coverage })
+      .from(financeLedgerChallenges)
+      .where(
+        and(
+          eq(financeLedgerChallenges.userId, run.userId),
+          eq(financeLedgerChallenges.candidateId, candidate.id),
+        ),
+      )
+      .limit(1);
+    const rawClaim = (sourceChallenge?.coverage as { conversationEvidence?: unknown } | undefined)
+      ?.conversationEvidence;
+    const claim =
+      rawClaim === undefined ? undefined : financeConversationCausalClaimSchema.parse(rawClaim);
+    await commitFinanceCandidateEffects({
+      db,
+      tx: executor as ActionTransaction,
+      run,
+      candidateId: candidate.id,
+      candidateRevision: expectedRevision,
+      principal: context.principal,
+      requestId: context.requestId,
+      items: currentItems.map(({ item }) => item),
+      now: now(),
+      ...(claim ? { claim } : {}),
+      ...(input.humanApproval ? { humanApproval: input.humanApproval } : {}),
+      applyEffects: async (effectRequestId) => {
+        const effectContext = { ...context, requestId: effectRequestId };
+        for (const { item, prepared } of currentItems) {
+          await applyPrepared(prepared, effectContext, executor, input.humanApproval);
+          await executor
+            .update(financeMaintenanceCandidateItems)
+            .set({ disposition: "committed", updatedAt: now() })
+            .where(eq(financeMaintenanceCandidateItems.id, item.id));
+        }
+      },
+    });
     await executor
       .update(financeMaintenanceCandidates)
       .set({ state: "committed", updatedAt: now() })
@@ -3330,6 +3399,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       context: MutationContext,
     ) {
       return db.transaction(async (tx) => {
+        await lockFinanceEffectOwner(tx, context.principal.userId);
         const bypass = await readBypass(tx, context.principal.userId, true);
         const outcome = await settleMaintenanceCandidateInTransaction({
           candidateId,
@@ -3494,6 +3564,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     ): Promise<FinanceActionOutcome<T>> {
       await requireWorkspaceExecution(executor ?? db, context.principal, "finances", now());
       const approval = await actionTransaction(executor, async (tx) => {
+        await lockFinanceEffectOwner(tx, context.principal.userId);
         await requireWorkspaceExecution(tx, context.principal, "finances", now());
         const [preview] = await tx
           .select()

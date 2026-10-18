@@ -195,3 +195,86 @@ export const financeConversationProofResultSchema = z
   })
   .strict();
 export type FinanceConversationProofResult = z.infer<typeof financeConversationProofResultSchema>;
+
+/** This is a causal claim, never approval or financial execution authority. */
+export const financeConversationCausalClaimSchema = z
+  .object({
+    sourceMessageIds: z
+      .array(idSchema)
+      .min(1)
+      .max(100)
+      .refine((ids) => new Set(ids).size === ids.length, "Source message IDs must be unique."),
+    explanation: z.string().trim().min(1).max(4000),
+  })
+  .strict();
+export type FinanceConversationCausalClaim = z.infer<typeof financeConversationCausalClaimSchema>;
+export const financeConversationEffectReceiptSchema = z
+  .object({
+    id: idSchema,
+    runId: idSchema,
+    candidateId: idSchema,
+    candidateRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+    automationScheduleId: idSchema.nullable(),
+    authorizationConnectionId: idSchema.nullable(),
+    committedAt: isoDateTimeSchema,
+    requestId: z.string().min(1).max(1000),
+    originRequestId: z.string().min(1).max(1000),
+    actor: z.object({ type: z.enum(["user", "agent"]), id: z.string().min(1).max(240) }).strict(),
+    authorityBasis: z.enum([
+      "original_live_grant",
+      "authenticated_owner",
+      "legacy_unbound_context",
+    ]),
+    humanApproval: z.object({ actorId: idSchema, reviewId: idSchema }).strict().nullable(),
+    sourceMessageIds: z.array(idSchema).max(100),
+    explanation: z.string().min(1).max(4000),
+    auditEventIds: z.array(idSchema).max(10000),
+    recordRefs: z
+      .array(z.object({ kind: z.string().min(1).max(100), id: idSchema }).strict())
+      .max(10000),
+    outcome: z.literal("committed"),
+    actionFamilies: z.array(z.string().min(1).max(100)).max(100),
+    status: z.enum(["applied", "no_changes"]),
+    significance: z.enum(["routine", "budget_decision"]),
+  })
+  .strict();
+export type FinanceConversationEffectReceipt = z.infer<
+  typeof financeConversationEffectReceiptSchema
+>;
+export const financeConversationEvidenceReadInputSchema = z
+  .object({
+    candidateId: idSchema,
+    candidateRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+    cursor: z.string().min(1).max(3000).optional(),
+  })
+  .strict();
+export type FinanceConversationEvidenceReadInput = z.infer<
+  typeof financeConversationEvidenceReadInputSchema
+>;
+export const financeConversationEvidenceReadResultSchema = z.discriminatedUnion("state", [
+  z
+    .object({
+      state: z.literal("available"),
+      receipt: financeConversationEffectReceiptSchema.extend({
+        auditEventIds: z.array(idSchema).max(100),
+        recordRefs: z
+          .array(z.object({ kind: z.string().min(1).max(100), id: idSchema }).strict())
+          .max(100),
+      }),
+      nextCursor: z.string().max(3000).nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      state: z.literal("unavailable"),
+      reason: z.enum([
+        "run_has_no_original_host",
+        "no_committed_effect_receipt",
+        "original_run_binding_changed",
+      ]),
+    })
+    .strict(),
+]);
+export type FinanceConversationEvidenceReadResult = z.infer<
+  typeof financeConversationEvidenceReadResultSchema
+>;

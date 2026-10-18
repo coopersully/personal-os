@@ -33,6 +33,7 @@ CREATE TABLE finance_recurring_schedule_versions (
  CONSTRAINT fin_schedule_slots_check CHECK ((cadence = 'semimonthly' AND semimonthly_days IS NOT NULL AND array_ndims(semimonthly_days) = 1 AND array_lower(semimonthly_days,1) = 1 AND cardinality(semimonthly_days) = 2 AND semimonthly_days[1] IS NOT NULL AND semimonthly_days[2] IS NOT NULL AND semimonthly_days[1] BETWEEN 1 AND 31 AND semimonthly_days[2] BETWEEN 1 AND 31 AND semimonthly_days[1] <> semimonthly_days[2]) OR (cadence <> 'semimonthly' AND semimonthly_days IS NULL)),
  CONSTRAINT fin_schedule_actor_check CHECK (actor_user_id = user_id),
  CONSTRAINT fin_schedule_self_check CHECK (supersedes_id IS NULL OR supersedes_id <> id),
+ CONSTRAINT fin_schedule_account_fk FOREIGN KEY(user_id,account_id) REFERENCES finance_accounts(user_id,id),
  CONSTRAINT fin_schedule_income_fk FOREIGN KEY(user_id,income_stream_id) REFERENCES finance_income_streams(user_id,id),
  CONSTRAINT fin_schedule_obligation_fk FOREIGN KEY(user_id,obligation_id) REFERENCES finance_recurring_obligations(user_id,id)
 );

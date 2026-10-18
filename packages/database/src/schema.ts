@@ -3917,6 +3917,11 @@ export const financeRecurringScheduleVersions = pgTable(
       sql`${table.supersedesId} IS NULL OR ${table.supersedesId} <> ${table.id}`,
     ),
     foreignKey({
+      name: "fin_schedule_account_fk",
+      columns: [table.userId, table.accountId],
+      foreignColumns: [financeAccounts.userId, financeAccounts.id],
+    }),
+    foreignKey({
       name: "fin_schedule_income_fk",
       columns: [table.userId, table.incomeStreamId],
       foreignColumns: [financeIncomeStreams.userId, financeIncomeStreams.id],

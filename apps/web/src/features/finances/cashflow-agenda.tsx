@@ -1,17 +1,16 @@
-import {
-  type FinanceCashflowScheduleItem,
-  type FinanceCashflowScheduleView,
-  formatDateOnly,
-} from "@personal-os/domain";
+import { formatDateOnly } from "@personal-os/domain";
 import type { ReactNode } from "react";
 import { ItemGroup } from "@/components/ui/item";
 
-export type FinanceCashflowViewProps = {
-  schedule: FinanceCashflowScheduleView;
-  renderItem: (item: FinanceCashflowScheduleItem) => ReactNode;
+export type FinanceCashflowViewProps<T extends { key: string; date: string | null }> = {
+  schedule: { dated: T[] };
+  renderItem: (item: T) => ReactNode;
 };
 
-export function FinanceCashflowAgenda({ schedule, renderItem }: FinanceCashflowViewProps) {
+export function FinanceCashflowAgenda<T extends { key: string; date: string | null }>({
+  schedule,
+  renderItem,
+}: FinanceCashflowViewProps<T>) {
   const dates = [...new Set(schedule.dated.map((item) => item.date as string))];
   return (
     <section aria-label="Upcoming money agenda" className="flex min-w-0 flex-col gap-5">

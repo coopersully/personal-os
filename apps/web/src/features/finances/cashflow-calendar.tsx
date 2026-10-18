@@ -1,18 +1,16 @@
-import {
-  type FinanceCashflowScheduleItem,
-  type FinanceCashflowScheduleView,
-  formatDateOnly,
-  localDateToIso,
-  parseLocalDate,
-} from "@personal-os/domain";
+import { formatDateOnly, localDateToIso, parseLocalDate } from "@personal-os/domain";
 import { Fragment, type ReactNode, useId, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Empty, EmptyDescription } from "@/components/ui/empty";
 import { ItemGroup } from "@/components/ui/item";
 
-type Props = {
-  schedule: FinanceCashflowScheduleView;
-  renderItem: (item: FinanceCashflowScheduleItem) => ReactNode;
+type CalendarItem = { key: string; date: string | null };
+type Props<T extends CalendarItem> = {
+  schedule: { from: string; to: string; today: string; dated: T[] };
+  renderItem: (item: T) => ReactNode;
+  itemLabel?: string;
+  pageSize?: number;
 };
 
 function calendarDate(value: string) {
@@ -28,17 +26,29 @@ function dateOnly(date: Date) {
   });
 }
 
-export function FinanceCashflowCalendar(props: Props) {
+export function FinanceCashflowCalendar<T extends CalendarItem>(props: Props<T>) {
   // A changed range starts a fresh, valid selection and month together.
   return <CashflowCalendarRange key={`${props.schedule.from}:${props.schedule.to}`} {...props} />;
 }
 
-function CashflowCalendarRange({ schedule, renderItem }: Props) {
+function CashflowCalendarRange<T extends CalendarItem>({
+  schedule,
+  renderItem,
+  itemLabel = "next expected item",
+  pageSize,
+}: Props<T>) {
   const [selected, setSelected] = useState(() => calendarDate(schedule.from));
+  const [page, setPage] = useState(0);
   const [month, setMonth] = useState(() => calendarDate(schedule.from));
   const headingId = useId();
   const selectedDate = dateOnly(selected);
   const items = schedule.dated.filter((item) => item.date === selectedDate);
+  const visiblePage = pageSize
+    ? Math.min(page, Math.max(0, Math.ceil(items.length / pageSize) - 1))
+    : 0;
+  const visibleItems = pageSize
+    ? items.slice(visiblePage * pageSize, (visiblePage + 1) * pageSize)
+    : items;
   const counts = new Map<string, number>();
   for (const item of schedule.dated) {
     if (item.date) counts.set(item.date, (counts.get(item.date) ?? 0) + 1);
@@ -47,7 +57,7 @@ function CashflowCalendarRange({ schedule, renderItem }: Props) {
     <div className="flex min-w-0 flex-col gap-6 sm:flex-row">
       <div className="w-full min-w-0 sm:max-w-sm">
         <Calendar
-          aria-label="Next expected items calendar"
+          aria-label={`${itemLabel[0]?.toUpperCase()}${itemLabel.slice(1)}s calendar`}
           today={calendarDate(schedule.today)}
           mode="single"
           required
@@ -55,6 +65,7 @@ function CashflowCalendarRange({ schedule, renderItem }: Props) {
           month={month}
           onMonthChange={setMonth}
           onSelect={(date) => {
+            setPage(0);
             setSelected(date);
             setMonth(date);
           }}
@@ -67,7 +78,7 @@ function CashflowCalendarRange({ schedule, renderItem }: Props) {
             labelDayButton: (date, modifiers) => {
               const iso = dateOnly(date);
               const count = counts.get(iso) ?? 0;
-              return `${formatDateOnly(iso, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}, ${count} next expected ${count === 1 ? "item" : "items"}${modifiers.selected ? ", selected" : ""}`;
+              return `${formatDateOnly(iso, { weekday: "long", month: "long", day: "numeric", year: "numeric" })}, ${count} ${itemLabel}${count === 1 ? "" : "s"}${modifiers.selected ? ", selected" : ""}`;
             },
           }}
           formatters={{
@@ -88,16 +99,37 @@ function CashflowCalendarRange({ schedule, renderItem }: Props) {
           })}
         </h3>
         {items.length ? (
-          <ItemGroup aria-label="Selected day's next expected items">
-            {items.map((item) => (
+          <ItemGroup aria-label={`Selected day's ${itemLabel}s`}>
+            {visibleItems.map((item) => (
               <Fragment key={item.key}>{renderItem(item)}</Fragment>
             ))}
           </ItemGroup>
         ) : (
           <Empty>
-            <EmptyDescription>No next expected items recorded for this day.</EmptyDescription>
+            <EmptyDescription>No {itemLabel}s recorded for this day.</EmptyDescription>
           </Empty>
         )}
+        {pageSize && items.length > pageSize ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              disabled={visiblePage === 0}
+              onClick={() => setPage(visiblePage - 1)}
+            >
+              Previous occurrences
+            </Button>
+            <span className="text-sm">
+              Page {visiblePage + 1} of {Math.ceil(items.length / pageSize)}
+            </span>
+            <Button
+              variant="outline"
+              disabled={(visiblePage + 1) * pageSize >= items.length}
+              onClick={() => setPage(visiblePage + 1)}
+            >
+              Next occurrences
+            </Button>
+          </div>
+        ) : null}
       </section>
     </div>
   );

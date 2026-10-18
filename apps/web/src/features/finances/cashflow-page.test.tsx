@@ -2,13 +2,18 @@
 import "@testing-library/jest-dom/vitest";
 import { ApiClientError } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { FinanceCashflowPage } from "./cashflow-page";
 
 const api = vi.hoisted(() => ({
   getMe: vi.fn(),
+  listFinanceCashflowSources: vi.fn(),
+  listFinanceRecurringSchedules: vi.fn(),
+  listFinanceBalanceBases: vi.fn(),
+  getFinanceCashflowProjection: vi.fn(),
+  listFinanceBalanceBasisSources: vi.fn(),
   getFinanceSnapshot: vi.fn(),
   getFinanceForecast: vi.fn(),
   listFinanceAccounts: vi.fn(),
@@ -34,6 +39,35 @@ beforeEach(() => {
   api.getMe.mockResolvedValue({
     id: "00000000-0000-4000-8000-000000000001",
     planningTimezone: "America/New_York",
+  });
+  api.listFinanceCashflowSources.mockResolvedValue({
+    from: "2026-10-01",
+    to: "2026-10-31",
+    accounts: [],
+    income: [],
+    obligations: [],
+    transactions: [],
+    coverage: { truncated: false, transactionLimit: 1000 },
+  });
+  api.listFinanceRecurringSchedules.mockResolvedValue([]);
+  api.listFinanceBalanceBases.mockResolvedValue([]);
+  api.getFinanceCashflowProjection.mockResolvedValue({
+    schedule: {
+      from: "2026-10-01",
+      to: "2026-10-31",
+      occurrences: [],
+      matchEvents: [],
+      unavailableSources: [],
+    },
+    projection: {
+      status: "unavailable",
+      reasons: [{ code: "balance_basis_unavailable", evidenceId: null }],
+    },
+  });
+  api.listFinanceBalanceBasisSources.mockResolvedValue({
+    accounts: [],
+    transactions: [],
+    coverage: { complete: true, truncated: false, transactionLimit: 1000 },
   });
   api.getFinanceSnapshot.mockResolvedValue({
     data: { ledger: { trustworthy: false } },
@@ -65,7 +99,9 @@ beforeEach(() => {
 it("shows honest unavailable balance instead of legacy compatibility forecast totals", async () => {
   renderPage();
   expect(await screen.findByRole("region", { name: "Upcoming money" })).toBeVisible();
-  expect(screen.getByText(/Projected balance unavailable/)).toBeVisible();
+  expect(await screen.findByRole("list", { name: "Unavailable cycle evidence" })).toHaveTextContent(
+    "A current balance statement is missing or no longer applicable.",
+  );
   expect(screen.queryByText("$79,000.00")).not.toBeInTheDocument();
   expect(api.getFinanceForecast).not.toHaveBeenCalled();
   expect(api.getFinanceSnapshot).not.toHaveBeenCalled();

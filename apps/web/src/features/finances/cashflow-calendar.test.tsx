@@ -152,3 +152,29 @@ it("marks today from the planning timezone rather than the browser clock", () =>
     screen.getByRole("button", { name: /Monday, March 9, 2026/ }).closest('[data-today="true"]'),
   ).not.toBeNull();
 });
+
+it("keeps selected-day counts and later rows reachable, then clamps a shorter refresh", async () => {
+  const user = userEvent.setup();
+  const source = {
+    ...schedule(),
+    dated: Array.from({ length: 51 }, (_, index) => item("2026-03-08", `Payment ${index + 1}`)),
+  };
+  const { rerender } = render(
+    <FinanceCashflowCalendar schedule={source} renderItem={renderItem} pageSize={50} />,
+  );
+  expect(
+    screen.getByRole("button", { name: /March 8, 2026, 51 next expected items/ }),
+  ).toBeVisible();
+  expect(screen.queryByText("Payment 51")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Next occurrences" }));
+  expect(screen.getByText("Payment 51")).toBeVisible();
+  rerender(
+    <FinanceCashflowCalendar
+      schedule={{ ...source, dated: source.dated.slice(0, 1) }}
+      renderItem={renderItem}
+      pageSize={50}
+    />,
+  );
+  expect(screen.getByText("Payment 1")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Next occurrences" })).not.toBeInTheDocument();
+});

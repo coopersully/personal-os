@@ -26,7 +26,7 @@ import { WorkspaceHeaderControls } from "@/components/workspace-header-controls"
 import { api } from "../../api.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
-import { FinanceCashflowTimeline } from "./cashflow-timeline";
+import { FinanceCashflowPlanning } from "./cashflow-planning";
 import { FinanceSourceState, requireFinanceResult } from "./position-material.js";
 import { RecurringCostSection } from "./recurring-cost-section";
 import { FinanceReimbursementList } from "./reimbursement-list";
@@ -206,10 +206,10 @@ export function FinanceCashflowPage() {
             {recurring.isPending ? (
               <Skeleton className="h-32 w-full" />
             ) : recurring.data ? (
-              <FinanceCashflowTimeline
-                income={income}
-                obligations={obligations}
-                accounts={accounts.data?.accounts ?? []}
+              <FinanceCashflowPlanning
+                accessDenied={[recurring.error, accounts.error].some(
+                  (error) => error instanceof ApiClientError && [401, 403].includes(error.status),
+                )}
               />
             ) : null}
           </section>

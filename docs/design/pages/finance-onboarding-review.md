@@ -78,6 +78,10 @@ current account session; an older owner's in-flight response cannot become a new
 Only an actual completion timestamp or the persisted migration-time existing-access grant permits
 ordinary workspace entry. Neither loading nor read failure implies an incomplete or completed setup.
 Previously recorded access is not revoked by later source, registration or Chat failure.
+An authoritative same-account HTTP 401/403 clears the cached setup projection, private review
+draft and actions, and derived workspace access. A fresh successful server read is required to
+restore them. Responses from reads or writes started before that denial remain stale even after
+recovery. Transient transport errors retain the last valid snapshot and review draft.
 
 New owners entering ordinary Finance destinations return to setup with a bounded local Finance
 return path. Setup, accounts/linking, Chat, Automations and question/review evidence stay reachable.

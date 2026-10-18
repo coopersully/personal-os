@@ -38,17 +38,22 @@ export function useFinanceWorkspaceReadiness() {
   const query = useQuery({
     queryKey: financeWorkspaceReadinessKey,
     enabled: !!session.owner && !access.denied,
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const started = { ...preferenceSession(cache) };
       if (!started.owner) throw new Error("Load your account before reading Finance readiness.");
       const captured = captureFinanceOnboardingAccess(cache);
       try {
         const snapshot = await financeOnboardingApiAdapter.getFinanceOnboarding();
-        if (!sameSession(cache, started) || !confirmFinanceOnboardingRead(cache, captured))
+        if (
+          signal.aborted ||
+          !sameSession(cache, started) ||
+          !confirmFinanceOnboardingRead(cache, captured)
+        )
           throw new Error("Your Finance access changed. Reload readiness.");
         return snapshot;
       } catch (error) {
-        if (sameSession(cache, started)) denyFinanceOnboardingAccess(cache, captured, error);
+        if (!signal.aborted && sameSession(cache, started))
+          denyFinanceOnboardingAccess(cache, captured, error);
         throw error;
       }
     },

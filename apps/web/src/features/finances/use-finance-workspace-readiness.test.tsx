@@ -157,3 +157,28 @@ it("cannot restore a late read from before same-owner denial even after recovery
   expect(result.current.snapshot?.existingAccess).toBe(false);
   expect(result.current.manualCreationVisible).toBe(false);
 });
+
+it("ignores a canceled read denial after a fresh same-owner read succeeds", async () => {
+  let reject!: (reason: unknown) => void;
+  read.mockReturnValueOnce(
+    new Promise<FinanceOnboardingSnapshot>((_, r) => {
+      reject = r;
+    }),
+  );
+  const { wrapper, client } = fixture();
+  const mounted = renderHook(useFinanceWorkspaceReadiness, { wrapper });
+  await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+  await act(async () => {
+    await client.cancelQueries({ queryKey: financeWorkspaceReadinessKey });
+  });
+  read.mockResolvedValue({ ...snapshot(1), existingAccess: true });
+  await act(async () => {
+    await mounted.result.current.reload();
+  });
+  await waitFor(() => expect(mounted.result.current.readiness?.workspaceAccessible).toBe(true));
+  await act(async () => {
+    reject(new ApiClientError({ status: 403, code: "forbidden", message: "Old denial" }));
+  });
+  expect(mounted.result.current.isError).toBe(false);
+  expect(mounted.result.current.snapshot?.existingAccess).toBe(true);
+});

@@ -39,6 +39,20 @@ Ledger diagnostics disclose their individual evidence and recovery paths.
 Record counts from different checks are never added into a synthetic issue total because the
 underlying records may overlap.
 
+## Reimbursement receipt evidence
+
+Cash flow Reimbursements keeps one row per allocation-owned claim. Receipt history and evidence
+opens a labelled disclosure containing each recorded match's amount, rationale, recording time,
+and canonical credit transaction link. Claim, allocation and source references remain inspectable;
+provider remote identifiers are provenance rather than local transaction links. Local transaction
+source references link only when they contain a valid canonical transaction ID.
+
+Unknown due dates remain unknown, and cancelling an expected remainder retains its recorded
+receipts and cancellation evidence. Match recording time is not a settlement date. Receipt detail
+amounts carry no assumed currency because the current reimbursement read does not supply one;
+the existing summary totals are preserved. Original expense amounts and dates, currency-qualified
+journey totals, and receipt correction/unmatch remain outside this read-only disclosure.
+
 ## Complete Plan contract
 
 Plan displays the latest complete budget version, including proposed or active
@@ -187,11 +201,41 @@ Review.
 - Canonical Review leads with its current bounded question. Older maintenance
   approvals disclose their individual prepared changes inside the labelled
   compatibility queue.
-- Cash flow withholds legacy forecasts when shared or excluded accounts cannot be
-  represented accurately. Scenario comparisons are explicit, hypothetical inputs and
-  never change a saved plan.
-- Cash flow shows reimbursements as their own expected/received/remaining
-  ledger, including overdue state and linked credits.
+- Cash flow Outlook presents Upcoming money as a shared agenda or calendar. Human-confirmed,
+  versioned schedules supply durable occurrence identities and explicit expected, matched and
+  remaining amounts. Unconfirmed sources retain only their next expected date; they never expand
+  recurrence. A confirmed schedule with no occurrence in the selected range does not invent one.
+  Occurrence dates use each source's stated timezone; today uses the owner's planning timezone.
+  Undated sources remain visible. Range, presentation and account selection are URL-backed;
+  omitted account scope includes unassigned sources, while an explicit empty selection includes none.
+- Schedule statements bind the current source revision and immutable predecessor. Receipt inspection
+  supports explicit partial matches and full reversal against current canonical transaction facts.
+  Earlier schedule history stays inspectable. Actual payments, expected residuals and recorded match
+  times remain distinct. Source links open the exact Income or Bills & subscriptions record.
+- Payday projections require a selected confirmed income schedule and qualified balance statements.
+  Each statement names current or available balance, validity, optional floor and explicit inclusion
+  of every known movement from a dedicated complete history read. Incomplete, stale or ambiguous
+  evidence leaves the projection unavailable. Estimates are end-of-day values, not intraday minima.
+  Currency never falls back to USD and unknown floors are distinct from zero.
+- Occurrence lists and calendar-day details are bounded and paginated without dropping counts or
+  access to later items. Authoritative access denial hides cached private evidence and dismisses
+  statements; changing owners remounts facts and drafts together. A transient read failure keeps
+  existing context with an honest retry state. These are implementation contracts; database,
+  browser and integrated acceptance evidence is recorded separately from production claims.
+- Scenario comparisons are explicit hypothetical inputs and never change a saved plan.
+- Cash flow reimbursement journeys keep the original expense, active allocation, expectation,
+  received cash and remaining claim distinct. Human corrections revise the existing claim;
+  receipt removal retains immutable audit evidence and releases actual credit capacity. Unknown
+  retries retain the exact request and key. A correction denied with 401/403 hides the entire
+  cached reimbursement list and dismisses dialogs; transient failures retain context.
+- Personal cost to date subtracts received reimbursements only. It is shown only for a posted,
+  fully allocated expense with complete owned-source, receipt, currency and capacity evidence.
+  Pending, shared or ambiguous evidence remains unavailable. The result covers the whole expense,
+  can repeat across its claim cards and must never be added across those cards. Original outlay,
+  expectation and received amounts remain separately labelled.
+- Match and balance confirmations bind both transaction content and reimbursement relationship
+  generations. Match, unmatch and rematch cannot revive old evidence. Legacy statements without a
+  relationship generation remain unknown until reviewed again.
 - A mixed purchase is edited in one exact-cent breakdown dialog. Every cent
   must be assigned, reimbursement treatment is explicit, and a future merchant
   rule is unavailable for mixed allocations.
@@ -393,3 +437,17 @@ The manual account form uses the same Sonner identifier from loading through the
 creation result or error. Field corrections stay with their controls; action-result notifications
 are not duplicated inline. This repairs the form's inherited feedback behavior while extending
 currency capture; it is not a currency regression.
+### Recurring cost comparison
+
+Bills & subscriptions compares each original recurring source with its expected amount, cadence,
+source status, source-account currency and observation date. Matching merchants remain separate
+records. Savings movements stay outside recurring-cost comparisons and retain their management
+controls. Each payment retains its existing exact-record pause, confirm or resume action.
+
+Monthly and annual equivalents require a demonstrated fixed amount and supported currency units.
+Current recurring records do not establish fixedness, so their equivalents remain unavailable with
+an explicit reason; a user-supplied source alone does not confirm a fixed cost. Missing currency
+never becomes USD, and inferred, review-needed and inactive records remain distinct. The pure
+normalization contract supports exact factors 52/26/24/12/4/1 with currency-separated totals, but the
+adapter must supply applicable evidence before it can expose them. Service identity and price
+history remain unknown until independently established; merchant names prove neither.

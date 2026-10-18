@@ -512,6 +512,10 @@ describe("database schema contracts", () => {
       "0116_finance_onboarding_receipts",
       "0117_finance_planning_evidence",
       "0118_finance_preferences_legacy_access",
+      "0119_finance_recurring_occurrences",
+      "0120_finance_legacy_access_erasure_guard",
+      "0121_oauth_access_token_rotations",
+      "0122_finance_reimbursement_relationship_generation",
     ]);
   });
 

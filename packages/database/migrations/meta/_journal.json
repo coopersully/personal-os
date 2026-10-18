@@ -883,6 +883,34 @@
       "when": 1792353605000,
       "tag": "0118_finance_preferences_legacy_access",
       "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1792353606000,
+      "tag": "0119_finance_recurring_occurrences",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1792353607000,
+      "tag": "0120_finance_legacy_access_erasure_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1792353608000,
+      "tag": "0121_oauth_access_token_rotations",
+      "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1792353609000,
+      "tag": "0122_finance_reimbursement_relationship_generation",
+      "breakpoints": true
     }
   ]
 }

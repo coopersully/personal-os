@@ -1,21 +1,26 @@
 import {
   auditEvents,
   type Database,
+  financeAccounts,
   financeReimbursementMatches,
   financeReimbursements,
   financeTransactionAllocations,
+  financeTransactionRelationships,
   financeTransactions,
 } from "@personal-os/database";
 import {
   type FinanceReimbursement,
   type FinanceReimbursementStatus,
+  financeReimbursementCorrectionSchema,
   type ReconcileFinanceReimbursementInput,
   toCents,
 } from "@personal-os/domain";
-import { and, desc, eq, gte, inArray } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
+import { executeFinanceIdempotently, loadFinanceAuthorization } from "./finance/context.js";
 import { selectPlausibleReimbursementCredits } from "./finance-reimbursement-candidates.js";
+import { qualifyReimbursementPersonalCost } from "./finance-reimbursement-cost.js";
 import {
   lockReimbursementCases,
   lockReimbursementMatches,
@@ -118,100 +123,318 @@ async function readReimbursement(
 export function createFinanceReimbursementService({ db, now }: { db: Database; now: () => Date }) {
   return {
     async list(userId: string) {
-      const rows = await db
-        .select()
-        .from(financeReimbursements)
-        .where(eq(financeReimbursements.userId, userId))
-        .orderBy(financeReimbursements.dueDate, financeReimbursements.createdAt);
-      const ids = rows.map((row) => row.id);
-      const matches = ids.length
-        ? await db
+      return db.transaction(
+        async (snapshot) => {
+          const rows = await snapshot
             .select()
-            .from(financeReimbursementMatches)
-            .where(
-              and(
-                eq(financeReimbursementMatches.userId, userId),
-                inArray(financeReimbursementMatches.reimbursementId, ids),
-              ),
-            )
-        : [];
-      const matchesByReimbursement = new Map<string, typeof matches>();
-      for (const match of matches) {
-        const items = matchesByReimbursement.get(match.reimbursementId) ?? [];
-        items.push(match);
-        matchesByReimbursement.set(match.reimbursementId, items);
-      }
-      const openAllocationIds = rows
-        .filter((row) => row.status !== "cancelled" && row.status !== "received")
-        .map((row) => row.allocationId);
-      const openAllocations = openAllocationIds.length
-        ? await db
-            .select({ transactionId: financeTransactionAllocations.transactionId })
-            .from(financeTransactionAllocations)
-            .where(
-              and(
-                eq(financeTransactionAllocations.userId, userId),
-                inArray(financeTransactionAllocations.id, openAllocationIds),
-              ),
-            )
-        : [];
-      const openTransactionIds = openAllocations.map((row) => row.transactionId);
-      const openExpenseDates = openTransactionIds.length
-        ? await db
-            .select({ date: financeTransactions.transactionDate })
+            .from(financeReimbursements)
+            .where(eq(financeReimbursements.userId, userId))
+            .orderBy(financeReimbursements.dueDate, financeReimbursements.createdAt);
+          const ids = rows.map((row) => row.id);
+          const matches = ids.length
+            ? await snapshot
+                .select()
+                .from(financeReimbursementMatches)
+                .where(
+                  and(
+                    eq(financeReimbursementMatches.userId, userId),
+                    inArray(financeReimbursementMatches.reimbursementId, ids),
+                  ),
+                )
+            : [];
+          const correctionAudits = ids.length
+            ? await snapshot
+                .select()
+                .from(auditEvents)
+                .where(
+                  and(
+                    eq(auditEvents.userId, userId),
+                    eq(auditEvents.entityType, "finance_reimbursement"),
+                    inArray(auditEvents.entityId, ids),
+                    inArray(auditEvents.action, [
+                      "finance.reimbursement_corrected",
+                      "finance.reimbursement_credit_unmatched",
+                    ]),
+                  ),
+                )
+                .orderBy(auditEvents.createdAt, auditEvents.id)
+            : [];
+          const matchesByReimbursement = new Map<string, typeof matches>();
+          for (const match of matches) {
+            const items = matchesByReimbursement.get(match.reimbursementId) ?? [];
+            items.push(match);
+            matchesByReimbursement.set(match.reimbursementId, items);
+          }
+          // Read current owned source facts separately from immutable match-recorded evidence.
+          const allocationIds = [...new Set(rows.map((row) => row.allocationId))];
+          const expenseSources = allocationIds.length
+            ? await snapshot
+                .select({
+                  allocationId: financeTransactionAllocations.id,
+                  allocationAmount: financeTransactionAllocations.amount,
+                  allocationRevision: financeTransactionAllocations.revision,
+                  allocationState: financeTransactionAllocations.state,
+                  allocationTreatment: financeTransactionAllocations.treatment,
+                  transactionId: financeTransactions.id,
+                  amount: financeTransactions.amount,
+                  currency: financeTransactions.currencyCode,
+                  date: financeTransactions.transactionDate,
+                  merchant: financeTransactions.merchant,
+                  pending: financeTransactions.pending,
+                })
+                .from(financeTransactionAllocations)
+                .innerJoin(
+                  financeTransactions,
+                  and(
+                    eq(financeTransactions.id, financeTransactionAllocations.transactionId),
+                    eq(financeTransactions.userId, userId),
+                  ),
+                )
+                .innerJoin(
+                  financeAccounts,
+                  and(
+                    eq(financeAccounts.id, financeTransactions.accountId),
+                    eq(financeAccounts.userId, userId),
+                  ),
+                )
+                .where(
+                  and(
+                    eq(financeTransactionAllocations.userId, userId),
+                    inArray(financeTransactionAllocations.id, allocationIds),
+                  ),
+                )
+            : [];
+          const expenseByAllocation = new Map(
+            expenseSources.map((source) => [source.allocationId, source]),
+          );
+          const creditIds = [...new Set(matches.map((match) => match.creditTransactionId))];
+          const receiptSources = creditIds.length
+            ? await snapshot
+                .select({
+                  transactionId: financeTransactions.id,
+                  amount: financeTransactions.amount,
+                  currency: financeTransactions.currencyCode,
+                  date: financeTransactions.transactionDate,
+                  merchant: financeTransactions.merchant,
+                  pending: financeTransactions.pending,
+                })
+                .from(financeTransactions)
+                .innerJoin(
+                  financeAccounts,
+                  and(
+                    eq(financeAccounts.id, financeTransactions.accountId),
+                    eq(financeAccounts.userId, userId),
+                  ),
+                )
+                .where(
+                  and(
+                    eq(financeTransactions.userId, userId),
+                    inArray(financeTransactions.id, creditIds),
+                  ),
+                )
+            : [];
+          const receiptById = new Map(
+            receiptSources.map((source) => [source.transactionId, source]),
+          );
+          const expenseTransactionIds = [
+            ...new Set(expenseSources.map((source) => source.transactionId)),
+          ];
+          const qualificationTransactionIds = [
+            ...new Set([...expenseTransactionIds, ...creditIds]),
+          ];
+          const qualificationTransactions = qualificationTransactionIds.length
+            ? await snapshot
+                .select()
+                .from(financeTransactions)
+                .where(
+                  and(
+                    eq(financeTransactions.userId, userId),
+                    inArray(financeTransactions.id, qualificationTransactionIds),
+                  ),
+                )
+            : [];
+          const qualificationAccountIds = [
+            ...new Set(qualificationTransactions.map((row) => row.accountId)),
+          ];
+          const qualificationAccounts = qualificationAccountIds.length
+            ? await snapshot
+                .select()
+                .from(financeAccounts)
+                .where(
+                  and(
+                    eq(financeAccounts.userId, userId),
+                    inArray(financeAccounts.id, qualificationAccountIds),
+                  ),
+                )
+            : [];
+          const qualificationAllocations = expenseTransactionIds.length
+            ? await snapshot
+                .select()
+                .from(financeTransactionAllocations)
+                .where(
+                  and(
+                    eq(financeTransactionAllocations.userId, userId),
+                    inArray(financeTransactionAllocations.transactionId, expenseTransactionIds),
+                  ),
+                )
+            : [];
+          const qualificationRelationships = qualificationTransactionIds.length
+            ? await snapshot
+                .select({
+                  userId: financeTransactionRelationships.userId,
+                  transactionIds: financeTransactionRelationships.transactionIds,
+                })
+                .from(financeTransactionRelationships)
+                .where(
+                  and(
+                    eq(financeTransactionRelationships.userId, userId),
+                    sql`${financeTransactionRelationships.transactionIds} ?| ARRAY[${sql.join(
+                      qualificationTransactionIds.map((id) => sql`${id}`),
+                      sql`, `,
+                    )}]::text[]`,
+                  ),
+                )
+            : [];
+          const personalCostByExpense = new Map(
+            expenseTransactionIds.map((expenseTransactionId) => [
+              expenseTransactionId,
+              qualifyReimbursementPersonalCost({
+                ownerUserId: userId,
+                expenseTransactionId,
+                transactions: qualificationTransactions,
+                accounts: qualificationAccounts,
+                allocations: qualificationAllocations,
+                reimbursements: rows,
+                matches,
+                relationships: qualificationRelationships,
+              }),
+            ]),
+          );
+
+          const openAllocationIds = rows
+            .filter((row) => row.status !== "cancelled" && row.status !== "received")
+            .map((row) => row.allocationId);
+          const openAllocations = openAllocationIds.length
+            ? await snapshot
+                .select({ transactionId: financeTransactionAllocations.transactionId })
+                .from(financeTransactionAllocations)
+                .where(
+                  and(
+                    eq(financeTransactionAllocations.userId, userId),
+                    inArray(financeTransactionAllocations.id, openAllocationIds),
+                  ),
+                )
+            : [];
+          const openTransactionIds = openAllocations.map((row) => row.transactionId);
+          const openExpenseDates = openTransactionIds.length
+            ? await snapshot
+                .select({ date: financeTransactions.transactionDate })
+                .from(financeTransactions)
+                .where(
+                  and(
+                    eq(financeTransactions.userId, userId),
+                    inArray(financeTransactions.id, openTransactionIds),
+                  ),
+                )
+            : [];
+          const oldestOpenAnchor = openExpenseDates.map((row) => row.date).toSorted()[0];
+          const credits = await snapshot
+            .select({
+              category: financeTransactions.category,
+              id: financeTransactions.id,
+              amount: financeTransactions.amount,
+              date: financeTransactions.transactionDate,
+              merchant: financeTransactions.merchant,
+              pending: financeTransactions.pending,
+            })
             .from(financeTransactions)
             .where(
               and(
                 eq(financeTransactions.userId, userId),
-                inArray(financeTransactions.id, openTransactionIds),
+                eq(financeTransactions.direction, "income"),
+                oldestOpenAnchor
+                  ? gte(financeTransactions.transactionDate, oldestOpenAnchor)
+                  : undefined,
               ),
             )
-        : [];
-      const oldestOpenAnchor = openExpenseDates.map((row) => row.date).toSorted()[0];
-      const credits = await db
-        .select({
-          category: financeTransactions.category,
-          id: financeTransactions.id,
-          amount: financeTransactions.amount,
-          date: financeTransactions.transactionDate,
-          merchant: financeTransactions.merchant,
-          pending: financeTransactions.pending,
-        })
-        .from(financeTransactions)
-        .where(
-          and(
-            eq(financeTransactions.userId, userId),
-            eq(financeTransactions.direction, "income"),
-            oldestOpenAnchor
-              ? gte(financeTransactions.transactionDate, oldestOpenAnchor)
-              : undefined,
-          ),
-        )
-        .orderBy(desc(financeTransactions.transactionDate), desc(financeTransactions.id))
-        .limit(500);
-      const candidates = selectPlausibleReimbursementCredits({
-        credits,
-        matches,
-        reimbursements: rows,
-      });
-      const creditById = new Map(credits.map((credit) => [credit.id, credit]));
-      return {
-        reimbursements: rows.map((row) =>
-          serialize(row, matchesByReimbursement.get(row.id) ?? [], now()),
-        ),
-        unmatchedCredits: candidates.flatMap((candidate) => {
-          const credit = creditById.get(candidate.transactionId);
-          return credit
-            ? [
-                {
-                  amount: candidate.remainingAmount / 100,
-                  date: credit.date,
-                  transactionId: credit.id,
-                },
-              ]
-            : [];
-        }),
-      };
+            .orderBy(desc(financeTransactions.transactionDate), desc(financeTransactions.id))
+            .limit(500);
+          const candidates = selectPlausibleReimbursementCredits({
+            credits,
+            matches,
+            reimbursements: rows,
+          });
+          const creditById = new Map(credits.map((credit) => [credit.id, credit]));
+          return {
+            reimbursements: rows.map((row): FinanceReimbursement => {
+              const item = serialize(row, matchesByReimbursement.get(row.id) ?? [], now());
+              const source = expenseByAllocation.get(row.allocationId);
+              return {
+                ...item,
+                corrections: correctionAudits
+                  .filter((audit) => audit.entityId === row.id)
+                  .flatMap((audit) => {
+                    const parsed = financeReimbursementCorrectionSchema.safeParse({
+                      ...(audit.after?.correction as Record<string, unknown> | undefined),
+                      id: audit.id,
+                      recordedAt: audit.createdAt.toISOString(),
+                    });
+                    return parsed.success ? [parsed.data] : [];
+                  }),
+                sourceExpense: source
+                  ? {
+                      transactionId: source.transactionId,
+                      amount: source.amount / 100,
+                      currency: source.currency,
+                      date: source.date,
+                      merchant: source.merchant,
+                      pending: source.pending,
+                      allocationAmount: source.allocationAmount / 100,
+                      allocationRevision: source.allocationRevision,
+                      allocationState: source.allocationState,
+                      allocationTreatment: source.allocationTreatment,
+                      personalCostToDate: (() => {
+                        const cost = personalCostByExpense.get(source.transactionId);
+                        return cost?.state === "qualified"
+                          ? {
+                              state: "qualified" as const,
+                              amount: cost.amountCents / 100,
+                              receivedAmount: cost.receivedCents / 100,
+                              currency: cost.currency,
+                              scope: cost.scope,
+                            }
+                          : {
+                              state: "unavailable" as const,
+                              reason: cost?.reason ?? "source_missing",
+                            };
+                      })(),
+                    }
+                  : null,
+                matches: item.matches.map((match) => {
+                  const credit = receiptById.get(match.creditTransactionId);
+                  return {
+                    ...match,
+                    creditTransaction: credit ? { ...credit, amount: credit.amount / 100 } : null,
+                  };
+                }),
+              };
+            }),
+            unmatchedCredits: candidates.flatMap((candidate) => {
+              const credit = creditById.get(candidate.transactionId);
+              return credit
+                ? [
+                    {
+                      amount: candidate.remainingAmount / 100,
+                      date: credit.date,
+                      transactionId: credit.id,
+                    },
+                  ]
+                : [];
+            }),
+          };
+        },
+        { accessMode: "read only", isolationLevel: "repeatable read" },
+      );
     },
 
     async reconcile(
@@ -219,6 +442,17 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
       context: Context,
       executor?: ReimbursementWriter,
     ) {
+      const correction =
+        input.operation === "correct_expected" || input.operation === "unmatch_credit";
+      if (
+        correction &&
+        (context.principal.actorType !== "user" ||
+          context.principal.actorId !== context.principal.userId)
+      )
+        throw new AppError(
+          "forbidden",
+          "Reimbursement corrections require your explicit confirmation.",
+        );
       const write = async (tx: ReimbursementWriter) => {
         const userId = context.principal.userId;
         await lockReimbursementTopology(tx, userId);
@@ -306,6 +540,239 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
           return serialize(created, []);
         }
 
+        // The owner topology lock serializes absent matches and crossed case/credit writes.
+        // Corrections preserve the original case and record removed evidence in its audit history.
+        if (input.operation === "correct_expected" || input.operation === "unmatch_credit") {
+          const [row] = await lockReimbursementCases(tx, userId, [input.reimbursementId], true);
+          if (!row) throw new AppError("not_found", "The reimbursement was not found.");
+          if (row.revision !== input.expectedRevision)
+            throw new AppError(
+              "conflict",
+              "The reimbursement changed; refresh before correcting it.",
+            );
+          const [allocation] = await tx
+            .select()
+            .from(financeTransactionAllocations)
+            .where(
+              and(
+                eq(financeTransactionAllocations.id, row.allocationId),
+                eq(financeTransactionAllocations.userId, userId),
+              ),
+            )
+            .limit(1);
+          if (!allocation) throw new AppError("not_found", "The source allocation was not found.");
+          const preliminaryMatches = await lockReimbursementMatches(tx, userId, {
+            reimbursementIds: [row.id],
+          });
+          const transactionIds = [
+            ...new Set([
+              allocation.transactionId,
+              ...preliminaryMatches.map((match) => match.creditTransactionId),
+            ]),
+          ].sort();
+          const transactions = await tx
+            .select()
+            .from(financeTransactions)
+            .where(
+              and(
+                eq(financeTransactions.userId, userId),
+                inArray(financeTransactions.id, transactionIds),
+              ),
+            );
+          const accountIds = [...new Set(transactions.map((item) => item.accountId))].sort();
+          if (accountIds.length)
+            await tx
+              .select()
+              .from(financeAccounts)
+              .where(
+                and(eq(financeAccounts.userId, userId), inArray(financeAccounts.id, accountIds)),
+              )
+              .orderBy(financeAccounts.id)
+              .for("update");
+          const lockedTransactions = await tx
+            .select()
+            .from(financeTransactions)
+            .where(
+              and(
+                eq(financeTransactions.userId, userId),
+                inArray(financeTransactions.id, transactionIds),
+              ),
+            )
+            .orderBy(financeTransactions.id)
+            .for("update");
+          const [lockedAllocation] = await tx
+            .select()
+            .from(financeTransactionAllocations)
+            .where(
+              and(
+                eq(financeTransactionAllocations.userId, userId),
+                eq(financeTransactionAllocations.id, allocation.id),
+              ),
+            )
+            .for("update");
+          if (!lockedAllocation || lockedAllocation.revision !== allocation.revision)
+            throw new AppError(
+              "conflict",
+              "The source allocation changed; refresh before correcting it.",
+            );
+          const matches = await lockReimbursementMatches(
+            tx,
+            userId,
+            { reimbursementIds: [row.id] },
+            true,
+          );
+          const matchedCreditId =
+            input.operation === "unmatch_credit"
+              ? matches.find((match) => match.id === input.matchId)?.creditTransactionId
+              : undefined;
+          const canonicalEvidence: FinanceReimbursement["evidence"] = {
+            summary: input.evidence.summary,
+            sourceRefs: lockedTransactions
+              .filter(
+                (transaction) =>
+                  transaction.id === allocation.transactionId || transaction.id === matchedCreditId,
+              )
+              .map((transaction) => ({
+                accountId: transaction.accountId,
+                provider: "local",
+                remoteId: transaction.id,
+                revision: transaction.updatedAt.toISOString(),
+                sourceType: "finance_transaction",
+              })),
+          };
+          if (
+            !canonicalEvidence.sourceRefs.some(
+              (source) => source.remoteId === allocation.transactionId,
+            )
+          )
+            throw new AppError(
+              "conflict",
+              "The source expense is unavailable; refresh before correcting it.",
+            );
+          let remainingMatches = matches;
+          let expectedAmount = row.expectedAmount;
+          if (input.operation === "correct_expected") {
+            if (row.cancelledAt)
+              throw new AppError("conflict", "Cancelled expectations cannot be edited.");
+            if (allocation.state !== "active" || allocation.treatment !== "reimbursable")
+              throw new AppError(
+                "conflict",
+                "Review the source expense allocation before correcting this expectation.",
+              );
+            expectedAmount = toCents(input.expectedAmount);
+            const siblings = await tx
+              .select()
+              .from(financeReimbursements)
+              .where(
+                and(
+                  eq(financeReimbursements.userId, userId),
+                  eq(financeReimbursements.allocationId, allocation.id),
+                ),
+              );
+            const reserved = siblings
+              .filter((item) => item.id !== row.id)
+              .reduce(
+                (sum, item) => sum + (item.cancelledAt ? item.receivedAmount : item.expectedAmount),
+                0,
+              );
+            if (
+              expectedAmount < row.receivedAmount ||
+              expectedAmount + reserved > allocation.amount
+            )
+              throw new AppError(
+                "invalid_request",
+                "The expectation must cover recorded receipts and fit the source allocation's remaining capacity.",
+              );
+          } else {
+            const match = matches.find((item) => item.id === input.matchId);
+            if (!match)
+              throw new AppError(
+                "conflict",
+                "This receipt is no longer matched; refresh its history.",
+              );
+            await tx
+              .delete(financeReimbursementMatches)
+              .where(
+                and(
+                  eq(financeReimbursementMatches.id, match.id),
+                  eq(financeReimbursementMatches.userId, userId),
+                ),
+              );
+            remainingMatches = matches.filter((item) => item.id !== match.id);
+          }
+          if (matches.reduce((sum, item) => sum + item.amount, 0) !== row.receivedAmount)
+            throw new AppError(
+              "conflict",
+              "The recorded receipts need review before this reimbursement can be corrected.",
+            );
+          const receivedAmount = remainingMatches.reduce((sum, item) => sum + item.amount, 0);
+          const dueDate = input.operation === "correct_expected" ? input.dueDate : row.dueDate;
+          const status = deriveReimbursementStatus({
+            cancelledAt: row.cancelledAt,
+            dueDate,
+            expectedCents: expectedAmount,
+            receivedCents: receivedAmount,
+            now: now(),
+            status: row.status,
+          });
+          const [updated] = await tx
+            .update(financeReimbursements)
+            .set({
+              expectedAmount,
+              receivedAmount,
+              dueDate,
+              ...(input.operation === "correct_expected"
+                ? { payer: input.payer, evidence: canonicalEvidence, rationale: input.rationale }
+                : {}),
+              revision: row.revision + 1,
+              status,
+              updatedAt: now(),
+            })
+            .where(
+              and(
+                eq(financeReimbursements.id, row.id),
+                eq(financeReimbursements.userId, userId),
+                eq(financeReimbursements.revision, input.expectedRevision),
+              ),
+            )
+            .returning();
+          if (!updated)
+            throw new AppError(
+              "conflict",
+              "The reimbursement changed before the correction was recorded.",
+            );
+          await tx.insert(auditEvents).values(
+            auditValues({
+              action:
+                input.operation === "correct_expected"
+                  ? "finance.reimbursement_corrected"
+                  : "finance.reimbursement_credit_unmatched",
+              before: { reimbursement: serialize(row, matches), matches },
+              after: {
+                reimbursement: serialize(updated, remainingMatches),
+                evidence: canonicalEvidence,
+                rationale: input.rationale,
+                correction: {
+                  operation: input.operation,
+                  rationale: input.rationale,
+                  evidence: canonicalEvidence,
+                  previousExpectedAmount: row.expectedAmount / 100,
+                  expectedAmount: updated.expectedAmount / 100,
+                  removedMatch:
+                    input.operation === "unmatch_credit"
+                      ? (serialize(row, matches).matches.find(
+                          (match) => match.id === input.matchId,
+                        ) ?? null)
+                      : null,
+                },
+              },
+              entityId: row.id,
+              entityType: "finance_reimbursement",
+              ...context,
+            }),
+          );
+          return serialize(updated, remainingMatches);
+        }
         const { row, matches } = await readReimbursement(tx, userId, input.reimbursementId, true);
         if (input.operation === "cancel") {
           if (row.status === "cancelled") {
@@ -450,6 +917,26 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
         );
         return serialize(updated, [...matches, match]);
       };
+      if (input.operation === "correct_expected" || input.operation === "unmatch_credit") {
+        const authorization = await loadFinanceAuthorization({
+          db: executor ?? db,
+          principal: context.principal,
+          requestId: context.requestId,
+        });
+        return executeFinanceIdempotently(
+          db,
+          authorization,
+          {
+            idempotencyKey: input.idempotencyKey,
+            operation: `reimbursement:${input.operation}`,
+            payload: input,
+            requireUserAdmission: true,
+            lockIdentities: [`finance-reimbursement-topology:${context.principal.userId}`],
+          },
+          write,
+          executor,
+        );
+      }
       return executor ? write(executor) : db.transaction(write);
     },
   };

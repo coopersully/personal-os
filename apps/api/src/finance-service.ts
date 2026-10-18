@@ -74,6 +74,7 @@ import type {
   FinanceTransactionQuery,
   FinanceWealthSummary,
   MaintenanceScope,
+  ManageFinanceRecurringItemInput,
   MaterialSourceReference,
   MergeFinanceMerchantsInput,
   ReconcileFinanceReimbursementInput,
@@ -125,6 +126,10 @@ import {
   serializeFinanceAccountRows,
 } from "./finance/account-service.js";
 import {
+  assertCashflowAccountMayBeDeleted,
+  createFinanceBalanceBasisService,
+} from "./finance/balance-basis-service.js";
+import {
   type FinanceBudgetApproval,
   requireActiveBudgetAuthority,
 } from "./finance/budget-authority.js";
@@ -142,8 +147,14 @@ import { createFinanceLedgerService } from "./finance/ledger-service.js";
 import { supersedeFinanceMaintenanceLineage } from "./finance/maintenance-rebuild.js";
 import { normalizedMerchant, titleCaseMerchant } from "./finance/merchant-identity.js";
 import { createFinanceMerchantService } from "./finance/merchant-service.js";
+import {
+  createFinancePlanningEvidenceService,
+  requireExplicitUser,
+} from "./finance/planning-evidence-service.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import { appendFinanceProfile } from "./finance/profile-writer.js";
+import { createFinanceRecurringOccurrenceService } from "./finance/recurring-occurrence-service.js";
+import { createFinanceRecurringScheduleService } from "./finance/recurring-schedule-service.js";
 import { issueMaintenanceReviewQuestion } from "./finance/review-action-service.js";
 import { createSetupService } from "./finance/setup-service.js";
 import {
@@ -761,6 +772,14 @@ export function createFinanceService({
   const inbox = createInboxService({ db, now });
   const canonicalLedger = createFinanceLedgerService({ db, now });
   const planning = createProfileBudgetService({ db, now });
+  const recurringSchedules = createFinanceRecurringScheduleService({ db, now });
+  const recurringOccurrences = createFinanceRecurringOccurrenceService({ db, now });
+  const balanceBases = createFinanceBalanceBasisService({
+    db,
+    now,
+    readOccurrences: recurringOccurrences.listFinanceRecurringOccurrences,
+  });
+  const planningEvidence = createFinancePlanningEvidenceService({ db, now });
   const setup = createSetupService({ db, now, planning });
   function legacyMutationContext(context: FinanceMutationContext): MutationContext {
     return {
@@ -3314,6 +3333,7 @@ export function createFinanceService({
   const incomeStreamValue = (
     row: typeof financeIncomeStreams.$inferSelect,
   ): FinanceIncomeStream => ({
+    revision: row.revision,
     accountId: row.accountId,
     cadence: row.cadence,
     confidence: row.confidence / 10_000,
@@ -3329,6 +3349,7 @@ export function createFinanceService({
   const recurringValue = (
     row: typeof financeRecurringObligations.$inferSelect,
   ): FinanceRecurringObligation => ({
+    revision: row.revision,
     accountId: row.accountId,
     cadence: row.cadence,
     confidence: row.confidence / 10_000,
@@ -3493,7 +3514,11 @@ export function createFinanceService({
             ? [existing[0]]
             : await executor
                 .update(financeIncomeStreams)
-                .set({ ...values, updatedAt: now() })
+                .set({
+                  ...values,
+                  revision: sql`${financeIncomeStreams.revision} + 1`,
+                  updatedAt: now(),
+                })
                 .where(eq(financeIncomeStreams.id, existing[0].id))
                 .returning()
           : await executor
@@ -3612,7 +3637,11 @@ export function createFinanceService({
             ? [existing[0]]
             : await executor
                 .update(financeRecurringObligations)
-                .set({ ...values, updatedAt: now() })
+                .set({
+                  ...values,
+                  revision: sql`${financeRecurringObligations.revision} + 1`,
+                  updatedAt: now(),
+                })
                 .where(eq(financeRecurringObligations.id, existing[0].id))
                 .returning()
           : await executor
@@ -3942,6 +3971,9 @@ export function createFinanceService({
     linkFinanceTransactions: canonicalLedger.linkTransactions,
     ...inbox,
     ...planning,
+    ...recurringSchedules,
+    ...recurringOccurrences,
+    ...balanceBases,
     ...setup,
     async getFinanceConfiguration(userId: string, requestId: string = randomUUID()) {
       const boundedRead = <T>(read: (executor: Database) => Promise<T>) =>
@@ -4559,7 +4591,12 @@ export function createFinanceService({
       if (!before) throw new AppError("not_found", "The income stream was not found.");
       const [row] = await executor
         .update(financeIncomeStreams)
-        .set({ source: "user", status: input.status, updatedAt: now() })
+        .set({
+          source: "user",
+          status: input.status,
+          revision: sql`${financeIncomeStreams.revision} + 1`,
+          updatedAt: now(),
+        })
         .where(eq(financeIncomeStreams.id, id))
         .returning();
       const value = incomeStreamValue(
@@ -4616,6 +4653,7 @@ export function createFinanceService({
         .set({
           source: context.principal.actorType === "user" ? "user" : before.source,
           status: input.status,
+          revision: sql`${financeRecurringObligations.revision} + 1`,
           updatedAt: now(),
         })
         .where(eq(financeRecurringObligations.id, id))
@@ -5513,23 +5551,31 @@ export function createFinanceService({
             financeRecurringObligations.displayName,
           ),
       ]);
+      const latest = await planningEvidence.listLatestEvidence(userId, {
+        goalIds: [],
+        obligationIds: obligations.map((row) => row.id),
+      });
+      const evidenceById = new Map(
+        latest.flatMap((entry) =>
+          entry.kind === "obligation" ? [[entry.sourceId, entry] as const] : [],
+        ),
+      );
       return canonicalResult(
         {
           income: income.map(incomeStreamValue),
-          obligations: obligations.map(recurringValue),
+          obligations: obligations.map((row) => ({
+            ...recurringValue(row),
+            planningEvidence: evidenceById.get(row.id) ?? null,
+          })),
         },
         `Found ${income.length + obligations.length} recurring Finance items.`,
       );
     },
     async manageFinanceRecurringItem(
-      input: {
-        idempotencyKey: string;
-        itemId: string;
-        itemType: "income" | "obligation";
-        operation: "pause" | "resume" | "cancel";
-      },
+      input: ManageFinanceRecurringItemInput,
       context: FinanceMutationContext,
     ) {
+      if (input.operation === "confirm_cost") requireExplicitUser(context);
       return executeFinanceIdempotently(
         db,
         context,
@@ -5539,6 +5585,27 @@ export function createFinanceService({
           payload: input,
         },
         async (tx) => {
+          if (input.operation === "confirm_cost") {
+            const {
+              itemId,
+              itemType: _itemType,
+              operation: _operation,
+              idempotencyKey: _key,
+              ...statement
+            } = input;
+            const { source, evidence } = await planningEvidence.confirmObligation({
+              tx,
+              context,
+              input: { ...statement, obligationId: itemId },
+            });
+            return canonicalResult(
+              {
+                ...recurringValue(source),
+                planningEvidence: evidence.kind === "obligation" ? evidence : null,
+              },
+              "Planning cost evidence recorded from your statement.",
+            );
+          }
           const auditContext = legacyMutationContext(context);
           if (input.itemType === "income") {
             if (input.operation === "cancel")
@@ -8145,6 +8212,7 @@ export function createFinanceService({
           )
           .orderBy(financeTransactions.id)
           .for("update");
+        await assertCashflowAccountMayBeDeleted(tx, context.principal.userId, before.id);
         await assertAccountMayBeDeleted(tx, context.principal.userId, before.id);
         for (let offset = 0; offset < ownedTransactions.length; offset += 1_000) {
           const transactionIds = ownedTransactions

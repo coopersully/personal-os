@@ -8,9 +8,9 @@ import {
 import {
   type FinanceOnboardingSnapshot,
   financeOnboardingSaveInputSchema,
+  financeOnboardingSnapshotSchema,
 } from "@personal-os/domain";
 import { and, eq, sql } from "drizzle-orm";
-import { z } from "zod";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
 import type {
@@ -24,48 +24,6 @@ import {
   requireFinanceExecution,
   requireFinanceMutation,
 } from "./context.js";
-
-// Decode persisted receipts without deriving, repairing, or granting authority from their contents.
-const snapshotSchema = z
-  .object({
-    revision: z.number().int().nonnegative(),
-    completedAt: z.iso.datetime().nullable(),
-    existingAccess: z.boolean(),
-    source: z
-      .object({
-        state: z.enum(["usable", "syncing", "missing", "ownership_required", "unavailable"]),
-        summary: z.string(),
-        recoveryHref: z.string().nullable(),
-      })
-      .strict(),
-    contextReview: z.enum(["reviewed", "needs_review", "unavailable"]),
-    questions: z
-      .array(
-        z
-          .object({
-            questionId: z.string(),
-            label: z.string(),
-            disposition: z.enum(["unreviewed", "answered", "none", "unknown"]),
-            answerSummary: z.string().nullable(),
-            allowsNone: z.boolean(),
-          })
-          .strict(),
-      )
-      .max(100),
-    displayPreferences: z.object({ reviewed: z.boolean(), summary: z.array(z.string()) }).strict(),
-    automationChoice: z.enum(["later", "now"]).nullable(),
-    manualVisibility: z.enum(["auto", "show", "hide"]),
-    automation: z
-      .object({
-        registrationCount: z.number().int().nonnegative(),
-        authorizedRegistrationWithCadence: z.boolean(),
-        chatVerification: z.enum(["pending", "verified", "unavailable"]),
-        canSendChat: z.boolean(),
-        historyAvailable: z.boolean(),
-      })
-      .strict(),
-  })
-  .strict();
 
 function state(
   row: typeof financeOnboardingStates.$inferSelect | undefined,
@@ -139,7 +97,7 @@ export function createFinanceOnboardingRepository(options: {
                 ),
               );
             if (!receipt) return null;
-            const parsed = snapshotSchema.safeParse(receipt.result);
+            const parsed = financeOnboardingSnapshotSchema.safeParse(receipt.result);
             if (!parsed.success)
               throw new AppError("internal_error", "The saved Finance setup receipt is invalid.");
             return {
@@ -194,7 +152,9 @@ export function createFinanceOnboardingRepository(options: {
                   .returning({ userId: financeOnboardingStates.userId });
             if (changed.length !== 1)
               throw new AppError("conflict", "Finance setup changed. Reload before continuing.");
-            const result: FinanceOnboardingSnapshot = snapshotSchema.parse(input.receipt.result);
+            const result: FinanceOnboardingSnapshot = financeOnboardingSnapshotSchema.parse(
+              input.receipt.result,
+            );
             await tx.insert(financeOnboardingReceipts).values({
               userId: context.userId,
               idempotencyKey: input.receipt.idempotencyKey,

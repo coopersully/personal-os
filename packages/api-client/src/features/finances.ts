@@ -59,6 +59,9 @@ import type {
   FinanceMaintenanceInput,
   FinanceMaintenancePayload,
   FinanceMerchant,
+  FinanceOnboardingCompleteInput,
+  FinanceOnboardingSaveInput,
+  FinanceOnboardingSnapshot,
   FinanceOverview,
   FinancePeriodReview,
   FinancePlaybookResponse,
@@ -120,6 +123,7 @@ import type {
 import {
   financeLedgerChallengePageSchema,
   financeLedgerChallengeSchema,
+  financeOnboardingSnapshotSchema,
   financePeriodReviewSchema,
   financeStatusSchema,
 } from "@personal-os/domain";
@@ -165,6 +169,29 @@ export function createFinanceApi(request: FinanceRequest) {
   }
 
   return {
+    async getFinanceOnboarding(): Promise<FinanceOnboardingSnapshot> {
+      return financeOnboardingSnapshotSchema.parse(await request("/v1/finances/onboarding"));
+    },
+    async saveFinanceOnboardingAnswers(
+      input: FinanceOnboardingSaveInput,
+    ): Promise<FinanceOnboardingSnapshot> {
+      return financeOnboardingSnapshotSchema.parse(
+        await request("/v1/finances/onboarding/answers", {
+          method: "POST",
+          body: JSON.stringify(input),
+        }),
+      );
+    },
+    async completeFinanceOnboarding(
+      input: FinanceOnboardingCompleteInput,
+    ): Promise<FinanceOnboardingSnapshot> {
+      return financeOnboardingSnapshotSchema.parse(
+        await request("/v1/finances/onboarding/complete", {
+          method: "POST",
+          body: JSON.stringify(input),
+        }),
+      );
+    },
     async getFinancePosition(scope: FinancePositionReadScope): Promise<FinancePositionEvidence> {
       const search = new URLSearchParams({ from: scope.from, through: scope.through });
       if (scope.accountIds !== undefined) search.set("accountIds", scope.accountIds.join(","));

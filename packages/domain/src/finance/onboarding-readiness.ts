@@ -178,3 +178,45 @@ export const financeOnboardingSaveInputSchema = z
 export const financeOnboardingCompleteInputSchema = financeOnboardingSaveInputSchema
   .pick({ expectedRevision: true, idempotencyKey: true, automationChoice: true })
   .strict();
+
+/** Validate HTTP responses and immutable replay receipts without granting capability. */
+export const financeOnboardingSnapshotSchema = z
+  .object({
+    revision: z.number().int().nonnegative(),
+    completedAt: z.iso.datetime().nullable(),
+    existingAccess: z.boolean(),
+    source: z
+      .object({
+        state: z.enum(["usable", "syncing", "missing", "ownership_required", "unavailable"]),
+        summary: z.string(),
+        recoveryHref: z.string().nullable(),
+      })
+      .strict(),
+    contextReview: z.enum(["reviewed", "needs_review", "unavailable"]),
+    questions: z
+      .array(
+        z
+          .object({
+            questionId: z.string(),
+            label: z.string(),
+            disposition: z.enum(["unreviewed", "answered", "none", "unknown"]),
+            answerSummary: z.string().nullable(),
+            allowsNone: z.boolean(),
+          })
+          .strict(),
+      )
+      .max(100),
+    displayPreferences: z.object({ reviewed: z.boolean(), summary: z.array(z.string()) }).strict(),
+    automationChoice: z.enum(["later", "now"]).nullable(),
+    manualVisibility: z.enum(["auto", "show", "hide"]),
+    automation: z
+      .object({
+        registrationCount: z.number().int().nonnegative(),
+        authorizedRegistrationWithCadence: z.boolean(),
+        chatVerification: z.enum(["pending", "verified", "unavailable"]),
+        canSendChat: z.boolean(),
+        historyAvailable: z.boolean(),
+      })
+      .strict(),
+  })
+  .strict();

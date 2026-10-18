@@ -42,9 +42,9 @@ function ScheduleItem({ item }: { item: FinanceCashflowScheduleItem }) {
     <Item role="listitem" className="min-w-0">
       <ItemContent className="min-w-0 gap-2">
         <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
-          <ItemTitle className="min-w-0 break-words">
+          <ItemTitle className="min-w-0 max-w-full line-clamp-none break-words">
             <Link
-              className="underline underline-offset-4"
+              className="min-w-0 max-w-full break-words underline underline-offset-4"
               to={`/finances/cashflow?view=${item.source.kind === "income" ? "income" : "subscriptions"}&record=${encodeURIComponent(item.source.id)}`}
             >
               {item.displayName}

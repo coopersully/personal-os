@@ -1354,3 +1354,4 @@ export type CreateFinanceCategoryInput = z.infer<typeof createFinanceCategoryInp
 export * from "./finance/conversation.js";
 
 export * from "./finance/activity.js";
+export * from "./finance/onboarding-readiness.js";

@@ -862,6 +862,41 @@
       "when": 1792353602000,
       "tag": "0115_finance_conversation_core",
       "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "7",
+      "when": 1792353603000,
+      "tag": "0116_finance_onboarding_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1792353604000,
+      "tag": "0117_finance_planning_evidence",
+      "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1792353605000,
+      "tag": "0118_finance_preferences_legacy_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1792353606000,
+      "tag": "0119_finance_recurring_occurrences",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1792353607000,
+      "tag": "0120_finance_legacy_access_erasure_guard",
+      "breakpoints": true
     }
   ]
 }

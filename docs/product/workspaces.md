@@ -203,6 +203,14 @@ without obscuring provider truth.
 
 ## Finances
 
+Finances is designed as an automated financial assistant with a strong analytical foundation. Use
+available authorized context to make money understandable through visual exploration, explainable
+patterns, evidence-backed forecasts, and hypothetical scenarios. Collect additional context for a
+clear user benefit, not merely because it might be interesting. Manual operation remains supported;
+agent maintenance is the intended way to keep the workspace useful and current. See
+[Finance intelligence and visual exploration](finance-workspace-plan.md#finance-intelligence-and-visual-exploration)
+for the durable motivation, evidence standards, and human decision boundary.
+
 The [Finance MVP specification](finance-workspace-plan.md) defines the first complete delivery
 journey against this larger target. Both Codex and Claude must support separately verified
 maintenance and two-way Finance SMS at launch, including durable answers and continuation after

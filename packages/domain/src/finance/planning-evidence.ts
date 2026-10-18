@@ -1,8 +1,15 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "../common.js";
-import { financeRecurringObligationSchema } from "../finance.js";
-
-const financeCadenceSchema = financeRecurringObligationSchema.shape.cadence;
+// Kept in this leaf contract so root Finance DTOs can import evidence without a cycle.
+const financeCadenceSchema = z.enum([
+  "biweekly",
+  "irregular",
+  "monthly",
+  "quarterly",
+  "semimonthly",
+  "weekly",
+  "yearly",
+]);
 
 /** Storage cents match the bounded planning-input contract; no conversion is implied. */
 export const financePlanningEvidenceCentsSchema = z.number().int().min(0).max(10_000_000_000);

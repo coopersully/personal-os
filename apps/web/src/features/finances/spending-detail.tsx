@@ -1,4 +1,8 @@
-import type { FinanceSpendingDashboard, FinanceSpendingGroup } from "@personal-os/domain";
+import type {
+  FinanceSpendingDashboard,
+  FinanceSpendingDrillDown,
+  FinanceSpendingGroup,
+} from "@personal-os/domain";
 import {
   ResponsiveDialog,
   ResponsiveDialogContent,
@@ -11,11 +15,13 @@ import { formatMoney } from "./format";
 export function SpendingDetail({
   data,
   group,
+  drillDown,
   onClose,
   onSelect,
 }: {
   data: FinanceSpendingDashboard;
   group: FinanceSpendingGroup | null;
+  drillDown?: FinanceSpendingDrillDown | null;
   onClose: () => void;
   onSelect: (group: FinanceSpendingGroup) => void;
 }) {
@@ -23,16 +29,39 @@ export function SpendingDetail({
     (item) =>
       item.id === group?.id || item.categories.some((category) => category.id === group?.id),
   );
-  const ids = new Set(group?.drillDown.contributionIds);
+  const selectedScope = group?.drillDown ?? drillDown;
+  const ids = new Set(selectedScope?.contributionIds);
   const contributions = data.snapshot.contributions.filter((item) => ids.has(item.id));
+  const totals =
+    group ??
+    contributions.reduce(
+      (sum, item) => ({
+        grossCents: sum.grossCents + item.grossCents,
+        reimbursementAdjustmentCents:
+          sum.reimbursementAdjustmentCents + item.reimbursementAdjustmentCents,
+        reimbursementOutstandingCents:
+          sum.reimbursementOutstandingCents + item.reimbursementOutstandingCents,
+        refundAdjustmentCents: sum.refundAdjustmentCents + item.refundAdjustmentCents,
+        netCents: sum.netCents + item.netCents,
+        pendingCents: sum.pendingCents + (item.pending ? item.netCents : 0),
+      }),
+      {
+        grossCents: 0,
+        reimbursementAdjustmentCents: 0,
+        reimbursementOutstandingCents: 0,
+        refundAdjustmentCents: 0,
+        netCents: 0,
+        pendingCents: 0,
+      },
+    );
   return (
-    <ResponsiveDialog open={!!group} onOpenChange={(open) => !open && onClose()}>
+    <ResponsiveDialog open={!!selectedScope} onOpenChange={(open) => !open && onClose()}>
       <ResponsiveDialogContent>
         <ResponsiveDialogHeader>
-          <ResponsiveDialogTitle>{group?.label}</ResponsiveDialogTitle>
+          <ResponsiveDialogTitle>{group?.label ?? "Spending detail"}</ResponsiveDialogTitle>
           <ResponsiveDialogDescription>
-            {data.snapshot.scope.from} – {data.snapshot.scope.through} · Current category membership
-            · USD
+            {selectedScope?.scope.from} – {selectedScope?.scope.through} · Current category
+            membership · USD
           </ResponsiveDialogDescription>
         </ResponsiveDialogHeader>
         {bucket?.kind === "bucket" ? (
@@ -56,12 +85,12 @@ export function SpendingDetail({
         ) : null}
         <dl className="grid grid-cols-2 gap-2">
           {[
-            ["Gross", group?.grossCents],
-            ["Reimbursable portion", group?.reimbursementAdjustmentCents],
-            ["Still owed", group?.reimbursementOutstandingCents],
-            ["Matched refunds", group?.refundAdjustmentCents],
-            ["Net spending", group?.netCents],
-            ["Pending included", group?.pendingCents],
+            ["Gross", totals.grossCents],
+            ["Reimbursable portion", totals.reimbursementAdjustmentCents],
+            ["Still owed", totals.reimbursementOutstandingCents],
+            ["Matched refunds", totals.refundAdjustmentCents],
+            ["Net spending", totals.netCents],
+            ["Pending included", totals.pendingCents],
           ].map(([label, cents]) => (
             <div key={label}>
               <dt className="text-sm text-muted-foreground">{label}</dt>

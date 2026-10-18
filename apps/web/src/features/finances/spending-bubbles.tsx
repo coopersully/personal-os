@@ -1,9 +1,23 @@
 import type { FinanceSpendingDashboard, FinanceSpendingGroup } from "@personal-os/domain";
-import { motion, useReducedMotion } from "motion/react";
+import { type HTMLMotionProps, motion, useDragControls, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { formatMoney } from "./format";
 
+function SpendingBubble(props: HTMLMotionProps<"button">) {
+  const controls = useDragControls();
+  return (
+    <motion.button
+      {...props}
+      dragControls={controls}
+      dragListener={false}
+      onPointerDown={(event) => {
+        props.onPointerDown?.(event);
+        if (props.drag) controls.start(event, { distanceThreshold: 6 });
+      }}
+    />
+  );
+}
 type Position = { x: number; y: number; radius: number };
 /** Bounded deterministic relaxation; no idle simulation or offscreen animation loop. */
 export function settleSpendingBubbles(nodes: Position[]) {
@@ -114,7 +128,7 @@ export function SpendingBubbles({
           if (!node) return null;
           const diameter = node.radius * width * 2;
           return (
-            <motion.button
+            <SpendingBubble
               key={group.id}
               type="button"
               drag={!reduced && arrange}
@@ -173,7 +187,7 @@ export function SpendingBubbles({
                   {formatMoney(group.netCents / 100)}
                 </span>
               ) : null}
-            </motion.button>
+            </SpendingBubble>
           );
         })}
       </div>

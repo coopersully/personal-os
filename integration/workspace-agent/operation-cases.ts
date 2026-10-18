@@ -2,6 +2,11 @@
  * A missing ordinary operation must get an adapter; it cannot be waived by the inventory test.
  */
 export const workspaceApiExceptions = {
+  getFinanceConversationMessageContext: {
+    kind: "owner_interaction",
+    reason:
+      "Only the authenticated human resolves a bounded owner-scoped source message in Chat; agents consume original run batches and cannot inspect live history through source links.",
+  },
   listFinanceActivity: {
     kind: "owner_interaction",
     reason:

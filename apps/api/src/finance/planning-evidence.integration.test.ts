@@ -158,6 +158,25 @@ describe.sequential("canonical explicit user planning evidence", () => {
     ).rejects.toMatchObject({ code: "conflict" });
   });
 
+  it("forbids agent replay of a completed human receipt with identical owner/key/payload", async () => {
+    const f = await fixture();
+    await f.service.manageFinanceGoal(f.progress, f.context);
+    await f.service.manageFinanceRecurringItem(f.cost, f.context);
+    const agent = { ...f.context, actorType: "agent" as const, actorId: "synthetic-agent" };
+    await expect(f.service.manageFinanceGoal(f.progress, agent)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    await expect(f.service.manageFinanceRecurringItem(f.cost, agent)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    expect(
+      await database.db
+        .select()
+        .from(financePlanningEvidence)
+        .where(eq(financePlanningEvidence.userId, f.owner.id)),
+    ).toHaveLength(2);
+  });
+
   it("rolls back source CAS, evidence and audit together when the supplied transaction fails", async () => {
     const f = await fixture();
     const helper = createFinancePlanningEvidenceService({ db: database.db, now });

@@ -151,7 +151,7 @@ export async function mirrorAcceptedMaintenanceReviewAnswer(
         eq(auditEvents.entityId, input.caseId),
         eq(auditEvents.actorType, "agent"),
         sql`${auditEvents.after}->>'requestId' = ${input.requestId}`,
-        sql`${auditEvents.after}->>'operationId' = ${financeConversationMessages.sourceOperationId}`,
+        sql`${auditEvents.after}->>'operationId' = ${financeConversationMessages.sourceOperationId}::text`,
         sql`${auditEvents.after}->>'prompt' = ${financeConversationMessages.text}`,
       ),
     )

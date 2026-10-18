@@ -329,7 +329,7 @@ export async function recordFinanceConversationAcceptedAnswer(
           eq(auditEvents.action, "finance.contextual_question.created"),
           eq(auditEvents.entityId, input.questionId),
           eq(auditEvents.actorType, "agent"),
-          sql`${auditEvents.after}->>'operationId' = ${financeConversationMessages.sourceOperationId}`,
+          sql`${auditEvents.after}->>'operationId' = ${financeConversationMessages.sourceOperationId}::text`,
           sql`${auditEvents.after}->>'prompt' = ${financeConversationMessages.text}`,
         ),
       )

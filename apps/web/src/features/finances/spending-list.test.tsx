@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import type { FinanceSpendingDashboard } from "@personal-os/domain";
-import { render, screen, within } from "@testing-library/react";
+import type { FinanceSpendingDashboard, FinanceSpendingMonthlyBudget } from "@personal-os/domain";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { SpendingList } from "./spending-list";
 
 it("sorts exact amounts, exposes negative groups, and expands bucket categories", async () => {
@@ -30,4 +30,30 @@ it("sorts exact amounts, exposes negative groups, and expands bucket categories"
   await user.click(screen.getByRole("button", { name: "Rail" }));
   expect(select).toHaveBeenCalledWith(groups[0]?.categories[0]);
   expect(screen.getAllByText(/Budget unavailable/).length).toBeGreaterThan(0);
+});
+
+afterEach(() => cleanup());
+it("sorts qualified monthly utilization separately from selected-period spending", () => {
+  const groups = [
+    { id: "a", label: "Travel", netCents: 100, pendingCents: 0, categories: [] },
+    { id: "b", label: "Food", netCents: 900, pendingCents: 0, categories: [] },
+    { id: "c", label: "No limit", netCents: 0, pendingCents: 0, categories: [] },
+  ] as unknown as FinanceSpendingDashboard["groups"];
+  const monthlyBudget = {
+    state: "qualified",
+    coverage: "partial",
+    groups: [
+      { groupId: "a", budgetCents: 10000, usedCents: 11000, overspent: true },
+      { groupId: "b", budgetCents: 20000, usedCents: 5000, overspent: false },
+      { groupId: "c", budgetCents: null, usedCents: 0, overspent: false },
+    ],
+  } as FinanceSpendingMonthlyBudget;
+  render(<SpendingList groups={groups} monthlyBudget={monthlyBudget} onSelect={vi.fn()} />);
+  expect(
+    screen.getByText(/Observed monthly \$110.00 of \$100.00 · 110.0% · Over budget \$10.00/),
+  ).toBeVisible();
+  expect(screen.getByText("No budget limit")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: /Monthly budget used/ }));
+  const list = screen.getByRole("list");
+  expect(within(list).getAllByRole("button")[0]).toHaveTextContent("Travel");
 });

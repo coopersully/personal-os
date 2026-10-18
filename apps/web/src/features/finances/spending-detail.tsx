@@ -16,6 +16,7 @@ import {
 } from "@/components/responsive-dialog";
 import { Button } from "@/components/ui/button";
 import { formatMoney } from "./format";
+import { SpendingMonthlyBudgetContext } from "./spending-budget-qualification";
 /** Only bounded, reproducible selections can open the exact Transactions consumer. */
 export function spendingTransactionsDestination(
   data: FinanceSpendingDashboard,
@@ -84,6 +85,10 @@ export function SpendingDetail({
   onClose: () => void;
   onSelect: (group: FinanceSpendingGroup) => void;
 }) {
+  const monthly =
+    data.monthlyBudget?.state === "qualified" && group
+      ? data.monthlyBudget.groups.find((item) => item.groupId === group.id)
+      : null;
   const bucket = data.groups.find(
     (item) =>
       item.id === group?.id || item.categories.some((category) => category.id === group?.id),
@@ -159,9 +164,21 @@ export function SpendingDetail({
           ))}
         </dl>
         <p className="text-sm text-muted-foreground">
-          Monthly budget comparison unavailable: budget account and currency scope is not
-          established.
+          Selected-period spending above uses the displayed transaction and account filters. Monthly
+          usage below covers the whole qualified month and all confirmed budget accounts.
         </p>
+        <SpendingMonthlyBudgetContext budget={data.monthlyBudget} />
+        {monthly ? (
+          <p>
+            Monthly usage: {formatMoney(monthly.usedCents / 100)}
+            {monthly.budgetCents
+              ? ` of ${formatMoney(monthly.budgetCents / 100)}`
+              : " · No budget limit"}
+            {monthly.budgetCents && monthly.usedCents > monthly.budgetCents
+              ? ` · Over budget ${formatMoney((monthly.usedCents - monthly.budgetCents) / 100)}`
+              : ""}
+          </p>
+        ) : null}
         {destination ? (
           <Button asChild variant="secondary">
             <Link to={destination}>Open matching transactions</Link>

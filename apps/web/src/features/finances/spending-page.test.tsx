@@ -296,3 +296,50 @@ it("defaults Rhythm to three calendar months using saved Monday week start and r
     }),
   );
 });
+it("offers scope confirmation only for an unavailable single-month comparison", async () => {
+  vi.mocked(api.getFinanceSpending).mockImplementation(async (query) => ({
+    ...dashboard(query),
+    monthlyBudget: {
+      state: "unavailable",
+      reason: "qualification_required",
+      qualificationRequired: true,
+    },
+  }));
+  mount("?period=custom&from=2026-09-01&through=2026-09-30");
+  await screen.findByText("Confirm this month's budget scope");
+  cleanup();
+  mount("?period=custom&from=2026-08-01&through=2026-09-30");
+  await screen.findByRole("button", { name: "Groceries" });
+  expect(screen.queryByText("Confirm this month's budget scope")).not.toBeInTheDocument();
+});
+it("uses qualified whole-month usage alongside selected-day amounts without changing the legacy snapshot contract", async () => {
+  vi.mocked(api.getFinanceSpending).mockImplementation(async (query) => ({
+    ...dashboard(query),
+    monthlyBudget: {
+      state: "qualified",
+      month: "2026-09",
+      period: { from: "2026-09-01", through: "2026-09-30", timezone: "America/Chicago" },
+      currency: "USD",
+      accountIds: [accountId],
+      qualificationId: "qualified",
+      confirmedAt: "2026-10-18T12:00:00Z",
+      qualificationKind: "retrospective",
+      coverage: "unknown",
+      includesPending: true,
+      basis: "personal_cost",
+      subtractsRefunds: true,
+      groups: [{ groupId: "food", budgetCents: 10000, usedCents: 2500, overspent: false }],
+    },
+  }));
+  mount("?view=list&period=today&from=2026-09-08");
+  await screen.findByText("Observed monthly $25.00 of $100.00 · 25.0%");
+  expect(screen.getByText(/2026-09-08 – 2026-09-08/)).toBeVisible();
+  expect(screen.getByText(/America\/Chicago/)).toBeVisible();
+  expect(screen.getByText(/Confirmed later/)).toBeVisible();
+  expect(screen.queryByText("Confirm this month's budget scope")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Groceries" }));
+  const detail = await screen.findByRole("dialog");
+  expect(detail).toHaveTextContent("Monthly usage: $25.00 of $100.00");
+  expect(detail).toHaveTextContent("whole qualified month");
+  expect(detail).toHaveTextContent("Observed usage · historical coverage unknown");
+});

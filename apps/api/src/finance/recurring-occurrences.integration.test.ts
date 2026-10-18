@@ -387,6 +387,17 @@ describe.sequential("recurring schedule actual matching and explicit balance bas
     ).toMatchObject({ status: "estimated", endingBalanceMinorUnits: 360000 });
   });
 
+  it("retains an unpaid fixed predecessor before its successor boundary and withholds the estimate", async () => {
+    const f = await fixture();
+    await f.service.confirmFinanceRecurringSchedule({ ...f.costInput, expectedSourceRevision: 2, supersedesId: f.cost.data.id, effectiveFrom: "2026-03-01", anchorLocalDate: "2026-03-01", amountCents: 12000, idempotencyKey: randomUUID() }, f.context);
+    await closePreviousPayday(f);
+    await statement(f);
+    const view = await f.service.getFinanceCashflowProjection(f.user.id, { from: "2026-02-22", to: "2026-03-31", selectedIncomeStreamId: f.income.id });
+    expect(view.schedule.occurrences.find(row => row.scheduleVersionId === f.cost.data.id && row.localDate === "2026-02-22")).toMatchObject({ inCurrentSchedule: true, remainingExpectedCents: 10000 });
+    expect(view.projection.status).toBe("unavailable");
+    expect(view.projection.status === "unavailable" && view.projection.reasons.map(reason => reason.code)).toContain("overdue_expected");
+  });
+
   it("uses today's next payday and excludes retired reversed variable history from a fixed successor forecast", async () => {
     const f = await fixture();
     const variable = await f.service.confirmFinanceRecurringSchedule(

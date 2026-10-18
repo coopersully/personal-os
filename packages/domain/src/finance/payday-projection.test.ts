@@ -226,6 +226,12 @@ describe("projectPaydayCycle", () => {
     expect(reasons(input)).toContain("invalid_match");
   });
 
+  it("withholds an estimate for an unpaid predecessor even when a successor commitment exists", () => {
+    const input = fixture();
+    input.occurrences = [first(input.occurrences), occurrence({ id: "predecessor-bill", version: "bill:old", localDate: "2026-10-15", direction: "outgoing", classification: "external_expense", amountMinorUnits: 200, remainingExpectedMinorUnits: 200 }), occurrence({ id: "successor-bill", version: "bill:new", localDate: "2026-10-20", direction: "outgoing", classification: "external_expense", amountMinorUnits: 300, remainingExpectedMinorUnits: 300 })];
+    expect(reasons(input)).toContain("overdue_expected");
+  });
+
   it("rejects duplicate references within one occurrence even when aggregate capacity remains", () => {
     const input = fixture();
     input.actualMovements = [actual()];

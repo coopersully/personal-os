@@ -698,9 +698,15 @@ export function createFinanceBalanceBasisService({
             : [];
           if (successors.length > 1000) return unavailable("unconfirmed_schedule");
           const retiredVersions = new Set(successors.map((row) => row.previous));
-          const active = schedule.occurrences.filter(
-            (row) => row.inCurrentSchedule && !retiredVersions.has(row.scheduleVersionId),
-          );
+          const reversedMatchIds = new Set(schedule.matchEvents.flatMap(event => event.reversesMatchId ? [event.reversesMatchId] : []));
+          const active = schedule.occurrences.filter(row => {
+            if (!row.inCurrentSchedule) return false;
+            // A successor does not settle a predecessor's unpaid fixed commitment.
+            // Only materialized, fully reversed variable correction history is excluded.
+            if (row.amountBasis !== "variable" || !retiredVersions.has(row.scheduleVersionId) || !row.occurrenceId) return true;
+            const originals = schedule.matchEvents.filter(event => event.occurrenceId === row.occurrenceId && event.kind === "match");
+            return !originals.length || !originals.every(event => reversedMatchIds.has(event.id));
+          });
           const paydayRow = active
             .filter(
               (row) =>

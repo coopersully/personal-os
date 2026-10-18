@@ -190,7 +190,7 @@ export function projectFinanceOnboardingEvidence(
 /** All reads use the supplied executor, including nested Chat savepoints on that connection. */
 export function createFinanceOnboardingEvidenceLoader(options: {
   now?: () => Date;
-  onChatFailure?: (failure: { category: "unexpected" }) => void;
+  onChatFailure?: (failure: { category: "unexpected"; durationMs: number }) => void;
   hasLegacyAccess: (executor: Database | FinanceTransaction, userId: string) => Promise<boolean>;
 }) {
   const now = options.now ?? (() => new Date());
@@ -255,11 +255,15 @@ export function createFinanceOnboardingEvidenceLoader(options: {
       if (authorizedRegistrationWithCadence) break;
     }
     let chat: FinanceConversationReadiness | null;
+    const chatStartedAt = performance.now();
     try {
       // getReadiness owns a nested transaction/savepoint; catch only after its rollback.
       chat = await createFinanceConversationService({ db, now }).getReadiness(userId);
     } catch {
-      options.onChatFailure?.({ category: "unexpected" });
+      options.onChatFailure?.({
+        category: "unexpected",
+        durationMs: performance.now() - chatStartedAt,
+      });
       chat = null;
     }
     return projectFinanceOnboardingEvidence({

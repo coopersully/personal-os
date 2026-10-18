@@ -627,8 +627,16 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   const financeConversation = createFinanceConversationService({ db: dependencies.db, now });
   const loadFinanceOnboardingEvidence = createFinanceOnboardingEvidenceLoader({
     now,
-    onChatFailure: ({ category }) =>
-      dependencies.log?.({ event: "finance_onboarding_chat_unavailable", category }),
+    onChatFailure: ({ category, durationMs }) =>
+      dependencies.log?.({
+        event: "finance_onboarding_chat_unavailable",
+        category,
+        durationMs,
+        method: "INTERNAL",
+        path: "finance/onboarding/chat-readiness",
+        requestId: randomUUID(),
+        status: 503,
+      }),
     hasLegacyAccess: async (executor, userId) => {
       const [grant] = await executor
         .select({ userId: financeOnboardingLegacyAccess.userId })

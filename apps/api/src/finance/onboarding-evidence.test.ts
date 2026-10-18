@@ -384,7 +384,10 @@ describe("Finance onboarding evidence loader", () => {
       canSendChat: false,
       historyAvailable: true,
     });
-    expect(onChatFailure).toHaveBeenCalledExactlyOnceWith({ category: "unexpected" });
+    expect(onChatFailure).toHaveBeenCalledExactlyOnceWith({
+      category: "unexpected",
+      durationMs: expect.any(Number),
+    });
     mocks.profile.mockRejectedValue(new Error("Essential profile read failed"));
     await expect(
       createFinanceOnboardingEvidenceLoader({ hasLegacyAccess: async () => false })(

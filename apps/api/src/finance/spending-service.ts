@@ -15,6 +15,7 @@ import {
   financeTransactions,
 } from "@personal-os/database";
 import {
+  type FinanceBudgetBaselineQualificationRead,
   type FinanceSpendingContribution,
   type FinanceSpendingDashboard,
   type FinanceSpendingGroup,
@@ -27,6 +28,7 @@ import {
 } from "@personal-os/domain";
 import { eq } from "drizzle-orm";
 import { AppError } from "../errors.js";
+import { projectFinanceSpendingMonthlyBudget } from "./spending-budget.js";
 import { projectFinanceSpending, type SpendingEvidenceInput } from "./spending-contributions.js";
 
 type Metadata = {
@@ -42,6 +44,7 @@ export function buildFinanceSpendingDashboard(
   evidence: SpendingEvidenceInput,
   requested: FinanceSpendingQuery,
   metadata: Metadata,
+  qualification?: FinanceBudgetBaselineQualificationRead,
 ): FinanceSpendingDashboard {
   const query = financeSpendingQuerySchema.parse(requested);
   const accounts = new Set(metadata.accounts.map((row) => row.id));
@@ -151,6 +154,17 @@ export function buildFinanceSpendingDashboard(
   }
   const positiveAreaCents = groups.reduce((total, row) => total + row.positiveAreaCents, 0);
   return financeSpendingDashboardSchema.parse({
+    monthlyBudget: projectFinanceSpendingMonthlyBudget(
+      evidence,
+      query,
+      groups,
+      qualification ?? {
+        state: "unavailable",
+        reason: "qualification_required",
+        qualificationRequired: true,
+        candidates: [],
+      },
+    ),
     referenceRevision: createHash("sha256")
       .update(
         JSON.stringify({
@@ -188,10 +202,21 @@ export function buildFinanceSpendingDashboard(
 }
 
 /** Complete owner-scoped evidence, loaded once in one read-only repeatable snapshot. */
-export function createFinanceSpendingService(input: { db: Database; now: () => Date }) {
+export function createFinanceSpendingService(input: {
+  db: Database;
+  now: () => Date;
+  readBudgetQualification?:
+    | ((userId: string, month: string) => Promise<FinanceBudgetBaselineQualificationRead>)
+    | undefined;
+}) {
   return {
     async readSpending(userId: string, requested: FinanceSpendingQuery) {
       const query = financeSpendingQuerySchema.parse(requested);
+      const qualification =
+        input.readBudgetQualification &&
+        query.scope.from.slice(0, 7) === query.scope.through.slice(0, 7)
+          ? await input.readBudgetQualification(userId, query.scope.from.slice(0, 7))
+          : undefined;
       return input.db.transaction(
         async (tx) => {
           const accounts = await tx
@@ -364,6 +389,7 @@ export function createFinanceSpendingService(input: { db: Database; now: () => D
                 ],
               },
             },
+            qualification,
           );
         },
         { isolationLevel: "repeatable read", accessMode: "read only" },

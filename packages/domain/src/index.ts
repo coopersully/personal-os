@@ -10,6 +10,7 @@ export * from "./desktop.js";
 export * from "./desktop-release.js";
 export * from "./execution-policy.js";
 export * from "./feature-contracts.js";
+export * from "./finance/goal-scenario-projection.js";
 export * from "./finance/recurring-cost-projection.js";
 export * from "./finance.js";
 export * from "./finance-maintenance.js";

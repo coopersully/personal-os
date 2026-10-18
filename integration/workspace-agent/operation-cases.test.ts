@@ -6,6 +6,9 @@ import { discoverToolDictionary, renderToolDictionary } from "./tool-dictionary.
 
 it("exposes domain input fields instead of silently narrowing workspace mutations", async () => {
   const mappings = {
+    get_finance_budget_baseline_qualification: domain.financeBudgetBaselineQualificationQuerySchema,
+    prepare_finance_budget_baseline_qualification:
+      domain.prepareFinanceBudgetBaselineQualificationInputSchema,
     list_events: domain.eventListQuerySchema,
     list_mail: domain.mailListQuerySchema,
     list_reminders: domain.reminderListQuerySchema,
@@ -153,9 +156,6 @@ it("does not publish strict intersections that forbid their own sibling argument
   }
   for (const { tool } of await discoverToolDictionary()) inspect(tool.inputSchema);
 });
-    get_finance_budget_baseline_qualification: domain.financeBudgetBaselineQualificationQuerySchema,
-    prepare_finance_budget_baseline_qualification:
-      domain.prepareFinanceBudgetBaselineQualificationInputSchema,
 
 it("keeps baseline preparation discoverable only with write authority and human confirmation out of MCP", async () => {
   const dictionary = new Map(

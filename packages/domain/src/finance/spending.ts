@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { financeTransactionSchema } from "../finance.js";
 
 const cents = z.number().int().safe();
 const reference = z.string().min(1);
@@ -120,6 +121,7 @@ export const financeSpendingGroupSchema = z.object({
 export type FinanceSpendingGroup = z.infer<typeof financeSpendingGroupSchema>;
 
 export const financeSpendingDashboardSchema = z.object({
+  referenceRevision: z.string().min(1).optional(),
   schemaVersion: z.literal(1),
   snapshot: financeSpendingSnapshotSchema,
   effectiveGrouping: z.enum(["buckets", "categories"]),
@@ -154,3 +156,32 @@ export const financeSpendingDashboardSchema = z.object({
   }),
 });
 export type FinanceSpendingDashboard = z.infer<typeof financeSpendingDashboardSchema>;
+
+/** Bounded source-reference filter. IDs select views and never establish authority. */
+export const financeSpendingReferenceFilterSchema = z
+  .object({
+    query: financeSpendingQuerySchema,
+    referenceRevision: z.string().regex(/^[a-f0-9]{64}$/),
+    groupId: z.string().min(1).max(100).nullable(),
+    from: z.iso.date(),
+    through: z.iso.date(),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      value.from <= value.through &&
+      value.from >= value.query.scope.from &&
+      value.through <= value.query.scope.through,
+    "Reference dates must remain inside the selected Spending scope",
+  );
+export type FinanceSpendingReferenceFilter = z.infer<typeof financeSpendingReferenceFilterSchema>;
+export const financeSpendingReferencePageSchema = z.object({
+  items: z.array(financeTransactionSchema),
+  nextCursor: z.string().nullable(),
+  referenceRevision: z.string(),
+  totalTransactions: z.number().int().nonnegative(),
+  netCents: cents,
+  scope: financeSpendingScopeSchema,
+  contributions: z.array(financeSpendingContributionSchema),
+});
+export type FinanceSpendingReferencePage = z.infer<typeof financeSpendingReferencePageSchema>;

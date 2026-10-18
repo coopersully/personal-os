@@ -43,6 +43,88 @@ const targetReasons: Record<string, string> = {
   projected: "Unavailable.",
 };
 
+function formatCents(amountCents: number, currency: string): string {
+  return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(
+    amountCents / 100,
+  );
+}
+
+function ContributionCurve({
+  scenario,
+  currency,
+}: {
+  scenario: Projection["scenarios"][number];
+  currency: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [page, setPage] = useState(0);
+  const pageSize = 24;
+  const pageCount = Math.ceil(scenario.curve.length / pageSize);
+  const start = page * pageSize;
+  return (
+    <details onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary className="cursor-pointer">
+        Hypothetical dated contribution curve for {scenario.name}
+      </summary>
+      {open ? (
+        <div className="flex flex-col gap-2">
+          <p>
+            Contributions {start + 1}–{Math.min(start + pageSize, scenario.curve.length)} of{" "}
+            {scenario.curve.length} · Page {page + 1} of {pageCount}
+          </p>
+          <Table aria-label={`Hypothetical contribution curve for ${scenario.name}`}>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Local date</TableHead>
+                <TableHead>Cumulative contributions</TableHead>
+                <TableHead>Hypothetical total</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {scenario.curve.slice(start, start + pageSize).map((point) => (
+                <TableRow key={point.localDate}>
+                  <TableCell>{point.localDate}</TableCell>
+                  <TableCell>{formatCents(point.cumulativeContributionCents, currency)}</TableCell>
+                  <TableCell>{formatCents(point.projectedAmountCents, currency)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              aria-label={`Previous contributions for ${scenario.name}`}
+              disabled={page === 0}
+              onClick={() => setPage((value) => value - 1)}
+            >
+              Previous
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              aria-label={`Next contributions for ${scenario.name}`}
+              disabled={page + 1 === pageCount}
+              onClick={() => setPage((value) => value + 1)}
+            >
+              Next
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              aria-label={`Last contributions for ${scenario.name}`}
+              disabled={page + 1 === pageCount}
+              onClick={() => setPage(pageCount - 1)}
+            >
+              Last page
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </details>
+  );
+}
+
 /** View-only session state. Saved goal values never establish confirmed progress or currency. */
 export function FinanceGoalScenarioExplorer({ asOfLocalDate = "" }: { asOfLocalDate?: string }) {
   const id = useId();
@@ -58,16 +140,16 @@ export function FinanceGoalScenarioExplorer({ asOfLocalDate = "" }: { asOfLocalD
   const [confirmed, setConfirmed] = useState(false);
   const [alternatives, setAlternatives] = useState<Alternative[]>([]);
   const [projection, setProjection] = useState<Projection | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const clearDraftFeedback = () => {
+    setProjection(null);
+    setValidationError(null);
+  };
   const update = (key: keyof typeof draft, value: string) => {
     setDraft((previous) => ({ ...previous, [key]: value }));
     if (key === "progress" || key === "currency" || key === "asOf") setConfirmed(false);
-    setProjection(null);
+    clearDraftFeedback();
   };
-  const format = (amountCents: number) =>
-    new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency: projection?.currency ?? "USD",
-    }).format(amountCents / 100);
   return (
     <section aria-labelledby={`${id}-title`} className="flex flex-col gap-4">
       <h2 id={`${id}-title`} className="font-semibold">
@@ -106,11 +188,20 @@ export function FinanceGoalScenarioExplorer({ asOfLocalDate = "" }: { asOfLocalD
               ...(draft.targetDate ? { targetLocalDate: draft.targetDate } : {}),
             };
             setProjection(projectGoalScenarios(input));
+            setValidationError(null);
           } catch (error) {
-            toast.error(error instanceof Error ? error.message : "Check the hypothetical inputs.");
+            const message =
+              error instanceof Error ? error.message : "Check the hypothetical inputs.";
+            setValidationError(message);
+            toast.error(message);
           }
         }}
       >
+        {validationError ? (
+          <p role="alert" className="text-destructive text-sm">
+            {validationError}
+          </p>
+        ) : null}
         <FieldSet>
           <FieldLegend>Hypothetical inputs</FieldLegend>
           <FieldGroup className="grid gap-4 sm:grid-cols-2">
@@ -143,7 +234,7 @@ export function FinanceGoalScenarioExplorer({ asOfLocalDate = "" }: { asOfLocalD
               checked={confirmed}
               onCheckedChange={(value) => {
                 setConfirmed(value === true);
-                setProjection(null);
+                clearDraftFeedback();
               }}
             />
             <FieldLabel htmlFor={`${id}-confirmed`}>
@@ -168,7 +259,7 @@ export function FinanceGoalScenarioExplorer({ asOfLocalDate = "" }: { asOfLocalD
                         i === index ? { ...item, name: event.target.value } : item,
                       ),
                     );
-                    setProjection(null);
+                    clearDraftFeedback();
                   }}
                 />
               </Field>
@@ -186,7 +277,7 @@ export function FinanceGoalScenarioExplorer({ asOfLocalDate = "" }: { asOfLocalD
                         i === index ? { ...item, amount: event.target.value } : item,
                       ),
                     );
-                    setProjection(null);
+                    clearDraftFeedback();
                   }}
                 />
               </Field>
@@ -196,7 +287,7 @@ export function FinanceGoalScenarioExplorer({ asOfLocalDate = "" }: { asOfLocalD
               variant="ghost"
               onClick={() => {
                 setAlternatives((rows) => rows.filter((_, i) => i !== index));
-                setProjection(null);
+                clearDraftFeedback();
               }}
             >
               Remove alternative {index + 1}
@@ -213,7 +304,7 @@ export function FinanceGoalScenarioExplorer({ asOfLocalDate = "" }: { asOfLocalD
                 ...rows,
                 { id: crypto.randomUUID(), name: `Alternative ${rows.length + 1}`, amount: "" },
               ]);
-              setProjection(null);
+              clearDraftFeedback();
             }}
           >
             Add hypothetical alternative
@@ -231,7 +322,9 @@ export function FinanceGoalScenarioExplorer({ asOfLocalDate = "" }: { asOfLocalD
           </p>
           <p>
             Hypothetical remaining target:{" "}
-            {projection.remainingCents === null ? "Unknown" : format(projection.remainingCents)}
+            {projection.remainingCents === null
+              ? "Unknown"
+              : formatCents(projection.remainingCents, projection.currency)}
           </p>
           {projection.scenarios.map((scenario) => (
             <section
@@ -240,38 +333,15 @@ export function FinanceGoalScenarioExplorer({ asOfLocalDate = "" }: { asOfLocalD
               className="flex flex-col gap-2"
             >
               <h3 className="font-medium">
-                {scenario.name} · {format(scenario.monthlyContributionCents)} each month
+                {scenario.name} ·{" "}
+                {formatCents(scenario.monthlyContributionCents, projection.currency)} each month
               </h3>
               <p>
                 {reasons[scenario.reason]}
                 {scenario.completionLocalDate ? `: ${scenario.completionLocalDate}` : ""}
               </p>
               {scenario.curve.length ? (
-                <details>
-                  <summary className="cursor-pointer">
-                    Hypothetical dated contribution curve for {scenario.name}
-                  </summary>
-                  <div className="max-h-72 overflow-auto">
-                    <Table aria-label={`Hypothetical contribution curve for ${scenario.name}`}>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Local date</TableHead>
-                          <TableHead>Cumulative contributions</TableHead>
-                          <TableHead>Hypothetical total</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {scenario.curve.map((point) => (
-                          <TableRow key={point.localDate}>
-                            <TableCell>{point.localDate}</TableCell>
-                            <TableCell>{format(point.cumulativeContributionCents)}</TableCell>
-                            <TableCell>{format(point.projectedAmountCents)}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </details>
+                <ContributionCurve scenario={scenario} currency={projection.currency} />
               ) : null}
             </section>
           ))}
@@ -280,7 +350,7 @@ export function FinanceGoalScenarioExplorer({ asOfLocalDate = "" }: { asOfLocalD
               Hypothetical target date {projection.targetDateRequirement.localDate}:{" "}
               {projection.targetDateRequirement.requiredMonthlyContributionCents === null
                 ? targetReasons[projection.targetDateRequirement.reason]
-                : `${format(projection.targetDateRequirement.requiredMonthlyContributionCents)} each month across ${projection.targetDateRequirement.scheduledContributionCount} scheduled contributions.`}
+                : `${formatCents(projection.targetDateRequirement.requiredMonthlyContributionCents, projection.currency)} each month across ${projection.targetDateRequirement.scheduledContributionCount} scheduled contributions.`}
             </p>
           ) : null}
         </section>

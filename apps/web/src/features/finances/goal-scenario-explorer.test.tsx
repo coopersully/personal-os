@@ -33,7 +33,7 @@ it("requires user-chosen dates and does not infer saved progress or currency", (
   expect(screen.queryByLabelText("Hypothetical goal results")).not.toBeInTheDocument();
 });
 
-it("distinguishes unknown and confirmed zero and shows anchored exact hypothetical curves", () => {
+it("distinguishes unknown and confirmed zero and shows anchored exact hypothetical curves", async () => {
   render(<FinanceGoalScenarioExplorer asOfLocalDate="2027-01-31" />);
   inputs();
   fill("Hypothetical current amount (blank means unknown)", "0");
@@ -44,7 +44,7 @@ it("distinguishes unknown and confirmed zero and shows anchored exact hypothetic
   const baseline = screen.getByRole("region", { name: "Hypothetical Baseline" });
   expect(within(baseline).getByText("Hypothetical completion: 2027-03-31")).toBeInTheDocument();
   fireEvent.click(within(baseline).getByText("Hypothetical dated contribution curve for Baseline"));
-  expect(within(baseline).getByRole("cell", { name: "2027-02-28" })).toBeInTheDocument();
+  expect(await within(baseline).findByRole("cell", { name: "2027-02-28" })).toBeInTheDocument();
   expect(within(baseline).getByRole("cell", { name: "2027-03-31" })).toBeInTheDocument();
   expect(screen.getByText(/Zero interest or growth/)).toBeInTheDocument();
   fill("Hypothetical current amount (blank means unknown)", "1");
@@ -86,7 +86,11 @@ it("reports invalid cents and unsupported currency through Sonner and permits co
   expect(feedback.error).toHaveBeenLastCalledWith(
     "Enter each amount with at most two decimal places.",
   );
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Enter each amount with at most two decimal places.",
+  );
   fill("Hypothetical target amount", "10");
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   fill("Currency code (two minor-unit digits)", "JPY");
   compare();
   expect(feedback.error).toHaveBeenLastCalledWith(expect.stringContaining("two minor-unit digits"));
@@ -95,4 +99,50 @@ it("reports invalid cents and unsupported currency through Sonner and permits co
   fireEvent.click(screen.getByRole("checkbox"));
   compare();
   expect(screen.getByText("Already achieved under these hypothetical inputs.")).toBeInTheDocument();
+});
+
+it("lazily renders at most 24 curve points and preserves access to the final horizon month", async () => {
+  render(<FinanceGoalScenarioExplorer asOfLocalDate="2027-01-31" />);
+  inputs();
+  fill("Hypothetical target amount", "20");
+  fill("Baseline monthly contribution", "0.01");
+  fill("Hypothetical current amount (blank means unknown)", "0");
+  fireEvent.click(screen.getByRole("checkbox"));
+  for (let i = 1; i <= 3; i++) {
+    fireEvent.click(screen.getByRole("button", { name: "Add hypothetical alternative" }));
+    fill(`Alternative ${i} monthly contribution`, "0.01");
+  }
+  compare();
+  expect(screen.queryByRole("table", { hidden: true })).not.toBeInTheDocument();
+  const baseline = screen.getByRole("region", { name: "Hypothetical Baseline" });
+  fireEvent.click(within(baseline).getByText("Hypothetical dated contribution curve for Baseline"));
+  const table = await within(baseline).findByRole("table");
+  expect(within(table).getAllByRole("row")).toHaveLength(25);
+  expect(screen.getAllByRole("table", { hidden: true })).toHaveLength(1);
+  expect(
+    within(baseline).getByText("Contributions 1–24 of 1200 · Page 1 of 50"),
+  ).toBeInTheDocument();
+  expect(
+    within(baseline).getByRole("button", { name: "Previous contributions for Baseline" }),
+  ).toBeDisabled();
+  fireEvent.click(
+    within(baseline).getByRole("button", { name: "Next contributions for Baseline" }),
+  );
+  expect(within(table).getByRole("cell", { name: "2029-01-31" })).toBeInTheDocument();
+  fireEvent.click(
+    within(baseline).getByRole("button", { name: "Last contributions for Baseline" }),
+  );
+  expect(
+    within(baseline).getByText("Contributions 1177–1200 of 1200 · Page 50 of 50"),
+  ).toBeInTheDocument();
+  expect(within(table).getByRole("cell", { name: "2126-12-31" })).toBeInTheDocument();
+  expect(
+    within(baseline).getByRole("button", { name: "Next contributions for Baseline" }),
+  ).toBeDisabled();
+  fireEvent.click(
+    within(baseline).getByRole("button", { name: "Previous contributions for Baseline" }),
+  );
+  expect(
+    within(baseline).getByText("Contributions 1153–1176 of 1200 · Page 49 of 50"),
+  ).toBeInTheDocument();
 });

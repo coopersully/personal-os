@@ -5272,9 +5272,43 @@ export const financesWorkspaceSettings = pgTable(
     investmentAccountIds: uuid("investment_account_ids").array(),
     financeTransactionView: text("finance_transaction_view").notNull().default("table"),
     financeTransactionGroup: text("finance_transaction_group").notNull().default("none"),
+    financeManualVisibility: text("finance_manual_visibility").notNull().default("auto"),
+    financeSpendingView: text("finance_spending_view").notNull().default("bubbles"),
+    financeSpendingGrouping: text("finance_spending_grouping").notNull().default("auto"),
+    financeSpendingIncludePending: boolean("finance_spending_include_pending")
+      .notNull()
+      .default(true),
+    financeSpendingIncludeUncategorized: boolean("finance_spending_include_uncategorized")
+      .notNull()
+      .default(true),
+    financeSpendingBasis: text("finance_spending_basis").notNull().default("personal_cost"),
+    financeSpendingSubtractRefunds: boolean("finance_spending_subtract_refunds")
+      .notNull()
+      .default(true),
+    financeSpendingPeriod: text("finance_spending_period").notNull().default("month"),
   },
   (table) => [
     check("finances_workspace_settings_revision_check", sql`${table.revision} > 0`),
+    check(
+      "finances_manual_visibility_check",
+      sql`${table.financeManualVisibility} IN ('auto','show','hide')`,
+    ),
+    check(
+      "finances_spending_view_check",
+      sql`${table.financeSpendingView} IN ('bubbles','list','trends','rhythm')`,
+    ),
+    check(
+      "finances_spending_grouping_check",
+      sql`${table.financeSpendingGrouping} IN ('auto','buckets','categories')`,
+    ),
+    check(
+      "finances_spending_basis_check",
+      sql`${table.financeSpendingBasis} IN ('personal_cost','full_outflow')`,
+    ),
+    check(
+      "finances_spending_period_check",
+      sql`${table.financeSpendingPeriod} IN ('today','week','month','custom')`,
+    ),
     check(
       "finances_transaction_view_check",
       sql`${table.financeTransactionView} IN ('table', 'cards')`,
@@ -5282,6 +5316,27 @@ export const financesWorkspaceSettings = pgTable(
     check(
       "finances_transaction_group_check",
       sql`${table.financeTransactionGroup} IN ('none', 'date', 'category', 'merchant', 'direction', 'posting')`,
+    ),
+  ],
+);
+
+/** Migration-time existing Finance access only; never setup completion or agent capability. */
+export const financeOnboardingLegacyAccess = pgTable(
+  "finance_onboarding_legacy_access",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    grantedAt: timestamp("granted_at", { withTimezone: true }).notNull().defaultNow(),
+    provenance: text("provenance")
+      .$type<"finance_records_at_migration">()
+      .notNull()
+      .default("finance_records_at_migration"),
+  },
+  (table) => [
+    check(
+      "finance_onboarding_legacy_access_provenance_check",
+      sql`${table.provenance} = 'finance_records_at_migration'`,
     ),
   ],
 );

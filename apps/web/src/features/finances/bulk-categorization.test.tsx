@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { FinanceCategory, FinanceTransaction } from "@personal-os/domain";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, type QueryKey, useQuery } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FinanceBulkCategorization, useFinanceBulkSelection } from "./bulk-categorization";
@@ -28,9 +28,11 @@ const categories = [{ id: "food", name: "Food" }] as FinanceCategory[];
 function Harness({
   transactions = records,
   disabled = false,
+  reloadQueryKey,
 }: {
   transactions?: FinanceTransaction[];
   disabled?: boolean;
+  reloadQueryKey?: QueryKey;
 }) {
   const selection = useFinanceBulkSelection(transactions, disabled);
   return (
@@ -38,7 +40,11 @@ function Harness({
       {transactions.map((item) => (
         <div key={item.id}>{selection.control(item)}</div>
       ))}
-      <FinanceBulkCategorization selection={selection} categories={categories} />
+      <FinanceBulkCategorization
+        selection={selection}
+        categories={categories}
+        reloadQueryKey={reloadQueryKey}
+      />
     </>
   );
 }
@@ -207,4 +213,66 @@ it("blocks duplicate submissions while a response is pending", async () => {
   await waitFor(() =>
     expect(screen.getByRole("button", { name: "Reload transactions" })).toBeEnabled(),
   );
+});
+
+it("refetches the active exact Spending query before unlocking and reselects its fresh records", async () => {
+  const reloadQueryKey = [
+    "finance-spending-transactions",
+    { referenceRevision: "a".repeat(64) },
+    "page-two",
+  ];
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const load = vi
+    .fn<() => Promise<FinanceTransaction[]>>()
+    .mockRejectedValue(Object.assign(new Error("Spending changed"), { status: 409 }));
+  function ExactHarness() {
+    const query = useQuery({
+      queryKey: reloadQueryKey,
+      queryFn: load,
+      initialData: records,
+      staleTime: Infinity,
+    });
+    return <Harness transactions={query.data} reloadQueryKey={reloadQueryKey} />;
+  }
+  render(
+    <QueryClientProvider client={client}>
+      <ExactHarness />
+    </QueryClientProvider>,
+  );
+  const user = userEvent.setup();
+  api.applyFinanceCategorizations.mockResolvedValue([
+    { transactionId: records[0].id, status: "failed", applied: false, error: { code: "conflict" } },
+  ]);
+  await user.click(screen.getByRole("checkbox", { name: "Select Cafe, 2026-10-18" }));
+  await confirm(user);
+  await waitFor(() => expect(load).toHaveBeenCalled());
+  load.mockClear();
+  await user.click(screen.getByRole("button", { name: "Reload transactions" }));
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining("could not reload"),
+      expect.anything(),
+    ),
+  );
+  expect(load).toHaveBeenCalledOnce();
+  expect(screen.getByRole("checkbox", { name: "Select Cafe, 2026-10-18" })).toBeDisabled();
+  expect(toast.success).not.toHaveBeenCalledWith(
+    expect.stringContaining("Transactions reloaded"),
+    expect.anything(),
+  );
+  const updated = { ...records[0], updatedAt: "2026-10-18T14:00:00.000Z" };
+  load.mockResolvedValue([updated]);
+  await user.click(screen.getByRole("button", { name: "Reload transactions" }));
+  await waitFor(() =>
+    expect(screen.getByRole("checkbox", { name: "Select Cafe, 2026-10-18" })).toBeEnabled(),
+  );
+  expect(screen.getByRole("checkbox", { name: "Select Cafe, 2026-10-18" })).not.toBeChecked();
+  await user.click(screen.getByRole("checkbox", { name: "Select Cafe, 2026-10-18" }));
+  await confirm(user);
+  await waitFor(() => expect(api.applyFinanceCategorizations).toHaveBeenCalledTimes(2));
+  expect(
+    api.applyFinanceCategorizations.mock.lastCall?.[0].decisions[0].expectedTransactionUpdatedAt,
+  ).toBe(updated.updatedAt);
 });

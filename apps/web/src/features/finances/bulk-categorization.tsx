@@ -3,7 +3,7 @@ import type {
   FinanceCategory,
   FinanceTransaction,
 } from "@personal-os/domain";
-import { useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
+import { type QueryKey, useIsMutating, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/api";
@@ -98,9 +98,11 @@ function resultLabel(result: FinanceCategorizationApplyResult | undefined, fallb
 export function FinanceBulkCategorization({
   selection,
   categories,
+  reloadQueryKey = ["finance-transactions"],
 }: {
   selection: Selection;
   categories: FinanceCategory[];
+  reloadQueryKey?: QueryKey | undefined;
 }) {
   const client = useQueryClient();
   const categoryInputId = useId();
@@ -116,10 +118,7 @@ export function FinanceBulkCategorization({
     const id = toast.loading("Reloading transactions…");
     try {
       // throwOnError keeps an unsuccessful refresh from enabling a retry with old data.
-      await client.invalidateQueries(
-        { queryKey: ["finance-transactions"] },
-        { throwOnError: true },
-      );
+      await client.invalidateQueries({ queryKey: reloadQueryKey }, { throwOnError: true });
       selection.clear();
       selection.setReloadRequired(false);
       toast.success("Transactions reloaded. Review and select records before trying again.", {

@@ -14,7 +14,7 @@ import type {
 } from "@personal-os/domain";
 import { addMonths, formatDateOnly, formatMonth } from "@personal-os/domain";
 import { EmptyState, Spinner } from "@personal-os/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
@@ -342,9 +342,14 @@ export function FinancesPage() {
       transactionFilters,
     ],
   });
+  const spendingTransactionQueryKey = [
+    "finance-spending-transactions",
+    spendingReference,
+    currentTransactionCursor,
+  ];
   const spendingTransactionList = useQuery({
     enabled: section === "transactions" && spendingReference.status === "valid",
-    queryKey: ["finance-spending-transactions", spendingReference, currentTransactionCursor],
+    queryKey: spendingTransactionQueryKey,
     queryFn: () => {
       if (spendingReference.status !== "valid") throw new Error("Invalid Spending reference");
       return api.listFinanceSpendingTransactions(
@@ -942,6 +947,7 @@ export function FinancesPage() {
                   onCategorize={openCategorize}
                   onNextPage={nextTransactionPage}
                   onPreviousPage={previousTransactionPage}
+                  reloadQueryKey={exactSpending ? spendingTransactionQueryKey : undefined}
                   onSort={exactSpending ? undefined : sortTransactions}
                   sort={transactionSort}
                   transactions={transactionList.data?.items ?? []}
@@ -2720,6 +2726,7 @@ function FinanceLedgerHealthCard({ health }: { health: FinanceLedgerHealth }) {
 function FinanceTransactionsTable({
   categories,
   selectionDisabled = false,
+  reloadQueryKey,
   hasPreviousPage,
   isCategorizing,
   isLoading,
@@ -2734,6 +2741,7 @@ function FinanceTransactionsTable({
 }: {
   categories: FinanceCategory[];
   selectionDisabled?: boolean;
+  reloadQueryKey?: QueryKey | undefined;
   hasPreviousPage: boolean;
   isCategorizing: boolean;
   isLoading: boolean;
@@ -2898,7 +2906,11 @@ function FinanceTransactionsTable({
 
   return (
     <div className="flex flex-col gap-3">
-      <FinanceBulkCategorization selection={selection} categories={categories} />
+      <FinanceBulkCategorization
+        selection={selection}
+        categories={categories}
+        reloadQueryKey={reloadQueryKey}
+      />
       {groupHeadings.size > 0 && (hasPreviousPage || nextCursor) ? (
         <p className="text-xs text-muted-foreground">Grouped within this page</p>
       ) : null}

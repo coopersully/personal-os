@@ -23,7 +23,7 @@ import {
 } from "@personal-os/database";
 import { defaultNotificationPreferences } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { createFinanceActionService } from "../finance-action-service.js";
 import { createFinanceService } from "../finance-service.js";
 import { createFinanceSmsAcknowledgementDispatcher } from "../finance-sms-acknowledgement.js";
@@ -506,6 +506,65 @@ describe.sequential("signed Finance context SMS and durable completion", () => {
       binding,
     };
   }
+  it("takes the owner lock before SMS prepare locks when racing normal approval", async () => {
+    const f = await approvalFixture();
+    let prepared!: () => void;
+    const preparedSignal = new Promise<void>((resolve) => {
+      prepared = resolve;
+    });
+    let release!: () => void;
+    const continueSms = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const decide = createFinanceSmsApprovalService({
+      db: database.db,
+      now,
+      admit: createSmsApprovalAdmission({ enabled: () => true }),
+      actions: {
+        ...f.actions,
+        approve: async (...args) => {
+          // The real SMS admission and source/review locks are already held here.
+          prepared();
+          await continueSms;
+          return f.actions.approve(...args);
+        },
+      },
+    });
+    const sms = database.db.transaction((tx) => decide(f.command, f.context, tx));
+    await preparedSignal;
+    const normal = f.actions.approve(f.review.id, { ...f.context, requestId: randomUUID() });
+    let waitingOnOwner = false;
+    try {
+      // Observe a real blocked advisory lock, rather than assuming scheduling order.
+      for (let attempt = 0; attempt < 50; attempt++) {
+        const result = await database.db.execute(
+          sql`select count(*)::int as count from pg_locks where locktype = 'advisory' and not granted`,
+        );
+        if (Number(result.rows[0]?.count) > 0) {
+          waitingOnOwner = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    } finally {
+      release();
+    }
+    const results = await Promise.allSettled([sms, normal]);
+    expect(waitingOnOwner).toBe(true);
+    expect(results.map((r) => r.status)).toEqual(["fulfilled", "fulfilled"]);
+    expect(results[0]).toMatchObject({ status: "fulfilled", value: { state: "accepted" } });
+    expect(results[1]).toMatchObject({ status: "fulfilled", value: { status: "applied" } });
+    const [transaction] = await database.db
+      .select()
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, f.transaction.id));
+    expect(transaction?.categoryId).toBe(f.category.id);
+    const [binding] = await database.db
+      .select()
+      .from(textReplyBindings)
+      .where(eq(textReplyBindings.id, f.binding.id));
+    expect(binding?.state).toBe("accepted");
+  });
   it.each([
     "approve",
     "reject",

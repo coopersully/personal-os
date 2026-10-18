@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import { ApiClientError } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { FinanceCashflowPage } from "./cashflow-page";
@@ -16,11 +17,12 @@ const api = vi.hoisted(() => ({
   listFinanceReimbursements: vi.fn(),
 }));
 vi.mock("../../api.js", () => ({ api, errorMessage: (error: Error) => error.message }));
-function renderPage(path = "/finances/cashflow") {
+function renderPage(
+  path = "/finances/cashflow",
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
   return render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+    <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[path]}>
         <FinanceCashflowPage />
       </MemoryRouter>
@@ -276,4 +278,42 @@ it("keeps independent outlook failures and empty pattern views explicit", async 
   });
   renderPage("/finances/cashflow?view=income");
   expect(await screen.findByText("No income patterns yet")).toBeVisible();
+});
+
+it("hides cached recurring evidence and its open confirmation after an authoritative same-owner 403", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  api.listFinanceRecurringItems.mockResolvedValue({
+    data: {
+      income: [],
+      obligations: [
+        {
+          id: "00000000-0000-4000-8000-000000000002",
+          revision: 2,
+          accountId: "cash-1",
+          displayName: "Private music",
+          merchant: "Music",
+          expectedAmount: 10,
+          kind: "subscription",
+          status: "active",
+          source: "user",
+          cadence: "monthly",
+          nextExpectedDate: null,
+          lastObservedDate: null,
+        },
+      ],
+    },
+  });
+  renderPage("/finances/cashflow?view=subscriptions", client);
+  fireEvent.click(await screen.findByRole("button", { name: "Confirm cost for Private music" }));
+  expect(screen.getByRole("dialog")).toBeVisible();
+  api.listFinanceRecurringItems.mockRejectedValue(
+    new ApiClientError({ status: 403, code: "forbidden", message: "Access denied" }),
+  );
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["finance-recurring-items"] });
+  });
+  expect(await screen.findByText(/Recurring cost access unavailable/)).toBeVisible();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.queryByRole("listitem", { name: "Private music" })).not.toBeInTheDocument();
+  expect(client.getQueryData(["me"])).toMatchObject({ id: "00000000-0000-4000-8000-000000000001" });
 });

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import { ApiClientError } from "@personal-os/api-client";
 import type { FinanceRecurringObligation } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { RecurringCostSection } from "./recurring-cost-section";
 
@@ -91,4 +92,33 @@ it("uses applicable evidence without asking for redundant confirmation", async (
   expect(await screen.findByRole("button", { name: "Edit statement for Music" })).toBeVisible();
   expect(screen.queryByRole("button", { name: "Confirm cost for Music" })).not.toBeInTheDocument();
   expect(screen.getAllByText("€12.00")[0]).toBeVisible();
+});
+
+it.each([
+  401, 403,
+])("suppresses cached private rows and dismisses an open form after same-owner me denial %s", async (status) => {
+  api.getMe.mockResolvedValue({ id: owner, planningTimezone: "UTC" });
+  const client = show();
+  fireEvent.click(await screen.findByRole("button", { name: "Confirm cost for Music" }));
+  expect(screen.getByRole("dialog")).toBeVisible();
+  api.getMe.mockRejectedValue(
+    new ApiClientError({ status, code: "forbidden", message: "Access denied" }),
+  );
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["me"] });
+  });
+  expect(await screen.findByText(/Recurring cost access unavailable/)).toBeVisible();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.queryByRole("listitem", { name: "Music" })).not.toBeInTheDocument();
+  expect(client.getQueryData(["me"])).toMatchObject({ id: owner });
+});
+it("retains usable cached evidence on a transient identity refresh failure", async () => {
+  api.getMe.mockResolvedValue({ id: owner, planningTimezone: "UTC" });
+  const client = show();
+  expect(await screen.findByRole("button", { name: "Confirm cost for Music" })).toBeVisible();
+  api.getMe.mockRejectedValue(new Error("Network unavailable"));
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["me"] });
+  });
+  expect(screen.getByRole("button", { name: "Confirm cost for Music" })).toBeVisible();
 });

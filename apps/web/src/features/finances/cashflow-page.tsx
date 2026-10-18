@@ -1,3 +1,4 @@
+import { ApiClientError } from "@personal-os/api-client";
 import type {
   FinanceIncomeStream,
   FinanceRecurringObligation,
@@ -412,6 +413,10 @@ export function FinanceCashflowPage() {
               ) : obligations.length ? (
                 <>
                   <RecurringCostSection
+                    accessDenied={[recurring.error, accounts.error].some(
+                      (error) =>
+                        error instanceof ApiClientError && [401, 403].includes(error.status),
+                    )}
                     obligations={obligations}
                     accounts={accounts.data?.accounts ?? []}
                     renderActions={(item) => patternActions(item, "obligation")}

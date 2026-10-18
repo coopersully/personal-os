@@ -20,7 +20,6 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { api } from "../../api.js";
-import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import {
   isConfirmedFinanceMutationFailure,
@@ -75,7 +74,13 @@ export function RecurringCostConfirmation({
     (!account?.currencyCode || account.currencyCode === currency) &&
     (item.status === "active" || item.status === "needs_review");
   const mutation = useFeedbackMutation({
-    feedback: { action: "save this recurring cost statement", safeToRetry: false, form: true },
+    feedback: {
+      action: "save this recurring cost statement",
+      safeToRetry: false,
+      form: true,
+      pending: "Saving cost statement…",
+      success: "Cost statement saved.",
+    },
     mutationFn: async () => {
       if (!attempt.current) {
         if (!valid || !parsed.success || parsed.data.operation !== "confirm_cost")
@@ -194,12 +199,6 @@ export function RecurringCostConfirmation({
               Variable payments remain outside precise annual and monthly totals.
             </p>
           ) : null}
-          {uncertain ? (
-            <p role="status">
-              The result is unknown. Retry the same statement to recover its saved result.
-            </p>
-          ) : null}
-          <MutationFeedback feedback={mutation.feedback} />
           <DialogFooter>
             <Button type="button" variant="ghost" disabled={locked} onClick={onClose}>
               Cancel

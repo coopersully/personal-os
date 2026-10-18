@@ -1,3 +1,4 @@
+import { ApiClientError } from "@personal-os/api-client";
 import {
   type FinanceAccount,
   type FinanceRecurringObligation,
@@ -5,7 +6,7 @@ import {
   localDateAt,
 } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { api } from "../../api.js";
 import { RecurringCostConfirmation } from "./recurring-cost-confirmation.js";
@@ -15,7 +16,9 @@ export function RecurringCostSection({
   obligations,
   accounts,
   renderActions,
+  accessDenied = false,
 }: {
+  accessDenied?: boolean;
   obligations: FinanceRecurringObligation[];
   accounts: Pick<FinanceAccount, "id" | "name" | "currencyCode">[];
   renderActions?: (item: FinanceRecurringObligation) => ReactNode;
@@ -25,6 +28,11 @@ export function RecurringCostSection({
     item: FinanceRecurringObligation;
     open: boolean;
   } | null>(null);
+  const denied =
+    accessDenied || (me.error instanceof ApiClientError && [401, 403].includes(me.error.status));
+  useEffect(() => {
+    if (denied) setSelection(null);
+  }, [denied]);
   let context: { ownerUserId: string; today: string } | undefined;
   if (me.data?.planningTimezone && idSchema.safeParse(me.data.id).success) {
     try {
@@ -39,6 +47,13 @@ export function RecurringCostSection({
   }
   const selected = selection?.item ?? null;
   const account = selected ? accounts.find((item) => item.id === selected.accountId) : undefined;
+  if (denied)
+    return (
+      <p role="status">
+        Recurring cost access unavailable. Check your account permissions before viewing or
+        confirming statements.
+      </p>
+    );
   return (
     <>
       {!context ? (

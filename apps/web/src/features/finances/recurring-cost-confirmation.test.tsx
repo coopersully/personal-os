@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import { ApiClientError } from "@personal-os/api-client";
 import type { FinanceRecurringObligation } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { Toaster, type ToastT, toast } from "sonner";
 import { RecurringCostConfirmation } from "./recurring-cost-confirmation";
 
 const api = vi.hoisted(() => ({ manageFinanceRecurringItem: vi.fn() }));
@@ -34,25 +36,35 @@ function show(
   const current = { ...item, ...changes };
   if (omitRevision) delete current.revision;
   render(
-    <QueryClientProvider client={client}>
-      <RecurringCostConfirmation
-        item={current}
-        {...(currencyCode
-          ? { account: { id: item.accountId as string, name: "Checking", currencyCode } }
-          : {})}
-        today="2026-10-18"
-        open
-        onClose={close}
-      />
-    </QueryClientProvider>,
+    <>
+      <Toaster />
+      <QueryClientProvider client={client}>
+        <RecurringCostConfirmation
+          item={current}
+          {...(currencyCode
+            ? { account: { id: item.accountId as string, name: "Checking", currencyCode } }
+            : {})}
+          today="2026-10-18"
+          open
+          onClose={close}
+        />
+      </QueryClientProvider>
+    </>,
   );
   return { client, close };
+}
+function activeToasts() {
+  return toast.getToasts().filter((entry): entry is ToastT => "title" in entry);
 }
 function fill() {
   fireEvent.change(screen.getByLabelText("Amount behavior"), { target: { value: "fixed" } });
   fireEvent.click(screen.getByRole("checkbox"));
 }
-beforeEach(() => vi.resetAllMocks());
+beforeEach(() => {
+  vi.resetAllMocks();
+  toast.dismiss();
+});
+afterEach(() => toast.dismiss());
 it("requires explicit fixedness and statement, binding exact current source revision/content", async () => {
   api.manageFinanceRecurringItem.mockResolvedValue({ outcome: "completed" });
   const { close } = show();
@@ -139,4 +151,69 @@ it("saves explicit variable evidence without implying precise totals", async () 
       expect.objectContaining({ fixedness: "variable" }),
     ),
   );
+});
+
+it("updates an actual Sonner loading toast to confirmed success under the same ID", async () => {
+  let complete!: (value: { outcome: "completed" }) => void;
+  api.manageFinanceRecurringItem.mockReturnValue(
+    new Promise((resolve) => {
+      complete = resolve;
+    }),
+  );
+  show();
+  fill();
+  fireEvent.click(screen.getByRole("button", { name: "Save cost statement" }));
+  expect(await screen.findByText("Saving cost statement…")).toBeInTheDocument();
+  const pending = activeToasts().at(-1);
+  expect(pending?.type).toBe("loading");
+  await act(async () => complete({ outcome: "completed" }));
+  expect(await screen.findByText("Cost statement saved.")).toBeInTheDocument();
+  const success = activeToasts().find((entry) => entry.id === pending?.id);
+  expect(success?.type).toBe("success");
+  expect(within(screen.getByRole("dialog")).queryByRole("status")).not.toBeInTheDocument();
+  expect(within(screen.getByRole("dialog")).queryByRole("alert")).not.toBeInTheDocument();
+});
+it.each([
+  400,
+  401,
+  403,
+  409,
+  429,
+  500,
+  "network",
+  "failed_result",
+  "pending_result",
+])("uses actual Sonner without inline action results for %s", async (failure) => {
+  if (failure === "failed_result")
+    api.manageFinanceRecurringItem.mockResolvedValue({
+      outcome: "failed",
+      communication: { headline: "Rejected" },
+    });
+  else if (failure === "pending_result")
+    api.manageFinanceRecurringItem.mockResolvedValue({
+      outcome: "work_remaining",
+      communication: { headline: "Not complete" },
+    });
+  else
+    api.manageFinanceRecurringItem.mockRejectedValue(
+      typeof failure === "number"
+        ? new ApiClientError({
+            status: failure,
+            code: failure === 400 ? "invalid_request" : "failure",
+            message: "Rejected",
+          })
+        : new Error("Connection lost"),
+    );
+  const { close } = show();
+  fill();
+  fireEvent.click(screen.getByRole("button", { name: "Save cost statement" }));
+  await waitFor(() => expect(activeToasts().at(-1)?.type).toBe("error"));
+  const current = activeToasts().at(-1);
+  expect(current?.title).toEqual(expect.any(String));
+  expect(screen.getAllByText(current?.title as string)[0]).toBeInTheDocument();
+  const dialog = within(screen.getByRole("dialog"));
+  expect(dialog.queryByRole("alert")).not.toBeInTheDocument();
+  expect(dialog.queryByRole("status")).not.toBeInTheDocument();
+  expect(dialog.queryByText(/The result is unknown/)).not.toBeInTheDocument();
+  expect(close).not.toHaveBeenCalled();
 });

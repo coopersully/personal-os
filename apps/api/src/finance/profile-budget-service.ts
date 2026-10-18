@@ -26,6 +26,7 @@ import type {
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
+import { requireHumanBudgetApproval } from "./budget-authority.js";
 import {
   executeFinanceIdempotently,
   type FinanceMutationContext,
@@ -493,18 +494,13 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
     },
 
     async approveFinanceBudget(input: ApproveFinanceBudgetInput, context: FinanceMutationContext) {
-      requireFinanceMutation(context, { approvalSource: input.approvalSource });
-      if (
-        context.actorType === "user"
-          ? input.approvalSource !== "user_instruction"
-          : !context.canSelfApprove ||
-            !context.bypassEnabled ||
-            input.approvalSource !== "agent_self_approval"
-      )
-        throw new AppError(
-          "forbidden",
-          "Budget activation requires matching actor provenance and explicit execution authority.",
-        );
+      requireFinanceMutation(context);
+      requireHumanBudgetApproval({
+        ...context,
+        scopes: new Set(context.canMutate ? ["finances:write"] : []),
+      });
+      if (input.approvalSource !== "user_instruction")
+        throw new AppError("forbidden", "Budget activation requires human approval.");
       return executeFinanceIdempotently(
         db,
         context,
@@ -577,10 +573,7 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
             if (!active) throw new AppError("internal_error", "The budget was not activated.");
             await tx.insert(auditEvents).values(
               auditValues({
-                action:
-                  input.approvalSource === "agent_self_approval"
-                    ? "finance.budget.agent_self_approved"
-                    : "finance.budget.user_instruction_approved",
+                action: "finance.budget.user_instruction_approved",
                 after: {
                   approvalSource: input.approvalSource,
                   status: "active",

@@ -124,6 +124,10 @@ import {
   createFinanceAccountService,
   serializeFinanceAccountRows,
 } from "./finance/account-service.js";
+import {
+  type FinanceBudgetApproval,
+  requireActiveBudgetAuthority,
+} from "./finance/budget-authority.js";
 import { createFinanceBudgetBucketService } from "./finance/budget-bucket-service.js";
 import { readFinanceConfiguration } from "./finance/configuration-service.js";
 import { createFinanceConnectionHandoffService } from "./finance/connection-handoff-service.js";
@@ -184,6 +188,7 @@ type MaintenanceMutationAttribution = {
   runId: string;
 };
 type MutationContext = {
+  financeBudgetApproval?: FinanceBudgetApproval;
   /** Internal action-service capability; never derived from a token or MCP input. */
   financePreparedAction?: boolean;
   /** Canonical intent already admitted with explicit execution authority. */
@@ -7492,6 +7497,7 @@ export function createFinanceService({
       context: MutationContext,
       executor?: FinanceActionWriteExecutor,
     ) {
+      const approval = requireActiveBudgetAuthority(input, context);
       const write = async (tx: FinanceActionWriteExecutor) => {
         // A single category budget shares the monthly replacement/capacity
         // surface with a complete plan. Use the same transaction-scoped lock
@@ -7559,7 +7565,14 @@ export function createFinanceService({
         await tx.insert(auditEvents).values(
           auditValues({
             action: "finance.budget_created",
-            after: { id: created.id, updatedAt: created.updatedAt.toISOString() },
+            after: {
+              ...approval,
+              id: created.id,
+              category: created.category,
+              limitCents: created.limit,
+              month: created.month,
+              updatedAt: created.updatedAt.toISOString(),
+            },
             before: null,
             entityId: created.id,
             entityType: "finance_budget",
@@ -7576,6 +7589,7 @@ export function createFinanceService({
       context: MutationContext,
       executor?: FinanceActionWriteExecutor,
     ): Promise<FinanceBudgetPlan> {
+      const approval = requireActiveBudgetAuthority(input, context);
       const write = async (tx: FinanceActionWriteExecutor) => {
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`finance-budget-plan:${context.principal.userId}:${input.month}`}, 0))`,
@@ -7722,6 +7736,11 @@ export function createFinanceService({
           auditValues({
             action: "finance.budget_plan_set",
             after: {
+              ...approval,
+              allocations: input.allocations.map(({ categoryId, limit }) => ({
+                categoryId,
+                limitCents: toCents(limit),
+              })),
               allocationCount: input.allocations.length,
               assumptionsCount: input.assumptions.length,
               goalCount: input.goalIds.length,
@@ -7731,6 +7750,10 @@ export function createFinanceService({
               planVersion: storedPlan.version,
             },
             before: {
+              allocations: currentBudgets.map(({ category, limit }) => ({
+                category,
+                limitCents: limit,
+              })),
               allocationCount: currentBudgets.length,
               month: input.month,
               priorAllocationCount: currentBudgets.length,

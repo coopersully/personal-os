@@ -474,6 +474,7 @@ describe.sequential("Finance profile and budget lifecycle", () => {
     await expect(
       service.approveFinanceBudget(
         {
+          // @ts-expect-error Legacy clients cannot grant new activation authority.
           approvalSource: "agent_self_approval",
           budgetVersionId: proposed.data.id,
           expectedVersion: proposed.data.version,
@@ -524,6 +525,7 @@ describe.sequential("Finance profile and budget lifecycle", () => {
     await expect(
       service.approveFinanceBudget(
         {
+          // @ts-expect-error Legacy clients cannot grant new activation authority.
           approvalSource: "agent_self_approval",
           budgetVersionId: revised.data.id,
           expectedVersion: revised.data.version,

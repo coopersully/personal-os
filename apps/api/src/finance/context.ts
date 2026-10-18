@@ -37,7 +37,7 @@ export async function loadFinanceAuthorization(input: {
     actorType: input.principal.actorType,
     bypassEnabled,
     canMutate,
-    // Only a new, explicit execution grant carries standing activation authority.
+    // General Finance execution authority never authorizes active budget changes.
     canSelfApprove: canMutate && bypassEnabled && input.principal.scopes.has("finances:execute"),
     requestId: input.requestId,
     userId: input.principal.userId,
@@ -54,7 +54,7 @@ export function requireFinanceMutation(
   if (options.approvalSource === "agent_self_approval" && !context.canSelfApprove) {
     throw new AppError(
       "forbidden",
-      "Agent self-approval requires an explicit Finance budget activation policy.",
+      "Agent self-approval requires explicit Finance execution authority.",
     );
   }
 }

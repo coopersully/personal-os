@@ -73,7 +73,7 @@ export const financeSetupInputSchema = z.discriminatedUnion("operation", [
     sessionId: idSchema,
   }),
   z.object({
-    approvalSource: z.enum(["user_instruction", "agent_self_approval"]),
+    approvalSource: z.literal("user_instruction"),
     budgetVersionId: idSchema,
     expectedProfileVersionId: idSchema.nullable().optional(),
     expectedVersion: z.number().int().positive(),

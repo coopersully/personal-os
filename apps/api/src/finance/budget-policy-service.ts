@@ -671,7 +671,7 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
             budget.planId !== input.planId ||
             budget.effectiveFrom !== input.period.from.slice(0, 7) ||
             !budget.approvedAt ||
-            (budget.approvedByActorType !== "user" && budget.approvedByActorType !== "agent") ||
+            budget.approvedByActorType !== "user" ||
             !budget.approvedByActorId ||
             !["active", "retired"].includes(budget.status) ||
             budget.balanceDelta !== 0 ||
@@ -681,7 +681,7 @@ export function createFinanceBudgetPolicyService({ db, now }: { db: Database; no
             snapshot.resources.reduce((n, r) => n + r.amountCents, 0) !==
               budget.expectedResources ||
             snapshot.allocations.reduce((n, a) => n + a.amountCents, 0) !== budget.allocatedTotal,
-          "Baseline must be an exact, complete, approved budget for this plan and period.",
+          "Baseline must be an exact, complete, human-approved budget for this plan and period.",
         );
         const existing = await tx.query.financeBudgetPeriodBaselines.findFirst({
           where: and(

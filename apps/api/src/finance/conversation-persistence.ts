@@ -548,6 +548,7 @@ export function createFinanceConversationService({
             and(
               eq(financeConversationBatchMessages.userId, principal.userId),
               eq(financeConversationBatchMessages.runId, input.runId),
+              isNotNull(financeConversationBatchMessages.deliveredAt),
               inArray(financeConversationBatchMessages.messageId, input.sourceMessageIds),
             ),
           );

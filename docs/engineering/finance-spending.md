@@ -124,3 +124,13 @@ explicit budget version, accounts, and USD selection. Prepare returns the exact 
 confirmation sends only that evidence and a stable idempotency key. Changing scope or account session
 invalidates the preview. This action qualifies historical comparison; it does not infer an original
 approval or complete onboarding.
+
+
+## Group visual identity
+
+The dashboard carries validated assigned category colors and semantic category, bucket, or
+uncategorized icon identities. Bubbles use the shared icon registry and neutral foreground text over
+a translucent tint. Unassigned categories and buckets use a stable identity-based palette fallback.
+The current bucket schema has no persisted color or icon fields; the fallback does not claim user
+assignment or persisted bucket color support. Visual metadata does not change contribution totals or
+exact transaction references.

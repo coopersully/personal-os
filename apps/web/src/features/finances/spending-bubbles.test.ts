@@ -9,6 +9,7 @@ import {
   settleSpendingBubbles,
   spendingBudgetFillHeight,
 } from "./spending-bubbles";
+import { spendingGroupVisual } from "./spending-visual";
 
 it("settles colliding proportional circles inside the canvas deterministically", () => {
   const input = [
@@ -33,7 +34,10 @@ it("settles colliding proportional circles inside the canvas deterministically",
   expect(input[0]?.x).toBe(0.5);
 });
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 it("inverts bottom circular segment area and clamps nonpositive or saturated usage", () => {
   expect(spendingBudgetFillHeight(0.5)).toBeCloseTo(0.5, 8);
   const height = spendingBudgetFillHeight(0.25);
@@ -131,4 +135,74 @@ it("keeps selected-period circle sizing independent of qualified monthly fill an
       .querySelector("[data-budget-fill]")
       ?.getAttribute("style"),
   ).toContain("inset(100%");
+});
+
+it("uses assigned category tint and semantic icons with readable foregrounds at narrow widths", () => {
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(240);
+  const groups = [
+    {
+      id: "food",
+      kind: "category",
+      label: "Groceries",
+      netCents: 4000,
+      positiveAreaCents: 4000,
+      categories: [],
+      visual: { color: "#123456", icon: "category" },
+    },
+    {
+      id: "bucket-legacy",
+      kind: "bucket",
+      label: "Living costs",
+      netCents: 100,
+      positiveAreaCents: 100,
+      categories: [],
+    },
+    {
+      id: "uncategorized",
+      kind: "category",
+      label: "Uncategorized",
+      netCents: 100,
+      positiveAreaCents: 100,
+      categories: [],
+    },
+    {
+      id: "tiny",
+      kind: "category",
+      label: "Very small purchase",
+      netCents: 1,
+      positiveAreaCents: 1,
+      categories: [],
+    },
+  ] as unknown as FinanceSpendingDashboard["groups"];
+  render(createElement(SpendingBubbles, { groups, onSelect: vi.fn() }));
+  const large = screen.getByRole("button", { name: /Groceries: \$40.00/ });
+  expect(large.getAttribute("style")).toContain("rgba(18, 52, 86");
+  expect(large).toHaveClass("text-foreground");
+  expect(large).not.toHaveClass("text-primary");
+  expect(large.querySelector('[data-spending-icon="category"] svg')).not.toBeNull();
+  expect(large).toHaveTextContent("Groceries");
+  const small = screen.getByRole("button", { name: /Living costs: \$1.00/ });
+  expect(small.querySelector('[data-spending-icon="bucket"] svg')).not.toBeNull();
+  expect(small).not.toHaveTextContent("Living costs");
+  expect(small.style.backgroundColor).not.toBe(large.style.backgroundColor);
+  expect(
+    screen
+      .getByRole("button", { name: /Uncategorized:/ })
+      .querySelector('[data-spending-icon="uncategorized"] svg'),
+  ).not.toBeNull();
+  const tiny = screen.getByRole("button", { name: /Very small purchase: \$0.01/ });
+  expect(tiny.querySelector("[data-spending-icon]")).toBeNull();
+  expect(tiny.getAttribute("title")).toContain("Very small purchase: $0.01");
+});
+it("keeps ID-based fallback identity stable without inventing stored artwork", () => {
+  const bucket = { id: "stable-bucket", kind: "bucket" as const };
+  expect(spendingGroupVisual(bucket)).toEqual(spendingGroupVisual({ ...bucket }));
+  expect(spendingGroupVisual(bucket).icon).toBe("bucket");
+  expect(spendingGroupVisual({ ...bucket, visual: { color: null, icon: "bucket" } }).color).toBe(
+    spendingGroupVisual(bucket).color,
+  );
+  expect(spendingGroupVisual({ id: "uncategorized", kind: "category" }).icon).toBe("uncategorized");
+  expect(
+    spendingGroupVisual({ ...bucket, visual: { color: "invalid", icon: "bucket" } }).color,
+  ).toBe(spendingGroupVisual(bucket).color);
 });

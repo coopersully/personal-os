@@ -7,6 +7,7 @@ import { type HTMLMotionProps, motion, useDragControls, useReducedMotion } from 
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { formatMoney } from "./format";
+import { spendingGroupVisual } from "./spending-visual";
 
 /** Invert a circular segment area. The result is height from the bottom, not a linear percent. */
 export function spendingBudgetFillHeight(ratio: number) {
@@ -151,6 +152,8 @@ export function SpendingBubbles({
           const node = nodes[index];
           if (!node) return null;
           const diameter = node.radius * width * 2;
+          const visual = spendingGroupVisual(group);
+          const VisualIcon = visual.Icon;
           const budget =
             monthlyBudget?.state === "qualified"
               ? monthlyBudget.groups.find((item) => item.groupId === group.id)
@@ -214,8 +217,13 @@ export function SpendingBubbles({
               }}
               aria-label={`${group.label}: ${formatMoney(group.netCents / 100)}. ${budgetLabel}.`}
               title={`${group.label}: ${formatMoney(group.netCents / 100)}. ${budgetLabel}.`}
-              style={{ width: diameter, height: diameter, touchAction: arrange ? "none" : "pan-y" }}
-              className={`absolute left-0 top-0 flex items-center justify-center overflow-hidden rounded-full bg-primary/15 p-0 text-primary hover:bg-primary/25 focus-visible:bg-primary/25 ${overage > 0 ? "border-2 border-(--status-warning-foreground)" : ""}`}
+              style={{
+                width: diameter,
+                height: diameter,
+                touchAction: arrange ? "none" : "pan-y",
+                backgroundColor: visual.backgroundColor,
+              }}
+              className={`group absolute left-0 top-0 flex flex-col items-center justify-center gap-1 overflow-hidden rounded-full p-0 text-foreground ${overage > 0 ? "border-2 border-(--status-warning-foreground)" : "border border-transparent hover:border-foreground/30 focus-visible:border-foreground/60"}`}
               transition={
                 reduced ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0.15 }
               }
@@ -224,9 +232,25 @@ export function SpendingBubbles({
                 <span
                   aria-hidden="true"
                   data-budget-fill="true"
-                  className="pointer-events-none absolute inset-0 rounded-full bg-primary/30"
-                  style={{ clipPath: `inset(${(1 - fill) * 100}% 0 0 0)` }}
+                  className="pointer-events-none absolute inset-0 rounded-full"
+                  style={{
+                    clipPath: `inset(${(1 - fill) * 100}% 0 0 0)`,
+                    backgroundColor: `${visual.color}55`,
+                  }}
                 />
+              ) : null}
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 rounded-full bg-foreground/0 group-hover:bg-foreground/5 group-focus-visible:bg-foreground/5"
+              />
+              {diameter >= 18 ? (
+                <span
+                  aria-hidden="true"
+                  data-spending-icon={visual.icon}
+                  className="relative size-4 shrink-0 [&>svg]:size-full"
+                >
+                  <VisualIcon />
+                </span>
               ) : null}
               {diameter >= 92 ? (
                 <span className="relative max-w-full px-2 text-center text-xs">

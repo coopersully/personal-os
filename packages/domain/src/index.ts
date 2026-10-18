@@ -11,6 +11,7 @@ export * from "./desktop-release.js";
 export * from "./execution-policy.js";
 export * from "./feature-contracts.js";
 export * from "./finance.js";
+export * from "./finance/cashflow-timeline.js";
 export * from "./finance-maintenance.js";
 export * from "./goals.js";
 export * from "./ilo-setup-release.js";

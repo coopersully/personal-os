@@ -18,6 +18,7 @@ vi.mock("../../api.js", () => ({
 
 it("maps Finance paths and marks the active navigation item", async () => {
   expect(financeSectionFromPath("/finances")).toBe("overview");
+  expect(financeSectionFromPath("/finances/spending")).toBe("spending");
   expect(financeSectionFromPath("/finances/review")).toBe("review");
   expect(financeSectionFromPath("/finances/budgets")).toBe("plan");
   expect(financeSectionFromPath("/finances/wealth")).toBe("wealth");
@@ -37,6 +38,10 @@ it("maps Finance paths and marks the active navigation item", async () => {
   );
   expect(screen.queryByRole("link", { name: /^Review/ })).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute("href", "/finances");
+  expect(screen.getByRole("link", { name: "Spending" })).toHaveAttribute(
+    "href",
+    "/finances/spending",
+  );
   expect(screen.getByRole("link", { name: "Budget" })).toHaveAttribute("href", "/finances/plan");
   expect(screen.getByRole("link", { name: "Wealth" })).toHaveAttribute("href", "/finances/wealth");
   expect(screen.queryByRole("link", { name: "Finance settings" })).not.toBeInTheDocument();

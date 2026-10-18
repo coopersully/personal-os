@@ -7,12 +7,15 @@ import { FinancePeriodReviewPage } from "./period-review-page.js";
 import { FinancePlanPage } from "./plan-page.js";
 import { FinanceReviewPage } from "./review-page.js";
 import { FinanceSetupPage } from "./setup-page.js";
+import { FinanceSpendingPage } from "./spending-page";
 import { FinanceWealthPage } from "./wealth-page.js";
 
 export function FinanceWorkspacePage() {
   const location = useLocation();
   const [section, reviewId] = location.pathname.split("/").slice(2);
   switch (section) {
+    case "spending":
+      return <FinanceSpendingPage />;
     case "accounts":
       return <FinanceAccountsPage />;
     case "plan":

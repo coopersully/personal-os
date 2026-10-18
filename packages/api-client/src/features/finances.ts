@@ -4,6 +4,7 @@ import type {
   ApproveFinanceBudgetInput,
   AttentionItem,
   ClassifyFinanceTransactionsInput,
+  ConfirmFinanceBudgetBaselineQualificationInput,
   CreateFinanceAccountInput,
   CreateFinanceBudgetBucketInput,
   CreateFinanceBudgetInput,
@@ -25,6 +26,8 @@ import type {
   FinanceAlert,
   FinanceAnswer,
   FinanceBudget,
+  FinanceBudgetBaselineQualificationRead,
+  FinanceBudgetBaselineReview,
   FinanceBudgetBucketList,
   FinanceBudgetPace,
   FinanceBudgetPacePeriod,
@@ -83,6 +86,10 @@ import type {
   FinanceSetupInput,
   FinanceSetupPayload,
   FinanceSnapshot,
+  FinanceSpendingDashboard,
+  FinanceSpendingQuery,
+  FinanceSpendingReferenceFilter,
+  FinanceSpendingReferencePage,
   FinanceStatus,
   FinanceToolResult,
   FinanceTransaction,
@@ -95,6 +102,7 @@ import type {
   ManageFinanceRecurringItemInput,
   ManageFinanceRuleInput,
   MergeFinanceMerchantsInput,
+  PrepareFinanceBudgetBaselineQualificationInput,
   PreviewFinanceBudgetPolicyInput,
   ReconcileFinanceReimbursementInput,
   RemoveFinanceTransactionInput,
@@ -118,9 +126,13 @@ import type {
   UpsertFinanceAttentionItemInput,
 } from "@personal-os/domain";
 import {
+  financeBudgetBaselineQualificationReadSchema,
+  financeBudgetBaselineReviewSchema,
   financeLedgerChallengePageSchema,
   financeLedgerChallengeSchema,
   financePeriodReviewSchema,
+  financeSpendingDashboardSchema,
+  financeSpendingReferencePageSchema,
   financeStatusSchema,
 } from "@personal-os/domain";
 
@@ -165,6 +177,71 @@ export function createFinanceApi(request: FinanceRequest) {
   }
 
   return {
+    async getFinanceBudgetBaselineQualification(
+      month: string,
+    ): Promise<FinanceBudgetBaselineQualificationRead> {
+      return financeBudgetBaselineQualificationReadSchema.parse(
+        await request(
+          `/v1/finances/budget-baselines/qualification?${new URLSearchParams({ month })}`,
+        ),
+      );
+    },
+    async prepareFinanceBudgetBaselineQualification(
+      input: PrepareFinanceBudgetBaselineQualificationInput,
+    ): Promise<FinanceBudgetBaselineReview> {
+      return financeBudgetBaselineReviewSchema.parse(
+        await request("/v1/finances/budget-baselines/qualification/prepare", {
+          method: "POST",
+          body: JSON.stringify(input),
+        }),
+      );
+    },
+    async confirmFinanceBudgetBaselineQualification(
+      input: ConfirmFinanceBudgetBaselineQualificationInput,
+    ): Promise<FinanceBudgetBaselineQualificationRead> {
+      return financeBudgetBaselineQualificationReadSchema.parse(
+        await request("/v1/finances/budget-baselines/qualification/confirm", {
+          method: "POST",
+          body: JSON.stringify(input),
+        }),
+      );
+    },
+    async listFinanceSpendingTransactions(
+      filter: FinanceSpendingReferenceFilter,
+      cursor?: string,
+      limit = 50,
+    ): Promise<FinanceSpendingReferencePage> {
+      return financeSpendingReferencePageSchema.parse(
+        await request("/v1/finances/spending/transactions", {
+          method: "POST",
+          body: JSON.stringify({ filter, ...(cursor ? { cursor } : {}), limit }),
+        }),
+      );
+    },
+    async getFinanceSpending(query: FinanceSpendingQuery): Promise<FinanceSpendingDashboard> {
+      const search = new URLSearchParams({
+        from: query.scope.from,
+        through: query.scope.through,
+        timezone: query.scope.timezone,
+        basis: query.scope.basis,
+        includePending: String(query.scope.includePending),
+        subtractRefunds: String(query.scope.subtractRefunds),
+        grouping: query.grouping,
+        includeUncategorized: String(query.includeUncategorized),
+      });
+      for (const key of ["accountIds", "categoryIds"] as const) {
+        const values = query.scope[key];
+        search.set(
+          `${key}Selection`,
+          values === null ? "all" : values.length ? "selected" : "none",
+        );
+        for (const id of values ?? []) search.append(key, id ?? "uncategorized");
+      }
+      const response = await request<{ spending: FinanceSpendingDashboard }>(
+        `/v1/finances/spending?${search}`,
+      );
+      return financeSpendingDashboardSchema.parse(response.spending);
+    },
     async getFinancePosition(scope: FinancePositionReadScope): Promise<FinancePositionEvidence> {
       const search = new URLSearchParams({ from: scope.from, through: scope.through });
       if (scope.accountIds !== undefined) search.set("accountIds", scope.accountIds.join(","));

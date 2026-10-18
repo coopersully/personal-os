@@ -876,6 +876,20 @@
       "when": 1792353604000,
       "tag": "0117_finance_planning_evidence",
       "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1792353605000,
+      "tag": "0118_finance_preferences_legacy_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1792353606000,
+      "tag": "0119_finance_recurring_occurrences",
+      "breakpoints": true
     }
   ]
 }

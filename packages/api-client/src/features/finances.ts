@@ -62,6 +62,9 @@ import type {
   FinanceMaintenanceInput,
   FinanceMaintenancePayload,
   FinanceMerchant,
+  FinanceOnboardingCompleteInput,
+  FinanceOnboardingSaveInput,
+  FinanceOnboardingSnapshot,
   FinanceOverview,
   FinancePeriodReview,
   FinancePlaybookResponse,
@@ -130,6 +133,7 @@ import {
   financeBudgetBaselineReviewSchema,
   financeLedgerChallengePageSchema,
   financeLedgerChallengeSchema,
+  financeOnboardingSnapshotSchema,
   financePeriodReviewSchema,
   financeSpendingDashboardSchema,
   financeSpendingReferencePageSchema,
@@ -177,6 +181,29 @@ export function createFinanceApi(request: FinanceRequest) {
   }
 
   return {
+    async getFinanceOnboarding(): Promise<FinanceOnboardingSnapshot> {
+      return financeOnboardingSnapshotSchema.parse(await request("/v1/finances/onboarding"));
+    },
+    async saveFinanceOnboardingAnswers(
+      input: FinanceOnboardingSaveInput,
+    ): Promise<FinanceOnboardingSnapshot> {
+      return financeOnboardingSnapshotSchema.parse(
+        await request("/v1/finances/onboarding/answers", {
+          method: "POST",
+          body: JSON.stringify(input),
+        }),
+      );
+    },
+    async completeFinanceOnboarding(
+      input: FinanceOnboardingCompleteInput,
+    ): Promise<FinanceOnboardingSnapshot> {
+      return financeOnboardingSnapshotSchema.parse(
+        await request("/v1/finances/onboarding/complete", {
+          method: "POST",
+          body: JSON.stringify(input),
+        }),
+      );
+    },
     async getFinanceBudgetBaselineQualification(
       month: string,
     ): Promise<FinanceBudgetBaselineQualificationRead> {

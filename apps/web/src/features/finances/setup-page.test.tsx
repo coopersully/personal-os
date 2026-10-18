@@ -2,6 +2,8 @@
 import "@testing-library/jest-dom/vitest";
 import {
   type FinanceConfiguration,
+  type FinanceOnboardingAdapter,
+  type FinanceOnboardingSnapshot,
   financeConfigurationCapabilities,
   financeProfileVersionSchema,
 } from "@personal-os/domain";
@@ -14,6 +16,9 @@ import { FinanceSetupPage } from "./setup-page.js";
 
 const api = vi.hoisted(() => ({
   getFinanceConfiguration: vi.fn(),
+  getFinanceOnboarding: vi.fn(),
+  saveFinanceOnboardingAnswers: vi.fn(),
+  completeFinanceOnboarding: vi.fn(),
   updateFinancialProfile: vi.fn(),
   updateFinanceProfile: vi.fn(),
   setupFinances: vi.fn(),
@@ -39,6 +44,38 @@ const profile = financeProfileVersionSchema.parse({
   preferences: { bufferTarget: null, debtPriority: null, emergencyReserveMonths: null, notes: [] },
   provenance: {},
 });
+function onboarding(): FinanceOnboardingSnapshot {
+  return {
+    revision: 1,
+    completedAt: null,
+    existingAccess: false,
+    source: {
+      state: "usable",
+      summary: "Included account with confirmed ownership",
+      recoveryHref: "/finances/accounts",
+    },
+    contextReview: "reviewed",
+    questions: [
+      {
+        questionId: "profile:income",
+        label: "Review saved income",
+        disposition: "unreviewed",
+        answerSummary: null,
+        allowsNone: false,
+      },
+    ],
+    displayPreferences: { reviewed: false, summary: ["Current month, personal cost"] },
+    automationChoice: null,
+    manualVisibility: "auto",
+    automation: {
+      registrationCount: 0,
+      authorizedRegistrationWithCadence: false,
+      chatVerification: "pending",
+      canSendChat: false,
+      historyAvailable: true,
+    },
+  };
+}
 function configuration(): FinanceConfiguration {
   return {
     profile: { state: "loaded", value: profile },
@@ -63,15 +100,15 @@ function configuration(): FinanceConfiguration {
     capabilities: financeConfigurationCapabilities({ state: "loaded", value: null }),
   };
 }
-function show(url = "/finances/setup") {
+function show(url = "/finances/setup", onboardingAdapter?: FinanceOnboardingAdapter | null) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  client.setQueryData(["me"], { planningTimezone: "America/New_York" });
+  client.setQueryData(["me"], { id, planningTimezone: "America/New_York" });
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[url]}>
-        <FinanceSetupPage />
+        <FinanceSetupPage {...(onboardingAdapter === undefined ? {} : { onboardingAdapter })} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -102,6 +139,7 @@ it("dates first payroll settings in the account's planning timezone", async () =
 beforeEach(() => {
   vi.resetAllMocks();
   api.getFinanceConfiguration.mockResolvedValue(configuration());
+  api.getFinanceOnboarding.mockResolvedValue(onboarding());
   api.listFinanceGoals.mockResolvedValue({ outcome: "completed", data: [] });
   api.listFinanceAccounts.mockResolvedValue({ accounts: [] });
   api.updateFinancialProfile.mockImplementation(async (input) => ({
@@ -194,9 +232,14 @@ it("keeps incomplete collection rows local across section navigation", async () 
 it("opens independent sections without mutations and retains a safe return link", async () => {
   show("/finances/setup?section=budget&returnTo=%2Ffinances%2Fplan");
   expect(await screen.findByRole("button", { name: "Prepare budget" })).toBeEnabled();
-  expect(screen.getByRole("link", { name: "Return to previous page" })).toHaveAttribute(
+  expect(screen.queryByRole("link", { name: "Continue" })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Correct existing records" })).toHaveAttribute(
     "href",
-    "/finances/plan",
+    "/finances/transactions?financeTask=correct",
+  );
+  expect(screen.getByRole("link", { name: "Import records" })).toHaveAttribute(
+    "href",
+    "/finances/transactions?financeTask=import",
   );
   expect(api.setupFinances).not.toHaveBeenCalled();
 });
@@ -630,7 +673,7 @@ it("renders account connection states and links an existing budget", async () =>
   await userEvent.click(screen.getByRole("button", { name: /Budget Draft/ }));
   expect(screen.getByRole("link", { name: "Open budget" })).toHaveAttribute(
     "href",
-    "/finances/plan",
+    "/finances/plan?financeTask=approve",
   );
 });
 it("retries a rejected payroll change without losing the draft", async () => {
@@ -669,4 +712,87 @@ it.each([
     api.updateFinancialProfile.mock.calls.length + api.updateFinanceProfile.mock.calls.length,
   ).toBe(1);
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+it("uses the real onboarding API adapter by default and advances only on server receipts", async () => {
+  show();
+  const user = userEvent.setup();
+  await user.selectOptions(await screen.findByLabelText("Review saved income"), "unknown");
+  await user.click(screen.getByRole("checkbox", { name: "I reviewed my display preferences" }));
+  await user.click(screen.getByRole("radio", { name: "Use Finance manually" }));
+  const saved = {
+    ...onboarding(),
+    revision: 2,
+    automationChoice: "later" as const,
+    displayPreferences: { reviewed: true, summary: [] },
+    questions: onboarding().questions.map((q) => ({ ...q, disposition: "unknown" as const })),
+  };
+  api.saveFinanceOnboardingAnswers.mockResolvedValue(saved);
+  await user.click(screen.getByRole("button", { name: "Save review" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Finish setup" })).toBeEnabled());
+  expect(api.saveFinanceOnboardingAnswers).toHaveBeenCalledWith({
+    expectedRevision: 1,
+    idempotencyKey: expect.any(String),
+    automationChoice: "later",
+    displayPreferencesReviewed: true,
+    answers: [{ questionId: "profile:income", disposition: "unknown" }],
+  });
+  let finish!: (value: FinanceOnboardingSnapshot) => void;
+  api.completeFinanceOnboarding.mockReturnValue(
+    new Promise<FinanceOnboardingSnapshot>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await user.click(screen.getByRole("button", { name: "Finish setup" }));
+  expect(
+    screen.queryByText("Setup complete. Your workspace remains available."),
+  ).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Reload setup review" })).toBeDisabled();
+  expect(api.completeFinanceOnboarding).toHaveBeenCalledWith({
+    expectedRevision: 2,
+    idempotencyKey: expect.any(String),
+    automationChoice: "later",
+  });
+  await act(async () => finish({ ...saved, revision: 3, completedAt: "2026-10-18T12:00:00Z" }));
+  expect(
+    await screen.findByText("Setup complete. Your workspace remains available."),
+  ).toBeVisible();
+});
+
+it("preserves an explicitly injected durable adapter without calling the default API", async () => {
+  const adapter = {
+    getFinanceOnboarding: vi.fn().mockResolvedValue(onboarding()),
+    saveFinanceOnboardingAnswers: vi.fn(),
+    completeFinanceOnboarding: vi.fn(),
+  };
+  show("/finances/setup", adapter);
+  await screen.findByLabelText("Review saved income");
+  expect(adapter.getFinanceOnboarding).toHaveBeenCalledTimes(1);
+  expect(api.getFinanceOnboarding).not.toHaveBeenCalled();
+});
+it("allows explicit null only when a composition stages setup review separately", async () => {
+  show("/finances/setup", null);
+  await screen.findByLabelText("Household size");
+  expect(screen.queryByRole("region", { name: "Setup review" })).not.toBeInTheDocument();
+  expect(api.getFinanceOnboarding).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["/finances/plan?financeTask=approve", "/finances/plan?financeTask=approve"],
+  ["https://evil.test", "/finances"],
+  ["/finances/setup", "/finances"],
+])("continues to a validated destination only after durable completion: %s", async (returnTo, expected) => {
+  api.getFinanceOnboarding.mockResolvedValue({
+    ...onboarding(),
+    completedAt: "2026-10-18T12:00:00Z",
+    automationChoice: "later",
+  });
+  show(`/finances/setup?returnTo=${encodeURIComponent(returnTo)}`);
+  expect(await screen.findByRole("link", { name: "Continue" })).toHaveAttribute("href", expected);
+});
+it("keeps grandfathered access distinct from completed setup navigation", async () => {
+  api.getFinanceOnboarding.mockResolvedValue({ ...onboarding(), existingAccess: true });
+  show("/finances/setup?returnTo=%2Ffinances%2Fplan");
+  await screen.findByRole("radiogroup", { name: "Initial Finance mode" });
+  expect(screen.queryByRole("link", { name: "Continue" })).not.toBeInTheDocument();
 });

@@ -13,8 +13,17 @@ import { FinanceReviewPage } from "./review-page.js";
 import { FinanceSetupPage } from "./setup-page.js";
 import { FinanceSpendingPage } from "./spending-page";
 import { FinanceWealthPage } from "./wealth-page.js";
+import { FinanceWorkspaceAccess } from "./workspace-access";
 
 export function FinanceWorkspacePage({ ownerId }: { ownerId: string }) {
+  return (
+    <FinanceWorkspaceAccess>
+      <FinanceWorkspaceRoute ownerId={ownerId} />
+    </FinanceWorkspaceAccess>
+  );
+}
+
+function FinanceWorkspaceRoute({ ownerId }: { ownerId: string }) {
   const location = useLocation();
   const [section, reviewId] = location.pathname.split("/").slice(2);
   switch (section) {
@@ -35,9 +44,13 @@ export function FinanceWorkspacePage({ ownerId }: { ownerId: string }) {
     case "accounts":
       return <FinanceAccountsPage />;
     case "plan":
-      return <FinancePlanPage />;
+      return (
+        <FinancePlanPage
+          approvalTask={new URLSearchParams(location.search).get("financeTask") === "approve"}
+        />
+      );
     case "budgets":
-      return <Navigate replace to="/finances/plan" />;
+      return <Navigate replace to={`/finances/plan${location.search}`} />;
     case "cashflow":
     case "subscriptions":
       return <FinanceCashflowPage />;
@@ -49,6 +62,8 @@ export function FinanceWorkspacePage({ ownerId }: { ownerId: string }) {
       ) : (
         <Navigate replace to="/finances" />
       );
+    case "profile":
+      return <Navigate replace to="/finances/setup?section=profile" />;
     case "setup":
       return <FinanceSetupPage />;
     case "wealth":
@@ -56,7 +71,7 @@ export function FinanceWorkspacePage({ ownerId }: { ownerId: string }) {
     case "imports":
       return <Navigate replace to="/finances/transactions?import=1" />;
     case "health":
-      return <Navigate replace to="/finances/transactions?checks=1" />;
+      return <Navigate replace to="/finances/transactions?checks=1&financeTask=correct" />;
     case "transactions":
       return <FinancesPage key={`${section}:${location.search}`} />;
     case "":

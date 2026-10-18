@@ -374,3 +374,22 @@ The account selector distinguishes selecting no accounts from following all elig
 persisted change. These view preferences never modify planning inclusion or account meanings.
 Finance notification settings show inherited/effective policy and support resetting an existing
 workspace override to global preferences using its current revision.
+
+## Manual account currency
+
+Manual account creation accepts an optional explicit three-letter uppercase currency code.
+The field starts blank: omitted or blank currency remains unknown (`null`), never a guessed USD.
+The canonical account writer stores the stated code and includes it in the creation audit and
+readback. The balance input displays the selected currency only after a valid code is present.
+Existing account presentation uses its source currency; unknown currency and unsupported accounting
+scope remain unavailable rather than becoming USD. This does not add conversion or qualify a
+non-USD source for USD-only planning.
+
+The existing account-update contract has no currency correction field. Correcting a previously
+created account's currency requires a separately reviewed canonical update contract; this creation
+change does not reinterpret historical accounts or transactions.
+
+The manual account form uses the same Sonner identifier from loading through the confirmed
+creation result or error. Field corrections stay with their controls; action-result notifications
+are not duplicated inline. This repairs the form's inherited feedback behavior while extending
+currency capture; it is not a currency regression.

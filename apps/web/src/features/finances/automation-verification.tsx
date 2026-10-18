@@ -102,6 +102,7 @@ export function AutomationVerification({
         // A replacement challenge supersedes proof. Clear stale verified projections
         // before refetching, including owner-qualified Chat readiness queries.
         await Promise.all([
+          client.invalidateQueries({ queryKey: ["finance-onboarding"] }),
           client.resetQueries(
             { queryKey: ["finance-conversation-readiness"] },
             { throwOnError: true },
@@ -122,6 +123,7 @@ export function AutomationVerification({
         ]);
         client.setQueryData(["finance-conversation-host-readiness", scheduleId], hostReadiness);
         client.setQueryData(["finance-conversation-readiness"], readiness);
+        await client.invalidateQueries({ queryKey: ["finance-onboarding"] });
         toast.success(
           hostReadiness.canSend
             ? "This host is ready for Finance Chat."

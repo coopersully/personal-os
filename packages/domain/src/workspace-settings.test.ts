@@ -18,6 +18,7 @@ describe("workspace settings contracts", () => {
     expect(getDefaultWorkspacePreferences("finances")).toEqual({
       includeArchivedInSearch: true,
       financeTransactionView: "table",
+      financeManualVisibility: "auto",
       financeSpendingView: "bubbles",
       financeSpendingGrouping: "auto",
       financeSpendingIncludePending: true,
@@ -106,4 +107,25 @@ it("adds Spending defaults without resetting existing account/transaction prefer
       preferences: { financeSpendingView: "rhythm" },
     }).success,
   ).toBe(true);
+});
+
+it("preserves explicit manual visibility with revisioned omitted-field updates", () => {
+  const settings = resolveWorkspaceSettings("finances", {
+    revision: 3,
+    financeManualVisibility: "hide",
+    spendAccountIds: [],
+  });
+  expect(settings.preferences.financeManualVisibility).toBe("hide");
+  expect(
+    workspaceSettingsUpdateSchemas.finances.parse({
+      expectedRevision: 3,
+      preferences: { financeSpendingView: "rhythm" },
+    }).preferences,
+  ).toEqual({ financeSpendingView: "rhythm" });
+  expect(
+    workspaceSettingsUpdateSchemas.finances.parse({
+      expectedRevision: 3,
+      preferences: { financeManualVisibility: "show" },
+    }).preferences,
+  ).toEqual({ financeManualVisibility: "show" });
 });

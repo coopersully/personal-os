@@ -76,14 +76,14 @@ function result<T>(data: T): FinanceToolResult<T> {
     schemaVersion: 1,
   };
 }
-function mount(route = "/finances/plan") {
+function mount(route = "/finances/plan", approvalTask = false) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[route]}>
-        <FinancePlanPage />
+        <FinancePlanPage approvalTask={approvalTask} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -642,4 +642,18 @@ it("keeps approval visible when the following budget refresh fails", async () =>
       data: { status: "active" },
     }),
   );
+});
+
+it("scopes setup approval entry to the actual proposal and excludes plan creation", async () => {
+  mount("/finances/plan?financeTask=approve", true);
+  expect(await screen.findByRole("button", { name: "Approve version 3" })).toBeEnabled();
+  expect(screen.queryByRole("button", { name: "Revise plan" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Budget buckets" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Approve version 3" }));
+  await waitFor(() =>
+    expect(api.approveFinanceBudget).toHaveBeenCalledWith(
+      expect.objectContaining({ budgetVersionId: id }),
+    ),
+  );
+  expect(api.createFinanceBudget).not.toHaveBeenCalled();
 });

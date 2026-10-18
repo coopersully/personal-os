@@ -6,6 +6,11 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { FinanceLinkedTransaction, FinanceTransactionControls } from "./transaction-controls.js";
 
+const workspaceReadiness = vi.hoisted(() => vi.fn());
+vi.mock("./use-finance-workspace-readiness", () => ({
+  useFinanceWorkspaceReadiness: workspaceReadiness,
+}));
+
 const api = vi.hoisted(() => ({
   getFinanceTransaction: vi.fn(),
   getWorkspaceSettings: vi
@@ -17,6 +22,16 @@ const api = vi.hoisted(() => ({
     preferences: input.preferences,
   })),
 }));
+beforeEach(() => {
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: true,
+    readiness: { workspaceAccessible: true },
+    isPending: false,
+    isError: false,
+    error: null,
+    reload: vi.fn(),
+  });
+});
 function render(ui: React.ReactNode) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },

@@ -88,6 +88,7 @@ export type RequestLog = TransportDiagnostics & {
     | "finance_receipt_mail_search_failed"
     | "mail_rule_work_dispatch_failed"
     | "finance_configuration_section_failed"
+    | "finance_onboarding_chat_unavailable"
     | "workspace_review_search_source_failed"
     | "mail_attachment_download_failed"
     | "request";

@@ -143,6 +143,7 @@ import { financeSectionFromPath } from "./navigation.js";
 import { PlaidConnectButton } from "./plaid-connect.js";
 import { FinanceReimbursementList } from "./reimbursement-list.js";
 import { FinanceAgentReviewQueue } from "./review-queue.js";
+import { spendingRecoveryDestination } from "./spending-reference";
 import { TransactionBreakdownDialog } from "./transaction-breakdown-dialog.js";
 import { FinanceLinkedTransaction, FinanceTransactionControls } from "./transaction-controls.js";
 import { financeSpendingReferenceFilter, financeTransactionFilters } from "./transaction-query.js";
@@ -162,6 +163,10 @@ export function FinancesPage() {
   const transactionFilters = financeTransactionFilters(transactionParams);
   const spendingReference = financeSpendingReferenceFilter(transactionParams);
   const exactSpending = spendingReference.status !== "absent";
+  const spendingRecoveryHref =
+    spendingReference.status === "valid"
+      ? spendingRecoveryDestination(spendingReference.filter)
+      : "/finances/spending";
   const linkedTransactionId = transactionParams.get("transactionId");
   const linkedReviewId = transactionParams.get("item") ?? undefined;
   const queryClient = useQueryClient();
@@ -764,9 +769,16 @@ export function FinancesPage() {
             ) : null}
           </div>
           <div className="flex gap-2">
-            <ShadcnButton asChild variant="outline" size="sm">
-              <Link to="/finances/spending">Open Spending</Link>
-            </ShadcnButton>
+            {spendingRecoveryHref ? (
+              <ShadcnButton asChild variant="outline" size="sm">
+                <Link to={spendingRecoveryHref}>Open Spending</Link>
+              </ShadcnButton>
+            ) : (
+              <p>
+                This selection cannot safely return to Spending. View the ledger to choose another
+                source.
+              </p>
+            )}
             <ShadcnButton
               variant="ghost"
               size="sm"

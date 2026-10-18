@@ -1934,6 +1934,10 @@ it("fails closed for invalid Spending links and provides explicit ledger recover
   expect(api.listFinanceTransactions).not.toHaveBeenCalled();
   expect(api.listFinanceSpendingTransactions).not.toHaveBeenCalled();
   expect(screen.queryByText("No transactions yet")).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Open Spending" })).toHaveAttribute(
+    "href",
+    "/finances/spending",
+  );
   fireEvent.click(screen.getByRole("button", { name: "View ledger" }));
   await waitFor(() => expect(api.listFinanceTransactions).toHaveBeenCalled());
 });
@@ -2002,9 +2006,18 @@ it("keeps changed Spending revisions closed instead of showing unrelated transac
   await screen.findByText(/This Spending view could not be confirmed/);
   expect(api.listFinanceTransactions).not.toHaveBeenCalled();
   expect(screen.queryByText("No transactions yet")).not.toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Open Spending" })).toHaveAttribute(
-    "href",
-    "/finances/spending",
+  const href = screen.getByRole("link", { name: "Open Spending" }).getAttribute("href");
+  const recovery = new URL(href ?? "", "https://nohmi.example");
+  expect(recovery.pathname).toBe("/finances/spending");
+  expect(JSON.parse(recovery.searchParams.get("recoverSpending") ?? "{}")).toEqual(
+    exactSpendingFilter,
+  );
+  expect(recovery.searchParams.has("spending")).toBe(false);
+  expect(api.listFinanceSpendingTransactions).toHaveBeenCalledTimes(1);
+  expect(api.listFinanceSpendingTransactions).toHaveBeenCalledWith(
+    exactSpendingFilter,
+    undefined,
+    50,
   );
 });
 
@@ -2021,5 +2034,54 @@ it("shows an exact empty Spending view without suggesting the ledger is empty", 
   renderPage(exactSpendingPath);
   expect(await screen.findByText("No source transactions in this Spending view")).toBeVisible();
   expect(screen.queryByText("No transactions yet")).not.toBeInTheDocument();
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+});
+
+it("preserves the complete original historical scope and selected group/bin on stale recovery", async () => {
+  const filter = {
+    ...exactSpendingFilter,
+    query: {
+      scope: {
+        ...exactSpendingFilter.query.scope,
+        timezone: "America/Chicago",
+        accountIds: [],
+        categoryIds: [null, "food"],
+        basis: "full_outflow",
+        includePending: true,
+        subtractRefunds: false,
+      },
+      grouping: "buckets",
+      includeUncategorized: false,
+    },
+    groupId: "bucket:food",
+    from: "2026-08-08",
+    through: "2026-08-09",
+  };
+  api.listFinanceSpendingTransactions.mockRejectedValue(
+    Object.assign(new Error("Spending changed"), { status: 409 }),
+  );
+  renderPage(`/finances/transactions?${new URLSearchParams({ spending: JSON.stringify(filter) })}`);
+  await screen.findByText(/This Spending view could not be confirmed/);
+  const href = screen.getByRole("link", { name: "Open Spending" }).getAttribute("href");
+  const destination = new URL(href ?? "", "https://nohmi.example");
+  expect(destination.pathname).toBe("/finances/spending");
+  expect(JSON.parse(destination.searchParams.get("recoverSpending") ?? "{}")).toEqual(filter);
+  expect(destination.searchParams.has("spending")).toBe(false);
+  expect(api.listFinanceSpendingTransactions).toHaveBeenCalledOnce();
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+});
+
+it("does not replace an unrepresentable valid recovery selection with default Spending", async () => {
+  const descriptor = {
+    ...exactSpendingFilter,
+    query: { scope: { ...exactSpendingFilter.query.scope, accountIds: [""] } },
+  };
+  descriptor.query.scope.accountIds = ["a".repeat(16000 - JSON.stringify(descriptor).length)];
+  const serialized = JSON.stringify(descriptor);
+  expect(serialized).toHaveLength(16000);
+  api.listFinanceSpendingTransactions.mockRejectedValue(new Error("Spending changed"));
+  renderPage(`/finances/transactions?${new URLSearchParams({ spending: serialized })}`);
+  expect(await screen.findByText(/This selection cannot safely return to Spending/)).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Open Spending" })).not.toBeInTheDocument();
   expect(api.listFinanceTransactions).not.toHaveBeenCalled();
 });

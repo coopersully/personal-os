@@ -1,10 +1,11 @@
+import { ApiClientError } from "@personal-os/api-client";
 import type {
   FinanceAnswer,
   FinanceConversationMessage,
   FinanceConversationReadiness,
   FinanceConversationSendInput,
 } from "@personal-os/domain";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -33,6 +34,7 @@ export function FinanceConversationPage({ ownerId }: { ownerId: string }) {
   return <OwnerConversation key={ownerId} ownerId={ownerId} />;
 }
 function OwnerConversation({ ownerId }: { ownerId: string }) {
+  const client = useQueryClient();
   const [params] = useSearchParams();
   const questionId = params.get("question");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -55,6 +57,36 @@ function OwnerConversation({ ownerId }: { ownerId: string }) {
   const commands = useRef(new Map<string, FinanceAnswer | FinanceConversationSendInput>());
   const readThrough = useRef("0");
   const [loadedThrough, setLoadedThrough] = useState("0");
+  const fetchedThrough = useRef("0");
+  const [accessDenied, setAccessDenied] = useState(false);
+  const accessGeneration = useRef(0);
+  const manualHistory = useRef(false);
+  const clearDeniedHistory = useCallback(
+    (error: unknown) => {
+      if (!(error instanceof ApiClientError) || (error.status !== 401 && error.status !== 403))
+        return;
+      accessGeneration.current += 1;
+      setAccessDenied(true);
+      setMessages([]);
+      setCursor(null);
+      setLoadedThrough("0");
+      fetchedThrough.current = "0";
+      readThrough.current = "0";
+      // Direct page requests do not pass through QueryCache's denial handler.
+      client
+        .getQueryCache()
+        .find({ queryKey: ["finance-conversation-history", ownerId], exact: true })
+        ?.setState({
+          data: undefined,
+          dataUpdatedAt: 0,
+          error,
+          errorUpdatedAt: Date.now(),
+          status: "error",
+          fetchStatus: "idle",
+        });
+    },
+    [client, ownerId],
+  );
   const readiness = useQuery({
     queryKey: ["finance-conversation-readiness", ownerId],
     queryFn: () => api.getFinanceConversationReadiness(),
@@ -83,18 +115,43 @@ function OwnerConversation({ ownerId }: { ownerId: string }) {
   const initial = useQuery({
     queryKey: ["finance-conversation-history", ownerId],
     queryFn: async () => {
-      const page = await api.getFinanceConversationHistory({ limit: 50 });
-      return page;
+      const generation = accessGeneration.current;
+      try {
+        const page = await api.getFinanceConversationHistory({ limit: 50 });
+        if (generation !== accessGeneration.current)
+          throw new ApiClientError({ status: 403, code: "forbidden", message: "Access changed" });
+        if (generation === accessGeneration.current) {
+          merge(page.messages);
+          const through = page.messages.reduce(
+            (max, message) => (BigInt(message.sequence) > BigInt(max) ? message.sequence : max),
+            "0",
+          );
+          if (BigInt(through) > BigInt(fetchedThrough.current)) fetchedThrough.current = through;
+          setAccessDenied(false);
+        }
+        return page;
+      } catch (error) {
+        clearDeniedHistory(error);
+        if (!manualHistory.current)
+          toast.error("Couldn’t load conversation. Try Refresh conversation.");
+        throw error;
+      }
     },
   });
   // Query data is rendered directly, including after a refresh failure; fetching never marks it read.
-  const visible = [
-    ...new Map(
-      [...(initial.data?.messages ?? []), ...messages].map((message) => [message.id, message]),
-    ).values(),
-  ].sort((a, b) =>
-    BigInt(a.sequence) < BigInt(b.sequence) ? -1 : BigInt(a.sequence) > BigInt(b.sequence) ? 1 : 0,
-  );
+  const visible = accessDenied
+    ? []
+    : [
+        ...new Map(
+          [...(initial.data?.messages ?? []), ...messages].map((message) => [message.id, message]),
+        ).values(),
+      ].sort((a, b) =>
+        BigInt(a.sequence) < BigInt(b.sequence)
+          ? -1
+          : BigInt(a.sequence) > BigInt(b.sequence)
+            ? 1
+            : 0,
+      );
   const historyThrough = (initial.data?.messages ?? []).reduce(
     (max, message) => (BigInt(message.sequence) > BigInt(max) ? message.sequence : max),
     loadedThrough,
@@ -105,23 +162,35 @@ function OwnerConversation({ ownerId }: { ownerId: string }) {
       if (BigInt(sequence) > BigInt(historyThrough)) return;
       if (BigInt(sequence) <= BigInt(readThrough.current)) return;
       readThrough.current = sequence;
-      void api.markFinanceConversationRendered(sequence).catch(() => {
+      if (accessDenied) return;
+      void api.markFinanceConversationRendered(sequence).catch((error) => {
+        clearDeniedHistory(error);
         if (readThrough.current === sequence) readThrough.current = "0";
       });
     },
-    [historyThrough],
+    [historyThrough, accessDenied, clearDeniedHistory],
   );
-  const loadMore = async () => {
+  const loadMore = async (refresh = false) => {
     if (loadingHistory) return;
     setLoadingHistory(true);
-    const id = toast.loading("Loading messages…");
+    const id = toast.loading(refresh ? "Refreshing conversation…" : "Loading messages…");
+    const generation = accessGeneration.current;
     try {
-      const after = cursor ?? initial.data?.nextCursor;
+      const after = refresh ? fetchedThrough.current : (cursor ?? initial.data?.nextCursor);
       const page = await api.getFinanceConversationHistory({
         ...(after ? { after } : {}),
         limit: 50,
       });
+      if (generation !== accessGeneration.current) {
+        toast.error("Access changed. Reload the conversation before continuing.", { id });
+        return;
+      }
+      setAccessDenied(false);
       merge(page.messages);
+      fetchedThrough.current = page.messages.reduce(
+        (max, message) => (BigInt(message.sequence) > BigInt(max) ? message.sequence : max),
+        fetchedThrough.current,
+      );
       setLoadedThrough((current) =>
         page.messages.reduce(
           (max, message) => (BigInt(message.sequence) > BigInt(max) ? message.sequence : max),
@@ -130,7 +199,8 @@ function OwnerConversation({ ownerId }: { ownerId: string }) {
       );
       setCursor(page.nextCursor);
       toast.success("Messages loaded", { id });
-    } catch {
+    } catch (error) {
+      clearDeniedHistory(error);
       toast.error("Couldn’t load messages. Try again.", { id });
     } finally {
       setLoadingHistory(false);
@@ -144,12 +214,13 @@ function OwnerConversation({ ownerId }: { ownerId: string }) {
         ? question.data?.state !== "available" ||
           question.data.question.status !== "open" ||
           answerBlocked
-        : !readiness.data?.canSend || readiness.isError
+        : accessDenied || !readiness.data?.canSend || readiness.isError
     )
       return;
     setPending(true);
     const id = toast.loading(contextual ? "Saving answer…" : "Saving message…");
     const snapshot = text;
+    const generation = accessGeneration.current;
     try {
       const available = question.data?.state === "available" ? question.data.question : null;
       const identity = JSON.stringify([draftKey, text.trim(), contextual ? available?.work : null]);
@@ -184,7 +255,12 @@ function OwnerConversation({ ownerId }: { ownerId: string }) {
         setAnswerBlocked(true);
         void question.refetch();
       } else {
-        merge([await api.sendFinanceConversationMessage(command)]);
+        const message = await api.sendFinanceConversationMessage(command);
+        if (generation !== accessGeneration.current) {
+          toast.error("Access changed. Reload the conversation before continuing.", { id });
+          return;
+        }
+        merge([message]);
         commands.current.delete(identity);
       }
       setDrafts((current) =>
@@ -192,7 +268,8 @@ function OwnerConversation({ ownerId }: { ownerId: string }) {
       );
       toast.success(contextual ? "Answer saved" : "Message saved for the next run", { id });
       void initial.refetch();
-    } catch {
+    } catch (error) {
+      clearDeniedHistory(error);
       toast.error("Couldn’t save. Your draft is retained; try again.", { id });
       void readiness.refetch();
     } finally {
@@ -202,17 +279,19 @@ function OwnerConversation({ ownerId }: { ownerId: string }) {
   const available = question.data?.state === "available" ? question.data.question : null;
   return (
     <section aria-label="Finance chat" className="mx-auto grid w-full min-w-0 max-w-3xl gap-6 p-4">
-      {!readiness.data?.canSend || readiness.isError ? (
+      {accessDenied || !readiness.data?.canSend || readiness.isError ? (
         <div className="grid gap-2">
           <p className="text-sm text-muted-foreground">
             Chat sending is locked.{" "}
-            {readiness.isPending
-              ? "Checking automation access…"
-              : readiness.isError
-                ? "Automation access could not be checked."
-                : readiness.data
-                  ? lockReasons[readiness.data.reason]
-                  : "Check automation access."}
+            {accessDenied
+              ? "Conversation access was denied. Refresh to check access again."
+              : readiness.isPending
+                ? "Checking automation access…"
+                : readiness.isError
+                  ? "Automation access could not be checked."
+                  : readiness.data
+                    ? lockReasons[readiness.data.reason]
+                    : "Check automation access."}
           </p>
           <Link className="text-sm underline underline-offset-4" to="/finances/automations">
             Open Automations
@@ -222,24 +301,36 @@ function OwnerConversation({ ownerId }: { ownerId: string }) {
       {initial.isPending ? <p>Loading conversation…</p> : null}
       <Button
         variant="outline"
-        disabled={initial.isFetching}
+        disabled={initial.isFetching || loadingHistory}
         onClick={() => {
           void (async () => {
-            const id = toast.loading("Loading conversation…");
-            const result = await initial.refetch();
             void readiness.refetch();
-            if (result.isError) toast.error("Couldn’t load conversation. Try again.", { id });
-            else toast.success("Conversation loaded", { id });
+            if (fetchedThrough.current !== "0" && !accessDenied) {
+              await loadMore(true);
+              return;
+            }
+            const id = toast.loading("Loading conversation…");
+            manualHistory.current = true;
+            try {
+              const result = await initial.refetch();
+              if (result.isError) toast.error("Couldn’t load conversation. Try again.", { id });
+              else {
+                setCursor(undefined);
+                toast.success("Conversation loaded", { id });
+              }
+            } finally {
+              manualHistory.current = false;
+            }
           })();
         }}
       >
         Refresh conversation
       </Button>
-      {!initial.isPending && !initial.isError && visible.length === 0 ? (
+      {!accessDenied && !initial.isPending && !initial.isError && visible.length === 0 ? (
         <p className="text-sm text-muted-foreground">No messages yet.</p>
       ) : null}
       <FinanceConversationThread messages={visible} onRendered={rendered} />
-      {(cursor === undefined ? initial.data?.nextCursor : cursor) ? (
+      {!accessDenied && (cursor === undefined ? initial.data?.nextCursor : cursor) ? (
         <Button variant="outline" disabled={loadingHistory} onClick={() => void loadMore()}>
           Load more messages
         </Button>
@@ -289,7 +380,7 @@ function OwnerConversation({ ownerId }: { ownerId: string }) {
         disabled={
           questionId
             ? available?.status !== "open" || answerBlocked || question.isError
-            : !readiness.data?.canSend || readiness.isError
+            : accessDenied || !readiness.data?.canSend || readiness.isError
         }
         label={questionId ? "Answer" : "Message"}
       />

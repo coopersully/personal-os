@@ -235,7 +235,7 @@ export function SpendingBubbles({
                   className="pointer-events-none absolute inset-0 rounded-full"
                   style={{
                     clipPath: `inset(${(1 - fill) * 100}% 0 0 0)`,
-                    backgroundColor: `${visual.color}55`,
+                    backgroundColor: visual.fillColor,
                   }}
                 />
               ) : null}

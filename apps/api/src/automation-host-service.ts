@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   accessTokens,
   auditEvents,
+  automationHostPromptIssues,
   automationHostSchedules,
   type Database,
   financeAnswerContinuations,
@@ -12,6 +13,9 @@ import {
 } from "@personal-os/database";
 import {
   type AutomationHostSchedule,
+  automationHostPromptIssueInputSchema,
+  automationHostPromptIssueSchema,
+  automationHostPromptPageInputSchema,
   automationHostScheduleBindInputSchema,
   automationHostScheduleCancelInputSchema,
   automationHostScheduleCreateInputSchema,
@@ -21,10 +25,14 @@ import {
   automationHostScheduleUpdateInputSchema,
   observeAutomationHostScheduleHealth,
 } from "@personal-os/domain";
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { activeHostConnectionGrant } from "./automation-host-grant.js";
 import { AppError } from "./errors.js";
+import {
+  FINANCE_AUTOMATION_PROMPT_VERSION,
+  renderFinanceAutomationPrompt,
+} from "./finance/automation-prompts.js";
 import { reconcileFinanceContinuations } from "./finance/continuation-reconciliation.js";
 import { encryptJson } from "./security.js";
 import type { Principal } from "./types.js";
@@ -92,10 +100,80 @@ export function createAutomationHostService(options: {
     requireConnection(principal, row.authorizationConnectionId);
     return row;
   }
-  const result = (schedule: AutomationHostSchedule) => ({
-    schedule,
-    health: observeAutomationHostScheduleHealth(schedule, now()),
-  });
+  const promptValue = (row: typeof automationHostPromptIssues.$inferSelect) =>
+    automationHostPromptIssueSchema.parse({
+      scheduleId: row.scheduleId,
+      templateVersion: row.templateVersion,
+      scheduleVersionAtIssue: row.scheduleVersionAtIssue,
+      text: row.text,
+      issuedAt: row.issuedAt.toISOString(),
+    });
+  async function result(
+    schedule: AutomationHostSchedule,
+    userId: string,
+    tx: Database | Tx = db,
+    knownLatest?: typeof automationHostPromptIssues.$inferSelect | null,
+  ) {
+    const latest =
+      knownLatest !== undefined
+        ? knownLatest
+        : (
+            await tx
+              .select()
+              .from(automationHostPromptIssues)
+              .where(
+                and(
+                  eq(automationHostPromptIssues.scheduleId, schedule.id),
+                  eq(automationHostPromptIssues.userId, userId),
+                ),
+              )
+              .orderBy(desc(automationHostPromptIssues.templateVersion))
+              .limit(1)
+          )[0];
+    return {
+      schedule,
+      health: observeAutomationHostScheduleHealth(schedule, now()),
+      prompt: {
+        externalAdoption: "unknown" as const,
+        latestIssued: latest ? promptValue(latest) : null,
+        currentTemplateVersion: FINANCE_AUTOMATION_PROMPT_VERSION,
+        upgradeAvailable: !latest || latest.templateVersion < FINANCE_AUTOMATION_PROMPT_VERSION,
+      },
+      chatCapability: {
+        state: "unverified" as const,
+        reason: "message_protocol_unavailable" as const,
+      },
+    };
+  }
+  async function insertPrompt(tx: Tx, principal: Principal, schedule: AutomationHostSchedule) {
+    const [issue] = await tx
+      .insert(automationHostPromptIssues)
+      .values({
+        userId: principal.userId,
+        scheduleId: schedule.id,
+        templateVersion: FINANCE_AUTOMATION_PROMPT_VERSION,
+        scheduleVersionAtIssue: schedule.version,
+        text: renderFinanceAutomationPrompt(schedule),
+        issuedAt: now(),
+      })
+      .returning();
+    if (!issue) throw new AppError("conflict", "The prompt could not be issued.");
+    await tx.insert(auditEvents).values({
+      userId: principal.userId,
+      actorType: principal.actorType,
+      actorId: principal.actorId,
+      requestId: randomUUID(),
+      action: "finance.host_prompt.issued",
+      entityType: "automation_host_schedule",
+      entityId: schedule.id,
+      before: null,
+      after: {
+        templateVersion: issue.templateVersion,
+        scheduleVersionAtIssue: issue.scheduleVersionAtIssue,
+      },
+    });
+    return promptValue(issue);
+  }
   function scheduleAudit(schedule: AutomationHostSchedule) {
     return {
       state: schedule.state,
@@ -146,10 +224,91 @@ export function createAutomationHostService(options: {
         })
         .where(eq(automationHostSchedules.id, row.id));
       await recordScheduleChange(tx, principal, updated, row.schedule);
-      return result(updated);
+      return result(updated, principal.userId, tx);
     });
   }
   return {
+    async promptHistory(principal: Principal, id: string, raw: unknown) {
+      await authorizeHost(principal);
+      const input = automationHostPromptPageInputSchema.parse(raw);
+      return db.transaction(async (tx) => {
+        await owned(tx, principal, id);
+        const rows = await tx
+          .select()
+          .from(automationHostPromptIssues)
+          .where(
+            and(
+              eq(automationHostPromptIssues.userId, principal.userId),
+              eq(automationHostPromptIssues.scheduleId, id),
+              input.beforeVersion
+                ? lt(automationHostPromptIssues.templateVersion, input.beforeVersion)
+                : undefined,
+            ),
+          )
+          .orderBy(desc(automationHostPromptIssues.templateVersion))
+          .limit(input.limit + 1);
+        const issues = rows.slice(0, input.limit).map(promptValue);
+        return {
+          issues,
+          nextCursor: rows.length > input.limit ? (issues.at(-1)?.templateVersion ?? null) : null,
+          currentTemplateVersion: FINANCE_AUTOMATION_PROMPT_VERSION,
+        };
+      });
+    },
+    async getPrompt(principal: Principal, id: string, templateVersion: number) {
+      await authorizeHost(principal);
+      z.int().positive().parse(templateVersion);
+      return db.transaction(async (tx) => {
+        await owned(tx, principal, id);
+        const [issue] = await tx
+          .select()
+          .from(automationHostPromptIssues)
+          .where(
+            and(
+              eq(automationHostPromptIssues.userId, principal.userId),
+              eq(automationHostPromptIssues.scheduleId, id),
+              eq(automationHostPromptIssues.templateVersion, templateVersion),
+            ),
+          );
+        if (!issue) throw new AppError("not_found", "Issued prompt not found.");
+        return promptValue(issue);
+      });
+    },
+    async issuePrompt(principal: Principal, id: string, templateVersion: number, raw: unknown) {
+      await authorizeHost(principal);
+      z.int().positive().parse(templateVersion);
+      const input = automationHostPromptIssueInputSchema.parse(raw);
+      return db.transaction(async (tx) => {
+        const row = await owned(tx, principal, id);
+        const [existing] = await tx
+          .select()
+          .from(automationHostPromptIssues)
+          .where(
+            and(
+              eq(automationHostPromptIssues.userId, principal.userId),
+              eq(automationHostPromptIssues.scheduleId, id),
+              eq(automationHostPromptIssues.templateVersion, templateVersion),
+            ),
+          );
+        // A replay is a read of immutable evidence, even after a later lifecycle/version change.
+        if (existing) return promptValue(existing);
+        if (templateVersion !== FINANCE_AUTOMATION_PROMPT_VERSION)
+          throw new AppError(
+            "conflict",
+            "This prompt template is unavailable. Reload the current version.",
+          );
+        if (row.schedule.version !== input.expectedScheduleVersion)
+          throw new AppError(
+            "conflict",
+            "The host schedule changed. Reload it before issuing a prompt.",
+          );
+        if (["cancelled", "revoked"].includes(row.schedule.state))
+          throw new AppError("conflict", "This host setup has ended.");
+        await liveGrant(tx, principal.userId, row.authorizationConnectionId);
+        await requireWorkspaceExecution(tx, principal, "finances", now());
+        return insertPrompt(tx, principal, row.schedule);
+      });
+    },
     async pendingAnswers(principal: Principal, cursorId?: string) {
       await authorizeHost(principal);
       const [cursor] = cursorId
@@ -554,7 +713,7 @@ export function createAutomationHostService(options: {
           details.push({ ...row, answer: answer ?? null });
         }
         return {
-          ...result(schedule.schedule),
+          ...(await result(schedule.schedule, principal.userId, tx)),
           continuations: details,
           hasMore: rows.length > 100,
           nextCursor: rows.length > 100 ? (details.at(-1)?.id ?? null) : null,
@@ -620,14 +779,40 @@ export function createAutomationHostService(options: {
               : undefined,
           ),
         );
-      return rows.map((row) => ({
-        ...result(row.schedule),
-        connectionAvailable: tokens.some(
-          (token) =>
-            token.authorizationConnectionId === row.authorizationConnectionId &&
-            token.scopes.includes("finances:maintain"),
-        ),
-      }));
+      const latestIssues = rows.length
+        ? await db
+            .selectDistinctOn([automationHostPromptIssues.scheduleId])
+            .from(automationHostPromptIssues)
+            .where(
+              and(
+                eq(automationHostPromptIssues.userId, principal.userId),
+                inArray(
+                  automationHostPromptIssues.scheduleId,
+                  rows.map((row) => row.id),
+                ),
+              ),
+            )
+            .orderBy(
+              automationHostPromptIssues.scheduleId,
+              desc(automationHostPromptIssues.templateVersion),
+            )
+        : [];
+      const latestBySchedule = new Map(latestIssues.map((issue) => [issue.scheduleId, issue]));
+      return Promise.all(
+        rows.map(async (row) => ({
+          ...(await result(
+            row.schedule,
+            principal.userId,
+            db,
+            latestBySchedule.get(row.id) ?? null,
+          )),
+          connectionAvailable: tokens.some(
+            (token) =>
+              token.authorizationConnectionId === row.authorizationConnectionId &&
+              token.scopes.includes("finances:maintain"),
+          ),
+        })),
+      );
     },
     async create(principal: Principal, raw: unknown) {
       await authorizeHost(principal, true);
@@ -669,7 +854,8 @@ export function createAutomationHostService(options: {
           schedule,
         });
         await recordScheduleChange(tx, principal, schedule, null);
-        return result(schedule);
+        await insertPrompt(tx, principal, schedule);
+        return result(schedule, principal.userId, tx);
       });
     },
     async bind(principal: Principal, id: string, raw: unknown) {
@@ -800,7 +986,7 @@ export function createAutomationHostService(options: {
             updatedAt: now(),
           })
           .where(eq(automationHostSchedules.id, id));
-        return result(schedule);
+        return result(schedule, principal.userId, tx);
       });
     },
   };

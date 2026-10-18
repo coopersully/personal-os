@@ -32,6 +32,7 @@ import {
   maxContextualRevision,
 } from "./contextual-question-store.js";
 
+import { recordFinanceConversationAcceptedAnswer } from "./conversation-service.js";
 import type { AdmitSmsAnswer } from "./sms-answer-port.js";
 
 type Consume = (accepted: FinanceDomainOutcome & { state: "accepted" }) => Promise<void>;
@@ -197,6 +198,17 @@ async function answerCore(
           sourceKind: "manual_question",
           contextualQuestionId: question.id,
         });
+        if (context.principal.actorType === "user") {
+          await recordFinanceConversationAcceptedAnswer(writeTx, {
+            userId: context.principal.userId,
+            operationId: input.operationId,
+            caseId: question.reviewCaseId,
+            questionId: question.id,
+            transactionId: question.transactionId,
+            text: input.text,
+            recordedAt,
+          });
+        }
         await writeTx.insert(auditEvents).values(
           auditValues({
             ...context,

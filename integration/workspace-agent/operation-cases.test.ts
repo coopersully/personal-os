@@ -6,7 +6,11 @@ import { discoverToolDictionary, renderToolDictionary } from "./tool-dictionary.
 
 it("exposes domain input fields instead of silently narrowing workspace mutations", async () => {
   const mappings = {
+    acknowledge_finance_conversation_batch: domain.financeConversationAcknowledgmentInputSchema,
+    reply_to_finance_conversation_batch: domain.financeConversationReplyInputSchema,
     list_events: domain.eventListQuerySchema,
+    get_finance_host_prompt_history: domain.automationHostPromptPageInputSchema,
+    issue_finance_host_prompt: domain.automationHostPromptIssueInputSchema,
     list_mail: domain.mailListQuerySchema,
     list_reminders: domain.reminderListQuerySchema,
     list_tasks: domain.taskListQuerySchema,
@@ -90,6 +94,7 @@ it("accounts for every typed workspace operation with an adapter or named semant
   const missing: string[] = [];
   for (const feature of [
     "finances",
+    "finance-conversation",
     "mail",
     "mail-stewardship",
     "calendar",
@@ -101,7 +106,7 @@ it("accounts for every typed workspace operation with an adapter or named semant
   ]) {
     const text = await readFile(`packages/api-client/src/features/${feature}.ts`, "utf8");
     for (const match of text.matchAll(
-      /(?:async ([A-Za-z0-9_]+)\(|^ {4}([A-Za-z0-9_]+): (?:async )?\()/gm,
+      /(?:async ([A-Za-z0-9_]+)\(|^ {4}([A-Za-z0-9_]+)(?:: (?:async )?)?\()/gm,
     )) {
       const name = match[1] ?? match[2];
       if (name && !methods.has(name) && !(name in workspaceApiExceptions))
@@ -152,4 +157,63 @@ it("does not publish strict intersections that forbid their own sibling argument
       else inspect(value);
   }
   for (const { tool } of await discoverToolDictionary()) inspect(tool.inputSchema);
+});
+
+it("exposes prompt artifact adapters with original-connection maintenance grants and no consent exception", async () => {
+  const dictionary = new Map(
+    (await discoverToolDictionary()).map((entry) => [entry.tool.name, entry]),
+  );
+  for (const name of ["get_finance_host_prompt_history", "get_finance_host_prompt"]) {
+    const entry = dictionary.get(name);
+    expect(entry?.definition).toMatchObject({
+      readOnly: true,
+      requiredScopes: ["finances:maintain"],
+      scopeMatch: "all",
+    });
+    expect(entry?.tool.inputSchema.properties).toHaveProperty("scheduleId");
+  }
+  const issue = dictionary.get("issue_finance_host_prompt");
+  expect(issue?.definition).toMatchObject({
+    readOnly: false,
+    policy: "approved_rule",
+    scopeMatch: "all",
+    requiredScopes: ["finances:maintain", "finances:write", "finances:execute"],
+  });
+  expect(issue?.tool.inputSchema.properties).toHaveProperty("templateVersion");
+  expect(issue?.tool.inputSchema.properties).toHaveProperty("expectedScheduleVersion");
+  for (const method of [
+    "getAutomationHostPromptHistory",
+    "getAutomationHostPrompt",
+    "issueAutomationHostPrompt",
+  ])
+    expect(workspaceApiExceptions).not.toHaveProperty(method);
+});
+
+it("gates every conversation delivery/proof tool by original execution grants and keeps human cursors separate", async () => {
+  const dictionary = new Map(
+    (await discoverToolDictionary()).map(({ tool, definition }) => [tool.name, definition]),
+  );
+  for (const name of [
+    "get_finance_conversation_batch",
+    "acknowledge_finance_conversation_batch",
+    "reply_to_finance_conversation_batch",
+    "exchange_finance_conversation_challenge",
+  ]) {
+    expect(dictionary.get(name)).toMatchObject({
+      readOnly: false,
+      policy: "approved_rule",
+      idempotent: true,
+      requiredScopes: ["finances:maintain", "finances:write", "finances:execute"],
+    });
+  }
+  for (const name of [
+    "getFinanceConversationReadiness",
+    "getFinanceConversationHostReadiness",
+    "getFinanceConversationHistory",
+    "sendFinanceConversationMessage",
+    "markFinanceConversationRendered",
+    "issueFinanceConversationChallenge",
+  ] as const) {
+    expect(workspaceApiExceptions[name].kind).toBe("owner_interaction");
+  }
 });

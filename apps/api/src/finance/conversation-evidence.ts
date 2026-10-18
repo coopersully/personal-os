@@ -2,16 +2,19 @@ import { isDeepStrictEqual } from "node:util";
 import {
   type Database,
   financeConversationBatches,
-  financeConversationBatchMessages,
   financeConversationEvidence,
-  financeConversationMessages,
+  type financeMaintenanceCandidateItems,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
-import { and, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
 import { requireWorkspaceExecution } from "../workspace-execution.js";
-import { requireHostRunAuthority } from "./host-run-authority.js";
+import {
+  lockFinanceEffectOwner,
+  requireFinanceEffectMessageProof,
+  validateFinanceConversationClaim,
+} from "./conversation-causality.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 export type FinanceConversationEvidenceInput = {
@@ -23,27 +26,24 @@ export type FinanceConversationEvidenceInput = {
   explanation: string;
 };
 
-/**
- * Called only by a mutation owner inside its transaction after its existing exact
- * financial authority/revision checks. This helper grants no financial authority.
- * Replays return committed evidence without invoking applyEffect again.
- */
+/** The caller owns all financial authority/approval guards and the outer transaction. */
 export async function commitFinanceConversationEvidence(
   tx: Transaction,
   principal: Principal,
   input: FinanceConversationEvidenceInput,
   applyEffect: () => Promise<Array<{ kind: string; id: string }>>,
   now: Date,
+  options: {
+    candidateItems: ReadonlyArray<typeof financeMaintenanceCandidateItems.$inferSelect>;
+    humanApproval?: { principal: Principal; reviewId: string };
+  },
 ) {
-  await tx.execute(
-    sql`select pg_advisory_xact_lock(hashtextextended(${`finance-maintenance:${principal.userId}`}, 0))`,
-  );
+  await lockFinanceEffectOwner(tx, principal.userId);
   if (
     !input.actionKey.trim() ||
     input.actionKey.length > 200 ||
     !input.explanation.trim() ||
     input.explanation.length > 4000 ||
-    !input.sourceMessageIds.length ||
     input.sourceMessageIds.length > 100 ||
     new Set(input.sourceMessageIds).size !== input.sourceMessageIds.length
   )
@@ -66,8 +66,16 @@ export async function commitFinanceConversationEvidence(
     !run.automationScheduleId
   )
     throw new AppError("forbidden", "Use the original Finance maintenance run.");
-  await requireHostRunAuthority(tx, run, principal, now);
-  await requireWorkspaceExecution(tx, principal, "finances", now);
+  await requireFinanceEffectMessageProof(tx, run, principal, now);
+  const exactHuman = options.humanApproval?.principal;
+  if (
+    exactHuman &&
+    (exactHuman.actorType !== "user" ||
+      exactHuman.userId !== run.userId ||
+      exactHuman.actorId !== run.userId)
+  )
+    throw new AppError("forbidden", "The existing exact owner approval is required.");
+  if (!exactHuman) await requireWorkspaceExecution(tx, principal, "finances", now);
   const [batch] = await tx
     .select()
     .from(financeConversationBatches)
@@ -83,32 +91,14 @@ export async function commitFinanceConversationEvidence(
     batch.automationScheduleId !== run.automationScheduleId
   )
     throw new AppError("conflict", "Use the original captured Finance message batch.");
-  const sources = await tx
-    .select({ message: financeConversationMessages })
-    .from(financeConversationBatchMessages)
-    .innerJoin(
-      financeConversationMessages,
-      and(
-        eq(financeConversationMessages.userId, financeConversationBatchMessages.userId),
-        eq(financeConversationMessages.id, financeConversationBatchMessages.messageId),
-      ),
-    )
-    .where(
-      and(
-        eq(financeConversationBatchMessages.userId, principal.userId),
-        eq(financeConversationBatchMessages.runId, input.runId),
-        isNotNull(financeConversationBatchMessages.deliveredAt),
-        inArray(financeConversationBatchMessages.messageId, input.sourceMessageIds),
-      ),
-    );
-  if (
-    sources.length !== input.sourceMessageIds.length ||
-    sources.some(({ message }) => message.sequence > batch.cutoffSequence) ||
-    (input.caseId && !sources.some(({ message }) => message.caseId === input.caseId))
-  )
-    throw new AppError(
-      "conflict",
-      "Action evidence must cite its owner-scoped fixed batch and canonical case.",
+  if (input.sourceMessageIds.length)
+    await validateFinanceConversationClaim(
+      tx,
+      run,
+      principal,
+      options.candidateItems,
+      { sourceMessageIds: input.sourceMessageIds, explanation: input.explanation },
+      now,
     );
   const [existing] = await tx
     .select()
@@ -139,7 +129,6 @@ export async function commitFinanceConversationEvidence(
       );
     return { evidence: existing, replayed: true };
   }
-  // Callback failure or evidence insert failure rolls back the caller's transaction.
   const effectRefs = await applyEffect();
   const [evidence] = await tx
     .insert(financeConversationEvidence)

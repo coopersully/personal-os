@@ -385,3 +385,18 @@ The account selector distinguishes selecting no accounts from following all elig
 persisted change. These view preferences never modify planning inclusion or account meanings.
 Finance notification settings show inherited/effective policy and support resetting an existing
 workspace override to global preferences using its current revision.
+
+### Recurring cost comparison
+
+Bills & subscriptions compares each original recurring source with its expected amount, cadence,
+source status, source-account currency and observation date. Matching merchants remain separate
+records. Savings movements stay outside recurring-cost comparisons and retain their management
+controls. Each payment retains its existing exact-record pause, confirm or resume action.
+
+Monthly and annual equivalents require a demonstrated fixed amount and supported currency units.
+Current recurring records do not establish fixedness, so their equivalents remain unavailable with
+an explicit reason; a user-supplied source alone does not confirm a fixed cost. Missing currency
+never becomes USD, and inferred, review-needed and inactive records remain distinct. The pure
+normalization contract supports exact factors 52/26/24/12/4/1 with currency-separated totals, but the
+adapter must supply applicable evidence before it can expose them. Service identity and price
+history remain unknown until independently established; merchant names prove neither.

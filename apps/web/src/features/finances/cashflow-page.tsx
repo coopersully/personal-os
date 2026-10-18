@@ -1,3 +1,4 @@
+import { ApiClientError } from "@personal-os/api-client";
 import type {
   FinanceIncomeStream,
   FinanceRecurringObligation,
@@ -27,6 +28,7 @@ import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { FinanceCashflowTimeline } from "./cashflow-timeline";
 import { FinanceSourceState, requireFinanceResult } from "./position-material.js";
+import { RecurringCostSection } from "./recurring-cost-section";
 import { FinanceReimbursementList } from "./reimbursement-list";
 import { FinanceScenarioComparison } from "./scenario-comparison.js";
 import { FinanceTransactionItem } from "./transaction-item";
@@ -97,6 +99,20 @@ export function FinanceCashflowPage() {
     selectedId === null
       ? items
       : items.filter((item) => item.id === selectedId && idSchema.safeParse(selectedId).success);
+  const patternActions = (
+    item: FinanceIncomeStream | FinanceRecurringObligation,
+    itemType: "income" | "obligation",
+  ) => (
+    <Button
+      size="icon-sm"
+      variant="ghost"
+      disabled={update.isPending}
+      aria-label={`${item.status === "active" ? "Pause" : item.status === "needs_review" ? "Confirm" : "Resume"} ${item.displayName}`}
+      onClick={() => change(item, itemType)}
+    >
+      {item.status === "active" ? <PauseIcon /> : <PlayIcon />}
+    </Button>
+  );
   const patternRows = (
     items: Array<FinanceIncomeStream | FinanceRecurringObligation>,
     itemType: "income" | "obligation",
@@ -110,17 +126,7 @@ export function FinanceCashflowPage() {
           direction={itemType === "income" ? "income" : "expense"}
           status={item.status === "active" ? "expected" : undefined}
           description={`${cadence[item.cadence] ?? item.cadence}${item.nextExpectedDate ? ` · Next ${date(item.nextExpectedDate)}` : " · Date not established"}`}
-          actions={
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              disabled={update.isPending}
-              aria-label={`${item.status === "active" ? "Pause" : item.status === "needs_review" ? "Confirm" : "Resume"} ${item.displayName}`}
-              onClick={() => change(item, itemType)}
-            >
-              {item.status === "active" ? <PauseIcon /> : <PlayIcon />}
-            </Button>
-          }
+          actions={patternActions(item, itemType)}
         >
           <Badge variant="secondary">
             {item.status === "needs_review"
@@ -269,7 +275,23 @@ export function FinanceCashflowPage() {
               {recurring.isPending ? (
                 <Skeleton className="h-28 w-full" />
               ) : sourceItems(obligations).length ? (
-                patternRows(sourceItems(obligations), "obligation")
+                <>
+                  <RecurringCostSection
+                    accessDenied={[recurring.error, accounts.error].some(
+                      (error) =>
+                        error instanceof ApiClientError && [401, 403].includes(error.status),
+                    )}
+                    obligations={sourceItems(obligations)}
+                    accounts={accounts.data?.accounts ?? []}
+                    renderActions={(item) => patternActions(item, "obligation")}
+                  />
+                  {sourceItems(obligations).some((item) => item.kind === "savings")
+                    ? patternRows(
+                        sourceItems(obligations).filter((item) => item.kind === "savings"),
+                        "obligation",
+                      )
+                    : null}
+                </>
               ) : recurring.isSuccess ? (
                 <Empty>
                   <EmptyHeader>

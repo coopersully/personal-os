@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import { ApiClientError } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { FinanceCashflowPage } from "./cashflow-page";
@@ -16,11 +17,12 @@ const api = vi.hoisted(() => ({
   listFinanceReimbursements: vi.fn(),
 }));
 vi.mock("../../api.js", () => ({ api, errorMessage: (error: Error) => error.message }));
-function renderPage(path = "/finances/cashflow") {
+function renderPage(
+  path = "/finances/cashflow",
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
   return render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+    <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[path]}>
         <FinanceCashflowPage />
       </MemoryRouter>
@@ -29,7 +31,10 @@ function renderPage(path = "/finances/cashflow") {
 }
 beforeEach(() => {
   vi.resetAllMocks();
-  api.getMe.mockResolvedValue({ planningTimezone: "America/New_York" });
+  api.getMe.mockResolvedValue({
+    id: "00000000-0000-4000-8000-000000000001",
+    planningTimezone: "America/New_York",
+  });
   api.getFinanceSnapshot.mockResolvedValue({
     data: { ledger: { trustworthy: false } },
     communication: { requiredDisclosures: [{ message: "Confirm account ownership." }] },
@@ -83,7 +88,7 @@ it.each([
   expect(screen.queryByText("No income patterns yet")).not.toBeInTheDocument();
   expect(screen.queryByText("No bills or subscriptions yet")).not.toBeInTheDocument();
 });
-it("marks a subscription inactive only inside the forecast, with pending and failed state", async () => {
+it("keeps exact source management actions in the recurring-cost ladder with failed state", async () => {
   api.listFinanceRecurringItems.mockResolvedValue({
     data: {
       income: [],
@@ -104,7 +109,8 @@ it("marks a subscription inactive only inside the forecast, with pending and fai
   });
   api.manageFinanceRecurringItem.mockRejectedValue(new Error("Could not save"));
   renderPage("/finances/subscriptions");
-  expect(await screen.findByText("Music")).toBeVisible();
+  expect(await screen.findByRole("region", { name: "Recurring cost ladder" })).toBeVisible();
+  expect(screen.getByText("Music")).toBeVisible();
   await userEvent.setup().click(screen.getByRole("button", { name: "Pause Music" }));
   expect(
     await screen.findByText(/Couldn’t confirm whether we could save this recurring payment/),
@@ -195,4 +201,42 @@ it("does not substitute another source for an unavailable target", async () => {
   renderPage("/finances/cashflow?view=income&record=11111111-1111-4111-8111-111111111111");
   expect(await screen.findByText("Selected income record unavailable")).toBeVisible();
   expect(screen.getByRole("link", { name: "Show all income" })).toBeVisible();
+});
+
+it("hides cached recurring evidence and its open confirmation after an authoritative same-owner 403", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  api.listFinanceRecurringItems.mockResolvedValue({
+    data: {
+      income: [],
+      obligations: [
+        {
+          id: "00000000-0000-4000-8000-000000000002",
+          revision: 2,
+          accountId: "cash-1",
+          displayName: "Private music",
+          merchant: "Music",
+          expectedAmount: 10,
+          kind: "subscription",
+          status: "active",
+          source: "user",
+          cadence: "monthly",
+          nextExpectedDate: null,
+          lastObservedDate: null,
+        },
+      ],
+    },
+  });
+  renderPage("/finances/cashflow?view=subscriptions", client);
+  fireEvent.click(await screen.findByRole("button", { name: "Confirm cost for Private music" }));
+  expect(screen.getByRole("dialog")).toBeVisible();
+  api.listFinanceRecurringItems.mockRejectedValue(
+    new ApiClientError({ status: 403, code: "forbidden", message: "Access denied" }),
+  );
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["finance-recurring-items"] });
+  });
+  expect(await screen.findByText(/Recurring cost access unavailable/)).toBeVisible();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.queryByRole("listitem", { name: "Private music" })).not.toBeInTheDocument();
+  expect(client.getQueryData(["me"])).toMatchObject({ id: "00000000-0000-4000-8000-000000000001" });
 });

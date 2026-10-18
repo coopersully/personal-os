@@ -36,6 +36,28 @@ or unexplained failure is not an environment diagnosis. If the defect is real, f
 new candidate. If isolated reproduction passes and evidence establishes runner contention, use
 successful equivalent hosted gates; do not keep rerunning the whole local suite to obtain lucky green.
 
+## Opt in to complete hosted verification
+
+Apply the repository label `ci:full` to the PR before its next genuine opened, reopened, or
+synchronize event (normally the final source or catchup push). CI reads the label from that PR
+event payload and selects full scope: repository contracts, lint, Node quality, both browser
+projects, Terraform, and the existing macOS/Windows native matrix. The normal PR merge checkout,
+head/base association, read-only permissions, source aggregate and metadata gate remain unchanged.
+Other PRs retain their classified scope.
+
+Adding or removing a label alone starts no workflow, cancels no source run and supplies no evidence.
+Do not create empty commits or close/reopen a PR solely to trigger CI. A retry retains its original
+event payload: labeling an already frozen candidate and rerunning an earlier unlabeled event does
+not opt it in. Use the complete local verifier when there is no genuine next candidate event.
+Labels are operator-managed; CI neither creates nor applies them. Removing the label affects only
+future genuine PR events and never cancels an existing full run.
+
+A full-scope configuration is not successful execution. Collect every distinct successful job,
+matrix member and exact candidate identity required above, then check the normal metadata gate.
+Hosted capacity, permissions, provider outages and native dependencies can still block delivery.
+Existing failure diagnosis and bounded retry rules continue to apply; a failed metadata gate after
+source recovery needs the documented metadata rerun, not a PR-body edit.
+
 ## Shared local capacity
 
 `pnpm verify` enters `.codex/scripts/verification-runner.py` before expensive work. One verifier per

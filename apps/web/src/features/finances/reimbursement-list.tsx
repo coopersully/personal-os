@@ -1,3 +1,4 @@
+import { ApiClientError } from "@personal-os/api-client";
 import type { FinanceReimbursement } from "@personal-os/domain";
 import { EmptyState, Spinner } from "@personal-os/ui";
 import { useQuery } from "@tanstack/react-query";
@@ -8,8 +9,7 @@ import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "@/comp
 import { Progress } from "@/components/ui/progress";
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
-import { formatMoney } from "./format.js";
-import { FinanceReimbursementJourney } from "./reimbursement-journey.js";
+import { FinanceReimbursementJourney, reimbursementAmount } from "./reimbursement-journey.js";
 
 function sectionFor(item: FinanceReimbursement) {
   if (["received", "cancelled"].includes(item.status)) return "Recently resolved";
@@ -22,6 +22,12 @@ export function FinanceReimbursementList() {
     queryFn: api.listFinanceReimbursements,
     queryKey: ["finance-reimbursements"],
   });
+  if (query.error instanceof ApiClientError && [401, 403].includes(query.error.status))
+    return (
+      <p role="status">
+        Reimbursement access unavailable. Check your permissions before viewing receipt evidence.
+      </p>
+    );
   if (query.isPending) return <Spinner label="Loading reimbursements" />;
   if (query.error && !query.data)
     return <InlineError error={query.error} retry={() => query.refetch()} />;
@@ -57,10 +63,24 @@ export function FinanceReimbursementList() {
                       </Badge>
                     </div>
                     <ItemDescription>
-                      {formatMoney(item.receivedAmount)} received of{" "}
-                      {formatMoney(item.expectedAmount)} · {formatMoney(remaining)} remaining
+                      {reimbursementAmount(item.receivedAmount, item.sourceExpense?.currency)}{" "}
+                      received of{" "}
+                      {reimbursementAmount(item.expectedAmount, item.sourceExpense?.currency)} ·{" "}
+                      {reimbursementAmount(remaining, item.sourceExpense?.currency)}{" "}
+                      {item.status === "cancelled" ? "cancelled remainder" : "remaining"}
                       {item.dueDate ? ` · due ${item.dueDate}` : ""}
                     </ItemDescription>
+                    {item.sourceExpense?.currency &&
+                    item.matches.some(
+                      (match) =>
+                        match.creditTransaction?.currency &&
+                        match.creditTransaction.currency !== item.sourceExpense?.currency,
+                    ) ? (
+                      <p className="text-sm text-muted-foreground">
+                        Receipt currency differs from the source expense. These amounts are not
+                        comparable across currencies.
+                      </p>
+                    ) : null}
                     <Progress
                       aria-label={`Reimbursement from ${item.payer ?? "unknown payer"}`}
                       value={progress}

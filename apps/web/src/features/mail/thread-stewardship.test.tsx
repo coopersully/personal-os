@@ -1,3 +1,4 @@
+import { expectQueryToast, watchQueryFeedback } from "../../../test-support/query-feedback";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { MailResponseBrief, MailThreadStewardship } from "@personal-os/domain";
@@ -242,7 +243,7 @@ describe("exact-thread Mail stewardship", () => {
   it("shows a safe error when thread stewardship cannot load", async () => {
     mocks.getMailThreadStewardship.mockRejectedValueOnce(new Error("Thread unavailable"));
     renderThread();
-    expect(await screen.findByText("Couldn’t load thread stewardship.")).toBeVisible();
+    await expectQueryToast("Couldn’t load thread stewardship.");
   });
   it("explains a missing obligation rationale and focuses the field before creating", async () => {
     const user = userEvent.setup();
@@ -263,3 +264,6 @@ describe("exact-thread Mail stewardship", () => {
     );
   });
 });
+
+beforeEach(watchQueryFeedback);
+afterEach(() => vi.restoreAllMocks());

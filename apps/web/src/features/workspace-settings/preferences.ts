@@ -1,4 +1,18 @@
-import type { Workspace, WorkspacePreferences, WorkspaceSettings } from "@personal-os/domain";
+import type {
+  WorkspaceSettings as DomainSettings,
+  Workspace as DomainWorkspace,
+  TodayPreferences,
+  TodaySettings,
+  WorkspacePreferencesMap,
+} from "@personal-os/domain";
+
+// Presentation stores share save mechanics without extending domain authority or workspaceSchema.
+type Workspace = DomainWorkspace | "today";
+type PreferenceMap = WorkspacePreferencesMap & { today: TodayPreferences };
+type WorkspacePreferences<W extends Workspace> = PreferenceMap[W];
+type SettingsMap = { [W in DomainWorkspace]: DomainSettings<W> } & { today: TodaySettings };
+type WorkspaceSettings<W extends Workspace> = SettingsMap[W];
+
 import {
   type MutateOptions,
   type QueryClient,
@@ -28,7 +42,11 @@ export function useWorkspacePreferences<W extends Workspace>(workspace: W) {
     queryFn: async () => {
       const started = { ...preferenceSession(cache) };
       if (!started.owner) throw new Error("Load your account before reading preferences.");
-      const settings = await api.getWorkspaceSettings(workspace);
+      const settings = (
+        workspace === "today"
+          ? await api.getTodaySettings()
+          : await api.getWorkspaceSettings(workspace)
+      ) as WorkspaceSettings<W>;
       if (!sameSession(cache, started))
         throw new Error("Your account session changed. Reload preferences.");
       return settings;
@@ -161,10 +179,17 @@ export function useSaveWorkspacePreferences<W extends Workspace>(workspace: W) {
           ? change(current.preferences as WorkspacePreferences<W>)
           : change;
       attempt.attempted = preferences;
-      const data = await api.updateWorkspaceSettings(workspace, {
-        expectedRevision: current.revision,
-        preferences,
-      });
+      const data = (
+        workspace === "today"
+          ? await api.updateTodaySettings({
+              expectedRevision: current.revision,
+              preferences: preferences as Partial<TodayPreferences>,
+            })
+          : await api.updateWorkspaceSettings(workspace, {
+              expectedRevision: current.revision,
+              preferences: preferences as never,
+            })
+      ) as WorkspaceSettings<W>;
       if (sameSession(cache, attempt.session)) saves.advances.set(current.revision, data);
       return data;
     },

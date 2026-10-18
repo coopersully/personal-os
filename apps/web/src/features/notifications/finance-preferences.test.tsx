@@ -4,6 +4,7 @@ import { defaultNotificationPreferences, type NotificationStatus } from "@person
 import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { expectQueryToast, watchQueryFeedback } from "../../../test-support/query-feedback";
 import {
   FinanceNotificationPreferenceSummary,
   FinanceNotificationPreferences,
@@ -86,9 +87,7 @@ it("shows a load error rather than presenting inherited defaults as saved state"
       <FinanceNotificationPreferences />
     </QueryClientProvider>,
   );
-  expect(
-    await screen.findByText("Couldn’t load Finance notification preferences."),
-  ).toBeInTheDocument();
+  await expectQueryToast("Couldn’t load Finance notification preferences.");
   expect(screen.queryByText("Inherited from global preferences")).not.toBeInTheDocument();
 });
 
@@ -514,3 +513,6 @@ it.each([
   expect(screen.queryByText(message)).not.toBeInTheDocument();
   expect(update).toHaveBeenCalledTimes(2);
 });
+
+beforeEach(watchQueryFeedback);
+afterEach(() => vi.restoreAllMocks());

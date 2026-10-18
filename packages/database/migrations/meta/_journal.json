@@ -838,8 +838,22 @@
     {
       "idx": 117,
       "version": "7",
+      "when": 1791820800000,
+      "tag": "0112_today_preferences",
+      "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
       "when": 1791806400000,
       "tag": "0112_connector_capability_health",
+      "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "7",
+      "when": 1791979200000,
+      "tag": "0113_connector_capability_health_reconciliation",
       "breakpoints": true
     }
   ]

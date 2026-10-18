@@ -1,3 +1,4 @@
+import { expectQueryToast, watchQueryFeedback } from "../../../test-support/query-feedback";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { MailReview, MailStatus, MailStewardshipQuestion } from "@personal-os/domain";
@@ -299,7 +300,7 @@ describe("Mail workspace stewardship", () => {
   it("keeps status and maintenance failures visible", async () => {
     mocks.getMailStatus.mockRejectedValueOnce(new Error("Status unavailable"));
     const first = renderPage("/mail/review");
-    expect(await screen.findByText("Couldn’t load mail stewardship.")).toBeVisible();
+    await expectQueryToast("Couldn’t load mail stewardship.");
     first.unmount();
 
     mocks.getMailStatus.mockResolvedValue({
@@ -317,3 +318,6 @@ describe("Mail workspace stewardship", () => {
     expect(screen.getByRole("heading", { name: "Clean" })).toBeVisible();
   });
 });
+
+beforeEach(watchQueryFeedback);
+afterEach(() => vi.restoreAllMocks());

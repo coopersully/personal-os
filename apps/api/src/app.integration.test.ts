@@ -7845,7 +7845,13 @@ describe.sequential("ilo API", () => {
     const capacityBriefService = createDailyBriefService({
       db: database.db,
       listEvents: async () => [
-        { ...createdEvent, allDay: true },
+        {
+          ...createdEvent,
+          allDay: true,
+          startsAt: "2026-07-13T00:00:00.000Z",
+          endsAt: "2026-07-14T00:00:00.000Z",
+          timezone: "UTC",
+        },
         {
           ...createdEvent,
           endsAt: "2026-07-13T14:00:00.000Z",

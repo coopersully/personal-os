@@ -325,6 +325,51 @@ describe.sequential("Calendar commitment proposals", () => {
     return { blocks, source };
   }
 
+  it("reads legacy Google all-day dates correctly without changing source identity", async () => {
+    const [row] = await database.db
+      .insert(calendarEvents)
+      .values({
+        userId,
+        calendarId: remoteCalendarId,
+        provider: "google",
+        remoteEventId: "legacy-holiday",
+        title: "Holiday",
+        allDay: true,
+        timezone: "America/New_York",
+        startsAt: new Date("2026-10-12T00:00:00Z"),
+        endsAt: new Date("2026-10-13T00:00:00Z"),
+        raw: { start: { date: "2026-10-12" }, end: { date: "2026-10-13" } },
+      })
+      .returning();
+    const query = { from: "2026-10-10T00:00:00Z", to: "2026-10-15T00:00:00Z" };
+    const events = await service.listEvents(userId, query);
+    const first = events.find((event) => event.id === row!.id);
+    expect(first).toMatchObject({
+      startsAt: "2026-10-12T04:00:00.000Z",
+      endsAt: "2026-10-13T04:00:00.000Z",
+      remoteEventId: "legacy-holiday",
+    });
+    expect((await service.listEvents(userId, query)).find((event) => event.id === row!.id)).toEqual(
+      first,
+    );
+    expect(
+      (
+        await service.listEvents(userId, {
+          from: "2026-10-13T01:00:00Z",
+          to: "2026-10-13T03:00:00Z",
+        })
+      ).some((event) => event.id === row!.id),
+    ).toBe(true);
+    expect(
+      (
+        await service.listEvents(userId, {
+          from: "2026-10-11T04:00:00Z",
+          to: "2026-10-12T04:00:00Z",
+        })
+      ).some((event) => event.id === row!.id),
+    ).toBe(false);
+  });
+
   it("keeps caller-supplied strong evidence preview-only and exposes source state", async () => {
     const proposal = await service.previewCommitment(userId, {
       candidate: candidate(),

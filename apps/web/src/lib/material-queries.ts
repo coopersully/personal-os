@@ -5,6 +5,7 @@ const materialQueryKeys = [
   "agenda",
   "calendars",
   "daily-brief",
+  "today-commitments",
   "events",
   "reminders",
   "tasks",

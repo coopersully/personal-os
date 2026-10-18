@@ -54,6 +54,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const args = process.argv.slice(2);
 if (args[0] !== '--host' || args[1] !== ${JSON.stringify(socket)} || process.env.DOCKER_CONTEXT) process.exit(4);
+if (args[2] === 'build' && (process.env.VITE_CARTO_API_KEY !== 'fixture-public-carto-key' || !args.includes('VITE_CARTO_API_KEY') || args.some(arg => arg.includes('fixture-public-carto-key')))) process.exit(7);
 if (args[2] === 'build' && fs.existsSync(path.join(args.at(-1), '.env'))) process.exit(5);
 if (args[2] === 'build' && !fs.readFileSync(path.join(args.at(-1), 'apps/api/src/release-revision.ts'), 'utf8').includes(${JSON.stringify(`const archivedRevision = "${revision}";`)})) process.exit(6);
 fs.appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify(args)+'\\n');
@@ -61,6 +62,9 @@ if (args[2] === 'image') console.log('sha256:'+'d'.repeat(64));
 `,
   );
   chmodSync(executable, 0o700);
+  mkdirSync(join(directory, "nohmi-production"));
+  const keyPath = join(directory, "nohmi-production", "carto-api-key");
+  writeFileSync(keyPath, "fixture-public-carto-key\n", { mode: 0o600 });
   const output = join(directory, "images.json");
   await run(
     process.execPath,
@@ -77,10 +81,49 @@ if (args[2] === 'image') console.log('sha256:'+'d'.repeat(64));
       env: {
         ...process.env,
         PATH: `${bin}:${process.env.PATH}`,
+        HOME: directory,
+        VITE_CARTO_API_KEY: "stale-environment-key",
         DOCKER_CONTEXT: "desktop-linux",
         DOCKER_HOST: "unix:///shared.sock",
       },
     },
+  );
+  for (const invalid of ["", "two tokens"]) {
+    writeFileSync(keyPath, invalid);
+    await assert.rejects(
+      run(
+        process.execPath,
+        [
+          new URL("./build.mjs", import.meta.url).pathname,
+          revision,
+          join(directory, "invalid.json"),
+          "--repository",
+          source,
+          "--docker-host",
+          socket,
+        ],
+        { env: { ...process.env, HOME: directory } },
+      ),
+      /failed \(1\)/,
+    );
+  }
+  writeFileSync(keyPath, "fixture-public-carto-key");
+  chmodSync(keyPath, 0o644);
+  await assert.rejects(
+    run(
+      process.execPath,
+      [
+        new URL("./build.mjs", import.meta.url).pathname,
+        revision,
+        join(directory, "unsafe.json"),
+        "--repository",
+        source,
+        "--docker-host",
+        socket,
+      ],
+      { env: { ...process.env, HOME: directory } },
+    ),
+    /failed \(1\)/,
   );
   const manifest = JSON.parse(readFileSync(output, "utf8"));
   assert.equal(manifest.revision, revision);

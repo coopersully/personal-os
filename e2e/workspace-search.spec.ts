@@ -46,7 +46,7 @@ test("each workspace discovers records and Calendar settings without changing li
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
 
   for (const [workspace, query, title] of [
     ["Calendar", "dentist", "Dentist appointment"],
@@ -93,7 +93,7 @@ test("Calendar remembers its view and opening and snap preferences", async ({ pa
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   const restore = await preserveWorkspacePreferences(page, "calendar", {
     calendarView: "auto",
     autoFollowToday: true,
@@ -165,7 +165,7 @@ test("Tasks keeps view switching and utilities in one responsive header", async 
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   const restore = await preserveWorkspacePreferences(page, "tasks", {
     taskSort: "default",
     taskRowDetails: ["estimate"],
@@ -269,7 +269,7 @@ test("Tasks plus guides creation into the existing responsive editors", async ({
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   await page.goto("/tasks");
   await page.getByRole("button", { name: "Create in Tasks" }).click();
   await page.getByRole("button", { name: "Task Something to do" }).click();
@@ -321,7 +321,7 @@ test("Tasks collections support browsing, searching, and sorting lists and proje
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   const restore = await preserveWorkspacePreferences(page, "tasks", {
     pinnedListIds: [],
     taskContainerSort: "updated",
@@ -397,7 +397,7 @@ test("Tasks restores saved display preferences on a fresh workspace entry", asyn
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   const restore = await preserveWorkspacePreferences(page, "tasks", {
     taskSort: "default",
     taskGroup: "none",
@@ -463,7 +463,7 @@ test("workspace settings edit Tasks display and Mail layout preferences", async 
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   const restoreTasks = await preserveWorkspacePreferences(page, "tasks", {
     taskSort: "default",
     taskGroup: "none",
@@ -555,7 +555,7 @@ test("Mail opens at its latest message and retains scrollable conversation histo
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   await page.goto("/mail");
   await page.locator(".mail-thread-row").filter({ hasText: "Board packet for Friday" }).click();
   const messages = page.locator(".mail-reader__message");
@@ -600,7 +600,7 @@ test("Mail single-message reader keeps the title at the top and uses the full ca
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   await page.goto("/mail");
   await page
     .locator(".mail-thread-row")
@@ -637,7 +637,7 @@ test("Mail saves full-width conversation layout and supports returning to the li
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   const restore = await preserveWorkspacePreferences(page, "mail", {
     mailConversationLayout: "split",
   });
@@ -710,7 +710,7 @@ test("Collapsed workspace sidebar keeps reviews centered and exposes the count i
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   await page.goto("/mail");
   const review = page.locator('[data-sidebar="menu-button"].review-navigation');
   await expect(review).toBeVisible();
@@ -737,7 +737,7 @@ test("Mail attachments download, retry failures, and preview safely", async ({ p
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   await page.route("**/v1/mail/threads/*/messages", async (route) => {
     const response = await route.fetch();
     const payload = await response.json();
@@ -796,7 +796,7 @@ test("Finance consolidates contextual controls and preserves responsive creation
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   const header = page.getByRole("navigation", { name: "Top navigation", exact: true });
   for (const [path, group, action] of [
     ["/finances/transactions", "Transaction controls", "Add in Transactions"],
@@ -956,7 +956,7 @@ test("Financial profile opens shared fields and preserves edits across sections 
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   await page.goto("/finances/setup");
   const steps = page.getByRole("navigation", { name: "Financial profile sections" });
   await expect(steps.getByRole("button")).toHaveCount(3);

@@ -1,5 +1,46 @@
 # nohmi — Implementation Log
 
+## 2026-10-14 — Today recovery surfaces (branch implementation)
+
+- Account, offline and essential Today read failures replace the whole screen with one shared
+  recovery surface, including failed refreshes with cached material. Drafts/observers remain
+  mounted; the recovery surface blocks background controls and workspace shortcuts.
+- Removed the shell banner insertion slot and transient grid/navigation failure messages.
+  Optional failures use Sonner; skeletons stay in their existing value slots. Actual connector
+  recovery work remains product content, rather than a card manufactured by a failed check.
+- Repository instructions, the frontend skill and canonical feedback/system/Today documents
+  prohibit alerts and loading/status items in bento grids, navigation, rails and sidebars.
+  Focused coverage exercises cached outages, recovery, optional spending geometry and shortcut
+  isolation. This records branch behavior, not a merge, deployment or completed release gate.
+
+## 2026-10-12 — Today refinements (branch implementation)
+
+- Separate daily timeline and calendar-week commitment cards, source-date all-day fixes,
+  revisioned Today personalization, optional spending/ritual/pet cards, and workspace/account
+  attention aggregation are implemented in this branch. Weekly material uses a bounded owner
+  projection with aggregate counts and signed cursors rather than the daily brief's limits.
+- MapCN is adapted for reicon, pinned MapLibre 6.14.0 and local worker assets. CARTO style,
+  glyph, sprite and vector resources returned HTTP 200; fixture-browser QA rendered the map.
+  The public key is configured in ignored local environments and the GitHub Actions repository
+  variable `VITE_CARTO_API_KEY` (read-back verified). Live style requests accepted the production
+  web and both Tauri origin headers; the packaged macOS app rendered real light/dark tiles.
+- Full `pnpm verify` passed at source commit `5c23c210`: 4,029 unit/integration tests,
+  136 desktop/mobile browser acceptance tests (two expected mobile skips), lint, types and
+  production builds. Coverage: 97.17% statements/lines, 94.08% branches, 95.79% functions.
+  Browser QA also verified authorized CARTO tiles, mobile filter containment and settings previews.
+- Source-date membership preserves both provider midnight-exclusive DATE ranges and existing
+  locally created all-day events with non-midnight ends. Proven Google legacy source dates are
+  corrected on read; uncertain legacy data requires a successful provider resync.
+- Packaged macOS smoke checks passed for map backgrounds/previews, marker, zoom controls,
+  attribution, Escape focus restoration and navigation remount. Today opened the native pet
+  quick-access panel and the native ritual checklist; responses synchronized and completion
+  removed the Continue action. Tests used an isolated application identifier and disposable
+  fixture account; fixture data was restored afterward. A separate no-key bundle preserved the
+  selected map preference while rendering the default background and unavailable preview.
+- No merge, deployment or provider-wide historical backfill is claimed. The production Mac's
+  installed builder/environment still needs an attended update once host access is available.
+  Windows webview execution remains unverified on this macOS host.
+
 ## 2026-10-12 — Finance text results and desktop pet refinements merged
 
 - [PR #242 — Fix Finance MCP text responses](https://github.com/coopersully/personal-os/pull/242)

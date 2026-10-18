@@ -7,6 +7,7 @@ import {
   ritualAnswerIsValid,
 } from "@personal-os/domain";
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { NohmiBrandMark } from "../../components/brand-marks.js";
 import { AlertTriangleIcon, CheckIcon, ClockIcon } from "../../components/icons.js";
 import { Button } from "../../components/ui/button.js";
@@ -133,15 +134,20 @@ export function RitualChecklist({
   saveResponse,
   act,
   preview = false,
+  feedback = "inline",
 }: {
   state: RitualState;
   preview?: boolean;
+  feedback?: "inline" | "toast";
   saveResponse: (stepId: string, input: RitualResponseInput) => Promise<RitualState>;
   act: (input: RitualActionInput) => Promise<RitualActionResult>;
 }) {
   const [state, setState] = useState(external);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  useEffect(() => {
+    if (feedback === "toast" && error) toast.error(error);
+  }, [error, feedback]);
   const [challenge, setChallenge] = useState<{
     count: number;
     id: string;
@@ -407,7 +413,7 @@ export function RitualChecklist({
                 : `${complete} of ${occurrence.definition.steps.length} tasks completed`}
             </Button>
           ) : null}
-          {error ? <p role="alert">{error}</p> : null}
+          {error && feedback === "inline" ? <p role="alert">{error}</p> : null}
         </CardFooter>
       </Card>
       <div className="ritual-support flex shrink-0 flex-col items-center gap-1">

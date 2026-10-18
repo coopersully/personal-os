@@ -67,6 +67,11 @@ const stylesheetForRitualChecks = stylesheetForDecorativeChecks
     /(\.ritual-browser-preview\[data-ritual-kind="night"\]\s*\{\s*)background: radial-gradient\(ellipse at 50% 0%, rgb\(240 248 255 \/ 65%\), transparent 65%\), rgb\(9 18 48\);/g,
     "$1",
   );
+// Approved Today weather backgrounds use only existing semantic sky tokens.
+const stylesheetForTodayChecks = stylesheetForRitualChecks.replace(
+  /(\.today-background--weather\[data-period="(morning|day|evening|night)"\]\s*\{\s*)background: linear-gradient\(145deg, var\(--weather-sky-\2-start\), var\(--background\)\);/g,
+  "$1",
+);
 const stylesheetPatterns = [
   { name: "gradient", pattern: /(?:linear|radial|conic)-gradient\(/g },
   { name: "decorative shadow", pattern: /(?:box|text)-shadow\s*:/g },
@@ -133,8 +138,8 @@ for (const path of await sourceFiles(root)) {
 }
 
 for (const { name, pattern } of stylesheetPatterns) {
-  for (const match of stylesheetForRitualChecks.matchAll(pattern)) {
-    const line = stylesheetForRitualChecks.slice(0, match.index).split("\n").length;
+  for (const match of stylesheetForTodayChecks.matchAll(pattern)) {
+    const line = stylesheetForTodayChecks.slice(0, match.index).split("\n").length;
     violations.push(`apps/web/src/styles.css:${line} ${name}: ${match[0]}`);
   }
 }

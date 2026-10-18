@@ -116,6 +116,16 @@ This includes repository mirror checks, lint, type checking, coverage enforcemen
 - Regression tests must assert Sonner delivery AND the absence of inline action-result copy.
   Follow `docs/design/feedback.md`; this rule takes precedence over generic inline-alert guidance.
 
+## Frontend Feedback Placement
+
+- NEVER insert alerts, error banners, loading/status rows, or diagnostic cards into a bento grid,
+  top navigation, workspace rail, or sidebar. A different element or warning button is no exception.
+- Essential account/page reads failing, even with cached data, use one shared blocking error screen
+  and recovery action. Optional refresh failures use deduplicated Sonner; loading keeps allocated
+  component geometry or uses a shared page loading boundary. Bento children are product cards only.
+- Test cached outages and recovery, and assert the absence of feedback items in those surfaces.
+  Follow `docs/design/feedback.md`; these rules override generic contextual Alert guidance.
+
 ## Frontend Icons
 
 - reicon is the only permitted icon pack. Import every glyph from

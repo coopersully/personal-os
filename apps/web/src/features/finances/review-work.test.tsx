@@ -1,3 +1,4 @@
+import { expectQueryToast, watchQueryFeedback } from "../../../test-support/query-feedback";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -127,7 +128,7 @@ it("makes empty and failed review work explicit", async () => {
   listFinanceQuestions.mockRejectedValue(new Error("Questions are unavailable"));
   listFinanceActionReviews.mockResolvedValue([]);
   renderWithQueryClient(<FinanceAgentReviewQueue />);
-  expect(await screen.findByText("Couldn’t load finance questions.")).toBeInTheDocument();
+  await expectQueryToast("Couldn’t load finance questions.");
 
   listFinanceQuestions.mockResolvedValue([]);
   listFinanceActionReviews.mockResolvedValue([]);
@@ -233,3 +234,6 @@ it("presents reimbursement states, amounts, and empty or failed results", async 
   renderWithQueryClient(<FinanceReimbursementList />);
   expect(await screen.findByText("Couldn’t load this material.")).toBeInTheDocument();
 });
+
+beforeEach(watchQueryFeedback);
+afterEach(() => vi.restoreAllMocks());

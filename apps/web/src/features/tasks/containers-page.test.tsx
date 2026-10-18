@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import type { TaskList, TaskProject } from "@personal-os/domain";
+import { expectQueryToast, watchQueryFeedback } from "../../../test-support/query-feedback";
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -320,6 +321,9 @@ it.each([
     new Error("Offline"),
   );
   renderCollection("projects");
-  expect(await screen.findByText(`Couldn’t load ${kind}.`)).toBeVisible();
+  await expectQueryToast(`Couldn’t load ${kind}.`);
   expect(screen.queryByText("No active projects")).not.toBeInTheDocument();
 });
+
+beforeEach(watchQueryFeedback);
+afterEach(() => vi.restoreAllMocks());

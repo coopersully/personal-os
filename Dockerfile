@@ -19,6 +19,8 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 
 FROM dependencies AS build
 COPY . .
+ARG VITE_CARTO_API_KEY=
+ENV VITE_CARTO_API_KEY=$VITE_CARTO_API_KEY
 ARG VITE_API_BASE_URL=http://localhost:8787
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN pnpm --filter @personal-os/api build \

@@ -505,7 +505,9 @@ describe("database schema contracts", () => {
       "0108_finance_sms_completion",
       "0110_workspace_agent_approval_provenance",
       "0111_finance_hosted_link_state",
+      "0112_today_preferences",
       "0112_connector_capability_health",
+      "0113_connector_capability_health_reconciliation",
     ]);
   });
 

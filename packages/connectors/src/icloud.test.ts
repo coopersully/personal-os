@@ -333,7 +333,13 @@ describe("iCloud connector", () => {
       kind: "upsert",
     });
     expect(sync.changes[1]).toMatchObject({
-      event: { allDay: true, status: "cancelled", title: "Untitled event" },
+      event: {
+        allDay: true,
+        status: "cancelled",
+        title: "Untitled event",
+        startsAt: new Date("2026-07-16T04:00:00Z"),
+        endsAt: new Date("2026-07-17T04:00:00Z"),
+      },
     });
 
     const updated = await value.updateEvent(
@@ -1495,4 +1501,34 @@ describe("iCloud attachment retrieval", () => {
       ),
     ).rejects.toThrow("download limit");
   });
+});
+
+it("preserves positive-offset all-day source dates on edits", async () => {
+  const client = davClient({
+    fetchCalendars: vi.fn(async () => [{ url: calendarId, timezone: "Asia/Tokyo" }]),
+    fetchCalendarObjects: vi.fn(async () => [
+      { data: allDayIcs, url: `${calendarId}event-2.ics`, etag: "etag-1" },
+    ]),
+  });
+  const { value } = connector(client);
+  const updated = await value.updateEvent(
+    credentials,
+    calendarId,
+    `${calendarId}event-2.ics`,
+    "etag-1",
+    {
+      startsAt: "2026-07-15T15:00:00Z",
+      endsAt: "2026-07-16T15:00:00Z",
+      allDay: true,
+      timezone: "Asia/Tokyo",
+    },
+  );
+  expect(client.updateCalendarObject).toHaveBeenCalledWith(
+    expect.objectContaining({
+      calendarObject: expect.objectContaining({
+        data: expect.stringContaining("DTSTART;VALUE=DATE:20260716"),
+      }),
+    }),
+  );
+  expect(updated.startsAt.toISOString()).toBe("2026-07-15T15:00:00.000Z");
 });

@@ -1,3 +1,8 @@
+import {
+  expectQueryToast,
+  retryQueryToast,
+  watchQueryFeedback,
+} from "../../../test-support/query-feedback";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { ApiClientError } from "@personal-os/api-client";
@@ -295,9 +300,9 @@ it("keeps pinned-project recovery readable through failed name loading and exact
   expect(screen.getByLabelText("Sort by")).toBeDisabled();
   expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
   await act(async () => rejectNames(new Error("Project names offline")));
-  await screen.findByText("Couldn’t load pinned project names.");
+  await expectQueryToast("Couldn’t load pinned project names.");
   expect(update).toHaveBeenCalledTimes(1);
-  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  retryQueryToast("Couldn’t load pinned project names.");
   await screen.findByText("Your change: Launch");
   expect(screen.getByLabelText("Sort by")).toBeDisabled();
   expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
@@ -703,3 +708,6 @@ it.each([
   expect(api.updateWorkspaceSettings).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole("button", { name: "Refresh latest settings" })).not.toBeInTheDocument();
 });
+
+beforeEach(watchQueryFeedback);
+afterEach(() => vi.restoreAllMocks());

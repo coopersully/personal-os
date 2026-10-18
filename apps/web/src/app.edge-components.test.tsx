@@ -2,6 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 import { ApiClientError } from "@personal-os/api-client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import {
@@ -93,11 +94,25 @@ it("renders all-day, future, ongoing, and quick-action event previews", () => {
   expect(screen.getByLabelText("Blocks another calendar")).toBeVisible();
 });
 
-it("renders task timeline states and rejects non-task material", () => {
+it("uses the real task row in the timeline and rejects non-task material", () => {
   const base = {
     endsAt: "2026-09-07T11:00:00.000Z",
-    material: { kind: "task", task: { title: "Write update" } },
     startsAt: "2026-09-07T10:00:00.000Z",
+    material: {
+      kind: "task",
+      task: {
+        id: "task",
+        title: "Write update",
+        lifecycle: "open",
+        deletedAt: null,
+        dueAt: null,
+        scheduledAt: "2026-09-07T10:00:00.000Z",
+        estimateMinutes: 60,
+        priority: "medium",
+        tags: [],
+        notes: null,
+      },
+    },
   };
   const props = {
     density: "full",
@@ -105,20 +120,21 @@ it("renders task timeline states and rejects non-task material", () => {
     layoutStyle: {},
     onEdit: () => {},
     timeZone: "UTC",
+    currentTime: new Date("2026-09-07T09:30:00.000Z"),
   } as const;
-  const { rerender, container } = render(
-    <TodayTaskTimelineCard {...props} currentTime={new Date("2026-09-07T09:30:00.000Z")} />,
+  const cache = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: React.ReactNode }) => (
+    <QueryClientProvider client={cache}>{children}</QueryClientProvider>
   );
-  expect(screen.getByText("in 30 min")).toBeVisible();
-  rerender(<TodayTaskTimelineCard {...props} currentTime={new Date("2026-09-07T10:45:00.000Z")} />);
-  expect(screen.getByText("15 min left")).toBeVisible();
-  rerender(<TodayTaskTimelineCard {...props} currentTime={new Date("2026-09-07T12:00:00.000Z")} />);
-  expect(screen.queryByText(/left|in 30/)).not.toBeInTheDocument();
+  const { rerender, container } = render(<TodayTaskTimelineCard {...props} />, { wrapper });
+  expect(screen.getByRole("checkbox", { name: "Complete Write update" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Open Write update" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Write update options" })).toBeVisible();
+  expect(container.querySelector('[data-slot="task-item"]')).not.toBeNull();
   rerender(
     <TodayTaskTimelineCard
       {...props}
       item={{ ...base, material: { event: event(), kind: "event" } } as never}
-      currentTime={new Date("2026-09-07T12:00:00.000Z")}
     />,
   );
   expect(container).toBeEmptyDOMElement();

@@ -223,7 +223,25 @@ describe("projectPaydayCycle", () => {
         matches: [{ actualMovementId: "actual", replacedExpectedMinorUnits: 200 }],
       }),
     ];
-    expect(reasons(input)).toContain("duplicate_identity");
+    expect(reasons(input)).toContain("invalid_match");
+  });
+
+  it("shares an actual capacity across distinct occurrences without counting its cash twice", () => {
+    const input = fixture();
+    input.occurrences = [first(input.occurrences), occurrence({ id: "bill-a", localDate: "2026-10-20", direction: "outgoing", classification: "external_expense", amountMinorUnits: 100, remainingExpectedMinorUnits: 0, matches: [{ actualMovementId: "actual", replacedExpectedMinorUnits: 100 }] }), occurrence({ id: "bill-b", localDate: "2026-10-21", direction: "outgoing", classification: "external_expense", amountMinorUnits: 100, remainingExpectedMinorUnits: 0, matches: [{ actualMovementId: "actual", replacedExpectedMinorUnits: 100 }] })];
+    input.actualMovements = [actual()];
+    expect(projectPaydayCycle(input)).toMatchObject({ status: "estimated", endingBalanceMinorUnits: 1300 });
+    input.occurrences[2] = occurrence({ ...input.occurrences[2], id: "bill-b", direction: "outgoing", classification: "external_expense", amountMinorUnits: 101, remainingExpectedMinorUnits: 0, matches: [{ actualMovementId: "actual", replacedExpectedMinorUnits: 101 }] });
+    expect(reasons(input)).toContain("invalid_match");
+  });
+
+  it("accepts historical included actual references but refuses unexplained historical cash", () => {
+    const input = fixture();
+    input.occurrences = [first(input.occurrences), occurrence({ id: "bill", localDate: "2026-10-20", direction: "outgoing", classification: "external_expense", amountMinorUnits: 200, remainingExpectedMinorUnits: 0, matches: [{ actualMovementId: "actual", replacedExpectedMinorUnits: 200 }] })];
+    input.actualMovements = [actual({ localDate: "2026-10-01", balanceReflection: "included" })];
+    expect(projectPaydayCycle(input)).toMatchObject({ status: "estimated", endingBalanceMinorUnits: 1500 });
+    input.actualMovements = [actual({ localDate: "2026-10-01", balanceReflection: "not_included" })];
+    expect(projectPaydayCycle(input).status).toBe("unavailable");
   });
 
   it.each([

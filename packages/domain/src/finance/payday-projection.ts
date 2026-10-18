@@ -245,12 +245,12 @@ export function projectPaydayCycle(input: PaydayProjectionInput): PaydayProjecti
   }
   const occurrenceById = new Map<string, PaydayOccurrence>();
   const actualById = new Map<string, PaydayActualMovement>();
-  const validateRecord = (record: MovementIdentity) => {
+  const validateRecord = (record: MovementIdentity, historicalIncluded = false) => {
     if (!text(record.id) || !text(record.version)) reject("missing_revision", record.id);
     if (!date(record.localDate)) reject("invalid_date", record.id);
     else if (
       validPeriod &&
-      (record.localDate < input.periodStartLocalDate || record.localDate > (end ?? ""))
+      ((record.localDate < input.periodStartLocalDate && !historicalIncluded) || record.localDate > (end ?? ""))
     )
       reject("invalid_period", record.id);
     if (!money(record.amountMinorUnits)) reject("invalid_money", record.id);
@@ -273,7 +273,7 @@ export function projectPaydayCycle(input: PaydayProjectionInput): PaydayProjecti
   for (const movement of input.actualMovements) {
     if (actualById.has(movement.id)) reject("duplicate_identity", movement.id);
     actualById.set(movement.id, movement);
-    validateRecord(movement);
+    validateRecord(movement, movement.balanceReflection === "included");
     if (
       scope.has(movement.accountId) &&
       movement.balanceReflection !== "included" &&
@@ -329,15 +329,17 @@ export function projectPaydayCycle(input: PaydayProjectionInput): PaydayProjecti
       actualById,
       (other) => other.pairedMovementId,
     );
-  const usedActual = new Set<string>();
+  // One canonical actual may replace several occurrences, but its cash capacity is shared.
+  const replacedByActual = new Map<string, bigint>();
   for (const occurrence of input.occurrences) {
     if (!money(occurrence.remainingExpectedMinorUnits)) reject("unknown_residual", occurrence.id);
     let replaced = 0n;
+    const usedInOccurrence = new Set<string>();
     for (const match of occurrence.matches.slice(0, RECORD_LIMIT)) {
       const actual = actualById.get(match.actualMovementId);
-      if (usedActual.has(match.actualMovementId))
+      if (usedInOccurrence.has(match.actualMovementId))
         reject("duplicate_identity", match.actualMovementId);
-      usedActual.add(match.actualMovementId);
+      usedInOccurrence.add(match.actualMovementId);
       if (
         !money(match.replacedExpectedMinorUnits) ||
         !actual ||
@@ -349,8 +351,14 @@ export function projectPaydayCycle(input: PaydayProjectionInput): PaydayProjecti
           match.replacedExpectedMinorUnits > actual.amountMinorUnits)
       )
         reject("invalid_match", occurrence.id);
-      if (money(match.replacedExpectedMinorUnits))
-        replaced += BigInt(match.replacedExpectedMinorUnits);
+      if (money(match.replacedExpectedMinorUnits)) {
+        const amount = BigInt(match.replacedExpectedMinorUnits);
+        replaced += amount;
+        const aggregate = (replacedByActual.get(match.actualMovementId) ?? 0n) + amount;
+        replacedByActual.set(match.actualMovementId, aggregate);
+        if (actual && money(actual.amountMinorUnits) && aggregate > BigInt(actual.amountMinorUnits))
+          reject("invalid_match", match.actualMovementId);
+      }
     }
     if (
       money(occurrence.amountMinorUnits) &&

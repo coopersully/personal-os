@@ -191,6 +191,66 @@ describe.sequential("recurring schedule actual matching and explicit balance bas
       match,
     };
   }
+  async function statement(f: Awaited<ReturnType<typeof fixture>>) {
+    const sources = await f.service.listFinanceBalanceBasisSources(f.user.id, { accountIds: [f.account.id] });
+    expect(sources.coverage).toMatchObject({ complete: true, truncated: false });
+    return f.service.confirmFinanceBalanceBasis({ accountId: f.account.id, kind: "current", amountCents: 100000, currencyCode: "USD", asOf: now().toISOString(), validUntil: "2026-05-01T00:00:00Z", protectedFloorCents: 0, expectedAccountRevision: f.account.contextualRevision.toString(), expectedBasisRevision: 0, reflections: sources.transactions.map(row => ({ transactionId: row.id, transactionRevision: row.transactionRevision, reflection: "included" as const })), idempotencyKey: randomUUID() }, f.context);
+  }
+  async function closePreviousPayday(f: Awaited<ReturnType<typeof fixture>>) {
+    const [salary] = await database.db.insert(financeTransactions).values({ userId: f.user.id, accountId: f.account.id, merchant: "Synthetic salary", amount: 300000, currencyCode: "USD", direction: "income", transactionDate: "2026-02-28", category: "Income", categorySource: "user", categoryConfidence: 10000 }).returning();
+    if (!salary) throw new Error("Missing synthetic salary");
+    const schedule = await f.service.listFinanceRecurringOccurrences(f.user.id, { from: "2026-02-28", to: "2026-02-28" });
+    const payday = schedule.occurrences.find(row => row.source.kind === "income");
+    if (!payday) throw new Error("Missing previous payday");
+    await f.service.manageFinanceOccurrenceMatch({ operation: "match_income", occurrence: { scheduleVersionId: payday.scheduleVersionId, localDate: payday.localDate, slot: payday.slot }, transactionId: salary.id, expectedTransactionRevision: salary.contextualRevision.toString(), amountCents: 300000, currencyCode: "USD", rationale: "Explicit previous salary", idempotencyKey: randomUUID() }, f.context);
+  }
+
+  it("reviews historical current revisions separately and refuses an incomplete balance statement", async () => {
+    const f = await fixture();
+    const [old] = await database.db.insert(financeTransactions).values({ userId: f.user.id, accountId: f.account.id, merchant: "Historical included expense", amount: 500, currencyCode: "USD", direction: "expense", transactionDate: "2025-01-01", category: "Rent", categorySource: "user" }).returning();
+    const timeline = await f.service.listFinanceCashflowSources(f.user.id, { from: "2026-03-01", to: "2026-03-31" });
+    expect(timeline.transactions.map(row => row.id)).not.toContain(old?.id);
+    const review = await f.service.listFinanceBalanceBasisSources(f.user.id, { accountIds: [f.account.id] });
+    expect(review.transactions.map(row => row.id)).toContain(old?.id);
+    expect((await f.service.listFinanceBalanceBasisSources(f.user.id, { accountIds: [] })).transactions).toEqual([]);
+    await expect(f.service.confirmFinanceBalanceBasis({ accountId: f.account.id, kind: "current", amountCents: 100000, currencyCode: "USD", asOf: now().toISOString(), validUntil: "2026-05-01T00:00:00Z", protectedFloorCents: 0, expectedAccountRevision: f.account.contextualRevision.toString(), expectedBasisRevision: 0, reflections: [{ transactionId: f.actual.id, transactionRevision: f.actual.contextualRevision.toString(), reflection: "included" }], idempotencyKey: randomUUID() }, f.context)).rejects.toMatchObject({ code: "conflict" });
+    await f.service.manageFinanceOccurrenceMatch(f.match, f.context);
+    await statement(f);
+    const view = await f.service.getFinanceCashflowProjection(f.user.id, { from: "2026-03-01", to: "2026-04-30", selectedIncomeStreamId: f.income.id });
+    expect(view.projection).toMatchObject({ status: "estimated", endingBalanceMinorUnits: 360000 });
+  });
+
+  it("shares one canonical allocation capacity across two occurrence matches without double cash", async () => {
+    const f = await fixture();
+    await f.service.manageFinanceOccurrenceMatch({ ...f.match, amountCents: 4000 }, f.context);
+    await f.service.manageFinanceOccurrenceMatch({ ...f.match, occurrence: { ...f.match.occurrence, localDate: "2026-03-08" }, amountCents: 6000, idempotencyKey: randomUUID() }, f.context);
+    await statement(f);
+    expect((await f.service.getFinanceCashflowProjection(f.user.id, { from: "2026-03-01", to: "2026-04-30", selectedIncomeStreamId: f.income.id })).projection).toMatchObject({ status: "estimated", endingBalanceMinorUnits: 360000 });
+  });
+
+  it("preserves separate canonical allocation identities for multiple matches to one transaction", async () => {
+    const f = await fixture();
+    await database.db.update(financeTransactionAllocations).set({ state: "invalidated" }).where(eq(financeTransactionAllocations.id, f.allocation.id));
+    const allocations = await database.db.insert(financeTransactionAllocations).values([4000, 6000].map((amount, allocationOrder) => ({ userId: f.user.id, transactionId: f.actual.id, categoryId: f.allocation.categoryId, amount, allocationOrder, treatment: "personal" as const }))).returning();
+    for (const allocation of allocations) await f.service.manageFinanceOccurrenceMatch({ ...f.match, allocationId: allocation.id, expectedAllocationRevision: allocation.revision, amountCents: allocation.amount, idempotencyKey: randomUUID() }, f.context);
+    await statement(f);
+    expect((await f.service.getFinanceCashflowProjection(f.user.id, { from: "2026-03-01", to: "2026-04-30", selectedIncomeStreamId: f.income.id })).projection).toMatchObject({ status: "estimated", endingBalanceMinorUnits: 360000 });
+  });
+
+  it("uses today's next payday and excludes retired reversed variable history from a fixed successor forecast", async () => {
+    const f = await fixture();
+    const variable = await f.service.confirmFinanceRecurringSchedule({ ...f.costInput, expectedSourceRevision: 2, supersedesId: f.cost.data.id, effectiveFrom: "2026-02-15", anchorLocalDate: "2026-02-15", amountBasis: "variable", idempotencyKey: randomUUID() }, f.context);
+    const match = await f.service.manageFinanceOccurrenceMatch({ ...f.match, occurrence: { scheduleVersionId: variable.data.id, localDate: "2026-02-22", slot: 0 } }, f.context);
+    await f.service.manageFinanceOccurrenceMatch({ operation: "reverse", matchId: match.data.id, rationale: "Correct variable schedule", idempotencyKey: randomUUID() }, f.context);
+    await f.service.confirmFinanceRecurringSchedule({ ...f.costInput, expectedSourceRevision: 3, supersedesId: variable.data.id, effectiveFrom: "2026-03-01", anchorLocalDate: "2026-03-01", idempotencyKey: randomUUID() }, f.context);
+    await closePreviousPayday(f);
+    await statement(f);
+    const view = await f.service.getFinanceCashflowProjection(f.user.id, { from: "2026-02-22", to: "2026-04-30", selectedIncomeStreamId: f.income.id });
+    expect(view.schedule.occurrences.some(row => row.scheduleVersionId === variable.data.id && row.amountBasis === "variable")).toBe(true);
+    expect(view.schedule.matchEvents.some(row => row.kind === "reverse")).toBe(true);
+    expect(view.projection).toMatchObject({ status: "estimated", endingBalanceMinorUnits: 350000 });
+  });
+
   it("expands stable month-end identities without creating occurrence rows on reads", async () => {
     const f = await fixture();
     const broad = await f.service.listFinanceRecurringOccurrences(f.user.id, {

@@ -19,6 +19,9 @@ import {
   type ConfirmFinanceBalanceBasisInput,
   confirmFinanceBalanceBasisInputSchema,
   type FinanceBalanceBasis,
+  type FinanceBalanceBasisSourcesQuery,
+  type FinanceBalanceBasisSourceSnapshots,
+  financeBalanceBasisSourcesQuerySchema,
   type FinanceCashflowActualEligibilityReason,
   type FinanceCashflowProjectionQuery,
   type FinanceCashflowProjectionView,
@@ -360,13 +363,12 @@ export function createFinanceBalanceBasisService({
       ),
     );
   }
-  return {
-    listFinanceBalanceBases,
-    async listFinanceCashflowSources(
+  async function readSourceSnapshots(
       userId: string,
       raw: FinanceRecurringOccurrencesQuery,
+      allHistory = false,
     ): Promise<FinanceCashflowSourceSnapshots> {
-      const query = financeRecurringOccurrencesQuerySchema.parse(raw);
+      const query = allHistory ? raw : financeRecurringOccurrencesQuerySchema.parse(raw);
       return db.transaction(
         async (tx) => {
           const data = await readCashflowActuals(tx, userId, query);
@@ -471,6 +473,16 @@ export function createFinanceBalanceBasisService({
         },
         { isolationLevel: "repeatable read", accessMode: "read only" },
       );
+    }
+  return {
+    listFinanceBalanceBases,
+    listFinanceCashflowSources(userId: string, raw: FinanceRecurringOccurrencesQuery) {
+      return readSourceSnapshots(userId, raw);
+    },
+    async listFinanceBalanceBasisSources(userId: string, raw: FinanceBalanceBasisSourcesQuery = {}): Promise<FinanceBalanceBasisSourceSnapshots> {
+      const query = financeBalanceBasisSourcesQuerySchema.parse(raw);
+      const snapshots = await readSourceSnapshots(userId, { from: "0001-01-01", to: "9999-12-31", ...query }, true);
+      return { accounts: snapshots.accounts, transactions: snapshots.transactions, coverage: { ...snapshots.coverage, complete: !snapshots.coverage.truncated } };
     },
     async confirmFinanceBalanceBasis(
       raw: ConfirmFinanceBalanceBasisInput,
@@ -530,21 +542,15 @@ export function createFinanceBalanceBasisService({
           if ((previous?.basisRevision ?? 0) !== input.expectedBasisRevision)
             throw new AppError("conflict", "A newer balance statement exists; reload it.");
           const ids = input.reflections.map((row) => row.transactionId).sort();
-          const transactions = ids.length
-            ? await tx
-                .select()
-                .from(financeTransactions)
-                .where(
-                  and(
-                    eq(financeTransactions.userId, context.userId),
-                    eq(financeTransactions.accountId, account.id),
-                    inArray(financeTransactions.id, ids),
-                  ),
-                )
-                .orderBy(financeTransactions.id)
-                .for("update")
-            : [];
+          const transactions = await tx
+            .select()
+            .from(financeTransactions)
+            .where(and(eq(financeTransactions.userId, context.userId), eq(financeTransactions.accountId, account.id)))
+            .orderBy(financeTransactions.id)
+            .limit(LIMIT + 1)
+            .for("update");
           if (
+            transactions.length > LIMIT ||
             transactions.length !== ids.length ||
             transactions.some(
               (row) =>
@@ -554,7 +560,7 @@ export function createFinanceBalanceBasisService({
           )
             throw new AppError(
               "conflict",
-              "A reflected transaction is unavailable or changed; reload the actuals.",
+              "Review every known account transaction at its current revision before recording a statement; the safe review limit is 1000.",
             );
           const [saved] = await tx
             .insert(financeCashBalanceBases)
@@ -650,85 +656,73 @@ export function createFinanceBalanceBasisService({
             )
           )
             return unavailable("balance_basis_unavailable");
-          // The complete visible actual range must have exact current reflection evidence; new or revised rows fail closed.
-          const movements: PaydayActualMovement[] = [];
-          for (const row of data.transactions.filter((entry) =>
-            selected.some((account) => account.id === entry.accountId),
-          )) {
-            const basis = bases.find((entry) => entry.accountId === row.accountId);
-            const reflection = basis?.reflections.find(
-              (ref) =>
-                ref.transactionId === row.id &&
-                ref.transactionRevision === row.contextualRevision.toString(),
-            );
-            if (!reflection) return unavailable("actual_review_required");
-            const eligible = data.eligibility(
-              row,
-              row.direction === "income" ? "income" : "expense",
-            );
-            if (!eligible.eligible) return unavailable("actual_review_required");
-            movements.push({
-              id: row.id,
-              version: row.contextualRevision.toString(),
-              localDate: row.transactionDate,
-              amountMinorUnits: row.amount,
-              currencyCode: row.currencyCode ?? basis?.currencyCode ?? "",
-              accountId: row.accountId,
-              direction: row.direction === "income" ? "incoming" : "outgoing",
-              classification: row.direction === "income" ? "external_income" : "external_expense",
-              pairedMovementId: null,
-              postingStatus: row.pending ? "pending" : "posted",
-              balanceReflection: reflection.reflection,
-            });
-          }
-          const occurrences: PaydayOccurrence[] = schedule.occurrences
-            .filter((row) => row.inCurrentSchedule)
-            .map((row) => ({
-              id: row.key,
-              version: row.scheduleVersionId,
-              localDate: row.localDate,
-              amountMinorUnits: row.expectedAmountCents,
-              currencyCode: row.currencyCode,
-              accountId: row.accountId ?? "",
-              direction: row.source.kind === "income" ? "incoming" : "outgoing",
-              classification: row.source.kind === "income" ? "external_income" : "external_expense",
-              incomeStreamId: row.source.kind === "income" ? row.source.id : null,
-              pairedOccurrenceId: null,
-              remainingExpectedMinorUnits: row.remainingExpectedCents,
-              matches: schedule.matchEvents
-                .filter((event) => row.matchIds.includes(event.id) && event.kind === "match")
-                .map((event) => ({
-                  actualMovementId:
-                    event.incomeTransactionId ??
-                    data.allocations.find((allocation) => allocation.id === event.allocationId)
-                      ?.transactionId ??
-                    "",
-                  replacedExpectedMinorUnits: event.amountCents,
-                })),
-            }));
-          if (
-            schedule.occurrences.some(
-              (row) =>
-                row.amountBasis !== "fixed" ||
-                row.matchState === "invalidated" ||
-                row.expectedAmountCents === null,
-            )
-          )
-            return unavailable("unknown_amount");
-          const payday = occurrences
-            .filter(
-              (row) =>
-                row.incomeStreamId === query.selectedIncomeStreamId &&
-                row.localDate !== null &&
-                row.localDate >= query.from,
-            )
-            .sort((a, b) => (a.localDate ?? "").localeCompare(b.localDate ?? ""))[0];
           const asOf = now();
           const timezone = await tx.query.users.findFirst({
-            where: (table, { eq }) => eq(table.id, userId),
-            columns: { planningTimezone: true },
+            where: (table, { eq }) => eq(table.id, userId), columns: { planningTimezone: true },
           });
           if (!timezone) return unavailable("balance_basis_unavailable");
+          const today = localDateToIso(localDateAt(asOf, timezone.planningTimezone));
+          const visibleVersionIds = [...new Set(schedule.occurrences.map(row => row.scheduleVersionId))];
+          const successors = visibleVersionIds.length ? await tx.select({ previous: financeRecurringScheduleVersions.supersedesId }).from(financeRecurringScheduleVersions)
+            .where(and(eq(financeRecurringScheduleVersions.userId,userId), inArray(financeRecurringScheduleVersions.supersedesId,visibleVersionIds), lte(financeRecurringScheduleVersions.effectiveFrom,today))).limit(1001) : [];
+          if (successors.length > 1000) return unavailable("unconfirmed_schedule");
+          const retiredVersions = new Set(successors.map(row => row.previous));
+          const active = schedule.occurrences.filter(row => row.inCurrentSchedule && !retiredVersions.has(row.scheduleVersionId));
+          const paydayRow = active.filter(row => row.source.kind === "income" && row.source.id === query.selectedIncomeStreamId && row.localDate >= today && row.localDate >= query.from)
+            .sort((a,b) => a.localDate.localeCompare(b.localDate) || a.key.localeCompare(b.key))[0];
+          if (!paydayRow) return { schedule, projection: { status: "unavailable", reasons: [{ code: "next_payday_unavailable", evidenceId: null }] } } satisfies FinanceCashflowProjectionView;
+          const horizon = active.filter(row => row.localDate <= paydayRow.localDate);
+          // Reversed historical/retired versions are retained for inspection, never forecast inputs.
+          if (horizon.some(row => row.amountBasis !== "fixed" || row.matchState === "invalidated" || row.expectedAmountCents === null))
+            return unavailable("unknown_amount");
+          const horizonMatchIds = new Set(horizon.flatMap(row => row.matchIds));
+          const horizonEvents = schedule.matchEvents.filter(event => horizonMatchIds.has(event.id) && event.kind === "match");
+          const requiredActualIds = new Set(horizonEvents.flatMap(event => {
+            const id = event.incomeTransactionId ?? data.allocations.find(allocation => allocation.id === event.allocationId)?.transactionId;
+            return id ? [id] : [];
+          }));
+          const movements: PaydayActualMovement[] = [];
+          // Validate all known reflection revisions before filtering the calculation horizon.
+          // Unexplained historical/new/changed actuals never disappear from the basis check.
+          for (const row of data.transactions.filter(entry => selected.some(account => account.id === entry.accountId))) {
+            const basis = bases.find(entry => entry.accountId === row.accountId);
+            const reflection = basis?.reflections.find(ref => ref.transactionId === row.id && ref.transactionRevision === row.contextualRevision.toString());
+            if (!reflection) return unavailable("actual_review_required");
+            if (row.transactionDate < query.from) {
+              if (reflection.reflection !== "included") return unavailable("actual_review_required");
+              if (!requiredActualIds.has(row.id)) continue;
+            }
+            if (row.transactionDate > paydayRow.localDate) {
+              if (requiredActualIds.has(row.id)) return unavailable("actual_review_required");
+              continue;
+            }
+            const eligibility = data.eligibility(row, row.direction === "income" ? "income" : "expense");
+            if (!eligibility.eligible) return unavailable("actual_review_required");
+            const common = { localDate: row.transactionDate, currencyCode: row.currencyCode ?? basis?.currencyCode ?? "", accountId: row.accountId,
+              direction: row.direction === "income" ? "incoming" as const : "outgoing" as const,
+              classification: row.direction === "income" ? "external_income" as const : "external_expense" as const,
+              pairedMovementId: null, postingStatus: row.pending ? "pending" as const : "posted" as const, balanceReflection: reflection.reflection };
+            const allocations = data.allocations.filter(allocation => allocation.transactionId === row.id && allocation.state === "active");
+            if (row.direction === "expense" && allocations.length) {
+              if (allocations.reduce((sum,allocation) => sum + allocation.amount, 0) !== row.amount) return unavailable("actual_review_required");
+              for (const allocation of allocations) {
+                if (!data.eligibility(row,"expense",allocation).eligible) return unavailable("actual_review_required");
+                movements.push({ ...common, id: `allocation:${allocation.id}`, version: `${row.contextualRevision}:${allocation.revision}`, amountMinorUnits: allocation.amount });
+              }
+            } else movements.push({ ...common, id: `transaction:${row.id}`, version: row.contextualRevision.toString(), amountMinorUnits: row.amount });
+          }
+          const occurrences: PaydayOccurrence[] = horizon.map(row => {
+            const replacements = new Map<string,number>();
+            for (const event of horizonEvents.filter(entry => row.matchIds.includes(entry.id))) {
+              const actualId = event.allocationId ? `allocation:${event.allocationId}` : event.incomeTransactionId ? `transaction:${event.incomeTransactionId}` : "";
+              replacements.set(actualId, (replacements.get(actualId) ?? 0) + event.amountCents);
+            }
+            return { id: row.key, version: row.scheduleVersionId, localDate: row.localDate, amountMinorUnits: row.expectedAmountCents, currencyCode: row.currencyCode, accountId: row.accountId ?? "",
+              direction: row.source.kind === "income" ? "incoming" : "outgoing", classification: row.source.kind === "income" ? "external_income" : "external_expense",
+              incomeStreamId: row.source.kind === "income" ? row.source.id : null, pairedOccurrenceId: null, remainingExpectedMinorUnits: row.remainingExpectedCents,
+              matches: [...replacements].map(([actualMovementId,replacedExpectedMinorUnits]) => ({actualMovementId,replacedExpectedMinorUnits})) };
+          });
+          const payday = occurrences.find(row => row.id === paydayRow.key);
           const chosen = bases.filter((basis) =>
             selected.some((account) => account.id === basis.accountId),
           );

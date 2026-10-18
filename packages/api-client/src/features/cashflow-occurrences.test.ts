@@ -30,3 +30,12 @@ it("sends explicit match statements through the canonical transport without chan
     body: JSON.stringify(input),
   });
 });
+
+it("reviews complete balance history independently of the calendar range and preserves account scope", async () => {
+  const request = vi.fn().mockResolvedValue({});
+  const api = createFinanceApi(request);
+  await api.listFinanceBalanceBasisSources({ accountIds: [] });
+  expect(request).toHaveBeenLastCalledWith("/v1/finances/balance-basis-sources?accountIds=");
+  await api.listFinanceBalanceBasisSources();
+  expect(request).toHaveBeenLastCalledWith("/v1/finances/balance-basis-sources?");
+});

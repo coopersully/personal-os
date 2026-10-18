@@ -126,3 +126,67 @@ export function projectFinanceConversationReadiness(input: {
     return blocked("challenge_required", "verify_message_protocol");
   return { ...base, canSend: true, reason: "ready", recovery: "none" };
 }
+
+export const financeConversationHistoryPageSchema = z
+  .object({
+    messages: z.array(financeConversationMessageSchema).max(100),
+    nextCursor: financeConversationSequenceSchema.nullable(),
+  })
+  .strict();
+export type FinanceConversationHistoryPage = z.infer<typeof financeConversationHistoryPageSchema>;
+export const financeConversationRenderedInputSchema = z
+  .object({ throughSequence: financeConversationSequenceSchema })
+  .strict();
+export const financeConversationAcknowledgmentInputSchema = z
+  .object({ messageIds: z.array(idSchema).max(100) })
+  .strict();
+export type FinanceConversationAcknowledgmentInput = z.infer<
+  typeof financeConversationAcknowledgmentInputSchema
+>;
+export const financeConversationReplyInputSchema = z
+  .object({
+    text: z.string().trim().min(1).max(10_000),
+    idempotencyKey: z.string().trim().min(1).max(200),
+    caseId: idSchema.nullable().default(null),
+    sourceMessageIds: z.array(idSchema).min(1).max(100),
+  })
+  .strict();
+export type FinanceConversationReplyInput = z.infer<typeof financeConversationReplyInputSchema>;
+export const financeConversationProofOperationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("fetch") }).strict(),
+  z
+    .object({
+      kind: z.literal("acknowledge"),
+      challengeId: idSchema,
+      nonce: z.string().min(1).max(256),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("respond"),
+      challengeId: idSchema,
+      response: z.string().trim().min(1).max(1000),
+    })
+    .strict(),
+]);
+export type FinanceConversationProofOperation = z.infer<
+  typeof financeConversationProofOperationSchema
+>;
+export const financeConversationChallengeSchema = z
+  .object({
+    challengeId: idSchema,
+    nonce: z.string().min(1).max(256),
+    protocolVersion: z.string().min(1).max(100),
+    expiresAt: isoDateTimeSchema,
+  })
+  .strict();
+export type FinanceConversationChallenge = z.infer<typeof financeConversationChallengeSchema>;
+export const financeConversationProofResultSchema = z
+  .object({
+    challengeId: idSchema,
+    protocolVersion: z.string().min(1).max(100),
+    verified: z.boolean(),
+    nonce: z.string().max(256).optional(),
+  })
+  .strict();
+export type FinanceConversationProofResult = z.infer<typeof financeConversationProofResultSchema>;

@@ -98,7 +98,9 @@ it("distinguishes explicit zero monthly targets from absent targets in the consu
       { groupId: "absent", budgetCents: null, usedCents: 100, overspent: false },
     ],
   };
-  expect(financeSpendingMonthlyBudgetSchema.parse(monthly).groups).toEqual(monthly.groups);
+  const parsed = financeSpendingMonthlyBudgetSchema.parse(monthly);
+  if (parsed.state !== "qualified") throw new Error("Expected qualified monthly fixture");
+  expect(parsed.groups).toEqual(monthly.groups);
   expect(
     financeSpendingMonthlyBudgetSchema.safeParse({
       ...monthly,

@@ -844,3 +844,181 @@ it("uses durable setup revisions and forwards current authority failures without
     await server.close();
   }
 });
+
+it.each([
+  false,
+  true,
+])("reads qualified cash-flow window evidence only for an explicit window: %s", async (withWindow) => {
+  const window = {
+    from: "2026-10-01",
+    to: "2026-10-31",
+    accountIds: [id],
+    selectedIncomeStreamId: null,
+  };
+  const qualified = {
+    schedule: {
+      from: window.from,
+      to: window.to,
+      occurrences: [],
+      matchEvents: [],
+      unavailableSources: [],
+    },
+    projection: {
+      status: "unavailable",
+      reasons: [{ code: "balance_basis_unavailable", evidenceId: null }],
+    },
+  };
+  const api = {
+    listFinanceAlerts: vi.fn(async () => []),
+    getFinanceForecast: vi.fn(async () => ({ legacy: true })),
+    listFinanceIncomeStreams: vi.fn(async () => []),
+    listFinanceRecurringObligations: vi.fn(async () => []),
+    getFinanceCashflowProjection: vi.fn(async () => qualified),
+    listFinanceRecurringSchedules: vi.fn(async () => [
+      { id: "scoped", accountId: id },
+      { id: "other", accountId: "22222222-2222-4222-8222-222222222222" },
+      { id: "unknown", accountId: null },
+    ]),
+    listFinanceBalanceBases: vi.fn(async () => []),
+    listFinanceBalanceBasisSources: vi.fn(async () => ({
+      accounts: [],
+      transactions: [],
+      coverage: { complete: false, truncated: true, transactionLimit: 1000 },
+    })),
+    listFinanceCashflowSources: vi.fn(async () => ({
+      from: window.from,
+      to: window.to,
+      accounts: [],
+      income: [],
+      obligations: [],
+      transactions: [],
+      coverage: { truncated: true, transactionLimit: 1000 },
+    })),
+  };
+  const server = new McpServer({ name: "cash-flow-window", version: "1" });
+  registerFinanceTools(server, api as unknown as PersonalOsApiClient);
+  const client = new Client({ name: "test", version: "1" });
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(st), client.connect(ct)]);
+  try {
+    const result = await client.callTool({
+      name: "get_finance_cashflow",
+      arguments: withWindow ? { window } : {},
+    });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      data: { alerts: [], forecast: { legacy: true }, incomeStreams: [], recurringItems: [] },
+    });
+    if (withWindow) {
+      expect(api.getFinanceCashflowProjection).toHaveBeenCalledExactlyOnceWith(window);
+      expect(result.structuredContent).toMatchObject({
+        data: {
+          qualifiedCashflow: qualified,
+          rawCashflowContext: {
+            recurringSchedules: [{ id: "scoped", accountId: id }],
+            balanceBases: [],
+            balanceStatementSources: {
+              coverage: { complete: false, truncated: true, transactionLimit: 1000 },
+            },
+            cashflowSources: {
+              from: window.from,
+              to: window.to,
+              coverage: { truncated: true, transactionLimit: 1000 },
+            },
+          },
+        },
+      });
+      expect(api.listFinanceBalanceBases).toHaveBeenCalledExactlyOnceWith([id]);
+      expect(api.listFinanceBalanceBasisSources).toHaveBeenCalledExactlyOnceWith({
+        accountIds: [id],
+      });
+      expect(api.listFinanceCashflowSources).toHaveBeenCalledExactlyOnceWith({
+        from: window.from,
+        to: window.to,
+        accountIds: [id],
+      });
+    } else {
+      expect(api.getFinanceCashflowProjection).not.toHaveBeenCalled();
+      expect(api.listFinanceRecurringSchedules).not.toHaveBeenCalled();
+      expect(api.listFinanceBalanceBases).not.toHaveBeenCalled();
+      expect(api.listFinanceBalanceBasisSources).not.toHaveBeenCalled();
+      expect(api.listFinanceCashflowSources).not.toHaveBeenCalled();
+      expect((result.structuredContent as { data: object }).data).not.toHaveProperty(
+        "qualifiedCashflow",
+      );
+    }
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+it("rejects invalid or spoofed cash-flow windows before canonical projection reads", async () => {
+  const getFinanceCashflowProjection = vi.fn();
+  const server = new McpServer({ name: "cash-flow-validation", version: "1" });
+  const legacyReads = {
+    listFinanceAlerts: vi.fn(),
+    getFinanceForecast: vi.fn(),
+    listFinanceIncomeStreams: vi.fn(),
+    listFinanceRecurringObligations: vi.fn(),
+  };
+  registerFinanceTools(server, {
+    ...legacyReads,
+    getFinanceCashflowProjection,
+  } as unknown as PersonalOsApiClient);
+  const client = new Client({ name: "test", version: "1" });
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(st), client.connect(ct)]);
+  try {
+    for (const window of [
+      { from: "2026-10-31", to: "2026-10-01", selectedIncomeStreamId: null },
+      { from: "2026-01-01", to: "2027-01-02", selectedIncomeStreamId: null },
+      { from: "2026-10-01", to: "2026-10-31", selectedIncomeStreamId: null, userId: id },
+    ])
+      expect(
+        (await client.callTool({ name: "get_finance_cashflow", arguments: { window } })).isError,
+      ).toBe(true);
+    expect(getFinanceCashflowProjection).not.toHaveBeenCalled();
+    for (const read of Object.values(legacyReads)) expect(read).not.toHaveBeenCalled();
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+it("returns a cash-flow window authority failure without falling back to legacy or partial context", async () => {
+  const api = {
+    listFinanceAlerts: vi.fn(async () => []),
+    getFinanceForecast: vi.fn(async () => ({ legacy: true })),
+    listFinanceIncomeStreams: vi.fn(async () => []),
+    listFinanceRecurringObligations: vi.fn(async () => []),
+    getFinanceCashflowProjection: vi.fn(async () => {
+      throw new ApiClientError({
+        status: 403,
+        code: "forbidden",
+        message: "Cash-flow scope unavailable.",
+      });
+    }),
+    listFinanceRecurringSchedules: vi.fn(async () => []),
+    listFinanceBalanceBases: vi.fn(async () => []),
+    listFinanceBalanceBasisSources: vi.fn(async () => ({})),
+    listFinanceCashflowSources: vi.fn(async () => ({})),
+  };
+  const server = new McpServer({ name: "cash-flow-denial", version: "1" });
+  registerFinanceTools(server, api as unknown as PersonalOsApiClient);
+  const client = new Client({ name: "test", version: "1" });
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(st), client.connect(ct)]);
+  try {
+    const response = await client.callTool({
+      name: "get_finance_cashflow",
+      arguments: { window: { from: "2026-10-01", to: "2026-10-31", selectedIncomeStreamId: null } },
+    });
+    expect(response.isError).toBe(true);
+    expect(response.structuredContent).toMatchObject({ error: { status: 403, code: "forbidden" } });
+    expect(response.structuredContent).not.toHaveProperty("data");
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});

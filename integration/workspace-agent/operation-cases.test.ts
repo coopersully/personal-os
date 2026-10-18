@@ -290,3 +290,19 @@ it("keeps durable onboarding reads separate from current execution mutations", a
       requiredScopes: ["finances:write", "finances:execute"],
     });
 });
+
+it("keeps qualified cash-flow context read-only and explicit human statements outside agent authority", async () => {
+  const entry = (await discoverToolDictionary()).find(
+    ({ tool }) => tool.name === "get_finance_cashflow",
+  );
+  expect(entry?.definition).toMatchObject({ readOnly: true, requiredScopes: ["finances:read"] });
+  expect(entry?.tool.inputSchema.properties).toHaveProperty("window");
+  expect(entry?.tool.inputSchema.additionalProperties).toBe(false);
+  for (const name of [
+    "confirmFinanceRecurringSchedule",
+    "manageFinanceOccurrenceMatch",
+    "confirmFinanceBalanceBasis",
+  ] as const)
+    expect(workspaceApiExceptions[name].kind).toBe("owner_consent");
+  expect(workspaceApiExceptions.listFinanceRecurringOccurrences.tool).toBe("get_finance_cashflow");
+});

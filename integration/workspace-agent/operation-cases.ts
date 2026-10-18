@@ -2,6 +2,27 @@
  * A missing ordinary operation must get an adapter; it cannot be waived by the inventory test.
  */
 export const workspaceApiExceptions = {
+  confirmFinanceRecurringSchedule: {
+    kind: "owner_consent",
+    reason:
+      "Only the authenticated human may record an explicit recurring schedule statement; agent projection reads cannot provide that consent.",
+  },
+  manageFinanceOccurrenceMatch: {
+    kind: "owner_consent",
+    reason:
+      "Only the authenticated human may confirm or reverse an occurrence match against exact source revisions; agent read context cannot mutate match evidence.",
+  },
+  confirmFinanceBalanceBasis: {
+    kind: "owner_consent",
+    reason:
+      "Only the authenticated human may confirm the account balance basis and historical inclusion statement; agents cannot manufacture this evidence.",
+  },
+  listFinanceRecurringOccurrences: {
+    kind: "equivalent",
+    tool: "get_finance_cashflow",
+    reason:
+      "An explicit window returns the exact canonical recurring-occurrence view as qualifiedCashflow.schedule, including match history and unavailable sources.",
+  },
   getFinanceConversationUnread: {
     kind: "owner_interaction",
     reason:
@@ -131,6 +152,12 @@ export const workspaceApiExceptions = {
 } as const;
 
 export const runtimeScenarios = [
+  {
+    id: "finance-qualified-cashflow",
+    file: "cashflow-window.integration.test.ts",
+    purpose:
+      "Authenticated explicit-window cash flow, exact account scope, unknown qualification and human-statement read boundaries",
+  },
   {
     id: "finance-conversation",
     file: "conversation.integration.test.ts",

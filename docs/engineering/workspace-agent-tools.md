@@ -5546,18 +5546,62 @@ Read the active budget and disclose resources, allocations, buffer or deficit, a
 
 ## get_finance_cashflow
 
-Read forecast income, obligations, alerts, and safe-to-spend evidence before near-term advice.
+Read legacy forecast income, obligations and alerts in their existing owner-wide scope. For qualified near-term advice, supply an explicit window to read the canonical occurrence/match evidence and qualified payday projection; preserve unavailable reasons and unknown amounts. Raw supporting context is separate from that qualified projection: current schedules and balance statements are account-scoped, and balance-statement sources cover capped all-known account history rather than only the calendar window. Preserve returned coverage/truncation flags; these independently read context records are not an atomic projection snapshot. Human statements, schedule/match confirmation, goal progress and balance confirmation require the authenticated human in nohmi; an agent cannot supply that consent.
 
 - Domain: finances; stage: inspect; policy: read_only.
 - Grants (all): finances:read.
 - Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
-- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `listFinanceAlerts`, `getFinanceForecast`, `listFinanceIncomeStreams`, `listFinanceRecurringObligations`.
+- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `listFinanceAlerts`, `getFinanceForecast`, `listFinanceIncomeStreams`, `listFinanceRecurringObligations`, `getFinanceCashflowProjection`, `listFinanceRecurringSchedules`, `listFinanceBalanceBases`, `listFinanceBalanceBasisSources`, `listFinanceCashflowSources`.
 
 ```json
 {
   "type": "object",
-  "properties": {},
-  "$schema": "https://json-schema.org/draft/2020-12/schema"
+  "properties": {
+    "window": {
+      "type": "object",
+      "properties": {
+        "from": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+        },
+        "to": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+        },
+        "accountIds": {
+          "maxItems": 100,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+          }
+        },
+        "selectedIncomeStreamId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "selectedIncomeStreamId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
 }
 ```
 
@@ -8688,6 +8732,53 @@ Create, revise, pause, resume, complete, or remove a financial goal. These are s
     {
       "type": "object",
       "properties": {
+        "goalId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "expectedVersion": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 2147483646
+        },
+        "progressAmountCents": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647
+        },
+        "currencyCode": {
+          "type": "string"
+        },
+        "asOf": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+        },
+        "operation": {
+          "type": "string",
+          "const": "confirm_progress"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "goalId",
+        "expectedVersion",
+        "progressAmountCents",
+        "currencyCode",
+        "asOf",
+        "operation",
+        "idempotencyKey"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
         "deadline": {
           "anyOf": [
             {
@@ -8854,40 +8945,131 @@ Pause, resume, cancel, or correct a detected recurring income or obligation used
 ```json
 {
   "type": "object",
-  "properties": {
-    "idempotencyKey": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 200
-    },
-    "itemId": {
-      "type": "string",
-      "format": "uuid",
-      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-    },
-    "itemType": {
-      "type": "string",
-      "enum": [
-        "income",
-        "obligation"
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "itemId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "itemType": {
+          "type": "string",
+          "enum": [
+            "income",
+            "obligation"
+          ]
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "pause",
+            "resume",
+            "cancel"
+          ]
+        }
+      },
+      "required": [
+        "idempotencyKey",
+        "itemId",
+        "itemType",
+        "operation"
       ]
     },
-    "operation": {
-      "type": "string",
-      "enum": [
-        "pause",
-        "resume",
-        "cancel"
-      ]
+    {
+      "type": "object",
+      "properties": {
+        "expectedRevision": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 2147483646
+        },
+        "expectedAmountCents": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000000000
+        },
+        "cadence": {
+          "type": "string",
+          "enum": [
+            "biweekly",
+            "irregular",
+            "monthly",
+            "quarterly",
+            "semimonthly",
+            "weekly",
+            "yearly"
+          ]
+        },
+        "accountId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "currencyCode": {
+          "type": "string"
+        },
+        "fixedness": {
+          "type": "string",
+          "enum": [
+            "fixed",
+            "variable"
+          ]
+        },
+        "asOf": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "itemId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "itemType": {
+          "type": "string",
+          "const": "obligation"
+        },
+        "operation": {
+          "type": "string",
+          "const": "confirm_cost"
+        }
+      },
+      "required": [
+        "expectedRevision",
+        "expectedAmountCents",
+        "cadence",
+        "accountId",
+        "currencyCode",
+        "fixedness",
+        "asOf",
+        "idempotencyKey",
+        "itemId",
+        "itemType",
+        "operation"
+      ],
+      "additionalProperties": false
     }
-  },
-  "required": [
-    "idempotencyKey",
-    "itemId",
-    "itemType",
-    "operation"
-  ],
-  "$schema": "https://json-schema.org/draft/2020-12/schema"
+  ]
 }
 ```
 
@@ -10950,6 +11132,314 @@ Create, evidence-match a ledger credit to, or cancel a reimbursement. This can c
         "operation",
         "rationale",
         "reimbursementId"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "operation": {
+          "type": "string",
+          "const": "correct_expected"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 200
+        },
+        "reimbursementId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "expectedAmount": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100000000
+        },
+        "payer": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dueDate": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence": {
+          "type": "object",
+          "properties": {
+            "sourceRefs": {
+              "minItems": 1,
+              "maxItems": 20,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "accountId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "google",
+                      "icloud",
+                      "local",
+                      "paypal",
+                      "plaid",
+                      "twilio",
+                      "venmo",
+                      "x",
+                      "zelle"
+                    ]
+                  },
+                  "remoteId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "revision": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sourceType": {
+                    "type": "string",
+                    "enum": [
+                      "calendar_event",
+                      "finance_account",
+                      "finance_income_stream",
+                      "finance_recurring_obligation",
+                      "finance_transaction",
+                      "mail_thread",
+                      "text_message",
+                      "reminder",
+                      "task",
+                      "task_list",
+                      "task_project",
+                      "goal",
+                      "bookmark",
+                      "local"
+                    ]
+                  }
+                },
+                "required": [
+                  "accountId",
+                  "provider",
+                  "remoteId",
+                  "revision",
+                  "sourceType"
+                ]
+              }
+            },
+            "summary": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            }
+          },
+          "required": [
+            "sourceRefs",
+            "summary"
+          ],
+          "additionalProperties": false
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      },
+      "required": [
+        "operation",
+        "idempotencyKey",
+        "reimbursementId",
+        "expectedRevision",
+        "expectedAmount",
+        "payer",
+        "dueDate",
+        "evidence",
+        "rationale"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "operation": {
+          "type": "string",
+          "const": "unmatch_credit"
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 200
+        },
+        "reimbursementId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "expectedRevision": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "matchId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+        },
+        "evidence": {
+          "type": "object",
+          "properties": {
+            "sourceRefs": {
+              "minItems": 1,
+              "maxItems": 20,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "accountId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "google",
+                      "icloud",
+                      "local",
+                      "paypal",
+                      "plaid",
+                      "twilio",
+                      "venmo",
+                      "x",
+                      "zelle"
+                    ]
+                  },
+                  "remoteId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "revision": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sourceType": {
+                    "type": "string",
+                    "enum": [
+                      "calendar_event",
+                      "finance_account",
+                      "finance_income_stream",
+                      "finance_recurring_obligation",
+                      "finance_transaction",
+                      "mail_thread",
+                      "text_message",
+                      "reminder",
+                      "task",
+                      "task_list",
+                      "task_project",
+                      "goal",
+                      "bookmark",
+                      "local"
+                    ]
+                  }
+                },
+                "required": [
+                  "accountId",
+                  "provider",
+                  "remoteId",
+                  "revision",
+                  "sourceType"
+                ]
+              }
+            },
+            "summary": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            }
+          },
+          "required": [
+            "sourceRefs",
+            "summary"
+          ],
+          "additionalProperties": false
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      },
+      "required": [
+        "operation",
+        "idempotencyKey",
+        "reimbursementId",
+        "expectedRevision",
+        "matchId",
+        "evidence",
+        "rationale"
       ],
       "additionalProperties": false
     }

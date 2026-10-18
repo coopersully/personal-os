@@ -8,6 +8,7 @@ import {
   type FinanceReceiptReview,
   type FinanceToolResult,
   financeBudgetBaselineQualificationQuerySchema,
+  financeCashflowProjectionQuerySchema,
   financeConversationAcknowledgmentInputSchema,
   financeConversationEvidenceReadInputSchema,
   financeConversationProofOperationSchema,
@@ -811,11 +812,11 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
       description:
-        "Read forecast income, obligations, alerts, and safe-to-spend evidence before near-term advice.",
-      inputSchema: {},
+        "Read legacy forecast income, obligations and alerts in their existing owner-wide scope. For qualified near-term advice, supply an explicit window to read the canonical occurrence/match evidence and qualified payday projection; preserve unavailable reasons and unknown amounts. Raw supporting context is separate from that qualified projection: current schedules and balance statements are account-scoped, and balance-statement sources cover capped all-known account history rather than only the calendar window. Preserve returned coverage/truncation flags; these independently read context records are not an atomic projection snapshot. Human statements, schedule/match confirmation, goal progress and balance confirmation require the authenticated human in nohmi; an agent cannot supply that consent.",
+      inputSchema: z.object({ window: financeCashflowProjectionQuerySchema.optional() }).strict(),
       title: "Get Finance cash flow",
     },
-    async () =>
+    async ({ window }) =>
       financeApiResult(async () => {
         const [alerts, forecast, incomeStreams, recurringItems] = await Promise.all([
           api.listFinanceAlerts(),
@@ -823,9 +824,49 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
           api.listFinanceIncomeStreams(),
           api.listFinanceRecurringObligations(),
         ]);
+        if (!window)
+          return envelope(
+            { alerts, forecast, incomeStreams, recurringItems },
+            "Cash-flow evidence loaded.",
+          );
+        const { selectedIncomeStreamId: _selectedIncome, ...sourceWindow } = window;
+        const [
+          qualifiedCashflow,
+          schedules,
+          balanceBases,
+          balanceStatementSources,
+          cashflowSources,
+        ] = await Promise.all([
+          api.getFinanceCashflowProjection(window),
+          api.listFinanceRecurringSchedules(),
+          api.listFinanceBalanceBases(window.accountIds),
+          api.listFinanceBalanceBasisSources(
+            window.accountIds === undefined ? {} : { accountIds: window.accountIds },
+          ),
+          api.listFinanceCashflowSources(sourceWindow),
+        ]);
+        const recurringSchedules =
+          window.accountIds === undefined
+            ? schedules
+            : schedules.filter(
+                (schedule) =>
+                  schedule.accountId !== null && window.accountIds?.includes(schedule.accountId),
+              );
         return envelope(
-          { alerts, forecast, incomeStreams, recurringItems },
-          "Cash-flow evidence loaded.",
+          {
+            alerts,
+            forecast,
+            incomeStreams,
+            recurringItems,
+            qualifiedCashflow,
+            rawCashflowContext: {
+              recurringSchedules,
+              balanceBases,
+              balanceStatementSources,
+              cashflowSources,
+            },
+          },
+          "Qualified cash-flow window and separate supporting context loaded.",
         );
       }),
   );

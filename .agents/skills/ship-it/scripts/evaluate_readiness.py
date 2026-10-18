@@ -7,7 +7,6 @@ from pathlib import Path
 from acceptance import review_problems
 
 PENDING = {"IN_PROGRESS", "PENDING", "QUEUED", "WAITING"}
-FAILED = {"ACTION_REQUIRED", "CANCELLED", "ERROR", "FAILURE", "STALE", "TIMED_OUT"}
 GITHUB_MERGE_STATES = {
     "BEHIND",
     "BLOCKED",

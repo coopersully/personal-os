@@ -84,7 +84,13 @@ requires source references but does not authenticate their contents; inspect eac
 ```
 
 Determine expected required checks from live branch protection/rulesets, not from the checks that
-happen to appear. Include every reported current-head CI check. Optional `NEUTRAL` or `SKIPPED`
+happen to appear. Retain the complete raw check/status inventory. Include every reported current-head
+CI/security execution check and every live-required or workflow-selected check in `ci.checks`.
+An authenticated optional advisory review lifecycle status (such as CodeRabbit coverage) belongs in
+feedback evidence, outside execution checks. Record provider/purpose and classification evidence;
+never classify by display name alone or omit a required/selected check. Unknown classification
+remains unresolved and blocks readiness. Advisory findings and threads
+remain in the complete feedback ledger. Optional `NEUTRAL` or `SKIPPED`
 checks may be marked `required: false`; a required check satisfies the gate only with `SUCCESS`.
 
 CodeRabbit is optional advisory review. Its absence, rate limit or skipped coverage does not block

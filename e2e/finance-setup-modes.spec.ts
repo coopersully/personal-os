@@ -3,15 +3,115 @@ import type { FinanceOnboardingSnapshot } from "@personal-os/domain";
 import { expect, test } from "@playwright/test";
 import {
   addReviewedManualSource,
+  browserFinanceHuman,
   completeFinanceSetupViaApi,
   createFinanceSetupHost,
   createFinanceSetupPersona,
   verifyFinanceChatThroughOriginalAgent,
 } from "./finance-setup-fixtures.js";
+import { financeLegacyBrowserAccounts } from "./finance-setup-legacy.js";
 
-// Runs under both repository projects. Actual pre-0118 legacy migration remains
-// integration evidence; it is never represented by an inserted browser grant.
+// Runs under both repository projects. The server prepares historical canonical
+// records before the actual published migration; browser tests never insert grants.
 test.describe("durable Finance manual setup", () => {
+  test("actual migration eligibility survives source loss without implying completion or Chat", async ({
+    page,
+    baseURL,
+  }, info) => {
+    if (!baseURL) throw new Error("Browser runtime baseURL is required");
+    const runtimeURL = baseURL;
+    const persona = financeLegacyBrowserAccounts.find(
+      (account) => account.project === info.project.name,
+    );
+    if (!persona) throw new Error(`Missing legacy fixture for ${info.project.name}`);
+    async function login(account: { email: string; password: string }) {
+      await page.goto("/login");
+      await page.getByLabel("Email", { exact: true }).fill(account.email);
+      await page.getByLabel("Password", { exact: true }).fill(account.password);
+      await page.getByRole("button", { name: "Log in", exact: true }).click();
+      await expect(page).not.toHaveURL(/\/login(?:[/?#]|$)/);
+      return browserFinanceHuman(page, runtimeURL);
+    }
+    const human = await login(persona.legacy);
+    const initial = await human.getFinanceOnboarding();
+    expect(initial).toMatchObject({ existingAccess: true, completedAt: null });
+    expect(initial.automation.canSendChat).toBe(false);
+    const source = (await human.listFinanceAccounts()).accounts.find(
+      (account) => account.name === "Legacy checking",
+    );
+    if (!source) throw new Error("Historical canonical source is missing");
+    await human.disconnectFinanceAccount(source.id, { idempotencyKey: randomUUID() });
+    await human.updateFinanceAccount(source.id, {
+      idempotencyKey: randomUUID(),
+      includeInPlanning: false,
+    });
+    const lostSource = await human.getFinanceOnboarding();
+    expect(lostSource).toMatchObject({
+      existingAccess: true,
+      completedAt: null,
+      source: { state: "missing" },
+    });
+    expect(lostSource.automation.canSendChat).toBe(false);
+    await page.goto("/finances/transactions?view=table");
+    await expect(page).toHaveURL(/\/finances\/transactions\?view=table$/);
+    await expect(page.getByRole("region", { name: "Setup review", exact: true })).toHaveCount(0);
+    await page.reload();
+    await expect(page).toHaveURL(/\/finances\/transactions\?view=table$/);
+    await page.goto("/finances/accounts");
+    await page.getByRole("button", { name: "Edit Legacy checking", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Edit account", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.goto("/finances/setup");
+    await expect(page.getByRole("region", { name: "Setup review", exact: true })).toBeVisible();
+    await expect(page.getByText("Setup complete. Your workspace remains available.")).toHaveCount(
+      0,
+    );
+    expect((await human.getFinanceOnboarding()).completedAt).toBeNull();
+    await human.logout();
+
+    const control = await login(persona.generalSetupOnly);
+    expect((await control.getMe()).setup.status).toBe("complete");
+    const controlBefore = await control.getFinanceOnboarding();
+    expect(controlBefore).toMatchObject({
+      existingAccess: false,
+      completedAt: null,
+      source: { state: "missing" },
+    });
+    await addReviewedManualSource(control);
+    const controlAfter = await control.getFinanceOnboarding();
+    expect(controlAfter).toMatchObject({
+      existingAccess: false,
+      completedAt: null,
+      source: { state: "usable" },
+    });
+    await page.goto("/finances/spending");
+    await expect(page).toHaveURL(
+      (url) =>
+        url.pathname === "/finances/setup" &&
+        url.searchParams.get("returnTo") === "/finances/spending",
+    );
+    await control.logout();
+    const { human: postMigration } = await createFinanceSetupPersona(page, baseURL);
+    await addReviewedManualSource(postMigration);
+    const newOwner = await postMigration.getFinanceOnboarding();
+    expect(newOwner).toMatchObject({
+      existingAccess: false,
+      completedAt: null,
+      source: { state: "usable" },
+    });
+    await info.attach("actual-legacy-migration-browser-snapshots", {
+      body: JSON.stringify({
+        migration: "0118_finance_preferences_legacy_access",
+        initial,
+        lostSource,
+        controlBefore,
+        controlAfter,
+        newOwner,
+      }),
+      contentType: "application/json",
+    });
+  });
+
   test("registered Now can finish while Chat waits for original-agent proof, then revocation locks only sending", async ({
     page,
     baseURL,

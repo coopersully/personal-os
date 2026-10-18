@@ -6,6 +6,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { loadQaFixtures, qaFixtureAccounts } from "../apps/api/src/qa-fixtures.js";
 import { createDatabaseClient } from "../packages/database/src/index.js";
 import { completeFinanceSetupViaApi } from "./finance-setup-fixtures.js";
+import { prepareFinanceLegacyMigrationFixture } from "./finance-setup-legacy.js";
 
 const root = resolve(import.meta.dirname, "..");
 const apiPort = process.env.ILO_E2E_API_PORT ?? "8797";
@@ -66,6 +67,17 @@ try {
     .withPassword("personal_os")
     .withUsername("personal_os")
     .start();
+  const historicalDatabase = createDatabaseClient(postgres.getConnectionUri());
+  try {
+    await prepareFinanceLegacyMigrationFixture(
+      historicalDatabase,
+      resolve(root, "packages/database/migrations"),
+    );
+  } finally {
+    await historicalDatabase.close();
+  }
+  // Normal API startup now applies the actual published legacy migration and
+  // every later journal entry to the canonical historical records above.
   api = start("pnpm", ["--filter", "@personal-os/api", "exec", "tsx", "src/main.ts"], {
     ALLOWED_ORIGINS: webUrl,
     API_BASE_URL: apiUrl,

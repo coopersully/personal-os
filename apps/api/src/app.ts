@@ -51,6 +51,7 @@ import { createDesktopReleaseService } from "./desktop-release-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
 import { createExecutionPolicyService } from "./execution-policy-service.js";
+import { createFinanceActivityService } from "./finance/activity-service.js";
 import { createFinanceBudgetBaselineQualificationService } from "./finance/baseline-qualification-service.js";
 import { createFinanceBudgetPolicyService } from "./finance/budget-policy-service.js";
 import { createFinanceContextualQuestionService } from "./finance/contextual-question-service.js";
@@ -58,6 +59,7 @@ import {
   type ContextualPrincipal,
   contextualTransaction,
 } from "./finance/contextual-question-store.js";
+import { createFinanceConversationService } from "./finance/conversation-persistence.js";
 import { createFinanceMaintenanceIntentService } from "./finance/maintenance-intent-service.js";
 import { createFinancePositionService } from "./finance/position-service.js";
 import { createFinanceSmsPort } from "./finance/sms-answer-port.js";
@@ -96,6 +98,8 @@ import { createRitualService } from "./ritual-service.js";
 import { registerAssistantRoutes } from "./routes/assistant.js";
 import { registerAutomationHostRoutes } from "./routes/automation-hosts.js";
 import { registerCalendarRoutes } from "./routes/calendar.js";
+import { registerFinanceActivityRoutes } from "./routes/finance-activity.js";
+import { registerFinanceConversationRoutes } from "./routes/finance-conversation.js";
 import { registerFinanceRoutes } from "./routes/finances.js";
 import { registerGoalsRoutes } from "./routes/goals.js";
 import { registerMailRoutes } from "./routes/mail.js";
@@ -628,6 +632,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     now,
     readBudgetQualification: baselineQualification.getQualification,
   });
+  const financeActivity = createFinanceActivityService({
+    db: dependencies.db,
+    cursorSecret: dependencies.config.encryptionKey,
+  });
+  const financeConversation = createFinanceConversationService({ db: dependencies.db, now });
   const financePosition = createFinancePositionService({ db: dependencies.db, now });
   const financeChallenges = createFinanceChallengeService({
     actions: financeActions,
@@ -1468,6 +1477,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     finances,
     mutationContext,
   });
+
+  registerFinanceConversationRoutes({ app, conversation: financeConversation });
+  registerFinanceActivityRoutes({ app, activity: financeActivity });
 
   registerReminderRoutes({ app, mutationContext, reminders });
 

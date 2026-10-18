@@ -49,3 +49,36 @@ it("loads every owner-bound answer page and fails if a cursor repeats", async ()
   fetch.mockImplementation(async () => Response.json({ continuations: [], nextCursor: "repeat" }));
   await expect(api.listFinanceAnswerContinuations()).rejects.toThrow("cursor did not advance");
 });
+
+it("retrieves exact issued prompt versions and sends replay identity without regenerating text", async () => {
+  const issue = {
+    scheduleId: "host/id",
+    templateVersion: 2,
+    scheduleVersionAtIssue: 4,
+    text: "Stored exact text",
+    issuedAt: "2026-10-18T15:00:00.000Z",
+  };
+  const fetch = vi
+    .fn<typeof globalThis.fetch>()
+    .mockImplementation(async () => Response.json(issue));
+  const api = createApiClient({ baseUrl: "https://example.test", fetch });
+  expect(await api.getAutomationHostPrompt("host/id", 2)).toEqual(issue);
+  expect(fetch.mock.calls[0]?.[0]).toBe(
+    "https://example.test/v1/automation-hosts/host%2Fid/prompts/2",
+  );
+  await api.getAutomationHostPromptHistory("host/id", { beforeVersion: 2, limit: 1 });
+  expect(fetch.mock.calls[1]?.[0]).toBe(
+    "https://example.test/v1/automation-hosts/host%2Fid/prompts?beforeVersion=2&limit=1",
+  );
+  expect(await api.issueAutomationHostPrompt("host/id", 2, { expectedScheduleVersion: 4 })).toEqual(
+    issue,
+  );
+  expect(fetch.mock.calls[2]?.[1]).toMatchObject({
+    method: "PUT",
+    body: JSON.stringify({ expectedScheduleVersion: 4 }),
+  });
+  await api.getAutomationHostPromptHistory("host/id");
+  expect(fetch.mock.calls[3]?.[0]).toBe(
+    "https://example.test/v1/automation-hosts/host%2Fid/prompts",
+  );
+});

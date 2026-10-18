@@ -80,6 +80,14 @@ describe("Finance MCP workflows", () => {
     expect(
       tools.tools.find((tool) => tool.name === "approve_finance_budget")?.description,
     ).toContain("exact authenticated human approval");
+    const setupDescription = tools.tools.find(
+      (tool) => tool.name === "setup_finances",
+    )?.description;
+    expect(setupDescription).toContain("requires exact authenticated human approval in nohmi");
+    expect(setupDescription).toContain(
+      "cannot activate budgets, even with execution or review bypass",
+    );
+    expect(setupDescription).not.toContain("agent_self_approval");
     await client.close();
     await server.close();
   });
@@ -489,6 +497,93 @@ describe("Finance MCP workflows", () => {
   });
 });
 
+it("forwards bounded immutable host prompt reads/issuance and preserves API denials", async () => {
+  const issue = {
+    scheduleId: id,
+    templateVersion: 2,
+    scheduleVersionAtIssue: 3,
+    text: `Exact issued instructions for ${id}`,
+    issuedAt: "2026-10-18T15:00:00.000Z",
+  };
+  const api = {
+    getAutomationHostPromptHistory: vi.fn(async () => ({
+      issues: [issue],
+      nextCursor: 2,
+      currentTemplateVersion: 2,
+    })),
+    getAutomationHostPrompt: vi.fn(async () => issue),
+    issueAutomationHostPrompt: vi.fn(async () => issue),
+  };
+  const server = new McpServer({ name: "finance-host-prompt-adapters", version: "1" });
+  registerFinanceTools(server, api as unknown as PersonalOsApiClient);
+  const client = new Client({ name: "prompt-adapter-test", version: "1" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  try {
+    const history = await client.callTool({
+      name: "get_finance_host_prompt_history",
+      arguments: { scheduleId: id, beforeVersion: 3, limit: 1 },
+    });
+    expect(api.getAutomationHostPromptHistory).toHaveBeenCalledWith(id, {
+      beforeVersion: 3,
+      limit: 1,
+    });
+    expect(history.structuredContent).toEqual({
+      result: { issues: [issue], nextCursor: 2, currentTemplateVersion: 2 },
+    });
+    const exact = await client.callTool({
+      name: "get_finance_host_prompt",
+      arguments: { scheduleId: id, templateVersion: 2 },
+    });
+    expect(api.getAutomationHostPrompt).toHaveBeenCalledWith(id, 2);
+    expect(exact.structuredContent).toEqual({ result: issue });
+    const issued = await client.callTool({
+      name: "issue_finance_host_prompt",
+      arguments: { scheduleId: id, templateVersion: 2, expectedScheduleVersion: 3 },
+    });
+    expect(api.issueAutomationHostPrompt).toHaveBeenCalledWith(id, 2, {
+      expectedScheduleVersion: 3,
+    });
+    expect(issued.structuredContent).toEqual({ result: issue });
+    const badPage = await client.callTool({
+      name: "get_finance_host_prompt_history",
+      arguments: { scheduleId: id, limit: 101 },
+    });
+    expect(badPage.isError).toBe(true);
+    expect(api.getAutomationHostPromptHistory).toHaveBeenCalledTimes(1);
+    const badVersion = await client.callTool({
+      name: "issue_finance_host_prompt",
+      arguments: { scheduleId: id, templateVersion: 0, expectedScheduleVersion: 3 },
+    });
+    expect(badVersion.isError).toBe(true);
+    expect(api.issueAutomationHostPrompt).toHaveBeenCalledTimes(1);
+    api.getAutomationHostPrompt.mockRejectedValueOnce(
+      new ApiClientError({
+        status: 403,
+        code: "forbidden",
+        message: "Use this schedule's original host connection.",
+        requestId: "prompt-denied",
+      }),
+    );
+    const denied = await client.callTool({
+      name: "get_finance_host_prompt",
+      arguments: { scheduleId: id, templateVersion: 2 },
+    });
+    expect(denied.isError).toBe(true);
+    expect(denied.structuredContent).toMatchObject({
+      error: {
+        status: 403,
+        code: "forbidden",
+        requestId: "prompt-denied",
+        message: "Use this schedule's original host connection.",
+      },
+    });
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
 it("reads and prepares exact baseline qualification without exposing human confirmation", async () => {
   const getFinanceBudgetBaselineQualification = vi.fn(async () => ({
     state: "unavailable",
@@ -567,6 +662,72 @@ it("reads and prepares exact baseline qualification without exposing human confi
       tools.tools.find((tool) => tool.name === "prepare_finance_budget_baseline_qualification")
         ?.annotations?.readOnlyHint,
     ).toBe(false);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+it("forwards exact Spending selections and source revisions without mutation authority", async () => {
+  const query = {
+    scope: {
+      from: "2026-10-01",
+      through: "2026-10-18",
+      timezone: "America/New_York",
+      accountIds: [],
+      categoryIds: [null],
+      basis: "personal_cost",
+      includePending: false,
+      subtractRefunds: true,
+    },
+    grouping: "categories",
+    includeUncategorized: true,
+  };
+  const filter = {
+    query,
+    referenceRevision: "a".repeat(64),
+    groupId: null,
+    from: "2026-10-02",
+    through: "2026-10-04",
+  };
+  const getFinanceSpending = vi.fn(async () => ({ actual: "dashboard" }));
+  const listFinanceSpendingTransactions = vi.fn(async () => {
+    throw new ApiClientError({
+      status: 409,
+      code: "conflict",
+      message: "Refresh the Spending reference.",
+    });
+  });
+  const server = new McpServer({ name: "spending-parity", version: "1" });
+  registerFinanceTools(server, {
+    getFinanceSpending,
+    listFinanceSpendingTransactions,
+  } as unknown as PersonalOsApiClient);
+  const client = new Client({ name: "test", version: "1" });
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(st), client.connect(ct)]);
+  try {
+    await client.callTool({ name: "get_finance_spending", arguments: query });
+    expect(getFinanceSpending).toHaveBeenCalledExactlyOnceWith(query);
+    const stale = await client.callTool({
+      name: "list_finance_spending_transactions",
+      arguments: { filter, cursor: "next", limit: 25 },
+    });
+    expect(listFinanceSpendingTransactions).toHaveBeenCalledExactlyOnceWith(filter, "next", 25);
+    expect(stale.isError).toBe(true);
+    expect(stale.structuredContent).toMatchObject({ error: { status: 409, code: "conflict" } });
+    const invalid = await client.callTool({
+      name: "list_finance_spending_transactions",
+      arguments: { filter: { ...filter, from: "2026-09-01" } },
+    });
+    expect(invalid.isError).toBe(true);
+    expect(listFinanceSpendingTransactions).toHaveBeenCalledTimes(1);
+    const spoof = await client.callTool({
+      name: "list_finance_spending_transactions",
+      arguments: { filter, ownerId: id },
+    });
+    expect(spoof.isError).toBe(true);
+    expect(listFinanceSpendingTransactions).toHaveBeenCalledTimes(1);
   } finally {
     await client.close();
     await server.close();

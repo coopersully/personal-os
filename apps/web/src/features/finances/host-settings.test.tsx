@@ -4,8 +4,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { toast } from "sonner";
 import { FinanceHostSettings } from "./host-settings.js";
 
+vi.mock("sonner", () => ({
+  toast: { loading: vi.fn(() => "notification"), success: vi.fn(), error: vi.fn() },
+}));
 const mocks = vi.hoisted(() => ({
   listAutomationHostSchedules: vi.fn(),
   listAutomationHostConnections: vi.fn(),
@@ -86,9 +90,7 @@ it("binds the exact setup version and lets unfinished setup be cancelled", async
   mocks.listAutomationHostSchedules.mockResolvedValue([schedule()]);
   const user = userEvent.setup();
   show();
-  expect(((await screen.findByLabelText("Host prompt")) as HTMLTextAreaElement).value).toContain(
-    "operation start",
-  );
+  await screen.findByRole("button", { name: "Instructions" });
   await user.type(screen.getByLabelText("Host automation identifier"), "original-host");
   await user.type(screen.getByLabelText("Next host run"), "2026-12-20T15:00");
   await user.click(screen.getByRole("button", { name: "Bind host" }));
@@ -128,7 +130,13 @@ it("clears the encrypted trigger input after save and surfaces stale-version rej
     new Error("The host schedule state changed."),
   );
   await user.click(screen.getByRole("button", { name: "Revoke continuation access" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("The host schedule state changed.");
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "The host schedule state changed.",
+      expect.any(Object),
+    ),
+  );
+  expect(screen.queryByText("The host schedule state changed.")).not.toBeInTheDocument();
 });
 it("shows waiting answers and ambiguous delivery without suggesting an automatic retry", async () => {
   mocks.listAutomationHostSchedules.mockResolvedValue([schedule("codex_desktop", "active")]);
@@ -229,9 +237,13 @@ it("keeps uncertain delivery fenced until human inspection and shows a stale-rec
     }),
   );
   await user.click(button);
-  expect(await screen.findByRole("alert")).toHaveTextContent(
-    "Delivery changed. Reload before recovery.",
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "Delivery changed. Reload before recovery.",
+      expect.any(Object),
+    ),
   );
+  expect(screen.queryByText("Delivery changed. Reload before recovery.")).not.toBeInTheDocument();
   expect(mocks.reconcileFinanceHostDelivery).toHaveBeenCalledTimes(1);
   expect(mocks.bindFinanceAnswerContinuation).not.toHaveBeenCalled();
 });
@@ -302,9 +314,15 @@ it("preserves a safe visible failure when a host write rejects without an Error 
   const user = userEvent.setup();
   show();
   await user.click(await screen.findByRole("button", { name: "Revoke continuation access" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent(
-    "The host change could not be saved. Reload its status.",
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "The host change could not be saved. Reload its status.",
+      expect.any(Object),
+    ),
   );
+  expect(
+    screen.queryByText("The host change could not be saved. Reload its status."),
+  ).not.toBeInTheDocument();
   expect(mocks.revokeAutomationHostSchedule).toHaveBeenCalledWith(id, {
     expectedVersion: 3,
     expectedState: "paused",

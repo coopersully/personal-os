@@ -158,14 +158,16 @@ export function SpendingBubbles({
             monthlyBudget?.state === "qualified"
               ? monthlyBudget.groups.find((item) => item.groupId === group.id)
               : undefined;
-          const fill = budget?.budgetCents
-            ? spendingBudgetFillHeight(budget.usedCents / budget.budgetCents)
+          const limit = budget?.budgetCents;
+          const hasLimit = budget !== undefined && limit !== null && limit !== undefined;
+          const fill = hasLimit
+            ? spendingBudgetFillHeight(
+                limit === 0 ? (budget.usedCents > 0 ? 1 : 0) : budget.usedCents / limit,
+              )
             : null;
-          const overage = budget?.budgetCents
-            ? Math.max(0, budget.usedCents - budget.budgetCents)
-            : 0;
-          const budgetLabel = budget?.budgetCents
-            ? `Monthly budget used ${formatMoney(budget.usedCents / 100)} of ${formatMoney(budget.budgetCents / 100)}${monthlyBudget?.state === "qualified" && monthlyBudget.coverage !== "complete" ? "; observed usage, incomplete history" : ""}${overage > 0 ? `; Over budget ${formatMoney(overage / 100)}` : ""}`
+          const overage = hasLimit ? Math.max(0, budget.usedCents - limit) : 0;
+          const budgetLabel = hasLimit
+            ? `Monthly budget used ${formatMoney(budget.usedCents / 100)} of ${formatMoney(limit / 100)}${monthlyBudget?.state === "qualified" && monthlyBudget.coverage !== "complete" ? "; observed usage, incomplete history" : ""}${limit === 0 && budget.usedCents <= 0 ? "; No utilization" : ""}${overage > 0 ? `; Over budget ${formatMoney(overage / 100)}` : ""}`
             : budget
               ? "No monthly budget limit"
               : "Monthly budget comparison unavailable";

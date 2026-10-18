@@ -171,10 +171,12 @@ export function SpendingDetail({
         {monthly ? (
           <p>
             Monthly usage: {formatMoney(monthly.usedCents / 100)}
-            {monthly.budgetCents
+            {monthly.budgetCents !== null && monthly.budgetCents !== undefined
               ? ` of ${formatMoney(monthly.budgetCents / 100)}`
               : " · No budget limit"}
-            {monthly.budgetCents && monthly.usedCents > monthly.budgetCents
+            {monthly.budgetCents !== null &&
+            monthly.budgetCents !== undefined &&
+            monthly.usedCents > monthly.budgetCents
               ? ` · Over budget ${formatMoney((monthly.usedCents - monthly.budgetCents) / 100)}`
               : ""}
           </p>

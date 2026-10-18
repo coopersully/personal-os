@@ -27,7 +27,9 @@ export function SpendingList({
       : undefined;
   const budgetValue = (id: string) => {
     const budget = budgetFor(id);
-    return budget?.budgetCents ? budget.usedCents / budget.budgetCents : null;
+    if (!budget || budget.budgetCents === null || budget.budgetCents === undefined) return null;
+    if (budget.budgetCents === 0) return budget.usedCents > 0 ? Number.POSITIVE_INFINITY : 0;
+    return budget.usedCents / budget.budgetCents;
   };
   const compare = (a: FinanceSpendingGroup, b: FinanceSpendingGroup) => {
     if (sort === "budget") {
@@ -35,6 +37,7 @@ export function SpendingList({
         right = budgetValue(b.id);
       if (left === null) return right === null ? a.label.localeCompare(b.label) : 1;
       if (right === null) return -1;
+      if (left === right) return a.label.localeCompare(b.label);
       return (left - right) * (ascending ? 1 : -1);
     }
     return (
@@ -46,7 +49,9 @@ export function SpendingList({
   const budgetCopy = (id: string) => {
     const budget = budgetFor(id);
     if (!budget) return "Budget unavailable";
-    if (!budget.budgetCents) return "No budget limit";
+    if (budget.budgetCents === null || budget.budgetCents === undefined) return "No budget limit";
+    if (budget.budgetCents === 0)
+      return `${monthlyBudget?.state === "qualified" && monthlyBudget.coverage !== "complete" ? "Observed monthly" : "Monthly"} ${formatMoney(budget.usedCents / 100)} of ${formatMoney(0)} · ${budget.usedCents > 0 ? `Over budget ${formatMoney(budget.usedCents / 100)}` : "No utilization"}`;
     return `${monthlyBudget?.state === "qualified" && monthlyBudget.coverage !== "complete" ? "Observed monthly" : "Monthly"} ${formatMoney(budget.usedCents / 100)} of ${formatMoney(budget.budgetCents / 100)} · ${((budget.usedCents / budget.budgetCents) * 100).toFixed(1)}%${budget.usedCents > budget.budgetCents ? ` · Over budget ${formatMoney((budget.usedCents - budget.budgetCents) / 100)}` : ""}`;
   };
   const row = (group: FinanceSpendingGroup) => (

@@ -3,6 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import {
   type FinanceSpendingDashboard,
   type FinanceSpendingDrillDown,
+  type FinanceSpendingMonthlyBudget,
   financeSpendingReferenceFilterSchema,
 } from "@personal-os/domain";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -214,4 +215,58 @@ it("fails closed for missing revisions, oversized filters, or ambiguous selected
     screen.queryByRole("link", { name: "Open matching transactions" }),
   ).not.toBeInTheDocument();
   expect(screen.getByText(/Matching transactions are unavailable/)).toBeVisible();
+});
+
+it("distinguishes explicit zero monthly targets from null and absent comparisons in exact detail", () => {
+  const { data, group } = referenceFixture();
+  const budget: Extract<FinanceSpendingMonthlyBudget, { state: "qualified" }> = {
+    state: "qualified",
+    month: "2026-10",
+    period: { from: "2026-10-01", through: "2026-10-31", timezone: "America/New_York" },
+    currency: "USD",
+    accountIds: [],
+    qualificationId: "qualification",
+    confirmedAt: "2026-10-18T00:00:00Z",
+    qualificationKind: "retrospective",
+    coverage: "partial",
+    includesPending: false,
+    basis: "full_outflow",
+    subtractsRefunds: false,
+    groups: [{ groupId: group.id, budgetCents: 0, usedCents: 250, overspent: true }],
+  };
+  const node = (monthlyBudget: FinanceSpendingMonthlyBudget) => (
+    <MemoryRouter>
+      <SpendingDetail
+        data={{ ...data, monthlyBudget }}
+        group={group}
+        onClose={vi.fn()}
+        onSelect={vi.fn()}
+      />
+    </MemoryRouter>
+  );
+  const { rerender } = render(node(budget));
+  expect(screen.getByText("Monthly usage: $2.50 of $0.00 · Over budget $2.50")).toBeVisible();
+  expect(screen.queryByText(/Infinity|NaN/)).not.toBeInTheDocument();
+  for (const usedCents of [0, -100]) {
+    rerender(
+      node({
+        ...budget,
+        groups: [{ groupId: group.id, budgetCents: 0, usedCents, overspent: false }],
+      }),
+    );
+    expect(
+      screen.getByText(`Monthly usage: ${usedCents === 0 ? "$0.00" : "-$1.00"} of $0.00`),
+    ).toBeVisible();
+    expect(screen.getByRole("dialog")).not.toHaveTextContent("Over budget");
+  }
+  rerender(
+    node({
+      ...budget,
+      groups: [{ groupId: group.id, budgetCents: null, usedCents: 250, overspent: false }],
+    }),
+  );
+  expect(screen.getByText("Monthly usage: $2.50 · No budget limit")).toBeVisible();
+  rerender(node({ ...budget, groups: [] }));
+  expect(screen.queryByText(/Monthly usage:/)).not.toBeInTheDocument();
+  expect(screen.getByRole("dialog")).not.toHaveTextContent("Infinity");
 });

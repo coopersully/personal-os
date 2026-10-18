@@ -302,3 +302,76 @@ it("animates changing area-correct fill within300ms and disables animation for r
     transition: { duration: 0, ease: "easeOut" },
   });
 });
+it("defensively renders a zero target separately from null without infinite utilization", () => {
+  const groups = [
+    {
+      id: "food",
+      kind: "category",
+      label: "Food",
+      netCents: 100,
+      positiveAreaCents: 100,
+      categories: [],
+    },
+  ] as unknown as FinanceSpendingDashboard["groups"];
+  const monthlyBudget = {
+    state: "qualified",
+    month: "2026-10",
+    period: { from: "2026-10-01", through: "2026-10-31", timezone: "America/New_York" },
+    currency: "USD",
+    accountIds: [],
+    qualificationId: "qualification",
+    confirmedAt: "2026-10-18T00:00:00Z",
+    qualificationKind: "retrospective",
+    includesPending: false,
+    basis: "personal_cost",
+    subtractsRefunds: true,
+    coverage: "complete",
+    groups: [],
+  } as Extract<FinanceSpendingMonthlyBudget, { state: "qualified" }>;
+  const props = {
+    groups,
+    onSelect: vi.fn(),
+    monthlyBudget: {
+      ...monthlyBudget,
+      groups: [{ groupId: "food", budgetCents: 0, usedCents: 250, overspent: true }],
+    },
+  };
+  const { rerender } = render(createElement(SpendingBubbles, props));
+  const selected = () => screen.getByRole("button", { name: /Food:/ });
+  expect(selected()).toHaveAccessibleName(
+    /Monthly budget used \$2.50 of \$0.00; Over budget \$2.50/,
+  );
+  expect(selected()).toHaveClass("border-2");
+  expect(fillAnimation.props.at(-1)).toMatchObject({ animate: { clipPath: "inset(0% 0 0 0)" } });
+  for (const usedCents of [0, -100]) {
+    rerender(
+      createElement(SpendingBubbles, {
+        ...props,
+        monthlyBudget: {
+          ...monthlyBudget,
+          groups: [{ groupId: "food", budgetCents: 0, usedCents, overspent: false }],
+        },
+      }),
+    );
+    expect(selected()).toHaveAccessibleName(/No utilization/);
+    expect(selected()).not.toHaveAccessibleName(/Over budget|Infinity|NaN/);
+    expect(selected()).not.toHaveClass("border-2");
+    expect(fillAnimation.props.at(-1)).toMatchObject({
+      animate: { clipPath: "inset(100% 0 0 0)" },
+    });
+  }
+  rerender(
+    createElement(SpendingBubbles, {
+      ...props,
+      monthlyBudget: {
+        ...monthlyBudget,
+        groups: [{ groupId: "food", budgetCents: null, usedCents: 250, overspent: false }],
+      },
+    }),
+  );
+  expect(selected()).toHaveAccessibleName(/No monthly budget limit/);
+  expect(selected().querySelector("[data-budget-fill]")).toBeNull();
+  rerender(createElement(SpendingBubbles, { ...props, monthlyBudget }));
+  expect(selected()).toHaveAccessibleName(/Monthly budget comparison unavailable/);
+  expect(selected().querySelector("[data-budget-fill]")).toBeNull();
+});

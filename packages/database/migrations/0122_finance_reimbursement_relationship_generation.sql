@@ -1,3 +1,7 @@
+-- Prevent relationship writes between the initial snapshot and trigger installation.
+-- Deployment must retry the entire migration if concurrent writers cause a lock deadlock.
+LOCK TABLE finance_reimbursement_matches IN SHARE ROW EXCLUSIVE MODE;
+--> statement-breakpoint
 -- Relationship state is derived by the database, never supplied by a writer.
 -- Baseline existing rows before installing the guard, in this migration transaction.
 ALTER TABLE finance_transactions

@@ -488,3 +488,90 @@ describe("Finance MCP workflows", () => {
     expect(response.structuredContent).not.toHaveProperty("communication.nextQuestion");
   });
 });
+
+it("forwards bounded immutable host prompt reads/issuance and preserves API denials", async () => {
+  const issue = {
+    scheduleId: id,
+    templateVersion: 2,
+    scheduleVersionAtIssue: 3,
+    text: `Exact issued instructions for ${id}`,
+    issuedAt: "2026-10-18T15:00:00.000Z",
+  };
+  const api = {
+    getAutomationHostPromptHistory: vi.fn(async () => ({
+      issues: [issue],
+      nextCursor: 2,
+      currentTemplateVersion: 2,
+    })),
+    getAutomationHostPrompt: vi.fn(async () => issue),
+    issueAutomationHostPrompt: vi.fn(async () => issue),
+  };
+  const server = new McpServer({ name: "finance-host-prompt-adapters", version: "1" });
+  registerFinanceTools(server, api as unknown as PersonalOsApiClient);
+  const client = new Client({ name: "prompt-adapter-test", version: "1" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  try {
+    const history = await client.callTool({
+      name: "get_finance_host_prompt_history",
+      arguments: { scheduleId: id, beforeVersion: 3, limit: 1 },
+    });
+    expect(api.getAutomationHostPromptHistory).toHaveBeenCalledWith(id, {
+      beforeVersion: 3,
+      limit: 1,
+    });
+    expect(history.structuredContent).toEqual({
+      result: { issues: [issue], nextCursor: 2, currentTemplateVersion: 2 },
+    });
+    const exact = await client.callTool({
+      name: "get_finance_host_prompt",
+      arguments: { scheduleId: id, templateVersion: 2 },
+    });
+    expect(api.getAutomationHostPrompt).toHaveBeenCalledWith(id, 2);
+    expect(exact.structuredContent).toEqual({ result: issue });
+    const issued = await client.callTool({
+      name: "issue_finance_host_prompt",
+      arguments: { scheduleId: id, templateVersion: 2, expectedScheduleVersion: 3 },
+    });
+    expect(api.issueAutomationHostPrompt).toHaveBeenCalledWith(id, 2, {
+      expectedScheduleVersion: 3,
+    });
+    expect(issued.structuredContent).toEqual({ result: issue });
+    const badPage = await client.callTool({
+      name: "get_finance_host_prompt_history",
+      arguments: { scheduleId: id, limit: 101 },
+    });
+    expect(badPage.isError).toBe(true);
+    expect(api.getAutomationHostPromptHistory).toHaveBeenCalledTimes(1);
+    const badVersion = await client.callTool({
+      name: "issue_finance_host_prompt",
+      arguments: { scheduleId: id, templateVersion: 0, expectedScheduleVersion: 3 },
+    });
+    expect(badVersion.isError).toBe(true);
+    expect(api.issueAutomationHostPrompt).toHaveBeenCalledTimes(1);
+    api.getAutomationHostPrompt.mockRejectedValueOnce(
+      new ApiClientError({
+        status: 403,
+        code: "forbidden",
+        message: "Use this schedule's original host connection.",
+        requestId: "prompt-denied",
+      }),
+    );
+    const denied = await client.callTool({
+      name: "get_finance_host_prompt",
+      arguments: { scheduleId: id, templateVersion: 2 },
+    });
+    expect(denied.isError).toBe(true);
+    expect(denied.structuredContent).toMatchObject({
+      error: {
+        status: 403,
+        code: "forbidden",
+        requestId: "prompt-denied",
+        message: "Use this schedule's original host connection.",
+      },
+    });
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});

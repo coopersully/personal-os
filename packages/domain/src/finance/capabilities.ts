@@ -1,5 +1,55 @@
 export const financeCapabilityManifest = [
   {
+    apiOperation: "getFinanceConversationBatch",
+    capability: "workflow.conversation_batch_delivery",
+    mcpTool: "get_finance_conversation_batch",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+  {
+    apiOperation: "acknowledgeFinanceConversationBatch",
+    capability: "workflow.conversation_batch_acknowledgment",
+    mcpTool: "acknowledge_finance_conversation_batch",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+  {
+    apiOperation: "replyToFinanceConversationBatch",
+    capability: "workflow.conversation_batch_reply",
+    mcpTool: "reply_to_finance_conversation_batch",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+  {
+    apiOperation: "exchangeFinanceConversationChallenge",
+    capability: "workflow.conversation_protocol_verification",
+    mcpTool: "exchange_finance_conversation_challenge",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+
+  {
+    apiOperation: "getAutomationHostPromptHistory",
+    capability: "workflow.host_prompt_history",
+    mcpTool: "get_finance_host_prompt_history",
+    mode: "read",
+    requiredScope: "finances:maintain",
+  },
+  {
+    apiOperation: "getAutomationHostPrompt",
+    capability: "workflow.host_prompt_read",
+    mcpTool: "get_finance_host_prompt",
+    mode: "read",
+    requiredScope: "finances:maintain",
+  },
+  {
+    apiOperation: "issueAutomationHostPrompt",
+    capability: "workflow.host_prompt_issue",
+    mcpTool: "issue_finance_host_prompt",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+  {
     apiOperation: "getFinanceContinuations",
     capability: "workflow.answer_continuations",
     mcpTool: "get_finance_continuations",

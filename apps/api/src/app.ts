@@ -57,6 +57,7 @@ import {
   type ContextualPrincipal,
   contextualTransaction,
 } from "./finance/contextual-question-store.js";
+import { createFinanceConversationService } from "./finance/conversation-persistence.js";
 import { createFinanceMaintenanceIntentService } from "./finance/maintenance-intent-service.js";
 import { createFinancePositionService } from "./finance/position-service.js";
 import { createFinanceSmsPort } from "./finance/sms-answer-port.js";
@@ -94,6 +95,7 @@ import { createRitualService } from "./ritual-service.js";
 import { registerAssistantRoutes } from "./routes/assistant.js";
 import { registerAutomationHostRoutes } from "./routes/automation-hosts.js";
 import { registerCalendarRoutes } from "./routes/calendar.js";
+import { registerFinanceConversationRoutes } from "./routes/finance-conversation.js";
 import { registerFinanceRoutes } from "./routes/finances.js";
 import { registerGoalsRoutes } from "./routes/goals.js";
 import { registerMailRoutes } from "./routes/mail.js";
@@ -617,6 +619,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     maintenance,
     now,
   });
+  const financeConversation = createFinanceConversationService({ db: dependencies.db, now });
   const financePosition = createFinancePositionService({ db: dependencies.db, now });
   const financeChallenges = createFinanceChallengeService({
     actions: financeActions,
@@ -1455,6 +1458,8 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     finances,
     mutationContext,
   });
+
+  registerFinanceConversationRoutes({ app, conversation: financeConversation });
 
   registerReminderRoutes({ app, mutationContext, reminders });
 

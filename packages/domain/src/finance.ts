@@ -1350,3 +1350,5 @@ export const createFinanceCategoryInputSchema = z.strictObject({
   name: z.string().trim().min(1).max(120),
 });
 export type CreateFinanceCategoryInput = z.infer<typeof createFinanceCategoryInputSchema>;
+
+export * from "./finance/conversation.js";

@@ -1,11 +1,12 @@
-import type { ConfirmFinanceRecurringScheduleInput, FinanceRecurringSchedule, FinanceRecurringOccurrencesQuery, FinanceRecurringOccurrencesView, ManageFinanceOccurrenceMatchInput, FinanceOccurrenceMatchEvent, ConfirmFinanceBalanceBasisInput, FinanceBalanceBasis, FinanceCashflowSourceSnapshots, FinanceCashflowProjectionQuery, FinanceCashflowProjectionView } from "@personal-os/domain";
 import type {
   AnswerFinanceReviewInput,
   ApplyFinanceCategorizationsInput,
   ApproveFinanceBudgetInput,
   AttentionItem,
   ClassifyFinanceTransactionsInput,
+  ConfirmFinanceBalanceBasisInput,
   ConfirmFinanceBudgetBaselineQualificationInput,
+  ConfirmFinanceRecurringScheduleInput,
   CreateFinanceAccountInput,
   CreateFinanceBudgetBucketInput,
   CreateFinanceBudgetInput,
@@ -26,6 +27,9 @@ import type {
   FinanceActionReview,
   FinanceAlert,
   FinanceAnswer,
+  FinanceBalanceBasis,
+  FinanceBalanceBasisSourceSnapshots,
+  FinanceBalanceBasisSourcesQuery,
   FinanceBudget,
   FinanceBudgetBaselineQualificationRead,
   FinanceBudgetBaselineReview,
@@ -42,6 +46,9 @@ import type {
   FinanceBudgetRevisionProposalRecord,
   FinanceBudgetStatus,
   FinanceBudgetVersion,
+  FinanceCashflowProjectionQuery,
+  FinanceCashflowProjectionView,
+  FinanceCashflowSourceSnapshots,
   FinanceCategorizationApplyResult,
   FinanceCategorizationProposal,
   FinanceCategorizationProposalPage,
@@ -63,6 +70,7 @@ import type {
   FinanceMaintenanceInput,
   FinanceMaintenancePayload,
   FinanceMerchant,
+  FinanceOccurrenceMatchEvent,
   FinanceOverview,
   FinancePeriodReview,
   FinancePlaybookResponse,
@@ -74,6 +82,9 @@ import type {
   FinanceReceiptReview,
   FinanceReceiptReviewInput,
   FinanceRecurringObligation,
+  FinanceRecurringOccurrencesQuery,
+  FinanceRecurringOccurrencesView,
+  FinanceRecurringSchedule,
   FinanceReimbursement,
   FinanceReimbursementQuestionAnswer,
   FinanceReviewCase,
@@ -100,6 +111,7 @@ import type {
   LinkFinanceTransactionsInput,
   MaintenanceScope,
   ManageFinanceGoalInput,
+  ManageFinanceOccurrenceMatchInput,
   ManageFinanceRecurringItemInput,
   ManageFinanceRuleInput,
   MergeFinanceMerchantsInput,
@@ -183,14 +195,60 @@ export function createFinanceApi(request: FinanceRequest) {
     return params;
   }
   return {
-    async listFinanceRecurringSchedules(): Promise<FinanceRecurringSchedule[]> { return request("/v1/finances/recurring-schedules"); },
-    async confirmFinanceRecurringSchedule(input: ConfirmFinanceRecurringScheduleInput): Promise<FinanceToolResult<FinanceRecurringSchedule>> { return request("/v1/finances/recurring-schedules", { method: "POST", body: JSON.stringify(input) }); },
-    async listFinanceRecurringOccurrences(query: FinanceRecurringOccurrencesQuery): Promise<FinanceRecurringOccurrencesView> { return request(`/v1/finances/recurring-occurrences?${cashflowQuery(query)}`); },
-    async manageFinanceOccurrenceMatch(input: ManageFinanceOccurrenceMatchInput): Promise<FinanceToolResult<FinanceOccurrenceMatchEvent>> { return request("/v1/finances/recurring-occurrence-matches", { method: "POST", body: JSON.stringify(input) }); },
-    async listFinanceBalanceBases(accountIds?: string[]): Promise<FinanceBalanceBasis[]> { const params = new URLSearchParams(); if (accountIds !== undefined) params.set("accountIds", accountIds.join(",")); return request(`/v1/finances/balance-bases?${params}`); },
-    async confirmFinanceBalanceBasis(input: ConfirmFinanceBalanceBasisInput): Promise<FinanceToolResult<FinanceBalanceBasis>> { return request("/v1/finances/balance-bases", { method: "POST", body: JSON.stringify(input) }); },
-    async listFinanceCashflowSources(query: FinanceRecurringOccurrencesQuery): Promise<FinanceCashflowSourceSnapshots> { return request(`/v1/finances/cashflow-sources?${cashflowQuery(query)}`); },
-    async getFinanceCashflowProjection(query: FinanceCashflowProjectionQuery): Promise<FinanceCashflowProjectionView> { const params = cashflowQuery(query); if (query.selectedIncomeStreamId !== null) params.set("selectedIncomeStreamId", query.selectedIncomeStreamId); return request(`/v1/finances/cashflow-projection?${params}`); },
+    async listFinanceRecurringSchedules(): Promise<FinanceRecurringSchedule[]> {
+      return request("/v1/finances/recurring-schedules");
+    },
+    async confirmFinanceRecurringSchedule(
+      input: ConfirmFinanceRecurringScheduleInput,
+    ): Promise<FinanceToolResult<FinanceRecurringSchedule>> {
+      return request("/v1/finances/recurring-schedules", {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+    },
+    async listFinanceRecurringOccurrences(
+      query: FinanceRecurringOccurrencesQuery,
+    ): Promise<FinanceRecurringOccurrencesView> {
+      return request(`/v1/finances/recurring-occurrences?${cashflowQuery(query)}`);
+    },
+    async manageFinanceOccurrenceMatch(
+      input: ManageFinanceOccurrenceMatchInput,
+    ): Promise<FinanceToolResult<FinanceOccurrenceMatchEvent>> {
+      return request("/v1/finances/recurring-occurrence-matches", {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+    },
+    async listFinanceBalanceBases(accountIds?: string[]): Promise<FinanceBalanceBasis[]> {
+      const params = new URLSearchParams();
+      if (accountIds !== undefined) params.set("accountIds", accountIds.join(","));
+      return request(`/v1/finances/balance-bases?${params}`);
+    },
+    async confirmFinanceBalanceBasis(
+      input: ConfirmFinanceBalanceBasisInput,
+    ): Promise<FinanceToolResult<FinanceBalanceBasis>> {
+      return request("/v1/finances/balance-bases", { method: "POST", body: JSON.stringify(input) });
+    },
+    async listFinanceBalanceBasisSources(
+      query: FinanceBalanceBasisSourcesQuery = {},
+    ): Promise<FinanceBalanceBasisSourceSnapshots> {
+      const params = new URLSearchParams();
+      if (query.accountIds !== undefined) params.set("accountIds", query.accountIds.join(","));
+      return request(`/v1/finances/balance-basis-sources?${params}`);
+    },
+    async listFinanceCashflowSources(
+      query: FinanceRecurringOccurrencesQuery,
+    ): Promise<FinanceCashflowSourceSnapshots> {
+      return request(`/v1/finances/cashflow-sources?${cashflowQuery(query)}`);
+    },
+    async getFinanceCashflowProjection(
+      query: FinanceCashflowProjectionQuery,
+    ): Promise<FinanceCashflowProjectionView> {
+      const params = cashflowQuery(query);
+      if (query.selectedIncomeStreamId !== null)
+        params.set("selectedIncomeStreamId", query.selectedIncomeStreamId);
+      return request(`/v1/finances/cashflow-projection?${params}`);
+    },
 
     async getFinanceBudgetBaselineQualification(
       month: string,

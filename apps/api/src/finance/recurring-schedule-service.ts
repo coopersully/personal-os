@@ -4,18 +4,18 @@ import {
   financeAccounts,
   financeIncomeStreams,
   financeOccurrenceMatchEvents,
-  financeRecurringOccurrences,
   financeRecurringObligations,
+  financeRecurringOccurrences,
   financeRecurringScheduleVersions,
 } from "@personal-os/database";
 import {
   type ConfirmFinanceRecurringScheduleInput,
+  confirmFinanceRecurringScheduleInputSchema,
   type FinanceRecurringSchedule,
   type FinanceToolResult,
-  confirmFinanceRecurringScheduleInputSchema,
   financeRecurringScheduleSchema,
 } from "@personal-os/domain";
-import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
 import { lockReimbursementTopology } from "../finance-reimbursement-locks.js";
@@ -104,6 +104,22 @@ export function createFinanceRecurringScheduleService({
           await lockReimbursementTopology(tx, context.userId);
           const table =
             input.source.kind === "income" ? financeIncomeStreams : financeRecurringObligations;
+          if (input.accountId) {
+            const [account] = await tx
+              .select()
+              .from(financeAccounts)
+              .where(
+                and(
+                  eq(financeAccounts.userId, context.userId),
+                  eq(financeAccounts.id, input.accountId),
+                ),
+              )
+              .limit(1)
+              .for("update");
+            if (!account) throw new AppError("not_found", "Source account not found.");
+            if (account.currencyCode !== null && account.currencyCode !== input.currencyCode)
+              throw new AppError("invalid_request", "Schedule and account currency differ.");
+          }
           const [source] = await tx
             .select()
             .from(table)
@@ -124,22 +140,6 @@ export function createFinanceRecurringScheduleService({
               "conflict",
               "The source changed; reload its current revision and account.",
             );
-          if (input.accountId) {
-            const [account] = await tx
-              .select()
-              .from(financeAccounts)
-              .where(
-                and(
-                  eq(financeAccounts.userId, context.userId),
-                  eq(financeAccounts.id, input.accountId),
-                ),
-              )
-              .limit(1)
-              .for("update");
-            if (!account) throw new AppError("not_found", "Source account not found.");
-            if (account.currencyCode !== null && account.currencyCode !== input.currencyCode)
-              throw new AppError("invalid_request", "Schedule and account currency differ.");
-          }
           const column =
             input.source.kind === "income"
               ? financeRecurringScheduleVersions.incomeStreamId
@@ -265,26 +265,24 @@ export function createFinanceRecurringScheduleService({
             .returning();
           if (!saved)
             throw new AppError("internal_error", "Schedule statement could not be recorded.");
-          await tx
-            .insert(auditEvents)
-            .values(
-              auditValues({
-                action: "finance.recurring_schedule.confirmed",
-                before: { versionId: previous?.id ?? null, revision: source.revision },
-                after: {
-                  versionId: saved.id,
-                  revision: updated.revision,
-                  effectiveFrom: saved.effectiveFrom,
-                },
-                entityId: source.id,
-                entityType:
-                  input.source.kind === "income"
-                    ? "finance_income_stream"
-                    : "finance_recurring_obligation",
-                principal: context,
-                requestId: context.requestId,
-              }),
-            );
+          await tx.insert(auditEvents).values(
+            auditValues({
+              action: "finance.recurring_schedule.confirmed",
+              before: { versionId: previous?.id ?? null, revision: source.revision },
+              after: {
+                versionId: saved.id,
+                revision: updated.revision,
+                effectiveFrom: saved.effectiveFrom,
+              },
+              entityId: source.id,
+              entityType:
+                input.source.kind === "income"
+                  ? "finance_income_stream"
+                  : "finance_recurring_obligation",
+              principal: context,
+              requestId: context.requestId,
+            }),
+          );
           return cashflowResult(
             scheduleValue(saved),
             "Your explicit recurring schedule was recorded.",

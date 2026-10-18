@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { FinanceIncomeStream, FinanceRecurringObligation } from "../finance.js";
 import type { FinanceRecurringOccurrencesQuery } from "./recurring-schedule.js";
 
@@ -48,4 +49,16 @@ export type FinanceCashflowSourceSnapshots = {
     }>;
   }>;
   coverage: { truncated: boolean; transactionLimit: number };
+};
+
+/** Account-scoped statement review covers all known history, independently of the calendar window. */
+export const financeBalanceBasisSourcesQuerySchema = z.object({
+  accountIds: z.array(z.uuid()).max(100).optional(),
+});
+export type FinanceBalanceBasisSourcesQuery = z.infer<typeof financeBalanceBasisSourcesQuerySchema>;
+export type FinanceBalanceBasisSourceSnapshots = Pick<
+  FinanceCashflowSourceSnapshots,
+  "accounts" | "transactions"
+> & {
+  coverage: { complete: boolean; truncated: boolean; transactionLimit: number };
 };

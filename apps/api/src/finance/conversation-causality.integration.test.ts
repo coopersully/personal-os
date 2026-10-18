@@ -26,6 +26,7 @@ import { createFinanceActionService } from "../finance-action-service.js";
 import { createFinanceChallengeService } from "../finance-challenge-service.js";
 import { createFinanceService } from "../finance-service.js";
 import type { Principal } from "../types.js";
+import { createWorkspaceMaintenanceService } from "../workspace-maintenance-service.js";
 import { loadFinanceAuthorization } from "./context.js";
 import { createFinanceContextualQuestionService } from "./contextual-question-service.js";
 import { createFinanceConversationService } from "./conversation-persistence.js";
@@ -385,6 +386,24 @@ describe.sequential("Finance bound causal settlement", () => {
     expect(await f.submit([f.question.id, f.answer.id])).toEqual(submitted);
     const resolution = await f.challenges.resolve(f.userId, f.run.id);
     if (!resolution.candidateRevision) throw new Error("revision");
+    // The canonical maintenance runner claims queued resolution work and releases
+    // its exact challenge checkpoint before settlement; resolve() alone is not that handoff.
+    const maintenance = createWorkspaceMaintenanceService({
+      db: database.db,
+      now: () => new Date(),
+    });
+    const claimed = await maintenance.claim(f.run.id);
+    if (!claimed) throw new Error("resolution claim");
+    await maintenance.checkpointAndRelease({
+      runId: f.run.id,
+      claimId: claimed.claimId,
+      status: "awaiting_agent_challenge",
+      checkpoint: {
+        candidateId: f.candidate.id,
+        phase: "challenge",
+        revision: resolution.candidateRevision,
+      },
+    });
     const effect = () =>
       f.actions.settleFinanceMaintenanceCandidate(
         f.candidate.id,

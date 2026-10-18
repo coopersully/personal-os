@@ -8,6 +8,7 @@ import {
   financeConversationCapabilities,
   financeConversationMessages,
   type financeMaintenanceCandidateItems,
+  financeReviewActionRequests,
   financeReviewCases,
   financeTransactions,
   type workspaceMaintenanceRuns,
@@ -259,34 +260,68 @@ export async function validateFinanceConversationClaim(
     const caseId =
       message.caseId ?? message.recordRefs.find((ref) => ref.kind === "review_case")?.id;
     const matching =
-      question &&
       caseId &&
-      answers.some(
+      answers.find(
         (answer) =>
-          answer.recordRefs.some(
-            (ref) => ref.kind === "contextual_question" && ref.id === question.id,
-          ) &&
+          answer.sourceMessageIds.includes(message.id) &&
           (answer.caseId ?? answer.recordRefs.find((ref) => ref.kind === "review_case")?.id) ===
-            caseId,
+            caseId &&
+          (!question ||
+            answer.recordRefs.some(
+              (ref) => ref.kind === "contextual_question" && ref.id === question.id,
+            )),
       );
-    if (
-      !matching ||
-      message.authorKind !== "agent" ||
-      message.idempotencyKey !== `question:${question?.id}:1` ||
-      !message.sourceOperationId
-    )
+    if (!matching || message.authorKind !== "agent" || !message.sourceOperationId)
       throw new AppError(
         "conflict",
-        "A prior source must be the actual canonical question for a delivered answer.",
+        "A prior source must be the actual canonical question for a delivered accepted answer.",
       );
+    if (!question) {
+      const [request] = await tx
+        .select({ id: financeReviewActionRequests.id })
+        .from(financeReviewActionRequests)
+        .where(
+          and(
+            eq(financeReviewActionRequests.userId, run.userId),
+            eq(financeReviewActionRequests.reviewCaseId, caseId),
+            eq(financeReviewActionRequests.authorityOperationId, message.sourceOperationId),
+            eq(financeReviewActionRequests.prompt, message.text),
+          ),
+        )
+        .limit(1);
+      const [accepted] = matching.sourceOperationId
+        ? await tx
+            .select({ id: auditEvents.id })
+            .from(auditEvents)
+            .where(
+              and(
+                eq(auditEvents.userId, run.userId),
+                eq(auditEvents.action, "finance.review_answer.accepted"),
+                eq(auditEvents.entityId, caseId),
+                eq(auditEvents.actorType, "user"),
+                eq(auditEvents.actorId, run.userId),
+                sql`${auditEvents.after}->>'operationId' = ${matching.sourceOperationId}`,
+              ),
+            )
+            .limit(1)
+        : [];
+      if (!request || !accepted)
+        throw new AppError(
+          "conflict",
+          "The prior ReviewCase question must link to its actual accepted owner answer.",
+        );
+    }
     const [audit] = await tx
       .select({ id: auditEvents.id })
       .from(auditEvents)
       .where(
         and(
           eq(auditEvents.userId, run.userId),
-          eq(auditEvents.action, "finance.contextual_question.created"),
-          eq(auditEvents.entityId, question.id),
+          eq(
+            auditEvents.action,
+            question ? "finance.contextual_question.created" : "finance.review_question.created",
+          ),
+          eq(auditEvents.entityId, question?.id ?? caseId),
           eq(auditEvents.actorType, "agent"),
           sql`${auditEvents.after}->>'operationId' = ${message.sourceOperationId}`,
           sql`${auditEvents.after}->>'prompt' = ${message.text}`,

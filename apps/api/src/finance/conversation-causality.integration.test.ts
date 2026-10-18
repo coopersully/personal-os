@@ -8,9 +8,12 @@ import {
   executionPolicySettings,
   financeAccounts,
   financeConversationMessages,
+  financeLedgerChallenges,
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
   financeMutationRecords,
+  financeReviewAnswers,
+  financeReviewCases,
   financeTransactions,
   migrateDatabase,
   users,
@@ -23,12 +26,14 @@ import { createFinanceActionService } from "../finance-action-service.js";
 import { createFinanceChallengeService } from "../finance-challenge-service.js";
 import { createFinanceService } from "../finance-service.js";
 import type { Principal } from "../types.js";
+import { loadFinanceAuthorization } from "./context.js";
 import { createFinanceContextualQuestionService } from "./contextual-question-service.js";
 import { createFinanceConversationService } from "./conversation-persistence.js";
 import {
   captureFinanceConversationBatch,
   postgresConversationBatchStore,
 } from "./conversation-service.js";
+import { createInboxService } from "./inbox-service.js";
 
 /** Authored for Lead's exclusive PG slot; real bound producer/submit/settle paths, no mocked authority. */
 describe.sequential("Finance bound causal settlement", () => {
@@ -446,5 +451,136 @@ describe.sequential("Finance bound causal settlement", () => {
     await expect(f.submit([f.question.id, foreignMessage.id])).rejects.toThrow();
     expect(unrelated).toHaveLength(1);
     expect(await f.receipts()).toHaveLength(0);
+  });
+  it("mirrors only a newly projected actual-agent ReviewCase question and its canonical owner answer, retaining exact retry identity", async () => {
+    const f = await hostFixture();
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        userId: f.userId,
+        accountId: f.account.id,
+        amount: 1800,
+        merchant: "Review prompt",
+        direction: "expense",
+        transactionDate: "2026-10-18",
+        needsReview: true,
+      })
+      .returning();
+    if (!transaction) throw new Error("transaction");
+    const run = await canonicalRun(f.userId);
+    const claimId = randomUUID();
+    const revision = `sha256:${"e".repeat(64)}`;
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({
+        automationScheduleId: f.scheduleId,
+        authorizationConnectionId: f.connectionId,
+        status: "running",
+        leaseClaimId: claimId,
+        leaseExpiresAt: new Date(Date.now() + 60000),
+      })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    const [candidate] = await database.db
+      .insert(financeMaintenanceCandidates)
+      .values({ userId: f.userId, runId: run.id, revision, state: "challenged" })
+      .returning();
+    if (!candidate) throw new Error("candidate");
+    await database.db.insert(financeMaintenanceCandidateItems).values({
+      candidateId: candidate.id,
+      ordinal: 0,
+      actionKind: "question",
+      disposition: "question",
+      expectedRevision: transaction.updatedAt.toISOString(),
+      fingerprint: `sha256:${"f".repeat(64)}`,
+      privatePayload: {
+        prompt: "Was this an actual shared meal?",
+        why: "Need owner evidence",
+        reviewReason: "category_ambiguity",
+        underlyingAction: "transaction",
+        transactionId: transaction.id,
+        choices: [],
+      },
+      sourceRefs: [],
+    });
+    await database.db.insert(financeLedgerChallenges).values({
+      userId: f.userId,
+      runId: run.id,
+      candidateId: candidate.id,
+      candidateRevision: revision,
+      rubricVersion: "finance-ledger-challenge-v1",
+      cutoff: new Date(),
+      state: "resolved",
+      submittingAgentId: f.agent.actorId,
+    });
+    const finances = createFinanceService({ db: database.db, now: () => new Date() });
+    const input = {
+      userId: f.userId,
+      runId: run.id,
+      candidateId: candidate.id,
+      candidateRevision: revision,
+      context: {
+        principal: f.agent,
+        requestId: randomUUID(),
+        maintenanceClaim: { claimId, runId: run.id },
+        maintenance: {
+          runId: run.id,
+          rulebookVersion: run.rulebookVersion,
+          policy: "approved_rule" as const,
+          idempotencyKey: randomUUID(),
+        },
+      },
+    };
+    await finances.projectMaintenanceCandidateQuestionsForUser(input);
+    await finances.projectMaintenanceCandidateQuestionsForUser({
+      ...input,
+      context: { ...input.context, requestId: randomUUID() },
+    });
+    const [review] = await database.db
+      .select()
+      .from(financeReviewCases)
+      .where(
+        and(
+          eq(financeReviewCases.userId, f.userId),
+          eq(financeReviewCases.transactionId, transaction.id),
+        ),
+      );
+    if (!review) throw new Error("review");
+    const messages = () =>
+      database.db
+        .select()
+        .from(financeConversationMessages)
+        .where(eq(financeConversationMessages.userId, f.userId));
+    const questions = (await messages()).filter((m) => m.authorKind === "agent");
+    expect(questions).toHaveLength(1);
+    expect(questions[0]?.text).toBe("Was this an actual shared meal?");
+    expect(questions[0]?.recordRefs.some((r) => r.kind === "contextual_question")).toBe(false);
+    const inbox = createInboxService({ db: database.db, now: () => new Date() });
+    const context = await loadFinanceAuthorization({ db: database.db, ...f.context });
+    const answer = {
+      idempotencyKey: randomUUID(),
+      answer: "Shared meal",
+      resolution: { type: "clarify" as const, clarification: "This was a shared meal" },
+    };
+    await inbox.answerFinanceReview(review.id, answer, context);
+    await inbox.answerFinanceReview(review.id, answer, context);
+    const accepted = (await messages()).filter((m) => m.authorKind === "user");
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0]?.sourceMessageIds).toEqual([questions[0]?.id]);
+    expect(accepted[0]?.text).toBe(answer.resolution.clarification);
+    const persisted = await database.db
+      .select()
+      .from(financeReviewAnswers)
+      .where(eq(financeReviewAnswers.reviewCaseId, review.id));
+    expect(persisted).toHaveLength(1);
+    expect(accepted[0]?.sourceOperationId).toBe(persisted[0]?.operationId);
+    const followup = await f.conversation.send(f.principal, {
+      text: "Additional context",
+      caseId: review.id,
+      idempotencyKey: randomUUID(),
+      recordRefs: [{ kind: "transaction", id: transaction.id }],
+    });
+    expect(followup.id).not.toBe(accepted[0]?.id);
+    expect((await messages()).filter((m) => m.authorKind === "agent")).toHaveLength(1);
+    expect((await messages()).filter((m) => m.authorKind === "user")).toHaveLength(2);
   });
 });

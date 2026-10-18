@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import {
+  auditEvents,
   type Database,
   financeConversationBatches,
   financeConversationBatchMessages,
@@ -288,7 +289,8 @@ export async function recordFinanceConversationAcceptedAnswer(
     userId: string;
     operationId: string;
     caseId: string;
-    questionId: string;
+    questionId?: string;
+    sourceMessageIds?: string[];
     transactionId: string;
     text: string;
     recordedAt: Date;
@@ -315,6 +317,35 @@ export async function recordFinanceConversationAcceptedAnswer(
       throw new AppError("conflict", "The canonical answer message already has different content.");
     return existing;
   }
+  let sourceMessageIds = input.sourceMessageIds ?? [];
+  if (input.questionId && !input.sourceMessageIds) {
+    const [question] = await tx
+      .select({ id: financeConversationMessages.id })
+      .from(financeConversationMessages)
+      .innerJoin(
+        auditEvents,
+        and(
+          eq(auditEvents.userId, financeConversationMessages.userId),
+          eq(auditEvents.action, "finance.contextual_question.created"),
+          eq(auditEvents.entityId, input.questionId),
+          eq(auditEvents.actorType, "agent"),
+          sql`${auditEvents.after}->>'operationId' = ${financeConversationMessages.sourceOperationId}`,
+          sql`${auditEvents.after}->>'prompt' = ${financeConversationMessages.text}`,
+        ),
+      )
+      .where(
+        and(
+          eq(financeConversationMessages.userId, input.userId),
+          eq(financeConversationMessages.authorKind, "agent"),
+          sql`${financeConversationMessages.recordRefs} @> ${JSON.stringify([
+            { kind: "contextual_question" as const, id: input.questionId },
+            { kind: "review_case", id: input.caseId },
+          ])}::jsonb`,
+        ),
+      )
+      .limit(1);
+    sourceMessageIds = question ? [question.id] : [];
+  }
   // Row allocation serializes against batch cutoff reads without taking a new
   // advisory lock after the answer service's existing question/receipt locks.
   const [conversation] = await tx
@@ -340,10 +371,12 @@ export async function recordFinanceConversationAcceptedAnswer(
       idempotencyKey: key,
       recordRefs: [
         { kind: "review_case", id: input.caseId },
-        { kind: "contextual_question", id: input.questionId },
+        ...(input.questionId
+          ? [{ kind: "contextual_question" as const, id: input.questionId }]
+          : []),
         { kind: "transaction", id: input.transactionId },
       ],
-      sourceMessageIds: [],
+      sourceMessageIds,
       createdAt: input.recordedAt,
     })
     .returning();

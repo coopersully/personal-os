@@ -14,7 +14,8 @@ export async function mirrorCreatedFinanceQuestion(
   tx: Transaction,
   principal: Principal,
   input: {
-    questionId: string;
+    questionId?: string;
+    idempotencyKey?: string;
     caseId: string;
     transactionId: string;
     accountId: string;
@@ -25,7 +26,8 @@ export async function mirrorCreatedFinanceQuestion(
 ) {
   if (principal.actorType !== "agent") return null;
   await requireWorkspaceExecution(tx, principal, "finances", input.createdAt);
-  const key = `question:${input.questionId}:1`;
+  const key = input.idempotencyKey ?? (input.questionId ? `question:${input.questionId}:1` : null);
+  if (!key) throw new AppError("internal_error", "A canonical question identity is required.");
   const [existing] = await tx
     .select()
     .from(financeConversationMessages)
@@ -66,7 +68,9 @@ export async function mirrorCreatedFinanceQuestion(
       sourceOperationId: input.operationId,
       idempotencyKey: key,
       recordRefs: [
-        { kind: "contextual_question", id: input.questionId },
+        ...(input.questionId
+          ? [{ kind: "contextual_question" as const, id: input.questionId }]
+          : []),
         { kind: "review_case", id: input.caseId },
         { kind: "transaction", id: input.transactionId },
         { kind: "account", id: input.accountId },

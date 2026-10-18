@@ -136,6 +136,7 @@ import {
   type FinanceMutationContext,
   requireFinanceExecution,
 } from "./finance/context.js";
+import { mirrorNewMaintenanceReviewQuestion } from "./finance/conversation-review-mirror.js";
 import { createInboxService } from "./finance/inbox-service.js";
 import { createFinanceLedgerService } from "./finance/ledger-service.js";
 import { supersedeFinanceMaintenanceLineage } from "./finance/maintenance-rebuild.js";
@@ -6141,7 +6142,22 @@ export function createFinanceService({
             },
             tx,
           );
-          await issueMaintenanceReviewQuestion(tx, input.userId, projectedReview.id);
+          const newlyIssued = await issueMaintenanceReviewQuestion(
+            tx,
+            input.userId,
+            projectedReview.id,
+          );
+          if (newlyIssued)
+            await mirrorNewMaintenanceReviewQuestion(tx, {
+              userId: input.userId,
+              runId: input.runId,
+              candidateId: candidate.id,
+              candidateItemId: item.id,
+              candidateRevision: input.candidateRevision,
+              review: newlyIssued.review,
+              request: newlyIssued.request,
+              requestId: input.context.requestId,
+            });
           activeReviewIds.add(projectedReview.id);
         }
         return { created: items.length, total: activeReviewIds.size };

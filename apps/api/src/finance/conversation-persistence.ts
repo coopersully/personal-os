@@ -110,12 +110,23 @@ export function createFinanceConversationService({
       liveGrant: tokens.some((token) => token.scopes.includes("finances:maintain")),
     };
   }
-  async function readiness(tx: Transaction, userId: string): Promise<FinanceConversationReadiness> {
+  async function readiness(
+    tx: Transaction,
+    userId: string,
+    scheduleId?: string,
+  ): Promise<FinanceConversationReadiness> {
     const schedules = await tx
       .select()
       .from(automationHostSchedules)
-      .where(eq(automationHostSchedules.userId, userId))
+      .where(
+        and(
+          eq(automationHostSchedules.userId, userId),
+          scheduleId ? eq(automationHostSchedules.id, scheduleId) : undefined,
+        ),
+      )
       .orderBy(desc(automationHostSchedules.updatedAt));
+    if (scheduleId && !schedules.length)
+      throw new AppError("not_found", "The Finance host registration was not found.");
     let fallback: FinanceConversationReadiness | null = null;
     for (const candidate of schedules) {
       const { schedule, liveGrant, tokens } = await liveSchedule(tx, userId, candidate.id);
@@ -286,6 +297,9 @@ export function createFinanceConversationService({
   return {
     async getReadiness(userId: string) {
       return db.transaction((tx) => readiness(tx, userId));
+    },
+    async getHostReadiness(userId: string, scheduleId: string) {
+      return db.transaction((tx) => readiness(tx, userId, scheduleId));
     },
     async send(principal: Principal, raw: FinanceConversationSendInput) {
       if (principal.actorType !== "user" || principal.actorId !== principal.userId)
@@ -534,6 +548,7 @@ export function createFinanceConversationService({
             and(
               eq(financeConversationBatchMessages.userId, principal.userId),
               eq(financeConversationBatchMessages.runId, input.runId),
+              isNotNull(financeConversationBatchMessages.deliveredAt),
               inArray(financeConversationBatchMessages.messageId, input.sourceMessageIds),
             ),
           );

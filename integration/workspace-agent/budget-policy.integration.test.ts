@@ -1,4 +1,6 @@
+import { approveFinanceBudgetInputSchema } from "@personal-os/domain";
 import { createMcpWorkspaceFixture, type WorkspaceFixture } from "./fixture.js";
+import { connectHumanFinanceClient } from "./human-finance.js";
 
 describe("Finance policy definitions through MCP", () => {
   let f: WorkspaceFixture;
@@ -38,13 +40,32 @@ describe("Finance policy definitions through MCP", () => {
       rationale: "Retain buffer",
       idempotencyKey: crypto.randomUUID(),
     });
-    budget = await call("approve_finance_budget", {
+    const approval = {
       budgetVersionId: budget.id,
       expectedVersion: budget.version,
       expectedProfileVersionId: profile.id,
-      approvalSource: "agent_self_approval",
       idempotencyKey: crypto.randomUUID(),
-    });
+    };
+    for (const approvalSource of ["agent_self_approval", "user_instruction"]) {
+      expect(
+        (
+          await client.callTool({
+            name: "approve_finance_budget",
+            arguments: { ...approval, approvalSource },
+          })
+        ).isError,
+      ).toBe(true);
+    }
+    const human = await connectHumanFinanceClient(f);
+    budget = (
+      await human.approveFinanceBudget(
+        approveFinanceBudgetInputSchema.parse({
+          ...approval,
+          approvalSource: "user_instruction",
+        }),
+      )
+    ).data as unknown as Record<string, unknown>;
+    expect(budget).toMatchObject({ status: "active", approvedAt: expect.any(String) });
     const profileRef = { id: profile.id, revision: String(profile.version) },
       budgetRef = { id: budget.id, revision: String(budget.version) };
     const period = { from: "2026-10-01", through: "2026-10-31", timezone: "America/New_York" };

@@ -129,6 +129,23 @@ stays immutable; the active plan and forecast can differ. Validate current evide
 revisions under lock. Concurrent small revisions cannot exceed an aggregate cap. Crossing a
 boundary creates a proposal without silently normalizing overspending by changing the baseline.
 
+A monthly comparison additionally needs an explicit currency, complete account universe, calendar
+month and timezone, and stable allocation identity and amounts. Present this review only when that
+baseline needs qualification; it is not a global setup requirement. The person confirms the exact
+persisted review. Agents may prepare it but cannot confirm it. The resulting snapshot is immutable,
+including account membership and category labels, so a later account addition, category rename or
+new active plan cannot silently change an earlier comparison. Selected chart accounts and dates do
+not narrow the whole-month budget numerator.
+
+Historical confirmation records its own human actor and timestamp alongside the original budget
+approval actor and timestamp. A later human confirmation may qualify an existing complete historical
+snapshot, including one originally approved by an agent, but must be labelled retrospective; it
+never rewrites the old actor or claims that the person approved it at the time. Missing account,
+currency, baseline or allocation evidence remains explicitly unavailable with a contextual review
+path. A user-confirmed budget currency is a declaration for that baseline, not evidence that unknown
+ledger transaction currencies are qualified. The Spending projection must still validate its
+numerator's accounting basis, pending/refund treatment, currency and coverage independently.
+
 The person explicitly designates one complete, human-approved baseline for each calendar month.
 Changing a policy, replacing a plan, or changing timezone cannot create a second baseline for that
 month. Policy terms and saved preview evidence remain immutable history; edits append versions,

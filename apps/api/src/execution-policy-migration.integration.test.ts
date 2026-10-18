@@ -95,7 +95,12 @@ describe.sequential("global execution policy migration", () => {
         });
         expect(() =>
           requireFinanceMutation(context, { approvalSource: "agent_self_approval" }),
-        ).toThrow("explicit Finance budget activation policy");
+        ).toThrow(
+          expect.objectContaining({
+            code: "forbidden",
+            message: "Agent self-approval requires explicit Finance execution authority.",
+          }),
+        );
       }
     } finally {
       await database.close();

@@ -1,0 +1,308 @@
+// @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
+import { toast } from "sonner";
+import { FinanceAutomationsPage } from "./automations-page.js";
+
+const api = vi.hoisted(() => ({
+  listAutomationHostSchedules: vi.fn(),
+  listAutomationHostConnections: vi.fn(),
+  getFinanceConversationReadiness: vi.fn(),
+  getFinanceConversationHostReadiness: vi.fn(),
+  issueFinanceConversationChallenge: vi.fn(),
+  exchangeFinanceConversationChallenge: vi.fn(),
+  createAutomationHostSchedule: vi.fn(),
+  bindAutomationHostSchedule: vi.fn(),
+  updateAutomationHostSchedule: vi.fn(),
+  revokeAutomationHostSchedule: vi.fn(),
+  cancelAutomationHostSchedule: vi.fn(),
+}));
+vi.mock("../../api.js", () => ({ api }));
+vi.mock("sonner", () => ({
+  toast: { loading: vi.fn(() => "notice"), success: vi.fn(), error: vi.fn(), dismiss: vi.fn() },
+}));
+const readiness = {
+  canSend: false,
+  recovery: "verify_message_protocol",
+  messageCapability: "unverified",
+};
+function status(state = "active", event = false) {
+  return {
+    schedule: {
+      id: "schedule-a",
+      label: "Finance host",
+      state,
+      version: 7,
+      hostSurface: event ? "claude_code_routine" : "codex_desktop",
+      tenantAuthorizationConnectionId: "connection-original",
+      createdAt: "2026-10-18T09:00:00Z",
+      updatedAt: "2026-10-18T09:00:00Z",
+      trigger: event
+        ? { type: "event" }
+        : { type: "recurring", recurrence: { everyMinutes: 1440, timeZone: "America/New_York" } },
+    },
+    connectionAvailable: true,
+    health: {
+      state: "overdue",
+      lastObservedAt: "2026-10-18T10:00:00Z",
+      nextExpectedAt: "2026-10-18T09:00:00Z",
+      overdueAt: "2026-10-18T10:00:00Z",
+      graceMilliseconds: 3600000,
+    },
+  };
+}
+function OwnerReadiness() {
+  const query = useQuery({
+    queryKey: ["finance-conversation-readiness", "owner-a"],
+    queryFn: api.getFinanceConversationReadiness,
+  });
+  return <p>{query.data?.canSend ? "Owner Chat available" : "Owner Chat locked"}</p>;
+}
+function open(extra?: ReactNode) {
+  const user = userEvent.setup();
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <FinanceAutomationsPage />
+      {extra}
+    </QueryClientProvider>,
+  );
+  return user;
+}
+beforeEach(() => {
+  vi.resetAllMocks();
+  vi.mocked(toast.loading).mockReturnValue("notice");
+  api.listAutomationHostSchedules.mockResolvedValue([status()]);
+  api.listAutomationHostConnections.mockResolvedValue([
+    { id: "connection-original", label: "Original host", scopes: ["finances:maintain"] },
+  ]);
+  api.getFinanceConversationReadiness.mockResolvedValue(readiness);
+  api.getFinanceConversationHostReadiness.mockResolvedValue(readiness);
+});
+it("separates server schedule health, observed evidence, and aggregate Chat readiness", async () => {
+  api.getFinanceConversationReadiness.mockResolvedValue({ ...readiness, canSend: true });
+  open();
+  expect(await screen.findByText(/Chat is available/)).toBeInTheDocument();
+  expect(await screen.findByText(/Schedule health: overdue/)).toBeInTheDocument();
+  expect(screen.getByText(/Grace: 60 minutes/)).toBeInTheDocument();
+  expect(screen.getByText(/Successful maintenance is not established/)).toBeInTheDocument();
+  expect(screen.getByText(/Message access for this host: unverified/)).toBeInTheDocument();
+});
+it("does not invent an event countdown", async () => {
+  api.listAutomationHostSchedules.mockResolvedValue([status("active", true)]);
+  open();
+  expect(await screen.findByText(/Event-based · next run unknown/)).toBeInTheDocument();
+  expect(screen.queryByText(/Next expected start/)).not.toBeInTheDocument();
+});
+it("issues a real challenge and checks actual readiness without exchanging as the human", async () => {
+  api.issueFinanceConversationChallenge.mockResolvedValue({
+    challengeId: "actual-challenge",
+    nonce: "server-nonce",
+    protocolVersion: "1",
+    expiresAt: "2026-10-18T23:00:00Z",
+  });
+  const user = open();
+  await user.click(await screen.findByRole("button", { name: "Verify message access" }));
+  await user.click(screen.getByRole("button", { name: "Prepare verification challenge" }));
+  expect(
+    ((await screen.findByLabelText("Instructions for your original host")) as HTMLTextAreaElement)
+      .value,
+  ).toContain("actual-challenge");
+  expect(api.issueFinanceConversationChallenge).toHaveBeenCalledWith("schedule-a");
+  expect(api.exchangeFinanceConversationChallenge).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Check Chat readiness" }));
+  await waitFor(() =>
+    expect(toast.success).toHaveBeenCalledWith(
+      "Readiness checked. This host is not ready for Finance Chat.",
+      {
+        id: "notice",
+      },
+    ),
+  );
+  expect(screen.queryByText("Verification challenge prepared.")).not.toBeInTheDocument();
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+});
+it("registers only existing authorized connections and retains a failed draft with Sonner", async () => {
+  api.createAutomationHostSchedule.mockRejectedValue(new Error("Registration unavailable"));
+  const user = open();
+  await user.click(screen.getByRole("button", { name: "Register automation" }));
+  await user.clear(screen.getByLabelText("Name"));
+  await user.type(screen.getByLabelText("Name"), "My saved draft");
+  await user.selectOptions(screen.getByLabelText("Authorized connection"), "connection-original");
+  await user.click(screen.getByRole("button", { name: "Register expected schedule" }));
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith("Registration unavailable", { id: "notice" }),
+  );
+  expect(screen.getByLabelText("Name")).toHaveValue("My saved draft");
+  expect(screen.queryByText("Registration unavailable")).not.toBeInTheDocument();
+  expect(api.createAutomationHostSchedule).toHaveBeenCalledWith(
+    expect.objectContaining({
+      tenantAuthorizationConnectionId: "connection-original",
+      requestedScopes: ["finances:maintain"],
+      trigger: {
+        type: "recurring",
+        recurrence: { type: "interval", everyMinutes: 1440, timeZone: expect.any(String) },
+      },
+    }),
+  );
+});
+it("binds setup with the original registration revision and expected state", async () => {
+  api.listAutomationHostSchedules.mockResolvedValue([status("setup_pending", true)]);
+  const user = open();
+  await user.click(await screen.findByRole("button", { name: "Details and setup" }));
+  await user.type(screen.getByLabelText("Host automation identifier"), "real-host-id");
+  await user.click(screen.getByRole("button", { name: "Bind existing host job" }));
+  await waitFor(() =>
+    expect(api.bindAutomationHostSchedule).toHaveBeenCalledWith("schedule-a", {
+      hostSurface: "claude_code_routine",
+      hostAutomationId: "real-host-id",
+      expectedVersion: 7,
+      expectedState: "setup_pending",
+    }),
+  );
+});
+it("requires removal confirmation and fences the original state/version", async () => {
+  const user = open();
+  await user.click(await screen.findByRole("button", { name: "Remove registration" }));
+  expect(api.revokeAutomationHostSchedule).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Confirm removal" }));
+  await waitFor(() =>
+    expect(api.revokeAutomationHostSchedule).toHaveBeenCalledWith("schedule-a", {
+      expectedVersion: 7,
+      expectedState: "active",
+    }),
+  );
+});
+it("distinguishes execution authorization from connection recovery", async () => {
+  api.getFinanceConversationReadiness.mockResolvedValue({
+    ...readiness,
+    recovery: "authorize_execution",
+    reason: "execution_not_authorized",
+  });
+  open();
+  expect(await screen.findByText(/Authorize Finance execution/)).toBeInTheDocument();
+  expect(screen.queryByText(/Reconnect your authorized host/)).not.toBeInTheDocument();
+});
+
+it("updates individual host readiness only from its actual server proof", async () => {
+  const user = open();
+  expect(await screen.findByText(/Message access for this host: unverified/)).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Verify message access" }));
+  api.getFinanceConversationHostReadiness.mockResolvedValue({
+    ...readiness,
+    canSend: true,
+    messageCapability: "verified",
+  });
+  await user.click(screen.getByRole("button", { name: "Check Chat readiness" }));
+  await waitFor(() =>
+    expect(toast.success).toHaveBeenCalledWith("This host is ready for Finance Chat.", {
+      id: "notice",
+    }),
+  );
+  expect(api.getFinanceConversationHostReadiness).toHaveBeenCalledWith("schedule-a");
+  expect(screen.getByText(/Message access for this host: verified/)).toBeInTheDocument();
+});
+it("retains a real challenge on copy failure with no inline action error", async () => {
+  api.issueFinanceConversationChallenge.mockResolvedValue({
+    challengeId: "actual-challenge",
+    nonce: "server-nonce",
+    protocolVersion: "1",
+    expiresAt: "2026-10-18T23:00:00Z",
+  });
+  const user = open();
+  await user.click(await screen.findByRole("button", { name: "Verify message access" }));
+  await user.click(screen.getByRole("button", { name: "Prepare verification challenge" }));
+  await screen.findByLabelText("Instructions for your original host");
+  vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("Clipboard unavailable"));
+  await user.click(screen.getByRole("button", { name: "Copy verification instructions" }));
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith("Clipboard unavailable", { id: "notice" }),
+  );
+  expect(screen.queryByText("Clipboard unavailable")).not.toBeInTheDocument();
+  expect(
+    (screen.getByLabelText("Instructions for your original host") as HTMLTextAreaElement).value,
+  ).toContain("actual-challenge");
+});
+it("announces load failures through Sonner without an inline error", async () => {
+  api.listAutomationHostSchedules.mockRejectedValue(new Error("offline"));
+  open();
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith("Automations could not be loaded", expect.any(Object)),
+  );
+  expect(screen.queryByText("Automations could not be loaded")).not.toBeInTheDocument();
+});
+
+it("refreshes host and owner-qualified Chat readiness after replacement verification", async () => {
+  const verified = { ...readiness, canSend: true, messageCapability: "verified" };
+  api.getFinanceConversationReadiness.mockResolvedValue(verified);
+  api.getFinanceConversationHostReadiness.mockResolvedValue(verified);
+  api.issueFinanceConversationChallenge.mockResolvedValue({
+    challengeId: "replacement-challenge",
+    nonce: "actual-nonce",
+    protocolVersion: "1",
+    expiresAt: "2026-10-18T23:00:00Z",
+  });
+  const user = open(<OwnerReadiness />);
+  await screen.findByText("Owner Chat available");
+  await screen.findByText(/Message access for this host: verified/);
+  api.getFinanceConversationReadiness.mockResolvedValue(readiness);
+  api.getFinanceConversationHostReadiness.mockResolvedValue(readiness);
+  await user.click(screen.getByRole("button", { name: "Verify message access" }));
+  await user.click(screen.getByRole("button", { name: "Prepare verification challenge" }));
+  await waitFor(() =>
+    expect(toast.success).toHaveBeenCalledWith("Verification challenge prepared.", {
+      id: "notice",
+    }),
+  );
+  expect(screen.getByText("Owner Chat locked")).toBeInTheDocument();
+  expect(screen.getByText(/Message access for this host: unverified/)).toBeInTheDocument();
+  expect(screen.queryByText(/Chat is available through/)).not.toBeInTheDocument();
+  expect(api.exchangeFinanceConversationChallenge).not.toHaveBeenCalled();
+});
+it("preserves an issued replacement challenge when readiness refresh fails without stale verified claims", async () => {
+  const verified = { ...readiness, canSend: true, messageCapability: "verified" };
+  api.getFinanceConversationReadiness.mockResolvedValue(verified);
+  api.getFinanceConversationHostReadiness.mockResolvedValue(verified);
+  api.issueFinanceConversationChallenge.mockResolvedValue({
+    challengeId: "replacement-challenge",
+    nonce: "actual-nonce",
+    protocolVersion: "1",
+    expiresAt: "2026-10-18T23:00:00Z",
+  });
+  const user = open(<OwnerReadiness />);
+  await screen.findByText("Owner Chat available");
+  await screen.findByText(/Message access for this host: verified/);
+  api.getFinanceConversationReadiness.mockRejectedValue(new Error("Readiness offline"));
+  api.getFinanceConversationHostReadiness.mockRejectedValue(new Error("Readiness offline"));
+  await user.click(screen.getByRole("button", { name: "Verify message access" }));
+  await user.click(screen.getByRole("button", { name: "Prepare verification challenge" }));
+  const message =
+    "Challenge prepared, but readiness could not be refreshed. Check Chat readiness again.";
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith(message, { id: "notice" }));
+  expect(
+    (screen.getByLabelText("Instructions for your original host") as HTMLTextAreaElement).value,
+  ).toContain("replacement-challenge");
+  expect(screen.getByText("Owner Chat locked")).toBeInTheDocument();
+  expect(screen.queryByText(/Message access for this host: verified/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Chat is available through/)).not.toBeInTheDocument();
+  expect(screen.queryByText(message)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Copy verification instructions" })).toBeEnabled();
+});
+
+it("keeps saved instructions neutral when the actual host is already verified", async () => {
+  api.getFinanceConversationHostReadiness.mockResolvedValue({
+    ...readiness,
+    canSend: true,
+    messageCapability: "verified",
+  });
+  const user = open();
+  await screen.findByText(/Message access for this host: verified/);
+  await user.click(screen.getByRole("button", { name: "Instructions" }));
+  expect(screen.getByRole("dialog", { name: "Finance host instructions" })).toBeInTheDocument();
+  expect(screen.getByText(/Installation status is unknown/)).toBeInTheDocument();
+  expect(screen.queryByText(/Chat verification is pending/)).not.toBeInTheDocument();
+});

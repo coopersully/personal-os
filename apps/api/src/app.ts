@@ -51,6 +51,8 @@ import { createDesktopReleaseService } from "./desktop-release-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
 import { createExecutionPolicyService } from "./execution-policy-service.js";
+import { createFinanceActivityService } from "./finance/activity-service.js";
+import { createFinanceBudgetBaselineQualificationService } from "./finance/baseline-qualification-service.js";
 import { createFinanceBudgetPolicyService } from "./finance/budget-policy-service.js";
 import { loadFinanceAuthorization } from "./finance/context.js";
 import { createFinanceContextualQuestionService } from "./finance/contextual-question-service.js";
@@ -66,6 +68,7 @@ import { createFinancePositionService } from "./finance/position-service.js";
 import { createFinanceSmsPort } from "./finance/sms-answer-port.js";
 import { createFinanceSmsApprovalService } from "./finance/sms-approval-service.js";
 import { createFinanceSmsContextDispatcher } from "./finance/sms-context-dispatcher.js";
+import { createFinanceSpendingService } from "./finance/spending-service.js";
 import { resolveFinanceWorks } from "./finance/work-resolver.js";
 import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceChallengeService } from "./finance-challenge-service.js";
@@ -99,6 +102,7 @@ import { createRitualService } from "./ritual-service.js";
 import { registerAssistantRoutes } from "./routes/assistant.js";
 import { registerAutomationHostRoutes } from "./routes/automation-hosts.js";
 import { registerCalendarRoutes } from "./routes/calendar.js";
+import { registerFinanceActivityRoutes } from "./routes/finance-activity.js";
 import { registerFinanceConversationRoutes } from "./routes/finance-conversation.js";
 import { registerFinanceOnboardingRoutes } from "./routes/finance-onboarding.js";
 import { registerFinanceRoutes } from "./routes/finances.js";
@@ -473,6 +477,10 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     ...(plaid ? { plaid } : {}),
     providerItems: financeProviderItems,
   });
+  const baselineQualification = createFinanceBudgetBaselineQualificationService({
+    db: dependencies.db,
+    now,
+  });
   const financeBudgetPolicies = createFinanceBudgetPolicyService({ db: dependencies.db, now });
   const financeContextualQuestions = createFinanceContextualQuestionService({
     db: dependencies.db,
@@ -623,6 +631,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     goals: goalService,
     maintenance,
     now,
+  });
+  const financeSpending = createFinanceSpendingService({ db: dependencies.db, now });
+  const financeActivity = createFinanceActivityService({
+    db: dependencies.db,
+    cursorSecret: dependencies.config.encryptionKey,
   });
   const financeConversation = createFinanceConversationService({ db: dependencies.db, now });
   const loadFinanceOnboardingEvidence = createFinanceOnboardingEvidenceLoader({
@@ -1482,12 +1495,14 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     db: dependencies.db,
     financeChallenges,
     financeBudgetPolicies,
+    baselineQualification,
     contextualQuestions: financeContextualQuestions,
     canonicalFinanceMaintenance,
     financeMaintenance,
     financePeriodReviews,
     financePlaybook,
     financePosition,
+    financeSpending,
     financeStatus,
     finances,
     mutationContext,
@@ -1504,6 +1519,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
         requestId: context.get("requestId"),
       }),
   });
+  registerFinanceActivityRoutes({ app, activity: financeActivity });
 
   registerReminderRoutes({ app, mutationContext, reminders });
 

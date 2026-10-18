@@ -5,6 +5,7 @@ import {
 } from "@personal-os/database";
 import { eq } from "drizzle-orm";
 import { createMcpWorkspaceFixture, type WorkspaceFixture } from "./fixture.js";
+import { connectHumanFinanceClient } from "./human-finance.js";
 
 describe("Finance planning and recurring workflows through MCP", () => {
   let f: WorkspaceFixture;
@@ -42,11 +43,23 @@ describe("Finance planning and recurring workflows through MCP", () => {
       expectedNetPay: 2000,
     });
     const category = await call("create_finance_category", { name: "Planning food" });
-    await call("set_finance_budget_plan", {
+    const proposed = await call("set_finance_budget_plan", {
       month: "2026-10",
       allocations: [{ categoryId: category.id, limit: 100 }],
       rationale: "Fixture expected income covers food",
       assumptions: ["Income stated in profile"],
+    });
+    expect(proposed).toMatchObject({
+      status: "pending_review",
+      review: { id: expect.any(String) },
+    });
+    expect(
+      JSON.stringify(await call("get_finance_category_budget_status", { month: "2026-10" })),
+    ).not.toContain("Planning food");
+    const human = await connectHumanFinanceClient(f);
+    const review = proposed.review as { id: string };
+    await expect(human.approveFinanceActionReview(review.id)).resolves.toMatchObject({
+      status: "applied",
     });
     expect(
       JSON.stringify(await call("get_finance_category_budget_status", { month: "2026-10" })),

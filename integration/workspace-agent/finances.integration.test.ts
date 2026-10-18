@@ -1,6 +1,8 @@
 import { auditEvents, financeBudgetVersions } from "@personal-os/database";
+import { approveFinanceBudgetInputSchema } from "@personal-os/domain";
 import { eq } from "drizzle-orm";
 import { createMcpWorkspaceFixture, type WorkspaceFixture } from "./fixture.js";
+import { connectHumanFinanceClient } from "./human-finance.js";
 
 describe("Finance MCP execution", () => {
   let f: WorkspaceFixture;
@@ -74,7 +76,7 @@ describe("Finance activation through MCP", () => {
   afterAll(async () => {
     await f?.close();
   });
-  it("activates a budget with truthful agent provenance and rejects human impersonation", async () => {
+  it("keeps agent proposals inactive until exact human approval and preserves both actor identities", async () => {
     await f.setBypass(true);
     const { client } = await f.connectAgent([
       "finances:read",
@@ -114,16 +116,37 @@ describe("Finance activation through MCP", () => {
         })
       ).isError,
     ).toBe(true);
-    const approved = await call("approve_finance_budget", {
-      ...input,
-      approvalSource: "agent_self_approval",
-    });
+    expect(
+      (
+        await client.callTool({
+          name: "approve_finance_budget",
+          arguments: { ...input, approvalSource: "agent_self_approval" },
+        })
+      ).isError,
+    ).toBe(true);
+    expect(
+      await f.db.query.financeBudgetVersions.findFirst({
+        where: eq(financeBudgetVersions.id, String(budget.data.id)),
+      }),
+    ).toMatchObject({ status: "proposed", approvedAt: null, approvedByActorType: null });
+    const human = await connectHumanFinanceClient(f);
+    const approved = await human.approveFinanceBudget(
+      approveFinanceBudgetInputSchema.parse({
+        ...input,
+        approvalSource: "user_instruction",
+      }),
+    );
     expect(approved.data).toMatchObject({ status: "active" });
     expect(
       await f.db.query.financeBudgetVersions.findFirst({
         where: eq(financeBudgetVersions.id, String(budget.data.id)),
       }),
-    ).toMatchObject({ status: "active", approvedByActorType: "agent" });
+    ).toMatchObject({
+      status: "active",
+      approvedByActorType: "user",
+      approvedByActorId: f.owner.id,
+      createdByActorType: "agent",
+    });
     expect(
       await f.db
         .select()
@@ -132,9 +155,10 @@ describe("Finance activation through MCP", () => {
     ).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          actorType: "agent",
-          action: "finance.budget.agent_self_approved",
-          after: expect.objectContaining({ approvalSource: "agent_self_approval" }),
+          actorType: "user",
+          actorId: f.owner.id,
+          action: "finance.budget.user_instruction_approved",
+          after: expect.objectContaining({ approvalSource: "user_instruction" }),
         }),
       ]),
     );

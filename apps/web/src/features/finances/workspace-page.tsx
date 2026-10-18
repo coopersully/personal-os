@@ -1,18 +1,31 @@
 import { Navigate, useLocation } from "react-router-dom";
+import { api } from "../../api.js";
 import { FinanceAccountsPage } from "./accounts-page.js";
+import { FinanceActivityPage } from "./activity-page.js";
+import { FinanceAutomationsPage } from "./automations-page.js";
 import { FinanceCashflowPage } from "./cashflow-page.js";
+import { FinanceConversationPage } from "./conversation-page.js";
 import { FinanceOverviewPage } from "./overview-page.js";
 import { FinancesPage } from "./page.js";
 import { FinancePeriodReviewPage } from "./period-review-page.js";
 import { FinancePlanPage } from "./plan-page.js";
 import { FinanceReviewPage } from "./review-page.js";
 import { FinanceSetupPage } from "./setup-page.js";
+import { FinanceSpendingPage } from "./spending-page";
 import { FinanceWealthPage } from "./wealth-page.js";
 
-export function FinanceWorkspacePage() {
+export function FinanceWorkspacePage({ ownerId }: { ownerId: string }) {
   const location = useLocation();
   const [section, reviewId] = location.pathname.split("/").slice(2);
   switch (section) {
+    case "chat":
+      return <FinanceConversationPage ownerId={ownerId} />;
+    case "automations":
+      return <FinanceAutomationsPage />;
+    case "activity":
+      return <FinanceActivityPage ownerId={ownerId} readActivity={api.listFinanceActivity} />;
+    case "spending":
+      return <FinanceSpendingPage />;
     case "accounts":
       return <FinanceAccountsPage />;
     case "plan":

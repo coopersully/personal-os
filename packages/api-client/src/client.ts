@@ -39,6 +39,7 @@ import { createAssistantApiClient } from "./features/assistant.js";
 import { createAutomationHostApi } from "./features/automation-hosts.js";
 import { createCalendarApiClient } from "./features/calendar.js";
 import { createDesktopReleaseApiClient } from "./features/desktop-release.js";
+import { createFinanceActivityApi } from "./features/finance-activity.js";
 import { createFinanceConversationApi } from "./features/finance-conversation.js";
 import { createFinanceApi } from "./features/finances.js";
 import { createGoalsApiClient } from "./features/goals.js";
@@ -211,6 +212,7 @@ export function createApiClient(options: ClientOptions) {
     },
     ...createFinanceApi(request),
     ...createFinanceConversationApi(request),
+    ...createFinanceActivityApi(request),
     ...createAutomationHostApi(request),
     ...createCalendarApiClient(request),
     ...createGoalsApiClient(request),

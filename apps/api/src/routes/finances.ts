@@ -65,6 +65,7 @@ import {
 } from "@personal-os/domain";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { z } from "zod";
+import type { createFinanceBudgetBaselineQualificationService } from "../finance/baseline-qualification-service.js";
 import type { createFinanceBudgetPolicyService } from "../finance/budget-policy-service.js";
 import { loadFinanceAuthorization } from "../finance/context.js";
 import type { createFinanceContextualQuestionService } from "../finance/contextual-question-service.js";
@@ -74,6 +75,7 @@ import {
   buildFinancePeriodReviewResult,
   buildFinanceSnapshotResult,
 } from "../finance/presentation-service.js";
+import type { createFinanceSpendingService } from "../finance/spending-service.js";
 import type { createFinanceActionService, SupportedActionKind } from "../finance-action-service.js";
 import type { FinanceChallengeService } from "../finance-challenge-service.js";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
@@ -84,6 +86,8 @@ import type { createFinanceService } from "../finance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
 import type { AppEnv, Principal } from "../types.js";
 import { requireWorkspaceExecutionRoute } from "../workspace-execution.js";
+import { registerFinanceBaselineQualificationRoutes } from "./finance-baseline-qualification.js";
+import { registerFinanceSpendingRoute } from "./finance-spending.js";
 import { parseBody, requireFeatureAccess, requireHuman, requireScope } from "./support.js";
 
 type MutationContext = {
@@ -92,11 +96,13 @@ type MutationContext = {
 };
 
 type FinanceRouteOptions = {
+  financeSpending?: ReturnType<typeof createFinanceSpendingService>;
   app: Hono<AppEnv>;
   db?: Database;
   actions?: ReturnType<typeof createFinanceActionService>;
   financeChallenges?: FinanceChallengeService;
   contextualQuestions?: ReturnType<typeof createFinanceContextualQuestionService>;
+  baselineQualification?: ReturnType<typeof createFinanceBudgetBaselineQualificationService>;
   financeBudgetPolicies?: ReturnType<typeof createFinanceBudgetPolicyService>;
   financeMaintenance: FinanceMaintenanceService;
   canonicalFinanceMaintenance?: ReturnType<typeof createFinanceMaintenanceIntentService>;
@@ -116,10 +122,12 @@ export function registerFinanceRoutes({
   financeChallenges,
   contextualQuestions,
   financeBudgetPolicies,
+  baselineQualification,
   canonicalFinanceMaintenance,
   financePeriodReviews,
   financePlaybook,
   financePosition,
+  financeSpending,
   financeStatus,
   finances,
   mutationContext,
@@ -177,6 +185,7 @@ export function registerFinanceRoutes({
       (context.req.method === "GET" && context.req.path === "/v1/finances/position") ||
       (context.req.method === "POST" &&
         [
+          "/v1/finances/spending/transactions",
           "/v1/finances/categorizations/propose",
           "/v1/finances/scenarios/compare",
           "/v1/finances/budget-policies/preview",
@@ -189,6 +198,11 @@ export function registerFinanceRoutes({
   };
   app.use("/v1/finances", requireFinanceAccess);
   app.use("/v1/finances/*", requireFinanceAccess);
+  registerFinanceBaselineQualificationRoutes({
+    app,
+    service: baselineQualification,
+    financeContext,
+  });
   const questions = () => {
     if (!contextualQuestions)
       throw new Error("Finance contextual question service is unavailable.");
@@ -198,6 +212,11 @@ export function registerFinanceRoutes({
     if (!financePosition) throw new Error("Finance position service is unavailable.");
     return financePosition;
   };
+  registerFinanceSpendingRoute({
+    app,
+    spending: financeSpending,
+    readTransaction: finances.getFinanceTransaction,
+  });
   app.get("/v1/finances/position", async (context) => {
     const accountIds = context.req.query("accountIds");
     const scope = financePositionReadScopeSchema.parse({
@@ -439,9 +458,12 @@ export function registerFinanceRoutes({
   );
   app.put("/v1/finances/budget-plan", async (context) => {
     const input = await parseBody(context, setFinanceBudgetPlanInputSchema);
-    return act(context, "budget_plan", input, async () =>
-      context.json({ plan: await finances.setBudgetPlan(input, financeMutationContext(context)) }),
+    const outcome = await requireActions().performDirect(
+      "budget_plan",
+      input,
+      financeMutationContext(context),
     );
+    return context.json(outcome, outcome.status === "pending_review" ? 202 : 200);
   });
   app.get("/v1/finances", async (context) => {
     const query = financeBudgetStatusQuerySchema.parse(context.req.query());
@@ -1078,12 +1100,12 @@ export function registerFinanceRoutes({
   });
   app.post("/v1/finances/budgets", async (context) => {
     const input = await parseBody(context, createFinanceBudgetInputSchema);
-    return act(context, "budget_plan", input, async () =>
-      context.json(
-        { budget: await finances.createBudget(input, financeMutationContext(context)) },
-        201,
-      ),
+    const outcome = await requireActions().performDirect(
+      "budget_plan",
+      input,
+      financeMutationContext(context),
     );
+    return context.json(outcome, outcome.status === "pending_review" ? 202 : 200);
   });
   app.get("/v1/finances/budget-buckets", async (context) =>
     context.json(

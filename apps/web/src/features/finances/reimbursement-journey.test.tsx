@@ -205,14 +205,22 @@ it("integrates receipt details without changing the claim summary totals", async
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  expect(await screen.findByText(/\$40.00 received of \$120.00 · \$80.00 remaining/)).toBeVisible();
+  expect(
+    await screen.findByText(
+      /40.00 \(currency unknown\) received of 120.00 \(currency unknown\) · 80.00 \(currency unknown\) remaining/,
+    ),
+  ).toBeVisible();
   expect(screen.getByLabelText("Reimbursement from Casey")).toHaveAttribute(
     "aria-valuenow",
     "33.33333333333333",
   );
   await userEvent.click(screen.getByRole("button", { name: "Receipt history and evidence" }));
   expect(screen.getByRole("link", { name: "Open credit transaction 1" })).toBeVisible();
-  expect(screen.getByText(/\$40.00 received of \$120.00 · \$80.00 remaining/)).toBeVisible();
+  expect(
+    screen.getByText(
+      /40.00 \(currency unknown\) received of 120.00 \(currency unknown\) · 80.00 \(currency unknown\) remaining/,
+    ),
+  ).toBeVisible();
   expect(api.listFinanceReimbursements).toHaveBeenCalledTimes(1);
 });
 
@@ -236,4 +244,128 @@ it("does not link missing or invalid local transaction IDs and retains optional 
   expect(screen.getByText("Cancellation time not recorded")).toBeVisible();
   expect(screen.queryByRole("link")).not.toBeInTheDocument();
   expect(screen.getAllByText(allocationId)).toHaveLength(2);
+});
+
+it("shows exact original expense, allocation and credit facts without inventing personal net cost", async () => {
+  const item = claim();
+  item.sourceExpense = {
+    transactionId: sourceId,
+    amount: 200,
+    allocationAmount: 120,
+    allocationRevision: 3,
+    allocationState: "active",
+    allocationTreatment: "reimbursable",
+    currency: "EUR",
+    date: "2026-10-01",
+    merchant: "Dinner",
+    pending: false,
+  };
+  if (item.matches[0])
+    item.matches[0].creditTransaction = {
+      transactionId: creditId,
+      amount: 40,
+      currency: "USD",
+      date: "2026-10-12",
+      merchant: "Repayment",
+      pending: true,
+    };
+  mount(item);
+  await userEvent.click(screen.getByRole("button", { name: "Receipt history and evidence" }));
+  expect(screen.getByText("Gross expense outlay")).toBeVisible();
+  expect(screen.getByText("€200.00")).toBeVisible();
+  expect(screen.getByText("Reimbursable allocation")).toBeVisible();
+  expect(screen.getByText(/Expense date/)).toHaveTextContent("2026-10-01");
+  expect(screen.getByText(/Credit transaction date/)).toHaveTextContent("2026-10-12");
+  expect(screen.getByText(/Match recorded/).querySelector("time")).toHaveAttribute(
+    "dateTime",
+    recordedAt,
+  );
+  expect(screen.getByText(/Pending credit, not settled/)).toBeVisible();
+  expect(screen.getByText(/Credit currency USD differs from expense currency EUR/)).toBeVisible();
+  expect(screen.getByText(/Personal net cost unavailable/)).toBeVisible();
+});
+it("renders audited removed receipts and keeps unmatch actions available after cancellation", async () => {
+  const item = claim({
+    status: "cancelled",
+    cancelledAt: recordedAt,
+    cancelledRationale: "Remainder waived",
+  });
+  const removed = item.matches[0];
+  if (!removed) throw new Error("Fixture receipt missing");
+  item.corrections = [
+    {
+      id: sourceId,
+      operation: "unmatch_credit",
+      recordedAt,
+      rationale: "Wrong credit was linked",
+      evidence,
+      previousExpectedAmount: 120,
+      expectedAmount: 120,
+      removedMatch: removed,
+    },
+  ];
+  mount(item);
+  await userEvent.click(screen.getByRole("button", { name: "Receipt history and evidence" }));
+  expect(screen.queryByRole("button", { name: "Correct expectation" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Remove receipt match 1" })).toBeVisible();
+  expect(
+    screen.getByRole("list", { name: "Recorded reimbursement corrections" }),
+  ).toHaveTextContent("Wrong credit was linked");
+  expect(screen.getByRole("link", { name: "Open removed credit transaction" })).toHaveAttribute(
+    "href",
+    `/finances/transactions?transactionId=${creditId}`,
+  );
+  expect(screen.getByText("Remainder waived")).toBeVisible();
+});
+
+it("displays qualified actual whole-expense personal cost without subtracting expected recovery", async () => {
+  const item = claim({
+    sourceExpense: {
+      transactionId: sourceId,
+      amount: 200,
+      allocationAmount: 120,
+      allocationRevision: 1,
+      allocationState: "active",
+      allocationTreatment: "reimbursable",
+      currency: "EUR",
+      date: "2026-10-01",
+      merchant: "Meal",
+      pending: false,
+      personalCostToDate: {
+        state: "qualified",
+        amount: 150,
+        receivedAmount: 50,
+        currency: "EUR",
+        scope: "whole_expense",
+      },
+    },
+  });
+  mount(item);
+  await userEvent.click(screen.getByRole("button", { name: "Receipt history and evidence" }));
+  expect(screen.getByText("Personal cost to date (whole expense): €150.00")).toBeVisible();
+  expect(screen.getByText(/Gross expense less €50.00/)).toBeVisible();
+  expect(screen.getByText(/Expected recovery is not deducted/)).toBeVisible();
+  expect(screen.getByText(/Do not add case cards together/)).toBeVisible();
+  expect(screen.queryByText(/Personal net cost unavailable/)).not.toBeInTheDocument();
+});
+it("discloses a canonical unsupported qualification reason", async () => {
+  mount(
+    claim({
+      sourceExpense: {
+        transactionId: sourceId,
+        amount: 200,
+        allocationAmount: 120,
+        allocationRevision: 1,
+        allocationState: "active",
+        allocationTreatment: "reimbursable",
+        currency: "EUR",
+        date: "2026-10-01",
+        merchant: "Meal",
+        pending: false,
+        personalCostToDate: { state: "unavailable", reason: "incomplete_allocations" },
+      },
+    }),
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Receipt history and evidence" }));
+  expect(screen.getByText("Personal net cost unavailable: incomplete allocations.")).toBeVisible();
 });

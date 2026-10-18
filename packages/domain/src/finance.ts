@@ -798,6 +798,20 @@ export const financeReimbursementSchema = z
         allocationRevision: z.number().int().positive(),
         allocationState: z.enum(["active", "invalidated"]),
         allocationTreatment: z.enum(["personal", "reimbursable"]),
+        personalCostToDate: z
+          .discriminatedUnion("state", [
+            z
+              .object({
+                state: z.literal("qualified"),
+                amount: moneySchema,
+                receivedAmount: moneySchema,
+                currency: z.string().length(3),
+                scope: z.literal("whole_expense"),
+              })
+              .strict(),
+            z.object({ state: z.literal("unavailable"), reason: z.string().min(1) }).strict(),
+          ])
+          .optional(),
       })
       .nullable()
       .optional(),

@@ -1,5 +1,26 @@
 export const financeCapabilityManifest = [
   {
+    apiOperation: "getAutomationHostPromptHistory",
+    capability: "workflow.host_prompt_history",
+    mcpTool: "get_finance_host_prompt_history",
+    mode: "read",
+    requiredScope: "finances:maintain",
+  },
+  {
+    apiOperation: "getAutomationHostPrompt",
+    capability: "workflow.host_prompt_read",
+    mcpTool: "get_finance_host_prompt",
+    mode: "read",
+    requiredScope: "finances:maintain",
+  },
+  {
+    apiOperation: "issueAutomationHostPrompt",
+    capability: "workflow.host_prompt_issue",
+    mcpTool: "issue_finance_host_prompt",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+  {
     apiOperation: "getFinanceContinuations",
     capability: "workflow.answer_continuations",
     mcpTool: "get_finance_continuations",

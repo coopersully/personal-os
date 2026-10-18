@@ -1,3 +1,4 @@
+import type { FinanceOnboardingAdapter } from "@personal-os/domain";
 import { useMutationState, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -8,11 +9,16 @@ import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { SettingsSection } from "../settings/settings-layout.js";
 import { FinanceConfigurationEditor } from "./configuration-editor.js";
+import { FinanceOnboardingReview } from "./onboarding-review.js";
 import { requireFinanceResult } from "./position-material.js";
 import { SetupMaintenance } from "./setup-maintenance.js";
 import { financeConfigurationKey, useFinanceConfiguration } from "./use-finance-configuration.js";
 
-export function FinanceSetupPage() {
+export function FinanceSetupPage({
+  onboardingAdapter,
+}: {
+  onboardingAdapter?: FinanceOnboardingAdapter;
+} = {}) {
   const query = useFinanceConfiguration();
   const client = useQueryClient();
   const [params, setParams] = useSearchParams();
@@ -72,6 +78,7 @@ export function FinanceSetupPage() {
     );
   return (
     <section className="grid gap-4" aria-label="Financial profile">
+      {onboardingAdapter ? <FinanceOnboardingReview adapter={onboardingAdapter} /> : null}
       <nav aria-label="Financial profile sections" className="grid gap-2 sm:grid-cols-3">
         {(
           [

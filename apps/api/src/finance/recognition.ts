@@ -219,7 +219,32 @@ function addCents(map: Map<string, number>, id: string, amount: number): void {
  * Canonical, API-owned recognition oracle. Position producers map its detailed
  * qualifications to the shared validating MoneyFact reason codes.
  */
+export type FinanceResolvedSpendingEvidence = {
+  excludedTransactionIds: ReadonlySet<string>;
+  transferTransactionIds: ReadonlySet<string>;
+  refundTransactionIds: ReadonlySet<string>;
+  replacedPendingIds: ReadonlySet<string>;
+  matchedByCredit: ReadonlyMap<string, number>;
+  relationshipReimbursementByCredit: ReadonlyMap<string, number>;
+  relationshipReimbursementByExpense: ReadonlyMap<string, number>;
+};
+
 export function recognizeFinanceActivity(input: RecognitionInput): FinanceActivityRecognition {
+  return recognize(input).recognition;
+}
+
+/** Resolve identities across the entire evidence snapshot, before any Spending filters. */
+export function resolveFinanceSpendingEvidence(input: Omit<RecognitionInput, "period">) {
+  const snapshot: RecognitionInput = { ...input };
+  delete snapshot.period;
+  const { evidence, recognition } = recognize(snapshot);
+  return { evidence, qualifications: recognition.qualifications };
+}
+
+function recognize(input: RecognitionInput): {
+  evidence: FinanceResolvedSpendingEvidence;
+  recognition: FinanceActivityRecognition;
+} {
   const accountById = new Map(input.accounts.map((account) => [account.id, account]));
   const transactions = input.transactions.filter(
     (transaction) => transaction.userId === input.userId,
@@ -435,6 +460,16 @@ export function recognizeFinanceActivity(input: RecognitionInput): FinanceActivi
     relationshipReimbursementReceivedCents += recognized;
   }
 
+  const evidence: FinanceResolvedSpendingEvidence = {
+    excludedTransactionIds,
+    transferTransactionIds,
+    refundTransactionIds,
+    replacedPendingIds,
+    matchedByCredit,
+    relationshipReimbursementByCredit,
+    relationshipReimbursementByExpense,
+  };
+
   const unknownOwnershipIds = input.accounts
     .filter((account) => account.includeInPlanning && account.ownershipType === "unknown")
     .map((account) => account.id)
@@ -593,18 +628,21 @@ export function recognizeFinanceActivity(input: RecognitionInput): FinanceActivi
   }
 
   return {
-    grossPostedExpenseCents,
-    investmentContributionsCents,
-    observedIncomeCents,
-    pendingExposureCents,
-    postedSpendCents,
-    qualifications,
-    refundCreditsCents,
-    reimbursementExpectedCents,
-    reimbursementOutstandingCents: Math.max(
-      0,
-      reimbursementExpectedCents - reimbursementReceivedCents,
-    ),
-    reimbursementReceivedCents,
+    evidence,
+    recognition: {
+      grossPostedExpenseCents,
+      investmentContributionsCents,
+      observedIncomeCents,
+      pendingExposureCents,
+      postedSpendCents,
+      qualifications,
+      refundCreditsCents,
+      reimbursementExpectedCents,
+      reimbursementOutstandingCents: Math.max(
+        0,
+        reimbursementExpectedCents - reimbursementReceivedCents,
+      ),
+      reimbursementReceivedCents,
+    },
   };
 }

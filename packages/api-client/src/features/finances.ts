@@ -4,6 +4,7 @@ import type {
   ApproveFinanceBudgetInput,
   AttentionItem,
   ClassifyFinanceTransactionsInput,
+  ConfirmFinanceBudgetBaselineQualificationInput,
   CreateFinanceAccountInput,
   CreateFinanceBudgetBucketInput,
   CreateFinanceBudgetInput,
@@ -25,6 +26,8 @@ import type {
   FinanceAlert,
   FinanceAnswer,
   FinanceBudget,
+  FinanceBudgetBaselineQualificationRead,
+  FinanceBudgetBaselineReview,
   FinanceBudgetBucketList,
   FinanceBudgetPace,
   FinanceBudgetPacePeriod,
@@ -95,6 +98,7 @@ import type {
   ManageFinanceRecurringItemInput,
   ManageFinanceRuleInput,
   MergeFinanceMerchantsInput,
+  PrepareFinanceBudgetBaselineQualificationInput,
   PreviewFinanceBudgetPolicyInput,
   ReconcileFinanceReimbursementInput,
   RemoveFinanceTransactionInput,
@@ -118,6 +122,8 @@ import type {
   UpsertFinanceAttentionItemInput,
 } from "@personal-os/domain";
 import {
+  financeBudgetBaselineQualificationReadSchema,
+  financeBudgetBaselineReviewSchema,
   financeLedgerChallengePageSchema,
   financeLedgerChallengeSchema,
   financePeriodReviewSchema,
@@ -165,6 +171,35 @@ export function createFinanceApi(request: FinanceRequest) {
   }
 
   return {
+    async getFinanceBudgetBaselineQualification(
+      month: string,
+    ): Promise<FinanceBudgetBaselineQualificationRead> {
+      return financeBudgetBaselineQualificationReadSchema.parse(
+        await request(
+          `/v1/finances/budget-baselines/qualification?${new URLSearchParams({ month })}`,
+        ),
+      );
+    },
+    async prepareFinanceBudgetBaselineQualification(
+      input: PrepareFinanceBudgetBaselineQualificationInput,
+    ): Promise<FinanceBudgetBaselineReview> {
+      return financeBudgetBaselineReviewSchema.parse(
+        await request("/v1/finances/budget-baselines/qualification/prepare", {
+          method: "POST",
+          body: JSON.stringify(input),
+        }),
+      );
+    },
+    async confirmFinanceBudgetBaselineQualification(
+      input: ConfirmFinanceBudgetBaselineQualificationInput,
+    ): Promise<FinanceBudgetBaselineQualificationRead> {
+      return financeBudgetBaselineQualificationReadSchema.parse(
+        await request("/v1/finances/budget-baselines/qualification/confirm", {
+          method: "POST",
+          body: JSON.stringify(input),
+        }),
+      );
+    },
     async getFinancePosition(scope: FinancePositionReadScope): Promise<FinancePositionEvidence> {
       const search = new URLSearchParams({ from: scope.from, through: scope.through });
       if (scope.accountIds !== undefined) search.set("accountIds", scope.accountIds.join(","));

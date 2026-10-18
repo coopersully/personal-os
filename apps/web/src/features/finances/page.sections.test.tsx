@@ -21,6 +21,11 @@ import {
   TransactionDetails,
 } from "./page.js";
 
+const workspaceReadiness = vi.hoisted(() => vi.fn());
+vi.mock("./use-finance-workspace-readiness", () => ({
+  useFinanceWorkspaceReadiness: workspaceReadiness,
+}));
+
 const api = vi.hoisted(() => ({
   getWorkspaceSettings: vi.fn(),
   updateWorkspaceSettings: vi.fn(),
@@ -97,6 +102,14 @@ function renderPage(path: string, nonAccountWriter = false) {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: true,
+    readiness: { workspaceAccessible: true },
+    isPending: false,
+    isError: false,
+    error: null,
+    reload: vi.fn(),
+  });
   let savedPreferences = resolveWorkspaceSettings("finances");
   api.getWorkspaceSettings.mockImplementation(async () => savedPreferences);
   api.updateWorkspaceSettings.mockImplementation(async (_workspace, input) => {
@@ -1789,4 +1802,120 @@ it("does not label another hook's transaction-view failure as an unsaved account
     screen.queryByRole("button", { name: "Review unsaved account selections" }),
   ).not.toBeInTheDocument();
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+it.each([
+  false,
+  undefined,
+])("blocks direct transaction creation and import entries when manual visibility is %s", async (manualCreationVisible) => {
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible,
+    readiness: { workspaceAccessible: true },
+    isPending: false,
+    isError: false,
+    reload: vi.fn(),
+  });
+  renderPage("/finances/transactions?import=1#finance-add-transaction");
+  await screen.findByRole("button", { name: "Filters" });
+  expect(screen.queryByRole("dialog", { name: "Add a transaction" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Import transactions" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Add in Transactions" })).not.toBeInTheDocument();
+});
+it("limits the import setup task to the permitted import form", async () => {
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: true,
+    readiness: { workspaceAccessible: false },
+    isPending: false,
+    isError: false,
+    reload: vi.fn(),
+  });
+  renderPage("/finances/transactions?financeTask=import&import=1#finance-add-transaction");
+  expect(await screen.findByRole("dialog", { name: "Import transactions" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Filters" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Add a transaction" })).not.toBeInTheDocument();
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+});
+it.each([
+  {
+    manualCreationVisible: undefined,
+    isPending: true,
+    isError: false,
+    copy: "Loading manual import availability…",
+  },
+  {
+    manualCreationVisible: undefined,
+    isPending: false,
+    isError: true,
+    copy: "Couldn’t check manual import availability.",
+  },
+  {
+    manualCreationVisible: false,
+    isPending: false,
+    isError: false,
+    copy: "Manual import is hidden.",
+  },
+])("keeps import task availability honest: $copy", async (state) => {
+  workspaceReadiness.mockReturnValue({
+    ...state,
+    error: new Error("Unavailable"),
+    readiness: undefined,
+    reload: vi.fn(),
+  });
+  renderPage("/finances/transactions?financeTask=import&import=1");
+  expect(await screen.findByText(state.copy, { exact: false })).toBeVisible();
+  expect(screen.queryByRole("dialog", { name: "Import transactions" })).not.toBeInTheDocument();
+  expect(api.listFinanceTransactions).not.toHaveBeenCalled();
+});
+it("retains correction records and categorization while hiding unrelated creation in correction tasks", async () => {
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: true,
+    readiness: { workspaceAccessible: false },
+    isPending: false,
+    isError: false,
+    reload: vi.fn(),
+  });
+  api.listFinanceTransactions.mockResolvedValue({
+    items: [
+      {
+        id: "meal",
+        accountId: "checking",
+        amount: 18.5,
+        category: null,
+        categoryId: null,
+        categoryConfidence: null,
+        categorySource: null,
+        merchant: "Correction cafe",
+        merchantId: null,
+        createdAt: "2026-08-23T12:00:00Z",
+        updatedAt: "2026-08-23T12:00:00Z",
+        date: "2026-08-23",
+        direction: "expense",
+        needsReview: true,
+        pending: false,
+        notes: null,
+        rawMerchant: null,
+      },
+    ],
+    nextCursor: null,
+  });
+  renderPage("/finances/transactions?financeTask=correct&import=1#finance-add-transaction");
+  expect(await screen.findByText("Correction cafe")).toBeVisible();
+  fireEvent.click(screen.getByRole("row", { name: "Open Correction cafe transaction" }));
+  expect(await screen.findByRole("button", { name: "Categorize" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Add in Transactions" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Add a transaction" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog", { name: "Import transactions" })).not.toBeInTheDocument();
+});
+
+it("does not treat an import marker on another route as permission to open source setup", async () => {
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: true,
+    readiness: { workspaceAccessible: false },
+    isPending: false,
+    isError: false,
+    reload: vi.fn(),
+  });
+  renderPage("/finances/review/legacy?financeTask=import&import=1");
+  expect(await screen.findByText("Everything is categorized")).toBeVisible();
+  expect(screen.queryByRole("dialog", { name: "Import transactions" })).not.toBeInTheDocument();
 });

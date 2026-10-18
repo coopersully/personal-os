@@ -26,6 +26,7 @@ import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { FinanceNotificationPreferences } from "../notifications/finance-preferences";
 import { FinanceConfigurationEditor } from "./configuration-editor.js";
 import { FinanceHostSettings } from "./host-settings.js";
+import { FinanceManualVisibilitySettings } from "./manual-visibility-settings";
 
 const financeHumanOnlyActionLabels = {
   add_manual_transaction: "add manual transactions",
@@ -82,6 +83,7 @@ export function FinanceSettings() {
   });
   return (
     <div className="agent-access" id="guidance">
+      <FinanceManualVisibilitySettings />
       <FinanceConfigurationEditor />
       <FinanceNotificationPreferences />
       <FinanceHostSettings />

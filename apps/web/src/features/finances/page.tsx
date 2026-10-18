@@ -1,5 +1,4 @@
 import type {
-  FinanceAccount,
   FinanceBudgetPacePeriod,
   FinanceBudgetStatus,
   FinanceForecast,
@@ -135,6 +134,7 @@ import { FinanceTransactionItem } from "./transaction-item";
 export { FinanceBudgetBucketManager } from "./bucket-manager.js";
 
 import { BudgetPaceGraph } from "./budget-pace-graph.js";
+import { financeSetupTask } from "./finance-workspace-access";
 import { formatMoney } from "./format.js";
 import { financeSectionFromPath } from "./navigation.js";
 import { PlaidConnectButton } from "./plaid-connect.js";
@@ -143,17 +143,33 @@ import { FinanceAgentReviewQueue } from "./review-queue.js";
 import { TransactionBreakdownDialog } from "./transaction-breakdown-dialog.js";
 import { FinanceLinkedTransaction, FinanceTransactionControls } from "./transaction-controls.js";
 import { financeTransactionFilters } from "./transaction-query.js";
+import { useFinanceWorkspaceReadiness } from "./use-finance-workspace-readiness";
 
 export function FinancesPage() {
   const location = useLocation();
+  const workspace = useFinanceWorkspaceReadiness();
+  const financeTask = financeSetupTask(location.pathname, location.search);
+  const importTaskOnly = financeTask === "import";
+  const canCreateManual =
+    workspace.manualCreationVisible === true &&
+    !workspace.isError &&
+    !workspace.isPending &&
+    workspace.readiness?.workspaceAccessible === true &&
+    !financeTask;
+  const canImport =
+    workspace.manualCreationVisible === true &&
+    !workspace.isError &&
+    !workspace.isPending &&
+    (workspace.readiness?.workspaceAccessible === true || importTaskOnly) &&
+    (!financeTask || importTaskOnly);
   const navigate = useNavigate();
   const section =
     location.pathname === "/finances/budgets"
       ? "budgets"
       : financeSectionFromPath(location.pathname);
   const [categoryOpen, setCategoryOpen] = useState(false);
-  const [importOpen, setImportOpen] = useState(() =>
-    new URLSearchParams(location.search).has("import"),
+  const [importOpen, setImportOpen] = useState(
+    () => new URLSearchParams(location.search).has("import") || importTaskOnly,
   );
   const transactionParams = new URLSearchParams(location.search);
   const transactionFilters = financeTransactionFilters(transactionParams);
@@ -278,7 +294,7 @@ export function FinancesPage() {
     kind: "category" | "overages" | "planned" | "spent";
   } | null>(null);
   const showTransactionForm =
-    section === "transactions" && location.hash === "#finance-add-transaction";
+    section === "transactions" && canCreateManual && location.hash === "#finance-add-transaction";
   const closeTransactionForm = () =>
     navigate({ pathname: location.pathname, search: location.search, hash: "" }, { replace: true });
   const [scopeDialog, setScopeDialog] = useState<"spend" | "cash" | "investments" | null>(null);
@@ -319,7 +335,7 @@ export function FinancesPage() {
         query.queryKey[0] === "agent-access-work-items",
     });
   const transactionList = useQuery({
-    enabled: section === "transactions",
+    enabled: section === "transactions" && !importTaskOnly,
     queryFn: () =>
       api.listFinanceTransactions({
         ...transactionFilters,
@@ -524,6 +540,130 @@ export function FinancesPage() {
       : reviewOnly
         ? finance.transactions.filter((item) => item.needsReview)
         : finance.transactions;
+  const importDialog = (
+    <ImportDialog
+      open={canImport && importOpen}
+      onOpenChange={(open) => {
+        if (importHistory.isPending) return;
+        setImportOpen(open);
+        if (!open && transactionParams.has("import")) {
+          const next = new URLSearchParams(location.search);
+          next.delete("import");
+          navigate({ pathname: location.pathname, search: next.toString() }, { replace: true });
+        }
+      }}
+    >
+      <ImportContent>
+        <ImportHeader>
+          <ImportTitle>Import transactions</ImportTitle>
+          <ImportDescription>
+            Upload a CSV exported from PayPal, Venmo, or Zelle. Duplicate rows are skipped.
+          </ImportDescription>
+        </ImportHeader>
+        <ImportBody>
+          <ShadcnFieldGroup>
+            <ShadcnField>
+              <ShadcnFieldLabel htmlFor="finance-import-account">
+                Destination account
+              </ShadcnFieldLabel>
+              <ShadcnNativeSelect
+                id="finance-import-account"
+                onChange={(event) => setImportAccountId(event.target.value)}
+                value={importAccountId}
+              >
+                <NativeSelectOption value="">Select account</NativeSelectOption>
+                {finance.accounts
+                  .filter((item) => item.provider === importProvider)
+                  .map((item) => (
+                    <NativeSelectOption key={item.id} value={item.id}>
+                      {item.name}
+                    </NativeSelectOption>
+                  ))}
+              </ShadcnNativeSelect>
+            </ShadcnField>
+            <ShadcnField>
+              <ShadcnFieldLabel htmlFor="finance-import-provider">Export provider</ShadcnFieldLabel>
+              <ShadcnNativeSelect
+                id="finance-import-provider"
+                onChange={(event) => {
+                  setImportProvider(event.target.value as "paypal" | "venmo" | "zelle");
+                  setImportAccountId("");
+                }}
+                value={importProvider}
+              >
+                <NativeSelectOption value="paypal">PayPal</NativeSelectOption>
+                <NativeSelectOption value="venmo">Venmo</NativeSelectOption>
+                <NativeSelectOption value="zelle">Zelle</NativeSelectOption>
+              </ShadcnNativeSelect>
+            </ShadcnField>
+            <ShadcnField>
+              <ShadcnFieldLabel htmlFor="finance-import-file">CSV export</ShadcnFieldLabel>
+              <ShadcnInput
+                accept="text/csv,.csv"
+                id="finance-import-file"
+                onChange={async (event) => {
+                  const file = event.currentTarget.files?.[0];
+                  if (!file) return;
+                  setImportCsv(await file.text());
+                  setImportFileName(file.name);
+                }}
+                type="file"
+              />
+              {importFileName ? (
+                <ShadcnFieldDescription>{importFileName} ready to import</ShadcnFieldDescription>
+              ) : null}
+            </ShadcnField>
+            <ShadcnButton
+              disabled={importHistory.isPending || !importAccountId || !importCsv}
+              onClick={() => importHistory.mutate()}
+            >
+              {importHistory.isPending ? "Importing" : "Import CSV"}
+            </ShadcnButton>
+            <MutationFeedback feedback={importHistory.feedback} />
+            {!importAccountId || !importCsv ? (
+              <p className="text-sm text-muted-foreground">
+                Choose an account and a CSV file to import.
+              </p>
+            ) : null}
+            {importHistory.data ? (
+              <ShadcnFieldDescription>
+                Imported {importHistory.data.imported}; skipped {importHistory.data.skipped}{" "}
+                duplicates.
+              </ShadcnFieldDescription>
+            ) : null}
+          </ShadcnFieldGroup>
+        </ImportBody>
+      </ImportContent>
+    </ImportDialog>
+  );
+  if (importTaskOnly) {
+    if (workspace.isPending) return <p role="status">Loading manual import availability…</p>;
+    if (workspace.isError)
+      return (
+        <InlineError
+          error={workspace.error}
+          title="Couldn’t check manual import availability."
+          retry={() => workspace.reload()}
+        />
+      );
+    if (workspace.manualCreationVisible === undefined)
+      return <p>Manual import availability has not been confirmed.</p>;
+    if (!canImport)
+      return (
+        <p>
+          Manual import is hidden.{" "}
+          <Link to="/settings?section=finances">Review manual tools in Finance settings</Link>.
+        </p>
+      );
+    return (
+      <>
+        {importDialog}
+        {!importOpen ? (
+          <ShadcnButton onClick={() => setImportOpen(true)}>Import transactions</ShadcnButton>
+        ) : null}
+      </>
+    );
+  }
   return (
     <div
       className={`wide-page flex w-full max-w-6xl flex-col gap-5 pb-8${section === "budgets" ? " wide-page--compact" : ""}`}
@@ -645,7 +785,9 @@ export function FinancesPage() {
       ) : null}
       {section === "transactions" ? (
         <FinanceTransactionControls
-          onImport={() => setImportOpen(true)}
+          onImport={() => {
+            if (canImport) setImportOpen(true);
+          }}
           onAddCategory={() => setCategoryOpen(true)}
           exportAction={<FinanceExportMenu />}
           accounts={finance.accounts}
@@ -662,7 +804,9 @@ export function FinancesPage() {
           categories={categories.data ?? []}
         />
       ) : null}
-      {categoryOpen ? <FinanceCategoryDialog onClose={() => setCategoryOpen(false)} /> : null}
+      {canCreateManual && categoryOpen ? (
+        <FinanceCategoryDialog onClose={() => setCategoryOpen(false)} />
+      ) : null}
       {section === "transactions" && linkedTransactionId ? (
         <FinanceLinkedTransaction
           id={linkedTransactionId}
@@ -956,107 +1100,7 @@ export function FinancesPage() {
               </ShadcnItemGroup>
             )}
           </section>
-          <ImportDialog
-            open={importOpen}
-            onOpenChange={(open) => {
-              if (importHistory.isPending) return;
-              setImportOpen(open);
-              if (!open && transactionParams.has("import")) {
-                const next = new URLSearchParams(location.search);
-                next.delete("import");
-                navigate(
-                  { pathname: location.pathname, search: next.toString() },
-                  { replace: true },
-                );
-              }
-            }}
-          >
-            <ImportContent>
-              <ImportHeader>
-                <ImportTitle>Import transactions</ImportTitle>
-                <ImportDescription>
-                  Upload a CSV exported from PayPal, Venmo, or Zelle. Duplicate rows are skipped.
-                </ImportDescription>
-              </ImportHeader>
-              <ImportBody>
-                <ShadcnFieldGroup>
-                  <ShadcnField>
-                    <ShadcnFieldLabel htmlFor="finance-import-account">
-                      Destination account
-                    </ShadcnFieldLabel>
-                    <ShadcnNativeSelect
-                      id="finance-import-account"
-                      onChange={(event) => setImportAccountId(event.target.value)}
-                      value={importAccountId}
-                    >
-                      <NativeSelectOption value="">Select account</NativeSelectOption>
-                      {finance.accounts
-                        .filter((item) => item.provider === importProvider)
-                        .map((item) => (
-                          <NativeSelectOption key={item.id} value={item.id}>
-                            {item.name}
-                          </NativeSelectOption>
-                        ))}
-                    </ShadcnNativeSelect>
-                  </ShadcnField>
-                  <ShadcnField>
-                    <ShadcnFieldLabel htmlFor="finance-import-provider">
-                      Export provider
-                    </ShadcnFieldLabel>
-                    <ShadcnNativeSelect
-                      id="finance-import-provider"
-                      onChange={(event) => {
-                        setImportProvider(event.target.value as "paypal" | "venmo" | "zelle");
-                        setImportAccountId("");
-                      }}
-                      value={importProvider}
-                    >
-                      <NativeSelectOption value="paypal">PayPal</NativeSelectOption>
-                      <NativeSelectOption value="venmo">Venmo</NativeSelectOption>
-                      <NativeSelectOption value="zelle">Zelle</NativeSelectOption>
-                    </ShadcnNativeSelect>
-                  </ShadcnField>
-                  <ShadcnField>
-                    <ShadcnFieldLabel htmlFor="finance-import-file">CSV export</ShadcnFieldLabel>
-                    <ShadcnInput
-                      accept="text/csv,.csv"
-                      id="finance-import-file"
-                      onChange={async (event) => {
-                        const file = event.currentTarget.files?.[0];
-                        if (!file) return;
-                        setImportCsv(await file.text());
-                        setImportFileName(file.name);
-                      }}
-                      type="file"
-                    />
-                    {importFileName ? (
-                      <ShadcnFieldDescription>
-                        {importFileName} ready to import
-                      </ShadcnFieldDescription>
-                    ) : null}
-                  </ShadcnField>
-                  <ShadcnButton
-                    disabled={importHistory.isPending || !importAccountId || !importCsv}
-                    onClick={() => importHistory.mutate()}
-                  >
-                    {importHistory.isPending ? "Importing" : "Import CSV"}
-                  </ShadcnButton>
-                  <MutationFeedback feedback={importHistory.feedback} />
-                  {!importAccountId || !importCsv ? (
-                    <p className="text-sm text-muted-foreground">
-                      Choose an account and a CSV file to import.
-                    </p>
-                  ) : null}
-                  {importHistory.data ? (
-                    <ShadcnFieldDescription>
-                      Imported {importHistory.data.imported}; skipped {importHistory.data.skipped}{" "}
-                      duplicates.
-                    </ShadcnFieldDescription>
-                  ) : null}
-                </ShadcnFieldGroup>
-              </ImportBody>
-            </ImportContent>
-          </ImportDialog>
+          {importDialog}
         </div>
         <div className="flex flex-col gap-6">
           <ShadcnCard hidden={section !== "accounts"}>
@@ -1068,16 +1112,22 @@ export function FinancesPage() {
               </ShadcnCardDescription>
               <ShadcnCardAction>
                 <div className="flex items-center gap-2">
-                  <ShadcnButton asChild size="sm" variant="ghost">
-                    <Link to="/finances/imports">Import history</Link>
-                  </ShadcnButton>
-                  <ShadcnButton
-                    onClick={() => setShowAccountForm(true)}
-                    size="sm"
-                    variant="outline"
-                  >
-                    Track account
-                  </ShadcnButton>
+                  {canImport ? (
+                    <ShadcnButton asChild size="sm" variant="ghost">
+                      <Link to="/finances/imports">Import history</Link>
+                    </ShadcnButton>
+                  ) : null}
+                  {canCreateManual ? (
+                    <ShadcnButton
+                      onClick={() => {
+                        if (canCreateManual) setShowAccountForm(true);
+                      }}
+                      size="sm"
+                      variant="outline"
+                    >
+                      Track account
+                    </ShadcnButton>
+                  ) : null}
                   <PlaidConnectButton onConnected={refresh} />
                 </div>
               </ShadcnCardAction>
@@ -1114,7 +1164,7 @@ export function FinancesPage() {
               )}
             </ShadcnCardContent>
           </ShadcnCard>
-          <ShadcnCard hidden={section !== "accounts" || !showAccountForm}>
+          <ShadcnCard hidden={section !== "accounts" || !showAccountForm || !canCreateManual}>
             <ShadcnCardHeader>
               <ShadcnCardTitle>Track an account</ShadcnCardTitle>
               <ShadcnCardDescription>

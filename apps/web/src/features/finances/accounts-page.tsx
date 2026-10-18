@@ -6,7 +6,7 @@ import type {
 } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
 import { CurrencyInput } from "@/components/currency-input";
 import { HistoryIcon } from "@/components/icons";
@@ -51,10 +51,19 @@ import {
   FinanceSourceState,
   refreshFinancePosition,
 } from "./position-material.js";
+import { useFinanceWorkspaceReadiness } from "./use-finance-workspace-readiness";
 import { FinanceCreateButton } from "./workspace-header";
 
 export function FinanceAccountsPage() {
   const client = useQueryClient();
+  const workspace = useFinanceWorkspaceReadiness();
+  const task = new URLSearchParams(useLocation().search).get("financeTask");
+  const canImport =
+    workspace.manualCreationVisible === true &&
+    !workspace.isError &&
+    !workspace.isPending &&
+    workspace.readiness?.workspaceAccessible === true &&
+    !task;
   const health = useQuery({
     queryKey: ["finance-ledger-health"],
     queryFn: () => api.getFinanceLedgerHealth(),
@@ -71,19 +80,21 @@ export function FinanceAccountsPage() {
   const [editing, setEditing] = useState<FinanceAccount | null>(null);
   return (
     <div className="flex flex-col gap-5">
-      <WorkspaceHeaderControls label="Account controls">
-        <Button
-          asChild
-          size="icon"
-          variant="ghost"
-          aria-label="Import records"
-          title="Import records"
-        >
-          <Link to="/finances/imports">
-            <HistoryIcon />
-          </Link>
-        </Button>
-      </WorkspaceHeaderControls>
+      {canImport ? (
+        <WorkspaceHeaderControls label="Account controls">
+          <Button
+            asChild
+            size="icon"
+            variant="ghost"
+            aria-label="Import records"
+            title="Import records"
+          >
+            <Link to="/finances/imports">
+              <HistoryIcon />
+            </Link>
+          </Button>
+        </WorkspaceHeaderControls>
+      ) : null}
       <Card>
         <CardHeader>
           <CardTitle>Accounts</CardTitle>

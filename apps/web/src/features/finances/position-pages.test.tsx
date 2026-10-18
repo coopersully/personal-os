@@ -29,6 +29,11 @@ vi.stubGlobal(
   },
 );
 
+const workspaceReadiness = vi.hoisted(() => vi.fn());
+vi.mock("./use-finance-workspace-readiness", () => ({
+  useFinanceWorkspaceReadiness: workspaceReadiness,
+}));
+
 const api = vi.hoisted(() => ({
   createFinanceAccount: vi.fn(),
   getFinanceConfiguration: vi.fn(),
@@ -112,6 +117,14 @@ function mount(page: React.ReactNode) {
 afterEach(cleanup);
 beforeEach(() => {
   vi.resetAllMocks();
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: true,
+    readiness: { workspaceAccessible: true },
+    isPending: false,
+    isError: false,
+    error: null,
+    reload: vi.fn(),
+  });
   api.getFinanceLedgerHealth.mockResolvedValue({ balanceOnlyAccounts: 0 });
   api.getFinanceSnapshot.mockResolvedValue(
     envelope({
@@ -1188,4 +1201,19 @@ it.each([
     expect(within(metrics).getAllByText("Unavailable")).toHaveLength(3);
   }
   expect(entry).toBeVisible();
+});
+
+it("retains account correction and bank linking while manual capture and imports are hidden", async () => {
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: false,
+    readiness: { workspaceAccessible: true },
+    isPending: false,
+    isError: false,
+    reload: vi.fn(),
+  });
+  mount(<FinanceAccountsPage />);
+  expect(await screen.findByRole("button", { name: "Edit Shared checking" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Import records" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Edit Shared checking" }));
+  expect(screen.getByLabelText("Ownership")).toBeEnabled();
 });

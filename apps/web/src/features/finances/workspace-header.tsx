@@ -14,6 +14,7 @@ import {
 import { ManualAccountEditor } from "./accounts-page";
 import { PlaidConnectButton } from "./plaid-connect";
 import { refreshFinancePosition } from "./position-material";
+import { useFinanceWorkspaceReadiness } from "./use-finance-workspace-readiness";
 
 export function FinanceCreateButton({
   onSelect,
@@ -25,7 +26,18 @@ export function FinanceCreateButton({
   const navigate = useNavigate();
   const location = useLocation();
   const client = useQueryClient();
+  const workspace = useFinanceWorkspaceReadiness();
+  const task = new URLSearchParams(location.search).get("financeTask");
+  const canCreateTransaction =
+    workspace.manualCreationVisible === true &&
+    !workspace.isError &&
+    !workspace.isPending &&
+    workspace.readiness?.workspaceAccessible === true &&
+    !task;
+  const canCreateManualAccount =
+    workspace.manualCreationVisible === true && !workspace.isError && !workspace.isPending && !task;
   const [step, setStep] = useState<"choose" | "account" | "manual" | null>(null);
+  if (task || (kind === "transaction" && !canCreateTransaction)) return null;
   return (
     <>
       <Button
@@ -34,7 +46,9 @@ export function FinanceCreateButton({
             ? "Add account"
             : kind === "transaction"
               ? "Add transaction"
-              : "Add in Finances"
+              : canCreateTransaction
+                ? "Add in Finances"
+                : "Add account"
         }
         size="icon-sm"
         variant="ghost"
@@ -47,12 +61,12 @@ export function FinanceCreateButton({
             });
             return;
           }
-          setStep(kind === "account" ? "account" : "choose");
+          setStep(kind === "account" || !canCreateTransaction ? "account" : "choose");
         }}
       >
         <PlusIcon aria-hidden="true" />
       </Button>
-      {step === "manual" ? (
+      {step === "manual" && canCreateManualAccount ? (
         <ManualAccountEditor onClose={() => setStep(null)} />
       ) : (
         <ResponsiveDialog open={step !== null} onOpenChange={(open) => !open && setStep(null)}>
@@ -73,30 +87,34 @@ export function FinanceCreateButton({
                       setStep(null);
                     }}
                   />
-                  <Button variant="outline" onClick={() => setStep("manual")}>
-                    Track account manually
-                  </Button>
+                  {canCreateManualAccount ? (
+                    <Button variant="outline" onClick={() => setStep("manual")}>
+                      Track account manually
+                    </Button>
+                  ) : null}
                 </>
               ) : (
                 <>
-                  <Button
-                    className="h-auto justify-start gap-3 py-4"
-                    variant="ghost"
-                    onClick={() => {
-                      setStep(null);
-                      onSelect?.();
-                      navigate({
-                        pathname: "/finances/transactions",
-                        search:
-                          location.pathname === "/finances/transactions" ? location.search : "",
-                        hash: "finance-add-transaction",
-                      });
-                    }}
-                  >
-                    <PlusIcon />
-                    Transaction
-                    <ChevronRightIcon className="ml-auto" />
-                  </Button>
+                  {canCreateTransaction ? (
+                    <Button
+                      className="h-auto justify-start gap-3 py-4"
+                      variant="ghost"
+                      onClick={() => {
+                        setStep(null);
+                        onSelect?.();
+                        navigate({
+                          pathname: "/finances/transactions",
+                          search:
+                            location.pathname === "/finances/transactions" ? location.search : "",
+                          hash: "finance-add-transaction",
+                        });
+                      }}
+                    >
+                      <PlusIcon />
+                      Transaction
+                      <ChevronRightIcon className="ml-auto" />
+                    </Button>
+                  ) : null}
                   <Button
                     className="h-auto justify-start gap-3 py-4"
                     variant="ghost"
@@ -109,7 +127,7 @@ export function FinanceCreateButton({
                 </>
               )}
             </ResponsiveDialogBody>
-            {step === "account" && !kind ? (
+            {step === "account" && !kind && canCreateTransaction ? (
               <ResponsiveDialogFooter>
                 <Button variant="ghost" onClick={() => setStep("choose")}>
                   Back

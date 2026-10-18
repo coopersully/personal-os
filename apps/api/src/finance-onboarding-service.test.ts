@@ -275,6 +275,46 @@ describe("durable Finance onboarding service", () => {
     expect((await f.service.getFinanceOnboarding("owner")).automationChoice).toBe("later");
   });
 
+  it("requires canonical answered evidence to remain present after a durable answered review", async () => {
+    const f = fixture();
+    const question = f.row.evidence.questions[0];
+    if (!question) throw new Error("Missing question");
+    question.disposition = "answered";
+    question.answerSummary = "$1000";
+    await f.service.saveFinanceOnboardingAnswers(
+      { ...f.save, answers: [{ questionId: question.questionId, disposition: "answered" }] },
+      context,
+    );
+    question.disposition = "unknown";
+    question.answerSummary = null;
+    expect((await f.service.getFinanceOnboarding("owner")).questions[0]?.disposition).toBe(
+      "unreviewed",
+    );
+    await expect(
+      f.service.completeFinanceOnboarding(
+        { expectedRevision: 1, idempotencyKey: "cleared", automationChoice: "later" },
+        context,
+      ),
+    ).rejects.toMatchObject({ details: { blockers: ["context_review_required"] } });
+    expect(f.writes()).toBe(1);
+    expect(f.receipts.size).toBe(1);
+    question.disposition = "answered";
+    question.answerSummary = " ";
+    expect((await f.service.getFinanceOnboarding("owner")).questions[0]?.disposition).toBe(
+      "unreviewed",
+    );
+    question.answerSummary = "$1000";
+    await f.service.completeFinanceOnboarding(
+      { expectedRevision: 1, idempotencyKey: "restored", automationChoice: "later" },
+      context,
+    );
+    question.disposition = "unknown";
+    question.answerSummary = null;
+    const completed = await f.service.getFinanceOnboarding("owner");
+    expect(completed.completedAt).toBe("2026-10-18T12:00:00.000Z");
+    expect(completed.questions[0]?.disposition).toBe("unreviewed");
+  });
+
   it("propagates durable write failures without inventing a successful receipt", async () => {
     const f = fixture();
     f.failWrite();

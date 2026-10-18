@@ -54,10 +54,17 @@ export interface FinanceOnboardingRepository {
 
 function snapshot({ state, evidence }: FinanceOnboardingRead): FinanceOnboardingSnapshot {
   const reviews = new Map(state.answers.map((answer) => [answer.questionId, answer.disposition]));
-  const questions = evidence.questions.map((question) => ({
-    ...question,
-    disposition: reviews.get(question.questionId) ?? question.disposition,
-  }));
+  const questions = evidence.questions.map((question) => {
+    const disposition = reviews.get(question.questionId) ?? question.disposition;
+    return {
+      ...question,
+      disposition:
+        disposition === "answered" &&
+        (question.disposition !== "answered" || !question.answerSummary?.trim())
+          ? ("unreviewed" as const)
+          : disposition,
+    };
+  });
   return {
     ...evidence,
     revision: state.revision,

@@ -1,6 +1,8 @@
 # Finance experience parallel workstreams
 
-Status: delivery decomposition for review; no workers dispatched, no merge authorization implied.
+Status: approved delivery decomposition. Live assignments, progress, and scoped authorization are
+tracked in [COO-104 — Deliver the automated Finance experience and visual insights](https://linear.app/coopersully/issue/COO-104/deliver-the-automated-finance-experience-and-visual-insights).
+This document defines target work and does not establish shipped capability.
 
 ## Delivery priority: maximum safe parallelism
 
@@ -19,22 +21,26 @@ release each verified independent slice immediately under normal delivery author
 - Use bounded file ownership and isolated worktrees. Delegate implementation across all available
   worker slots, rebalance as workers finish, and prioritize work that unblocks the most consumers.
   Do not create competing copies of domain logic to manufacture apparent independence.
-- The integration owner is a coordination role, not a mandatory author of every adapter: reserve
-  shared-file edits in short integration slots and merge narrow changes continuously. Contract-family
-  owners may operate independently; schema/journal allocation and shared composition remain serialized.
+- The integration owner is an implementation worker with reserved shared-path responsibility.
+  Contract-family workers may author adapters within explicit ownership slots; schema/journal
+  allocation and shared composition remain serialized. The Lead coordinates acceptance and merge
+  order but never implements adapters, documentation fixes, tests, or conflict resolutions.
 - Reviews and focused verification run alongside unrelated implementation. Integrate accepted slices
   continuously; do not save all conflict resolution, coverage repair, or E2E work for the end.
 - Unavailable dependencies may hide unfinished features, but never expose fake completion or introduce
   a setup gate before manual/automation-later journeys work. Required approval, audit, tenant isolation,
   and financial correctness gates remain release prerequisites.
 
-This preference updates execution scheduling. It does not by itself assign an autonomous network
-role, launch implementation in this planning turn, or waive repository merge authorization.
+Execution follows the [autonomous development contract](../../engineering/autonomous-development.md).
+The assigned Lead records dispatch and scoped merge authority; this scheduling preference does not
+replace role boundaries or repository acceptance gates.
 
 Read the [design](../specs/2026-10-18-finance-experience-design.md) and
 [implementation tasks](2026-10-18-finance-experience.md). This document replaces the original
 coarse sequential delivery order with explicit workstream dependencies. Requirements and acceptance
 criteria remain in those documents. A workstream may contain several independently reviewed PRs.
+
+Shared-path implementation is tracked by [COO-105 — Integrate Finance experience contracts and shared composition](https://linear.app/coopersully/issue/COO-105/integrate-finance-experience-contracts-and-shared-composition). The epic owns the remaining live child relationships.
 
 ## Ownership and shipping map
 
@@ -138,7 +144,8 @@ instructions when capability changes. Do not silently mark old registrations ver
 ## Writable boundaries and integration ownership
 
 Each implementation worker must have an isolated managed worktree and bounded file ownership.
-These are planned assignments, not active delegation or an autonomous network-role assignment.
+These boundaries inform dispatch; live ownership and exact prerequisite milestones remain in Linear
+and the Lead’s private registry. B is an implementation worker, never the Lead acting as an author.
 
 - **A:** approval services, compatibility budget mutations, approval tests and authority guidance.
 - **B:** domain contract exports, workspace preference schema, database schema/migrations/journal,
@@ -153,7 +160,8 @@ These are planned assignments, not active delegation or an autonomous network-ro
 - **J:** shared E2E fixtures, cross-stream tests, consolidated delivery evidence and documentation.
 
 No two workers concurrently edit the shared route/client/schema/navigation files. Domain owners
-provide narrow adapter changes to B or integrate them sequentially after rebasing. Migration numbers
+provide narrow adapter changes to B or integrate them sequentially after updating their base under
+the repository catch-up policy; published history is not rewritten without separate authorization. Migration numbers
 are allocated at integration, not independently in multiple worktrees. No opportunistic broad refactors.
 Small teams can reuse workers across waves; the number of streams is not a concurrency requirement.
 
@@ -178,7 +186,10 @@ Small teams can reuse workers across waves; the number of streams is not a concu
   and production-equivalent evidence for external boundaries. No repeated full suite solely because
   metadata changed; no claim that mocked host execution proves live delivery.
 
-Every slice follows repository PR/Linear and review requirements. This decomposition does not grant
+Every slice requires current independent deep-review acceptance of its candidate, zero unresolved
+review threads, and complete frozen-candidate verification before an authorized Lead merges.
+The [planning reviews](2026-10-18-finance-plan-review.md) are not implementation acceptance. Every slice follows repository PR/Linear
+requirements. This decomposition does not grant
 permission to merge, deploy, or create independently scheduled chats. Keep final unresolved product
 choices in the design; technical discoveries that alter behavior must be surfaced rather than hidden
 as stream-specific assumptions.
@@ -188,7 +199,7 @@ as stream-specific assumptions.
 Before dispatch, turn each stream's referenced tasks into a bounded assignment with owned files,
 contract versions, prerequisites already landed, acceptance commands, and a definition of independently
 shippable completion. Keep one coordinator responsible for integration ordering and final acceptance.
-The current request produces this map; implementation has not started.
+Use the linked epic and child issues for live execution state; this map is not a second task ledger.
 
 ## Approved follow-on parallel streams
 
@@ -209,7 +220,7 @@ separate projection modules; coordinate Cash flow composition with D through the
 N owns reimbursement presentation; H retains existing manual reconcile mutation behavior. O owns
 goal-specific hypothetical math and presentation, not the existing budget authority service. B owns
 new schema/route/client integration; J owns shared fixture/E2E integration. All writable work remains
-isolated and assigned only when dispatch is requested.
+isolated and begins only under a bounded worker dispatch.
 
 Recommended availability: L/N can develop alongside core Cash flow/Spending after contracts; O can
 follow authority and a bounded scenario audit; K follows dated aggregates; M follows the reliable

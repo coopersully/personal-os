@@ -1,6 +1,6 @@
 # Finance experience design
 
-Status: complete design for review; not implemented. October 18, 2026.
+Status: approved target design; not implemented by this documentation change. October 18, 2026.
 
 Subsequent approval: Cooper explicitly approved the missed-run grace period, repeated-run candidate
 threshold, and session-only bubble-position persistence documented below.

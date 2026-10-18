@@ -2,7 +2,8 @@
 
 October 18, 2026. Four independent read-only reviews covered the larger workstream slices.
 No implementation or runtime tests were performed by these reviewers. Findings were checked against
-source and incorporated as design §13, task refinements, and dependency corrections.
+source and incorporated as design §13, task refinements, and dependency corrections. These planning
+reviews do not satisfy current independent deep-review acceptance for an implementation candidate.
 
 ## Review coverage and disposition
 
@@ -10,7 +11,7 @@ source and incorporated as design §13, task refinements, and dependency correct
 | --- | --- | --- |
 | Spending, List, Trends, Rhythm | Period-sensitive recognition could double-count across bins; expected vs received reimbursements differ; partial account scope can mislead budget fills; date-only data cannot support intraday claims | Shared contribution snapshot, separate full-budget utilization, exact-month history, calendar-day comparison, negative-total disclosure added |
 | Cash flow, recurring, payday, reimbursements, goals | No complete recurring occurrence ledger; balance inclusion basis missing; reimbursements allocation-owned; recurring currency/service identity incomplete; legacy goal zero not confirmed | Explicit occurrence/snapshot prerequisites, grouping existing reimbursement identities, guarded receipt correction, currency/service coverage and goal confirmation/horizon added |
-| Automations, Chat, Reviews, Activity | Host registry narrower than copy-prompt flow; claimed work cannot silently move connections; capability self-report insufficient; concurrent replies and case state undefined | Three proposed external-host behaviors await confirmation; fixed run-owned message snapshot accepted; case/evidence and guarded recovery contracts drafted |
+| Automations, Chat, Reviews, Activity | Host registry narrower than copy-prompt flow; claimed work cannot silently move connections; capability self-report insufficient; concurrent replies and case state undefined | Generic registration, capability handshake, and guarded recovery subsequently approved; fixed run-owned message snapshot accepted; case/evidence contracts incorporated |
 | Authority, setup, manual parity, integration | Legacy budget writes omitted from task ownership; old setup completion differs from onboarding; disconnected existing users could be stranded; whole-stream dependencies unnecessarily serial | Expanded mutation inventory, independent onboarding completion, existing-user access preserved, capability matrix and narrow release gates added |
 
 ## Accepted and no longer open

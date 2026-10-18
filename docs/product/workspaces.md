@@ -319,7 +319,7 @@ and Generous sensitivity when enabled. These preferences belong in Calendar sett
 
 October 18 target revision: Finance will have an explicit, resumable setup gate for the normal
 workspace, including account connection, financial context, and recommended registered automation.
-Exact completion criteria and optional paths remain under discussion. This supersedes the earlier
+Completion, manual-later paths, and existing-user access follow design §§2 and 13. This supersedes the earlier
 independent-access target below where conflicting; it is not implemented by this documentation change.
 The [Finance setup contract](../design/pages/finances.md#financial-setup-contract) records the new
 automation prompt, schedule tracking, and management direction.

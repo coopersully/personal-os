@@ -31,7 +31,7 @@ execution machinery does not require user controls; human budget approval remain
 Single-month spending selections use the applicable approved budget for that month, including past
 months. Missing budgets and multi-month selections omit fill with an explanation while retaining
 bucket/category grouping. Never silently substitute today's budget. This settles the historical
-selection question mentioned below; exact revision selection and partial coverage remain to specify.
+selection question mentioned below; design §§4 and 13 define exact revision selection and partial coverage.
 
 ## Overview user job
 
@@ -45,9 +45,9 @@ The spending bubble view defaults to configured budget buckets, or categories wh
 configured, and remembers the user's explicit grouping choice. Buckets support category drill-down.
 Both bucket and category contexts offer Transactions links preserving the selected group and period.
 The visual direction is a draggable, elastic field attracted toward the center. Released bubbles
-remain roughly where placed, with a gentle center pull. Exact motion, position persistence, and
-click/drill-down interactions remain under discussion. See the
-[discussion notes](../../product/finance-experience-discussion.md).
+remain roughly where placed, with a gentle center pull. Session-only position persistence, motion,
+and distinct drill-down/transaction interactions follow the accepted
+[design](../../superpowers/specs/2026-10-18-finance-experience-design.md#5-elastic-bubble-interaction).
 
 Use the assigned bucket/category color with a translucent tonal overlay filling upward inside the
 bubble; do not use a perimeter progress ring. Labels, icons, and controls remain legible above it.
@@ -171,7 +171,7 @@ If a Finance projection fails, available sibling work remains visible and affect
 
 October 18 target revision: introduce an explicit, resumable setup flow gating the normal Finance
 workspace, covering connected accounts/Plaid, financial context, and recommended automation setup.
-The completion criteria, optional paths, and treatment of existing users are still being designed.
+Design §§2 and 13 define completion, manual-later paths, and preserved access for existing users.
 Setup may finish with automation verification pending. Show automation-dependent destinations such
 as Chat in a locked state until the agent checks in and confirms the required capability; do not
 hide them. Lead setup with a copyable one-time external-agent interview prompt using the existing
@@ -179,8 +179,8 @@ setup protocol, alongside manual entry of the same canonical profile answers. Th
 is separate from the recurring automation prompt. Manual profile answers are not manual bookkeeping
 and remain available regardless of the manual creation setting.
 Explicit unknown answers may complete deferrable context questions; agents follow up later. Missing
-prerequisites necessary for required agent capabilities remain blocking, with exact prerequisites
-still to be defined. This does not override permitted pending automation verification or locked Chat.
+prerequisites block only the capability that needs them, as defined in design §§2 and 13.
+This does not override permitted pending automation verification or locked Chat.
 This direction supersedes the independent-access target below where it conflicts; the following
 configuration behavior remains the pre-redesign contract, not evidence that the new gate is shipped.
 
@@ -269,8 +269,8 @@ human approver where relevant; and link to authoritative audit evidence and affe
 Important changes must be durably audited. Verify coverage and useful change details across all
 relevant mutation paths before claiming completeness. Group routine bookkeeping into expandable
 entries with individual change details; give budget changes and other significant decisions their
-own entries. Detailed layout and event selection are still under discussion; this page is not yet
-implemented.
+own entries. Design §8 defines event selection and evidence; this documentation does not implement
+the Activity page.
 
 ### Accepted direction: asynchronous question chat
 
@@ -286,17 +286,16 @@ required capability. Show expected next-run timing near the composer;
 label inferred timing as estimated and never equate a scheduled start with a guaranteed reply.
 Messages must persist for consumption and response by the authorized automation. Corrections and
 existing question-answering remain available without chat. Explore automatic recognition of regular
-external maintenance runs; the threshold for registering inferred automation and verifying that it
-can consume messages remains unresolved. These are target requirements, not shipped behavior.
+external maintenance runs using the accepted thresholds and authenticated confirmation in design §6.
+The capability handshake in §13 is required before Chat unlocks. These are target requirements, not shipped behavior.
 
 ### Accepted direction: manual control visibility
 
 Once Finance automation is set up, manual transaction and manual account creation controls default
 to hidden. A Finance setting lets the person show or hide these controls; the capabilities remain
 supported. Corrections to existing records and answering questions always remain available.
-This is accepted target behavior, not a claim of implementation. The setup detection, explicit
-preference handling, and paused/failed automation behavior remain under discussion in
-[Finance experience discussion](../../product/finance-experience-discussion.md).
+This is accepted target behavior, not a claim of implementation. Setup detection, explicit preference
+handling, and paused/failed automation behavior follow design §§3 and 8; corrections remain available.
 
 **See whether my Finance context is ready for a scoped agent and understand
 which decisions still require me.**

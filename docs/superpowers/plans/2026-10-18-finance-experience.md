@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Execution preference is maximum parallel implementation in isolated worktrees. This document does not itself start implementation or authorize merging.
 
+**Delivery:** [COO-104 — Deliver the automated Finance experience and visual insights](https://linear.app/coopersully/issue/COO-104/deliver-the-automated-finance-experience-and-visual-insights). The Lead owns acceptance and authorized merges; implementation workers own all edits, tests, and conflict resolution.
+
 **Goal:** Deliver automated Finance setup, accurate interactive spending, asynchronous agent conversation, and traceable activity while preserving usable manual workflows.
 
 **Architecture:** Extend existing Finance domain services and durable host/maintenance infrastructure. Domain/API owns accounting, authority, readiness, and evidence; MCP adapts those operations and the React UI consumes typed projections. Deliver dependency-ordered slices without changing Overview or introducing a second ledger or scheduler.
@@ -325,7 +327,9 @@ human-only. New UI adapters must delegate to those APIs and preserve exact revis
 - [ ] Run `pnpm exec playwright test e2e/finance-setup.spec.ts e2e/finance-spending.spec.ts e2e/finance-conversation.spec.ts e2e/finance-automations.spec.ts` in the checked-in runtime; require desktop/mobile PASS.
 - [ ] Reconcile old contradictory documentation and record shipped scope only after verified code.
   Check the coverage matrix against the final MCP catalog and inspect all new pages visually.
-- [ ] Freeze the candidate and run `pnpm verify` once under repository delivery policy. Resolve every
+- [ ] Converge current independent deep-review acceptance with focused checks, commit/freeze the
+  candidate, then run `pnpm verify` under repository delivery policy with one verification owner.
+  Require zero unresolved review threads and all protected merge gates. Resolve every
   unexplained failure; report actual evidence, never assume a documentation change proves availability.
 - [ ] Exercise permitted production-equivalent Plaid and external-host registration/check-in/next-run
   reply flows. Record configuration, authority, transport, time, lifecycle, recovery, and observation
@@ -361,7 +365,7 @@ produce this plan.
 ## Accepted extension: timeline and trends workstreams
 
 These tasks implement spec §11. They can be separate delivery workstreams after shared contracts
-are settled. Their shared route/client/schema edits must have one integration owner. Task 11 final
+are settled. Their shared route/client/schema edits must have one integration worker owner. Task 11 final
 acceptance must include both extensions before declaring the whole design complete.
 
 ### Task 12: Spending Trends

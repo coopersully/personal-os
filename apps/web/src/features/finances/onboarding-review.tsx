@@ -141,7 +141,7 @@ function ReviewSnapshot({
       onSnapshot(next);
     },
   });
-  const locked = mutation.isPending || snapshot.completedAt !== null;
+  const locked = mutation.isPending || reloading || snapshot.completedAt !== null;
   return (
     <section aria-label="Setup review" className="grid gap-4 rounded-lg bg-card p-4">
       <div>
@@ -243,11 +243,19 @@ function ReviewSnapshot({
           </div>
         </>
       )}
-      {mustReload ? (
-        <Button variant="secondary" disabled={reloading} onClick={() => void onReload()}>
+      <div className="grid gap-2">
+        <p className="text-sm text-muted-foreground">
+          After editing your profile, reload this review to use the latest saved values. Reloading
+          replaces any unsaved review choices.
+        </p>
+        <Button
+          variant="secondary"
+          disabled={mutation.isPending || reloading}
+          onClick={() => void onReload()}
+        >
           Reload setup review
         </Button>
-      ) : null}
+      </div>
       {!readiness.chat.canSend ? (
         <p className="text-sm text-muted-foreground">
           {readiness.chat.reason === "verification_required"

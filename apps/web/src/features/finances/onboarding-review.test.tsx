@@ -2,11 +2,17 @@
 import "@testing-library/jest-dom/vitest";
 import type { FinanceOnboardingAdapter, FinanceOnboardingSnapshot } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FinanceOnboardingReview } from "./onboarding-review.js";
 
-vi.mock("sonner", () => ({ toast: { loading: vi.fn(), success: vi.fn(), error: vi.fn() } }));
+const toast = vi.hoisted(() => ({
+  loading: vi.fn(() => "setup-review-toast"),
+  success: vi.fn(),
+  error: vi.fn(),
+}));
+vi.mock("sonner", () => ({ toast }));
+beforeEach(() => vi.clearAllMocks());
 function snapshot(): FinanceOnboardingSnapshot {
   return {
     revision: 1,
@@ -80,6 +86,14 @@ it("saves explicit unknown and manual later before durable completion", async ()
   expect(screen.getByRole("button", { name: "Finish setup" })).toBeDisabled();
   await user.click(screen.getByRole("button", { name: "Save review" }));
   await waitFor(() => expect(screen.getByRole("button", { name: "Finish setup" })).toBeEnabled());
+  expect(toast.loading).toHaveBeenCalledWith("Saving setup review…");
+  expect(toast.success).toHaveBeenCalledWith("Setup review saved", { id: "setup-review-toast" });
+  expect(toast.loading.mock.invocationCallOrder[0]).toBeLessThan(
+    toast.success.mock.invocationCallOrder[0] ?? Number.NaN,
+  );
+  expect(toast.error).not.toHaveBeenCalled();
+  expect(screen.queryByText("Saving setup review…")).not.toBeInTheDocument();
+  expect(screen.queryByText("Setup review saved")).not.toBeInTheDocument();
   expect(adapter.saveFinanceOnboardingAnswers).toHaveBeenCalledWith({
     expectedRevision: 1,
     idempotencyKey: expect.any(String),
@@ -95,6 +109,10 @@ it("saves explicit unknown and manual later before durable completion", async ()
   });
   await user.click(screen.getByRole("button", { name: "Finish setup" }));
   await screen.findByText("Setup complete. Your workspace remains available.");
+  expect(toast.loading).toHaveBeenLastCalledWith("Finishing setup…");
+  expect(toast.success).toHaveBeenLastCalledWith("Setup complete", { id: "setup-review-toast" });
+  expect(screen.queryByText("Finishing setup…")).not.toBeInTheDocument();
+  expect(screen.queryByText("Setup complete", { exact: true })).not.toBeInTheDocument();
   expect(client.getQueryData(["finance-onboarding", adapter])).toMatchObject({
     revision: 3,
     completedAt: "2026-10-18T12:00:00Z",
@@ -117,10 +135,34 @@ it("retains edits after a conflict and requires explicit reload before another w
   adapter.saveFinanceOnboardingAnswers.mockRejectedValue(new Error("Revision conflict"));
   await user.click(screen.getByRole("button", { name: "Save review" }));
   await screen.findByRole("button", { name: "Reload setup review" });
+  expect(toast.loading).toHaveBeenCalledWith("Saving setup review…");
+  expect(toast.error).toHaveBeenCalledWith(
+    "Setup outcome unconfirmed. Your edits are still here. Reload the review before trying again.",
+    { id: "setup-review-toast" },
+  );
+  expect(toast.loading.mock.invocationCallOrder[0]).toBeLessThan(
+    toast.error.mock.invocationCallOrder[0] ?? Number.NaN,
+  );
+  expect(toast.success).not.toHaveBeenCalled();
+  expect(screen.queryByText("Saving setup review…")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Setup outcome unconfirmed/)).not.toBeInTheDocument();
+  expect(screen.queryByText("Revision conflict")).not.toBeInTheDocument();
   expect(screen.getByLabelText("Income")).toHaveValue("unknown");
+  expect(screen.getByLabelText("Automation")).toHaveValue("later");
   expect(screen.getByRole("button", { name: "Save review" })).toBeDisabled();
+  toast.loading.mockClear();
+  toast.error.mockClear();
+  toast.success.mockClear();
   await user.click(screen.getByRole("button", { name: "Reload setup review" }));
   await waitFor(() => expect(screen.getByLabelText("Income")).toHaveValue("unreviewed"));
+  expect(toast.loading).toHaveBeenCalledWith("Reloading setup review…");
+  expect(toast.success).toHaveBeenCalledWith("Setup review reloaded", { id: "setup-review-toast" });
+  expect(toast.loading.mock.invocationCallOrder[0]).toBeLessThan(
+    toast.success.mock.invocationCallOrder[0] ?? Number.NaN,
+  );
+  expect(toast.error).not.toHaveBeenCalled();
+  expect(screen.queryByText("Reloading setup review…")).not.toBeInTheDocument();
+  expect(screen.queryByText("Setup review reloaded")).not.toBeInTheDocument();
   expect(adapter.saveFinanceOnboardingAnswers).toHaveBeenCalledTimes(1);
 });
 it("keeps completed setup available during provider failure without presenting completion again", async () => {
@@ -143,8 +185,129 @@ it("does not call pending completion confirmed", async () => {
   const adapter = show(initial);
   adapter.completeFinanceOnboarding.mockResolvedValue({ ...initial, revision: 2 });
   await userEvent.click(await screen.findByRole("button", { name: "Finish setup" }));
-  await waitFor(() => expect(adapter.completeFinanceOnboarding).toHaveBeenCalledTimes(1));
+  await waitFor(() =>
+    expect(toast.success).toHaveBeenCalledWith("Setup is still pending", {
+      id: "setup-review-toast",
+    }),
+  );
+  expect(adapter.completeFinanceOnboarding).toHaveBeenCalledTimes(1);
+  expect(toast.loading).toHaveBeenCalledWith("Finishing setup…");
+  expect(toast.loading.mock.invocationCallOrder[0]).toBeLessThan(
+    toast.success.mock.invocationCallOrder[0] ?? Number.NaN,
+  );
+  expect(toast.success).not.toHaveBeenCalledWith("Setup complete", expect.anything());
+  expect(toast.error).not.toHaveBeenCalled();
+  expect(screen.queryByText("Finishing setup…")).not.toBeInTheDocument();
+  expect(screen.queryByText("Setup is still pending")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Finish setup" })).toBeEnabled();
   expect(
     screen.queryByText("Setup complete. Your workspace remains available."),
   ).not.toBeInTheDocument();
+});
+
+it("keeps failed explicit reload feedback in Sonner and preserves the locked draft", async () => {
+  const user = userEvent.setup();
+  const adapter = show();
+  await screen.findByLabelText("Income");
+  await user.selectOptions(screen.getByLabelText("Income"), "unknown");
+  await user.click(screen.getByRole("checkbox"));
+  await user.selectOptions(screen.getByLabelText("Automation"), "later");
+  adapter.saveFinanceOnboardingAnswers.mockRejectedValue(new Error("Revision conflict"));
+  await user.click(screen.getByRole("button", { name: "Save review" }));
+  await screen.findByRole("button", { name: "Reload setup review" });
+  toast.loading.mockClear();
+  toast.error.mockClear();
+  toast.success.mockClear();
+  adapter.getFinanceOnboarding.mockRejectedValueOnce(new Error("Offline"));
+  await user.click(screen.getByRole("button", { name: "Reload setup review" }));
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "Setup review could not reload. Your edits are still here.",
+      { id: "setup-review-toast" },
+    ),
+  );
+  expect(toast.loading).toHaveBeenCalledWith("Reloading setup review…");
+  expect(toast.loading.mock.invocationCallOrder[0]).toBeLessThan(
+    toast.error.mock.invocationCallOrder[0] ?? Number.NaN,
+  );
+  expect(toast.success).not.toHaveBeenCalled();
+  expect(screen.queryByText("Reloading setup review…")).not.toBeInTheDocument();
+  expect(
+    screen.queryByText("Setup review could not reload. Your edits are still here."),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByText("Offline")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Income")).toHaveValue("unknown");
+  expect(screen.getByLabelText("Automation")).toHaveValue("later");
+  expect(screen.getByRole("checkbox")).toBeChecked();
+  expect(screen.getByRole("button", { name: "Save review" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Finish setup" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Reload setup review" })).toBeEnabled();
+  expect(adapter.saveFinanceOnboardingAnswers).toHaveBeenCalledTimes(1);
+  expect(adapter.completeFinanceOnboarding).not.toHaveBeenCalled();
+});
+
+it("announces a failed Finish through the same toast and requires reload without false completion", async () => {
+  const initial = snapshot();
+  initial.questions = [];
+  initial.displayPreferences.reviewed = true;
+  initial.automationChoice = "later";
+  const adapter = show(initial);
+  adapter.completeFinanceOnboarding.mockRejectedValue(new Error("Revision conflict"));
+  await userEvent.click(await screen.findByRole("button", { name: "Finish setup" }));
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "Setup outcome unconfirmed. Your edits are still here. Reload the review before trying again.",
+      { id: "setup-review-toast" },
+    ),
+  );
+  expect(toast.loading).toHaveBeenCalledWith("Finishing setup…");
+  expect(toast.loading.mock.invocationCallOrder[0]).toBeLessThan(
+    toast.error.mock.invocationCallOrder[0] ?? Number.NaN,
+  );
+  expect(toast.success).not.toHaveBeenCalled();
+  expect(screen.queryByText("Finishing setup…")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Setup outcome unconfirmed/)).not.toBeInTheDocument();
+  expect(
+    screen.queryByText("Setup complete. Your workspace remains available."),
+  ).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Automation")).toHaveValue("later");
+  expect(screen.getByRole("button", { name: "Save review" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Finish setup" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Reload setup review" })).toBeEnabled();
+});
+
+it("explicitly reloads saved profile facts and replaces unsaved review choices only after success", async () => {
+  const adapter = show();
+  const user = userEvent.setup();
+  await user.selectOptions(await screen.findByLabelText("Income"), "unknown");
+  await user.selectOptions(screen.getByLabelText("Automation"), "later");
+  expect(screen.getByText(/replaces any unsaved review choices/)).toBeVisible();
+  let resolveReload!: (next: FinanceOnboardingSnapshot) => void;
+  adapter.getFinanceOnboarding.mockReturnValueOnce(
+    new Promise<FinanceOnboardingSnapshot>((resolve) => {
+      resolveReload = resolve;
+    }),
+  );
+  await user.click(screen.getByRole("button", { name: "Reload setup review" }));
+  expect(screen.getByLabelText("Income")).toHaveValue("unknown");
+  expect(screen.getByLabelText("Income")).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Save review" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Finish setup" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Reload setup review" })).toBeDisabled();
+  const refreshed = {
+    ...snapshot(),
+    questions: snapshot().questions.map((q) => ({
+      ...q,
+      disposition: "answered" as const,
+      answerSummary: "$1,234.56 saved income",
+    })),
+  };
+  await act(async () => resolveReload(refreshed));
+  expect(await screen.findByText("$1,234.56 saved income")).toBeVisible();
+  expect(screen.getByLabelText("Income")).toHaveValue("answered");
+  expect(screen.getByLabelText("Automation")).toHaveValue("");
+  expect(adapter.saveFinanceOnboardingAnswers).not.toHaveBeenCalled();
+  expect(adapter.completeFinanceOnboarding).not.toHaveBeenCalled();
+  expect(toast.success).toHaveBeenCalledWith("Setup review reloaded", { id: "setup-review-toast" });
+  expect(screen.queryByText("Setup review reloaded")).not.toBeInTheDocument();
 });

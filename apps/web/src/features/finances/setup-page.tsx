@@ -9,15 +9,17 @@ import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { SettingsSection } from "../settings/settings-layout.js";
 import { FinanceConfigurationEditor } from "./configuration-editor.js";
+import { financeOnboardingApiAdapter } from "./onboarding-adapter.js";
 import { FinanceOnboardingReview } from "./onboarding-review.js";
 import { requireFinanceResult } from "./position-material.js";
 import { SetupMaintenance } from "./setup-maintenance.js";
 import { financeConfigurationKey, useFinanceConfiguration } from "./use-finance-configuration.js";
 
 export function FinanceSetupPage({
-  onboardingAdapter,
+  onboardingAdapter = financeOnboardingApiAdapter,
 }: {
-  onboardingAdapter?: FinanceOnboardingAdapter;
+  /** Explicit null is reserved for compositions that intentionally stage the review separately. */
+  onboardingAdapter?: FinanceOnboardingAdapter | null;
 } = {}) {
   const query = useFinanceConfiguration();
   const client = useQueryClient();

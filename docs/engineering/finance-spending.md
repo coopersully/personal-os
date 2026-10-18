@@ -1,8 +1,7 @@
 # Spending contribution contract
 
 `projectFinanceSpending` in `apps/api/src/finance/spending-contributions.ts` is a pure API-owned
-projection. Its schemas live in `packages/domain/src/finance/spending.ts`. It is groundwork for
-Spending, Trends and Rhythm; this module does not expose a live aggregate endpoint or render a view.
+projection. Its schemas live in `packages/domain/src/finance/spending.ts`. The dashboard service and Spending views consume this projection without recomputing recognition.
 
 The caller supplies an owner-scoped, complete recognition evidence snapshot, including identity
 relationships outside the requested period. It must exclude deleted/tombstoned records at the
@@ -48,14 +47,14 @@ Daily-bin area instead represents the positive daily net; negative-net days reta
 negative adjustment. Consumers that regroup categories into buckets must recompute area from bucket
 nets while preserving the same contributions. No negative bubble area is implied.
 
-Historical monthly budget comparison is explicitly unavailable (`historical_budget_not_resolved`).
-This slice does not guess historical approvals, budget account scope, carry-forward limits or fills.
-The qualified monthly budget adapter and production observation remain separate delivery work.
+The v1 snapshot budget comparison remains explicitly unavailable (`historical_budget_not_resolved`).
+The separate dashboard `monthlyBudget` field reads immutable human-qualified monthly baselines. It
+never guesses historical approval or account scope. Production observation remains separate work.
 The dashboard loader, route, typed client and views are described below.
 
 ## Dashboard loader and presentation
 
-The next dashboard slice adds `GET /v1/finances/spending`, backed by a read-only repeatable-read
+The dashboard adds `GET /v1/finances/spending`, backed by a read-only repeatable-read
 snapshot of all authenticated-owner recognition evidence. It does not substitute transaction paging
 for the ledger. Requested foreign accounts/categories fail closed. The URL adapter preserves all,
 explicit no selection, and uncategorized selection; the typed client validates the response.
@@ -105,3 +104,25 @@ and transaction count summarize the entire exact filter. Native transaction amou
 original meaning and may differ from selected split/personal-cost portions. Canonical row timestamps
 and account identities must still match the snapshot or the read fails with a conflict rather than
 silently mixing changed records. This endpoint performs no financial mutation or approval.
+
+
+## Qualified monthly budget usage
+
+For a selection contained in one calendar month, the composition root supplies the budget authority's
+owner-scoped qualification reader. The adapter uses its immutable target cents, explicit account
+selection, currency, complete calendar month, and timezone. Monthly use is computed from the same
+canonical recognition projection over that whole account/month scope, independently of the selected
+bubble dates or accounts. Labels disclose the monthly scope, unknown or partial observed coverage,
+accounting choices, and later retrospective confirmation. Unresolved historical category identity,
+unsupported currency, unavailable accounts, or unresolved recognition withholds comparison. Multi-month
+selections do not display fills.
+
+Bubble area continues to represent selected-period spending. Translucent fill uses the inverse
+circular-segment area for monthly utilization; negative use clamps to zero and overspend fills the
+circle with explicit overspend text. List rows expose precise monthly target/use and utilization.
+
+When the authority reports that qualification is required, a contextual human review flow requires
+explicit budget version, accounts, and USD selection. Prepare returns the exact review and fingerprint;
+confirmation sends only that evidence and a stable idempotency key. Changing scope or account session
+invalidates the preview. This action qualifies historical comparison; it does not infer an original
+approval or complete onboarding.

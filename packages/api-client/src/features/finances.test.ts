@@ -176,3 +176,52 @@ it("encodes exact Spending all/none/uncategorized scopes and validates response"
   params = new URL(request.mock.calls[1]?.[0] as string, "http://localhost").searchParams;
   expect(params.get("accountIdsSelection")).toBe("all");
 });
+
+it("posts bounded exact Spending filters without granting tenant authority", async () => {
+  const query = {
+    scope: {
+      from: "2026-03-07",
+      through: "2026-03-09",
+      timezone: "America/New_York",
+      accountIds: null,
+      categoryIds: null,
+      basis: "personal_cost" as const,
+      includePending: true,
+      subtractRefunds: true,
+    },
+    grouping: "auto" as const,
+    includeUncategorized: true,
+  };
+  const filter = {
+    query,
+    referenceRevision: "a".repeat(64),
+    groupId: null,
+    from: query.scope.from,
+    through: query.scope.through,
+  };
+  const response = {
+    items: [],
+    nextCursor: null,
+    referenceRevision: filter.referenceRevision,
+    totalTransactions: 0,
+    netCents: 0,
+    scope: query.scope,
+    contributions: [],
+  };
+  const request = vi.fn().mockResolvedValue(response);
+  await expect(
+    createFinanceApi(request as FinanceRequest).listFinanceSpendingTransactions(
+      filter,
+      undefined,
+      50,
+    ),
+  ).resolves.toEqual(response);
+  expect(request).toHaveBeenCalledWith("/v1/finances/spending/transactions", {
+    method: "POST",
+    body: JSON.stringify({ filter, limit: 50 }),
+  });
+  request.mockResolvedValue({ items: [] });
+  await expect(
+    createFinanceApi(request as FinanceRequest).listFinanceSpendingTransactions(filter),
+  ).rejects.toThrow();
+});

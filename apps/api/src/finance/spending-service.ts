@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   type Database,
   financeAccounts,
@@ -18,9 +19,11 @@ import {
   type FinanceSpendingDashboard,
   type FinanceSpendingGroup,
   type FinanceSpendingQuery,
+  type FinanceSpendingReferenceFilter,
   financeProvenanceSchema,
   financeSpendingDashboardSchema,
   financeSpendingQuerySchema,
+  financeSpendingReferenceFilterSchema,
 } from "@personal-os/domain";
 import { eq } from "drizzle-orm";
 import { AppError } from "../errors.js";
@@ -148,6 +151,20 @@ export function buildFinanceSpendingDashboard(
   }
   const positiveAreaCents = groups.reduce((total, row) => total + row.positiveAreaCents, 0);
   return financeSpendingDashboardSchema.parse({
+    referenceRevision: createHash("sha256")
+      .update(
+        JSON.stringify({
+          scope: snapshot.scope,
+          sources: metadata.transactions
+            .map((row) => ({ id: row.id, updatedAt: row.updatedAt }))
+            .sort((a, b) => a.id.localeCompare(b.id)),
+          contributions: [...snapshot.contributions].sort((a, b) => a.id.localeCompare(b.id)),
+          groups: groups
+            .map((row) => ({ id: row.id, categoryIds: [...row.categoryIds].sort() }))
+            .sort((a, b) => a.id.localeCompare(b.id)),
+        }),
+      )
+      .digest("hex"),
     schemaVersion: 1,
     snapshot,
     effectiveGrouping,
@@ -324,6 +341,7 @@ export function createFinanceSpendingService(input: { db: Database; now: () => D
                 id: row.id,
                 accountId: row.accountId,
                 merchant: row.merchant,
+                updatedAt: row.updatedAt.toISOString(),
                 date: row.transactionDate,
                 pending: row.pending,
               })),
@@ -351,5 +369,58 @@ export function createFinanceSpendingService(input: { db: Database; now: () => D
         { isolationLevel: "repeatable read", accessMode: "read only" },
       );
     },
+  };
+}
+
+/** Revalidate source references against the authenticated current snapshot before paging. */
+export function selectFinanceSpendingReferences(
+  dashboard: FinanceSpendingDashboard,
+  requested: FinanceSpendingReferenceFilter,
+  cursor?: string,
+  limit = 50,
+) {
+  const filter = financeSpendingReferenceFilterSchema.parse(requested);
+  if (filter.referenceRevision !== dashboard.referenceRevision)
+    throw new AppError(
+      "conflict",
+      "Spending changed. Return to Spending and reopen this selection.",
+    );
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100)
+    throw new AppError("invalid_request", "Choose at most 100 transactions.");
+  const group =
+    filter.groupId === null
+      ? null
+      : dashboard.groups
+          .flatMap((row) => [row, ...row.categories])
+          .find((row) => row.id === filter.groupId);
+  if (filter.groupId !== null && !group)
+    throw new AppError("not_found", "The spending group was not found.");
+  const ids = group ? new Set(group.drillDown.contributionIds) : null;
+  const contributions = dashboard.snapshot.contributions.filter(
+    (row) =>
+      (ids === null || ids.has(row.id)) && row.date >= filter.from && row.date <= filter.through,
+  );
+  const transactionIds = [...new Set(contributions.map((row) => row.transactionId))].sort();
+  const cursorRevision = createHash("sha256").update(JSON.stringify(filter)).digest("hex");
+  let offset = 0;
+  if (cursor) {
+    const match = /^([a-f0-9]{64}):(\d+)$/.exec(cursor);
+    if (!match || match[1] !== cursorRevision)
+      throw new AppError("conflict", "Spending pagination is stale. Reopen the selection.");
+    offset = Number(match[2]);
+    if (!Number.isSafeInteger(offset) || offset > transactionIds.length)
+      throw new AppError("invalid_request", "Invalid spending cursor.");
+  }
+  const pageIds = transactionIds.slice(offset, offset + limit);
+  const pageSet = new Set(pageIds);
+  return {
+    transactionIds: pageIds,
+    totalTransactions: transactionIds.length,
+    nextCursor:
+      offset + limit < transactionIds.length ? `${cursorRevision}:${offset + limit}` : null,
+    referenceRevision: filter.referenceRevision,
+    netCents: contributions.reduce((sum, row) => sum + row.netCents, 0),
+    scope: { ...dashboard.snapshot.scope, from: filter.from, through: filter.through },
+    contributions: contributions.filter((row) => pageSet.has(row.transactionId)),
   };
 }

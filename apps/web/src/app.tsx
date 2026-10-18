@@ -2978,6 +2978,7 @@ function workspaceTitleForLocation(pathname: string, search: string): string | n
   if (pathname === "/goals") return "Goals";
   if (pathname === "/motives") return "Motives";
   if (pathname === "/finances") return "Finances";
+  if (pathname === "/finances/spending") return "Spending";
   if (pathname === "/finances/accounts") return "Accounts";
   if (pathname === "/finances/budgets" || pathname === "/finances/plan") return "Budget";
   if (pathname === "/finances/wealth") return "Wealth";

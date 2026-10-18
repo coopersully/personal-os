@@ -181,6 +181,7 @@ export function registerFinanceRoutes({
       (context.req.method === "GET" && context.req.path === "/v1/finances/position") ||
       (context.req.method === "POST" &&
         [
+          "/v1/finances/spending/transactions",
           "/v1/finances/categorizations/propose",
           "/v1/finances/scenarios/compare",
           "/v1/finances/budget-policies/preview",
@@ -202,7 +203,11 @@ export function registerFinanceRoutes({
     if (!financePosition) throw new Error("Finance position service is unavailable.");
     return financePosition;
   };
-  registerFinanceSpendingRoute({ app, spending: financeSpending });
+  registerFinanceSpendingRoute({
+    app,
+    spending: financeSpending,
+    readTransaction: finances.getFinanceTransaction,
+  });
   app.get("/v1/finances/position", async (context) => {
     const accountIds = context.req.query("accountIds");
     const scope = financePositionReadScopeSchema.parse({

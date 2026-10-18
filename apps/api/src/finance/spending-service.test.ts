@@ -1,7 +1,10 @@
 import type { FinanceSpendingQuery } from "@personal-os/domain";
 import { describe, expect, it } from "vitest";
 import type { SpendingEvidenceInput } from "./spending-contributions.js";
-import { buildFinanceSpendingDashboard } from "./spending-service.js";
+import {
+  buildFinanceSpendingDashboard,
+  selectFinanceSpendingReferences,
+} from "./spending-service.js";
 
 function required<T>(value: T | undefined): T {
   if (value === undefined) throw new Error("Missing Spending fixture");
@@ -180,5 +183,73 @@ describe("Spending dashboard canonical consumer", () => {
     );
     expect(result.transactions.map((row) => row.id)).toEqual(["purchase"]);
     expect(result.currency.unsupported).toEqual([]);
+  });
+});
+
+describe("Exact Spending transaction reference selection", () => {
+  it("returns exact allocations/group scope and rejects stale or foreign selection", () => {
+    const dashboard = buildFinanceSpendingDashboard(evidence, query, metadata);
+    const filter = {
+      query,
+      referenceRevision: dashboard.referenceRevision ?? "",
+      groupId: "needs",
+      from: query.scope.from,
+      through: query.scope.through,
+    };
+    const page = selectFinanceSpendingReferences(dashboard, filter);
+    expect(page.transactionIds).toEqual(["purchase"]);
+    expect(page.netCents).toBe(1200);
+    expect(page.totalTransactions).toBe(1);
+    expect(page.contributions.map((row) => row.id)).toEqual(
+      dashboard.groups[0]?.drillDown.contributionIds,
+    );
+    expect(() =>
+      selectFinanceSpendingReferences(dashboard, { ...filter, referenceRevision: "0".repeat(64) }),
+    ).toThrow("Spending changed");
+    expect(() =>
+      selectFinanceSpendingReferences(dashboard, { ...filter, groupId: "foreign" }),
+    ).toThrow("group was not found");
+    expect(() =>
+      selectFinanceSpendingReferences(dashboard, { ...filter, from: "2026-03-01" }),
+    ).toThrow();
+  });
+  it("binds cursor to exact filter and snapshot; selected totals span all pages", () => {
+    const input = {
+      ...evidence,
+      transactions: [
+        ...evidence.transactions,
+        { ...required(evidence.transactions[0]), id: "second", amount: 333 },
+      ],
+    };
+    const dashboard = buildFinanceSpendingDashboard(input, query, metadata);
+    const filter = {
+      query,
+      referenceRevision: dashboard.referenceRevision ?? "",
+      groupId: null,
+      from: query.scope.from,
+      through: query.scope.through,
+    };
+    const first = selectFinanceSpendingReferences(dashboard, filter, undefined, 1);
+    expect(first.totalTransactions).toBe(2);
+    expect(first.netCents).toBe(1533);
+    expect(first.contributions).toHaveLength(1);
+    expect(first.nextCursor).not.toBeNull();
+    const second = selectFinanceSpendingReferences(
+      dashboard,
+      filter,
+      first.nextCursor ?? undefined,
+      1,
+    );
+    expect(second.transactionIds).toEqual(["second"]);
+    expect(second.netCents).toBe(1533);
+    expect(second.nextCursor).toBeNull();
+    expect(() =>
+      selectFinanceSpendingReferences(
+        dashboard,
+        { ...filter, through: "2026-03-08" },
+        first.nextCursor ?? undefined,
+        1,
+      ),
+    ).toThrow("pagination is stale");
   });
 });

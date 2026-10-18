@@ -139,6 +139,7 @@ export const financeSpendingDashboardSchema = z.object({
       id: reference,
       accountId: reference,
       merchant: z.string(),
+      updatedAt: z.iso.datetime().optional(),
       date: z.string(),
       pending: z.boolean(),
     }),

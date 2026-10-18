@@ -13,13 +13,32 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { NativeSelect } from "@/components/ui/native-select";
 import {
-  preferenceSession,
   registerSessionCleanup,
-  sameSession,
   usePreferenceSession,
 } from "../workspace-settings/account-save-session";
+import {
+  captureFinanceOnboardingAccess,
+  confirmFinanceOnboardingRead,
+  denyFinanceOnboardingAccess,
+  isFinanceOnboardingAccessCurrent,
+  useFinanceOnboardingAccess,
+} from "./onboarding-access.js";
 import { financeOnboardingApiAdapter } from "./onboarding-adapter.js";
 import { FinanceSetupAgentGuidance } from "./setup-agent-guidance.js";
+
+const injectedKeys = new WeakMap<FinanceOnboardingAdapter, readonly unknown[]>();
+let nextInjectedKey = 0;
+/** Keep explicit adapter contexts separate from the account-bound default query. */
+export function financeOnboardingReviewKey(adapter: FinanceOnboardingAdapter): readonly unknown[] {
+  if (adapter === financeOnboardingApiAdapter) return ["finance-onboarding", adapter];
+  let key = injectedKeys.get(adapter);
+  if (!key) {
+    key = ["finance-onboarding", "injected", ++nextInjectedKey];
+    injectedKeys.set(adapter, key);
+  }
+  return key;
+}
+const accessDeniedCopy = "Finance setup access could not be confirmed. Retry to check your access.";
 
 const sessionCleanups = new WeakSet<ReturnType<typeof useQueryClient>>();
 
@@ -45,6 +64,8 @@ export function FinanceOnboardingReview({
   const client = useQueryClient();
   const defaultAdapter = adapter === financeOnboardingApiAdapter;
   const session = usePreferenceSession(client);
+  const access = useFinanceOnboardingAccess(client);
+  const queryKey = financeOnboardingReviewKey(adapter);
   useEffect(() => {
     if (defaultAdapter && !sessionCleanups.has(client)) {
       sessionCleanups.add(client);
@@ -62,28 +83,39 @@ export function FinanceOnboardingReview({
     };
   }, []);
   const query = useQuery({
-    queryKey: ["finance-onboarding", adapter],
-    enabled: !defaultAdapter || !!session.owner,
+    queryKey,
+    enabled: !defaultAdapter || (!!session.owner && !access.denied),
     queryFn: async ({ signal }) => {
-      const captured = { ...preferenceSession(client) };
+      const captured = captureFinanceOnboardingAccess(client);
       if (defaultAdapter && !captured.owner)
         throw new Error("Load your account before reading Finance setup.");
-      const current = () => !defaultAdapter || sameSession(client, captured);
-      const refreshing = client.getQueryData(["finance-onboarding", adapter]) !== undefined;
+      const current = () => !defaultAdapter || isFinanceOnboardingAccessCurrent(client, captured);
+      const refreshing = client.getQueryData(queryKey) !== undefined;
       const id = toast.loading(refreshing ? "Reloading setup review…" : "Loading setup review…");
       const onAbort = () => toast.dismiss(id);
       signal.addEventListener("abort", onAbort, { once: true });
       if (signal.aborted) onAbort();
       try {
         const next = await adapter.getFinanceOnboarding();
-        if (signal.aborted || !current()) throw new Error("Finance setup account changed.");
+        if (
+          signal.aborted ||
+          !current() ||
+          (defaultAdapter && !confirmFinanceOnboardingRead(client, captured))
+        )
+          throw new Error("Finance setup access changed.");
         if (!signal.aborted) {
           if (refreshing) toast.success("Setup review reloaded", { id });
           else toast.dismiss(id);
         }
         return next;
       } catch (error) {
-        if (!signal.aborted && current())
+        if (
+          !signal.aborted &&
+          defaultAdapter &&
+          denyFinanceOnboardingAccess(client, captured, error)
+        ) {
+          toast.error(accessDeniedCopy, { id });
+        } else if (!signal.aborted && current())
           toast.error(
             refreshing
               ? "Setup review could not reload. Your edits are still here."
@@ -100,12 +132,15 @@ export function FinanceOnboardingReview({
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
-  if ((defaultAdapter && !session.owner) || !query.data)
+  if ((defaultAdapter && (!session.owner || access.denied)) || !query.data)
     return (
       <section aria-label="Setup review" className="grid gap-4 rounded-lg bg-card p-4">
         <h2 className="font-medium">Review your setup</h2>
-        {query.isError ? (
-          <Button disabled={query.isFetching} onClick={() => void query.refetch()}>
+        {query.isError || (defaultAdapter && access.denied) ? (
+          <Button
+            disabled={query.isFetching || (defaultAdapter && !session.owner)}
+            onClick={() => void query.refetch()}
+          >
             Retry setup review
           </Button>
         ) : null}
@@ -113,20 +148,20 @@ export function FinanceOnboardingReview({
     );
   return (
     <ReviewSnapshot
-      key={`${defaultAdapter ? `${session.owner}:${session.epoch}:` : ""}${query.data.revision}:${reload}`}
+      key={`${defaultAdapter ? `${session.owner}:${session.epoch}:${access.generation}:` : ""}${query.data.revision}:${reload}`}
       adapter={adapter}
       {...(continueTo === undefined ? {} : { continueTo })}
       snapshot={query.data}
-      onSnapshot={(next) => client.setQueryData(["finance-onboarding", adapter], next)}
+      onSnapshot={(next) => client.setQueryData(queryKey, next)}
       reloading={query.isFetching}
       onReload={async () => {
-        const captured = { ...preferenceSession(client) };
+        const captured = captureFinanceOnboardingAccess(client);
         if (defaultAdapter && !captured.owner) return;
         const result = await query.refetch();
         if (
           !result.isError &&
           mounted.current &&
-          (!defaultAdapter || sameSession(client, captured))
+          (!defaultAdapter || isFinanceOnboardingAccessCurrent(client, captured))
         )
           setReload((value) => value + 1);
       }}
@@ -168,9 +203,9 @@ function ReviewSnapshot({
     snapshot.questions.some((q) => answers[q.questionId] !== q.disposition);
   const mutation = useMutation({
     mutationFn: async (operation: "save" | "complete") => {
-      const captured = { ...preferenceSession(client) };
-      if (defaultAdapter && !captured.owner) return null;
-      const current = () => !defaultAdapter || sameSession(client, captured);
+      const captured = captureFinanceOnboardingAccess(client);
+      if (defaultAdapter && (!captured.owner || captured.denied)) return null;
+      const current = () => !defaultAdapter || isFinanceOnboardingAccessCurrent(client, captured);
       if (!choice) throw new Error("Choose when to set up automation.");
       const id = toast.loading(operation === "save" ? "Saving setup review…" : "Finishing setup…");
       let dismissed = false;
@@ -216,6 +251,10 @@ function ReviewSnapshot({
         );
         return { snapshot: next, captured };
       } catch (error) {
+        if (defaultAdapter && denyFinanceOnboardingAccess(client, captured, error)) {
+          toast.error(accessDeniedCopy, { id });
+          throw error;
+        }
         if (!current()) {
           dismissStale();
           return null;
@@ -231,7 +270,8 @@ function ReviewSnapshot({
       }
     },
     onSuccess: (result) => {
-      if (!result || (defaultAdapter && !sameSession(client, result.captured))) return;
+      if (!result || (defaultAdapter && !isFinanceOnboardingAccessCurrent(client, result.captured)))
+        return;
       const next = result.snapshot;
       setSnapshot(next);
       setAnswers(Object.fromEntries(next.questions.map((q) => [q.questionId, q.disposition])));

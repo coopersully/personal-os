@@ -326,3 +326,29 @@ it("does not reuse a previous owner's cached or late review count", async () => 
   expect(screen.queryByText("4 items need review")).not.toBeInTheDocument();
   expect(screen.getByText("1 item needs review")).toBeVisible();
 });
+
+it.each([
+  "unconfirmed_schedule",
+  "source_changed",
+])("does not call an empty occurrence list clear when a source is %s", async (reason) => {
+  api.listFinanceRecurringOccurrences.mockResolvedValue({
+    occurrences: [],
+    unavailableSources: [{ reason }],
+  });
+  mount();
+  expect(await screen.findByText("Upcoming money cannot be fully determined yet.")).toBeVisible();
+  expect(
+    screen.queryByText("No unmatched scheduled money in this date range."),
+  ).not.toBeInTheDocument();
+  expect(screen.getByText(/This list is incomplete/)).toBeVisible();
+  expect(screen.getByRole("link", { name: "Open upcoming money" })).toBeVisible();
+});
+
+it("reports no unmatched scheduled money only after all source schedules are available", async () => {
+  mount();
+  expect(await screen.findByText("No unmatched scheduled money in this date range.")).toBeVisible();
+  expect(screen.queryByText(/This list is incomplete/)).not.toBeInTheDocument();
+  expect(
+    screen.queryByText("Upcoming money cannot be fully determined yet."),
+  ).not.toBeInTheDocument();
+});

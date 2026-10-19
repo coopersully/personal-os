@@ -38,6 +38,21 @@ design §§4 and 13 retain the accepted direction.
 
 ## Overview user job
 
+### Daily summary
+
+Overview leads with what needs the person, recorded changes, and upcoming money before secondary
+account-view settings. Its review count comes from the shared Finance decision summary, including
+questions, approvals and cases shown by the global Reviews dialog; it is not a transaction-only
+Inbox count. A review link opens that canonical destination without copying its first question or
+placing an approval action on Overview. Unavailable or denied decision reads suppress an all-clear.
+
+Recorded reviews and maintenance link to Activity evidence rather than implying a new completed
+action. Upcoming money shows at most three canonical expected occurrences across 30 owner-local
+dates, with remaining amounts for partial occurrences, explicit currencies and incomplete-source
+caveats. Its Cash flow link retains that exact agenda range. Expected movements are not booked
+money or a safe-to-spend total. Existing position, ownership, complete-plan review and manual
+correction controls remain available; no second queue or financial source is created.
+
 ### Spending dashboard
 
 Spending is a new sidebar destination; retain Overview and existing destinations in this scope.
@@ -58,7 +73,11 @@ Bubble size represents spending for the selected period; fill represents monthly
 must be explicitly labeled as monthly even on shorter views. Animate fill changes and distinguish
 overspending from exactly using the budget. Missing limits never become invented percentages.
 Single-month selections resolve the applicable approved budget; multi-month selections omit fill.
-See the [spending contract](../../engineering/finance-spending.md) for coverage and disclosure rules.
+A visible legend separates selected-period circle size from monthly fill. Positive circles retain
+true area; those below 44 px leave the Tab order. A collapsed All spending groups disclosure offers
+full names, exact amounts, qualified monthly usage and overage through native 44 px controls.
+Zero and negative groups remain in List. Reduced motion disables Arrange and preserves vertical
+scrolling. See the [spending contract](../../engineering/finance-spending.md) for coverage and disclosure rules.
 
 Include pending spending by default, with a configurable inclusion option in the view and Finance
 settings. Expose grouping defaults and granular display choices during setup using simple controls;
@@ -154,11 +173,11 @@ category change, bookkeeping result or scheduled maintenance.
 
 ## Canonical Review contract
 
-Overview includes one compact outstanding list from the canonical Inbox, including
-open and deferred cases. Show five rows initially with an explicit expansion for the rest;
-do not duplicate its first question in a second next-step block. Each row identifies
-the merchant, transaction date, account, amount, direction, posting state, and review reason.
-Amounts from distinct review reasons are not summed into a synthetic financial loss.
+Overview links to the canonical shared Reviews destination using the Finance decision summary;
+it does not reproduce the outstanding queue. The review surface retains open and deferred cases
+with their merchant, transaction date, account, amount, direction, posting state, and reason.
+Questions, approvals and cases remain distinct decision types. Amounts from distinct review
+reasons are not summed into a synthetic financial loss.
 
 Selecting a row opens the shared review editor. Review also allows choosing any outstanding
 case. The API supplies each case's prompt and transaction context. Exact transaction links
@@ -287,14 +306,13 @@ Budget activation and changes to the active budget always require explicit human
 exact proposal. Agents may prepare proposals; no automatic adjustment allowance or self-approval
 replaces that decision. This target supersedes earlier budget self-approval guidance.
 
-Add a Finance activity destination showing important agent actions and user-approved financial
-changes. It must distinguish proposals, approvals, and completed changes; identify the agent and
-human approver where relevant; and link to authoritative audit evidence and affected records.
-Important changes must be durably audited. Verify coverage and useful change details across all
-relevant mutation paths before claiming completeness. Group routine bookkeeping into expandable
-entries with individual change details; give budget changes and other significant decisions their
-own entries. Design §8 defines event selection and evidence; this documentation does not implement
-the Activity page.
+Finance Activity exposes canonical human decisions and validated committed candidate-effect
+receipts, with links to supporting messages, audit evidence, and affected records. Proposed,
+failed, or no-change actions are not presented as completed financial effects. Routine actions may
+group by one run and action family; budget decisions remain individually inspectable with their
+human-approval provenance. Coverage is partial: historical actions without the required receipt
+are not inferred from conversation text. The [conversation contract](../../engineering/finance-conversation.md#activity-financial-scope)
+defines the implemented evidence boundary; design §8 retains the broader target.
 
 ### Accepted direction: asynchronous question chat
 
@@ -311,15 +329,20 @@ label inferred timing as estimated and never equate a scheduled start with a gua
 Messages must persist for consumption and response by the authorized automation. Corrections and
 existing question-answering remain available without chat. Explore automatic recognition of regular
 external maintenance runs using the accepted thresholds and authenticated confirmation in design §6.
-The capability handshake in §13 is required before Chat unlocks. These are target requirements, not shipped behavior.
+The capability handshake in design §13 is implemented and required before Chat unlocks.
+The [conversation contract](../../engineering/finance-conversation.md) defines fixed-batch delivery,
+separate receipts, and current authority checks. This merged implementation does not establish
+that an external host is configured, verified, or successfully running maintenance for a person.
 
 ### Accepted direction: manual control visibility
 
 Once Finance automation is set up, manual transaction and manual account creation controls default
 to hidden. A Finance setting lets the person show or hide these controls; the capabilities remain
 supported. Corrections to existing records and answering questions always remain available.
-This is accepted target behavior, not a claim of implementation. Setup detection, explicit preference
-handling, and paused/failed automation behavior follow design §§3 and 8; corrections remain available.
+The implemented Auto preference shows manual tools until an agent is registered; explicit Show
+and Hide preferences override that display default. Account linking and corrections remain available.
+Registration is a display input, not proof of Chat capability or successful maintenance. Design §§3
+and 8 retain the accepted setup and recovery direction.
 
 **See whether my Finance context is ready for a scoped agent and understand
 which decisions still require me.**
@@ -330,10 +353,10 @@ and authorization; Finance routes there without duplicating those controls.
 
 Finance settings provides the canonical financial profile and planning preferences, plus
 separate payroll details. The **Let agents apply confident Finance changes** switch
-is off by default, controls agent self-approval and the legacy Finance
-apply-or-review boundary, and remains a signed-in-user control. Enabling it does not turn
-uncertainty into permission: questions and ambiguous activity still come to
-Review.
+is off by default and remains a signed-in-user control for eligible non-budget Finance actions.
+It does not authorize an active budget change: every such change still requires exact authenticated
+human approval. Enabling it does not turn uncertainty into permission; questions and ambiguous
+activity still come to Review.
 
 ## Content contract
 
@@ -581,6 +604,28 @@ The manual account form uses the same Sonner identifier from loading through the
 creation result or error. Field corrections stay with their controls; action-result notifications
 are not duplicated inline. This repairs the form's inherited feedback behavior while extending
 currency capture; it is not a currency regression.
+### Forecast explanation hierarchy
+
+Cash flow leads with the useful result and keeps its limits visible. A qualified payday cycle shows
+its estimated ending balance with currency and as-of context, expected income, and the warning that
+this is not a safe-to-spend amount. Daily movements, opening and lowest balances, balance evidence,
+and intraday assumptions remain in labelled disclosures. Expected income is not a confirmed receipt.
+Schedule details retain the record's timezone and observed provenance; planning-date metadata uses
+the person's planning timezone rather than silently substituting the schedule's timezone.
+
+Recurring costs show the currency-separated eligible monthly subset before individual sources.
+Annual equivalents, calculation assumptions, and source dates are disclosed on demand; exclusion
+and stale-evidence reasons stay visible. Reimbursements keep received amounts, expected remainder,
+and pending-credit status visible while explaining the original expense and personal-cost basis
+under Expense basis. Receipts and corrections remain inspectable.
+
+Goal comparisons appear before their input form and receive keyboard focus after an explicit
+comparison. Hypothetical, not-saved, and zero-growth limits stay visible; dates, anchors and horizon
+assumptions use a disclosure. Saved progress retains its exact goal version and evidence. Goal
+input errors use Sonner once, while static amount-format guidance stays beside the field. These
+presentation choices do not alter formulas, financial records, source qualification, or required
+human confirmation.
+
 ### Recurring cost comparison
 
 Bills & subscriptions compares each original recurring source with its expected amount, cadence,

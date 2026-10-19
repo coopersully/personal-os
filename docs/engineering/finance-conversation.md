@@ -30,10 +30,11 @@ Migration `0115_finance_conversation_core` follows the immutable host-prompt and
 migrations. Owner deletion cascades private conversation state. Deleted source cases clear only the
 nullable live link, retaining immutable provenance. Shared migration history is append-only.
 
-The effect-evidence helper is not yet integrated into financial mutation owners. A persisted reply is
-not proof that a financial action occurred, and it never supplies human budget approval. Actual
-PostgreSQL migration, concurrency, rollback, privacy and deletion evidence, independent review,
-complete candidate verification and supported-host observation remain required release gates.
+Candidate settlement integrates committed financial-effect evidence with the guarded mutation
+transaction, as described below. A persisted reply alone is not proof that a financial action
+occurred, and it never supplies human budget approval. Other historical financial actions without
+a canonical receipt remain outside Activity's current coverage. Source verification and merged
+implementation do not establish deployment or an actual supported-host cycle.
 
 ## Committed financial-effect readback
 

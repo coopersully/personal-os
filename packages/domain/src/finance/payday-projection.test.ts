@@ -89,6 +89,111 @@ function reasons(input: PaydayProjectionInput) {
 }
 
 describe("projectPaydayCycle", () => {
+  it("requires owned balance evidence and rejects duplicate account statements", () => {
+    const input = fixture();
+    input.balances = [];
+    expect(reasons(input)).toContain("invalid_balance_basis");
+    input.balances = [first(fixture().balances), first(fixture().balances)];
+    expect(projectPaydayCycle(input)).toMatchObject({
+      status: "unavailable",
+      reasons: expect.arrayContaining([{ code: "duplicate_identity", evidenceId: "cash" }]),
+    });
+  });
+
+  it.each([
+    { label: "missing source revision", changes: { version: "" }, reason: "missing_revision" },
+    { label: "missing account", changes: { accountId: "" }, reason: "invalid_scope" },
+    {
+      label: "unsupported currency",
+      changes: { currencyCode: "ZZZ" },
+      reason: "unsupported_currency",
+    },
+    { label: "mixed currency", changes: { currencyCode: "EUR" }, reason: "mixed_currency" },
+    { label: "date after payday", changes: { localDate: "2026-10-31" }, reason: "invalid_period" },
+    {
+      label: "expense labeled incoming",
+      changes: { classification: "external_expense" as const, direction: "incoming" as const },
+      reason: "unclassified_movement",
+    },
+    {
+      label: "external movement with transfer reference",
+      changes: { pairedMovementId: "other" },
+      reason: "unpaired_transfer",
+    },
+  ])("withholds cash estimates for $label actual evidence", ({ changes, reason }) => {
+    const input = fixture();
+    input.actualMovements = [actual(changes)];
+    expect(reasons(input)).toContain(reason);
+  });
+
+  it("rejects duplicate expected identities and matches whose actual receipt is missing", () => {
+    const input = fixture();
+    input.occurrences = [occurrence(), occurrence()];
+    expect(reasons(input)).toContain("duplicate_identity");
+    input.occurrences = [
+      occurrence({
+        remainingExpectedMinorUnits: 800,
+        matches: [{ actualMovementId: "missing", replacedExpectedMinorUnits: 200 }],
+      }),
+    ];
+    expect(reasons(input)).toContain("invalid_match");
+    input.occurrences = [
+      occurrence({
+        remainingExpectedMinorUnits: 1000,
+        matches: [{ actualMovementId: "missing", replacedExpectedMinorUnits: -1 }],
+      }),
+    ];
+    expect(reasons(input)).toContain("invalid_match");
+  });
+
+  it.each([
+    { label: "future statement", changes: { asOfLocalDate: "2026-10-19" } },
+    { label: "invalid date", changes: { asOfLocalDate: "2026-02-30" } },
+    { label: "missing revision", changes: { sourceRevision: "" } },
+    { label: "wrong currency", changes: { currencyCode: "EUR" } },
+    { label: "missing amount", changes: { amountMinorUnits: null } },
+    { label: "repeated account", changes: { accountIds: ["cash", "cash"] } },
+  ])("refuses a protected floor with $label", ({ changes }) => {
+    const input = fixture();
+    input.protectedFloor = {
+      amountMinorUnits: 100,
+      currencyCode: "USD",
+      accountIds: ["cash"],
+      confirmed: true,
+      asOfLocalDate: "2026-10-18",
+      sourceRevision: "floor:1",
+      ...changes,
+    };
+    expect(reasons(input)).toContain("invalid_floor");
+  });
+
+  it("keeps an already received payday and an included actual in opening cash without inventing another receipt", () => {
+    const input = fixture();
+    input.occurrences = [
+      occurrence({
+        remainingExpectedMinorUnits: 0,
+        matches: [{ actualMovementId: "received", replacedExpectedMinorUnits: 1000 }],
+      }),
+    ];
+    input.actualMovements = [
+      actual({
+        id: "received",
+        direction: "incoming",
+        classification: "external_income",
+        amountMinorUnits: 1000,
+        balanceReflection: "included",
+      }),
+    ];
+    expect(projectPaydayCycle(input)).toMatchObject({
+      status: "estimated",
+      openingBalanceMinorUnits: 500,
+      endingBalanceMinorUnits: 500,
+      expectedEndPaydayIncomeMinorUnits: 0,
+      days: [],
+      lowestEndOfDayBalance: { amountMinorUnits: 500, basis: "opening" },
+      evidence: { actualMovements: [{ id: "received", balanceReflection: "included" }] },
+    });
+  });
   it("projects explicit selected income, inclusive payday estimate and lowest end-of-day without mutation", () => {
     const input = fixture();
     input.occurrences = [

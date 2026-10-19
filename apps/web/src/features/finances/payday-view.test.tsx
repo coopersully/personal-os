@@ -148,3 +148,73 @@ it("withholds stale-source results and explains unavailable canonical review rat
   expect(screen.getByText(/balance statement is missing/)).toBeInTheDocument();
   expect(screen.queryByRole("table")).not.toBeInTheDocument();
 });
+
+it("shows an explicit zero protected floor and returns to the first movement page when selection clears", () => {
+  const view = estimate();
+  if (view.projection.status !== "estimated") throw new Error("Expected estimate fixture");
+  view.projection.protectedFloor = {
+    status: "confirmed",
+    amountMinorUnits: 0,
+    lowestEndOfDayMarginMinorUnits: 10000,
+    belowFloorAtEndOfDay: false,
+    sourceRevision: "floor:1",
+  };
+  view.projection.lowestEndOfDayBalance.basis = "opening";
+  const callbacks = actions();
+  render(
+    <PaydayView
+      view={view}
+      incomeStreams={incomeStreams}
+      selectedIncomeStreamId="job-a"
+      {...callbacks}
+    />,
+  );
+  expect(screen.getByText(/User-confirmed floor \$0.00/)).toHaveTextContent(
+    "not an intraday affordability guarantee",
+  );
+  expect(screen.getByText(/Opening statement/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Next cycle movements" }));
+  fireEvent.click(screen.getByRole("button", { name: "Previous cycle movements" }));
+  expect(screen.getByText("Cycle movement page 1 of 2")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Next cycle movements" }));
+  fireEvent.change(screen.getByLabelText("Income stream defining this cycle"), {
+    target: { value: "" },
+  });
+  expect(callbacks.onIncomeStreamChange).toHaveBeenCalledWith(null);
+  expect(screen.getByText("Cycle movement page 1 of 2")).toBeVisible();
+});
+
+it("distinguishes a selected but unloaded cycle and supplies honest fallback for unfamiliar evidence reasons", () => {
+  const { rerender } = render(
+    <PaydayView
+      view={null}
+      incomeStreams={incomeStreams}
+      selectedIncomeStreamId="job-a"
+      {...actions()}
+    />,
+  );
+  expect(screen.getByText(/Cycle evidence has not been loaded/)).toBeVisible();
+  const view = estimate();
+  view.projection = {
+    status: "unavailable",
+    reasons: [{ code: "invalid_scope", evidenceId: null }],
+  };
+  view.schedule.unavailableSources = [
+    { source: { kind: "income", id: "job-a" }, reason: "unconfirmed_schedule" },
+  ];
+  rerender(
+    <PaydayView
+      view={view}
+      incomeStreams={incomeStreams}
+      selectedIncomeStreamId="job-a"
+      {...actions()}
+    />,
+  );
+  expect(screen.getByRole("list", { name: "Unavailable cycle evidence" })).toHaveTextContent(
+    "incomplete or inconsistent",
+  );
+  expect(
+    screen.getByText(/Some recurring sources have unavailable dates or amounts/),
+  ).toBeVisible();
+  expect(screen.queryByRole("table")).not.toBeInTheDocument();
+});

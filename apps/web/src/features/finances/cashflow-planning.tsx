@@ -119,6 +119,7 @@ function OwnerCashflowPlanning({ user }: { user: Awaited<ReturnType<typeof api.g
   const [sourceLimit, setSourceLimit] = useState(20);
   const [historyLimit, setHistoryLimit] = useState(50);
   const [match, setMatch] = useState<FinanceRecurringOccurrence | null>(null);
+  const [denialObserved, setDenialObserved] = useState(false);
   const review = useQuery({
     queryKey: ["finance-balance-basis-sources", ownerId, balanceAccountId],
     queryFn: () =>
@@ -127,16 +128,21 @@ function OwnerCashflowPlanning({ user }: { user: Awaited<ReturnType<typeof api.g
       }),
     enabled: enabled && balanceAccountId !== null,
   });
-  const accessDenied = [
-    sources.error,
-    schedules.error,
-    bases.error,
-    projection.error,
-    review.error,
-    accounts.error,
-  ].some(denied);
+  const accessDenied =
+    denialObserved ||
+    [
+      sources.error,
+      schedules.error,
+      bases.error,
+      projection.error,
+      review.error,
+      accounts.error,
+    ].some(denied);
   useEffect(() => {
     if (accessDenied) {
+      // Dismissing a review changes its query key, but cannot restore revoked access.
+      // Only this authenticated owner's remount may discard an observed denial.
+      setDenialObserved(true);
       setScheduleForm(null);
       setBalanceAccountId(null);
       setMatch(null);

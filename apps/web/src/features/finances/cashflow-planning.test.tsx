@@ -66,11 +66,32 @@ vi.mock("./occurrence-match-dialog.js", () => ({
   },
 }));
 vi.mock("./payday-view.js", () => ({
-  PaydayView: ({ onReviewActuals }: PaydayViewProps) => (
+  PaydayView: ({
+    onReviewActuals,
+    onConfirmSchedule,
+    onConfirmBalance,
+    onIncomeStreamChange,
+    onRefresh,
+  }: PaydayViewProps) => (
     <section aria-label="Payday projection">
       Qualified projection read
       <button type="button" onClick={onReviewActuals}>
         Review actual matches
+      </button>
+      <button type="button" onClick={onConfirmSchedule}>
+        Review schedule sources
+      </button>
+      <button type="button" onClick={onConfirmBalance}>
+        Review balance statements
+      </button>
+      <button type="button" onClick={() => onIncomeStreamChange(income)}>
+        Choose payday source
+      </button>
+      <button type="button" onClick={() => onIncomeStreamChange(null)}>
+        Clear payday source
+      </button>
+      <button type="button" onClick={onRefresh}>
+        Refresh planning evidence
       </button>
     </section>
   ),
@@ -305,7 +326,7 @@ it.each([
   "me",
 ])("hides cached private material and dismisses dialogs after same-owner %s 403", async (kind) => {
   const user = userEvent.setup();
-  const { client } = mount();
+  const { client, unmount } = mount();
   await user.click(await screen.findByRole("button", { name: "Revise schedule" }));
   expect(screen.getByRole("dialog")).toBeVisible();
   const fn = kind === "sources" ? mock.api.listFinanceCashflowSources : mock.api.getMe;
@@ -328,6 +349,12 @@ it.each([
       queryKey: [kind === "sources" ? "finance-cashflow-sources" : "me"],
     });
   });
+  if (kind === "sources") {
+    expect(screen.getByText(/Cash flow planning access unavailable/)).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Private salary" })).not.toBeInTheDocument();
+    unmount();
+    mount();
+  }
   expect(await screen.findByRole("link", { name: "Private salary" })).toBeVisible();
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
@@ -442,4 +469,179 @@ it("discloses capped source coverage instead of presenting partial counts as com
   expect(screen.getByText(/This source read reached its limit/)).toHaveTextContent(
     "narrow the date range or account selection",
   );
+});
+
+it("requires an authenticated planning timezone before requesting private Finance material", async () => {
+  mock.api.getMe.mockResolvedValue({ id: owner, planningTimezone: null });
+  mount();
+  expect(await screen.findByText("Planning timezone unavailable.")).toBeVisible();
+  expect(mock.api.listFinanceCashflowSources).not.toHaveBeenCalled();
+  expect(mock.api.listFinanceAccounts).not.toHaveBeenCalled();
+});
+
+it("recovers from an initial identity failure without querying private sources prematurely", async () => {
+  mock.api.getMe.mockRejectedValueOnce(new Error("Identity temporarily unavailable"));
+  const user = userEvent.setup();
+  mount();
+  await screen.findByRole("button", { name: "Try again" });
+  expect(mock.api.listFinanceCashflowSources).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByRole("link", { name: "Private salary" })).toBeVisible();
+});
+
+it.each([
+  "listFinanceCashflowSources",
+  "listFinanceRecurringSchedules",
+  "listFinanceBalanceBases",
+  "listFinanceAccounts",
+  "getFinanceCashflowProjection",
+] as const)("lets a failed %s read recover through its actual retry control", async (method) => {
+  mock.api[method].mockRejectedValueOnce(new Error("Temporary read failure"));
+  const user = userEvent.setup();
+  mount();
+  await user.click(await screen.findByRole("button", { name: "Try again" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument(),
+  );
+  expect(mock.api[method]).toHaveBeenCalledTimes(2);
+  expect(await screen.findByRole("link", { name: "Private salary" })).toBeVisible();
+});
+
+it.each([
+  "listFinanceCashflowSources",
+  "listFinanceRecurringSchedules",
+  "listFinanceBalanceBases",
+  "listFinanceAccounts",
+  "getFinanceCashflowProjection",
+  "listFinanceBalanceBasisSources",
+] as const)("hides private snapshots after %s loses authorization", async (method) => {
+  const user = userEvent.setup();
+  const { client } = mount();
+  await screen.findByRole("link", { name: "Private salary" });
+  mock.api[method].mockRejectedValue(
+    new ApiClientError({ status: 401, code: "unauthorized", message: "Expired" }),
+  );
+  if (method === "listFinanceBalanceBasisSources") {
+    await user.click(screen.getByRole("button", { name: "Review balance for Private cash" }));
+  } else {
+    await act(async () => {
+      await client.invalidateQueries({
+        predicate: (query) => String(query.queryKey[0]).startsWith("finance-"),
+      });
+    });
+  }
+  expect(await screen.findByText(/Cash flow planning access unavailable/)).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Private salary" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+it("retries a failed balance-history read, scopes its movements and closes the opening statement", async () => {
+  const user = userEvent.setup();
+  mock.api.listFinanceBalanceBasisSources.mockRejectedValueOnce(new Error("Review unavailable"));
+  mount();
+  await user.click(await screen.findByRole("button", { name: "Review balance for Private cash" }));
+  await user.click(await screen.findByRole("button", { name: "Try again" }));
+  expect(await screen.findByRole("dialog", { name: "Balance statement" })).toBeVisible();
+  expect(mock.basis.mock.lastCall?.[0].previousBasis).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Close statement" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+it("keeps retained history and later schedule sources reachable without duplicating them in the current agenda", async () => {
+  const user = userEvent.setup();
+  mock.api.getFinanceCashflowProjection.mockResolvedValue({
+    ...structuredClone(result),
+    schedule: {
+      ...structuredClone(result.schedule),
+      occurrences: [
+        occurrence,
+        ...Array.from({ length: 51 }, (_, index) => ({
+          ...occurrence,
+          key: `history-${index}`,
+          displayName: `Old salary ${index + 1}`,
+          inCurrentSchedule: false,
+        })),
+      ],
+    },
+  });
+  mock.api.listFinanceCashflowSources.mockResolvedValue({
+    ...structuredClone(sources),
+    income: Array.from({ length: 21 }, (_, index) => ({
+      ...sources.income[0],
+      id: index === 0 ? income : `00000000-0000-4000-8000-${String(index + 100).padStart(12, "0")}`,
+      displayName: `Source ${index + 1}`,
+    })),
+  });
+  mount();
+  const history = await screen.findByRole("region", { name: "Retained occurrence history" });
+  expect(within(history).queryByRole("link", { name: /Old salary 51/ })).not.toBeInTheDocument();
+  await user.click(within(history).getByRole("button", { name: "Show more occurrence history" }));
+  expect(within(history).getByRole("link", { name: /Old salary 51/ })).toBeVisible();
+  const sourcesRegion = screen.getByRole("region", { name: "Recurring schedule sources" });
+  expect(
+    within(sourcesRegion).queryByRole("button", { name: "Source 21" }),
+  ).not.toBeInTheDocument();
+  await user.click(
+    within(sourcesRegion).getByRole("button", { name: "Show more schedule sources" }),
+  );
+  await user.click(within(sourcesRegion).getByRole("button", { name: "Source 21" }));
+  expect(mock.schedule.mock.lastCall?.[0]).toMatchObject({
+    source: { kind: "income", id: "00000000-0000-4000-8000-000000000120" },
+    supersedes: null,
+  });
+});
+
+it("focuses recovery destinations and changes only explicit payday selection before refreshing evidence", async () => {
+  const user = userEvent.setup();
+  mount();
+  await user.click(await screen.findByRole("button", { name: "Review schedule sources" }));
+  expect(screen.getByRole("region", { name: "Recurring schedule sources" })).toHaveFocus();
+  await user.click(screen.getByRole("button", { name: "Review balance statements" }));
+  expect(screen.getByRole("region", { name: "Balance statements" })).toHaveFocus();
+  await user.click(screen.getByRole("button", { name: "Choose payday source" }));
+  expect(screen.getByLabelText("Location")).toHaveTextContent(`paydayIncome=${income}`);
+  await user.click(screen.getByRole("button", { name: "Clear payday source" }));
+  expect(screen.getByLabelText("Location")).not.toHaveTextContent("paydayIncome");
+  expect(screen.getByLabelText("Location")).toHaveTextContent("sentinel=keep");
+  const reads = mock.api.listFinanceRecurringSchedules.mock.calls.length;
+  await user.click(screen.getByRole("button", { name: "Refresh planning evidence" }));
+  await waitFor(() =>
+    expect(mock.api.listFinanceRecurringSchedules.mock.calls.length).toBeGreaterThan(reads),
+  );
+});
+
+it("discards a latched denial only when the authenticated owner remounts, without restoring the previous owner's facts", async () => {
+  const user = userEvent.setup();
+  const { client } = mount();
+  mock.api.listFinanceBalanceBasisSources.mockRejectedValue(
+    new ApiClientError({ status: 401, code: "unauthorized", message: "Expired" }),
+  );
+  await user.click(await screen.findByRole("button", { name: "Review balance for Private cash" }));
+  expect(await screen.findByText(/Cash flow planning access unavailable/)).toBeVisible();
+  mock.api.getMe.mockResolvedValue({
+    id: "00000000-0000-4000-8000-000000000099",
+    planningTimezone: "America/New_York",
+  });
+  mock.api.listFinanceCashflowSources.mockResolvedValue({
+    ...structuredClone(sources),
+    accounts: [],
+    income: [],
+    obligations: [],
+    transactions: [],
+  });
+  mock.api.listFinanceAccounts.mockResolvedValue({ accounts: [] });
+  mock.api.listFinanceRecurringSchedules.mockResolvedValue([]);
+  mock.api.getFinanceCashflowProjection.mockResolvedValue({
+    ...structuredClone(result),
+    schedule: { ...structuredClone(result.schedule), occurrences: [] },
+  });
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["me"] });
+  });
+  expect(
+    await screen.findByText("No next expected items recorded in this date range."),
+  ).toBeVisible();
+  expect(screen.queryByText(/Cash flow planning access unavailable/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Private salary" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });

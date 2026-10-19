@@ -2165,18 +2165,44 @@ describe.sequential("finance service", () => {
     expect(repeated[0]?.id).toBe(repeated[1]?.id);
   });
 
-  it("manages manual finances, review decisions, budgets, and safe unavailable Plaid state", async () => {
+  async function manualFinanceFixture(label: string) {
+    const userId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: userId,
+      displayName: "Manual Finance scenario",
+      email: `manual-finance-${userId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
     const service = createFinanceService({ db: database.db, now: () => now });
-    const context = { principal: financePrincipal(userId), requestId: "manual-finance" };
+    const context = { principal: financePrincipal(userId), requestId: `manual-finance-${label}` };
+    const agentContext = {
+      principal: financeAgentPrincipal(userId),
+      requestId: `agent-finance-${label}`,
+    };
+    // The original scenario inherited this owner's approval from a sibling test.
+    await createExecutionPolicyService({ db: database.db, now: () => now }).update(
+      { expectedVersion: 1, reviewBypassEnabled: true },
+      context,
+    );
+    const account = await service.createAccount(
+      { balance: 1500, institution: "Cash", name: "Wallet", provider: "manual" },
+      context,
+    );
+    const shopping = (await service.listCategories(userId)).find(
+      (item) => item.slug === "shopping",
+    );
+    if (!shopping) throw new Error("Shopping category was not seeded.");
+    return { service, context, agentContext, userId, account, shopping };
+  }
+
+  it("keeps manual account availability and wealth independent of other scenarios", async () => {
+    const { service, context, userId } = await manualFinanceFixture("accounts");
     await expect(service.listMerchants("00000000-0000-4000-8000-000000000000")).resolves.toEqual(
       [],
     );
     expect(service.plaidAvailable()).toBe(false);
     await expect(service.createPlaidLinkToken(userId)).rejects.toThrow("Plaid is not configured");
-    const account = await service.createAccount(
-      { balance: 1500, institution: "Cash", name: "Wallet", provider: "manual" },
-      context,
-    );
     const wealthAccounts = await Promise.all(
       [
         { balance: 250, kind: "debt" as const, name: "Card" },
@@ -2197,6 +2223,11 @@ describe.sequential("finance service", () => {
     for (const wealthAccount of wealthAccounts) {
       await service.deleteAccount(wealthAccount.id, context);
     }
+  });
+
+  it("preserves categorization authority, stale previews and deferred-review replay", async () => {
+    const { service, context, agentContext, userId, account, shopping } =
+      await manualFinanceFixture("categorization");
     const categorized = await service.createTransaction(
       {
         accountId: account.id,
@@ -2229,10 +2260,6 @@ describe.sequential("finance service", () => {
       needsReview: false,
     });
     expect(review.needsReview).toBe(true);
-    const shopping = (await service.listCategories(userId)).find(
-      (item) => item.slug === "shopping",
-    );
-    if (!shopping) throw new Error("Shopping category was not seeded.");
     const [pendingCandidate] = await database.db
       .insert(financeTransactions)
       .values({
@@ -2276,10 +2303,6 @@ describe.sequential("finance service", () => {
         .from(financeClassificationDecisions)
         .where(eq(financeClassificationDecisions.transactionId, pendingCandidate.id)),
     ).resolves.toHaveLength(0);
-    const agentContext = {
-      principal: financeAgentPrincipal(userId),
-      requestId: "agent-finance",
-    };
     await expect(
       service.applyCategorizations(
         {
@@ -2540,6 +2563,24 @@ describe.sequential("finance service", () => {
         expectedTransactionUpdatedAt: lowConfidenceReview.transaction.updatedAt,
         learnMerchant: "never",
         rationale: "The user accepted the individual category.",
+      },
+      context,
+    );
+  });
+
+  it("fences concurrent category evidence and reviewed mutations with paginated reads", async () => {
+    const { service, context, agentContext, userId, account, shopping } =
+      await manualFinanceFixture("evidence");
+    const review = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 6,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Mystery Shop",
+        notes: null,
       },
       context,
     );
@@ -2902,6 +2943,11 @@ describe.sequential("finance service", () => {
           staleAgentReviewCandidate.id,
         ]),
       );
+  });
+
+  it("keeps transfer guidance, human decisions and concurrent review outcomes together", async () => {
+    const { service, context, agentContext, userId, account, shopping } =
+      await manualFinanceFixture("transfers");
     const transferCandidate = await service.createTransaction(
       {
         accountId: account.id,
@@ -3076,6 +3122,96 @@ describe.sequential("finance service", () => {
         (item) => item.transaction.id === recategorizedTransfer.id,
       ),
     ).toBe(false);
+  });
+
+  it("preserves the manual ledger through learning, import, budgets and guidance-fenced deletion", async () => {
+    const { service, context, userId, account, shopping } = await manualFinanceFixture("ledger");
+    const review = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 6,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Mystery Shop",
+        notes: null,
+      },
+      context,
+    );
+    // Preserve the same posted/pending and transfer contributions as the original journey.
+    // Their edge-case mutations are covered above; this fixture makes the aggregate explicit.
+    for (const item of [
+      { amount: 12.5, category: null, merchant: "Trader Joe's" },
+      { amount: 7, category: null, merchant: "Revision Race" },
+      { amount: 1, category: "Shopping", merchant: "Single Evidence" },
+      { amount: 2, category: "Shopping", merchant: "Single Evidence" },
+      { amount: 3, category: "Shopping", merchant: "Everyday Supplies" },
+      { amount: 4, category: "Shopping", merchant: "Everyday Supplies" },
+      { amount: 5, category: "Shopping", merchant: "Everyday Supplies" },
+    ]) {
+      await service.createTransaction(
+        {
+          ...item,
+          accountId: account.id,
+          categoryConfidence: null,
+          date: "2026-07-19",
+          direction: "expense",
+          notes: item.merchant === "Revision Race" ? "Changed after preview" : null,
+        },
+        context,
+      );
+    }
+    await database.db.insert(financeTransactions).values({
+      accountId: account.id,
+      amount: 800,
+      category: "Shopping",
+      categoryId: shopping.id,
+      direction: "expense",
+      merchant: "Pending Card Hold",
+      needsReview: false,
+      pending: true,
+      transactionDate: "2026-07-19",
+      userId,
+    });
+    // Exercise transfer recognition and both human decisions before the aggregate read.
+    for (const [amount, merchant, action] of [
+      [25, "Account movement", "confirm_transfer"],
+      [18, "Misclassified purchase", "recategorize"],
+    ] as const) {
+      const candidate = await service.createTransaction(
+        {
+          accountId: account.id,
+          amount,
+          category: null,
+          categoryConfidence: null,
+          date: "2026-07-19",
+          direction: "transfer",
+          merchant,
+          notes: null,
+        },
+        context,
+      );
+      await service.reconcileTransfers(userId);
+      const queued = (await service.listReviewQueue(userId)).find(
+        (item) => item.transaction.id === candidate.id,
+      );
+      if (!queued) throw new Error("Ledger transfer was not queued for review.");
+      await service.resolveReview(
+        queued.id,
+        {
+          action,
+          ...(action === "recategorize"
+            ? { categoryId: shopping.id, nonTransferDirection: "expense" as const }
+            : {}),
+          expectedTransactionUpdatedAt: queued.transaction.updatedAt,
+          learnMerchant: "never",
+          rationale: "Preserve the ledger fixture's human transfer decision.",
+        },
+        context,
+      );
+      await service.reconcileTransfers(userId);
+    }
     await service.updateTransaction(
       review.id,
       { category: "Shopping", learnMerchant: true },

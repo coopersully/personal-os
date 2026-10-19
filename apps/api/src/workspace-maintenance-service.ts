@@ -531,7 +531,7 @@ export function createWorkspaceMaintenanceService({
       const [run] = await db
         .update(workspaceMaintenanceRuns)
         .set({
-          leaseExpiresAt: sql`NOW() + ${leaseMilliseconds} * INTERVAL '1 millisecond'`,
+          leaseExpiresAt: sql`clock_timestamp() + ${leaseMilliseconds} * INTERVAL '1 millisecond'`,
           updatedAt: sql`NOW()`,
         })
         .where(

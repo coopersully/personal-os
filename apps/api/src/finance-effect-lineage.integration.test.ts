@@ -137,6 +137,10 @@ describe.sequential("Finance whole-candidate effect lineage", () => {
         })
         .where(eq(workspaceMaintenanceRuns.id, run.id));
       if (verifyProof) {
+        await database.db
+          .update(executionPolicySettings)
+          .set({ reviewBypassEnabled: true })
+          .where(eq(executionPolicySettings.userId, owner.id));
         const human = {
           userId: owner.id,
           actorId: owner.id,
@@ -158,6 +162,10 @@ describe.sequential("Finance whole-candidate effect lineage", () => {
           challengeId: proof.challengeId,
           response: "Verified actual bound protocol.",
         });
+        await database.db
+          .update(executionPolicySettings)
+          .set({ reviewBypassEnabled: false })
+          .where(eq(executionPolicySettings.userId, owner.id));
       }
     }
     const draft = await actions.prepareMaintenanceCandidateDraft(
@@ -520,6 +528,14 @@ describe.sequential("Finance whole-candidate effect lineage", () => {
         .from(financeConversationBatches)
         .where(eq(financeConversationBatches.userId, setup.owner.id)),
     ).toHaveLength(0);
+    expect(
+      (
+        await database.db
+          .select()
+          .from(executionPolicySettings)
+          .where(eq(executionPolicySettings.userId, setup.owner.id))
+      )[0]?.reviewBypassEnabled,
+    ).toBe(false);
     expect(await setup.actions.approve(setup.queued.review.id, setup.human)).toMatchObject({
       status: "applied",
     });

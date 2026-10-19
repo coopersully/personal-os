@@ -10,6 +10,8 @@ it("exposes domain input fields instead of silently narrowing workspace mutation
     complete_finance_onboarding: domain.financeOnboardingCompleteInputSchema,
     submit_finance_ledger_challenge: domain.submitFinanceLedgerChallengeInputSchema,
     get_finance_conversation_evidence: domain.financeConversationEvidenceReadInputSchema,
+    refresh_finance_maintenance_execution_authorization:
+      domain.refreshFinanceMaintenanceExecutionInputSchema,
     get_finance_spending: domain.financeSpendingQuerySchema,
     get_finance_budget_baseline_qualification: domain.financeBudgetBaselineQualificationQuerySchema,
     prepare_finance_budget_baseline_qualification:
@@ -305,4 +307,22 @@ it("keeps qualified cash-flow context read-only and explicit human statements ou
   ] as const)
     expect(workspaceApiExceptions[name].kind).toBe("owner_consent");
   expect(workspaceApiExceptions.listFinanceRecurringOccurrences.tool).toBe("get_finance_cashflow");
+});
+
+it("requires every current execution grant for both recovery tools", async () => {
+  const entries = await discoverToolDictionary();
+  for (const name of [
+    "get_finance_maintenance_execution_authorization",
+    "refresh_finance_maintenance_execution_authorization",
+  ]) {
+    const entry = entries.find(({ tool }) => tool.name === name);
+    expect(entry?.definition).toMatchObject({
+      scopeMatch: "all",
+      requiredScopes: ["finances:maintain", "finances:write", "finances:execute"],
+      openWorld: false,
+    });
+    expect(entry?.tool.inputSchema.additionalProperties).toBe(false);
+    expect(entry?.tool.inputSchema.properties).not.toHaveProperty("userId");
+    expect(entry?.tool.inputSchema.properties).not.toHaveProperty("claimId");
+  }
 });

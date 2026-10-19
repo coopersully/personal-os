@@ -63,6 +63,7 @@ import {
 import { createFinanceConversationEvidenceService } from "./finance/conversation-evidence-service.js";
 import { createFinanceConversationService } from "./finance/conversation-persistence.js";
 import { createFinanceConversationUnreadService } from "./finance/conversation-unread-service.js";
+import { createFinanceMaintenanceExecutionService } from "./finance/maintenance-execution-service.js";
 import { createFinanceMaintenanceIntentService } from "./finance/maintenance-intent-service.js";
 import { createFinanceOnboardingEvidenceLoader } from "./finance/onboarding-evidence.js";
 import { createFinanceOnboardingRepository } from "./finance/onboarding-repository.js";
@@ -108,6 +109,7 @@ import { registerFinanceActivityRoutes } from "./routes/finance-activity.js";
 import { registerFinanceConversationRoutes } from "./routes/finance-conversation.js";
 import { registerFinanceConversationEvidenceRoutes } from "./routes/finance-conversation-evidence.js";
 import { registerFinanceConversationUnreadRoutes } from "./routes/finance-conversation-unread.js";
+import { registerFinanceMaintenanceExecutionRoutes } from "./routes/finance-maintenance-execution.js";
 import { registerFinanceOnboardingRoutes } from "./routes/finance-onboarding.js";
 import { registerFinanceRoutes } from "./routes/finances.js";
 import { registerGoalsRoutes } from "./routes/goals.js";
@@ -649,6 +651,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     db: dependencies.db,
     cursorSecret: dependencies.config.encryptionKey,
     now,
+  });
+  const financeMaintenanceExecution = createFinanceMaintenanceExecutionService({
+    db: dependencies.db,
   });
   const financeConversationUnread = createFinanceConversationUnreadService({ db: dependencies.db });
   const financeConversation = createFinanceConversationService({ db: dependencies.db, now });
@@ -1523,6 +1528,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   });
 
   registerFinanceConversationRoutes({ app, conversation: financeConversation });
+  registerFinanceMaintenanceExecutionRoutes({ app, execution: financeMaintenanceExecution });
   registerFinanceConversationUnreadRoutes({ app, unread: financeConversationUnread });
   registerFinanceConversationEvidenceRoutes({ app, evidence: financeConversationEvidence });
   registerFinanceOnboardingRoutes({

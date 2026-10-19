@@ -1,5 +1,19 @@
 export const financeCapabilityManifest = [
   {
+    apiOperation: "getFinanceMaintenanceExecutionAuthorization",
+    capability: "workflow.execution_authorization_observation",
+    mcpTool: "get_finance_maintenance_execution_authorization",
+    mode: "read",
+    requiredScope: "finances:execute",
+  },
+  {
+    apiOperation: "refreshFinanceMaintenanceExecutionAuthorization",
+    capability: "workflow.execution_authorization_refresh",
+    mcpTool: "refresh_finance_maintenance_execution_authorization",
+    mode: "write",
+    requiredScope: "finances:execute",
+  },
+  {
     apiOperation: "getFinanceOnboarding",
     capability: "setup.durable_readiness",
     mcpTool: "get_finance_onboarding",

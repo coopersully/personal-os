@@ -5973,6 +5973,34 @@ Read whether ledger totals are trustworthy, including stale sources, duplicates,
 }
 ```
 
+## get_finance_maintenance_execution_authorization
+
+Read fresh candidate execution facts for the original Finance host with current maintenance, write and execution grants, policy, protocol proof and canonical OAuth lineage. This observation does not adopt credentials or expose financial history.
+
+- Domain: finances; stage: inspect; policy: read_only.
+- Grants (all): finances:maintain, finances:write, finances:execute.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `getFinanceMaintenanceExecutionAuthorization`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "runId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "description": "nohmi object identifier"
+    }
+  },
+  "required": [
+    "runId"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
 ## get_finance_maintenance_history
 
 Read a bounded page of resumable and settled Finance maintenance runs. Pass nextCursor as cursor with the same filters. Results expose canonical run status, typed next actions, and legacy recovery.
@@ -11550,6 +11578,69 @@ Refresh recurring, income, and alert ledger insights through nohmi's apply-or-re
   "type": "object",
   "properties": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
+```
+
+## refresh_finance_maintenance_execution_authorization
+
+Explicitly refresh an existing submitted candidate's execution binding through proven canonical OAuth succession on its original host. Requires current maintenance, write and execution grants, policy and protocol proof. Reuse operationId only for the exact command retry: its persisted pending result stays stable. After control progression, read fresh execution facts and use a NEW operationId. Active claims remain pending until their lease deadline; never steal a claim or replay financial effects. Missing historical bindings and unrelated credentials fail closed.
+
+- Domain: finances; stage: commit; policy: approved_rule.
+- Grants (all): finances:maintain, finances:write, finances:execute.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finances.ts); typed API methods: `refreshFinanceMaintenanceExecutionAuthorization`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "operationId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "candidateId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "candidateRevision": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "expectedCurrentActorId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    },
+    "expectedBindingRevision": {
+      "type": "string",
+      "maxLength": 19,
+      "pattern": "^(0|[1-9][0-9]*)$"
+    },
+    "expectedRunUpdatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+    },
+    "runId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+      "description": "nohmi object identifier"
+    }
+  },
+  "required": [
+    "operationId",
+    "candidateId",
+    "candidateRevision",
+    "expectedCurrentActorId",
+    "expectedBindingRevision",
+    "expectedRunUpdatedAt",
+    "runId"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
 }
 ```
 

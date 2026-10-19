@@ -50,11 +50,30 @@ protocol proof and policy authority. The read never starts a run, scans a live m
 replays effects. Signed cursors retain owner/run/candidate scope and page audit and record references
 at 100 per response. Missing historical receipts are explicitly unavailable.
 
-Expired or revoked original submitting credentials fail closed with a recoverable reconnect state;
-a different token or replacement host is not silently adopted. Explicit authorization refresh and
-claimed-run recovery remain separate acceptance work. The authored financial settlement and
-transport regressions require their own PostgreSQL evidence; earlier conversation delivery tests do
-not prove financial-effect settlement or complete browser acceptance.
+Explicit candidate execution recovery uses `get_finance_maintenance_execution_authorization` and
+`refresh_finance_maintenance_execution_authorization`. Both require all three current maintenance,
+write and execution grants, current policy, the original connection, current protocol proof and
+canonical OAuth successor lineage. A binding is initialized only by actual authenticated successful
+candidate challenge submission. Historical candidates have no inferred binding. Original actors,
+batches and economic receipts remain immutable; refresh never replays financial effects.
+
+Read fresh execution facts before a refresh. Reuse an operation ID only for an exact retry: admitted
+pending results remain stable. After control progression, read fresh facts and use a new operation
+ID. Active leases remain pending until their deadline; recovery never steals a claim. Server control
+uses the existing run and scheduler claim, with bounded retries and explicit reconciliation. A
+committed receipt permits only the existing derived completion phases, without economic replay.
+Committed evidence may be read by a proven canonical successor under the same current authority
+checks while retaining its original actor; this read changes no execution binding.
+
+Protocol challenges use an immutable server generation under the owner guard. The latest generation
+supersedes every earlier proof before verification checks; a new unverified challenge blocks older
+verified proof. Historical proofs receive no guessed generation: tied latest timestamps fail closed
+and require a fresh challenge. Bindings retain the server protocol version at submit and fail closed
+on version mismatch. Real challenge timestamps and expiry remain unchanged.
+
+The recovery source has focused verification; actual PostgreSQL races, authenticated transport,
+independent review and complete candidate verification remain release gates. Earlier delivery or
+readback tests do not prove recovery or complete browser acceptance.
 
 ## Human source-message navigation
 

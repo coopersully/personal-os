@@ -25,6 +25,7 @@ import {
   manageFinanceRecurringItemInputSchema,
   manageFinanceRuleInputSchema,
   prepareFinanceBudgetBaselineQualificationInputSchema,
+  refreshFinanceMaintenanceExecutionInputSchema,
   updateFinanceTransactionInputSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
@@ -508,6 +509,35 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     },
     async (input) =>
       financeApiResult(() => api.maintainFinances(financeMaintenanceInputSchema.parse(input))),
+  );
+
+  server.registerTool(
+    "get_finance_maintenance_execution_authorization",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Read fresh candidate execution facts for the original Finance host with current maintenance, write and execution grants, policy, protocol proof and canonical OAuth lineage. This observation does not adopt credentials or expose financial history.",
+      inputSchema: z.strictObject({ runId: id }),
+      title: "Get Finance maintenance execution authorization",
+    },
+    async ({ runId }) => apiResult(() => api.getFinanceMaintenanceExecutionAuthorization(runId)),
+  );
+  server.registerTool(
+    "refresh_finance_maintenance_execution_authorization",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description:
+        "Explicitly refresh an existing submitted candidate's execution binding through proven canonical OAuth succession on its original host. Requires current maintenance, write and execution grants, policy and protocol proof. Reuse operationId only for the exact command retry: its persisted pending result stays stable. After control progression, read fresh execution facts and use a NEW operationId. Active claims remain pending until their lease deadline; never steal a claim or replay financial effects. Missing historical bindings and unrelated credentials fail closed.",
+      inputSchema: refreshFinanceMaintenanceExecutionInputSchema.extend({ runId: id }),
+      title: "Refresh Finance maintenance execution authorization",
+    },
+    async ({ runId, ...input }) =>
+      apiResult(() =>
+        api.refreshFinanceMaintenanceExecutionAuthorization(
+          runId,
+          refreshFinanceMaintenanceExecutionInputSchema.parse(input),
+        ),
+      ),
   );
 
   server.registerTool(

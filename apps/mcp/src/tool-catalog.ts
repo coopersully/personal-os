@@ -569,6 +569,17 @@ export const iloToolCatalog = {
     openWorld: false,
   }),
   setup_finances: write("finances", ["finances:write"], { policy: "approved_rule" }),
+  get_finance_maintenance_execution_authorization: read(
+    "finances",
+    ["finances:maintain", "finances:write", "finances:execute"],
+    "inspect",
+    { openWorld: false },
+  ),
+  refresh_finance_maintenance_execution_authorization: write(
+    "finances",
+    ["finances:maintain", "finances:write", "finances:execute"],
+    { policy: "approved_rule", stage: "commit", idempotent: true, openWorld: false },
+  ),
   get_finance_maintenance_history: read("finances", ["finances:read"]),
   get_financial_profile: read("finances", ["finances:read"]),
   update_financial_profile: write("finances", ["finances:write"], {

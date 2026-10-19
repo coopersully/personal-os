@@ -1028,3 +1028,57 @@ it("returns a cash-flow window authority failure without falling back to legacy 
     await server.close();
   }
 });
+
+it("preserves typed pending recovery and strips only run routing from the strict command", async () => {
+  const input = {
+    operationId: id,
+    candidateId: id,
+    candidateRevision: `sha256:${"a".repeat(64)}`,
+    expectedCurrentActorId: id,
+    expectedBindingRevision: "1",
+    expectedRunUpdatedAt: "2026-10-18T12:00:00.000Z",
+  };
+  const pending = {
+    state: "pending",
+    operationId: id,
+    reason: "active_claim",
+    retryAt: "2026-10-18T12:02:00.000Z",
+  };
+  const refresh = vi.fn(async () => pending);
+  const observe = vi.fn(async () => ({ state: "unavailable", reason: "binding_unavailable" }));
+  const server = new McpServer({ name: "recovery-command", version: "1" });
+  registerFinanceTools(server, {
+    refreshFinanceMaintenanceExecutionAuthorization: refresh,
+    getFinanceMaintenanceExecutionAuthorization: observe,
+  } as unknown as PersonalOsApiClient);
+  const client = new Client({ name: "recovery-client", version: "1" });
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(st), client.connect(ct)]);
+  try {
+    for (let i = 0; i < 2; i++) {
+      const response = await client.callTool({
+        name: "refresh_finance_maintenance_execution_authorization",
+        arguments: { runId: id, ...input },
+      });
+      expect(response.isError).not.toBe(true);
+      expect(JSON.stringify(response)).toContain('"active_claim"');
+      expect(JSON.stringify(response)).toContain(pending.retryAt);
+    }
+    expect(refresh).toHaveBeenNthCalledWith(1, id, input);
+    expect(refresh).toHaveBeenNthCalledWith(2, id, input);
+    const invalid = await client.callTool({
+      name: "refresh_finance_maintenance_execution_authorization",
+      arguments: { runId: id, ...input, claimId: id },
+    });
+    expect(invalid.isError).toBe(true);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    await client.callTool({
+      name: "get_finance_maintenance_execution_authorization",
+      arguments: { runId: id },
+    });
+    expect(observe).toHaveBeenCalledWith(id);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});

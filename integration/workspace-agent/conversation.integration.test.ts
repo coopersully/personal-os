@@ -40,7 +40,7 @@ describe("verified Finance conversation transport", () => {
       "finances:write",
       "finances:execute",
     ] as const;
-    const a = await f.connectAgent([...scopes]);
+    const a = await f.connectAgent([...scopes], { credentialKind: "oauth" });
     const b = await f.connectAgent([...scopes]);
     const other = await f.connectAgent([...scopes], { ownerId: f.otherOwner.id });
     const [connection] = await a.api.listAutomationHostConnections();
@@ -155,6 +155,50 @@ describe("verified Finance conversation transport", () => {
         now: new Date("2026-10-11T15:00:00Z"),
       });
     });
+    expect(
+      await call("get_finance_maintenance_execution_authorization", { runId: run.id }),
+    ).toEqual({ state: "unavailable", reason: "binding_unavailable" });
+    const recoveryInput = {
+      runId: run.id,
+      operationId: first.id,
+      candidateId: first.id,
+      candidateRevision: `sha256:${"a".repeat(64)}`,
+      expectedCurrentActorId: a.credential.id,
+      expectedBindingRevision: "1",
+      expectedRunUpdatedAt: run.updatedAt.toISOString(),
+    };
+    const blockedRecovery = await call(
+      "refresh_finance_maintenance_execution_authorization",
+      recoveryInput,
+    );
+    expect(blockedRecovery).toMatchObject({
+      state: "blocked",
+      reason: "binding_unavailable",
+      operationId: first.id,
+    });
+    expect(
+      await call("refresh_finance_maintenance_execution_authorization", recoveryInput),
+    ).toEqual(blockedRecovery);
+    for (const alien of [b, other]) {
+      for (const name of [
+        "get_finance_maintenance_execution_authorization",
+        "refresh_finance_maintenance_execution_authorization",
+      ]) {
+        expect(
+          (
+            await alien.client.callTool({
+              name,
+              arguments: name.startsWith("get_") ? { runId: run.id } : recoveryInput,
+            })
+          ).isError,
+        ).toBe(true);
+      }
+    }
+    const forgedRecovery = await a.client.callTool({
+      name: "refresh_finance_maintenance_execution_authorization",
+      arguments: { ...recoveryInput, claimId: run.id },
+    });
+    expect(forgedRecovery.isError).toBe(true);
     const evidenceInput = {
       runId: run.id,
       candidateId: first.id,
@@ -246,6 +290,14 @@ describe("verified Finance conversation transport", () => {
           .where(eq(financeConversationReadCursors.userId, f.owner.id))
       )[0]?.readThroughSequence.toString(),
     ).toBe(first.sequence);
+    for (const name of [
+      "get_finance_maintenance_execution_authorization",
+      "refresh_finance_maintenance_execution_authorization",
+    ]) {
+      expect((await readOnly.client.listTools()).tools.some((tool) => tool.name === name)).toBe(
+        name.startsWith("get_"),
+      );
+    }
     await a.revoke();
     expect(
       (

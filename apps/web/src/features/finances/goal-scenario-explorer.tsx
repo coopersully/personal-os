@@ -7,7 +7,14 @@ import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -169,10 +176,8 @@ export function FinanceGoalScenarioExplorer({
   useEffect(() => {
     if (projection) results.current?.focus();
   }, [projection]);
-  const [validationError, setValidationError] = useState<string | null>(null);
   const clearDraftFeedback = () => {
     setProjection(null);
-    setValidationError(null);
   };
   const update = (key: keyof typeof draft, value: string) => {
     setDraft((previous) => ({ ...previous, [key]: value }));
@@ -315,22 +320,16 @@ export function FinanceGoalScenarioExplorer({
               ...(draft.targetDate ? { targetLocalDate: draft.targetDate } : {}),
             };
             setProjection(projectGoalScenarios(input));
-            setValidationError(null);
           } catch (error) {
             const message =
               error instanceof Error ? error.message : "Check the hypothetical inputs.";
-            setValidationError(message);
             toast.error(message);
           }
         }}
       >
-        {validationError ? (
-          <p role="alert" className="text-destructive text-sm">
-            {validationError}
-          </p>
-        ) : null}
         <FieldSet>
           <FieldLegend>Hypothetical inputs</FieldLegend>
+          <FieldDescription>Amounts accept up to two decimal places.</FieldDescription>
           <FieldGroup className="grid gap-4 sm:grid-cols-2">
             {(
               [

@@ -87,14 +87,17 @@ it("reports invalid cents and unsupported currency through Sonner and permits co
   expect(feedback.error).toHaveBeenLastCalledWith(
     "Enter each amount with at most two decimal places.",
   );
-  expect(screen.getByRole("alert")).toHaveTextContent(
-    "Enter each amount with at most two decimal places.",
-  );
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(
+    screen.queryByText("Enter each amount with at most two decimal places."),
+  ).not.toBeInTheDocument();
+  expect(screen.getByText("Amounts accept up to two decimal places.")).toBeVisible();
   fill("Hypothetical target amount", "10");
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   fill("Currency code (two minor-unit digits)", "JPY");
   compare();
   expect(feedback.error).toHaveBeenLastCalledWith(expect.stringContaining("two minor-unit digits"));
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   fill("Currency code (two minor-unit digits)", "USD");
   fill("Hypothetical current amount (blank means unknown)", "10");
   fireEvent.click(screen.getByRole("checkbox"));

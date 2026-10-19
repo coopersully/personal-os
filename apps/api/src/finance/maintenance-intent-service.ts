@@ -51,6 +51,12 @@ import type { FinanceStatusService } from "../finance-status-service.js";
 import type { Principal } from "../types.js";
 import { createWorkspaceMaintenanceService } from "../workspace-maintenance-service.js";
 import { reconcileFinanceContinuations } from "./continuation-reconciliation.js";
+import {
+  captureFinanceConversationBatch,
+  hasUsableFinanceConversationConsumer,
+  postgresConversationBatchStore,
+} from "./conversation-service.js";
+import { guardFinanceExecutionTransaction } from "./execution-owner-guard.js";
 import { requireHostRunAuthority } from "./host-run-authority.js";
 import {
   createLegacyFinanceMaintenanceService,
@@ -292,7 +298,10 @@ export function createFinanceMaintenanceIntentService({
               reason: "Resume this durable run; committed steps are retained.",
             }
           : null;
-    return { run, challengeId, nextAction, recovery };
+    const conversationBatch = run
+      ? await postgresConversationBatchStore.findBatch(db as unknown as Transaction, userId, run.id)
+      : null;
+    return { run, challengeId, nextAction, recovery, conversationBatch };
   }
   function result(data: FinanceMaintenancePayload): FinanceToolResult<FinanceMaintenancePayload> {
     const completed = data.run?.status === "completed";
@@ -348,7 +357,39 @@ export function createFinanceMaintenanceIntentService({
   async function resolveRun(input: FinanceMaintenanceInput, principal: Principal) {
     const userId = principal.userId;
     return db.transaction(async (tx) => {
+      await guardFinanceExecutionTransaction(tx, userId, {
+        actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
+        hostSchedules: true,
+      });
       await lock(tx, userId);
+      async function bindConversation(
+        run: MaintenanceRun | null,
+        recovery: FinanceMaintenanceRecovery | null,
+        captureNew = false,
+      ) {
+        if (run) {
+          const row = await ownedRun(tx, userId, run.id);
+          if (!row)
+            throw new AppError("conflict", "The Finance run changed before message capture.");
+          await requireHostRunAuthority(tx, row, principal, now());
+          const existingBatch = await postgresConversationBatchStore.findBatch(tx, userId, row.id);
+          if (
+            existingBatch ||
+            (captureNew && (await hasUsableFinanceConversationConsumer(tx, row, principal, now())))
+          )
+            await captureFinanceConversationBatch({
+              tx,
+              store: postgresConversationBatchStore,
+              userId,
+              runId: row.id,
+              automationScheduleId: row.automationScheduleId,
+              authorizationConnectionId: row.authorizationConnectionId,
+              now: now(),
+            });
+          return { run: runValue(row), recovery };
+        }
+        return { run, recovery };
+      }
       let scheduleId: string | null = null;
       if (
         (input.operation === "start" && input.automationScheduleId) ||
@@ -422,7 +463,7 @@ export function createFinanceMaintenanceIntentService({
           const existing = await ownedRun(tx, userId, continuation.maintenanceRunId);
           if (!existing)
             throw new AppError("conflict", "The saved continuation run is unavailable.");
-          return { run: runValue(existing), recovery: null };
+          return bindConversation(runValue(existing), null);
         }
         const [transaction] = await tx
           .select()
@@ -537,7 +578,7 @@ export function createFinanceMaintenanceIntentService({
           .update(financeAnswerContinuations)
           .set({ state: "accepted", maintenanceRunId: run.id, updatedAt: now() })
           .where(eq(financeAnswerContinuations.id, continuation.id));
-        return { run, recovery: null };
+        return bindConversation(run, null, !previousRun);
       }
       if (input.operation === "start") {
         const observed = await status.getFinanceStatus(userId, input.scope, tx);
@@ -565,14 +606,14 @@ export function createFinanceMaintenanceIntentService({
         }
         const resumed = await resumeBlocked(tx, row);
         await reconcileSetup(tx, resumed, true);
-        return { run: runValue(resumed), recovery: null };
+        return bindConversation(runValue(resumed), null, !previousRun);
       }
       const current = await ownedRun(tx, userId, input.runId);
       if (current) {
         await requireHostRunAuthority(tx, current, principal, now());
         const resumed = await resumeBlocked(tx, current);
         await reconcileSetup(tx, resumed, true);
-        return { run: runValue(resumed), recovery: null };
+        return bindConversation(runValue(resumed), null);
       }
       const [legacy] = await tx
         .select()
@@ -599,10 +640,10 @@ export function createFinanceMaintenanceIntentService({
           adopted = await resumeBlocked(tx, adopted);
           await reconcileSetup(tx, adopted, true);
         }
-        return {
-          run: adopted ? runValue(adopted) : null,
-          recovery: legacy.recovery as FinanceMaintenanceRecovery,
-        };
+        return bindConversation(
+          adopted ? runValue(adopted) : null,
+          legacy.recovery as FinanceMaintenanceRecovery,
+        );
       }
       if (["settled", "failed"].includes(legacy.stage))
         return { run: null, recovery: historicalRecovery(legacy) };
@@ -679,7 +720,7 @@ export function createFinanceMaintenanceIntentService({
           await reconcileSetup(tx, resumed, true);
         }
       }
-      return { run, recovery };
+      return bindConversation(run, recovery, !previousRun);
     });
   }
   return {

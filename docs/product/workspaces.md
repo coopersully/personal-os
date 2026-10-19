@@ -1,5 +1,11 @@
 # nohmi workspaces and interfaces
 
+> October 18 Finance experience revision: the consolidated [design](../superpowers/specs/2026-10-18-finance-experience-design.md)
+> and [implementation plan](../superpowers/plans/2026-10-18-finance-experience.md) define the target for setup,
+> Spending, Chat, Automations, Activity, and manual workflow coverage. They supersede conflicting
+> earlier targets below, including ungated setup and agent budget self-approval. This is not a
+> declaration that the redesigned experience has shipped.
+
 - Status: Target product contract; current implementation is recorded separately
 - Last reconciled: 2026-09-10
 
@@ -197,6 +203,14 @@ without obscuring provider truth.
 
 ## Finances
 
+Finances is designed as an automated financial assistant with a strong analytical foundation. Use
+available authorized context to make money understandable through visual exploration, explainable
+patterns, evidence-backed forecasts, and hypothetical scenarios. Collect additional context for a
+clear user benefit, not merely because it might be interesting. Manual operation remains supported;
+agent maintenance is the intended way to keep the workspace useful and current. See
+[Finance intelligence and visual exploration](finance-workspace-plan.md#finance-intelligence-and-visual-exploration)
+for the durable motivation, evidence standards, and human decision boundary.
+
 The [Finance MVP specification](finance-workspace-plan.md) defines the first complete delivery
 journey against this larger target. Both Codex and Claude must support separately verified
 maintenance and two-way Finance SMS at launch, including durable answers and continuation after
@@ -302,6 +316,13 @@ state retain their intent. Snap-to-follow can be disabled independently, with Pr
 and Generous sensitivity when enabled. These preferences belong in Calendar settings and search.
 
 ### Finance configuration and prerequisites
+
+October 18 target revision: Finance will have an explicit, resumable setup gate for the normal
+workspace, including account connection, financial context, and recommended registered automation.
+Completion, manual-later paths, and existing-user access follow design §§2 and 13. This supersedes the earlier
+independent-access target below where conflicting; it is not implemented by this documentation change.
+The [Finance setup contract](../design/pages/finances.md#financial-setup-contract) records the new
+automation prompt, schedule tracking, and management direction.
 
 Finance setup is an editable configuration surface, not a sequential questionnaire. Opening it
 loads existing settings without starting execution. Profile, accounts/records, and budget can be

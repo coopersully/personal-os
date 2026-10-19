@@ -1039,7 +1039,7 @@ describe.sequential("real contextual question producer", () => {
         expect(
           (
             await database.pool.query(
-              "SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query ILIKE '%finance_review_cases%'",
+              "SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query ILIKE '%users%' AND query ILIKE '%no key update%'",
             )
           ).rows.length,
         ).toBeGreaterThan(0);
@@ -1146,15 +1146,22 @@ describe.sequential("real contextual question producer", () => {
         now: () => new Date(),
       }).projectMaintenanceCandidateQuestionsForUser(input);
       await admitted;
+      const answers = [f.question.work, secondQuestion.question.work].map((work) =>
+        f.service.answerWork({ ...f.answer, operationId: randomUUID(), work }, f.context),
+      );
       try {
-        for (const work of [f.question.work, secondQuestion.question.work])
-          await expect(
-            f.service.answerWork({ ...f.answer, operationId: randomUUID(), work }, f.context),
-          ).rejects.toMatchObject({ code: "conflict", details: { retryable: true } });
+        await vi.waitFor(async () => {
+          const blocked = await database.pool.query(
+            "SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND cardinality(pg_blocking_pids(pid))>0 AND query ILIKE '%users%' AND query ILIKE '%no key update%'",
+          );
+          expect(blocked.rows).toHaveLength(2);
+        });
       } finally {
         release();
       }
       expect(await projecting).toEqual({ created: 2, total: 2 });
+      for (const answer of await Promise.all(answers))
+        expect(answer).toMatchObject({ state: "blocked" });
       expect(await f.service.answerWork(f.answer, f.context)).toMatchObject({ state: "blocked" });
     } else {
       const accepting = database.db.transaction(async (tx) => {
@@ -1176,16 +1183,13 @@ describe.sequential("real contextual question producer", () => {
           expect(
             (
               await database.pool.query(
-                "SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query ILIKE '%finance_transactions%'",
+                "SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query ILIKE '%users%' AND query ILIKE '%no key update%'",
               )
             ).rows.length,
           ).toBeGreaterThan(0);
         });
-        // Maintenance holds the first transaction while waiting for the second. C must not wait back on it.
-        await expect(f.service.answerWork(f.answer, f.context)).rejects.toMatchObject({
-          code: "conflict",
-          details: { retryable: true },
-        });
+        // The outer owner guard serializes projection before any source-row locks.
+        // Releasing the accepted answer lets projection reread the committed revision.
       } finally {
         release();
       }

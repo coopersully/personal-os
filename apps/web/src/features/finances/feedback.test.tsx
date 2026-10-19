@@ -1,4 +1,4 @@
-import { resolveWorkspaceSettings } from "@personal-os/domain";
+import { type FinanceOnboardingSnapshot, resolveWorkspaceSettings } from "@personal-os/domain";
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
@@ -7,8 +7,32 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api.js";
 import { FinancesPage } from "./page.js";
+import { financeWorkspaceReadinessKey } from "./use-finance-workspace-readiness";
 
 vi.mock("react-plaid-link", () => ({ usePlaidLink: () => ({ open: vi.fn(), ready: false }) }));
+// Exercise real access/visibility derivation rather than bypassing the workspace gate.
+function seedManualFinanceReadiness(client: QueryClient) {
+  client.setQueryData(["me"], { id: "finance-feedback-owner" });
+  const snapshot: FinanceOnboardingSnapshot = {
+    revision: 0,
+    completedAt: null,
+    existingAccess: true,
+    source: { state: "usable", summary: "Manual accounts", recoveryHref: null },
+    contextReview: "needs_review",
+    questions: [],
+    displayPreferences: { reviewed: false, summary: [] },
+    automationChoice: null,
+    manualVisibility: "show",
+    automation: {
+      registrationCount: 0,
+      authorizedRegistrationWithCadence: false,
+      chatVerification: "pending",
+      canSendChat: false,
+      historyAvailable: true,
+    },
+  };
+  client.setQueryData(financeWorkspaceReadinessKey, snapshot);
+}
 afterEach(() => vi.restoreAllMocks());
 describe("Finance form feedback", () => {
   it("validates account fields on submit and retains entered values after a failed save", async () => {
@@ -27,6 +51,7 @@ describe("Finance form feedback", () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
+    seedManualFinanceReadiness(client);
     render(
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={["/finances/accounts"]}>
@@ -202,7 +227,7 @@ function querySetup(route: string, cached?: { key: readonly unknown[]; value: un
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  client.setQueryData(["me"], { id: "finance-feedback-owner" });
+  seedManualFinanceReadiness(client);
   if (cached) client.setQueryData(cached.key, cached.value);
   render(
     <QueryClientProvider client={client}>

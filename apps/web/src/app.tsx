@@ -1214,6 +1214,7 @@ function SidebarCollapseHandle({
 }
 
 function AuthenticatedApp({ user }: { user: User }) {
+  const [financeUnreadSessionKey] = useState(() => crypto.randomUUID());
   const [editor, setEditor] = useState<Editor>(null);
   const desktopCapture = useCallback(
     (kind: "task" | "reminder" | "event") => setEditor({ kind }),
@@ -1466,6 +1467,8 @@ function AuthenticatedApp({ user }: { user: User }) {
                 />
               ) : sidebarMode === "finances" ? (
                 <FinanceSidebarNavigation
+                  ownerId={user.id}
+                  sessionKey={financeUnreadSessionKey}
                   onNavigate={closeMobileMenu}
                   reviewCount={financeInbox.data?.remainingWork.count ?? 0}
                   section={activeFinanceSection}
@@ -1514,6 +1517,8 @@ function AuthenticatedApp({ user }: { user: User }) {
                   ? {
                       renderWorkspaceNavigation: (onNavigate: () => void) => (
                         <FinanceSidebarNavigation
+                          ownerId={user.id}
+                          sessionKey={financeUnreadSessionKey}
                           onNavigate={onNavigate}
                           reviewCount={financeInbox.data?.remainingWork.count ?? 0}
                           section={activeFinanceSection}
@@ -1762,7 +1767,7 @@ function WorkspaceRoutes({
         path="/finances/*"
         element={
           <Suspense fallback={<PageLoading workspace="finances" />}>
-            <FinanceWorkspacePage />
+            <FinanceWorkspacePage ownerId={user.id} />
           </Suspense>
         }
       />
@@ -2978,6 +2983,10 @@ function workspaceTitleForLocation(pathname: string, search: string): string | n
   if (pathname === "/goals") return "Goals";
   if (pathname === "/motives") return "Motives";
   if (pathname === "/finances") return "Finances";
+  if (pathname === "/finances/chat") return "Chat";
+  if (pathname === "/finances/automations") return "Automations";
+  if (pathname === "/finances/activity") return "Activity";
+  if (pathname === "/finances/spending") return "Spending";
   if (pathname === "/finances/accounts") return "Accounts";
   if (pathname === "/finances/budgets" || pathname === "/finances/plan") return "Budget";
   if (pathname === "/finances/wealth") return "Wealth";

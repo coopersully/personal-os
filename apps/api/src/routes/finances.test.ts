@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { errorResponse } from "../errors.js";
 import type { createFinanceBudgetPolicyService } from "../finance/budget-policy-service.js";
 import type { createFinancePositionService } from "../finance/position-service.js";
+import type { createFinanceActionService } from "../finance-action-service.js";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
 import type { FinancePeriodReviewService } from "../finance-period-review-service.js";
 import type { createFinanceService } from "../finance-service.js";
@@ -360,6 +361,7 @@ describe("finance routes", () => {
   it("compares scenarios on the read scope and forwards a complete budget plan", async () => {
     const app = new Hono<AppEnv>();
     const setBudgetPlan = vi.fn(async (input) => input);
+    const performDirect = vi.fn(async () => ({ status: "pending_review", review: { id } }));
     app.use("*", async (context, next) => {
       context.set("principal", {
         actorId: id,
@@ -375,6 +377,7 @@ describe("finance routes", () => {
       financeMaintenance: {} as FinanceMaintenanceService,
       financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
       finances: { setBudgetPlan } as unknown as ReturnType<typeof createFinanceService>,
+      actions: { performDirect } as unknown as ReturnType<typeof createFinanceActionService>,
       mutationContext: (context) => ({
         principal: context.get("principal"),
         requestId: context.get("requestId"),
@@ -404,9 +407,24 @@ describe("finance routes", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(input),
     });
-    expect(plan.status).toBe(200);
-    await expect(plan.json()).resolves.toMatchObject({ plan: input });
-    expect(setBudgetPlan).toHaveBeenCalledWith(
+    expect(plan.status).toBe(202);
+    await expect(plan.json()).resolves.toMatchObject({ status: "pending_review", review: { id } });
+    expect(setBudgetPlan).not.toHaveBeenCalled();
+    const categoryInput = { category: "Food", limit: 100, month: "2026-08" };
+    const category = await app.request("/v1/finances/budgets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(categoryInput),
+    });
+    expect(category.status).toBe(202);
+    await expect(category.json()).resolves.toMatchObject({ status: "pending_review" });
+    expect(performDirect).toHaveBeenCalledWith(
+      "budget_plan",
+      expect.objectContaining(categoryInput),
+      expect.objectContaining({ requestId: "finance-plan" }),
+    );
+    expect(performDirect).toHaveBeenCalledWith(
+      "budget_plan",
       expect.objectContaining(input),
       expect.objectContaining({ requestId: "finance-plan" }),
     );

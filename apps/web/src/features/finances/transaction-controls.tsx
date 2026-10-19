@@ -52,7 +52,12 @@ import {
   useFinancePresentationParams,
   useSaveFinancePresentation,
 } from "./presentation-preferences";
+import {
+  type FinanceCategoryReadState,
+  financeTransactionCategoryLabel,
+} from "./transaction-category";
 import { transactionGroupingOptions } from "./transaction-groups";
+import { useFinanceWorkspaceReadiness } from "./use-finance-workspace-readiness";
 
 export function FinanceTransactionControls({
   accounts,
@@ -72,6 +77,13 @@ export function FinanceTransactionControls({
   onSort?: (value: string) => void;
 }) {
   const [params, setParams] = useSearchParams();
+  const workspace = useFinanceWorkspaceReadiness();
+  const canCreate =
+    workspace.manualCreationVisible === true &&
+    !workspace.isError &&
+    !workspace.isPending &&
+    workspace.readiness?.workspaceAccessible === true &&
+    !params.has("financeTask");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const openingDialog = useRef(false);
   const legacyReview = params.get("review");
@@ -349,56 +361,58 @@ export function FinanceTransactionControls({
           </DropdownMenu>
         ) : null}
         {exportAction}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="icon" aria-label="Add in Transactions">
-              <PlusIcon />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="end"
-            onCloseAutoFocus={(event) => {
-              if (openingDialog.current) event.preventDefault();
-              openingDialog.current = false;
-            }}
-          >
-            <DropdownMenuItem
-              asChild
-              onSelect={() => {
-                openingDialog.current = true;
+        {canCreate ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="icon" aria-label="Add in Transactions">
+                <PlusIcon />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              onCloseAutoFocus={(event) => {
+                if (openingDialog.current) event.preventDefault();
+                openingDialog.current = false;
               }}
             >
-              <Link
-                to={{
-                  pathname: "/finances/transactions",
-                  search: `?${params}`,
-                  hash: "finance-add-transaction",
+              <DropdownMenuItem
+                asChild
+                onSelect={() => {
+                  openingDialog.current = true;
                 }}
               >
-                <PlusIcon />
-                Add transaction
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => {
-                openingDialog.current = true;
-                onAddCategory?.();
-              }}
-            >
-              <TagsIcon />
-              Add category
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => {
-                openingDialog.current = true;
-                onImport?.();
-              }}
-            >
-              <UploadIcon />
-              Import transactions
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+                <Link
+                  to={{
+                    pathname: "/finances/transactions",
+                    search: `?${params}`,
+                    hash: "finance-add-transaction",
+                  }}
+                >
+                  <PlusIcon />
+                  Add transaction
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => {
+                  openingDialog.current = true;
+                  onAddCategory?.();
+                }}
+              >
+                <TagsIcon />
+                Add category
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => {
+                  openingDialog.current = true;
+                  onImport?.();
+                }}
+              >
+                <UploadIcon />
+                Import transactions
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
       </WorkspaceHeaderControls>
     </>
   );
@@ -419,10 +433,14 @@ function TransactionDate({
 
 export function FinanceLinkedTransaction({
   id,
+  categories = [],
+  categoryReadState = "unavailable",
   onBreakdown,
   onCategorize,
 }: {
   id: string;
+  categories?: FinanceCategory[];
+  categoryReadState?: FinanceCategoryReadState;
   onBreakdown: (transaction: FinanceTransaction) => void;
   onCategorize: (transaction: FinanceTransaction) => void;
 }) {
@@ -464,7 +482,7 @@ export function FinanceLinkedTransaction({
       <dl className="my-4 grid grid-cols-2 gap-3 text-sm">
         <div>
           <dt className="text-muted-foreground">Category</dt>
-          <dd>{item.category ?? "Uncategorized"}</dd>
+          <dd>{financeTransactionCategoryLabel(item, categories, categoryReadState)}</dd>
         </div>
         <div>
           <dt className="text-muted-foreground">Direction</dt>

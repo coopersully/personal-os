@@ -74,6 +74,7 @@ import type {
   FinanceTransactionQuery,
   FinanceWealthSummary,
   MaintenanceScope,
+  ManageFinanceRecurringItemInput,
   MaterialSourceReference,
   MergeFinanceMerchantsInput,
   ReconcileFinanceReimbursementInput,
@@ -124,6 +125,14 @@ import {
   createFinanceAccountService,
   serializeFinanceAccountRows,
 } from "./finance/account-service.js";
+import {
+  assertCashflowAccountMayBeDeleted,
+  createFinanceBalanceBasisService,
+} from "./finance/balance-basis-service.js";
+import {
+  type FinanceBudgetApproval,
+  requireActiveBudgetAuthority,
+} from "./finance/budget-authority.js";
 import { createFinanceBudgetBucketService } from "./finance/budget-bucket-service.js";
 import { readFinanceConfiguration } from "./finance/configuration-service.js";
 import { createFinanceConnectionHandoffService } from "./finance/connection-handoff-service.js";
@@ -132,13 +141,23 @@ import {
   type FinanceMutationContext,
   requireFinanceExecution,
 } from "./finance/context.js";
+import { mirrorNewMaintenanceReviewQuestion } from "./finance/conversation-review-mirror.js";
+import type { FinanceExecutionFence } from "./finance/execution-binding.js";
+import { assertFinanceDerivedCompletionClaim } from "./finance/execution-claim-fence.js";
+import { guardFinanceExecutionTransaction } from "./finance/execution-owner-guard.js";
 import { createInboxService } from "./finance/inbox-service.js";
 import { createFinanceLedgerService } from "./finance/ledger-service.js";
 import { supersedeFinanceMaintenanceLineage } from "./finance/maintenance-rebuild.js";
 import { normalizedMerchant, titleCaseMerchant } from "./finance/merchant-identity.js";
 import { createFinanceMerchantService } from "./finance/merchant-service.js";
+import {
+  createFinancePlanningEvidenceService,
+  requireExplicitUser,
+} from "./finance/planning-evidence-service.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import { appendFinanceProfile } from "./finance/profile-writer.js";
+import { createFinanceRecurringOccurrenceService } from "./finance/recurring-occurrence-service.js";
+import { createFinanceRecurringScheduleService } from "./finance/recurring-schedule-service.js";
 import { issueMaintenanceReviewQuestion } from "./finance/review-action-service.js";
 import { createSetupService } from "./finance/setup-service.js";
 import {
@@ -184,6 +203,8 @@ type MaintenanceMutationAttribution = {
   runId: string;
 };
 type MutationContext = {
+  financeExecution?: FinanceExecutionFence;
+  financeBudgetApproval?: FinanceBudgetApproval;
   /** Internal action-service capability; never derived from a token or MCP input. */
   financePreparedAction?: boolean;
   /** Canonical intent already admitted with explicit execution authority. */
@@ -703,6 +724,7 @@ function budget(row: typeof financeBudgets.$inferSelect): FinanceBudget {
 }
 function accountAuditSnapshot(value: FinanceAccount) {
   return {
+    currencyCode: value.currencyCode,
     id: value.id,
     kind: value.kind,
     provider: value.provider,
@@ -754,6 +776,14 @@ export function createFinanceService({
   const inbox = createInboxService({ db, now });
   const canonicalLedger = createFinanceLedgerService({ db, now });
   const planning = createProfileBudgetService({ db, now });
+  const recurringSchedules = createFinanceRecurringScheduleService({ db, now });
+  const recurringOccurrences = createFinanceRecurringOccurrenceService({ db, now });
+  const balanceBases = createFinanceBalanceBasisService({
+    db,
+    now,
+    readOccurrences: recurringOccurrences.listFinanceRecurringOccurrences,
+  });
+  const planningEvidence = createFinancePlanningEvidenceService({ db, now });
   const setup = createSetupService({ db, now, planning });
   function legacyMutationContext(context: FinanceMutationContext): MutationContext {
     return {
@@ -3307,6 +3337,7 @@ export function createFinanceService({
   const incomeStreamValue = (
     row: typeof financeIncomeStreams.$inferSelect,
   ): FinanceIncomeStream => ({
+    revision: row.revision,
     accountId: row.accountId,
     cadence: row.cadence,
     confidence: row.confidence / 10_000,
@@ -3322,6 +3353,7 @@ export function createFinanceService({
   const recurringValue = (
     row: typeof financeRecurringObligations.$inferSelect,
   ): FinanceRecurringObligation => ({
+    revision: row.revision,
     accountId: row.accountId,
     cadence: row.cadence,
     confidence: row.confidence / 10_000,
@@ -3486,7 +3518,11 @@ export function createFinanceService({
             ? [existing[0]]
             : await executor
                 .update(financeIncomeStreams)
-                .set({ ...values, updatedAt: now() })
+                .set({
+                  ...values,
+                  revision: sql`${financeIncomeStreams.revision} + 1`,
+                  updatedAt: now(),
+                })
                 .where(eq(financeIncomeStreams.id, existing[0].id))
                 .returning()
           : await executor
@@ -3605,7 +3641,11 @@ export function createFinanceService({
             ? [existing[0]]
             : await executor
                 .update(financeRecurringObligations)
-                .set({ ...values, updatedAt: now() })
+                .set({
+                  ...values,
+                  revision: sql`${financeRecurringObligations.revision} + 1`,
+                  updatedAt: now(),
+                })
                 .where(eq(financeRecurringObligations.id, existing[0].id))
                 .returning()
           : await executor
@@ -3935,6 +3975,9 @@ export function createFinanceService({
     linkFinanceTransactions: canonicalLedger.linkTransactions,
     ...inbox,
     ...planning,
+    ...recurringSchedules,
+    ...recurringOccurrences,
+    ...balanceBases,
     ...setup,
     async getFinanceConfiguration(userId: string, requestId: string = randomUUID()) {
       const boundedRead = <T>(read: (executor: Database) => Promise<T>) =>
@@ -4552,7 +4595,12 @@ export function createFinanceService({
       if (!before) throw new AppError("not_found", "The income stream was not found.");
       const [row] = await executor
         .update(financeIncomeStreams)
-        .set({ source: "user", status: input.status, updatedAt: now() })
+        .set({
+          source: "user",
+          status: input.status,
+          revision: sql`${financeIncomeStreams.revision} + 1`,
+          updatedAt: now(),
+        })
         .where(eq(financeIncomeStreams.id, id))
         .returning();
       const value = incomeStreamValue(
@@ -4609,6 +4657,7 @@ export function createFinanceService({
         .set({
           source: context.principal.actorType === "user" ? "user" : before.source,
           status: input.status,
+          revision: sql`${financeRecurringObligations.revision} + 1`,
           updatedAt: now(),
         })
         .where(eq(financeRecurringObligations.id, id))
@@ -4982,9 +5031,23 @@ export function createFinanceService({
       await assertMaintenanceScopeOwned(userId, scope);
       if (scope.type !== "all_outstanding") return { refreshed: false };
       if (context?.maintenanceClaim) {
+        const claim = context.maintenanceClaim;
         await db.transaction(async (tx) => {
+          await guardFinanceExecutionTransaction(tx, userId, {
+            runIds: [claim.runId],
+          });
+          if (context.financeExecution)
+            await assertFinanceDerivedCompletionClaim(tx, userId, claim.runId, {
+              claimId: claim.claimId,
+              financeExecution: context.financeExecution,
+            });
           await assertMaintenanceClaim(tx, context);
           await refreshCashflowIntelligence(userId, tx, context);
+          if (context.financeExecution)
+            await assertFinanceDerivedCompletionClaim(tx, userId, claim.runId, {
+              claimId: claim.claimId,
+              financeExecution: context.financeExecution,
+            });
         });
       } else {
         await refreshCashflowIntelligence(userId);
@@ -5506,23 +5569,31 @@ export function createFinanceService({
             financeRecurringObligations.displayName,
           ),
       ]);
+      const latest = await planningEvidence.listLatestEvidence(userId, {
+        goalIds: [],
+        obligationIds: obligations.map((row) => row.id),
+      });
+      const evidenceById = new Map(
+        latest.flatMap((entry) =>
+          entry.kind === "obligation" ? [[entry.sourceId, entry] as const] : [],
+        ),
+      );
       return canonicalResult(
         {
           income: income.map(incomeStreamValue),
-          obligations: obligations.map(recurringValue),
+          obligations: obligations.map((row) => ({
+            ...recurringValue(row),
+            planningEvidence: evidenceById.get(row.id) ?? null,
+          })),
         },
         `Found ${income.length + obligations.length} recurring Finance items.`,
       );
     },
     async manageFinanceRecurringItem(
-      input: {
-        idempotencyKey: string;
-        itemId: string;
-        itemType: "income" | "obligation";
-        operation: "pause" | "resume" | "cancel";
-      },
+      input: ManageFinanceRecurringItemInput,
       context: FinanceMutationContext,
     ) {
+      if (input.operation === "confirm_cost") requireExplicitUser(context);
       return executeFinanceIdempotently(
         db,
         context,
@@ -5532,6 +5603,27 @@ export function createFinanceService({
           payload: input,
         },
         async (tx) => {
+          if (input.operation === "confirm_cost") {
+            const {
+              itemId,
+              itemType: _itemType,
+              operation: _operation,
+              idempotencyKey: _key,
+              ...statement
+            } = input;
+            const { source, evidence } = await planningEvidence.confirmObligation({
+              tx,
+              context,
+              input: { ...statement, obligationId: itemId },
+            });
+            return canonicalResult(
+              {
+                ...recurringValue(source),
+                planningEvidence: evidence.kind === "obligation" ? evidence : null,
+              },
+              "Planning cost evidence recorded from your statement.",
+            );
+          }
           const auditContext = legacyMutationContext(context);
           if (input.itemType === "income") {
             if (input.operation === "cancel")
@@ -5832,7 +5924,13 @@ export function createFinanceService({
       userId: string;
     }) {
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, input.userId, { runIds: [input.runId] });
         await assertMaintenanceClaim(tx, input.context);
+        if (input.context.financeExecution && input.context.maintenanceClaim)
+          await assertFinanceDerivedCompletionClaim(tx, input.userId, input.runId, {
+            claimId: input.context.maintenanceClaim.claimId,
+            financeExecution: input.context.financeExecution,
+          });
         const [candidate] = await tx
           .select({ id: financeMaintenanceCandidates.id })
           .from(financeMaintenanceCandidates)
@@ -6136,15 +6234,36 @@ export function createFinanceService({
             },
             tx,
           );
-          await issueMaintenanceReviewQuestion(tx, input.userId, projectedReview.id);
+          const newlyIssued = await issueMaintenanceReviewQuestion(
+            tx,
+            input.userId,
+            projectedReview.id,
+          );
+          if (newlyIssued)
+            await mirrorNewMaintenanceReviewQuestion(tx, {
+              userId: input.userId,
+              runId: input.runId,
+              candidateId: candidate.id,
+              candidateItemId: item.id,
+              candidateRevision: input.candidateRevision,
+              review: newlyIssued.review,
+              request: newlyIssued.request,
+              requestId: input.context.requestId,
+            });
           activeReviewIds.add(projectedReview.id);
         }
+        if (input.context.financeExecution && input.context.maintenanceClaim)
+          await assertFinanceDerivedCompletionClaim(tx, input.userId, input.runId, {
+            claimId: input.context.maintenanceClaim.claimId,
+            financeExecution: input.context.financeExecution,
+          });
         return { created: items.length, total: activeReviewIds.size };
       });
     },
     async beginMaintenanceCandidatePreparation(input: { runId: string; userId: string }) {
       return db.transaction(async (tx) => {
         await tx.execute(sql`set transaction isolation level repeatable read`);
+        await guardFinanceExecutionTransaction(tx, input.userId, { runIds: [input.runId] });
         const [run] = await tx
           .select({ id: workspaceMaintenanceRuns.id, scope: workspaceMaintenanceRuns.scope })
           .from(workspaceMaintenanceRuns)
@@ -6220,6 +6339,7 @@ export function createFinanceService({
     }) {
       const items = input.items.map(normalizeCandidateDraft);
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, input.userId, { runIds: [input.runId] });
         const [run] = await tx
           .select({ id: workspaceMaintenanceRuns.id })
           .from(workspaceMaintenanceRuns)
@@ -6310,6 +6430,7 @@ export function createFinanceService({
     async finalizeMaintenanceCandidatePreparation(input: { runId: string; userId: string }) {
       return db.transaction(async (tx) => {
         await tx.execute(sql`set transaction isolation level repeatable read`);
+        await guardFinanceExecutionTransaction(tx, input.userId, { runIds: [input.runId] });
         const [run] = await tx
           .select({ id: workspaceMaintenanceRuns.id, scope: workspaceMaintenanceRuns.scope })
           .from(workspaceMaintenanceRuns)
@@ -7458,6 +7579,7 @@ export function createFinanceService({
               .insert(financeAccounts)
               .values({
                 balance: input.balance === null ? null : toCents(input.balance),
+                currencyCode: input.currencyCode ?? null,
                 institution: input.institution,
                 kind: input.kind ?? "cash",
                 kindSource: "user",
@@ -7492,6 +7614,13 @@ export function createFinanceService({
       context: MutationContext,
       executor?: FinanceActionWriteExecutor,
     ) {
+      const approval = requireActiveBudgetAuthority(input, context);
+      if (!context.financeBudgetApproval || !executor) {
+        throw new AppError(
+          "forbidden",
+          "Submit this budget allocation for revision-bound human review before applying it.",
+        );
+      }
       const write = async (tx: FinanceActionWriteExecutor) => {
         // A single category budget shares the monthly replacement/capacity
         // surface with a complete plan. Use the same transaction-scoped lock
@@ -7559,7 +7688,14 @@ export function createFinanceService({
         await tx.insert(auditEvents).values(
           auditValues({
             action: "finance.budget_created",
-            after: { id: created.id, updatedAt: created.updatedAt.toISOString() },
+            after: {
+              ...approval,
+              id: created.id,
+              category: created.category,
+              limitCents: created.limit,
+              month: created.month,
+              updatedAt: created.updatedAt.toISOString(),
+            },
             before: null,
             entityId: created.id,
             entityType: "finance_budget",
@@ -7568,7 +7704,7 @@ export function createFinanceService({
         );
         return created;
       };
-      const row = executor ? await write(executor) : await db.transaction(write);
+      const row = await write(executor);
       return budget(row);
     },
     async setBudgetPlan(
@@ -7576,6 +7712,13 @@ export function createFinanceService({
       context: MutationContext,
       executor?: FinanceActionWriteExecutor,
     ): Promise<FinanceBudgetPlan> {
+      const approval = requireActiveBudgetAuthority(input, context);
+      if (!context.financeBudgetApproval || !executor) {
+        throw new AppError(
+          "forbidden",
+          "Submit this budget plan for revision-bound human review before applying it.",
+        );
+      }
       const write = async (tx: FinanceActionWriteExecutor) => {
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`finance-budget-plan:${context.principal.userId}:${input.month}`}, 0))`,
@@ -7722,6 +7865,11 @@ export function createFinanceService({
           auditValues({
             action: "finance.budget_plan_set",
             after: {
+              ...approval,
+              allocations: input.allocations.map(({ categoryId, limit }) => ({
+                categoryId,
+                limitCents: toCents(limit),
+              })),
               allocationCount: input.allocations.length,
               assumptionsCount: input.assumptions.length,
               goalCount: input.goalIds.length,
@@ -7731,6 +7879,10 @@ export function createFinanceService({
               planVersion: storedPlan.version,
             },
             before: {
+              allocations: currentBudgets.map(({ category, limit }) => ({
+                category,
+                limitCents: limit,
+              })),
               allocationCount: currentBudgets.length,
               month: input.month,
               priorAllocationCount: currentBudgets.length,
@@ -7742,8 +7894,7 @@ export function createFinanceService({
           }),
         );
       };
-      if (executor) await write(executor);
-      else await db.transaction(write);
+      await write(executor);
       return input;
     },
     async createTransaction(
@@ -8093,6 +8244,7 @@ export function createFinanceService({
           )
           .orderBy(financeTransactions.id)
           .for("update");
+        await assertCashflowAccountMayBeDeleted(tx, context.principal.userId, before.id);
         await assertAccountMayBeDeleted(tx, context.principal.userId, before.id);
         for (let offset = 0; offset < ownedTransactions.length; offset += 1_000) {
           const transactionIds = ownedTransactions

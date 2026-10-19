@@ -658,7 +658,7 @@ describe.sequential("transaction-backed Finance Inbox", () => {
     expect(afterAnswer).toMatchObject({ categoryId: category.id, needsReview: false });
   });
 
-  it("allows only one concurrent clarification to replace an unchanged review", async () => {
+  it("serializes concurrent clarifications before reading each current review", async () => {
     const service = createInboxService({
       db: database.db,
       now: () => new Date("2026-08-24T21:00:00Z"),
@@ -702,8 +702,12 @@ describe.sequential("transaction-backed Finance Inbox", () => {
       },
       requestId: "concurrent-clarification",
     });
-    // Hold the case until both requests have observed the same resolution. Scheduling alone
-    // cannot prove a race: two genuinely sequential clarifications may both be valid.
+    const initial = await database.db.query.financeReviewCases.findFirst({
+      where: eq(financeReviewCases.id, review.id),
+    });
+    if (!initial) throw new Error("Missing initial clarification review.");
+    // Hold the case. The first request waits on it while the second waits on the
+    // first request's outer owner guard, then reads the newly committed resolution.
     let release: () => void = () => {};
     let held: () => void = () => {};
     const barrier = new Promise<void>((resolve) => {
@@ -738,7 +742,7 @@ describe.sequential("transaction-backed Finance Inbox", () => {
       await vi.waitFor(
         async () => {
           const blocked = await database.pool.query(
-            "SELECT count(*)::int AS count FROM pg_stat_activity WHERE query LIKE '%update \"finance_review_cases\"%' AND cardinality(pg_blocking_pids(pid))>0",
+            "SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname=current_database() AND cardinality(pg_blocking_pids(pid))>0 AND (query LIKE '%update \"finance_review_cases\"%' OR (query ILIKE '%users%' AND query ILIKE '%no key update%'))",
           );
           expect(blocked.rows[0]?.count).toBe(2);
         },
@@ -749,8 +753,13 @@ describe.sequential("transaction-backed Finance Inbox", () => {
     }
     await blocker;
     const attempts = await pendingAttempts;
-    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
-    expect(attempts.filter((attempt) => attempt.status === "rejected")).toHaveLength(1);
+    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(2);
+    expect(attempts.filter((attempt) => attempt.status === "rejected")).toHaveLength(0);
+    const clarified = await database.db.query.financeReviewCases.findFirst({
+      where: eq(financeReviewCases.id, review.id),
+    });
+    expect(clarified?.contextualRevision).toBe(initial.contextualRevision + 2n);
+    expect(["first note", "second note"]).toContain(clarified?.resolution?.answer);
   });
 
   it("applies a profile answer and resolves its Inbox row atomically", async () => {

@@ -6,7 +6,7 @@ import {
   createTwilioConnector,
   createXConnector,
 } from "@personal-os/connectors";
-import { mailThreads } from "@personal-os/database";
+import { financeOnboardingLegacyAccess, mailThreads } from "@personal-os/database";
 import {
   type AgentConnectionGuide,
   assistantDomains,
@@ -51,17 +51,27 @@ import { createDesktopReleaseService } from "./desktop-release-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
 import { createExecutionPolicyService } from "./execution-policy-service.js";
+import { createFinanceActivityService } from "./finance/activity-service.js";
+import { createFinanceBudgetBaselineQualificationService } from "./finance/baseline-qualification-service.js";
 import { createFinanceBudgetPolicyService } from "./finance/budget-policy-service.js";
+import { loadFinanceAuthorization } from "./finance/context.js";
 import { createFinanceContextualQuestionService } from "./finance/contextual-question-service.js";
 import {
   type ContextualPrincipal,
   contextualTransaction,
 } from "./finance/contextual-question-store.js";
+import { createFinanceConversationEvidenceService } from "./finance/conversation-evidence-service.js";
+import { createFinanceConversationService } from "./finance/conversation-persistence.js";
+import { createFinanceConversationUnreadService } from "./finance/conversation-unread-service.js";
+import { createFinanceMaintenanceExecutionService } from "./finance/maintenance-execution-service.js";
 import { createFinanceMaintenanceIntentService } from "./finance/maintenance-intent-service.js";
+import { createFinanceOnboardingEvidenceLoader } from "./finance/onboarding-evidence.js";
+import { createFinanceOnboardingRepository } from "./finance/onboarding-repository.js";
 import { createFinancePositionService } from "./finance/position-service.js";
 import { createFinanceSmsPort } from "./finance/sms-answer-port.js";
 import { createFinanceSmsApprovalService } from "./finance/sms-approval-service.js";
 import { createFinanceSmsContextDispatcher } from "./finance/sms-context-dispatcher.js";
+import { createFinanceSpendingService } from "./finance/spending-service.js";
 import { resolveFinanceWorks } from "./finance/work-resolver.js";
 import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceChallengeService } from "./finance-challenge-service.js";
@@ -71,6 +81,7 @@ import {
   createFinanceNotificationDispatcher,
   runFinanceReconciliationStages,
 } from "./finance-notification-runtime.js";
+import { createFinanceOnboardingService } from "./finance-onboarding-service.js";
 import { createFinancePeriodReviewService } from "./finance-period-review-service.js";
 import { createFinancePlaybookService } from "./finance-playbook-service.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
@@ -94,6 +105,12 @@ import { createRitualService } from "./ritual-service.js";
 import { registerAssistantRoutes } from "./routes/assistant.js";
 import { registerAutomationHostRoutes } from "./routes/automation-hosts.js";
 import { registerCalendarRoutes } from "./routes/calendar.js";
+import { registerFinanceActivityRoutes } from "./routes/finance-activity.js";
+import { registerFinanceConversationRoutes } from "./routes/finance-conversation.js";
+import { registerFinanceConversationEvidenceRoutes } from "./routes/finance-conversation-evidence.js";
+import { registerFinanceConversationUnreadRoutes } from "./routes/finance-conversation-unread.js";
+import { registerFinanceMaintenanceExecutionRoutes } from "./routes/finance-maintenance-execution.js";
+import { registerFinanceOnboardingRoutes } from "./routes/finance-onboarding.js";
 import { registerFinanceRoutes } from "./routes/finances.js";
 import { registerGoalsRoutes } from "./routes/goals.js";
 import { registerMailRoutes } from "./routes/mail.js";
@@ -466,6 +483,10 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     ...(plaid ? { plaid } : {}),
     providerItems: financeProviderItems,
   });
+  const baselineQualification = createFinanceBudgetBaselineQualificationService({
+    db: dependencies.db,
+    now,
+  });
   const financeBudgetPolicies = createFinanceBudgetPolicyService({ db: dependencies.db, now });
   const financeContextualQuestions = createFinanceContextualQuestionService({
     db: dependencies.db,
@@ -616,6 +637,54 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     goals: goalService,
     maintenance,
     now,
+  });
+  const financeSpending = createFinanceSpendingService({
+    db: dependencies.db,
+    now,
+    readBudgetQualification: baselineQualification.getQualification,
+  });
+  const financeActivity = createFinanceActivityService({
+    db: dependencies.db,
+    cursorSecret: dependencies.config.encryptionKey,
+  });
+  const financeConversationEvidence = createFinanceConversationEvidenceService({
+    db: dependencies.db,
+    cursorSecret: dependencies.config.encryptionKey,
+    now,
+  });
+  const financeMaintenanceExecution = createFinanceMaintenanceExecutionService({
+    db: dependencies.db,
+  });
+  const financeConversationUnread = createFinanceConversationUnreadService({ db: dependencies.db });
+  const financeConversation = createFinanceConversationService({ db: dependencies.db, now });
+  const loadFinanceOnboardingEvidence = createFinanceOnboardingEvidenceLoader({
+    now,
+    onChatFailure: ({ category, durationMs }) =>
+      dependencies.log?.({
+        event: "finance_onboarding_chat_unavailable",
+        category,
+        durationMs,
+        method: "INTERNAL",
+        path: "finance/onboarding/chat-readiness",
+        requestId: randomUUID(),
+        status: 503,
+      }),
+    hasLegacyAccess: async (executor, userId) => {
+      const [grant] = await executor
+        .select({ userId: financeOnboardingLegacyAccess.userId })
+        .from(financeOnboardingLegacyAccess)
+        .where(eq(financeOnboardingLegacyAccess.userId, userId))
+        .limit(1);
+      return grant !== undefined;
+    },
+  });
+  const financeOnboarding = createFinanceOnboardingService({
+    now,
+    repository: createFinanceOnboardingRepository({
+      db: dependencies.db,
+      now,
+      loadEvidence: loadFinanceOnboardingEvidence,
+    }),
   });
   const financePosition = createFinancePositionService({ db: dependencies.db, now });
   const financeChallenges = createFinanceChallengeService({
@@ -1445,16 +1514,34 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     db: dependencies.db,
     financeChallenges,
     financeBudgetPolicies,
+    baselineQualification,
     contextualQuestions: financeContextualQuestions,
     canonicalFinanceMaintenance,
     financeMaintenance,
     financePeriodReviews,
     financePlaybook,
     financePosition,
+    financeSpending,
     financeStatus,
     finances,
     mutationContext,
   });
+
+  registerFinanceConversationRoutes({ app, conversation: financeConversation });
+  registerFinanceMaintenanceExecutionRoutes({ app, execution: financeMaintenanceExecution });
+  registerFinanceConversationUnreadRoutes({ app, unread: financeConversationUnread });
+  registerFinanceConversationEvidenceRoutes({ app, evidence: financeConversationEvidence });
+  registerFinanceOnboardingRoutes({
+    app,
+    onboarding: financeOnboarding,
+    authorize: (context) =>
+      loadFinanceAuthorization({
+        db: dependencies.db,
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+  });
+  registerFinanceActivityRoutes({ app, activity: financeActivity });
 
   registerReminderRoutes({ app, mutationContext, reminders });
 

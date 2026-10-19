@@ -26,12 +26,17 @@ import type {
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
+import { requireHumanBudgetApproval } from "./budget-authority.js";
 import {
   executeFinanceIdempotently,
   type FinanceMutationContext,
   requireFinanceExecution,
   requireFinanceMutation,
 } from "./context.js";
+import {
+  createFinancePlanningEvidenceService,
+  requireExplicitUser,
+} from "./planning-evidence-service.js";
 import { withFinanceBudgetPresentation } from "./presentation-service.js";
 import { lockFinanceProfileVersion } from "./profile-version-lock.js";
 import { appendFinanceProfile, profileValue } from "./profile-writer.js";
@@ -91,6 +96,7 @@ function goalValue(row: typeof financeGoals.$inferSelect): FinanceGoal {
 }
 
 export function createProfileBudgetService({ db, now, executor: transaction }: Options) {
+  const planningEvidence = createFinancePlanningEvidenceService({ db, now });
   async function latestProfile(userId: string) {
     return db.query.financeProfileVersions.findFirst({
       orderBy: [desc(financeProfileVersions.version)],
@@ -493,18 +499,13 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
     },
 
     async approveFinanceBudget(input: ApproveFinanceBudgetInput, context: FinanceMutationContext) {
-      requireFinanceMutation(context, { approvalSource: input.approvalSource });
-      if (
-        context.actorType === "user"
-          ? input.approvalSource !== "user_instruction"
-          : !context.canSelfApprove ||
-            !context.bypassEnabled ||
-            input.approvalSource !== "agent_self_approval"
-      )
-        throw new AppError(
-          "forbidden",
-          "Budget activation requires matching actor provenance and explicit execution authority.",
-        );
+      requireFinanceMutation(context);
+      requireHumanBudgetApproval({
+        ...context,
+        scopes: new Set(context.canMutate ? ["finances:write"] : []),
+      });
+      if (input.approvalSource !== "user_instruction")
+        throw new AppError("forbidden", "Budget activation requires human approval.");
       return executeFinanceIdempotently(
         db,
         context,
@@ -577,10 +578,7 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
             if (!active) throw new AppError("internal_error", "The budget was not activated.");
             await tx.insert(auditEvents).values(
               auditValues({
-                action:
-                  input.approvalSource === "agent_self_approval"
-                    ? "finance.budget.agent_self_approved"
-                    : "finance.budget.user_instruction_approved",
+                action: "finance.budget.user_instruction_approved",
                 after: {
                   approvalSource: input.approvalSource,
                   status: "active",
@@ -642,13 +640,25 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
         .from(financeGoals)
         .where(eq(financeGoals.userId, userId))
         .orderBy(desc(financeGoals.updatedAt));
+      const latest = await planningEvidence.listLatestEvidence(
+        userId,
+        { goalIds: rows.map((row) => row.id), obligationIds: [] },
+        transaction,
+      );
+      const evidenceById = new Map(
+        latest.flatMap((entry) => (entry.kind === "goal" ? [[entry.goalId, entry] as const] : [])),
+      );
       return result({
-        data: rows.map(goalValue),
+        data: rows.map((row) => ({
+          ...goalValue(row),
+          planningEvidence: evidenceById.get(row.id) ?? null,
+        })),
         headline: `Found ${rows.length} financial goals.`,
       });
     },
 
     async manageFinanceGoal(input: ManageFinanceGoalInput, context: FinanceMutationContext) {
+      if (input.operation === "confirm_progress") requireExplicitUser(context);
       return executeFinanceIdempotently(
         db,
         context,
@@ -658,6 +668,21 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
           payload: input,
         },
         async (tx) => {
+          if (input.operation === "confirm_progress") {
+            const { operation: _operation, idempotencyKey: _key, ...statement } = input;
+            const { source, evidence } = await planningEvidence.confirmGoal({
+              tx,
+              context,
+              input: statement,
+            });
+            return result({
+              data: {
+                ...goalValue(source),
+                planningEvidence: evidence.kind === "goal" ? evidence : null,
+              },
+              headline: "Your stated goal progress was recorded.",
+            });
+          }
           if (input.operation === "create") {
             const [row] = await tx
               .insert(financeGoals)

@@ -18,6 +18,19 @@ import {
 } from "@personal-os/domain";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { AppError } from "./errors.js";
+import {
+  lockFinanceEffectOwner,
+  validateFinanceConversationClaim,
+} from "./finance/conversation-causality.js";
+import { initializeFinanceExecutionBinding } from "./finance/execution-binding.js";
+import {
+  assertFinanceDerivedCompletionClaim,
+  type FinanceDerivedCompletionClaim,
+} from "./finance/execution-claim-fence.js";
+import {
+  financeExecutionDecisionTime,
+  guardFinanceExecutionTransaction,
+} from "./finance/execution-owner-guard.js";
 import { requireHostRunAuthority } from "./finance/host-run-authority.js";
 import { stableFinanceActionInput } from "./finance-action-identity.js";
 import type { createFinanceActionService, SupportedActionKind } from "./finance-action-service.js";
@@ -73,6 +86,8 @@ export function createFinanceChallengeService({ actions, db, finances, now }: Op
       candidateId: string,
     ): Promise<FinanceLedgerChallenge> {
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, userId, { runIds: [runId] });
+        await lockFinanceEffectOwner(tx, userId);
         const [candidate] = await tx
           .select()
           .from(financeMaintenanceCandidates)
@@ -149,6 +164,11 @@ export function createFinanceChallengeService({ actions, db, finances, now }: Op
         throw new AppError("forbidden", "A connected agent must submit the ledger challenge.");
       const input = submitFinanceLedgerChallengeInputSchema.parse(inputValue);
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, context.principal.userId, {
+          actorIds: [context.principal.actorId],
+          challengeIds: [input.challengeId],
+        });
+        await lockFinanceEffectOwner(tx, context.principal.userId);
         const [challenge] = await tx
           .select()
           .from(financeLedgerChallenges)
@@ -227,6 +247,15 @@ export function createFinanceChallengeService({ actions, db, finances, now }: Op
           .where(eq(financeMaintenanceCandidateItems.candidateId, candidate.id))
           .orderBy(asc(financeMaintenanceCandidateItems.ordinal))
           .for("update");
+        if (input.conversationEvidence)
+          await validateFinanceConversationClaim(
+            tx,
+            run,
+            context.principal,
+            items,
+            input.conversationEvidence,
+            now(),
+          );
         const currentPacket = await finances.maintenanceCandidateSnapshot(
           context.principal.userId,
           run.scope,
@@ -390,11 +419,25 @@ export function createFinanceChallengeService({ actions, db, finances, now }: Op
           candidate.discoveryRevision,
           tx,
         );
+        const submittedAt = await financeExecutionDecisionTime(tx);
+        await requireHostRunAuthority(tx, run, context.principal, submittedAt);
+        await initializeFinanceExecutionBinding(tx, {
+          run,
+          candidateId: candidate.id,
+          candidateRevision: snapshot.revision,
+          submittedFromRevision: input.candidateRevision,
+          fingerprint: createHash("sha256").update(stableFinanceActionInput(input)).digest("hex"),
+          principal: context.principal,
+          at: submittedAt,
+        });
         const [updatedChallenge] = await tx
           .update(financeLedgerChallenges)
           .set({
             candidateRevision: snapshot.revision,
             coverage: {
+              ...(input.conversationEvidence
+                ? { conversationEvidence: input.conversationEvidence }
+                : {}),
               checked: [...new Set(input.checked)].toSorted(),
               reviewedItemIds: [...new Set(input.reviewedItemIds)].toSorted(),
               submissionFingerprint: createHash("sha256")
@@ -440,8 +483,12 @@ export function createFinanceChallengeService({ actions, db, finances, now }: Op
       });
     },
 
-    async resolve(userId: string, runId: string) {
+    async resolve(userId: string, runId: string, controlClaim?: FinanceDerivedCompletionClaim) {
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, userId, { runIds: [runId] });
+        await lockFinanceEffectOwner(tx, userId);
+        if (controlClaim)
+          await assertFinanceDerivedCompletionClaim(tx, userId, runId, controlClaim);
         const [challenge] = await tx
           .select()
           .from(financeLedgerChallenges)
@@ -485,6 +532,8 @@ export function createFinanceChallengeService({ actions, db, finances, now }: Op
           if (!resolved)
             throw new AppError("conflict", "The Finance challenge changed before resolution.");
         }
+        if (controlClaim)
+          await assertFinanceDerivedCompletionClaim(tx, userId, runId, controlClaim);
         return {
           candidateId: challenge.candidateId,
           candidateRevision: candidate?.revision,

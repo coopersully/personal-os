@@ -2,14 +2,18 @@ import type { AutomationHostSchedule, AutomationHostSurface } from "@personal-os
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import { Textarea } from "@/components/ui/textarea";
 import { api } from "../../api.js";
+
 import { QueryFeedback } from "../../components/async-state.js";
+import { HostPromptPanel } from "./host-prompt-panel.js";
+
+type HostScheduleStatus = Awaited<ReturnType<typeof api.listAutomationHostSchedules>>[number];
 
 export function FinanceHostSettings() {
   const queryClient = useQueryClient();
@@ -30,22 +34,24 @@ export function FinanceHostSettings() {
   const [surface, setSurface] = useState<AutomationHostSurface>("codex_desktop");
   const [label, setLabel] = useState("Finance maintenance");
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   async function perform(action: () => Promise<unknown>) {
     setPending(true);
-    setError(null);
+    const notification = toast.loading("Updating host settings…");
     try {
       await action();
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["finance-host-schedules"] }),
+        queryClient.invalidateQueries({ queryKey: ["finance-onboarding"] }),
         queryClient.invalidateQueries({ queryKey: ["finance-answer-continuations"] }),
         queryClient.invalidateQueries({ queryKey: ["finance-host-runs"] }),
       ]);
+      toast.success("Host settings updated.", { id: notification });
     } catch (error) {
-      setError(
+      toast.error(
         error instanceof Error
           ? error.message
           : "The host change could not be saved. Reload its status.",
+        { id: notification },
       );
     } finally {
       setPending(false);
@@ -70,7 +76,6 @@ export function FinanceHostSettings() {
         <QueryFeedback query={connections} title="Host connections could not be loaded" />
         <QueryFeedback query={answers} title="Saved answer status could not be loaded" />
         <QueryFeedback query={runs} title="Waiting host runs could not be loaded" />
-        {error ? <p role="alert">{error}</p> : null}
         {connections.data?.length ? (
           <form
             className="grid gap-3"
@@ -142,14 +147,15 @@ export function FinanceHostSettings() {
             this page.
           </p>
         ) : null}
-        {schedules.data?.map(({ schedule, health, connectionAvailable }) => (
+        {schedules.data?.map((status) => (
           <HostSchedule
-            key={schedule.id}
-            schedule={schedule}
+            key={status.schedule.id}
+            status={status}
+            schedule={status.schedule}
             health={
-              connectionAvailable === false
+              status.connectionAvailable === false
                 ? "Connection unavailable. Reauthorize your host."
-                : health.state
+                : status.health.state
             }
             pending={pending}
             perform={perform}
@@ -231,11 +237,13 @@ export function FinanceHostSettings() {
   );
 }
 function HostSchedule({
+  status,
   schedule,
   health,
   pending,
   perform,
 }: {
+  status: HostScheduleStatus;
   schedule: AutomationHostSchedule;
   health: string;
   pending: boolean;
@@ -244,11 +252,12 @@ function HostSchedule({
   const [automationId, setAutomationId] = useState("");
   const [next, setNext] = useState("");
   const [token, setToken] = useState("");
-  const prompt = `Use the original nohmi connection bound to schedule ${schedule.id}. First read get_finance_continuations for this schedule to obtain its current version and state, following nextCursor while hasMore is true to read every page. Report the actual host state using observe_finance_host_schedule with those expected values and a current observedAt (include the actual next host slot for Codex); never invent an observation. If its continuations list has pending or accepted answers, continue each one with maintain_finances operation continue, its continuationId, and automationScheduleId ${schedule.id}. Follow the returned next action and resume with the saved run ID until that case settles or needs a human decision; do not start a broader run while an answer continuation is outstanding. If no answer continuation is outstanding, start maintain_finances with operation start and automationScheduleId ${schedule.id}, then resume the returned run ID. Read the API-owned Finance playbook when instructed. Never guess answers or self-approve financial changes. Keep financial context inside nohmi; notify me only for decisions, failures, or completion.`;
+
   return (
     <section className="grid gap-3 rounded-md border p-3" aria-label={schedule.label}>
       <p className="font-medium">{schedule.label}</p>
       <p>{health.replaceAll("_", " ")}</p>
+      <HostPromptPanel status={status} />
       {schedule.state === "setup_pending" ? (
         <>
           <p>
@@ -256,8 +265,6 @@ function HostSchedule({
               ? "Create a recurring Codex automation every 5 minutes using the selected nohmi connection. Paste this prompt, then bind its automation identifier and next scheduled time below."
               : "Create a Claude routine using the selected nohmi connection and this prompt. Add an API trigger, then bind its routine identifier below."}
           </p>
-          <Label htmlFor={`host-prompt-${schedule.id}`}>Host prompt</Label>
-          <Textarea id={`host-prompt-${schedule.id}`} readOnly value={prompt} />
           <form
             className="grid gap-2"
             onSubmit={(event) => {

@@ -29,6 +29,8 @@ import {
   lockContextualQuestion,
   lockContextualTransaction,
 } from "./contextual-question-store.js";
+import { mirrorCreatedFinanceQuestion } from "./conversation-question-mirror.js";
+import { guardFinanceExecutionTransaction } from "./execution-owner-guard.js";
 import { resolveContextualWork } from "./work-resolver.js";
 
 const unavailable = (): FinanceContextualQuestionResult => ({
@@ -52,6 +54,10 @@ export function createFinanceContextualQuestionService(options: ContextualOption
       idSchema.parse(transactionId);
       const input = createFinanceContextualQuestionInputSchema.parse(raw);
       return contextualTransaction(options.db, executor, async (tx) => {
+        await guardFinanceExecutionTransaction(tx, context.principal.userId, {
+          actorIds: context.principal.actorType === "agent" ? [context.principal.actorId] : [],
+          hostSchedules: true,
+        });
         const authority = await loadFinanceAuthorization({ db: tx, ...context });
         return executeFinanceAdmittedMutation<Prepared, FinanceContextualQuestionResult>(
           tx,
@@ -146,6 +152,15 @@ export function createFinanceContextualQuestionService(options: ContextualOption
               .returning();
             if (!question)
               throw new AppError("internal_error", "The contextual question was not created.");
+            await mirrorCreatedFinanceQuestion(writeTx, context.principal, {
+              questionId: question.id,
+              caseId: review.id,
+              transactionId: transaction.id,
+              accountId: account.id,
+              operationId: input.operationId,
+              prompt: question.prompt,
+              createdAt: recordedAt,
+            });
             await writeTx.insert(auditEvents).values(
               auditValues({
                 ...context,
@@ -154,6 +169,8 @@ export function createFinanceContextualQuestionService(options: ContextualOption
                 entityId: question.id,
                 before: null,
                 after: {
+                  operationId: input.operationId,
+                  prompt: question.prompt,
                   reviewCaseId: review.id,
                   transactionId: transaction.id,
                   revision: "1",
@@ -177,6 +194,10 @@ export function createFinanceContextualQuestionService(options: ContextualOption
       authorizeContextual(context, "finances:read");
       idSchema.parse(id);
       return contextualTransaction(options.db, executor, async (tx) => {
+        await guardFinanceExecutionTransaction(tx, context.principal.userId, {
+          actorIds: context.principal.actorType === "agent" ? [context.principal.actorId] : [],
+          hostSchedules: true,
+        });
         await admitContextualOwner(tx, context.principal.userId);
         const locked = await lockContextualQuestion(tx, context.principal.userId, id, false);
         return locked ? { state: "available", question: contextualValue(locked) } : unavailable();

@@ -347,6 +347,8 @@ export const automationHostScheduleHealthSchema = z.object({
   nextExpectedAt: isoDateTimeSchema.nullable(),
   observedAt: isoDateTimeSchema,
   repairOwner: z.enum(["host"]).nullable(),
+  graceMilliseconds: z.number().nonnegative().nullable().default(null),
+  overdueAt: isoDateTimeSchema.nullable().default(null),
 });
 export type AutomationHostScheduleHealth = z.infer<typeof automationHostScheduleHealthSchema>;
 
@@ -387,12 +389,44 @@ export function observeAutomationHostScheduleHealth(
   if (schedule.nextExpectedAt === null) {
     throw new Error("A bound recurring schedule requires its next expected host slot.");
   }
-  const overdue = now.getTime() > new Date(schedule.nextExpectedAt).getTime();
+  const graceMilliseconds = Math.min(
+    3_600_000,
+    Math.max(300_000, schedule.trigger.recurrence.everyMinutes * 60_000 * 0.1),
+  );
+  const overdueAt = new Date(
+    new Date(schedule.nextExpectedAt).getTime() + graceMilliseconds,
+  ).toISOString();
+  const overdue = now.getTime() > new Date(overdueAt).getTime();
   return automationHostScheduleHealthSchema.parse({
     state: overdue ? "overdue" : "expected",
+    graceMilliseconds,
+    overdueAt,
     lastObservedAt: schedule.lastObservedAt,
     nextExpectedAt: schedule.nextExpectedAt,
     observedAt,
     repairOwner: overdue ? "host" : null,
   });
 }
+
+/** An immutable snapshot of instructions nohmi issued; not proof of host adoption. */
+export const automationHostPromptIssueSchema = z
+  .object({
+    scheduleId: idSchema,
+    templateVersion: z.int().positive(),
+    scheduleVersionAtIssue: z.int().positive(),
+    text: z.string().min(1),
+    issuedAt: isoDateTimeSchema,
+  })
+  .strict();
+export type AutomationHostPromptIssue = z.infer<typeof automationHostPromptIssueSchema>;
+export const automationHostPromptIssueInputSchema = z
+  .object({
+    expectedScheduleVersion: z.int().positive(),
+  })
+  .strict();
+export const automationHostPromptPageInputSchema = z
+  .object({
+    beforeVersion: z.coerce.number().int().positive().optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+  })
+  .strict();

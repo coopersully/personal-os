@@ -1,5 +1,6 @@
 import {
   auditEvents,
+  automationHostPromptIssues,
   financeAnswerContinuations,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
@@ -81,7 +82,25 @@ describe("connection-bound host controls", () => {
     const scheduleAudit = await f.db.query.auditEvents.findMany({
       where: eq(auditEvents.entityId, created.schedule.id),
     });
-    expect(scheduleAudit).toHaveLength(3);
+    const lifecycleAudit = scheduleAudit.filter((event) =>
+      ["finance.host_schedule.created", "finance.host_schedule.changed"].includes(event.action),
+    );
+    expect(lifecycleAudit).toHaveLength(3);
+    const promptAudit = scheduleAudit.filter(
+      (event) => event.action === "finance.host_prompt.issued",
+    );
+    expect(promptAudit).toEqual([
+      expect.objectContaining({
+        userId: f.owner.id,
+        actorType: "agent",
+        actorId: a.credential.id,
+        entityType: "automation_host_schedule",
+        entityId: created.schedule.id,
+        before: null,
+        after: { templateVersion: 1, scheduleVersionAtIssue: 1 },
+      }),
+    ]);
+    expect(scheduleAudit).toHaveLength(lifecycleAudit.length + promptAudit.length);
     expect(
       scheduleAudit.every(
         (event) => event.actorType === "agent" && event.actorId === a.credential.id,
@@ -273,5 +292,98 @@ describe("connection-bound host controls", () => {
       expectedState: "active",
     });
     expect(revoked).toMatchObject({ schedule: { state: "revoked" } });
+  });
+  it("reads and issues exact host prompts through the original authenticated MCP connection", async () => {
+    await f.setBypass(true);
+    const scopes = [
+      "finances:read",
+      "finances:maintain",
+      "finances:write",
+      "finances:execute",
+    ] as const;
+    const a = await f.connectAgent([...scopes]);
+    const b = await f.connectAgent([...scopes]);
+    const [connection] = await a.api.listAutomationHostConnections();
+    if (!connection) throw new Error("Original host connection fixture missing");
+    const created = await a.api.createAutomationHostSchedule({
+      tenantAuthorizationConnectionId: connection.id,
+      label: "Prompt adapter fixture",
+      requestedScopes: ["finances:maintain"],
+      hostSurface: "codex_desktop",
+      trigger: {
+        type: "recurring",
+        recurrence: { type: "interval", everyMinutes: 60, timeZone: "America/New_York" },
+      },
+    });
+    const scheduleId = created.schedule.id;
+    const original = created.prompt?.latestIssued;
+    expect(original).toBeDefined();
+    const exact = await a.client.callTool({
+      name: "get_finance_host_prompt",
+      arguments: { scheduleId, templateVersion: 1 },
+    });
+    expect(exact.isError, JSON.stringify(exact)).not.toBe(true);
+    expect(exact.structuredContent).toMatchObject({ result: original });
+    const history = await a.client.callTool({
+      name: "get_finance_host_prompt_history",
+      arguments: { scheduleId, limit: 1 },
+    });
+    expect(history.structuredContent).toMatchObject({
+      result: { issues: [original], nextCursor: null, currentTemplateVersion: 1 },
+    });
+    const empty = await a.client.callTool({
+      name: "get_finance_host_prompt_history",
+      arguments: { scheduleId, beforeVersion: 1, limit: 1 },
+    });
+    expect(empty.structuredContent).toMatchObject({ result: { issues: [], nextCursor: null } });
+    for (const name of [
+      "get_finance_host_prompt",
+      "get_finance_host_prompt_history",
+      "issue_finance_host_prompt",
+    ]) {
+      const alien = await b.client.callTool({
+        name,
+        arguments: {
+          scheduleId,
+          ...(name === "get_finance_host_prompt_history" ? {} : { templateVersion: 1 }),
+          ...(name === "issue_finance_host_prompt" ? { expectedScheduleVersion: 1 } : {}),
+        },
+      });
+      expect(alien.isError).toBe(true);
+      expect(alien.structuredContent).toMatchObject({ error: { code: "forbidden" } });
+    }
+    // Simulate a pre-expansion registry without fabricated issued history, then exercise first issuance.
+    await f.db
+      .delete(automationHostPromptIssues)
+      .where(eq(automationHostPromptIssues.scheduleId, scheduleId));
+    await f.setBypass(false);
+    const denied = await a.client.callTool({
+      name: "issue_finance_host_prompt",
+      arguments: { scheduleId, templateVersion: 1, expectedScheduleVersion: 1 },
+    });
+    expect(denied.isError).toBe(true);
+    expect(denied.structuredContent).toMatchObject({ error: { code: "forbidden" } });
+    await f.setBypass(true);
+    const issued = await a.client.callTool({
+      name: "issue_finance_host_prompt",
+      arguments: { scheduleId, templateVersion: 1, expectedScheduleVersion: 1 },
+    });
+    expect(issued.isError, JSON.stringify(issued)).not.toBe(true);
+    expect(issued.structuredContent).toMatchObject({
+      result: { scheduleId, templateVersion: 1, scheduleVersionAtIssue: 1, text: original?.text },
+    });
+    const replay = await a.client.callTool({
+      name: "issue_finance_host_prompt",
+      arguments: { scheduleId, templateVersion: 1, expectedScheduleVersion: 1 },
+    });
+    expect((replay.structuredContent as { result: unknown }).result).toEqual(
+      (issued.structuredContent as { result: unknown }).result,
+    );
+    const readonly = await f.connectAgent([...scopes], { readOnly: true });
+    const discovered = await readonly.client.listTools();
+    expect(discovered.tools.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining(["get_finance_host_prompt", "get_finance_host_prompt_history"]),
+    );
+    expect(discovered.tools.map((tool) => tool.name)).not.toContain("issue_finance_host_prompt");
   });
 });

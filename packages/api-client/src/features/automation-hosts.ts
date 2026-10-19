@@ -1,5 +1,6 @@
 import type {
   AccessScope,
+  AutomationHostPromptIssue,
   AutomationHostSchedule,
   AutomationHostScheduleBindInput,
   AutomationHostScheduleCancelInput,
@@ -15,6 +16,13 @@ export type HostScheduleStatus = {
   schedule: AutomationHostSchedule;
   health: AutomationHostScheduleHealth;
   connectionAvailable?: boolean;
+  prompt?: {
+    externalAdoption: "unknown";
+    latestIssued: AutomationHostPromptIssue | null;
+    currentTemplateVersion: number;
+    upgradeAvailable: boolean;
+  };
+  chatCapability?: { state: "unverified"; reason: "message_protocol_unavailable" };
 };
 export type FinanceContinuation = {
   id: string;
@@ -25,6 +33,31 @@ export type FinanceContinuation = {
 export function createAutomationHostApi(request: Request) {
   const path = (id: string) => `/v1/automation-hosts/${encodeURIComponent(id)}`;
   return {
+    getAutomationHostPromptHistory: (
+      id: string,
+      input: { beforeVersion?: number; limit?: number } = {},
+    ) => {
+      const query = new URLSearchParams();
+      if (input.beforeVersion !== undefined)
+        query.set("beforeVersion", String(input.beforeVersion));
+      if (input.limit !== undefined) query.set("limit", String(input.limit));
+      return request<{
+        issues: AutomationHostPromptIssue[];
+        nextCursor: number | null;
+        currentTemplateVersion: number;
+      }>(`${path(id)}/prompts${query.size ? `?${query}` : ""}`);
+    },
+    getAutomationHostPrompt: (id: string, templateVersion: number) =>
+      request<AutomationHostPromptIssue>(`${path(id)}/prompts/${templateVersion}`),
+    issueAutomationHostPrompt: (
+      id: string,
+      templateVersion: number,
+      input: { expectedScheduleVersion: number },
+    ) =>
+      request<AutomationHostPromptIssue>(`${path(id)}/prompts/${templateVersion}`, {
+        method: "PUT",
+        body: JSON.stringify(input),
+      }),
     listAutomationHostConnections: () =>
       request<{ id: string; label: string; scopes: AccessScope[] }[]>(
         "/v1/automation-hosts/connections",

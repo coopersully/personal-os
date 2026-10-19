@@ -1,6 +1,66 @@
 # Finances specification
 
+> October 18 Finance experience revision: the consolidated [design](../../superpowers/specs/2026-10-18-finance-experience-design.md)
+> and [implementation plan](../../superpowers/plans/2026-10-18-finance-experience.md) define the target for setup,
+> Spending, Chat, Automations, Activity, and manual workflow coverage. They supersede conflicting
+> earlier targets below, including ungated setup and agent budget self-approval. This is not a
+> declaration that the redesigned experience has shipped.
+
+## Latest accepted setup and history decisions — target behavior
+
+Spending defaults to personal cost, with a setting for full outflow. Reimbursable and received
+amounts remain distinct in supporting evidence. Finance uses one ongoing conversation and existing
+notification preferences.
+
+Conversation-driven Finance actions retain durable links between the handled case/question, the
+agent question when present, all relevant user replies, resulting activity/audit events, and affected
+financial records. Activity exposes the supporting excerpts and decision explanation with links back
+to source messages and records. A question covering three transactions answered in two user messages
+retains all three messages and all three transactions under the case, with specific evidence for each
+change where applicable. User-initiated instructions may create a case without an agent question.
+Keep original evidence and later corrections inspectable. Read receipts, answers, and successful
+financial actions are distinct states; conversational provenance never replaces exact budget approval.
+
+Users may defer automation and complete setup in manual mode with Chat visible but locked.
+Automated maintenance is the intended experience; manual mode is secondary but supported. Ensure
+usable UI equivalents for user-facing Finance agent workflows, including reviewing uncategorized
+transactions, categorization, splits, supported matching/reconciliation, questions, budget operations,
+and source/profile management. Audit actual tool/UI coverage before claiming completeness. Internal
+execution machinery does not require user controls; human budget approval remains mandatory.
+
+Single-month spending selections use the applicable approved budget for that month, including past
+months. Missing budgets and multi-month selections omit fill with an explanation while retaining
+bucket/category grouping. Never silently substitute today's budget. This settles the historical
+selection question mentioned below; design §§4 and 13 define exact revision selection and partial coverage.
+
 ## Overview user job
+
+### Accepted spending dashboard direction — not yet implemented
+
+Spending is a new sidebar destination; retain Overview and existing destinations in this scope.
+Automations and Activity each have their own sidebar page. Reassess redundancy after the redesign
+is visible rather than replacing Overview now.
+
+The spending bubble view defaults to configured budget buckets, or categories when no buckets are
+configured, and remembers the user's explicit grouping choice. Buckets support category drill-down.
+Both bucket and category contexts offer Transactions links preserving the selected group and period.
+The visual direction is a draggable, elastic field attracted toward the center. Released bubbles
+remain roughly where placed, with a gentle center pull. Session-only position persistence, motion,
+and distinct drill-down/transaction interactions follow the accepted
+[design](../../superpowers/specs/2026-10-18-finance-experience-design.md#5-elastic-bubble-interaction).
+
+Use the assigned bucket/category color with a translucent tonal overlay filling upward inside the
+bubble; do not use a perimeter progress ring. Labels, icons, and controls remain legible above it.
+Bubble size represents spending for the selected period; fill represents monthly budget usage and
+must be explicitly labeled as monthly even on shorter views. Animate fill changes and distinguish
+overspending from exactly using the budget. Missing limits never become invented percentages.
+Historical and cross-month budget selection, partial coverage, and exact overage styling remain
+to be specified before implementation.
+
+Include pending spending by default, with a configurable inclusion option in the view and Finance
+settings. Expose grouping defaults and granular display choices during setup using simple controls;
+agent-led setup discusses and saves the same preferences. These display settings must not redefine
+canonical ledger meaning or count a pending charge and its posted replacement twice.
 
 **Understand my current financial position and handle the next decision that
 needs me.**
@@ -38,6 +98,20 @@ An unconfigured plan renders one explanatory empty state and a setup action.
 Ledger diagnostics disclose their individual evidence and recovery paths.
 Record counts from different checks are never added into a synthetic issue total because the
 underlying records may overlap.
+
+## Reimbursement receipt evidence
+
+Cash flow Reimbursements keeps one row per allocation-owned claim. Receipt history and evidence
+opens a labelled disclosure containing each recorded match's amount, rationale, recording time,
+and canonical credit transaction link. Claim, allocation and source references remain inspectable;
+provider remote identifiers are provenance rather than local transaction links. Local transaction
+source references link only when they contain a valid canonical transaction ID.
+
+Unknown due dates remain unknown, and cancelling an expected remainder retains its recorded
+receipts and cancellation evidence. Match recording time is not a settlement date. Receipt detail
+amounts carry no assumed currency because the current reimbursement read does not supply one;
+the existing summary totals are preserved. Original expense amounts and dates, currency-qualified
+journey totals, and receipt correction/unmatch remain outside this read-only disclosure.
 
 ## Complete Plan contract
 
@@ -109,6 +183,31 @@ If a Finance projection fails, available sibling work remains visible and affect
 
 ## Financial setup contract
 
+October 18 target revision: introduce an explicit, resumable setup flow gating the normal Finance
+workspace, covering connected accounts/Plaid, financial context, and recommended automation setup.
+Design §§2 and 13 define completion, manual-later paths, and preserved access for existing users.
+Setup may finish with automation verification pending. Show automation-dependent destinations such
+as Chat in a locked state until the agent checks in and confirms the required capability; do not
+hide them. Lead setup with a copyable one-time external-agent interview prompt using the existing
+setup protocol, alongside manual entry of the same canonical profile answers. This interview prompt
+is separate from the recurring automation prompt. Manual profile answers are not manual bookkeeping
+and remain available regardless of the manual creation setting.
+Explicit unknown answers may complete deferrable context questions; agents follow up later. Missing
+prerequisites block only the capability that needs them, as defined in design §§2 and 13.
+This does not override permitted pending automation verification or locked Chat.
+This direction supersedes the independent-access target below where it conflicts; the following
+configuration behavior remains the pre-redesign contract, not evidence that the new gate is shipped.
+
+Automation setup creates a registration and a reusable template prompt containing its unique ID.
+The external agent uses that ID for Finance maintenance/run attribution under its existing
+authenticated connection. Save the issued prompt/version and expose it again in automation detail
+and edit views. Expected cadence, time, and timezone are editable tracking metadata; they do not
+change external schedules. List registrations, support editing/removal, and expose missed-run/stale
+attention based on expected versus observed runs. Registration time alone establishes no cadence.
+The recorded prompt is what nohmi supplied, not proof of the external host's current instructions.
+Use shadcn chat patterns. Detect recurring external maintenance, obtain agent confirmation of
+schedule and answer-consumption capability, then register it before enabling automated-mode chat.
+
 `/finances/setup` opens directly into a read-only configuration aggregate. Navigation and reload
 never start the setup protocol, prepare a budget, approve anything, or run maintenance.
 The **Profile**, **Accounts and records**, and **Budget** sections can be visited independently.
@@ -163,6 +262,55 @@ available at their relevant steps.
 
 ## Agent guidance user job
 
+### Accepted direction: comprehensive automation
+
+Finance setup leads with one comprehensive automation, with customization inside it. People should
+not need separate automations for transaction cleanup, budget monitoring, and periodic reviews.
+The agent handles as much as available evidence and granted authority allow, consulting relevant
+context before asking questions that require human input. This is a target UX direction; it does
+not expand financial action authority or remove support for multiple external schedules. Exact
+defaults and action boundaries remain in the Finance experience discussion.
+
+### Accepted direction: approvals and Finance activity
+
+Budget activation and changes to the active budget always require explicit human approval of the
+exact proposal. Agents may prepare proposals; no automatic adjustment allowance or self-approval
+replaces that decision. This target supersedes earlier budget self-approval guidance.
+
+Add a Finance activity destination showing important agent actions and user-approved financial
+changes. It must distinguish proposals, approvals, and completed changes; identify the agent and
+human approver where relevant; and link to authoritative audit evidence and affected records.
+Important changes must be durably audited. Verify coverage and useful change details across all
+relevant mutation paths before claiming completeness. Group routine bookkeeping into expandable
+entries with individual change details; give budget changes and other significant decisions their
+own entries. Design §8 defines event selection and evidence; this documentation does not implement
+the Activity page.
+
+### Accepted direction: asynchronous question chat
+
+The Chat sidebar item shows an unread-message count and a needs-attention indicator for unread
+messages. Persist user and agent receipt/acknowledgment separately; fetching a message is not proof
+of a reply or completed bookkeeping. Missed expected runs promptly surface needs-attention on the
+Automations destination and a recovery path. Schedule health and message receipts remain separate.
+
+Present outstanding questions as casual agent conversations, with transaction context and natural
+language answers. A registered Finance automation establishes the automated-mode default for manual
+controls. Show Chat locked while verification is pending; enable it after a check-in confirms the
+required capability. Show expected next-run timing near the composer;
+label inferred timing as estimated and never equate a scheduled start with a guaranteed reply.
+Messages must persist for consumption and response by the authorized automation. Corrections and
+existing question-answering remain available without chat. Explore automatic recognition of regular
+external maintenance runs using the accepted thresholds and authenticated confirmation in design §6.
+The capability handshake in §13 is required before Chat unlocks. These are target requirements, not shipped behavior.
+
+### Accepted direction: manual control visibility
+
+Once Finance automation is set up, manual transaction and manual account creation controls default
+to hidden. A Finance setting lets the person show or hide these controls; the capabilities remain
+supported. Corrections to existing records and answering questions always remain available.
+This is accepted target behavior, not a claim of implementation. Setup detection, explicit preference
+handling, and paused/failed automation behavior follow design §§3 and 8; corrections remain available.
+
 **See whether my Finance context is ready for a scoped agent and understand
 which decisions still require me.**
 
@@ -187,11 +335,41 @@ Review.
 - Canonical Review leads with its current bounded question. Older maintenance
   approvals disclose their individual prepared changes inside the labelled
   compatibility queue.
-- Cash flow withholds legacy forecasts when shared or excluded accounts cannot be
-  represented accurately. Scenario comparisons are explicit, hypothetical inputs and
-  never change a saved plan.
-- Cash flow shows reimbursements as their own expected/received/remaining
-  ledger, including overdue state and linked credits.
+- Cash flow Outlook presents Upcoming money as a shared agenda or calendar. Human-confirmed,
+  versioned schedules supply durable occurrence identities and explicit expected, matched and
+  remaining amounts. Unconfirmed sources retain only their next expected date; they never expand
+  recurrence. A confirmed schedule with no occurrence in the selected range does not invent one.
+  Occurrence dates use each source's stated timezone; today uses the owner's planning timezone.
+  Undated sources remain visible. Range, presentation and account selection are URL-backed;
+  omitted account scope includes unassigned sources, while an explicit empty selection includes none.
+- Schedule statements bind the current source revision and immutable predecessor. Receipt inspection
+  supports explicit partial matches and full reversal against current canonical transaction facts.
+  Earlier schedule history stays inspectable. Actual payments, expected residuals and recorded match
+  times remain distinct. Source links open the exact Income or Bills & subscriptions record.
+- Payday projections require a selected confirmed income schedule and qualified balance statements.
+  Each statement names current or available balance, validity, optional floor and explicit inclusion
+  of every known movement from a dedicated complete history read. Incomplete, stale or ambiguous
+  evidence leaves the projection unavailable. Estimates are end-of-day values, not intraday minima.
+  Currency never falls back to USD and unknown floors are distinct from zero.
+- Occurrence lists and calendar-day details are bounded and paginated without dropping counts or
+  access to later items. Authoritative access denial hides cached private evidence and dismisses
+  statements; changing owners remounts facts and drafts together. A transient read failure keeps
+  existing context with an honest retry state. These are implementation contracts; database,
+  browser and integrated acceptance evidence is recorded separately from production claims.
+- Scenario comparisons are explicit hypothetical inputs and never change a saved plan.
+- Cash flow reimbursement journeys keep the original expense, active allocation, expectation,
+  received cash and remaining claim distinct. Human corrections revise the existing claim;
+  receipt removal retains immutable audit evidence and releases actual credit capacity. Unknown
+  retries retain the exact request and key. A correction denied with 401/403 hides the entire
+  cached reimbursement list and dismisses dialogs; transient failures retain context.
+- Personal cost to date subtracts received reimbursements only. It is shown only for a posted,
+  fully allocated expense with complete owned-source, receipt, currency and capacity evidence.
+  Pending, shared or ambiguous evidence remains unavailable. The result covers the whole expense,
+  can repeat across its claim cards and must never be added across those cards. Original outlay,
+  expectation and received amounts remain separately labelled.
+- Match and balance confirmations bind both transaction content and reimbursement relationship
+  generations. Match, unmatch and rematch cannot revive old evidence. Legacy statements without a
+  relationship generation remain unknown until reviewed again.
 - A mixed purchase is edited in one exact-cent breakdown dialog. Every cent
   must be assigned, reimbursement treatment is explicit, and a future merchant
   rule is unavailable for mixed allocations.
@@ -374,3 +552,36 @@ The account selector distinguishes selecting no accounts from following all elig
 persisted change. These view preferences never modify planning inclusion or account meanings.
 Finance notification settings show inherited/effective policy and support resetting an existing
 workspace override to global preferences using its current revision.
+
+## Manual account currency
+
+Manual account creation accepts an optional explicit three-letter uppercase currency code.
+The field starts blank: omitted or blank currency remains unknown (`null`), never a guessed USD.
+The canonical account writer stores the stated code and includes it in the creation audit and
+readback. The balance input displays the selected currency only after a valid code is present.
+Existing account presentation uses its source currency; unknown currency and unsupported accounting
+scope remain unavailable rather than becoming USD. This does not add conversion or qualify a
+non-USD source for USD-only planning.
+
+The existing account-update contract has no currency correction field. Correcting a previously
+created account's currency requires a separately reviewed canonical update contract; this creation
+change does not reinterpret historical accounts or transactions.
+
+The manual account form uses the same Sonner identifier from loading through the confirmed
+creation result or error. Field corrections stay with their controls; action-result notifications
+are not duplicated inline. This repairs the form's inherited feedback behavior while extending
+currency capture; it is not a currency regression.
+### Recurring cost comparison
+
+Bills & subscriptions compares each original recurring source with its expected amount, cadence,
+source status, source-account currency and observation date. Matching merchants remain separate
+records. Savings movements stay outside recurring-cost comparisons and retain their management
+controls. Each payment retains its existing exact-record pause, confirm or resume action.
+
+Monthly and annual equivalents require a demonstrated fixed amount and supported currency units.
+Current recurring records do not establish fixedness, so their equivalents remain unavailable with
+an explicit reason; a user-supplied source alone does not confirm a fixed cost. Missing currency
+never becomes USD, and inferred, review-needed and inactive records remain distinct. The pure
+normalization contract supports exact factors 52/26/24/12/4/1 with currency-separated totals, but the
+adapter must supply applicable evidence before it can expose them. Service identity and price
+history remain unknown until independently established; merchant names prove neither.

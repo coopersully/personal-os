@@ -6,6 +6,7 @@ import type {
 import { eq, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
+import { guardFinanceExecutionTransaction } from "./finance/execution-owner-guard.js";
 import { assertSettingsRevision, type SettingsMutationContext } from "./settings-save.js";
 
 function serialize(
@@ -32,6 +33,7 @@ export function createExecutionPolicyService(input: { db: Database; now: () => D
       }
       return input.db.transaction(async (tx) => {
         const userId = context.principal.userId;
+        await guardFinanceExecutionTransaction(tx, userId, {});
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`execution-policy:${userId}`}, 0))`,
         );

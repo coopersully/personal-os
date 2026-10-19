@@ -2,6 +2,7 @@ import { type Database, financeReviewCases } from "@personal-os/database";
 import type { FinanceHumanWorkRef } from "@personal-os/domain";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { contextualTransaction } from "./finance/contextual-question-store.js";
+import { guardFinanceExecutionTransaction } from "./finance/execution-owner-guard.js";
 import { issueMaintenanceReviewQuestion } from "./finance/review-action-service.js";
 import { resolveFinanceWorks } from "./finance/work-resolver.js";
 import {
@@ -93,9 +94,10 @@ export function createFinanceNotificationDispatcher(options: {
     for (const row of undiscovered) {
       if (!options.enabled() || !shouldContinue()) break;
       try {
-        await contextualTransaction(options.db, undefined, (tx) =>
-          issueMaintenanceReviewQuestion(tx, row.userId, row.id),
-        );
+        await contextualTransaction(options.db, undefined, async (tx) => {
+          await guardFinanceExecutionTransaction(tx, row.userId, {});
+          return issueMaintenanceReviewQuestion(tx, row.userId, row.id);
+        });
       } catch {
         failed++;
       } finally {

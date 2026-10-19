@@ -438,7 +438,60 @@ export const iloToolCatalog = {
     destructive: true,
     policy: "approve_each",
   }),
+  get_finance_spending: read("finances", ["finances:read"], "inspect", { openWorld: false }),
+  list_finance_spending_transactions: read("finances", ["finances:read"], "inspect", {
+    openWorld: false,
+  }),
   get_finance_continuations: read("finances", ["finances:maintain"]),
+  get_finance_conversation_evidence: read(
+    "finances",
+    ["finances:maintain", "finances:write", "finances:execute"],
+    "inspect",
+    { openWorld: false },
+  ),
+  get_finance_conversation_batch: write(
+    "finances",
+    ["finances:maintain", "finances:write", "finances:execute"],
+    { policy: "approved_rule", stage: "inspect", idempotent: true, openWorld: false },
+  ),
+  acknowledge_finance_conversation_batch: write(
+    "finances",
+    ["finances:maintain", "finances:write", "finances:execute"],
+    { policy: "approved_rule", stage: "verify", idempotent: true, openWorld: false },
+  ),
+  reply_to_finance_conversation_batch: write(
+    "finances",
+    ["finances:maintain", "finances:write", "finances:execute"],
+    { policy: "approved_rule", stage: "commit", idempotent: true, openWorld: false },
+  ),
+  exchange_finance_conversation_challenge: write(
+    "finances",
+    ["finances:maintain", "finances:write", "finances:execute"],
+    { policy: "approved_rule", stage: "verify", idempotent: true, openWorld: false },
+  ),
+  get_finance_host_prompt_history: read("finances", ["finances:maintain"], "inspect", {
+    openWorld: false,
+  }),
+  get_finance_host_prompt: read("finances", ["finances:maintain"], "inspect", { openWorld: false }),
+  issue_finance_host_prompt: write(
+    "finances",
+    ["finances:maintain", "finances:write", "finances:execute"],
+    {
+      policy: "approved_rule",
+      idempotent: true,
+      openWorld: false,
+      stage: "prepare",
+    },
+  ),
+  get_finance_budget_baseline_qualification: read("finances", ["finances:read"], "inspect", {
+    openWorld: false,
+  }),
+  prepare_finance_budget_baseline_qualification: write("finances", ["finances:write"], {
+    policy: "preview",
+    stage: "prepare",
+    idempotent: true,
+    openWorld: false,
+  }),
   observe_finance_host_schedule: write("finances", ["finances:maintain"], {
     policy: "approved_rule",
   }),
@@ -502,7 +555,31 @@ export const iloToolCatalog = {
   }),
   get_finance_overview: read("finances", ["finances:read"], "context"),
   create_finance_attention_item: write("finances", ["finances:write"]),
+  get_finance_onboarding: read("finances", ["finances:read"], "inspect", { openWorld: false }),
+  save_finance_onboarding_answers: write("finances", ["finances:write", "finances:execute"], {
+    policy: "approved_rule",
+    stage: "commit",
+    idempotent: true,
+    openWorld: false,
+  }),
+  complete_finance_onboarding: write("finances", ["finances:write", "finances:execute"], {
+    policy: "approved_rule",
+    stage: "commit",
+    idempotent: true,
+    openWorld: false,
+  }),
   setup_finances: write("finances", ["finances:write"], { policy: "approved_rule" }),
+  get_finance_maintenance_execution_authorization: read(
+    "finances",
+    ["finances:maintain", "finances:write", "finances:execute"],
+    "inspect",
+    { openWorld: false },
+  ),
+  refresh_finance_maintenance_execution_authorization: write(
+    "finances",
+    ["finances:maintain", "finances:write", "finances:execute"],
+    { policy: "approved_rule", stage: "commit", idempotent: true, openWorld: false },
+  ),
   get_finance_maintenance_history: read("finances", ["finances:read"]),
   get_financial_profile: read("finances", ["finances:read"]),
   update_financial_profile: write("finances", ["finances:write"], {

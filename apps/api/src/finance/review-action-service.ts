@@ -33,6 +33,7 @@ import {
   type ContextualPrincipal,
   contextualRetry,
 } from "./contextual-question-store.js";
+import { mirrorAcceptedMaintenanceReviewAnswer } from "./conversation-review-mirror.js";
 import { financeMaintenanceLineage } from "./maintenance-rebuild.js";
 import { financeReviewPrompt, minimalSmsQuestionPrompt } from "./review-prompt.js";
 import type { AdmitSmsAnswer } from "./sms-answer-port.js";
@@ -104,15 +105,18 @@ export async function issueMaintenanceReviewQuestion(
         ),
       );
   }
-  await tx.insert(financeReviewActionRequests).values({
-    id: issued.request.requestId,
-    userId,
-    reviewCaseId: review.id,
-    authorityOperationId: issued.request.authorityOperationId,
-    actionRevision: BigInt(issued.request.work.actionRevision),
-    request: issued.request,
-    prompt: financeReviewPrompt(review.reasonCode, review.evidence),
-  });
+  const [createdRequest] = await tx
+    .insert(financeReviewActionRequests)
+    .values({
+      id: issued.request.requestId,
+      userId,
+      reviewCaseId: review.id,
+      authorityOperationId: issued.request.authorityOperationId,
+      actionRevision: BigInt(issued.request.work.actionRevision),
+      request: issued.request,
+      prompt: financeReviewPrompt(review.reasonCode, review.evidence),
+    })
+    .returning();
   const [changed] = await tx
     .update(financeReviewCases)
     .set({ humanAction: { state: "open", request: issued.request } })
@@ -124,7 +128,8 @@ export async function issueMaintenanceReviewQuestion(
       ),
     )
     .returning({ id: financeReviewCases.id });
-  if (!changed) throw contextualRetry();
+  if (!changed || !createdRequest) throw contextualRetry();
+  return { review, request: createdRequest };
 }
 
 async function lockReview(tx: FinanceTransaction, userId: string, id: string, write: boolean) {
@@ -383,6 +388,17 @@ export async function answerMaintenanceReviewQuestion(
         actorType: "user",
         actorId: context.principal.userId,
       });
+      await mirrorAcceptedMaintenanceReviewAnswer(writeTx, {
+        userId: context.principal.userId,
+        actorType: context.principal.actorType,
+        actorId: context.principal.actorId,
+        caseId: review.id,
+        transactionId: review.transactionId,
+        requestId: action.request.requestId,
+        operationId: command.operationId,
+        text: command.text,
+        recordedAt: options.now?.() ?? new Date(),
+      });
       const lineage = financeMaintenanceLineage(review.evidence);
       const [originRun] = lineage
         ? await writeTx
@@ -494,6 +510,17 @@ export async function recordMaintenanceReviewAppAnswer(
     sourceKind: context.actorType === "user" ? "app" : "agent",
     actorType: context.actorType,
     actorId: context.actorId,
+    recordedAt,
+  });
+  await mirrorAcceptedMaintenanceReviewAnswer(tx, {
+    userId: review.userId,
+    actorType: context.actorType,
+    actorId: context.actorId,
+    caseId: review.id,
+    transactionId: review.transactionId,
+    requestId: action.request.requestId,
+    operationId: action.terminal.operationId,
+    text,
     recordedAt,
   });
   const lineage = financeMaintenanceLineage(review.evidence);

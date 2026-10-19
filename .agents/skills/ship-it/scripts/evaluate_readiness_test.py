@@ -1,11 +1,13 @@
 import sys
+import copy
+import json
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from evaluate_readiness import evaluate
-from acceptance_test import acceptance_record
+from acceptance_test import acceptance_record, detailed_state
 
 HEAD = "a" * 40
 BASE = "b" * 40
@@ -114,6 +116,22 @@ def ready_state(**overrides):
 
 
 class EvaluateReadinessTest(unittest.TestCase):
+    def test_exact_frozen_detailed_plan_preserves_all_readiness_gates(self):
+        detailed = detailed_state()
+        state = ready_state()
+        original_head = state['pr']['headSha']
+        original_base = state['pr']['baseSha']
+        # Bind every existing readiness receipt to the frozen candidate.
+        serialized = json.dumps(state).replace(original_head, detailed['pr']['headSha']).replace(original_base, detailed['pr']['baseSha'])
+        state = json.loads(serialized)
+        state['acceptance'] = detailed['acceptance']
+        state['reviewedProductionPlan'] = detailed['reviewedProductionPlan']
+        before = copy.deepcopy(state)
+        self.assertEqual(evaluate(state)['decision'], 'MERGE')
+        self.assertEqual(state, before)
+        state['acceptance']['reviewers'] = state['acceptance']['implementers']
+        self.assertEqual(evaluate(state)['decision'], 'BLOCK')
+
     def test_missing_independent_acceptance_cannot_merge(self):
         state = ready_state()
         del state['acceptance']

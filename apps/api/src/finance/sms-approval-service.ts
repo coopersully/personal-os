@@ -21,6 +21,8 @@ import {
   loadFinanceAuthorization,
 } from "./context.js";
 import type { ContextualPrincipal } from "./contextual-question-store.js";
+import { lockFinanceEffectOwner } from "./conversation-causality.js";
+import { guardFinanceExecutionTransaction } from "./execution-owner-guard.js";
 import type { AdmitSmsAnswer } from "./sms-answer-port.js";
 
 /** SMS approves only a single reversible transaction categorization, never budget authority,
@@ -117,6 +119,10 @@ export function createFinanceSmsApprovalService(options: {
       context.principal.actorId !== context.principal.userId
     )
       return outcome("unavailable");
+    await guardFinanceExecutionTransaction(tx, context.principal.userId, {
+      reviewIds: [command.work.id],
+      hostSchedules: true,
+    });
     const authority = await loadFinanceAuthorization({ db: tx, ...context });
     return executeFinanceAdmittedMutation(
       tx,
@@ -128,6 +134,7 @@ export function createFinanceSmsApprovalService(options: {
         sourceKind: "sms",
       },
       async (executor) => {
+        await lockFinanceEffectOwner(executor, context.principal.userId);
         const admission = await options.admit(executor, {
           ...command,
           userId: context.principal.userId,

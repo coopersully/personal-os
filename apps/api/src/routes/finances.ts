@@ -5,6 +5,8 @@ import {
   approveFinanceBudgetInputSchema,
   cancelFinanceReimbursementInputSchema,
   classifyFinanceTransactionsInputSchema,
+  confirmFinanceBalanceBasisInputSchema,
+  confirmFinanceRecurringScheduleInputSchema,
   createFinanceAccountInputSchema,
   createFinanceBudgetBucketInputSchema,
   createFinanceBudgetInputSchema,
@@ -19,17 +21,20 @@ import {
   exchangePlaidTokenInputSchema,
   financeAccountQuerySchema,
   financeAnswerSchema,
+  financeBalanceBasisSourcesQuerySchema,
   financeBudgetBucketQuerySchema,
   financeBudgetPaceQuerySchema,
   financeBudgetPolicyLifecycleSchema,
   financeBudgetPolicyListSchema,
   financeBudgetStatusQuerySchema,
+  financeCashflowProjectionQuerySchema,
   financeCsvImportInputSchema,
   financeMaintenanceHistoryQuerySchema,
   financeMaintenanceInputSchema,
   financeMerchantQuerySchema,
   financePositionReadScopeSchema,
   financeReceiptReviewInputSchema,
+  financeRecurringOccurrencesQuerySchema,
   financeReviewDecisionInputSchema,
   financeReviewHistoryQuerySchema,
   financeScenarioInputSchema,
@@ -39,6 +44,7 @@ import {
   linkFinanceTransactionsInputSchema,
   maintenanceScopeQuerySchema,
   manageFinanceGoalInputSchema,
+  manageFinanceOccurrenceMatchInputSchema,
   manageFinanceRecurringItemInputSchema,
   manageFinanceRuleInputSchema,
   mergeFinanceMerchantsInputSchema,
@@ -65,6 +71,7 @@ import {
 } from "@personal-os/domain";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { z } from "zod";
+import type { createFinanceBudgetBaselineQualificationService } from "../finance/baseline-qualification-service.js";
 import type { createFinanceBudgetPolicyService } from "../finance/budget-policy-service.js";
 import { loadFinanceAuthorization } from "../finance/context.js";
 import type { createFinanceContextualQuestionService } from "../finance/contextual-question-service.js";
@@ -74,6 +81,7 @@ import {
   buildFinancePeriodReviewResult,
   buildFinanceSnapshotResult,
 } from "../finance/presentation-service.js";
+import type { createFinanceSpendingService } from "../finance/spending-service.js";
 import type { createFinanceActionService, SupportedActionKind } from "../finance-action-service.js";
 import type { FinanceChallengeService } from "../finance-challenge-service.js";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
@@ -84,6 +92,8 @@ import type { createFinanceService } from "../finance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
 import type { AppEnv, Principal } from "../types.js";
 import { requireWorkspaceExecutionRoute } from "../workspace-execution.js";
+import { registerFinanceBaselineQualificationRoutes } from "./finance-baseline-qualification.js";
+import { registerFinanceSpendingRoute } from "./finance-spending.js";
 import { parseBody, requireFeatureAccess, requireHuman, requireScope } from "./support.js";
 
 type MutationContext = {
@@ -92,11 +102,13 @@ type MutationContext = {
 };
 
 type FinanceRouteOptions = {
+  financeSpending?: ReturnType<typeof createFinanceSpendingService>;
   app: Hono<AppEnv>;
   db?: Database;
   actions?: ReturnType<typeof createFinanceActionService>;
   financeChallenges?: FinanceChallengeService;
   contextualQuestions?: ReturnType<typeof createFinanceContextualQuestionService>;
+  baselineQualification?: ReturnType<typeof createFinanceBudgetBaselineQualificationService>;
   financeBudgetPolicies?: ReturnType<typeof createFinanceBudgetPolicyService>;
   financeMaintenance: FinanceMaintenanceService;
   canonicalFinanceMaintenance?: ReturnType<typeof createFinanceMaintenanceIntentService>;
@@ -116,10 +128,12 @@ export function registerFinanceRoutes({
   financeChallenges,
   contextualQuestions,
   financeBudgetPolicies,
+  baselineQualification,
   canonicalFinanceMaintenance,
   financePeriodReviews,
   financePlaybook,
   financePosition,
+  financeSpending,
   financeStatus,
   finances,
   mutationContext,
@@ -177,6 +191,7 @@ export function registerFinanceRoutes({
       (context.req.method === "GET" && context.req.path === "/v1/finances/position") ||
       (context.req.method === "POST" &&
         [
+          "/v1/finances/spending/transactions",
           "/v1/finances/categorizations/propose",
           "/v1/finances/scenarios/compare",
           "/v1/finances/budget-policies/preview",
@@ -189,6 +204,11 @@ export function registerFinanceRoutes({
   };
   app.use("/v1/finances", requireFinanceAccess);
   app.use("/v1/finances/*", requireFinanceAccess);
+  registerFinanceBaselineQualificationRoutes({
+    app,
+    service: baselineQualification,
+    financeContext,
+  });
   const questions = () => {
     if (!contextualQuestions)
       throw new Error("Finance contextual question service is unavailable.");
@@ -198,6 +218,11 @@ export function registerFinanceRoutes({
     if (!financePosition) throw new Error("Finance position service is unavailable.");
     return financePosition;
   };
+  registerFinanceSpendingRoute({
+    app,
+    spending: financeSpending,
+    readTransaction: finances.getFinanceTransaction,
+  });
   app.get("/v1/finances/position", async (context) => {
     const accountIds = context.req.query("accountIds");
     const scope = financePositionReadScopeSchema.parse({
@@ -439,9 +464,12 @@ export function registerFinanceRoutes({
   );
   app.put("/v1/finances/budget-plan", async (context) => {
     const input = await parseBody(context, setFinanceBudgetPlanInputSchema);
-    return act(context, "budget_plan", input, async () =>
-      context.json({ plan: await finances.setBudgetPlan(input, financeMutationContext(context)) }),
+    const outcome = await requireActions().performDirect(
+      "budget_plan",
+      input,
+      financeMutationContext(context),
     );
+    return context.json(outcome, outcome.status === "pending_review" ? 202 : 200);
   });
   app.get("/v1/finances", async (context) => {
     const query = financeBudgetStatusQuerySchema.parse(context.req.query());
@@ -630,6 +658,92 @@ export function registerFinanceRoutes({
       ),
     ),
   );
+  app.get("/v1/finances/recurring-schedules", async (context) =>
+    context.json(await finances.listFinanceRecurringSchedules(context.get("principal").userId)),
+  );
+  app.post("/v1/finances/recurring-schedules", async (context) =>
+    context.json(
+      await finances.confirmFinanceRecurringSchedule(
+        await parseBody(context, confirmFinanceRecurringScheduleInputSchema),
+        await financeContext(context),
+      ),
+      201,
+    ),
+  );
+  app.get("/v1/finances/recurring-occurrences", async (context) => {
+    const accountIds = context.req.query("accountIds");
+    const query = financeRecurringOccurrencesQuerySchema.parse({
+      from: context.req.query("from"),
+      to: context.req.query("to"),
+      ...(accountIds !== undefined ? { accountIds: accountIds ? accountIds.split(",") : [] } : {}),
+    });
+    return context.json(
+      await finances.listFinanceRecurringOccurrences(context.get("principal").userId, query),
+    );
+  });
+  app.post("/v1/finances/recurring-occurrence-matches", async (context) =>
+    context.json(
+      await finances.manageFinanceOccurrenceMatch(
+        await parseBody(context, manageFinanceOccurrenceMatchInputSchema),
+        await financeContext(context),
+      ),
+      201,
+    ),
+  );
+  app.get("/v1/finances/balance-bases", async (context) => {
+    const value = context.req.query("accountIds");
+    const accountIds =
+      value === undefined
+        ? undefined
+        : z
+            .array(z.uuid())
+            .max(100)
+            .parse(value ? value.split(",") : []);
+    return context.json(
+      await finances.listFinanceBalanceBases(context.get("principal").userId, accountIds),
+    );
+  });
+  app.post("/v1/finances/balance-bases", async (context) =>
+    context.json(
+      await finances.confirmFinanceBalanceBasis(
+        await parseBody(context, confirmFinanceBalanceBasisInputSchema),
+        await financeContext(context),
+      ),
+      201,
+    ),
+  );
+  app.get("/v1/finances/balance-basis-sources", async (context) => {
+    const value = context.req.query("accountIds");
+    const query = financeBalanceBasisSourcesQuerySchema.parse(
+      value === undefined ? {} : { accountIds: value ? value.split(",") : [] },
+    );
+    return context.json(
+      await finances.listFinanceBalanceBasisSources(context.get("principal").userId, query),
+    );
+  });
+  app.get("/v1/finances/cashflow-sources", async (context) => {
+    const value = context.req.query("accountIds");
+    const query = financeRecurringOccurrencesQuerySchema.parse({
+      from: context.req.query("from"),
+      to: context.req.query("to"),
+      ...(value !== undefined ? { accountIds: value ? value.split(",") : [] } : {}),
+    });
+    return context.json(
+      await finances.listFinanceCashflowSources(context.get("principal").userId, query),
+    );
+  });
+  app.get("/v1/finances/cashflow-projection", async (context) => {
+    const value = context.req.query("accountIds");
+    const query = financeCashflowProjectionQuerySchema.parse({
+      from: context.req.query("from"),
+      to: context.req.query("to"),
+      selectedIncomeStreamId: context.req.query("selectedIncomeStreamId") ?? null,
+      ...(value !== undefined ? { accountIds: value ? value.split(",") : [] } : {}),
+    });
+    return context.json(
+      await finances.getFinanceCashflowProjection(context.get("principal").userId, query),
+    );
+  });
   app.get("/v1/finances/recurring-items", async (context) =>
     context.json(await finances.listFinanceRecurringItems(context.get("principal").userId)),
   );
@@ -1078,12 +1192,12 @@ export function registerFinanceRoutes({
   });
   app.post("/v1/finances/budgets", async (context) => {
     const input = await parseBody(context, createFinanceBudgetInputSchema);
-    return act(context, "budget_plan", input, async () =>
-      context.json(
-        { budget: await finances.createBudget(input, financeMutationContext(context)) },
-        201,
-      ),
+    const outcome = await requireActions().performDirect(
+      "budget_plan",
+      input,
+      financeMutationContext(context),
     );
+    return context.json(outcome, outcome.status === "pending_review" ? 202 : 200);
   });
   app.get("/v1/finances/budget-buckets", async (context) =>
     context.json(

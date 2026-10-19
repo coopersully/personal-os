@@ -5,7 +5,6 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   financeAccounts,
-  financeTransactions,
   migrateDatabase,
   users,
 } from "@personal-os/database";
@@ -44,17 +43,15 @@ describe("Finance SMS provenance migration", () => {
       .returning();
     if (!account) throw new Error("account");
     for (const source of ["app", "agent"]) {
-      const [transaction] = await database.db
-        .insert(financeTransactions)
-        .values({
-          userId,
-          accountId: account.id,
-          amount: 500,
-          merchant: "Legacy",
-          direction: "expense",
-          transactionDate: "2026-09-23",
-        })
-        .returning();
+      // The historical schema predates current reimbursement relationship columns.
+      const {
+        rows: [transaction],
+      } = await database.pool.query<{ id: string }>(
+        `INSERT INTO finance_transactions
+          (user_id, account_id, amount_cents, merchant, direction, transaction_date)
+         VALUES ($1, $2, 500, 'Legacy', 'expense', '2026-09-23') RETURNING id`,
+        [userId, account.id],
+      );
       if (!transaction) throw new Error("transaction");
       // Seed the published pre-0092 schema directly. Today's service also writes
       // action-authority columns introduced by later migrations.

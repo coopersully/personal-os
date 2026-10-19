@@ -18,7 +18,7 @@ import { Separator } from "@/components/ui/separator";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
 import { SettingsFeedbackContext } from "../../lib/settings-feedback.js";
-import { financeConversationReturnTo } from "./automation-recovery.js";
+import { financeConversationReturnTo, financeRecoveryHref } from "./automation-recovery.js";
 import {
   type AutomationAction,
   AutomationBinding,
@@ -84,7 +84,7 @@ export function FinanceAutomationsPage() {
             <Link to={returnTo}>Return to conversation</Link>
           </Button>
         ) : null}
-        <FinanceConversationReadiness />
+        <FinanceConversationReadiness returnTo={returnTo} />
         <Separator />
         <QueryFeedback query={schedules} title="Automations could not be loaded" />
         {schedules.isSuccess && !schedules.data.length ? (
@@ -97,6 +97,7 @@ export function FinanceAutomationsPage() {
               status={status}
               pending={pending}
               perform={perform}
+              returnTo={returnTo}
             />
           ))}
         </div>
@@ -109,10 +110,12 @@ function Automation({
   status,
   pending,
   perform,
+  returnTo,
 }: {
   status: HostStatus;
   pending: boolean;
   perform: AutomationAction;
+  returnTo: string | null;
 }) {
   const { schedule, health } = status;
   const [label, setLabel] = useState(schedule.label);
@@ -170,7 +173,15 @@ function Automation({
       <div className="flex flex-wrap gap-2">
         {status.connectionAvailable === false ? (
           <Button asChild variant="secondary">
-            <Link to="/settings?section=agent-connections">Reconnect host</Link>
+            <Link
+              to={
+                returnTo
+                  ? financeRecoveryHref("/settings?section=agent-connections", returnTo)
+                  : "/settings?section=agent-connections"
+              }
+            >
+              Reconnect host
+            </Link>
           </Button>
         ) : null}
         <HostPromptPanel status={status} />

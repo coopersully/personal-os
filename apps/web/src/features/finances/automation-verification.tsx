@@ -16,9 +16,9 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
-import { financeConversationRecovery } from "./automation-recovery.js";
+import { financeConversationRecovery, financeRecoveryHref } from "./automation-recovery.js";
 
-export function FinanceConversationReadiness() {
+export function FinanceConversationReadiness({ returnTo }: { returnTo?: string | null }) {
   const query = useQuery({
     queryKey: ["finance-conversation-readiness"],
     queryFn: api.getFinanceConversationReadiness,
@@ -41,7 +41,16 @@ export function FinanceConversationReadiness() {
                     {financeConversationRecovery[query.data.reason].action}
                   </a>
                 ) : (
-                  <Link to={financeConversationRecovery[query.data.reason].href}>
+                  <Link
+                    to={
+                      returnTo
+                        ? financeRecoveryHref(
+                            financeConversationRecovery[query.data.reason].href,
+                            returnTo,
+                          )
+                        : financeConversationRecovery[query.data.reason].href
+                    }
+                  >
                     {financeConversationRecovery[query.data.reason].action}
                   </Link>
                 )}

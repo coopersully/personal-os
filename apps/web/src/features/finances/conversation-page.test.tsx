@@ -9,9 +9,71 @@ import { createAppQueryClient } from "../../lib/query-client.js";
 import { FinanceActivityEntry } from "./activity-entry.js";
 import { FinanceAutomationsPage } from "./automations-page.js";
 import { FinanceConversationPage } from "./conversation-page.js";
+import { FinanceRecoveryReturn } from "./finance-recovery-return.js";
+
+it.each([
+  "aggregate",
+  "registration",
+])("retains contextual drafts through Chat, Automations, %s host recovery and Settings return", async (recoveryLink) => {
+  const target = "/finances/chat?question=q&message=m";
+  const client = createAppQueryClient({ queries: { retry: false } });
+  client.setQueryData(["me"], { id: "owner" });
+  api.getFinanceConversationReadiness
+    .mockResolvedValueOnce({ canSend: false, reason: "registration_paused" })
+    .mockResolvedValue({ canSend: false, reason: "connection_disconnected" });
+  api.getFinanceConversationHostReadiness.mockResolvedValue({ messageCapability: "unverified" });
+  api.getFinanceContextualQuestion.mockResolvedValue({ state: "unavailable" });
+  api.getFinanceConversationMessageContext.mockResolvedValue({
+    targetMessageId: "m",
+    messages: [message],
+  });
+  api.listAutomationHostSchedules.mockResolvedValue([
+    {
+      schedule: {
+        id: "schedule-a",
+        label: "Original host",
+        state: "active",
+        hostSurface: "codex_desktop",
+        trigger: {
+          type: "recurring",
+          recurrence: { everyMinutes: 60, timeZone: "America/New_York" },
+        },
+      },
+      connectionAvailable: false,
+      health: { state: "unknown", graceMilliseconds: null },
+    },
+  ]);
+  const user = userEvent.setup();
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[target]}>
+        <Routes>
+          <Route path="/finances/chat" element={<FinanceConversationPage ownerId="owner" />} />
+          <Route path="/finances/automations" element={<FinanceAutomationsPage />} />
+          <Route path="/settings" element={<FinanceRecoveryReturn />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  await user.type(await screen.findByLabelText("Answer"), "Keep this contextual reply");
+  await user.click(await screen.findByRole("link", { name: "Review host setup" }));
+  const region = await screen.findByRole("region", {
+    name: recoveryLink === "aggregate" ? "Finance Chat readiness" : "Original host",
+  });
+  const reconnect = region.querySelector<HTMLAnchorElement>("a[href*='agent-connections']");
+  expect(reconnect).not.toBeNull();
+  await user.click(reconnect as HTMLAnchorElement);
+  const back = await screen.findByRole("link", { name: "Return to conversation" });
+  expect(back).toHaveAttribute("href", target);
+  await user.click(back);
+  expect(await screen.findByLabelText("Answer")).toHaveValue("Keep this contextual reply");
+  expect(api.sendFinanceConversationMessage).not.toHaveBeenCalled();
+  expect(api.answerFinanceContextualQuestion).not.toHaveBeenCalled();
+});
 
 const api = vi.hoisted(() => ({
   getFinanceConversationReadiness: vi.fn(),
+  getFinanceConversationHostReadiness: vi.fn(),
   getFinanceConversationHistory: vi.fn(),
   getFinanceConversationMessageContext: vi.fn(),
   sendFinanceConversationMessage: vi.fn(),

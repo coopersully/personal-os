@@ -466,6 +466,30 @@ it("routes an unavailable original connection to reconnection without offering v
   expect(api.issueFinanceConversationChallenge).not.toHaveBeenCalled();
 });
 
+it.each([
+  null,
+  "https://outside.example/",
+  "//outside.example/",
+  "/finances/chat?bad=%ZZ",
+])("keeps both host recovery links plain when contextual return is absent or unsafe: %s", async (returnTo) => {
+  api.getFinanceConversationReadiness.mockResolvedValue({
+    ...readiness,
+    reason: "connection_disconnected",
+  });
+  api.listAutomationHostSchedules.mockResolvedValue([{ ...status(), connectionAvailable: false }]);
+  open(
+    undefined,
+    `/finances/automations${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`,
+  );
+  await waitFor(() =>
+    expect(screen.getAllByRole("link", { name: "Reconnect host" })).toHaveLength(2),
+  );
+  for (const link of screen.getAllByRole("link", { name: "Reconnect host" })) {
+    expect(link).toHaveAttribute("href", "/settings?section=agent-connections");
+  }
+  expect(screen.queryByRole("link", { name: "Return to conversation" })).not.toBeInTheDocument();
+});
+
 it("offers host setup for an overdue run without claiming to reschedule the external job", async () => {
   const user = open();
   await user.click(await screen.findByRole("button", { name: "Review host setup" }));

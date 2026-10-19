@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ComponentProps } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { FinanceCashflowTimeline } from "./cashflow-timeline";
 
@@ -25,7 +26,11 @@ const income = [
     status: "active" as const,
   },
 ] as const;
-function show(query = "", knownCurrency = true) {
+function show(
+  query = "",
+  knownCurrency = true,
+  overrides: Partial<ComponentProps<typeof FinanceCashflowTimeline>> = {},
+) {
   return render(
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
@@ -48,6 +53,7 @@ function show(query = "", knownCurrency = true) {
             },
           ]}
           accounts={knownCurrency ? [{ id: accountId, name: "Checking", currencyCode: "EUR" }] : []}
+          {...overrides}
         />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -102,4 +108,105 @@ it("does not silently substitute a timezone when user settings cannot load", asy
   show();
   expect(await screen.findByText("Couldn’t load this material.")).toBeVisible();
   expect(screen.queryByRole("link", { name: "Payroll" })).not.toBeInTheDocument();
+});
+
+it.each([
+  null,
+  "Invalid/Timezone",
+])("offers settings recovery for unavailable timezone %s without publishing expected records", async (planningTimezone) => {
+  api.getMe.mockResolvedValue({ planningTimezone });
+  show();
+  expect(await screen.findByRole("link", { name: "Review settings" })).toHaveAttribute(
+    "href",
+    "/settings",
+  );
+  expect(screen.queryByRole("link", { name: "Payroll" })).not.toBeInTheDocument();
+});
+
+it("retries a failed identity read through the visible recovery button", async () => {
+  api.getMe.mockRejectedValueOnce(new Error("Temporarily offline"));
+  show();
+  await userEvent.setup().click(await screen.findByRole("button", { name: "Try again" }));
+  expect(await screen.findByRole("link", { name: "Payroll" })).toBeVisible();
+  expect(api.getMe).toHaveBeenCalledTimes(2);
+});
+
+it.each([
+  1, 2,
+])("discloses %s excluded next dates and does not render them as in-range payments", async (count) => {
+  show("", true, {
+    income: Array.from({ length: count }, (_, index) => ({
+      ...income[0],
+      id: `11111111-1111-4111-8111-${String(index + 1).padStart(12, "0")}`,
+      nextExpectedDate: "2026-03-01",
+    })),
+    obligations: [],
+  });
+  expect(
+    await screen.findByText(
+      `${count} next expected ${count === 1 ? "item is" : "items are"} outside this date range.`,
+    ),
+  ).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Payroll" })).not.toBeInTheDocument();
+});
+
+it("shows inferred savings and unknown observation dates without treating them as confirmed income", async () => {
+  show("", true, {
+    income: [],
+    obligations: [
+      {
+        ...income[0],
+        id: accountId,
+        kind: "savings",
+        displayName: "Savings plan",
+        merchant: "Savings",
+        source: "inferred",
+        status: "needs_review",
+        nextExpectedDate: null,
+        lastObservedDate: null,
+      },
+    ],
+  });
+  expect(await screen.findByRole("link", { name: "Savings plan" })).toHaveAttribute(
+    "href",
+    `/finances/cashflow?view=subscriptions&record=${accountId}`,
+  );
+  expect(screen.getByText(/Savings movement/)).toBeVisible();
+  expect(screen.getByText("Date unknown · Needs confirmation")).toBeVisible();
+  expect(screen.getByText("Observation date not recorded")).toBeVisible();
+});
+
+it("updates the bounded date controls and recovers an unsupported URL presentation", async () => {
+  const user = userEvent.setup();
+  show("&timeline=unsupported");
+  expect(await screen.findByRole("option", { name: "Unsupported view" })).toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText("Timeline view"), "agenda");
+  await screen.findByRole("link", { name: "Payroll" });
+  fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-01-02" } });
+  fireEvent.change(screen.getByLabelText("Through"), { target: { value: "2026-02-27" } });
+  expect(screen.getByLabelText("From")).toHaveValue("2026-01-02");
+  expect(screen.getByLabelText("Through")).toHaveValue("2026-02-27");
+});
+
+it("allows explicit account inclusion, exclusion, all and none without losing source scope", async () => {
+  const user = userEvent.setup();
+  show();
+  await screen.findByRole("link", { name: "Payroll" });
+  await user.click(screen.getByRole("button", { name: "All source accounts" }));
+  await user.click(screen.getByRole("menuitemcheckbox", { name: "Checking" }));
+  await user.keyboard("{Escape}");
+  expect(screen.getByRole("button", { name: "No accounts selected" })).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Payroll" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "No accounts selected" }));
+  await user.click(screen.getByRole("menuitemcheckbox", { name: "Checking" }));
+  await user.keyboard("{Escape}");
+  expect(screen.getByRole("button", { name: "1 selected accounts" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "Payroll" })).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "1 selected accounts" }));
+  await user.click(screen.getByRole("menuitem", { name: "Select no accounts" }));
+  expect(screen.getByRole("button", { name: "No accounts selected" })).toBeVisible();
+  await user.click(screen.getByRole("button", { name: "No accounts selected" }));
+  await user.click(screen.getByRole("menuitem", { name: "All source accounts" }));
+  expect(screen.getByRole("button", { name: "All source accounts" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "Payroll" })).toBeVisible();
 });

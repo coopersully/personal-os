@@ -136,3 +136,59 @@ it("keeps a zero-selected-activity qualified row visible and selects its own emp
     transactionIds: [],
   });
 });
+it("reverses sorting and keeps unavailable budgets last with deterministic ties", () => {
+  const groups = ["Zulu", "Alpha", "Beta", "Missing", "Uncapped"].map((label, index) => ({
+    id: label,
+    label,
+    netCents: index * 100,
+    pendingCents: 0,
+    categories: [],
+    kind: "category" as const,
+    categoryIds: [label],
+    positiveAreaCents: index * 100,
+    grossCents: index * 100,
+    reimbursementAdjustmentCents: 0,
+    reimbursementOutstandingCents: 0,
+    refundAdjustmentCents: 0,
+    drillDown: {
+      scope: {
+        from: "2026-09-01",
+        through: "2026-09-30",
+        timezone: "UTC",
+        accountIds: null,
+        categoryIds: null,
+        basis: "personal_cost" as const,
+        includePending: true,
+        subtractRefunds: true,
+      },
+      contributionIds: [],
+      transactionIds: [],
+    },
+  }));
+  const monthlyBudget = {
+    state: "qualified",
+    coverage: "unknown",
+    groups: [
+      { groupId: "Zulu", budgetCents: 1000, usedCents: 500, overspent: false },
+      { groupId: "Alpha", budgetCents: 2000, usedCents: 1000, overspent: false },
+      { groupId: "Beta", budgetCents: 1000, usedCents: 100, overspent: false },
+      { groupId: "Uncapped", budgetCents: null, usedCents: 100, overspent: false },
+    ],
+  } as FinanceSpendingMonthlyBudget;
+  render(<SpendingList groups={groups} monthlyBudget={monthlyBudget} onSelect={vi.fn()} />);
+  const labels = () =>
+    within(screen.getByRole("list"))
+      .getAllByRole("button")
+      .map((button) => button.textContent);
+  fireEvent.click(screen.getByRole("button", { name: /Monthly budget used/ }));
+  expect(labels()).toEqual(["Alpha", "Zulu", "Beta", "Missing", "Uncapped"]);
+  fireEvent.click(screen.getByRole("button", { name: /Monthly budget used/ }));
+  expect(labels()).toEqual(["Beta", "Alpha", "Zulu", "Missing", "Uncapped"]);
+  fireEvent.click(screen.getByRole("button", { name: /Name/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Name/ }));
+  expect(labels()).toEqual(["Zulu", "Uncapped", "Missing", "Beta", "Alpha"]);
+  fireEvent.click(screen.getByRole("button", { name: /Spent/ }));
+  fireEvent.click(screen.getByRole("button", { name: /Spent/ }));
+  expect(labels()).toEqual(["Zulu", "Alpha", "Beta", "Missing", "Uncapped"]);
+  expect(screen.getByText("Budget unavailable")).toBeVisible();
+});

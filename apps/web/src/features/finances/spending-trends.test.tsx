@@ -33,7 +33,7 @@ function dashboard(): FinanceSpendingDashboard {
     schemaVersion: 1,
     snapshot: {
       schemaVersion: 1,
-      scope,
+      scope: { ...scope },
       asOf: "2026-03-15T12:00:00Z",
       coverage: "complete",
       contributions: [],
@@ -171,4 +171,89 @@ describe("spending trends", () => {
     await userEvent.click(screen.getByRole("button", { name: /2026-03-01: \$1.01/ }));
     expect(onSelect).toHaveBeenCalledWith(required(value.snapshot.bins[0]).drillDown);
   });
+});
+it("separates complete zero, refunds, future and partial evidence in accessible daily bars", () => {
+  const value = dashboard();
+  const base = required(value.snapshot.bins[0]);
+  value.snapshot.bins = [
+    { ...base, netCents: 0, positiveAreaCents: 0 },
+    {
+      ...base,
+      date: "2026-03-02",
+      netCents: -125,
+      positiveAreaCents: 0,
+      negativeAdjustmentCents: 125,
+    },
+    { ...base, date: "2026-03-03", future: true },
+    { ...base, date: "2026-03-04", coverage: "partial" },
+  ];
+  render(<FinanceSpendingTrends dashboard={value} comparisonLoading onSelect={vi.fn()} />);
+  expect(screen.getByText("Loading previous period")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /2026-03-01:.*Confirmed zero/ })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /2026-03-02:.*Net refund/ })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /2026-03-03:.*Future/ })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /2026-03-04:.*Partial coverage/ })).toBeInTheDocument();
+  expect(screen.getByText("Refunds/adjustments −$1.25")).toBeInTheDocument();
+});
+it("compares disappearing and newly observed groups without inventing a percentage basis", async () => {
+  const value = dashboard(),
+    previous = dashboard();
+  value.snapshot.netCents = 300;
+  previous.snapshot.netCents = 100;
+  value.groups = [
+    { id: "new", label: "New category", netCents: 300 },
+  ] as FinanceSpendingDashboard["groups"];
+  previous.groups = [
+    { id: "old", label: "Old category", netCents: 100 },
+  ] as FinanceSpendingDashboard["groups"];
+  value.currency.unsupported = [
+    { code: "EUR", transactionIds: ["foreign"] },
+    { code: null, transactionIds: ["unknown"] },
+  ];
+  const select = vi.fn();
+  render(<FinanceSpendingTrends dashboard={value} comparison={previous} onSelect={select} />);
+  expect(screen.getByText("$2.00 change · 200.0%")).toBeInTheDocument();
+  expect(
+    screen.getByText("Unsupported currencies excluded: EUR, Unknown currency"),
+  ).toBeInTheDocument();
+  expect(screen.getByText("New category").closest("tr")).toHaveTextContent("$3.00");
+  expect(screen.getByText("Old category").closest("tr")).toHaveTextContent("-$1.00");
+  await userEvent.click(screen.getByRole("button", { name: "2026-03-01" }));
+  expect(select).toHaveBeenCalledWith(required(value.snapshot.bins[0]).drillDown);
+});
+it("combines long history into calendar months while preserving partial coverage and exact membership", () => {
+  const value = dashboard();
+  value.snapshot.scope.through = "2026-12-31";
+  const base = required(value.snapshot.bins[0]);
+  value.snapshot.bins = [
+    { ...base, coverage: "complete" },
+    { ...base, date: "2026-03-31", coverage: "unknown", pendingCents: 20, provisional: true },
+    { ...base, date: "2026-04-02", coverage: "unknown", future: true },
+  ];
+  const result = spendingTrendBins(value);
+  expect(result.grain).toBe("Monthly");
+  expect(result.bins[0]).toMatchObject({
+    label: "2026-03-01 – 2026-03-31",
+    coverage: "partial",
+    partial: false,
+    provisional: true,
+    pendingCents: 20,
+    netCents: 202,
+  });
+  expect(result.bins[1]).toMatchObject({ coverage: "unknown", partial: true, future: true });
+  expect(result.bins[0]?.drillDown.transactionIds).toEqual(["t"]);
+  expect(
+    spendingComparisonScopes(
+      { ...scope, from: "2026-03-01", through: "2026-03-01" },
+      "today",
+      "2026-03-15T12:00:00Z",
+    ).label,
+  ).toBe("Previous day");
+  expect(
+    spendingComparisonScopes(
+      { ...scope, from: "2026-03-02", through: "2026-03-08" },
+      "week",
+      "2026-04-01T12:00:00Z",
+    ).label,
+  ).toBe("Previous week");
 });

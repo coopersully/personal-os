@@ -464,3 +464,96 @@ it("keeps in-flight evidence isolated when the owner changes", async () => {
     expect(screen.queryByText("Classified transactions")).not.toBeInTheDocument(),
   );
 });
+
+it("shows current coverage constraints and opens grouped routine actions with keyboard disclosure", async () => {
+  const user = (await import("@testing-library/user-event")).default.setup();
+  const first = financialEntry();
+  const value = page([first, { ...first, id: "second", action: "Second classification" }]);
+  value.capabilities.financialActions = {
+    state: "available",
+    scope: "committed_candidate_effects",
+  };
+  value.coverage.reasons = ["committed_receipts_with_incomplete_evidence_not_projected"];
+  render(view(vi.fn().mockResolvedValue(value)));
+  const trigger = await screen.findByRole("button", { name: "transaction · 2 actions" });
+  expect(
+    screen.getByText(/Includes applied changes with committed candidate receipts/),
+  ).toBeVisible();
+  expect(
+    screen.getByText(/Some committed receipts have incomplete supporting evidence/),
+  ).toBeVisible();
+  expect(screen.queryByText(/Historical decisions without/)).not.toBeInTheDocument();
+  expect(screen.queryByText("Second classification")).not.toBeInTheDocument();
+  trigger.focus();
+  await user.keyboard("{Enter}");
+  expect(trigger).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByText("Second classification")).toBeVisible();
+  await user.keyboard("{Enter}");
+  expect(trigger).toHaveAttribute("aria-expanded", "false");
+});
+
+it("applies a complete bounded filter set and deduplicates overlapping action pages", async () => {
+  const read = vi
+    .fn()
+    .mockResolvedValueOnce(page([entry], "cursor"))
+    .mockResolvedValueOnce(page([entry], "filtered"))
+    .mockResolvedValueOnce(
+      page([entry, { ...entry, id: "another", action: "Another accepted answer" }]),
+    );
+  render(view(read));
+  await screen.findByText(entry.explanation);
+  fireEvent.change(screen.getByLabelText("Event type"), {
+    target: { value: "human_answer_decision" },
+  });
+  fireEvent.change(screen.getByLabelText("Record ID"), {
+    target: { value: "11111111-1111-4111-8111-111111111111" },
+  });
+  fireEvent.change(screen.getByLabelText("Through (UTC)"), { target: { value: "2026-10-18" } });
+  fireEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Load more activity" })).toBeEnabled(),
+  );
+  expect(read.mock.calls[1]?.[0]).toEqual({
+    limit: 50,
+    type: "human_answer_decision",
+    recordId: "11111111-1111-4111-8111-111111111111",
+    through: "2026-10-18T23:59:59.999Z",
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Load more activity" }));
+  await screen.findByText("Another accepted answer");
+  expect(screen.getAllByText("Answer accepted")).toHaveLength(1);
+});
+
+it("ignores an expired owner's failed refresh and dismisses its loading toast", async () => {
+  let reject!: (reason: Error) => void;
+  const read = vi
+    .fn()
+    .mockResolvedValueOnce(page())
+    .mockImplementationOnce(
+      () =>
+        new Promise<Page>((_resolve, fail) => {
+          reject = fail;
+        }),
+    );
+  const rendered = render(view(read));
+  await screen.findByText(entry.explanation);
+  fireEvent.click(screen.getByRole("button", { name: "Refresh activity" }));
+  rendered.rerender(view(vi.fn().mockResolvedValue(page([])), "next-owner"));
+  await screen.findByText(/No recorded activity/);
+  reject(new ApiClientError({ status: 403, code: "forbidden", message: "Expired owner" }));
+  await waitFor(() => expect(toast.dismiss).toHaveBeenCalledWith("toast-id"));
+  expect(toast.error).not.toHaveBeenCalled();
+  expect(screen.queryByText(entry.explanation)).not.toBeInTheDocument();
+});
+
+it("does not group missing run or effect provenance", () => {
+  const financial = financialEntry();
+  const { effect: _effect, ...withoutEffect } = financial;
+  const values = [
+    { ...financial, id: "no-run", runId: null },
+    { ...withoutEffect, id: "no-effect" },
+  ];
+  expect(groupFinanceActivity(values).map((group) => group.entries.map((item) => item.id))).toEqual(
+    [["no-run"], ["no-effect"]],
+  );
+});

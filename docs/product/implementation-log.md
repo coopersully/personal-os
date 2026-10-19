@@ -1,5 +1,26 @@
 # nohmi — Implementation Log
 
+## 2026-10-19 — Integrated Finance experience merged
+
+- [PR #270 — Complete the Finance workspace and guarded agent workflows](https://github.com/coopersully/personal-os/pull/270)
+  merged at `498f08d4` with resumable setup, Spending, Chat, Automations and Activity, and manual
+  workflow surfaces. Setup receipts preserve existing access and separate completion from messaging
+  readiness; the conversation and activity trail connect decisions to their supporting records.
+- Spending defaults to personal cost while retaining full-outflow inspection, exact transaction
+  drill-down, and applicable monthly budget evidence. These distinctions keep expected reimbursements
+  and unsupported budget percentages from appearing as confirmed money. See the
+  [Finance specification](../design/pages/finances.md) and its owning contracts.
+- Every active budget activation or revision requires exact authenticated human approval. Agent
+  execution scopes, bypass, prior context and conversation replies do not substitute for that approval;
+  historical approval provenance remains evidence, not present authority. See [MCP policy](../mcp.md).
+- [PR #274 — Document confirmed Finance costs and goal progress](https://github.com/coopersully/personal-os/pull/274)
+  records the current cost and goal-progress distinctions, including current evidence versus expected
+  recovery. It does not add a second runtime delivery claim.
+- These are merged-source checkpoints. Production revision/controller proof, production-specific
+  shutdown evidence, and external-host/provider certification remain unobserved in this maintenance
+  run. The narrowed integration acceptance does not complete the broader Finance MVP SMS and host
+  acceptance requirements.
+
 ## 2026-10-12 — Finance text results and desktop pet refinements merged
 
 - [PR #242 — Fix Finance MCP text responses](https://github.com/coopersully/personal-os/pull/242)

@@ -5,8 +5,11 @@
 > Spending, Chat, Automations, Activity, and manual workflow coverage. They supersede conflicting
 > earlier targets below, including ungated setup and agent budget self-approval. This is not a
 > declaration that the redesigned experience has shipped.
+> The implementation merged in [PR #270 — Complete the Finance workspace and guarded agent workflows](https://github.com/coopersully/personal-os/pull/270).
+> The [implementation log](../../product/implementation-log.md) distinguishes this source checkpoint
+> from production and external-host acceptance.
 
-## Latest accepted setup and history decisions — target behavior
+## Latest accepted setup and history decisions
 
 Spending defaults to personal cost, with a setting for full outflow. Reimbursable and received
 amounts remain distinct in supporting evidence. Finance uses one ongoing conversation and existing
@@ -30,12 +33,12 @@ execution machinery does not require user controls; human budget approval remain
 
 Single-month spending selections use the applicable approved budget for that month, including past
 months. Missing budgets and multi-month selections omit fill with an explanation while retaining
-bucket/category grouping. Never silently substitute today's budget. This settles the historical
-selection question mentioned below; design §§4 and 13 define exact revision selection and partial coverage.
+bucket/category grouping. Never silently substitute today's budget. The [spending contract](../../engineering/finance-spending.md) defines revision selection and coverage;
+design §§4 and 13 retain the accepted direction.
 
 ## Overview user job
 
-### Accepted spending dashboard direction — not yet implemented
+### Spending dashboard
 
 Spending is a new sidebar destination; retain Overview and existing destinations in this scope.
 Automations and Activity each have their own sidebar page. Reassess redundancy after the redesign
@@ -54,8 +57,8 @@ bubble; do not use a perimeter progress ring. Labels, icons, and controls remain
 Bubble size represents spending for the selected period; fill represents monthly budget usage and
 must be explicitly labeled as monthly even on shorter views. Animate fill changes and distinguish
 overspending from exactly using the budget. Missing limits never become invented percentages.
-Historical and cross-month budget selection, partial coverage, and exact overage styling remain
-to be specified before implementation.
+Single-month selections resolve the applicable approved budget; multi-month selections omit fill.
+See the [spending contract](../../engineering/finance-spending.md) for coverage and disclosure rules.
 
 Include pending spending by default, with a configurable inclusion option in the view and Finance
 settings. Expose grouping defaults and granular display choices during setup using simple controls;
@@ -69,30 +72,37 @@ The portal and Finance MCP operate on the same accounts, transactions, versioned
 financial profile, complete budget, Inbox cases, and goals. Agent-created
 proposals are inspectable and actionable in the portal.
 
-Seven primary destinations serve distinct jobs:
+The sidebar groups destinations by job, matching the [navigation registry](../../../apps/web/src/features/finances/navigation.tsx):
 
-| Destination | Immediate job |
-| --- | --- |
-| Overview | Understand the ownership-qualified position and next material decision. |
-| Review | Select an outstanding Inbox item and supply context or apply a correction. |
-| Transactions | Inspect exact records with URL-backed filters and server pagination. |
-| Plan | Inspect, create, revise, and approve the complete versioned budget. |
-| Cash flow | Distinguish current evidence, dated forecasts, recurring items, subscriptions, and reimbursements. |
-| Wealth | Inspect the qualified snapshot and manage actual financial goals. |
-| Accounts | Check freshness and ownership, correct planning inclusion, and connect, import, or enter records. |
+| Group | Destination | Immediate job |
+| --- | --- | --- |
+| Money | Overview | Understand the ownership-qualified position and next material decision. |
+| Money | Transactions | Inspect exact records with URL-backed filters and server pagination. |
+| Money | Spending | Explore personal cost or full outflow by bucket/category and open the matching transactions. |
+| Money | Accounts | Check freshness and ownership, correct planning inclusion, and connect, import, or enter records. |
+| Planning | Budget | Inspect, create, revise, and approve the complete versioned budget on the Plan route. |
+| Planning | Cash flow | Distinguish current evidence, dated forecasts, recurring items, subscriptions, and reimbursements. |
+| Planning | Wealth | Inspect the qualified snapshot and manage actual financial goals. |
+| Manage | Chat | Continue the Finance conversation, with unread state and explicit sending readiness. |
+| Manage | Automations | Inspect registered schedules and their capability and health. |
+| Manage | Activity | Trace actions to supporting messages, decisions, and records. |
+| Manage | Financial profile | Review and edit setup and canonical planning inputs. |
+
+Review is no longer a sidebar destination; review work retains its canonical records and contextual
+entry points. Chat, Activity, and financial records keep conversation and action evidence connected.
 
 The default route uses one primary position block and an open sequence of
 supporting material. Unavailable amounts remain unavailable; partial ownership
-or stale sources remain visible. Financial setup and Finance settings are
-secondary destinations. Accounts links to transaction import; subscriptions remain available
+or stale sources remain visible. Financial profile is available in the sidebar; Finance settings remain a
+secondary destination. Accounts links to transaction import; subscriptions remain available
 from Cash flow. Legacy import links open the Transactions import flow, and Ledger health links
 redirect to Transactions checks. Existing budget and subscription deep links continue to resolve.
 
 Navigation uses the shared shadcn sidebar group, menu, button, and badge
 components. The workspace picker already names Finances, so the navigation
-does not repeat that heading. Review counts use the canonical Inbox collection
-in the menu badge; legacy approvals and overlapping diagnostic checks are not added to that count. The
-active destination retains its accessible current-page state.
+does not repeat that heading. Chat displays its canonical unread count and sending-readiness state; Accounts counts tracked
+accounts. Attention indicators use the owning account/profile/budget projections, not a sum of
+overlapping diagnostic checks. The active destination retains its accessible current-page state.
 
 An unconfigured plan renders one explanatory empty state and a setup action.
 Ledger diagnostics disclose their individual evidence and recovery paths.

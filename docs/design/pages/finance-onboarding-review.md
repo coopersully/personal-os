@@ -4,9 +4,10 @@
 
 The setup page uses `financeOnboardingApiAdapter` by default and permits an explicit injected
 adapter for composition and tests. The existing profile, accounts and budget editors retain their
-canonical ownership. The follow-on candidate composes a server-readiness route gate, the initial
-manual/agent choice and manual-tool visibility. These candidate changes require independent review,
-complete verification and browser acceptance before release readiness is claimed.
+canonical ownership. The integrated source composes a server-readiness route gate, the initial
+manual/agent choice and manual-tool visibility. It merged in
+[PR #270 — Complete the Finance workspace and guarded agent workflows](https://github.com/coopersully/personal-os/pull/270);
+this source checkpoint does not establish production rollout or external-host certification.
 
 The leaf review loads a revisioned server snapshot. People can review a saved answer, explicitly
 choose unknown, or choose none where the question permits it. Display preferences require an

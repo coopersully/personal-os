@@ -62,7 +62,7 @@ describe.sequential("immutable Finance host prompt issuance", () => {
         authorizationConnectionId: connectionId,
         tokenHash: randomUUID(),
         scopes: ["finances:maintain"],
-        expiresAt: new Date("2026-10-19T15:00:00Z"),
+        expiresAt: null,
       })
       .returning();
     if (!token) throw new Error("fixture token missing");

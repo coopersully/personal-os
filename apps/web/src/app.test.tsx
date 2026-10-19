@@ -9945,6 +9945,10 @@ describe("ilo web app", () => {
     await browser.keyboard("{Escape}");
     expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeDisabled();
     finishSave?.();
+    await waitFor(() => {
+      expect(pendingSave.queryClient.isMutating()).toBe(0);
+      expect(pendingSave.queryClient.isFetching()).toBe(0);
+    });
     pendingSave.unmount();
   }, 10_000);
 

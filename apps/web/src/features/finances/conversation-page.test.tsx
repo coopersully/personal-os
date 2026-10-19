@@ -468,3 +468,289 @@ it.each([
   expect(api.markFinanceConversationRendered).not.toHaveBeenCalled();
   expect(screen.getByLabelText("Answer")).toBeInTheDocument();
 });
+
+it("retains an answer draft through unavailable question reload and recovers current work", async () => {
+  api.getFinanceContextualQuestion.mockResolvedValue({ state: "unavailable" });
+  show("/finances/chat?question=q");
+  const user = userEvent.setup();
+  await screen.findByText("This question is unavailable. Your draft is retained.");
+  await user.type(screen.getByLabelText("Answer"), "Retained explanation");
+  expect(screen.getByRole("button", { name: "Save answer" })).toBeDisabled();
+  api.getFinanceContextualQuestion.mockRejectedValueOnce(new Error("private"));
+  await user.click(screen.getByRole("button", { name: "Reload question" }));
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith("Couldn’t reload question. Your draft is retained.", {
+      id: "toast-id",
+    }),
+  );
+  expect(screen.getByLabelText("Answer")).toHaveValue("Retained explanation");
+  api.getFinanceContextualQuestion.mockResolvedValue({
+    state: "available",
+    question: {
+      id: "q",
+      prompt: "Current question",
+      status: "open",
+      transactionId: "t",
+      work: { id: "q", revision: "2" },
+    },
+  });
+  await user.click(screen.getByRole("button", { name: "Reload question" }));
+  await screen.findByText("Current question");
+  expect(screen.getByRole("button", { name: "Save answer" })).toBeEnabled();
+  expect(screen.getByLabelText("Answer")).toHaveValue("Retained explanation");
+  expect(api.answerFinanceContextualQuestion).not.toHaveBeenCalled();
+});
+it("rejects malformed source context and retries without losing the question query", async () => {
+  api.getFinanceConversationMessageContext
+    .mockResolvedValueOnce({ targetMessageId: "wrong", messages: [message] })
+    .mockResolvedValue({ targetMessageId: "m", messages: [message] });
+  api.getFinanceContextualQuestion.mockResolvedValue({ state: "unavailable" });
+  show("/finances/chat?message=m&question=q");
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: "Retry source message" }));
+  await screen.findByRole("listitem", { name: "Source message" });
+  expect(screen.getByLabelText("Answer")).toBeInTheDocument();
+  expect(toast.success).toHaveBeenCalledWith("Source message loaded", { id: "toast-id" });
+});
+it("rejects a source context that omits the requested message", async () => {
+  api.getFinanceConversationMessageContext.mockResolvedValue({
+    targetMessageId: "missing",
+    messages: [message],
+  });
+  show("/finances/chat?message=missing");
+  await screen.findByRole("button", { name: "Retry source message" });
+  expect(toast.success).not.toHaveBeenCalledWith("Source message loaded", expect.anything());
+});
+it("keeps the conversation locked when readiness fails while readable history remains", async () => {
+  api.getFinanceConversationReadiness.mockRejectedValue(new Error("offline"));
+  show();
+  await screen.findByText(message.text);
+  await screen.findByText(/Automation access could not be checked/);
+  expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+});
+it("retries a failed rendered acknowledgement and ignores duplicate visible callbacks", async () => {
+  api.markFinanceConversationRendered
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockResolvedValue({});
+  show();
+  const row = (await screen.findByText(message.text)).closest("li");
+  const notify = () =>
+    act(() =>
+      intersect(
+        [{ isIntersecting: true, target: row } as unknown as IntersectionObserverEntry],
+        {} as IntersectionObserver,
+      ),
+    );
+  notify();
+  await waitFor(() => expect(api.markFinanceConversationRendered).toHaveBeenCalledTimes(1));
+  await act(async () => {});
+  notify();
+  await waitFor(() => expect(api.markFinanceConversationRendered).toHaveBeenCalledTimes(2));
+  notify();
+  expect(api.markFinanceConversationRendered).toHaveBeenCalledTimes(2);
+});
+it("locks the pending composer until the submitted snapshot is accepted", async () => {
+  let resolve!: (value: unknown) => void;
+  api.sendFinanceConversationMessage.mockImplementation(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  show();
+  const user = userEvent.setup();
+  await screen.findByText(message.text);
+  await user.type(screen.getByLabelText("Message"), "First draft");
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+  // Pending acceptance disables editing and repeated submissions.
+  expect(screen.getByLabelText("Message")).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+  await act(async () =>
+    resolve({
+      ...message,
+      id: "sent",
+      sequence: "9007199254740994",
+      authorKind: "user",
+      text: "First draft",
+    }),
+  );
+  expect(screen.getByLabelText("Message")).toHaveValue("");
+  expect(api.sendFinanceConversationMessage).toHaveBeenCalledOnce();
+});
+it("discards a late history page after authoritative denial", async () => {
+  let resolve!: (value: unknown) => void;
+  api.getFinanceConversationHistory
+    .mockResolvedValueOnce({ messages: [message], nextCursor: message.sequence })
+    .mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+  api.markFinanceConversationRendered.mockRejectedValue(
+    new ApiClientError({ status: 403, code: "forbidden", message: "denied" }),
+  );
+  show();
+  const user = userEvent.setup();
+  const row = (await screen.findByText(message.text)).closest("li");
+  await user.click(screen.getByRole("button", { name: "Load more messages" }));
+  act(() =>
+    intersect(
+      [{ isIntersecting: true, target: row } as unknown as IntersectionObserverEntry],
+      {} as IntersectionObserver,
+    ),
+  );
+  await screen.findByText(/Conversation access was denied/);
+  await act(async () =>
+    resolve({
+      messages: [
+        { ...message, id: "late", sequence: "9007199254740994", text: "Late confidential page" },
+      ],
+      nextCursor: null,
+    }),
+  );
+  expect(screen.queryByText("Late confidential page")).not.toBeInTheDocument();
+  expect(toast.error).toHaveBeenCalledWith(
+    "Access changed. Reload the conversation before continuing.",
+    { id: "toast-id" },
+  );
+});
+it("discards a late accepted send after conversation access is denied", async () => {
+  let resolve!: (value: unknown) => void;
+  api.sendFinanceConversationMessage.mockImplementation(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  api.markFinanceConversationRendered.mockRejectedValue(
+    new ApiClientError({ status: 401, code: "unauthorized", message: "denied" }),
+  );
+  show();
+  const user = userEvent.setup();
+  const row = (await screen.findByText(message.text)).closest("li");
+  await user.type(screen.getByLabelText("Message"), "Pending note");
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+  act(() =>
+    intersect(
+      [{ isIntersecting: true, target: row } as unknown as IntersectionObserverEntry],
+      {} as IntersectionObserver,
+    ),
+  );
+  await screen.findByText(/Conversation access was denied/);
+  await act(async () =>
+    resolve({
+      ...message,
+      id: "late",
+      text: "Accepted confidential note",
+      sequence: "9007199254740994",
+    }),
+  );
+  expect(screen.queryByText("Accepted confidential note")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Message")).toHaveValue("Pending note");
+});
+it("reports an unsuccessful manual initial-history retry once", async () => {
+  api.getFinanceConversationHistory.mockRejectedValue(new Error("offline"));
+  show();
+  const user = userEvent.setup();
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "Couldn’t load conversation. Try Refresh conversation.",
+    ),
+  );
+  toast.error.mockClear();
+  await user.click(screen.getByRole("button", { name: "Refresh conversation" }));
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith("Couldn’t load conversation. Try again.", {
+      id: "toast-id",
+    }),
+  );
+  expect(toast.error).toHaveBeenCalledOnce();
+});
+it("orders out-of-order history with equal sequences without dropping distinct messages", async () => {
+  api.getFinanceConversationHistory.mockResolvedValue({
+    messages: [
+      { ...message, id: "later", sequence: "9007199254740995", text: "Later" },
+      { ...message, id: "equal-a", text: "Equal A" },
+      { ...message, id: "equal-b", text: "Equal B" },
+      { ...message, id: "earlier", sequence: "9007199254740992", text: "Earlier" },
+    ],
+    nextCursor: null,
+  });
+  show();
+  await screen.findByText("Earlier");
+  expect(screen.getAllByRole("article").map((row) => row.textContent)).toEqual([
+    expect.stringContaining("Earlier"),
+    expect.stringContaining("Equal A"),
+    expect.stringContaining("Equal B"),
+    expect.stringContaining("Later"),
+  ]);
+});
+it("rejects a source context that finishes after history denial", async () => {
+  let resolve!: (value: unknown) => void;
+  api.getFinanceConversationMessageContext.mockImplementation(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  api.markFinanceConversationRendered.mockRejectedValue(
+    new ApiClientError({ status: 403, code: "forbidden", message: "denied" }),
+  );
+  show("/finances/chat?message=target");
+  const row = (await screen.findByText(message.text)).closest("li");
+  act(() =>
+    intersect(
+      [{ isIntersecting: true, target: row } as unknown as IntersectionObserverEntry],
+      {} as IntersectionObserver,
+    ),
+  );
+  await screen.findByText(/Conversation access was denied/);
+  await act(async () =>
+    resolve({
+      targetMessageId: "target",
+      messages: [{ ...message, id: "target", text: "Late target" }],
+    }),
+  );
+  expect(screen.queryByText("Late target")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Retry source message" })).toBeInTheDocument();
+});
+it("rejects initial history that finishes after source access denial", async () => {
+  let resolve!: (value: unknown) => void;
+  api.getFinanceConversationHistory.mockImplementation(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  api.getFinanceConversationMessageContext.mockRejectedValue(
+    new ApiClientError({ status: 403, code: "forbidden", message: "denied" }),
+  );
+  show("/finances/chat?message=target");
+  await screen.findByText(/Conversation access was denied/);
+  await act(async () => resolve({ messages: [message], nextCursor: null }));
+  expect(screen.queryByText(message.text)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+});
+it("keeps an answered contextual question read-only after a successful reload", async () => {
+  api.getFinanceContextualQuestion.mockResolvedValue({
+    state: "available",
+    question: {
+      id: "q",
+      prompt: "Already answered",
+      status: "answered",
+      transactionId: "t",
+      work: {},
+    },
+  });
+  show("/finances/chat?question=q");
+  const user = userEvent.setup();
+  await screen.findByText("Already answered");
+  await user.type(screen.getByLabelText("Answer"), "Unsaved note");
+  await user.click(screen.getByRole("button", { name: "Reload question" }));
+  await waitFor(() =>
+    expect(toast.success).toHaveBeenCalledWith("Question reloaded", { id: "toast-id" }),
+  );
+  expect(screen.getByRole("button", { name: "Save answer" })).toBeDisabled();
+  expect(api.answerFinanceContextualQuestion).not.toHaveBeenCalled();
+});

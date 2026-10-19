@@ -7,6 +7,7 @@ import {
   financeBalanceInclusions,
   financeCashBalanceBases,
   financeCategories,
+  financeEconomicEvents,
   financeIncomeStreams,
   financeOccurrenceMatchEvents,
   financeRecurringObligations,
@@ -14,6 +15,7 @@ import {
   financeReimbursementMatches,
   financeReimbursements,
   financeTransactionAllocations,
+  financeTransactionRelationships,
   financeTransactions,
   migrateDatabase,
   users,
@@ -749,6 +751,125 @@ describe.sequential("recurring schedule actual matching and explicit balance bas
         })
       ).projection.status,
     ).toBe("unavailable");
+  });
+
+  it.each([
+    "repayment",
+    "refund",
+  ] as const)("keeps an included canonical %s in opening cash without adding recurring income", async (kind) => {
+    const f = await fixture();
+    const [credit] = await database.db
+      .insert(financeTransactions)
+      .values({
+        userId: f.user.id,
+        accountId: f.account.id,
+        merchant: `Synthetic ${kind}`,
+        amount: 2000,
+        currencyCode: "USD",
+        direction: "income",
+        transactionDate: "2026-03-01",
+        category: "Income",
+        categorySource: "user",
+      })
+      .returning();
+    if (!credit) throw new Error("Missing credit");
+    if (kind === "repayment") {
+      await database.db
+        .update(financeTransactionAllocations)
+        .set({ treatment: "reimbursable" })
+        .where(eq(financeTransactionAllocations.id, f.allocation.id));
+      const [reimbursement] = await database.db
+        .insert(financeReimbursements)
+        .values({
+          userId: f.user.id,
+          allocationId: f.allocation.id,
+          expectedAmount: 10000,
+          receivedAmount: 2000,
+          status: "partially_received",
+          rationale: "Synthetic repayment",
+        })
+        .returning();
+      if (!reimbursement) throw new Error("Missing reimbursement");
+      await database.db.insert(financeReimbursementMatches).values({
+        userId: f.user.id,
+        reimbursementId: reimbursement.id,
+        creditTransactionId: credit.id,
+        amount: 2000,
+        rationale: "Synthetic repayment link",
+      });
+    } else {
+      const [event] = await database.db
+        .insert(financeEconomicEvents)
+        .values({ userId: f.user.id, kind: "refund", stableKey: randomUUID() })
+        .returning();
+      if (!event) throw new Error("Missing refund event");
+      await database.db.insert(financeTransactionRelationships).values({
+        userId: f.user.id,
+        economicEventId: event.id,
+        relationship: "refund",
+        transactionIds: [f.actual.id, credit.id],
+        rationale: "Explicit synthetic refund",
+        provenance: {
+          actorId: f.user.id,
+          actorType: "user",
+          confidence: 1,
+          evidence: {},
+          maintenanceRunId: null,
+          observedAt: now().toISOString(),
+          requestId: randomUUID(),
+          sourceId: null,
+        },
+      });
+    }
+    const sources = await f.service.listFinanceBalanceBasisSources(f.user.id, {
+      accountIds: [f.account.id],
+    });
+    const currentCredit = sources.transactions.find((row) => row.id === credit.id);
+    expect(currentCredit?.incomeEligibility).toEqual({
+      eligible: false,
+      reasons: ["reimbursement_or_refund_credit"],
+    });
+    await statement(f);
+    const view = await f.service.getFinanceCashflowProjection(f.user.id, {
+      from: "2026-03-01",
+      to: "2026-03-31",
+      selectedIncomeStreamId: f.income.id,
+    });
+    expect(view.projection).toMatchObject({
+      status: "estimated",
+      openingBalanceMinorUnits: 100000,
+      endingBalanceMinorUnits: 350000,
+      expectedEndPaydayIncomeMinorUnits: 300000,
+    });
+    expect(
+      view.projection.status === "estimated" &&
+        view.projection.evidence.actualMovements.some(
+          (row) => row.id === `transaction:${credit.id}`,
+        ),
+    ).toBe(false);
+    const payday = view.schedule.occurrences.find((row) => row.source.kind === "income");
+    if (!payday || !currentCredit) throw new Error("Missing current income source");
+    await expect(
+      f.service.manageFinanceOccurrenceMatch(
+        {
+          operation: "match_income",
+          occurrence: {
+            scheduleVersionId: payday.scheduleVersionId,
+            localDate: payday.localDate,
+            slot: payday.slot,
+          },
+          transactionId: credit.id,
+          expectedTransactionRevision: currentCredit.transactionRevision,
+          expectedReimbursementRelationshipRevision:
+            currentCredit.reimbursementRelationshipRevision,
+          amountCents: 2000,
+          currencyCode: "USD",
+          rationale: "Must not become recurring income",
+          idempotencyKey: randomUUID(),
+        },
+        f.context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
   });
 
   it("keeps legacy NULL balance reflection generations unknown without inventing a current revision", async () => {

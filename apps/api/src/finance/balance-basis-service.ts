@@ -50,6 +50,47 @@ import { type CashflowTransaction, cashflowResult } from "./recurring-schedule-s
 
 type Executor = Database | CashflowTransaction;
 const LIMIT = 1000;
+/** Matching exclusions do not remove cash already evidenced in the opening statement.
+ * The caller still validates the complete basis, account scope, bounds and date horizon.
+ */
+export function isIncludedNonRecurringCredit(input: {
+  userId: string;
+  transaction: Pick<
+    typeof financeTransactions.$inferSelect,
+    | "id"
+    | "userId"
+    | "accountId"
+    | "direction"
+    | "pending"
+    | "contextualRevision"
+    | "reimbursementRelationshipRevision"
+  >;
+  actualCurrencyCode: string | null;
+  basis: Pick<FinanceBalanceBasis, "accountId" | "currencyCode"> | undefined;
+  reflection: FinanceBalanceBasis["reflections"][number] | undefined;
+  requiredForOccurrence: boolean;
+  eligibility: { eligible: boolean; reasons: FinanceCashflowActualEligibilityReason[] };
+}): boolean {
+  const { transaction, basis, reflection, eligibility } = input;
+  return (
+    transaction.userId === input.userId &&
+    transaction.accountId === basis?.accountId &&
+    transaction.direction === "income" &&
+    !transaction.pending &&
+    financePlanningEvidenceCurrencySchema.safeParse(input.actualCurrencyCode).success &&
+    input.actualCurrencyCode === basis?.currencyCode &&
+    reflection?.transactionId === transaction.id &&
+    reflection.reflection === "included" &&
+    reflection.transactionRevision === transaction.contextualRevision.toString() &&
+    reflection.reimbursementRelationshipRevision ===
+      transaction.reimbursementRelationshipRevision.toString() &&
+    !input.requiredForOccurrence &&
+    !eligibility.eligible &&
+    eligibility.reasons.length === 1 &&
+    eligibility.reasons[0] === "reimbursement_or_refund_credit"
+  );
+}
+
 export async function readCashflowActuals(
   tx: Executor,
   userId: string,
@@ -799,6 +840,21 @@ export function createFinanceBalanceBasisService({
               row,
               row.direction === "income" ? "income" : "expense",
             );
+            if (
+              isIncludedNonRecurringCredit({
+                userId,
+                transaction: row,
+                basis,
+                reflection,
+                actualCurrencyCode:
+                  row.currencyCode ??
+                  selected.find((account) => account.id === row.accountId)?.currencyCode ??
+                  null,
+                requiredForOccurrence: requiredActualIds.has(row.id),
+                eligibility,
+              })
+            )
+              continue;
             if (!eligibility.eligible) return unavailable("actual_review_required");
             const common = {
               localDate: row.transactionDate,

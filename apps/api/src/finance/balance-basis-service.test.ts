@@ -227,3 +227,141 @@ it.each(
 )("does not waive %s for an included excluded credit", (_label, change) => {
   expect(isIncludedNonRecurringCredit(change(includedCredit()))).toBe(false);
 });
+
+function basisReadFixture(rows: unknown[], reflections: unknown[] = []) {
+  const query = (result: unknown[]) => {
+    const chain = {
+      from: () => chain,
+      where: () => chain,
+      orderBy: () => chain,
+      limit: vi.fn(async () => result),
+    };
+    return chain;
+  };
+  const select = vi.fn(() => query(reflections));
+  const db = { selectDistinctOn: vi.fn(() => query(rows)), select };
+  const service = createFinanceBalanceBasisService({
+    db: db as never,
+    now: () => new Date("2026-03-01T12:00:00Z"),
+    readOccurrences: vi.fn(),
+  });
+  return { service, select };
+}
+it.each([
+  undefined,
+  [],
+])("returns an empty balance history without reading unrelated reflections for scope %j", async (accountIds) => {
+  const f = basisReadFixture([]);
+  await expect(f.service.listFinanceBalanceBases(id, accountIds)).resolves.toEqual([]);
+  expect(f.select).not.toHaveBeenCalled();
+});
+it("withholds an oversized account history instead of silently projecting a partial balance universe", async () => {
+  const f = basisReadFixture(Array.from({ length: 101 }, () => ({ id })));
+  await expect(f.service.listFinanceBalanceBases(id)).rejects.toMatchObject({ code: "conflict" });
+  expect(f.select).not.toHaveBeenCalled();
+});
+it("withholds a reflection history that exceeds the bounded read", async () => {
+  const f = basisReadFixture(
+    [{ id }],
+    Array.from({ length: 100001 }, () => ({ basisId: id })),
+  );
+  await expect(f.service.listFinanceBalanceBases(id, [id])).rejects.toThrow(
+    "reflection history exceeds",
+  );
+});
+it("reads only a statement's own exact reflection revisions, retaining unknown relationship evidence", async () => {
+  const stamp = new Date("2026-03-01T10:00:00Z");
+  const row = {
+    id,
+    accountId: id,
+    basisRevision: 2,
+    accountContextualRevision: 9007199254740993n,
+    kind: "current",
+    amountCents: 0,
+    currencyCode: "USD",
+    asOf: stamp,
+    validUntil: new Date("2026-03-02T10:00:00Z"),
+    protectedFloorCents: null,
+    actorUserId: id,
+    recordedAt: stamp,
+  };
+  const other = "f2000000-0000-4000-8000-000000000002";
+  const f = basisReadFixture(
+    [row],
+    [
+      {
+        basisId: id,
+        transactionId: id,
+        transactionContextualRevision: 9007199254740994n,
+        reimbursementRelationshipRevision: null,
+        reflection: "included",
+      },
+      {
+        basisId: id,
+        transactionId: other,
+        transactionContextualRevision: 2n,
+        reimbursementRelationshipRevision: 3n,
+        reflection: "not_included",
+      },
+      {
+        basisId: other,
+        transactionId: other,
+        transactionContextualRevision: 1n,
+        reflection: "included",
+      },
+    ],
+  );
+  await expect(f.service.listFinanceBalanceBases(id, [id])).resolves.toMatchObject([
+    {
+      accountRevision: "9007199254740993",
+      amountCents: 0,
+      protectedFloorCents: null,
+      reflections: [
+        {
+          transactionId: id,
+          transactionRevision: "9007199254740994",
+          reimbursementRelationshipRevision: null,
+          reflection: "included",
+        },
+        {
+          transactionId: other,
+          transactionRevision: "2",
+          reimbursementRelationshipRevision: "3",
+          reflection: "not_included",
+        },
+      ],
+    },
+  ]);
+});
+it("rejects an agent's balance confirmation before opening a write transaction", async () => {
+  const f = fixture();
+  await expect(
+    f.service.confirmFinanceBalanceBasis(
+      {} as never,
+      { actorType: "agent", actorId: id, userId: id } as never,
+    ),
+  ).rejects.toMatchObject({ code: "forbidden" });
+  expect(f.transaction).not.toHaveBeenCalled();
+});
+it("rejects a future human balance statement before opening a write transaction", async () => {
+  const f = fixture();
+  await expect(
+    f.service.confirmFinanceBalanceBasis(
+      {
+        accountId: id,
+        expectedAccountRevision: "1",
+        expectedBasisRevision: 0,
+        kind: "current",
+        amountCents: 0,
+        currencyCode: "USD",
+        asOf: "2026-03-02T10:00:00Z",
+        validUntil: "2026-03-03T10:00:00Z",
+        protectedFloorCents: null,
+        reflections: [],
+        idempotencyKey: "future-statement",
+      },
+      { actorType: "user", actorId: id, userId: id, canMutate: true } as never,
+    ),
+  ).rejects.toMatchObject({ code: "invalid_request" });
+  expect(f.transaction).not.toHaveBeenCalled();
+});

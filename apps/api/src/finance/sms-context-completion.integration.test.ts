@@ -508,6 +508,7 @@ describe.sequential("signed Finance context SMS and durable completion", () => {
   }
   it("takes the owner lock before SMS prepare locks when racing normal approval", async () => {
     const f = await approvalFixture();
+    let smsBackendPid: number | undefined;
     let prepared!: () => void;
     const preparedSignal = new Promise<void>((resolve) => {
       prepared = resolve;
@@ -523,7 +524,11 @@ describe.sequential("signed Finance context SMS and durable completion", () => {
       actions: {
         ...f.actions,
         approve: async (...args) => {
-          // The real SMS admission and source/review locks are already held here.
+          // The real SMS admission and owner/source/review locks are already held here.
+          const executor = args[2];
+          if (!executor) throw new Error("Missing owning SMS transaction.");
+          const backend = await executor.execute(sql`select pg_backend_pid()::int as pid`);
+          smsBackendPid = Number(backend.rows[0]?.pid);
           prepared();
           await continueSms;
           return f.actions.approve(...args);
@@ -532,13 +537,14 @@ describe.sequential("signed Finance context SMS and durable completion", () => {
     });
     const sms = database.db.transaction((tx) => decide(f.command, f.context, tx));
     await preparedSignal;
+    if (!Number.isInteger(smsBackendPid)) throw new Error("Missing SMS backend identity.");
     const normal = f.actions.approve(f.review.id, { ...f.context, requestId: randomUUID() });
     let waitingOnOwner = false;
     try {
-      // Observe a real blocked advisory lock, rather than assuming scheduling order.
+      // Prove normal approval waits on the exact SMS owner-row guard, before advisory locks.
       for (let attempt = 0; attempt < 50; attempt++) {
         const result = await database.db.execute(
-          sql`select count(*)::int as count from pg_locks where locktype = 'advisory' and not granted`,
+          sql`select count(*)::int as count from pg_stat_activity where wait_event_type = 'Lock' and ${smsBackendPid}::int = any(pg_blocking_pids(pid)) and query ilike '%"users"%' and query ilike '%for no key update%'`,
         );
         if (Number(result.rows[0]?.count) > 0) {
           waitingOnOwner = true;

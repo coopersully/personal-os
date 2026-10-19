@@ -160,32 +160,37 @@ it.each([
   });
 });
 
+function reflectionOf(input: IncludedCreditInput) {
+  if (!input.reflection) throw new Error("Credit fixture requires a reflection");
+  return input.reflection;
+}
+
 const blockedCreditCases: Array<[string, (input: IncludedCreditInput) => IncludedCreditInput]> = [
   [
     "not included",
-    (input) => ({ ...input, reflection: { ...input.reflection!, reflection: "not_included" } }),
+    (input) => ({ ...input, reflection: { ...reflectionOf(input), reflection: "not_included" } }),
   ],
   ["missing reflection", (input) => ({ ...input, reflection: undefined })],
   [
     "stale contextual revision",
-    (input) => ({ ...input, reflection: { ...input.reflection!, transactionRevision: "1" } }),
+    (input) => ({ ...input, reflection: { ...reflectionOf(input), transactionRevision: "1" } }),
   ],
   [
     "missing contextual revision",
-    (input) => ({ ...input, reflection: { ...input.reflection!, transactionRevision: "" } }),
+    (input) => ({ ...input, reflection: { ...reflectionOf(input), transactionRevision: "" } }),
   ],
   [
     "stale relationship generation",
     (input) => ({
       ...input,
-      reflection: { ...input.reflection!, reimbursementRelationshipRevision: "2" },
+      reflection: { ...reflectionOf(input), reimbursementRelationshipRevision: "2" },
     }),
   ],
   [
     "missing relationship generation",
     (input) => ({
       ...input,
-      reflection: { ...input.reflection!, reimbursementRelationshipRevision: null },
+      reflection: { ...reflectionOf(input), reimbursementRelationshipRevision: null },
     }),
   ],
   ["pending", (input) => ({ ...input, transaction: { ...input.transaction, pending: true } })],

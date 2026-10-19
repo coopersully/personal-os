@@ -209,6 +209,7 @@ function confirmationFixture() {
     requestId: "confirm-unit",
   } as const;
   const input = { reviewId, expectedFingerprint: fingerprint, idempotencyKey: "confirm" };
+  evidence.prepare.mockReset();
   evidence.prepare.mockResolvedValue({
     snapshot: review.snapshot,
     fingerprint,
@@ -216,6 +217,7 @@ function confirmationFixture() {
   });
   return {
     ...f,
+    tx,
     service,
     review,
     rows,
@@ -289,6 +291,13 @@ describe("exact baseline review confirmation", () => {
         allocations: [{ amountCents: 0 }],
       },
     });
+    expect(evidence.prepare).toHaveBeenCalledExactlyOnceWith(f.tx, ownerId, {
+      accountIds: [accountId],
+      budgetVersionId: versionId,
+      currency: "USD",
+      month: "2026-10",
+      timezone: "UTC",
+    });
     expect(f.writes.map((write) => write.table)).toEqual([
       "finance_budget_baseline_qualifications",
       "audit_events",
@@ -325,6 +334,7 @@ describe("baseline review preparation persistence", () => {
       fingerprint: f.review.fingerprint,
       snapshot: f.review.snapshot,
     });
+    expect(evidence.prepare).toHaveBeenCalledExactlyOnceWith(f.tx, ownerId, input);
     expect(f.writes.map((write) => write.table)).toEqual([
       "finance_budget_baseline_reviews",
       "audit_events",

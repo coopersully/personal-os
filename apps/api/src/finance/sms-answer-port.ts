@@ -26,6 +26,7 @@ import {
   type ContextualOptions,
   contextualTransaction,
 } from "./contextual-question-store.js";
+import { guardFinanceExecutionTransaction } from "./execution-owner-guard.js";
 import { answerMaintenanceReviewQuestion } from "./review-action-service.js";
 import { type FinanceSmsQuestionResolution, resolveSmsQuestion } from "./work-resolver.js";
 
@@ -191,6 +192,11 @@ export function createFinanceSmsPort(
       )
         throw new AppError("forbidden", "SMS answers require the bound user's authority.");
       const command = financeSmsAnswerCommandSchema.parse(raw);
+      await guardFinanceExecutionTransaction(tx, context.principal.userId, {
+        reviewIds: [command.work.id],
+        hostSchedules: true,
+      });
+
       if (command.work.kind === "approval" && options.decideSmsApproval)
         return options.decideSmsApproval(command, context, tx);
       const [record] = await tx

@@ -294,6 +294,12 @@ export const financeMaintenanceCandidates = pgTable(
       "finance_maintenance_candidates_state_check",
       sql`${table.state} IN ('preparing', 'ready_for_challenge', 'challenged', 'awaiting_approval', 'committing', 'committed', 'superseded')`,
     ),
+    uniqueIndex("finance_candidate_owner_run_revision_idx").on(
+      table.userId,
+      table.id,
+      table.runId,
+      table.revision,
+    ),
     check("finance_maintenance_candidates_next_ordinal_check", sql`${table.nextOrdinal} >= 0`),
     uniqueIndex("finance_maintenance_candidates_active_run_idx")
       .on(table.runId)
@@ -5996,6 +6002,7 @@ export const financeConversationCapabilities = pgTable(
     automationScheduleId: uuid("automation_schedule_id").notNull(),
     authorizationConnectionId: uuid("authorization_connection_id").notNull(),
     protocolVersion: text("protocol_version").notNull(),
+    generation: bigint("generation", { mode: "bigint" }),
     nonceDigest: text("nonce_digest").notNull(),
     challengeText: text("challenge_text").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
@@ -6017,6 +6024,19 @@ export const financeConversationCapabilities = pgTable(
       table.automationScheduleId,
       table.authorizationConnectionId,
       table.protocolVersion,
+    ),
+    uniqueIndex("finance_conversation_capabilities_generation_idx")
+      .on(
+        table.userId,
+        table.automationScheduleId,
+        table.authorizationConnectionId,
+        table.protocolVersion,
+        table.generation,
+      )
+      .where(sql`${table.generation} IS NOT NULL`),
+    check(
+      "finance_conversation_capabilities_generation_check",
+      sql`${table.generation} IS NULL OR ${table.generation}>0`,
     ),
     check(
       "finance_conversation_capabilities_proof_check",
@@ -6133,6 +6153,110 @@ export const financeOnboardingReceipts = pgTable(
     check(
       "finance_onboarding_receipts_result_check",
       sql`jsonb_typeof(${table.result}) = 'object'`,
+    ),
+  ],
+);
+
+// Endpoint foreign keys below are DEFERRABLE INITIALLY DEFERRED in migration 0123.
+export const financeMaintenanceExecutionBindings = pgTable(
+  "finance_maintenance_execution_bindings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").notNull(),
+    candidateId: uuid("candidate_id").notNull(),
+    candidateRevision: text("candidate_revision").notNull(),
+    submittedFromRevision: text("submitted_from_revision").notNull(),
+    submissionFingerprint: text("submission_fingerprint").notNull(),
+    originalActorId: uuid("original_actor_id").notNull(),
+    currentActorId: uuid("current_actor_id").notNull(),
+    bindingRevision: bigint("binding_revision", { mode: "bigint" }).notNull().default(1n),
+    authorizationConnectionId: uuid("authorization_connection_id").notNull(),
+    automationScheduleId: uuid("automation_schedule_id").notNull(),
+    protocolVersion: text("protocol_version").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_execution_binding_owner_id_idx").on(table.userId, table.id),
+    uniqueIndex("finance_execution_binding_candidate_idx").on(
+      table.userId,
+      table.candidateId,
+      table.candidateRevision,
+    ),
+    foreignKey({
+      name: "finance_execution_binding_candidate_fk",
+      columns: [table.userId, table.candidateId, table.runId, table.candidateRevision],
+      foreignColumns: [
+        financeMaintenanceCandidates.userId,
+        financeMaintenanceCandidates.id,
+        financeMaintenanceCandidates.runId,
+        financeMaintenanceCandidates.revision,
+      ],
+    }),
+    foreignKey({
+      name: "finance_execution_binding_original_actor_fk",
+      columns: [table.userId, table.originalActorId],
+      foreignColumns: [accessTokens.userId, accessTokens.id],
+    }),
+    foreignKey({
+      name: "finance_execution_binding_current_actor_fk",
+      columns: [table.userId, table.currentActorId],
+      foreignColumns: [accessTokens.userId, accessTokens.id],
+    }),
+    foreignKey({
+      name: "finance_execution_binding_schedule_fk",
+      columns: [table.userId, table.automationScheduleId],
+      foreignColumns: [automationHostSchedules.userId, automationHostSchedules.id],
+    }),
+    check("finance_execution_binding_revision_check", sql`${table.bindingRevision}>0`),
+  ],
+);
+/** Only successful actor refreshes; pending commands use existing actor-bound Finance admission. */
+export const financeMaintenanceExecutionReceipts = pgTable(
+  "finance_maintenance_execution_receipts",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    bindingId: uuid("binding_id").notNull(),
+    fromActorId: uuid("from_actor_id").notNull(),
+    toActorId: uuid("to_actor_id").notNull(),
+    fromRevision: bigint("from_revision", { mode: "bigint" }).notNull(),
+    toRevision: bigint("to_revision", { mode: "bigint" }).notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("finance_execution_receipt_binding_revision_idx").on(
+      table.userId,
+      table.bindingId,
+      table.toRevision,
+    ),
+    foreignKey({
+      name: "finance_execution_receipt_binding_fk",
+      columns: [table.userId, table.bindingId],
+      foreignColumns: [
+        financeMaintenanceExecutionBindings.userId,
+        financeMaintenanceExecutionBindings.id,
+      ],
+    }),
+    foreignKey({
+      name: "finance_execution_receipt_from_actor_fk",
+      columns: [table.userId, table.fromActorId],
+      foreignColumns: [accessTokens.userId, accessTokens.id],
+    }),
+    foreignKey({
+      name: "finance_execution_receipt_to_actor_fk",
+      columns: [table.userId, table.toActorId],
+      foreignColumns: [accessTokens.userId, accessTokens.id],
+    }),
+    check(
+      "finance_execution_receipt_revision_check",
+      sql`${table.fromRevision}>0 AND ${table.toRevision}=${table.fromRevision}+1`,
     ),
   ],
 );

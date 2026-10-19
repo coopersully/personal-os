@@ -26,7 +26,7 @@ import {
   idSchema,
   projectFinanceConversationReadiness,
 } from "@personal-os/domain";
-import { and, asc, desc, eq, gt, inArray, isNotNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
 import { activeHostConnectionGrant } from "../automation-host-grant.js";
 import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
@@ -41,6 +41,15 @@ import {
   requireConversationCausality,
   requireDeliveredConversationAcknowledgment,
 } from "./conversation-service.js";
+import {
+  financeExecutionTokenSnapshot,
+  guardFinanceExecutionTransaction,
+} from "./execution-owner-guard.js";
+import {
+  getCurrentFinanceExecutionProof,
+  nextFinanceProofGeneration,
+  requireCurrentFinanceExecutionProof,
+} from "./execution-proof.js";
 import { requireHostRunAuthority } from "./host-run-authority.js";
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -100,6 +109,7 @@ export function createFinanceConversationService({
       .where(
         and(
           eq(accessTokens.userId, userId),
+          inArray(accessTokens.id, financeExecutionTokenSnapshot(tx, userId)),
           eq(accessTokens.authorizationConnectionId, schedule.authorizationConnectionId),
           activeHostConnectionGrant(now()),
         ),
@@ -153,21 +163,32 @@ export function createFinanceConversationService({
           if (!(error instanceof AppError) || error.code !== "forbidden") throw error;
         }
       }
-      const [proof] = await tx
-        .select()
-        .from(financeConversationCapabilities)
-        .where(
-          and(
-            eq(financeConversationCapabilities.userId, userId),
-            eq(financeConversationCapabilities.automationScheduleId, schedule.id),
-            eq(
-              financeConversationCapabilities.authorizationConnectionId,
-              schedule.authorizationConnectionId,
-            ),
-          ),
-        )
-        .orderBy(desc(financeConversationCapabilities.createdAt))
-        .limit(1);
+      const proof = await getCurrentFinanceExecutionProof(
+        tx,
+        userId,
+        schedule.id,
+        schedule.authorizationConnectionId,
+      );
+      const [olderProtocol] = !proof
+        ? await tx
+            .select({ id: financeConversationCapabilities.id })
+            .from(financeConversationCapabilities)
+            .where(
+              and(
+                eq(financeConversationCapabilities.userId, userId),
+                eq(financeConversationCapabilities.automationScheduleId, schedule.id),
+                eq(
+                  financeConversationCapabilities.authorizationConnectionId,
+                  schedule.authorizationConnectionId,
+                ),
+                ne(
+                  financeConversationCapabilities.protocolVersion,
+                  FINANCE_CONVERSATION_PROTOCOL_VERSION,
+                ),
+              ),
+            )
+            .limit(1)
+        : [];
       const registrationState =
         schedule.schedule.state === "active"
           ? "active"
@@ -181,7 +202,9 @@ export function createFinanceConversationService({
         executionAuthorized,
         connectionState: liveGrant ? "live" : "disconnected",
         messageCapability: !proof
-          ? "unverified"
+          ? olderProtocol
+            ? "protocol_upgrade_required"
+            : "unverified"
           : proof.protocolVersion !== FINANCE_CONVERSATION_PROTOCOL_VERSION
             ? "protocol_upgrade_required"
             : proof.verifiedAt
@@ -261,46 +284,26 @@ export function createFinanceConversationService({
     const saved = await postgresConversationBatchStore.findBatch(tx, principal.userId, runId);
     if (!saved)
       throw new AppError("conflict", "Start Finance maintenance to capture its message batch.");
-    const [proof] = await tx
-      .select({ id: financeConversationCapabilities.id })
-      .from(financeConversationCapabilities)
-      .where(
-        and(
-          eq(financeConversationCapabilities.userId, principal.userId),
-          eq(
-            financeConversationCapabilities.automationScheduleId,
-            run.automationScheduleId as string,
-          ),
-          eq(
-            financeConversationCapabilities.authorizationConnectionId,
-            run.authorizationConnectionId as string,
-          ),
-          eq(
-            financeConversationCapabilities.protocolVersion,
-            FINANCE_CONVERSATION_PROTOCOL_VERSION,
-          ),
-          isNotNull(financeConversationCapabilities.verifiedAt),
-        ),
-      )
-      .limit(1);
-    if (!proof)
-      throw new AppError(
-        "conflict",
-        "Verify this original host's current Finance message protocol first.",
-      );
-    if (
-      saved.authorizationConnectionId !== run.authorizationConnectionId ||
-      saved.automationScheduleId !== run.automationScheduleId
-    )
-      throw new AppError("conflict", "Recover this batch's original host binding explicitly.");
+    await requireCurrentFinanceExecutionProof(
+      tx,
+      principal.userId,
+      run.automationScheduleId as string,
+      run.authorizationConnectionId as string,
+    );
     return saved;
   }
   return {
     async getReadiness(userId: string) {
-      return db.transaction((tx) => readiness(tx, userId));
+      return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, userId, { hostSchedules: true });
+        return readiness(tx, userId);
+      });
     },
     async getHostReadiness(userId: string, scheduleId: string) {
-      return db.transaction((tx) => readiness(tx, userId, scheduleId));
+      return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, userId, { hostSchedules: true });
+        return readiness(tx, userId, scheduleId);
+      });
     },
     async send(principal: Principal, raw: FinanceConversationSendInput) {
       if (principal.actorType !== "user" || principal.actorId !== principal.userId)
@@ -312,6 +315,13 @@ export function createFinanceConversationService({
       )
         input.recordRefs.push({ kind: "review_case", id: input.caseId });
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, principal.userId, {
+          actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
+          connectionIds: principal.authorizationConnectionId
+            ? [principal.authorizationConnectionId]
+            : [],
+          hostSchedules: true,
+        });
         await lockOwner(tx, principal.userId);
         const [existing] = await tx
           .select()
@@ -379,6 +389,7 @@ export function createFinanceConversationService({
     async messageContext(userId: string, messageId: string) {
       const id = idSchema.parse(messageId);
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, userId, {});
         const [target] = await tx
           .select()
           .from(financeConversationMessages)
@@ -423,6 +434,13 @@ export function createFinanceConversationService({
         throw new AppError("forbidden", "Only the owner can mark rendered Finance messages read.");
       const through = BigInt(financeConversationSequenceSchema.parse(throughSequence));
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, principal.userId, {
+          actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
+          connectionIds: principal.authorizationConnectionId
+            ? [principal.authorizationConnectionId]
+            : [],
+          hostSchedules: true,
+        });
         await lockOwner(tx, principal.userId);
         const [conversation] = await tx
           .select()
@@ -448,6 +466,13 @@ export function createFinanceConversationService({
       if (!Number.isInteger(limit) || limit < 1 || limit > 100)
         throw new AppError("invalid_request", "Choose a page size between 1 and 100.");
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, principal.userId, {
+          actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
+          connectionIds: principal.authorizationConnectionId
+            ? [principal.authorizationConnectionId]
+            : [],
+          hostSchedules: true,
+        });
         await lockOwner(tx, principal.userId);
         const saved = await batch(tx, principal, runId);
         const [privateBatch] = await tx
@@ -524,6 +549,13 @@ export function createFinanceConversationService({
       if (messageIds.length > 100)
         throw new AppError("invalid_request", "Acknowledge at most 100 delivered messages.");
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, principal.userId, {
+          actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
+          connectionIds: principal.authorizationConnectionId
+            ? [principal.authorizationConnectionId]
+            : [],
+          hostSchedules: true,
+        });
         await lockOwner(tx, principal.userId);
         await batch(tx, principal, runId);
         const delivered = await tx
@@ -575,6 +607,13 @@ export function createFinanceConversationService({
       if (!input.sourceMessageIds.length || input.sourceMessageIds.length > 100)
         throw new AppError("invalid_request", "A reply requires bounded batch source messages.");
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, principal.userId, {
+          actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
+          connectionIds: principal.authorizationConnectionId
+            ? [principal.authorizationConnectionId]
+            : [],
+          hostSchedules: true,
+        });
         await lockOwner(tx, principal.userId);
         const saved = await batch(tx, principal, input.runId);
         const sourceRows = await tx
@@ -639,6 +678,13 @@ export function createFinanceConversationService({
     },
     async issueChallenge(principal: Principal, scheduleId: string) {
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, principal.userId, {
+          actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
+          connectionIds: principal.authorizationConnectionId
+            ? [principal.authorizationConnectionId]
+            : [],
+          hostSchedules: true,
+        });
         await lockOwner(tx, principal.userId);
         const { schedule, liveGrant } = await liveSchedule(tx, principal.userId, scheduleId);
         if (
@@ -651,6 +697,29 @@ export function createFinanceConversationService({
             "forbidden",
             "Enroll an active host with the owner's live Finance grant.",
           );
+        const [counter] = await tx
+          .select({
+            value: sql<string | null>`max(${financeConversationCapabilities.generation})::text`,
+          })
+          .from(financeConversationCapabilities)
+          .where(
+            and(
+              eq(financeConversationCapabilities.userId, principal.userId),
+              eq(financeConversationCapabilities.automationScheduleId, scheduleId),
+              eq(
+                financeConversationCapabilities.authorizationConnectionId,
+                schedule.authorizationConnectionId,
+              ),
+              eq(
+                financeConversationCapabilities.protocolVersion,
+                FINANCE_CONVERSATION_PROTOCOL_VERSION,
+              ),
+            ),
+          );
+        const generation = nextFinanceProofGeneration(
+          counter?.value === null || counter?.value === undefined ? null : BigInt(counter.value),
+        );
+        const issuedAt = now();
         const nonce = randomBytes(32).toString("hex");
         const [row] = await tx
           .insert(financeConversationCapabilities)
@@ -659,10 +728,11 @@ export function createFinanceConversationService({
             automationScheduleId: scheduleId,
             authorizationConnectionId: schedule.authorizationConnectionId,
             protocolVersion: FINANCE_CONVERSATION_PROTOCOL_VERSION,
+            generation,
             nonceDigest: conversationNonceDigest(nonce),
             challengeText: nonce,
-            expiresAt: new Date(now().getTime() + 600000),
-            createdAt: now(),
+            expiresAt: new Date(issuedAt.getTime() + 600000),
+            createdAt: issuedAt,
           })
           .returning();
         if (!row) throw new AppError("internal_error", "The message challenge was not issued.");
@@ -680,6 +750,13 @@ export function createFinanceConversationService({
       operation: Parameters<typeof advanceConversationProof>[0]["operation"],
     ) {
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, principal.userId, {
+          actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
+          connectionIds: principal.authorizationConnectionId
+            ? [principal.authorizationConnectionId]
+            : [],
+          hostSchedules: true,
+        });
         await lockOwner(tx, principal.userId);
         const [row] = await tx
           .select()
@@ -712,6 +789,15 @@ export function createFinanceConversationService({
         if (principal.actorType !== "agent" || !token?.scopes.includes("finances:maintain"))
           throw new AppError("forbidden", "Use the original authenticated Finance host.");
         await requireWorkspaceExecution(tx, principal, "finances", now());
+        const latest = await getCurrentFinanceExecutionProof(
+          tx,
+          principal.userId,
+          row.automationScheduleId,
+          row.authorizationConnectionId,
+          row.protocolVersion,
+        );
+        if (latest?.id !== row.id)
+          throw new AppError("conflict", "Use the current Finance protocol challenge.");
         const proof: ConversationProof = { ...row, challengeId: row.id };
         const next = advanceConversationProof({
           proof,
@@ -725,7 +811,7 @@ export function createFinanceConversationService({
           now: now(),
           operation,
         });
-        await tx
+        const [changed] = await tx
           .update(financeConversationCapabilities)
           .set({
             fetchedAt: next.fetchedAt,
@@ -734,7 +820,27 @@ export function createFinanceConversationService({
             verifiedAt: next.verifiedAt,
             response: next.response,
           })
-          .where(eq(financeConversationCapabilities.id, row.id));
+          .where(
+            and(
+              eq(financeConversationCapabilities.id, row.id),
+              eq(financeConversationCapabilities.userId, principal.userId),
+              eq(financeConversationCapabilities.automationScheduleId, row.automationScheduleId),
+              eq(
+                financeConversationCapabilities.authorizationConnectionId,
+                row.authorizationConnectionId,
+              ),
+              eq(financeConversationCapabilities.protocolVersion, row.protocolVersion),
+              row.generation === null
+                ? isNull(financeConversationCapabilities.generation)
+                : eq(financeConversationCapabilities.generation, row.generation),
+            ),
+          )
+          .returning({ id: financeConversationCapabilities.id });
+        if (!changed)
+          throw new AppError(
+            "conflict",
+            "The current Finance protocol challenge changed before persistence.",
+          );
         return {
           challengeId: row.id,
           protocolVersion: row.protocolVersion,

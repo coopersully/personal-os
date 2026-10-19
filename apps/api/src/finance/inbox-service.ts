@@ -552,6 +552,10 @@ export function createInboxService({ db, now }: Options) {
         {
           idempotencyKey: input.idempotencyKey,
           operation: "answer_finance_review",
+          executionOwnerPlan: {
+            hostSchedules: true,
+            actorIds: context.actorType === "agent" ? [context.actorId] : [],
+          },
           lockIdentities:
             input.resolution?.type === "update_profile"
               ? [`finance-profile:${context.userId}`]

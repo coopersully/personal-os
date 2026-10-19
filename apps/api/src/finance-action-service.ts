@@ -16,6 +16,7 @@ import {
   financeLedgerChallenges,
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
+  financeMaintenanceExecutionBindings,
   financeMerchants,
   financeProfiles,
   financeRecurringObligations,
@@ -64,10 +65,17 @@ import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import { isActiveBudgetAction, requireHumanBudgetApproval } from "./finance/budget-authority.js";
 import { commitFinanceCandidateEffects } from "./finance/candidate-effect-receipt.js";
+import { lockFinanceEffectOwner } from "./finance/conversation-causality.js";
 import {
-  loadFinanceEffectPrincipal,
-  lockFinanceEffectOwner,
-} from "./finance/conversation-causality.js";
+  type FinanceExecutionFence,
+  loadCandidateExecutionPrincipal,
+} from "./finance/execution-binding.js";
+import {
+  guardFinanceExecutionTransaction,
+  requireFinanceExecutionGuard,
+  withFinanceExecutionOwner,
+} from "./finance/execution-owner-guard.js";
+import { createFinanceMaintenanceControlRecovery } from "./finance/maintenance-control-recovery.js";
 import {
   financeActionFingerprint,
   financeCandidateActionFingerprint,
@@ -86,6 +94,7 @@ import type { Principal } from "./types.js";
 import { requireWorkspaceExecution } from "./workspace-execution.js";
 
 type MutationContext = {
+  financeExecution?: FinanceExecutionFence;
   principal: Principal;
   requestId: string;
 };
@@ -461,12 +470,24 @@ function questionFromRow(row: typeof financeAgentActionReviews.$inferSelect): Fi
  * only source of bypass authority is the persisted Finance settings row.
  */
 export function createFinanceActionService({ db, finances, now }: FinanceActionServiceOptions) {
+  const controlRecovery = createFinanceMaintenanceControlRecovery({ db });
   type ActionTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
   function actionTransaction<T>(
     executor: ActionTransaction | undefined,
+    context: MutationContext,
+    reviewId: string,
     run: (tx: ActionTransaction) => Promise<T>,
   ): Promise<T> {
-    return executor ? run(executor) : db.transaction(run);
+    return withFinanceExecutionOwner(
+      db,
+      context.principal.userId,
+      {
+        reviewIds: [reviewId],
+        actorIds: context.principal.actorType === "agent" ? [context.principal.actorId] : [],
+      },
+      run,
+      executor,
+    );
   }
   async function prepare(
     actionKind: SupportedActionKind,
@@ -2826,6 +2847,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     mode: "apply" | "queue";
     reviewId?: string;
     humanApproval?: { principal: Principal; reviewId: string };
+    serverHandoff?: boolean;
   }) {
     const { candidateId, executor, expectedRevision } = input;
     let context = input.context;
@@ -2861,12 +2883,19 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         .for("update");
       if (!committedRun)
         throw new AppError("conflict", "The committed Finance run is unavailable.");
-      await loadFinanceEffectPrincipal(
+      await loadCandidateExecutionPrincipal(
         executor as ActionTransaction,
         committedRun,
+        candidate.id,
+        expectedRevision,
         context.principal,
-        now(),
-        input.mode === "apply" && !input.humanApproval,
+        {
+          fence: context.financeExecution,
+          humanApproval: input.humanApproval?.principal,
+          serverHandoff: input.serverHandoff,
+          requireExecution: input.mode === "apply" && !input.humanApproval,
+          receiptOnly: true,
+        },
       );
       return { candidateId, status: "committed" as const };
     }
@@ -2904,12 +2933,18 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     if (!run) throw new AppError("conflict", "The Finance maintenance run is no longer available.");
     context = {
       ...context,
-      principal: await loadFinanceEffectPrincipal(
+      principal: await loadCandidateExecutionPrincipal(
         executor as ActionTransaction,
         run,
+        candidate.id,
+        expectedRevision,
         context.principal,
-        now(),
-        input.mode === "apply" && !input.humanApproval,
+        {
+          fence: context.financeExecution,
+          humanApproval: input.humanApproval?.principal,
+          serverHandoff: input.serverHandoff,
+          requireExecution: input.mode === "apply" && !input.humanApproval,
+        },
       ),
     };
     const checkpoint = run.checkpoint as {
@@ -3141,6 +3176,21 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             .set({ disposition: "committed", updatedAt: now() })
             .where(eq(financeMaintenanceCandidateItems.id, item.id));
         }
+        // Expiry is wall-clock state: recheck after the whole loop so any loss rolls
+        // back financial writes, audits and their immutable effect receipt together.
+        await loadCandidateExecutionPrincipal(
+          executor as ActionTransaction,
+          run,
+          candidate.id,
+          expectedRevision,
+          context.principal,
+          {
+            fence: context.financeExecution,
+            humanApproval: input.humanApproval?.principal,
+            serverHandoff: input.serverHandoff,
+            requireExecution: input.mode === "apply" && !input.humanApproval,
+          },
+        );
       },
     });
     await executor
@@ -3224,6 +3274,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     /** Recover only the persisted, fully challenged handoff; this never creates new work. */
     async recoverFinanceMaintenanceHandoff(userId: string, runId: string) {
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, userId, { runIds: [runId] });
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`finance-maintenance:${userId}`}, 0))`,
         );
@@ -3397,9 +3448,54 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           expectedState: "challenged",
           executor: tx,
           mode: bypass ? "apply" : "queue",
+          serverHandoff: true,
         });
         return { recovered: true, outcome };
       });
+    },
+    resumeFinanceMaintenanceControl: controlRecovery.resumeFinanceMaintenanceControl,
+    async getMaintenanceExecutionFence(
+      userId: string,
+      runId: string,
+    ): Promise<
+      (FinanceExecutionFence & { candidateId: string; candidateRevision: string }) | null
+    > {
+      const [binding] = await db
+        .select({
+          currentActorId: financeMaintenanceExecutionBindings.currentActorId,
+          bindingRevision: financeMaintenanceExecutionBindings.bindingRevision,
+          candidateId: financeMaintenanceExecutionBindings.candidateId,
+          candidateRevision: financeMaintenanceExecutionBindings.candidateRevision,
+        })
+        .from(financeMaintenanceExecutionBindings)
+        .innerJoin(
+          financeMaintenanceCandidates,
+          and(
+            eq(financeMaintenanceCandidates.id, financeMaintenanceExecutionBindings.candidateId),
+            eq(financeMaintenanceCandidates.userId, financeMaintenanceExecutionBindings.userId),
+            eq(
+              financeMaintenanceCandidates.revision,
+              financeMaintenanceExecutionBindings.candidateRevision,
+            ),
+            sql`${financeMaintenanceCandidates.state}<>'superseded'`,
+          ),
+        )
+        .where(
+          and(
+            eq(financeMaintenanceExecutionBindings.userId, userId),
+            eq(financeMaintenanceExecutionBindings.runId, runId),
+          ),
+        )
+        .orderBy(desc(financeMaintenanceExecutionBindings.createdAt))
+        .limit(1);
+      return binding
+        ? {
+            currentActorId: binding.currentActorId,
+            bindingRevision: binding.bindingRevision.toString(),
+            candidateId: binding.candidateId,
+            candidateRevision: binding.candidateRevision,
+          }
+        : null;
     },
     async settleFinanceMaintenanceCandidate(
       candidateId: string,
@@ -3407,6 +3503,10 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       context: MutationContext,
     ) {
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, context.principal.userId, {
+          candidateIds: [candidateId],
+          actorIds: context.principal.actorType === "agent" ? [context.principal.actorId] : [],
+        });
         await lockFinanceEffectOwner(tx, context.principal.userId);
         const bypass = await readBypass(tx, context.principal.userId, true);
         const outcome = await settleMaintenanceCandidateInTransaction({
@@ -3570,8 +3670,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       context: MutationContext,
       executor?: ActionTransaction,
     ): Promise<FinanceActionOutcome<T>> {
+      if (executor) requireFinanceExecutionGuard(executor, context.principal.userId);
       await requireWorkspaceExecution(executor ?? db, context.principal, "finances", now());
-      const approval = await actionTransaction(executor, async (tx) => {
+      const approval = await actionTransaction(executor, context, id, async (tx) => {
         await lockFinanceEffectOwner(tx, context.principal.userId);
         await requireWorkspaceExecution(tx, context.principal, "finances", now());
         const [preview] = await tx
@@ -3738,8 +3839,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       return approval as FinanceActionOutcome<T>;
     },
     async dismiss(id: string, context: MutationContext, executor?: ActionTransaction) {
+      if (executor) requireFinanceExecutionGuard(executor, context.principal.userId);
       await requireWorkspaceExecution(executor ?? db, context.principal, "finances", now());
-      return actionTransaction(executor, async (tx) => {
+      return actionTransaction(executor, context, id, async (tx) => {
         await requireWorkspaceExecution(tx, context.principal, "finances", now());
         const [review] = await tx
           .select()

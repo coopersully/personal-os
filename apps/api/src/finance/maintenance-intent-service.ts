@@ -56,6 +56,7 @@ import {
   hasUsableFinanceConversationConsumer,
   postgresConversationBatchStore,
 } from "./conversation-service.js";
+import { guardFinanceExecutionTransaction } from "./execution-owner-guard.js";
 import { requireHostRunAuthority } from "./host-run-authority.js";
 import {
   createLegacyFinanceMaintenanceService,
@@ -356,6 +357,10 @@ export function createFinanceMaintenanceIntentService({
   async function resolveRun(input: FinanceMaintenanceInput, principal: Principal) {
     const userId = principal.userId;
     return db.transaction(async (tx) => {
+      await guardFinanceExecutionTransaction(tx, userId, {
+        actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
+        hostSchedules: true,
+      });
       await lock(tx, userId);
       async function bindConversation(
         run: MaintenanceRun | null,

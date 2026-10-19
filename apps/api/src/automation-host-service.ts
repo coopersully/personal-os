@@ -34,6 +34,10 @@ import {
   renderFinanceAutomationPrompt,
 } from "./finance/automation-prompts.js";
 import { reconcileFinanceContinuations } from "./finance/continuation-reconciliation.js";
+import {
+  financeExecutionTokenSnapshot,
+  guardFinanceExecutionTransaction,
+} from "./finance/execution-owner-guard.js";
 import { encryptJson } from "./security.js";
 import type { Principal } from "./types.js";
 import { requireWorkspaceExecution } from "./workspace-execution.js";
@@ -76,6 +80,7 @@ export function createAutomationHostService(options: {
       .where(
         and(
           eq(accessTokens.userId, userId),
+          inArray(accessTokens.id, financeExecutionTokenSnapshot(tx, userId)),
           eq(accessTokens.authorizationConnectionId, connectionId),
           activeHostConnectionGrant(now()),
         ),
@@ -208,6 +213,13 @@ export function createAutomationHostService(options: {
     requiresExecution = true,
   ) {
     return db.transaction(async (tx) => {
+      await guardFinanceExecutionTransaction(tx, principal.userId, {
+        actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
+        connectionIds: principal.authorizationConnectionId
+          ? [principal.authorizationConnectionId]
+          : [],
+        hostSchedules: true,
+      });
       const row = await owned(tx, principal, id);
       if (row.schedule.version !== expectedVersion)
         throw new AppError("conflict", "The host schedule changed. Reload it before continuing.");
@@ -232,6 +244,13 @@ export function createAutomationHostService(options: {
       await authorizeHost(principal);
       const input = automationHostPromptPageInputSchema.parse(raw);
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, principal.userId, {
+          actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
+          connectionIds: principal.authorizationConnectionId
+            ? [principal.authorizationConnectionId]
+            : [],
+          hostSchedules: true,
+        });
         await owned(tx, principal, id);
         const rows = await tx
           .select()
@@ -259,6 +278,13 @@ export function createAutomationHostService(options: {
       await authorizeHost(principal);
       z.int().positive().parse(templateVersion);
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, principal.userId, {
+          actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
+          connectionIds: principal.authorizationConnectionId
+            ? [principal.authorizationConnectionId]
+            : [],
+          hostSchedules: true,
+        });
         await owned(tx, principal, id);
         const [issue] = await tx
           .select()
@@ -279,6 +305,13 @@ export function createAutomationHostService(options: {
       z.int().positive().parse(templateVersion);
       const input = automationHostPromptIssueInputSchema.parse(raw);
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, principal.userId, {
+          actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
+          connectionIds: principal.authorizationConnectionId
+            ? [principal.authorizationConnectionId]
+            : [],
+          hostSchedules: true,
+        });
         const row = await owned(tx, principal, id);
         const [existing] = await tx
           .select()
@@ -405,6 +438,13 @@ export function createAutomationHostService(options: {
         .strict()
         .parse(raw);
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, principal.userId, {
+          actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
+          connectionIds: principal.authorizationConnectionId
+            ? [principal.authorizationConnectionId]
+            : [],
+          hostSchedules: true,
+        });
         await tx
           .select({ id: users.id })
           .from(users)
@@ -497,6 +537,13 @@ export function createAutomationHostService(options: {
         .strict()
         .parse(raw);
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, principal.userId, {
+          actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
+          connectionIds: principal.authorizationConnectionId
+            ? [principal.authorizationConnectionId]
+            : [],
+          hostSchedules: true,
+        });
         await tx
           .select({ id: users.id })
           .from(users)
@@ -578,6 +625,13 @@ export function createAutomationHostService(options: {
     async bindAnswer(principal: Principal, id: string, scheduleId: string) {
       await authorizeHost(principal, true);
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, principal.userId, {
+          actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
+          connectionIds: principal.authorizationConnectionId
+            ? [principal.authorizationConnectionId]
+            : [],
+          hostSchedules: true,
+        });
         const schedule = await owned(tx, principal, scheduleId);
         if (schedule.schedule.state !== "active")
           throw new AppError("conflict", "Choose an active host schedule.");
@@ -632,6 +686,13 @@ export function createAutomationHostService(options: {
     },
     async continuations(principal: Principal, id: string, cursorId?: string) {
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, principal.userId, {
+          actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
+          connectionIds: principal.authorizationConnectionId
+            ? [principal.authorizationConnectionId]
+            : [],
+          hostSchedules: true,
+        });
         const schedule = await owned(tx, principal, id);
         if (
           principal.actorType !== "agent" ||
@@ -824,6 +885,13 @@ export function createAutomationHostService(options: {
       )
         throw new AppError("forbidden", "A schedule cannot expand the caller's scopes.");
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, principal.userId, {
+          actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
+          connectionIds: principal.authorizationConnectionId
+            ? [principal.authorizationConnectionId]
+            : [],
+          hostSchedules: true,
+        });
         const tokens = await liveGrant(tx, principal.userId, input.tenantAuthorizationConnectionId);
         if (
           !tokens.some((token) =>
@@ -961,6 +1029,13 @@ export function createAutomationHostService(options: {
       if (!/^sk-ant-oat01-[A-Za-z0-9_-]{10,500}$/.test(token))
         throw new AppError("invalid_request", "Use the routine's API trigger token.");
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, principal.userId, {
+          actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
+          connectionIds: principal.authorizationConnectionId
+            ? [principal.authorizationConnectionId]
+            : [],
+          hostSchedules: true,
+        });
         const row = await owned(tx, principal, id);
         if (
           row.schedule.version !== expectedVersion ||

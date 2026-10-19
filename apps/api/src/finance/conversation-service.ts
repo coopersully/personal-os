@@ -4,20 +4,16 @@ import {
   type Database,
   financeConversationBatches,
   financeConversationBatchMessages,
-  financeConversationCapabilities,
   financeConversationMessages,
   financeConversations,
   type workspaceMaintenanceRuns,
 } from "@personal-os/database";
-import {
-  FINANCE_CONVERSATION_PROTOCOL_VERSION,
-  type FinanceConversationBatch,
-  type FinanceConversationMessage,
-} from "@personal-os/domain";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import type { FinanceConversationBatch, FinanceConversationMessage } from "@personal-os/domain";
+import { and, eq, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
 import { requireWorkspaceExecution } from "../workspace-execution.js";
+import { getCurrentFinanceExecutionProof } from "./execution-proof.js";
 import { requireHostRunAuthority } from "./host-run-authority.js";
 
 export type ConversationBinding = {
@@ -405,21 +401,11 @@ export async function hasUsableFinanceConversationConsumer(
     if (error instanceof AppError && error.code === "forbidden") return false;
     throw error;
   }
-  const [proof] = await tx
-    .select({ id: financeConversationCapabilities.id })
-    .from(financeConversationCapabilities)
-    .where(
-      and(
-        eq(financeConversationCapabilities.userId, run.userId),
-        eq(financeConversationCapabilities.automationScheduleId, run.automationScheduleId),
-        eq(
-          financeConversationCapabilities.authorizationConnectionId,
-          run.authorizationConnectionId,
-        ),
-        eq(financeConversationCapabilities.protocolVersion, FINANCE_CONVERSATION_PROTOCOL_VERSION),
-        isNotNull(financeConversationCapabilities.verifiedAt),
-      ),
-    )
-    .limit(1);
-  return proof !== undefined;
+  const proof = await getCurrentFinanceExecutionProof(
+    tx,
+    run.userId,
+    run.automationScheduleId,
+    run.authorizationConnectionId,
+  );
+  return proof?.verifiedAt != null;
 }

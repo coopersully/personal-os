@@ -357,3 +357,98 @@ it("refreshes actual onboarding projection only after a confirmed host mutation"
   await screen.findByText("Manual capture visible");
   expect(api.getFinanceOnboarding).toHaveBeenCalledTimes(2);
 });
+
+it("shows an honest empty registration list", async () => {
+  api.listAutomationHostSchedules.mockResolvedValue([]);
+  open();
+  expect(await screen.findByText("No Finance automations registered.")).toBeInTheDocument();
+});
+it("cancels pending setup with the original version and closes after confirmation", async () => {
+  api.listAutomationHostSchedules.mockResolvedValue([status("setup_pending")]);
+  const user = open();
+  await user.click(await screen.findByRole("button", { name: "Cancel setup" }));
+  await user.click(screen.getByRole("button", { name: "Confirm cancellation" }));
+  await waitFor(() =>
+    expect(api.cancelAutomationHostSchedule).toHaveBeenCalledWith("schedule-a", {
+      expectedVersion: 7,
+      expectedState: "setup_pending",
+    }),
+  );
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+});
+it("saves a renamed paused registration and preserves revision fencing", async () => {
+  api.listAutomationHostSchedules.mockResolvedValue([status("paused")]);
+  const user = open();
+  await user.click(await screen.findByRole("button", { name: "Details and setup" }));
+  await user.clear(screen.getByLabelText("Name"));
+  await user.type(screen.getByLabelText("Name"), "Weekly review");
+  await user.click(screen.getByRole("button", { name: "Save name" }));
+  await waitFor(() =>
+    expect(api.updateAutomationHostSchedule).toHaveBeenCalledWith("schedule-a", {
+      expectedVersion: 7,
+      label: "Weekly review",
+    }),
+  );
+  expect(toast.success).toHaveBeenCalledWith("Automation name saved.", { id: "notice" });
+});
+it("uses safe fallback feedback for a non-Error failure and retains cancellation", async () => {
+  api.listAutomationHostSchedules.mockResolvedValue([status("setup_pending")]);
+  api.cancelAutomationHostSchedule.mockRejectedValue({ secret: "must not render" });
+  const user = open();
+  await user.click(await screen.findByRole("button", { name: "Cancel setup" }));
+  await user.click(screen.getByRole("button", { name: "Confirm cancellation" }));
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "The automation could not be saved. Reload its status and try again.",
+      { id: "notice" },
+    ),
+  );
+  expect(screen.getByRole("button", { name: "Confirm cancellation" })).toBeEnabled();
+  expect(screen.queryByText(/must not render/)).not.toBeInTheDocument();
+});
+it.each([
+  "revoked",
+  "cancelled",
+])("retains %s history without offering name or removal mutations", async (state) => {
+  api.listAutomationHostSchedules.mockResolvedValue([status(state)]);
+  const user = open();
+  await user.click(await screen.findByRole("button", { name: "Details and setup" }));
+  expect(screen.queryByRole("button", { name: "Save name" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Remove registration" })).not.toBeInTheDocument();
+  expect(screen.getByText("connection-original")).toBeInTheDocument();
+});
+it("reports missing observations and disables verification for an unavailable connection", async () => {
+  const missing = status();
+  api.listAutomationHostSchedules.mockResolvedValue([
+    {
+      ...missing,
+      connectionAvailable: false,
+      health: {
+        ...missing.health,
+        nextExpectedAt: null,
+        lastObservedAt: null,
+        overdueAt: null,
+        graceMilliseconds: null,
+      },
+    },
+  ]);
+  open();
+  expect(await screen.findByText(/Connection unavailable. Reauthorize/)).toBeInTheDocument();
+  expect(screen.getByText(/Next expected start: Not reported/)).toBeInTheDocument();
+  expect(screen.getByText(/Host observation: Not reported/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Verify message access" })).toBeDisabled();
+  expect(screen.queryByText(/Grace:/)).not.toBeInTheDocument();
+});
+it.each([
+  false,
+  true,
+])("shows the saved prompt version and upgrade state %s", async (upgradeAvailable) => {
+  api.listAutomationHostSchedules.mockResolvedValue([
+    { ...status(), prompt: { latestIssued: { templateVersion: "v2" }, upgradeAvailable } },
+  ]);
+  const user = open();
+  await user.click(await screen.findByRole("button", { name: "Details and setup" }));
+  expect(
+    screen.getByText(upgradeAvailable ? "Saved version v2 · Update available" : "Saved version v2"),
+  ).toBeInTheDocument();
+});

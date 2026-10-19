@@ -75,3 +75,22 @@ it("preserves null versus explicitly empty category selections", () => {
   value.query.scope.categoryIds = [];
   expect(spendingRecoveryControls(new URLSearchParams(), value).get("categories")).toBe("");
 });
+it("distinguishes no recovery from well-formed JSON with an unauthorized or incomplete descriptor", () => {
+  expect(parseSpendingRecovery(null)).toEqual({ state: "absent" });
+  for (const value of [{}, { ...filter(null), groupId: 42 }, { ...filter(null), query: {} }]) {
+    expect(parseSpendingRecovery(JSON.stringify(value))).toEqual({ state: "invalid" });
+  }
+});
+it("restores enabled accounting flags without mutating unrelated controls or the original URL", () => {
+  const value = filter([]);
+  value.query.scope.includePending = true;
+  value.query.scope.subtractRefunds = true;
+  value.query.includeUncategorized = true;
+  const original = new URLSearchParams("view=list&categories=old&pending=0");
+  const next = spendingRecoveryControls(original, value);
+  expect(next.get("pending")).toBe("1");
+  expect(next.get("refunds")).toBe("1");
+  expect(next.get("uncategorized")).toBe("1");
+  expect(next.get("view")).toBe("list");
+  expect(original.toString()).toBe("view=list&categories=old&pending=0");
+});

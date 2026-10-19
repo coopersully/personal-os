@@ -450,3 +450,149 @@ it("never replaces a missing recovered group with a broader selection", async ()
   );
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
+it("explains empty selected data and unsupported source money without showing unrelated transactions", async () => {
+  vi.mocked(api.getFinanceSpending).mockImplementation(async (query) => {
+    const value = dashboard(query);
+    value.groups = [];
+    value.snapshot.contributions = [];
+    value.snapshot.netCents = 0;
+    value.transactions = [];
+    value.groupingFallback = "buckets_unavailable" as FinanceSpendingDashboard["groupingFallback"];
+    value.excludedUncategorizedCents = 125;
+    value.negativeAdjustmentCents = 75;
+    value.source.lastSyncedAt = null;
+    value.source.reasons = ["new_provider_qualification"];
+    value.snapshot.qualifications = [];
+    value.currency.unsupported = [
+      { code: "EUR", transactionIds: ["foreign"] },
+      { code: null, transactionIds: ["unknown"] },
+    ];
+    return value;
+  });
+  mount("?accounts=&categories=&pending=0");
+  await screen.findByText("No spending in this selection");
+  expect(screen.getByText(/Buckets unavailable; showing categories/)).toBeVisible();
+  expect(screen.getByText("Excluded uncategorized: $1.25")).toBeVisible();
+  expect(screen.getByText("Negative adjustments: $0.75")).toBeVisible();
+  expect(screen.getByText(/Last sync unknown/)).toBeVisible();
+  expect(
+    screen.getByText(/EUR \(1 transactions\).*Unspecified currency \(1 transactions\)/),
+  ).toBeVisible();
+  expect(screen.queryByText("Market")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText("Why these totals are qualified"));
+  expect(screen.getByText(/Some spending evidence needs review/)).toBeVisible();
+  expect(api.getFinanceSpending).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      scope: expect.objectContaining({ accountIds: [], categoryIds: [], includePending: false }),
+    }),
+  );
+});
+it("rejects an invalid timezone before reading money and resets to the owner's timezone", async () => {
+  mount("?timezone=Not/AZone");
+  fireEvent.click(await screen.findByRole("button", { name: "Reset spending filters" }));
+  await screen.findByRole("button", { name: "Groceries" });
+  expect(
+    vi
+      .mocked(api.getFinanceSpending)
+      .mock.calls.every(([query]) => query.scope.timezone === "America/New_York"),
+  ).toBe(true);
+  expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
+});
+it("changes account membership and accounting options with explicit revisioned preference saves", async () => {
+  mount("?accounts=all");
+  await screen.findByRole("button", { name: "Groceries" });
+  fireEvent.click(screen.getByText("Spending options"));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Everyday account" }));
+  await waitFor(() =>
+    expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
+      "finances",
+      expect.objectContaining({ preferences: { spendAccountIds: [] } }),
+    ),
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("checkbox", { name: "Everyday account" })).toBeEnabled(),
+  );
+  fireEvent.click(screen.getByRole("checkbox", { name: "Everyday account" }));
+  await waitFor(() =>
+    expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
+      "finances",
+      expect.objectContaining({ preferences: { spendAccountIds: [accountId] } }),
+    ),
+  );
+  await waitFor(() => expect(screen.getByRole("button", { name: "Full outflow" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Full outflow" }));
+  await waitFor(() =>
+    expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
+      "finances",
+      expect.objectContaining({ preferences: { financeSpendingBasis: "full_outflow" } }),
+    ),
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("checkbox", { name: "Include pending" })).toBeEnabled(),
+  );
+  fireEvent.click(screen.getByRole("checkbox", { name: "Include pending" }));
+  await waitFor(() =>
+    expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
+      "finances",
+      expect.objectContaining({ preferences: { financeSpendingIncludePending: false } }),
+    ),
+  );
+});
+it("focuses Trends on a group then restores all categories without saving a category preference", async () => {
+  mount("?view=trends&period=custom&from=2026-09-01&through=2026-09-30");
+  await screen.findByRole("region", { name: "Spending trends" });
+  fireEvent.click(screen.getByText("Focus on a group"));
+  fireEvent.click(screen.getByRole("button", { name: "Groceries" }));
+  await waitFor(() =>
+    expect(api.getFinanceSpending).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: expect.objectContaining({ categoryIds: ["food"] }) }),
+    ),
+  );
+  await screen.findByText("Focus on a group");
+  const focus = screen.getByText("Focus on a group").closest("details");
+  if (!focus?.open) fireEvent.click(screen.getByText("Focus on a group"));
+  fireEvent.click(await screen.findByRole("button", { name: "All categories" }));
+  await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("categories="));
+  expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
+});
+it("clears missing recovery explicitly while retaining its full accounting filters", async () => {
+  mount(recoverySearch(recoveryFilter("deleted-group")));
+  fireEvent.click(await screen.findByRole("button", { name: "Clear recovered selection" }));
+  await waitFor(() =>
+    expect(screen.getByTestId("location")).not.toHaveTextContent("recoverSpending"),
+  );
+  expect(screen.getByTestId("location")).toHaveTextContent("refunds=0");
+  expect(screen.getByTestId("location")).toHaveTextContent("accounts=");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
+});
+it("saves explicit grouping and period choices, navigates periods, and retains edited custom dates", async () => {
+  mount("?period=month&from=2026-09-01");
+  await screen.findByRole("button", { name: "Groceries" });
+  fireEvent.click(screen.getByRole("button", { name: "Buckets" }));
+  await waitFor(() =>
+    expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
+      "finances",
+      expect.objectContaining({ preferences: { financeSpendingGrouping: "buckets" } }),
+    ),
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Previous period" })).toBeEnabled(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Previous period" }));
+  await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("from=2026-08-01"));
+  fireEvent.click(screen.getByRole("button", { name: "Custom" }));
+  await waitFor(() =>
+    expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
+      "finances",
+      expect.objectContaining({ preferences: { financeSpendingPeriod: "custom" } }),
+    ),
+  );
+  await waitFor(() => expect(screen.getByLabelText("From")).toBeEnabled());
+  fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-07-01" } });
+  await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("from=2026-07-01"));
+  expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
+    "finances",
+    expect.objectContaining({ preferences: { financeSpendingPeriod: "custom" } }),
+  );
+});

@@ -317,21 +317,25 @@ and Generous sensitivity when enabled. These preferences belong in Calendar sett
 
 ### Finance configuration and prerequisites
 
-October 18 target revision: Finance will have an explicit, resumable setup gate for the normal
-workspace, including account connection, financial context, and recommended registered automation.
-Completion, manual-later paths, and existing-user access follow design §§2 and 13. This supersedes the earlier
-independent-access target below where conflicting; it is not implemented by this documentation change.
-The [Finance setup contract](../design/pages/finances.md#financial-setup-contract) records the new
-automation prompt, schedule tracking, and management direction.
+Finance's resumable setup gate merged in
+[PR #270 — Complete the Finance workspace and guarded agent workflows](https://github.com/coopersully/personal-os/pull/270).
+Ordinary workspace entry requires recorded completion or the persisted migration-time existing-access
+grant. Loading and failed reads grant neither. Existing access preserves read/correction workflows
+without manufacturing completion or messaging authority. The
+[onboarding contract](../design/pages/finance-onboarding-review.md) owns the exact readiness rules.
 
-Finance setup is an editable configuration surface, not a sequential questionnaire. Opening it
-loads existing settings without starting execution. Profile, accounts/records, and budget can be
-worked on independently. Setup and Finance Settings share fields and mutation contracts; versioned
-financial facts, effective-dated payroll, and workspace preferences keep their authoritative stores.
-Explicit preparation, approval, and record-check actions remain separate. Missing capability
-prerequisites explain what is required and link to the relevant section with a return path; they
-never block unrelated records or hide an existing budget. Failed reads are unavailable, not missing
-user input. See [the Finance page contract](../design/pages/finances.md#financial-setup-contract).
+People review financial context and display preferences, connect a usable or syncing source, and
+choose automation now or later. Unknown answers remain valid where supported; a budget is never a
+setup prerequisite. Manual-later completion keeps Chat visible with sending locked until its own
+registration, verification, and capability requirements pass. Completed setup does not restart when
+sources or messaging later fail.
+
+Profile, accounts/records, and budget retain independent canonical editors. Setup and Finance
+Settings share fields and mutation contracts; versioned financial facts, effective-dated payroll,
+and workspace preferences keep their authoritative stores. Explicit preparation, exact human budget
+approval, and record-check actions remain separate. This replaces the earlier ungated-access target,
+not the independence of the underlying records. Source implementation does not establish production
+or external-host acceptance; see the [implementation log](implementation-log.md).
 
 Finance navigation and disclosure: Financial profile owns durable planning inputs; Accounts owns
 connection health and account corrections; Transactions owns pending activity and transaction

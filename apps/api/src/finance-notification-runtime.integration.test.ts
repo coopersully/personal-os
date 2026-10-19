@@ -16,17 +16,11 @@ import type { Principal } from "./types.js";
 describe.sequential("bounded automatic Finance discovery", () => {
   let container: StartedPostgreSqlContainer;
   let database: DatabaseClient;
+  const ids: string[] = [];
   beforeAll(async () => {
     container = await new PostgreSqlContainer("postgres:17.5-alpine").start();
     database = createDatabaseClient(container.getConnectionUri());
     await migrateDatabase(database.db, resolve(process.cwd(), "packages/database/migrations"));
-  }, 120000);
-  afterAll(async () => {
-    await database?.close();
-    await container?.stop();
-  });
-  it("honors disable and shutdown, scans bounded pages across owners, and repairs publication failure on rediscovery", async () => {
-    const ids: string[] = [];
     const producer = createFinanceContextualQuestionService({ db: database.db });
     for (let owner = 0; owner < 2; owner++) {
       const userId = randomUUID();
@@ -69,18 +63,35 @@ describe.sequential("bounded automatic Finance discovery", () => {
         ids.push(question.question.work.id);
       }
     }
-    let enabled = false;
-    const publish = vi.fn(async () => ({}) as never),
-      drain = vi.fn(async () => ({}) as never);
+  }, 120000);
+  afterAll(async () => {
+    await database?.close();
+    await container?.stop();
+  });
+
+  function dispatcher(enabled: () => boolean = () => true) {
+    const publish = vi.fn(async () => ({}) as never);
+    const drain = vi.fn(async () => ({}) as never);
     const run = createFinanceNotificationDispatcher({
       db: database.db,
-      enabled: () => enabled,
+      enabled,
       notifications: { publish, drain },
     });
+    return { publish, drain, run };
+  }
+
+  it("honors disable and shutdown without publishing or draining", async () => {
+    let enabled = false;
+    const { publish, drain, run } = dispatcher(() => enabled);
     expect(await run()).toEqual({ processed: 0, failed: 0 });
     enabled = true;
     expect(await run(() => false)).toEqual({ processed: 0, failed: 0 });
     expect(publish).not.toHaveBeenCalled();
+    expect(drain).not.toHaveBeenCalled();
+  });
+
+  it("scans bounded pages across owners without losing work", async () => {
+    const { publish, drain, run } = dispatcher();
     expect(await run()).toEqual({ processed: 25, failed: 0 });
     expect(await run()).toEqual({ processed: 7, failed: 0 });
     const discovered = publish.mock.calls.flatMap((call) =>
@@ -88,10 +99,24 @@ describe.sequential("bounded automatic Finance discovery", () => {
     );
     expect(new Set(discovered)).toEqual(new Set(ids));
     expect(drain).toHaveBeenCalledTimes(3);
+  });
+
+  it("rediscovers the exact work after publication fails", async () => {
+    const { publish, run } = dispatcher();
     publish.mockRejectedValueOnce(new Error("publication unavailable"));
-    expect((await run()).failed).toBe(1);
-    await run();
-    await run();
+    expect(await run()).toEqual({ processed: 25, failed: 1 });
+    const failedWork = (
+      publish.mock.calls[0] as unknown as [Principal, { work: { id: string }[] }]
+    )[1].work.map((item) => item.id);
+    expect(await run()).toEqual({ processed: 7, failed: 0 });
+    expect(await run()).toEqual({ processed: 25, failed: 0 });
+    const retried = publish.mock.calls
+      .slice(1)
+      .flatMap((call) =>
+        (call as unknown as [Principal, { work: { id: string }[] }])[1].work.map((item) => item.id),
+      );
     expect(publish.mock.calls.length).toBeGreaterThan(3);
+    expect(failedWork.length).toBeGreaterThan(0);
+    expect(retried).toEqual(expect.arrayContaining(failedWork));
   });
 });

@@ -32,9 +32,3 @@ onlyBuiltDependencies:
   - esbuild
   - protobufjs
   - ssh2
-
-# This advisory only affects React Router RSC server actions. ilo uses the
-# client-side BrowserRouter, and the registry has no patched stable release.
-auditConfig:
-  ignoreGhsas:
-    - GHSA-qwww-vcr4-c8h2

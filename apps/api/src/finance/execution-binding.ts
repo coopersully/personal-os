@@ -9,7 +9,11 @@ import { and, eq } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { readOAuthActorLineage } from "../oauth-actor-lineage.js";
 import type { Principal } from "../types.js";
-import { loadFinanceEffectPrincipal } from "./conversation-causality.js";
+import { requireWorkspaceExecution } from "../workspace-execution.js";
+import {
+  loadFinanceEffectPrincipal,
+  requireFinanceEffectMessageProof,
+} from "./conversation-causality.js";
 import {
   financeExecutionDecisionTime,
   requireFinanceExecutionGuard,
@@ -100,8 +104,15 @@ export async function loadCandidateExecutionPrincipal(
 ) {
   requireFinanceExecutionGuard(tx, run.userId);
   const at = await financeExecutionDecisionTime(tx);
+  // Only the canonical approve-each path supplies this authenticated owner principal.
+  // Exact approval replaces standing bypass consent, never the agent's live grant.
+  const exactHuman =
+    options.humanApproval?.actorType === "user" &&
+    options.humanApproval.userId === run.userId &&
+    options.humanApproval.actorId === run.userId;
+  const requirePolicy = options.requireExecution && !exactHuman;
   if (!run.authorizationConnectionId && !run.automationScheduleId)
-    return loadFinanceEffectPrincipal(tx, run, supplied, at, options.requireExecution);
+    return loadFinanceEffectPrincipal(tx, run, supplied, at, requirePolicy);
   const [binding] = await tx
     .select()
     .from(financeMaintenanceExecutionBindings)
@@ -114,23 +125,57 @@ export async function loadCandidateExecutionPrincipal(
       ),
     )
     .for("share");
-  // No historical binding backfill: old original-actor flows retain existing checks.
-  if (!binding) return loadFinanceEffectPrincipal(tx, run, supplied, at, options.requireExecution);
-  if (binding.protocolVersion !== FINANCE_CONVERSATION_PROTOCOL_VERSION)
-    throw new AppError("forbidden", "The original candidate protocol version changed.");
+  async function loadBoundPrincipal(principal: Principal, executionPolicy: boolean) {
+    const decisionTime = await financeExecutionDecisionTime(tx);
+    const current = await loadFinanceEffectPrincipal(tx, run, principal, decisionTime, false);
+    if (
+      !(["finances:maintain", "finances:write", "finances:execute"] as const).every((scope) =>
+        current.scopes.has(scope),
+      )
+    )
+      throw new AppError(
+        "forbidden",
+        "The bound Finance execution grant requires maintain, write and execute access.",
+      );
+    // A bound run requires its current original-host proof even when it captured no messages.
+    await requireFinanceEffectMessageProof(tx, run, current, decisionTime);
+    if (binding && current.actorId !== binding.originalActorId) {
+      const [token] = await tx
+        .select({ audience: accessTokens.audience })
+        .from(accessTokens)
+        .where(and(eq(accessTokens.userId, run.userId), eq(accessTokens.id, current.actorId)));
+      if (
+        !token?.audience ||
+        !(await readOAuthActorLineage(tx, {
+          ownerId: run.userId,
+          ancestorActorId: binding.originalActorId,
+          currentActorId: current.actorId,
+          audience: token.audience,
+        }))
+      )
+        throw new AppError(
+          "forbidden",
+          "The bound Finance execution actor has no canonical original-actor lineage.",
+        );
+    }
+    if (executionPolicy) await requireWorkspaceExecution(tx, current, "finances", decisionTime);
+    return current;
+  }
+  // No historical binding backfill; original-host authority still applies to a bound run.
+  if (!binding) return loadBoundPrincipal(supplied, requirePolicy);
+  if (
+    binding.protocolVersion !== FINANCE_CONVERSATION_PROTOCOL_VERSION ||
+    binding.automationScheduleId !== run.automationScheduleId ||
+    binding.authorizationConnectionId !== run.authorizationConnectionId
+  )
+    throw new AppError("forbidden", "The original candidate host or protocol version changed.");
   if (
     options.receiptOnly &&
     options.successorReceiptRead &&
     supplied.actorType === "agent" &&
     supplied.actorId !== binding.currentActorId
   ) {
-    const current = await loadFinanceEffectPrincipal(
-      tx,
-      run,
-      supplied,
-      await financeExecutionDecisionTime(tx),
-      true,
-    );
+    const current = await loadBoundPrincipal(supplied, true);
     const [token] = await tx
       .select({ audience: accessTokens.audience, clientId: accessTokens.clientId })
       .from(accessTokens)
@@ -151,10 +196,6 @@ export async function loadCandidateExecutionPrincipal(
       );
     return current;
   }
-  const exactHuman =
-    options.humanApproval?.actorType === "user" &&
-    options.humanApproval.userId === run.userId &&
-    options.humanApproval.actorId === run.userId;
   if (options.fence) {
     if (
       options.fence.bindingRevision !== binding.bindingRevision.toString() ||
@@ -175,16 +216,13 @@ export async function loadCandidateExecutionPrincipal(
       "conflict",
       "Unleased candidate settlement cannot steal an active or expired claim.",
     );
-  return loadFinanceEffectPrincipal(
-    tx,
-    run,
+  return loadBoundPrincipal(
     {
       ...supplied,
       actorId: binding.currentActorId,
       actorType: "agent",
       authorizationConnectionId: binding.authorizationConnectionId,
     },
-    at,
-    options.requireExecution,
+    requirePolicy,
   );
 }

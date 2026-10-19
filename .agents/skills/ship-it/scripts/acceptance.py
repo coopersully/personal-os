@@ -44,6 +44,34 @@ def exception_valid(row, implementers):
         return False
 
 
+def production_criterion_ids(plan, pr):
+    """Validate either reviewed schema and return IDs without changing the plan."""
+    criteria = plan.get('criteria')
+    if (type(plan.get('required')) is not bool or not isinstance(plan.get('owner'), str)
+            or not plan['owner'].strip() or not isinstance(criteria, list)):
+        return None
+    if all(isinstance(c, str) and c.strip() for c in criteria):
+        if not strings(plan.get('evidence')) or len(criteria) != len(set(criteria)):
+            return None
+        return criteria
+    if (plan['required'] is not True or not criteria
+            or not all(isinstance(c, dict) for c in criteria)
+            or not strings(plan.get('premerge_evidence'))
+            or not all(sha(pr.get(k)) and plan.get(field) == pr[k]
+                       for field, k in (('candidateHead', 'headSha'), ('candidateBase', 'baseSha')))):
+        return None
+    for row in criteria:
+        if (any(not isinstance(row.get(k), str) or not row[k].strip() for k in ('id', 'action'))
+                or row.get('result') not in ('planned', 'pending_post_merge')):
+            return None
+        if 'evidence' in row:
+            evidence = row['evidence']
+            if not ((isinstance(evidence, str) and evidence.strip()) or strings(evidence)):
+                return None
+    ids = [row['id'] for row in criteria]
+    return ids if len(ids) == len(set(ids)) else None
+
+
 def review_problems(state):
     state = mapping(state)
     pr = mapping(state.get('pr'))
@@ -77,11 +105,8 @@ def review_problems(state):
     plan = mapping(record.get('productionPlan'))
     if not plan or state.get('reviewedProductionPlan') != plan:
         errors.append('Production plan differs from the independently retained review snapshot')
-    criteria = plan.get('criteria')
-    if (type(plan.get('required')) is not bool or not isinstance(plan.get('owner'), str)
-            or not plan['owner'].strip() or not strings(plan.get('evidence'))
-            or not isinstance(criteria, list) or not all(isinstance(c, str) and c.strip() for c in criteria)
-            or len(criteria) != len(set(criteria))):
+    criteria = production_criterion_ids(plan, pr)
+    if criteria is None:
         errors.append('Reviewed production plan is missing or malformed')
     elif plan['required'] and not criteria:
         errors.append('Runtime changes need explicit production acceptance criteria')
@@ -112,7 +137,11 @@ def evaluate_delivery(state):
                 isinstance(row, dict) and row.get('deployedSha') == production.get('deployedSha')
                 and row.get('status') not in ('SUCCESS', 'PENDING') for row in criteria):
             return {'decision': 'BLOCK', 'reasons': ['Current production criterion failed or is unknown']}
-        if production.get('deployment') == 'PENDING' and production.get('health') in ('SUCCESS', 'PENDING'):
+        candidate_present = (sha(production.get('deployedSha'))
+                             and production.get('containsMerge') is True
+                             and production.get('changePresent') is True)
+        if (not candidate_present and production.get('deployment') == 'PENDING'
+                and production.get('health') in ('SUCCESS', 'PENDING')):
             return {'decision': 'WAIT', 'reasons': ['Deployment is active; the prior revision may still be serving']}
         if (not sha(production.get('deployedSha')) or production.get('containsMerge') is not True
                 or production.get('changePresent') is not True or not strings(production.get('evidence'))):
@@ -122,7 +151,7 @@ def evaluate_delivery(state):
         if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
             return {'decision': 'BLOCK', 'reasons': ['Production criteria evidence is missing']}
         ids = [r.get('id') for r in rows]
-        if (not all(isinstance(i, str) for i in ids) or len(ids) != len(set(ids)) or set(ids) != set(plan['criteria'])
+        if (not all(isinstance(i, str) for i in ids) or len(ids) != len(set(ids)) or set(ids) != set(production_criterion_ids(plan, pr))
                 or any(r.get('deployedSha') != production['deployedSha'] or not strings(r.get('evidence')) for r in rows)):
             return {'decision': 'BLOCK', 'reasons': ['Production coverage does not match the reviewed plan/revision']}
         statuses.extend(r.get('status') for r in rows)

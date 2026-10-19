@@ -53,6 +53,20 @@ required traffic and reset conditions where relevant. For independently reviewed
 use required=false, criteria=[], and a nonempty reason; record alternative distribution requirements
 in evidence. Do not remove criteria after merge to obtain a passing result.
 
+A required runtime plan may instead retain a detailed reviewed schema: `candidateHead` and
+`candidateBase` must match the current reviewed PR; `premerge_evidence` must be a nonempty array
+of nonblank references; and `criteria` must be a nonempty array of objects. Every object needs a
+unique nonblank `id`, a nonblank `action`, and `result` equal to `planned` or
+`pending_post_merge`. Optional criterion `evidence`, when present, is a nonblank reference or a
+nonempty array of nonblank references. The owner remains required. Mixed string/object criteria,
+missing evidence, malformed bindings and detailed non-runtime plans are rejected.
+
+The full detailed object must equal the independently retained snapshot, including actions,
+safety limits and extra metadata. Validation never normalizes or rewrites either snapshot; only
+validated IDs are derived in memory to match production observations. Premerge references do not
+satisfy postmerge production criteria. Canonical string-ID plans still require top-level
+`evidence`, with the existing non-runtime rules unchanged.
+
 Before final collection, save the independently reviewed plan into the PR checkpoint's
 `reviewedProductionPlan` with phase `final_check`. The checkpoint freezes that snapshot and refuses
 replacement, including after reopening a phase. Read it back into readiness/delivery state; do not

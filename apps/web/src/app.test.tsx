@@ -8054,15 +8054,10 @@ describe("ilo web app", () => {
     expect(await screen.findByRole("button", { name: "Calendar view: day" })).toBeInTheDocument();
   }, 30_000);
 
-  it("navigates Calendar through Tasks and Today to Settings activity", async () => {
-    const view = setup("/calendar");
+  it("filters Tasks across active and history views and opens reminder dialogs", async () => {
+    setup("/tasks");
     const browser = userEvent.setup();
-    expect(await screen.findByRole("button", { name: "Calendar view: week" })).toBeInTheDocument();
-    await browser.click(
-      within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
-        name: "Tasks",
-      }),
-    );
+    expect(await screen.findByRole("button", { name: "Tasks view: Inbox" })).toBeInTheDocument();
     await browser.click(screen.getByRole("link", { name: "All" }));
     await browser.click(screen.getByRole("button", { name: "Filters" }));
     await browser.selectOptions(screen.getByLabelText("Type"), "reminder");
@@ -8092,7 +8087,18 @@ describe("ilo web app", () => {
     expect(screen.getByRole("button", { name: "Tasks view: All tasks" })).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Open Test reminder" }));
     await browser.click(screen.getByRole("button", { name: "Close" }));
+  });
 
+  it("navigates Calendar through Tasks and Today to Settings activity", async () => {
+    setup("/calendar");
+    const browser = userEvent.setup();
+    expect(await screen.findByRole("button", { name: "Calendar view: week" })).toBeInTheDocument();
+    await browser.click(
+      within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
+        name: "Tasks",
+      }),
+    );
+    expect(await screen.findByRole("button", { name: "Tasks view: Inbox" })).toBeInTheDocument();
     await browser.click(
       within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
         name: "Today at a Glance",
@@ -8112,6 +8118,12 @@ describe("ilo web app", () => {
     expect(screen.getByText(/Connector ·/)).toBeInTheDocument();
     expect(screen.getByText(/System ·/)).toBeInTheDocument();
     expect(screen.getByText(/You ·/)).toBeInTheDocument();
+  });
+
+  it("keeps Activity search results and URL state aligned", async () => {
+    const view = setup("/settings?section=activity");
+    const browser = userEvent.setup();
+    expect(await screen.findByText("Reminder · created")).toBeInTheDocument();
     const activitySearch = screen.getByRole("searchbox", { name: "Search activity" });
     await browser.type(activitySearch, "system");
     expect(view.location.value).toBe("/settings?section=activity&q=system");

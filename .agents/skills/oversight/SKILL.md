@@ -46,3 +46,18 @@ production-accepted separately. Preserve current independent deep-review accepta
 threads and every protected merge gate. Route repairs to workers; never invoke a combined
 implementation workflow as head/orchestrator. Close the epic only after integrated acceptance and
 required production evidence pass, not merely when child PRs merge.
+
+## Scheduled status reports
+
+End every scheduled oversight wake with a user-visible report, even when nothing has changed.
+This requirement supersedes quiet-on-unchanged guidance for scheduled oversight wakes. Use one or
+two short sentences, about 40 words maximum, in plain English: say what is done or happening and
+what is blocked, next, or being waited on. For unchanged state, say there is no change and what
+must happen next; never imply that waiting proves completion.
+
+Keep hashes, run IDs and internal jargon in evidence records, outside this report. Do not recite
+coordination procedures or report every tool operation or worker callback. For example: “The
+spending checks passed. The remaining fixes are still being tested before the final review.”
+An unchanged report could say: “No change since the last update. We are waiting for the final
+tests to finish.” This reporting rule does not create schedules, change their cadence, or grant
+implementation, acceptance or merge authority.

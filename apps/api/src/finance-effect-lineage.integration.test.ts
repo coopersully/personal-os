@@ -622,9 +622,17 @@ describe.sequential("Finance whole-candidate effect lineage", () => {
       .update(financeMaintenanceCandidateItems)
       .set({ fingerprint: `sha256:${"f".repeat(64)}` })
       .where(eq(financeMaintenanceCandidateItems.id, setup.item.id));
-    expect(await setup.actions.approve(setup.queued.review.id, setup.human)).toMatchObject({
-      candidateSuperseded: true,
+    await expect(setup.actions.approve(setup.queued.review.id, setup.human)).rejects.toMatchObject({
+      code: "conflict",
+      message: "The Finance maintenance candidate requires rebuilding.",
     });
+    expect(
+      (
+        await database.db.query.financeMaintenanceCandidates.findFirst({
+          where: eq(financeMaintenanceCandidates.id, setup.candidate.id),
+        })
+      )?.state,
+    ).toBe("superseded");
     await assertNoBoundEffects(setup);
   });
   it("rejects a bound no-batch settlement without any protocol proof", async () => {

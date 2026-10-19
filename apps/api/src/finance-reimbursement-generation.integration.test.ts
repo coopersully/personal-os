@@ -250,6 +250,18 @@ describe.sequential("Database-owned reimbursement relationship generations", () 
   });
   it("covers the separate maintenance-answer match writer and its completed-answer replay", async () => {
     const f = await fixture();
+    const reviewState = async () => {
+      const [row] = await database.db
+        .select({ needsReview: financeTransactions.needsReview })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, f.credit.id));
+      return required(row).needsReview;
+    };
+    expect(await reviewState()).toBe(true);
+    expect(await generations(f.credit.id)).toEqual({
+      contextual_revision: "1",
+      reimbursement_relationship_revision: "1",
+    });
     await database.db
       .insert(executionPolicySettings)
       .values({ userId: f.owner.id, reviewBypassEnabled: true });
@@ -316,14 +328,16 @@ describe.sequential("Database-owned reimbursement relationship generations", () 
     const result = await actions.answerQuestion(question.id, answer, context);
     expect(result).toMatchObject({ status: "applied", result: { disposition: "match" } });
     expect(await generations(f.credit.id)).toEqual({
-      contextual_revision: "1",
+      contextual_revision: "2",
       reimbursement_relationship_revision: "2",
     });
+    expect(await reviewState()).toBe(false);
     await actions.answerQuestion(question.id, answer, context);
     expect(await generations(f.credit.id)).toEqual({
-      contextual_revision: "1",
+      contextual_revision: "2",
       reimbursement_relationship_revision: "2",
     });
+    expect(await reviewState()).toBe(false);
     expect(
       await database.db
         .select()

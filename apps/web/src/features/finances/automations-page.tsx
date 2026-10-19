@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,7 @@ import { Separator } from "@/components/ui/separator";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
 import { SettingsFeedbackContext } from "../../lib/settings-feedback.js";
+import { financeConversationReturnTo, financeRecoveryHref } from "./automation-recovery.js";
 import {
   type AutomationAction,
   AutomationBinding,
@@ -34,6 +36,8 @@ const date = (value: string | null) => (value ? new Date(value).toLocaleString()
 
 export function FinanceAutomationsPage() {
   const client = useQueryClient();
+  const [params] = useSearchParams();
+  const returnTo = financeConversationReturnTo(params.get("returnTo"));
   const schedules = useQuery({
     queryKey: ["finance-host-schedules"],
     queryFn: api.listAutomationHostSchedules,
@@ -75,20 +79,28 @@ export function FinanceAutomationsPage() {
           <p>One automation can maintain your finances. You can register additional hosts.</p>
           <AutomationRegistration pending={pending} perform={perform} />
         </div>
-        <FinanceConversationReadiness />
+        {returnTo ? (
+          <Button asChild variant="secondary" className="self-start">
+            <Link to={returnTo}>Return to conversation</Link>
+          </Button>
+        ) : null}
+        <FinanceConversationReadiness returnTo={returnTo} />
         <Separator />
         <QueryFeedback query={schedules} title="Automations could not be loaded" />
         {schedules.isSuccess && !schedules.data.length ? (
           <p>No Finance automations registered.</p>
         ) : null}
-        {schedules.data?.map((status) => (
-          <Automation
-            key={status.schedule.id}
-            status={status}
-            pending={pending}
-            perform={perform}
-          />
-        ))}
+        <div id="finance-automation-list" className="flex min-w-0 flex-col gap-6">
+          {schedules.data?.map((status) => (
+            <Automation
+              key={status.schedule.id}
+              status={status}
+              pending={pending}
+              perform={perform}
+              returnTo={returnTo}
+            />
+          ))}
+        </div>
       </div>
     </SettingsFeedbackContext.Provider>
   );
@@ -98,15 +110,38 @@ function Automation({
   status,
   pending,
   perform,
+  returnTo,
 }: {
   status: HostStatus;
   pending: boolean;
   perform: AutomationAction;
+  returnTo: string | null;
 }) {
   const { schedule, health } = status;
   const [label, setLabel] = useState(schedule.label);
   const [removeOpen, setRemoveOpen] = useState(false);
   const live = schedule.state === "active" || schedule.state === "paused";
+  const needsHostSetup = ["overdue", "unknown", "paused"].includes(health.state);
+  const setupAction =
+    schedule.state === "setup_pending"
+      ? "Finish setup"
+      : needsHostSetup
+        ? "Review host setup"
+        : "Details and setup";
+  const cause =
+    status.connectionAvailable === false
+      ? "The original host connection is unavailable. Reconnect it before verifying message access."
+      : health.state === "overdue"
+        ? "This host missed its expected check-in. Check that the external job is enabled and connected."
+        : health.state === "paused"
+          ? "This registration is paused. Resume the external job and confirm its registration in the host."
+          : health.state === "unknown"
+            ? "The host has not reported its next expected check-in. Check its schedule in the host."
+            : schedule.state === "setup_pending"
+              ? "Finish setup in the external host, then save its identifier here."
+              : schedule.state === "cancelled" || schedule.state === "revoked"
+                ? "This registration no longer accepts runs. Register and verify an automation to use Chat."
+                : null;
   return (
     <section aria-label={schedule.label} className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -119,11 +154,7 @@ function Automation({
           ? `Every ${schedule.trigger.recurrence.everyMinutes} minutes · ${schedule.trigger.recurrence.timeZone}`
           : "Event-based · next run unknown"}
       </p>
-      <p>
-        {status.connectionAvailable === false
-          ? "Connection unavailable. Reauthorize the original host connection."
-          : `Schedule health: ${health.state.replaceAll("_", " ")}`}
-      </p>
+      {cause ? <p>{cause}</p> : null}
       {schedule.state === "active" && schedule.trigger.type === "recurring" ? (
         <p>
           Next expected start: {date(health.nextExpectedAt)}
@@ -140,6 +171,19 @@ function Automation({
       <AutomationHostReadiness scheduleId={schedule.id} />
       <p>Saved instructions do not confirm installation.</p>
       <div className="flex flex-wrap gap-2">
+        {status.connectionAvailable === false ? (
+          <Button asChild variant="secondary">
+            <Link
+              to={
+                returnTo
+                  ? financeRecoveryHref("/settings?section=agent-connections", returnTo)
+                  : "/settings?section=agent-connections"
+              }
+            >
+              Reconnect host
+            </Link>
+          </Button>
+        ) : null}
         <HostPromptPanel status={status} />
         <AutomationVerification
           scheduleId={schedule.id}
@@ -147,7 +191,7 @@ function Automation({
         />
         <Dialog>
           <DialogTrigger asChild>
-            <Button variant="outline">Details and setup</Button>
+            <Button variant="outline">{setupAction}</Button>
           </DialogTrigger>
           <DialogContent className="max-h-[90dvh] overflow-y-auto">
             <DialogHeader>

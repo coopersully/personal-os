@@ -109,6 +109,8 @@ it("renders qualified end-payday estimates, floor unknown and intraday limits wi
   ).toBeInTheDocument();
   expect(screen.getByText(/Protected floor unknown. No zero floor/)).toBeInTheDocument();
   expect(screen.getByText(/intraday order and any intraday low are unknown/)).toBeInTheDocument();
+  expect(screen.getByText("Daily movements").parentElement).not.toHaveAttribute("open");
+  fireEvent.click(screen.getByText("Daily movements"));
   const table = screen.getByRole("table", { name: "Estimated cycle movements" });
   expect(within(table).getAllByRole("row")).toHaveLength(25);
   fireEvent.click(screen.getByRole("button", { name: "Next cycle movements" }));
@@ -172,7 +174,10 @@ it("shows an explicit zero protected floor and returns to the first movement pag
   expect(screen.getByText(/User-confirmed floor \$0.00/)).toHaveTextContent(
     "not an intraday affordability guarantee",
   );
+  expect(screen.getByText(/Opening statement/)).not.toBeVisible();
+  fireEvent.click(screen.getByText("How this estimate works"));
   expect(screen.getByText(/Opening statement/)).toBeVisible();
+  fireEvent.click(screen.getByText("Daily movements"));
   fireEvent.click(screen.getByRole("button", { name: "Next cycle movements" }));
   fireEvent.click(screen.getByRole("button", { name: "Previous cycle movements" }));
   expect(screen.getByText("Cycle movement page 1 of 2")).toBeVisible();

@@ -3,11 +3,18 @@ import {
   type GoalScenarioInput,
   projectGoalScenarios,
 } from "@personal-os/domain";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -165,10 +172,12 @@ export function FinanceGoalScenarioExplorer({
   const [confirmed, setConfirmed] = useState(false);
   const [alternatives, setAlternatives] = useState<Alternative[]>([]);
   const [projection, setProjection] = useState<Projection | null>(null);
-  const [validationError, setValidationError] = useState<string | null>(null);
+  const results = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (projection) results.current?.focus();
+  }, [projection]);
   const clearDraftFeedback = () => {
     setProjection(null);
-    setValidationError(null);
   };
   const update = (key: keyof typeof draft, value: string) => {
     setDraft((previous) => ({ ...previous, [key]: value }));
@@ -181,22 +190,91 @@ export function FinanceGoalScenarioExplorer({
         {connectedGoal ? `Explore ${connectedGoal.goal.name}` : "Explore a hypothetical goal"}
       </h2>
       <p className="text-muted-foreground text-sm">
-        Compare fixed monthly contributions with zero interest or growth. These inputs stay in this
-        session and do not change goals, budgets, or allocations.
+        See how a monthly contribution could change your goal date. No interest or growth is
+        assumed. Exploring never changes saved goals, budgets, or allocations.
       </p>
       {connectedGoal ? (
         <div className="flex flex-col gap-2">
           <p className="text-sm">
             {evidence
-              ? `Confirmed by you as of ${evidence.asOf} · ${evidence.currencyCode} · Goal version ${evidence.goalVersion}. This statement is not bank verification.`
+              ? `Saved progress confirmed by you as of ${evidence.asOf} · ${evidence.currencyCode}. This is your statement, not bank verification.`
               : "Current progress and currency are unknown for this goal version. Confirm them before using saved goal progress."}
           </p>
+          {evidence ? (
+            <details className="text-sm">
+              <summary className="cursor-pointer">Saved progress evidence</summary>
+              <p>
+                Goal version {evidence.goalVersion} · Evidence {evidence.evidenceId} · As of{" "}
+                {evidence.asOf}
+              </p>
+            </details>
+          ) : null}
           {onConfirmProgress ? (
             <Button type="button" variant="secondary" onClick={onConfirmProgress}>
               {evidence ? "Reconfirm saved progress" : "Confirm saved progress"}
             </Button>
           ) : null}
         </div>
+      ) : null}
+      {projection &&
+      (!connectedGoal ||
+        (evidence &&
+          projection.progress.sourceRevision === evidence.evidenceId &&
+          projection.sourceGoalRevision ===
+            `${connectedGoal.goal.id}:v${connectedGoal.goal.version}`)) ? (
+        <section
+          ref={results}
+          tabIndex={-1}
+          className="flex flex-col gap-4"
+          aria-label="Hypothetical goal results"
+        >
+          <p className="text-sm text-muted-foreground">
+            Hypothetical comparison · {projection.currency} · As of {projection.asOfLocalDate}.
+            Nothing is saved.
+          </p>
+          <p>
+            Hypothetical remaining target:{" "}
+            {projection.remainingCents === null
+              ? "Unknown"
+              : formatCents(projection.remainingCents, projection.currency)}
+          </p>
+          {projection.scenarios.map((scenario) => (
+            <section
+              key={scenario.name}
+              aria-label={`Hypothetical ${scenario.name}`}
+              className="flex flex-col gap-2"
+            >
+              <h3 className="font-medium">
+                {scenario.name} ·{" "}
+                {formatCents(scenario.monthlyContributionCents, projection.currency)} each month
+              </h3>
+              <p>
+                {reasons[scenario.reason]}
+                {scenario.completionLocalDate ? `: ${scenario.completionLocalDate}` : ""}
+              </p>
+              {scenario.curve.length ? (
+                <ContributionCurve scenario={scenario} currency={projection.currency} />
+              ) : null}
+            </section>
+          ))}
+          {projection.targetDateRequirement ? (
+            <p>
+              Hypothetical target date {projection.targetDateRequirement.localDate}:{" "}
+              {projection.targetDateRequirement.requiredMonthlyContributionCents === null
+                ? targetReasons[projection.targetDateRequirement.reason]
+                : `${formatCents(projection.targetDateRequirement.requiredMonthlyContributionCents, projection.currency)} each month across ${projection.targetDateRequirement.scheduledContributionCount} scheduled contributions.`}
+            </p>
+          ) : null}
+          <details>
+            <summary className="cursor-pointer">Dates and assumptions</summary>
+            <p className="text-sm">
+              As of {projection.asOfLocalDate}; first contribution{" "}
+              {projection.firstContributionLocalDate}. Monthly dates clamp to month-end and retain
+              the original day anchor. No holiday adjustments. Maximum 1200 monthly contributions.
+              Zero interest or growth.
+            </p>
+          </details>
+        </section>
       ) : null}
       <form
         className="flex flex-col gap-4"
@@ -242,22 +320,16 @@ export function FinanceGoalScenarioExplorer({
               ...(draft.targetDate ? { targetLocalDate: draft.targetDate } : {}),
             };
             setProjection(projectGoalScenarios(input));
-            setValidationError(null);
           } catch (error) {
             const message =
               error instanceof Error ? error.message : "Check the hypothetical inputs.";
-            setValidationError(message);
             toast.error(message);
           }
         }}
       >
-        {validationError ? (
-          <p role="alert" className="text-destructive text-sm">
-            {validationError}
-          </p>
-        ) : null}
         <FieldSet>
           <FieldLegend>Hypothetical inputs</FieldLegend>
+          <FieldDescription>Amounts accept up to two decimal places.</FieldDescription>
           <FieldGroup className="grid gap-4 sm:grid-cols-2">
             {(
               [
@@ -391,54 +463,6 @@ export function FinanceGoalScenarioExplorer({
           </Button>
         </div>
       </form>
-      {projection &&
-      (!connectedGoal ||
-        (evidence &&
-          projection.progress.sourceRevision === evidence.evidenceId &&
-          projection.sourceGoalRevision ===
-            `${connectedGoal.goal.id}:v${connectedGoal.goal.version}`)) ? (
-        <section className="flex flex-col gap-4" aria-label="Hypothetical goal results">
-          <p className="text-sm">
-            As of {projection.asOfLocalDate}; first contribution{" "}
-            {projection.firstContributionLocalDate}. Monthly dates clamp to month-end and retain the
-            original day anchor. No holiday adjustments. Maximum 1200 monthly contributions. Zero
-            interest or growth.
-          </p>
-          <p>
-            Hypothetical remaining target:{" "}
-            {projection.remainingCents === null
-              ? "Unknown"
-              : formatCents(projection.remainingCents, projection.currency)}
-          </p>
-          {projection.scenarios.map((scenario) => (
-            <section
-              key={scenario.name}
-              aria-label={`Hypothetical ${scenario.name}`}
-              className="flex flex-col gap-2"
-            >
-              <h3 className="font-medium">
-                {scenario.name} ·{" "}
-                {formatCents(scenario.monthlyContributionCents, projection.currency)} each month
-              </h3>
-              <p>
-                {reasons[scenario.reason]}
-                {scenario.completionLocalDate ? `: ${scenario.completionLocalDate}` : ""}
-              </p>
-              {scenario.curve.length ? (
-                <ContributionCurve scenario={scenario} currency={projection.currency} />
-              ) : null}
-            </section>
-          ))}
-          {projection.targetDateRequirement ? (
-            <p>
-              Hypothetical target date {projection.targetDateRequirement.localDate}:{" "}
-              {projection.targetDateRequirement.requiredMonthlyContributionCents === null
-                ? targetReasons[projection.targetDateRequirement.reason]
-                : `${formatCents(projection.targetDateRequirement.requiredMonthlyContributionCents, projection.currency)} each month across ${projection.targetDateRequirement.scheduledContributionCount} scheduled contributions.`}
-            </p>
-          ) : null}
-        </section>
-      ) : null}
     </section>
   );
 }

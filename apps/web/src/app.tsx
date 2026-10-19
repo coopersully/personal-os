@@ -352,6 +352,7 @@ import { DesktopDownloads } from "./features/desktop/downloads.js";
 import { useDesktopActions } from "./features/desktop/events.js";
 import { resetDesktopSession } from "./features/desktop/session.js";
 import { DesktopSettingsPanel } from "./features/desktop/settings.js";
+import { FinanceRecoveryReturn } from "./features/finances/finance-recovery-return.js";
 import {
   FinanceSidebarNavigation,
   financeSectionFromPath,
@@ -6221,6 +6222,7 @@ function SettingsPageContent({
         <SettingsSearch groups={searchableSettingsNavigation(user.canManageInvitations === true)} />
       }
     >
+      <FinanceRecoveryReturn />
       {settingsParent(section) !== section ? (
         <ShadcnButton asChild variant="ghost" size="sm">
           <Link to={settingsSectionPath(settingsParent(section))}>

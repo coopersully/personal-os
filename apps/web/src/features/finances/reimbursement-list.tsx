@@ -42,7 +42,7 @@ export function FinanceReimbursementList() {
       <CardHeader>
         <CardTitle>Reimbursements</CardTitle>
         <CardDescription>
-          Expected money stays visible until it is matched, cancelled, or needs your judgment.
+          Track recorded receipts and what you still expect to recover.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -69,7 +69,7 @@ export function FinanceReimbursementList() {
                     </div>
                     <ItemDescription>
                       {reimbursementAmount(item.receivedAmount, item.sourceExpense?.currency)}{" "}
-                      received of{" "}
+                      recorded received of{" "}
                       {reimbursementAmount(item.expectedAmount, item.sourceExpense?.currency)} ·{" "}
                       {reimbursementAmount(remaining, item.sourceExpense?.currency)}{" "}
                       {item.status === "cancelled" ? "cancelled remainder" : "remaining"}
@@ -86,24 +86,30 @@ export function FinanceReimbursementList() {
                         comparable across currencies.
                       </p>
                     ) : null}
-                    {item.sourceExpense?.personalCostToDate?.state === "qualified" ? (
-                      <p className="text-sm">
-                        Personal cost to date (whole expense):{" "}
-                        {reimbursementAmount(
-                          item.sourceExpense.personalCostToDate.amount,
-                          item.sourceExpense.personalCostToDate.currency,
-                        )}
-                        . May repeat on related claims; do not add case cards together.
-                      </p>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">
-                        Personal cost to date unavailable
-                        {item.sourceExpense?.personalCostToDate?.state === "unavailable"
-                          ? `: ${item.sourceExpense.personalCostToDate.reason.replaceAll("_", " ")}`
-                          : ""}
-                        .
-                      </p>
-                    )}
+                    <details className="text-sm">
+                      <summary className="cursor-pointer">Expense basis and personal cost</summary>
+                      {item.sourceExpense?.personalCostToDate?.state === "qualified" ? (
+                        <p className="text-sm">
+                          Personal cost to date (whole expense):{" "}
+                          {reimbursementAmount(
+                            item.sourceExpense.personalCostToDate.amount,
+                            item.sourceExpense.personalCostToDate.currency,
+                          )}
+                          . May repeat on related claims; do not add case cards together.
+                        </p>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          Personal cost to date unavailable
+                          {item.sourceExpense?.personalCostToDate?.state === "unavailable"
+                            ? `: ${item.sourceExpense.personalCostToDate.reason.replaceAll("_", " ")}`
+                            : ""}
+                          .
+                        </p>
+                      )}
+                    </details>
+                    {item.matches.some((match) => match.creditTransaction?.pending) ? (
+                      <Badge variant="secondary">Includes pending credit</Badge>
+                    ) : null}
                     <Progress
                       aria-label={`Reimbursement from ${item.payer ?? "unknown payer"}`}
                       value={progress}

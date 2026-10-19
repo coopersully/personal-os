@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-quer
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
+import { MemoryRouter } from "react-router-dom";
 import { toast } from "sonner";
 import { FinanceAutomationsPage } from "./automations-page.js";
 import { useFinanceWorkspaceReadiness } from "./use-finance-workspace-readiness";
@@ -28,6 +29,7 @@ vi.mock("sonner", () => ({
 }));
 const readiness = {
   canSend: false,
+  reason: "challenge_required",
   recovery: "verify_message_protocol",
   messageCapability: "unverified",
 };
@@ -63,14 +65,16 @@ function OwnerReadiness() {
   });
   return <p>{query.data?.canSend ? "Owner Chat available" : "Owner Chat locked"}</p>;
 }
-function open(extra?: ReactNode) {
+function open(extra?: ReactNode, route = "/finances/automations") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(["me"], { id: "owner-a" });
   const user = userEvent.setup();
   render(
     <QueryClientProvider client={client}>
-      <FinanceAutomationsPage />
-      {extra}
+      <MemoryRouter initialEntries={[route]}>
+        <FinanceAutomationsPage />
+        {extra}
+      </MemoryRouter>
     </QueryClientProvider>,
   );
   return user;
@@ -89,7 +93,7 @@ it("separates server schedule health, observed evidence, and aggregate Chat read
   api.getFinanceConversationReadiness.mockResolvedValue({ ...readiness, canSend: true });
   open();
   expect(await screen.findByText(/Chat is available/)).toBeInTheDocument();
-  expect(await screen.findByText(/Schedule health: overdue/)).toBeInTheDocument();
+  expect(await screen.findByText(/missed its expected check-in/)).toBeInTheDocument();
   expect(screen.getByText(/Grace: 60 minutes/)).toBeInTheDocument();
   expect(screen.getByText(/Successful maintenance is not established/)).toBeInTheDocument();
   expect(screen.getByText(/Message access for this host: unverified/)).toBeInTheDocument();
@@ -155,7 +159,7 @@ it("registers only existing authorized connections and retains a failed draft wi
 it("binds setup with the original registration revision and expected state", async () => {
   api.listAutomationHostSchedules.mockResolvedValue([status("setup_pending", true)]);
   const user = open();
-  await user.click(await screen.findByRole("button", { name: "Details and setup" }));
+  await user.click(await screen.findByRole("button", { name: "Finish setup" }));
   await user.type(screen.getByLabelText("Host automation identifier"), "real-host-id");
   await user.click(screen.getByRole("button", { name: "Bind existing host job" }));
   await waitFor(() =>
@@ -186,7 +190,7 @@ it("distinguishes execution authorization from connection recovery", async () =>
     reason: "execution_not_authorized",
   });
   open();
-  expect(await screen.findByText(/Authorize Finance execution/)).toBeInTheDocument();
+  expect(await screen.findByText(/does not have Finance execution permission/)).toBeInTheDocument();
   expect(screen.queryByText(/Reconnect your authorized host/)).not.toBeInTheDocument();
 });
 
@@ -379,7 +383,7 @@ it("cancels pending setup with the original version and closes after confirmatio
 it("saves a renamed paused registration and preserves revision fencing", async () => {
   api.listAutomationHostSchedules.mockResolvedValue([status("paused")]);
   const user = open();
-  await user.click(await screen.findByRole("button", { name: "Details and setup" }));
+  await user.click(await screen.findByRole("button", { name: "Review host setup" }));
   await user.clear(screen.getByLabelText("Name"));
   await user.type(screen.getByLabelText("Name"), "Weekly review");
   await user.click(screen.getByRole("button", { name: "Save name" }));
@@ -412,7 +416,7 @@ it.each([
 ])("retains %s history without offering name or removal mutations", async (state) => {
   api.listAutomationHostSchedules.mockResolvedValue([status(state)]);
   const user = open();
-  await user.click(await screen.findByRole("button", { name: "Details and setup" }));
+  await user.click(await screen.findByRole("button", { name: "Review host setup" }));
   expect(screen.queryByRole("button", { name: "Save name" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Remove registration" })).not.toBeInTheDocument();
   expect(screen.getByText("connection-original")).toBeInTheDocument();
@@ -433,7 +437,7 @@ it("reports missing observations and disables verification for an unavailable co
     },
   ]);
   open();
-  expect(await screen.findByText(/Connection unavailable. Reauthorize/)).toBeInTheDocument();
+  expect(await screen.findByText(/original host connection is unavailable/)).toBeInTheDocument();
   expect(screen.getByText(/Next expected start: Not reported/)).toBeInTheDocument();
   expect(screen.getByText(/Host observation: Not reported/)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Verify message access" })).toBeDisabled();
@@ -447,8 +451,103 @@ it.each([
     { ...status(), prompt: { latestIssued: { templateVersion: "v2" }, upgradeAvailable } },
   ]);
   const user = open();
-  await user.click(await screen.findByRole("button", { name: "Details and setup" }));
+  await user.click(await screen.findByRole("button", { name: "Review host setup" }));
   expect(
     screen.getByText(upgradeAvailable ? "Saved version v2 · Update available" : "Saved version v2"),
   ).toBeInTheDocument();
+});
+
+it("routes an unavailable original connection to reconnection without offering verification", async () => {
+  api.listAutomationHostSchedules.mockResolvedValue([{ ...status(), connectionAvailable: false }]);
+  open();
+  const reconnect = await screen.findByRole("link", { name: "Reconnect host" });
+  expect(reconnect).toHaveAttribute("href", "/settings?section=agent-connections");
+  expect(screen.getByRole("button", { name: "Verify message access" })).toBeDisabled();
+  expect(api.issueFinanceConversationChallenge).not.toHaveBeenCalled();
+});
+
+it.each([
+  null,
+  "https://outside.example/",
+  "//outside.example/",
+  "/finances/chat?bad=%ZZ",
+])("keeps both host recovery links plain when contextual return is absent or unsafe: %s", async (returnTo) => {
+  api.getFinanceConversationReadiness.mockResolvedValue({
+    ...readiness,
+    reason: "connection_disconnected",
+  });
+  api.listAutomationHostSchedules.mockResolvedValue([{ ...status(), connectionAvailable: false }]);
+  open(
+    undefined,
+    `/finances/automations${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`,
+  );
+  await waitFor(() =>
+    expect(screen.getAllByRole("link", { name: "Reconnect host" })).toHaveLength(2),
+  );
+  for (const link of screen.getAllByRole("link", { name: "Reconnect host" })) {
+    expect(link).toHaveAttribute("href", "/settings?section=agent-connections");
+  }
+  expect(screen.queryByRole("link", { name: "Return to conversation" })).not.toBeInTheDocument();
+});
+
+it("offers host setup for an overdue run without claiming to reschedule the external job", async () => {
+  const user = open();
+  await user.click(await screen.findByRole("button", { name: "Review host setup" }));
+  expect(screen.getByRole("dialog")).toHaveTextContent(/external job in its host separately/);
+  expect(api.updateAutomationHostSchedule).not.toHaveBeenCalled();
+  expect(api.bindAutomationHostSchedule).not.toHaveBeenCalled();
+});
+
+it("returns to the exact contextual conversation after recovery without allowing an external return", async () => {
+  open(
+    undefined,
+    "/finances/automations?returnTo=%2Ffinances%2Fchat%3Fquestion%3Dquestion-a%26message%3Dmessage-a",
+  );
+  expect(await screen.findByRole("link", { name: "Return to conversation" })).toHaveAttribute(
+    "href",
+    "/finances/chat?question=question-a&message=message-a",
+  );
+});
+
+it.each([
+  "https://example.com",
+  "//example.com",
+  "/settings",
+])("does not offer an unsafe recovery return to %s", async (returnTo) => {
+  open(undefined, `/finances/automations?returnTo=${encodeURIComponent(returnTo)}`);
+  await screen.findByRole("heading", { name: "Finance host" });
+  expect(screen.queryByRole("link", { name: "Return to conversation" })).not.toBeInTheDocument();
+});
+
+it.each([
+  ["paused", "paused", "Review host setup"],
+  ["active", "unknown", "Review host setup"],
+  ["setup_pending", "setup_pending", "Finish setup"],
+])("keeps %s registration recovery inspectable without changing the host", async (state, healthState, action) => {
+  const record = status(state);
+  api.listAutomationHostSchedules.mockResolvedValue([
+    { ...record, health: { ...record.health, state: healthState } },
+  ]);
+  const user = open();
+  await user.click(await screen.findByRole("button", { name: action }));
+  expect(screen.getByRole("dialog")).toHaveTextContent(
+    /Create, change, or stop the external job in its host separately/,
+  );
+  expect(api.bindAutomationHostSchedule).not.toHaveBeenCalled();
+  expect(api.updateAutomationHostSchedule).not.toHaveBeenCalled();
+});
+
+it("uses the actual registration control when no host is registered", async () => {
+  api.listAutomationHostSchedules.mockResolvedValue([]);
+  api.getFinanceConversationReadiness.mockResolvedValue({
+    ...readiness,
+    reason: "registration_missing",
+    recovery: "register_host",
+  });
+  const user = open();
+  await screen.findByText("No Finance automations registered.");
+  expect(screen.queryByRole("link", { name: "Set up automation" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Register automation" }));
+  expect(screen.getByRole("dialog", { name: "Register Finance automation" })).toBeInTheDocument();
+  expect(api.createAutomationHostSchedule).not.toHaveBeenCalled();
 });

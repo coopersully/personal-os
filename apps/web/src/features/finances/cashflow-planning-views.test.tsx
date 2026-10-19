@@ -38,6 +38,8 @@ it("keeps unknown amount, currency and provenance explicit and prevents unavaila
     </MemoryRouter>,
   );
   expect(screen.getByText(/Amount unknown/)).toBeVisible();
+  expect(screen.getByText(/Cadence not established/)).not.toBeVisible();
+  fireEvent.click(screen.getByText("Schedule details"));
   expect(screen.getByText(/Cadence not established/)).toBeVisible();
   expect(screen.getByRole("link", { name: "Unconfirmed bill" })).toHaveAttribute(
     "href",

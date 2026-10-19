@@ -1,6 +1,7 @@
 import type { FinanceConversationChallenge } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,8 +16,9 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
+import { financeConversationRecovery, financeRecoveryHref } from "./automation-recovery.js";
 
-export function FinanceConversationReadiness() {
+export function FinanceConversationReadiness({ returnTo }: { returnTo?: string | null }) {
   const query = useQuery({
     queryKey: ["finance-conversation-readiness"],
     queryFn: api.getFinanceConversationReadiness,
@@ -26,19 +28,36 @@ export function FinanceConversationReadiness() {
       <h2>Finance Chat</h2>
       <QueryFeedback query={query} title="Chat readiness could not be loaded" />
       {query.data ? (
-        <p>
-          {query.data.canSend
-            ? "Chat is available through an eligible verified automation."
-            : query.data.recovery === "authorize_execution"
-              ? "Authorize Finance execution before sending Chat messages."
-              : query.data.recovery === "reconnect"
-                ? "Reconnect your authorized host to restore Chat."
-                : query.data.recovery === "register_host"
-                  ? "Register an automation, then verify its message access to use Chat."
-                  : query.data.recovery === "resume_registration"
-                    ? "Resume an eligible registration in its host to restore Chat."
-                    : "Chat is locked until an eligible host completes message verification."}
-        </p>
+        query.data.canSend ? (
+          <p>Chat is available through an eligible verified automation.</p>
+        ) : (
+          <>
+            <p>{financeConversationRecovery[query.data.reason].cause}</p>
+            {query.data.reason !== "registration_missing" &&
+            query.data.reason !== "registration_revoked" ? (
+              <Button asChild variant="secondary" className="self-start">
+                {financeConversationRecovery[query.data.reason].href === "/finances/automations" ? (
+                  <a href="#finance-automation-list">
+                    {financeConversationRecovery[query.data.reason].action}
+                  </a>
+                ) : (
+                  <Link
+                    to={
+                      returnTo
+                        ? financeRecoveryHref(
+                            financeConversationRecovery[query.data.reason].href,
+                            returnTo,
+                          )
+                        : financeConversationRecovery[query.data.reason].href
+                    }
+                  >
+                    {financeConversationRecovery[query.data.reason].action}
+                  </Link>
+                )}
+              </Button>
+            ) : null}
+          </>
+        )
       ) : null}
     </section>
   );

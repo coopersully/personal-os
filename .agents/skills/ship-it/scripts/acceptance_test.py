@@ -261,3 +261,34 @@ class DetailedPlanTest(unittest.TestCase):
         self.assertEqual(evaluate_delivery(state)['decision'], 'BLOCK')
         state['production'].update(deployedSha=BASE, containsMerge=False, changePresent=False)
         self.assertEqual(evaluate_delivery(state)['decision'], 'WAIT')
+
+    def test_pending_candidate_deployment_cannot_hide_malformed_coverage(self):
+        mutations = [lambda s: s['production'].pop('criteria'),
+            lambda s: s['production'].update(criteria=None),
+            lambda s: s['production']['criteria'].pop(),
+            lambda s: s['production']['criteria'].append(dict(s['production']['criteria'][0], id='extra')),
+            lambda s: s['production']['criteria'].append(copy.deepcopy(s['production']['criteria'][0])),
+            lambda s: s['production']['criteria'][0].update(deployedSha=BASE),
+            lambda s: s['production']['criteria'][0].update(evidence=[])]
+        for mutate in mutations:
+            state = detailed_state()
+            state['production']['deployment'] = 'PENDING'
+            mutate(state)
+            with self.subTest(production=state['production']):
+                self.assertEqual(evaluate_delivery(state)['decision'], 'BLOCK')
+        state = detailed_state()
+        state['production']['deployment'] = 'PENDING'
+        self.assertEqual(evaluate_delivery(state)['decision'], 'WAIT')
+
+    def test_canonical_plan_diagnostic_reasons_are_unchanged(self):
+        for required, criteria, reason, expected in [
+            (True, [], None, 'Runtime changes need explicit production acceptance criteria'),
+            (False, ['task-create'], 'Not runtime', 'Non-deployment scope needs a reason and no runtime criteria'),
+            (False, [], None, 'Non-deployment scope needs a reason and no runtime criteria')]:
+            state = delivery_state()
+            plan = dict(required=required, criteria=criteria, owner='owner', evidence=['plan.json'])
+            if reason is not None:
+                plan['reason'] = reason
+            state['acceptance']['productionPlan'] = plan
+            state['reviewedProductionPlan'] = copy.deepcopy(plan)
+            self.assertEqual(review_problems(state), [expected])

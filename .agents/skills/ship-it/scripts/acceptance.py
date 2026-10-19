@@ -53,10 +53,6 @@ def production_criterion_ids(plan, pr):
     if all(isinstance(c, str) and c.strip() for c in criteria):
         if not strings(plan.get('evidence')) or len(criteria) != len(set(criteria)):
             return None
-        if plan['required']:
-            return criteria if criteria else None
-        if criteria or not isinstance(plan.get('reason'), str) or not plan['reason'].strip():
-            return None
         return criteria
     if (plan['required'] is not True or not criteria
             or not all(isinstance(c, dict) for c in criteria)
@@ -109,8 +105,13 @@ def review_problems(state):
     plan = mapping(record.get('productionPlan'))
     if not plan or state.get('reviewedProductionPlan') != plan:
         errors.append('Production plan differs from the independently retained review snapshot')
-    if production_criterion_ids(plan, pr) is None:
+    criteria = production_criterion_ids(plan, pr)
+    if criteria is None:
         errors.append('Reviewed production plan is missing or malformed')
+    elif plan['required'] and not criteria:
+        errors.append('Runtime changes need explicit production acceptance criteria')
+    elif not plan['required'] and (criteria or not isinstance(plan.get('reason'), str) or not plan['reason'].strip()):
+        errors.append('Non-deployment scope needs a reason and no runtime criteria')
     return errors
 
 
@@ -136,7 +137,11 @@ def evaluate_delivery(state):
                 isinstance(row, dict) and row.get('deployedSha') == production.get('deployedSha')
                 and row.get('status') not in ('SUCCESS', 'PENDING') for row in criteria):
             return {'decision': 'BLOCK', 'reasons': ['Current production criterion failed or is unknown']}
-        if production.get('deployment') == 'PENDING' and production.get('health') in ('SUCCESS', 'PENDING'):
+        candidate_present = (sha(production.get('deployedSha'))
+                             and production.get('containsMerge') is True
+                             and production.get('changePresent') is True)
+        if (not candidate_present and production.get('deployment') == 'PENDING'
+                and production.get('health') in ('SUCCESS', 'PENDING')):
             return {'decision': 'WAIT', 'reasons': ['Deployment is active; the prior revision may still be serving']}
         if (not sha(production.get('deployedSha')) or production.get('containsMerge') is not True
                 or production.get('changePresent') is not True or not strings(production.get('evidence'))):

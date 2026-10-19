@@ -1070,7 +1070,7 @@ describe.sequential("Finance prospective execution binding storage and derived c
       }),
     ).rejects.toMatchObject({
       code: "forbidden",
-      message: "The original candidate protocol version changed.",
+      message: "The original candidate host or protocol version changed.",
     });
     expect(f.effectApplications).toHaveBeenCalledTimes(1);
   });

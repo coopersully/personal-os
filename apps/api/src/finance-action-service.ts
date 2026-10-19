@@ -2893,7 +2893,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           fence: context.financeExecution,
           humanApproval: input.humanApproval?.principal,
           serverHandoff: input.serverHandoff,
-          requireExecution: input.mode === "apply" && !input.humanApproval,
+          requireExecution: input.mode === "apply",
           receiptOnly: true,
         },
       );
@@ -2943,7 +2943,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           fence: context.financeExecution,
           humanApproval: input.humanApproval?.principal,
           serverHandoff: input.serverHandoff,
-          requireExecution: input.mode === "apply" && !input.humanApproval,
+          requireExecution: input.mode === "apply",
         },
       ),
     };
@@ -3188,7 +3188,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             fence: context.financeExecution,
             humanApproval: input.humanApproval?.principal,
             serverHandoff: input.serverHandoff,
-            requireExecution: input.mode === "apply" && !input.humanApproval,
+            requireExecution: input.mode === "apply",
           },
         );
       },

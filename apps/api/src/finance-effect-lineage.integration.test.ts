@@ -2,8 +2,11 @@ import { resolve } from "node:path";
 import {
   accessTokens,
   auditEvents,
+  automationHostSchedules,
   createDatabaseClient,
   executionPolicySettings,
+  financeAgentActionReviews,
+  financeConversationBatches,
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
   financeMutationRecords,
@@ -20,6 +23,9 @@ import {
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { financeCandidateEffectKey } from "./finance/candidate-effect-receipt.js";
+import { createFinanceConversationService } from "./finance/conversation-persistence.js";
+import { loadCandidateExecutionPrincipal } from "./finance/execution-binding.js";
+import { guardFinanceExecutionTransaction } from "./finance/execution-owner-guard.js";
 import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceChallengeService } from "./finance-challenge-service.js";
 import { createFinanceService } from "./finance-service.js";
@@ -50,7 +56,7 @@ describe.sequential("Finance whole-candidate effect lineage", () => {
     }
   });
 
-  async function fixture() {
+  async function fixture(bound = false, verifyProof = true) {
     const [owner] = await database.db
       .insert(users)
       .values({
@@ -73,6 +79,87 @@ describe.sequential("Finance whole-candidate effect lineage", () => {
       { type: "all_outstanding" },
       `sha256:${"a".repeat(64)}`,
     );
+    const connectionId = crypto.randomUUID();
+    const [hostToken] = bound
+      ? await database.db
+          .insert(accessTokens)
+          .values({
+            userId: owner.id,
+            name: "Bound handoff",
+            tokenHash: crypto.randomUUID(),
+            authorizationConnectionId: connectionId,
+            scopes: ["finances:maintain", "finances:write", "finances:execute"],
+          })
+          .returning()
+      : [];
+    const agent = hostToken
+      ? {
+          userId: owner.id,
+          actorId: hostToken.id,
+          actorType: "agent" as const,
+          authorizationConnectionId: connectionId,
+          scopes: new Set(hostToken.scopes),
+        }
+      : null;
+    const conversation = createFinanceConversationService({ db: database.db, now: () => now });
+    let scheduleId: string | null = null;
+    if (agent) {
+      scheduleId = crypto.randomUUID();
+      const stamp = now.toISOString();
+      await database.db.insert(automationHostSchedules).values({
+        id: scheduleId,
+        userId: owner.id,
+        authorizationConnectionId: connectionId,
+        schedule: {
+          id: scheduleId,
+          tenantAuthorizationConnectionId: connectionId,
+          hostSurface: "codex_desktop",
+          hostAutomationId: "bound-approval-fixture",
+          label: "Bound approval",
+          effectiveScopes: [...agent.scopes],
+          trigger: {
+            type: "recurring",
+            recurrence: { type: "interval", everyMinutes: 5, timeZone: "UTC" },
+          },
+          state: "active",
+          lastObservedAt: stamp,
+          nextExpectedAt: stamp,
+          version: 1,
+          createdAt: stamp,
+          updatedAt: stamp,
+        },
+      });
+      await database.db
+        .update(workspaceMaintenanceRuns)
+        .set({
+          authorizationConnectionId: connectionId,
+          automationScheduleId: scheduleId,
+        })
+        .where(eq(workspaceMaintenanceRuns.id, run.id));
+      if (verifyProof) {
+        const human = {
+          userId: owner.id,
+          actorId: owner.id,
+          actorType: "user" as const,
+          scopes: new Set(["finances:read", "finances:write"] as const),
+        };
+        const proof = await conversation.issueChallenge(human, scheduleId);
+        const fetched = await conversation.advanceChallenge(agent, proof.challengeId, {
+          kind: "fetch",
+        });
+        if (!("nonce" in fetched)) throw new Error("Missing fetched challenge nonce.");
+        await conversation.advanceChallenge(agent, proof.challengeId, {
+          kind: "acknowledge",
+          challengeId: proof.challengeId,
+          nonce: fetched.nonce,
+        });
+        await conversation.advanceChallenge(agent, proof.challengeId, {
+          kind: "respond",
+          challengeId: proof.challengeId,
+          response: "Verified actual bound protocol.",
+        });
+      }
+    }
     const draft = await actions.prepareMaintenanceCandidateDraft(
       "profile",
       {
@@ -130,7 +217,7 @@ describe.sequential("Finance whole-candidate effect lineage", () => {
         rubricVersion: "finance-ledger-challenge-v1",
       },
       {
-        principal: {
+        principal: agent ?? {
           actorId: "handoff-agent",
           actorType: "agent",
           scopes: new Set(["finances:maintain", "finances:write"]),
@@ -166,7 +253,21 @@ describe.sequential("Finance whole-candidate effect lineage", () => {
         leaseExpiresAt: null,
       })
       .where(eq(workspaceMaintenanceRuns.id, run.id));
-    return { actions, candidate, challenge, finances, item, owner, resolution, run, step };
+    return {
+      actions,
+      candidate,
+      challenge,
+      finances,
+      item,
+      owner,
+      resolution,
+      run,
+      step,
+      agent,
+      hostToken,
+      conversation,
+      scheduleId,
+    };
   }
 
   async function effectContext(setup: Awaited<ReturnType<typeof fixture>>) {
@@ -380,5 +481,188 @@ describe.sequential("Finance whole-candidate effect lineage", () => {
         .from(financeProfileVersions)
         .where(eq(financeProfileVersions.userId, setup.owner.id)),
     ).toHaveLength(0);
+  });
+  async function boundReview() {
+    const setup = await fixture(true);
+    if (!setup.agent) throw new Error("Missing bound agent.");
+    const context = { principal: setup.agent, requestId: crypto.randomUUID() };
+    const queued = await setup.actions.settleFinanceMaintenanceCandidate(
+      setup.candidate.id,
+      revision(setup),
+      context,
+    );
+    if (queued.status !== "pending_review") throw new Error("Missing canonical pending review.");
+    const human = {
+      principal: {
+        userId: setup.owner.id,
+        actorId: setup.owner.id,
+        actorType: "user" as const,
+        scopes: new Set(["finances:write"] as const),
+      },
+      requestId: crypto.randomUUID(),
+    };
+    return { ...setup, context, queued, human };
+  }
+  async function assertNoBoundEffects(setup: Awaited<ReturnType<typeof fixture>>) {
+    expect(await receipts(setup.owner.id)).toHaveLength(0);
+    expect(
+      await database.db
+        .select()
+        .from(financeProfileVersions)
+        .where(eq(financeProfileVersions.userId, setup.owner.id)),
+    ).toHaveLength(0);
+  }
+  it("applies exact canonical human approval with bypass disabled and no chat batch, retaining original actor and approval", async () => {
+    const setup = await boundReview();
+    expect(
+      await database.db
+        .select()
+        .from(financeConversationBatches)
+        .where(eq(financeConversationBatches.userId, setup.owner.id)),
+    ).toHaveLength(0);
+    expect(await setup.actions.approve(setup.queued.review.id, setup.human)).toMatchObject({
+      status: "applied",
+    });
+    const [record] = await receipts(setup.owner.id);
+    const receipt = financeConversationEffectReceiptSchema.parse(
+      record?.response?.financeEffectReceipt,
+    );
+    expect(receipt.actor.id).toBe(setup.context.principal.actorId);
+    expect(receipt.humanApproval).toEqual({
+      actorId: setup.owner.id,
+      reviewId: setup.queued.review.id,
+    });
+    expect(receipt.sourceMessageIds).toEqual([]);
+    expect(
+      await database.db.query.executionPolicySettings.findFirst({
+        where: eq(executionPolicySettings.userId, setup.owner.id),
+      }),
+    ).toMatchObject({ reviewBypassEnabled: false });
+  });
+  it.each([
+    "finances:maintain",
+    "finances:write",
+    "finances:execute",
+  ] as const)("exact human approval cannot restore a bound grant that lost %s", async (lostScope) => {
+    const setup = await boundReview();
+    await database.db
+      .update(accessTokens)
+      .set({
+        scopes: [...setup.context.principal.scopes].filter((scope) => scope !== lostScope),
+      })
+      .where(eq(accessTokens.id, setup.context.principal.actorId));
+    await expect(setup.actions.approve(setup.queued.review.id, setup.human)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    await assertNoBoundEffects(setup);
+    expect(
+      await database.db.query.financeAgentActionReviews.findFirst({
+        where: eq(financeAgentActionReviews.id, setup.queued.review.id),
+      }),
+    ).toMatchObject({ status: "pending" });
+  });
+  it("exact human approval cannot revive a revoked bound token", async () => {
+    const setup = await boundReview();
+    await database.db
+      .update(accessTokens)
+      .set({ revokedAt: new Date() })
+      .where(eq(accessTokens.id, setup.context.principal.actorId));
+    await expect(setup.actions.approve(setup.queued.review.id, setup.human)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    await assertNoBoundEffects(setup);
+  });
+  it("does not turn missing or stale canonical approval into execution; automated policy remains required", async () => {
+    const setup = await boundReview();
+    await expect(setup.actions.approve(crypto.randomUUID(), setup.human)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    expect(
+      await setup.actions.settleFinanceMaintenanceCandidate(
+        setup.candidate.id,
+        revision(setup),
+        setup.context,
+      ),
+    ).toMatchObject({ status: "pending_review" });
+    const currentRun = await database.db.query.workspaceMaintenanceRuns.findFirst({
+      where: eq(workspaceMaintenanceRuns.id, setup.run.id),
+    });
+    if (!currentRun) throw new Error("Missing bound run.");
+    await expect(
+      database.db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, setup.owner.id, { runIds: [setup.run.id] });
+        return loadCandidateExecutionPrincipal(
+          tx,
+          currentRun,
+          setup.candidate.id,
+          revision(setup),
+          setup.context.principal,
+          { requireExecution: true },
+        );
+      }),
+    ).rejects.toThrow("review bypass");
+    // Canonical review fingerprint must still describe the exact prepared item set.
+    await database.db
+      .update(financeMaintenanceCandidateItems)
+      .set({ fingerprint: `sha256:${"f".repeat(64)}` })
+      .where(eq(financeMaintenanceCandidateItems.id, setup.item.id));
+    expect(await setup.actions.approve(setup.queued.review.id, setup.human)).toMatchObject({
+      candidateSuperseded: true,
+    });
+    await assertNoBoundEffects(setup);
+  });
+  it("rejects a bound no-batch settlement without any protocol proof", async () => {
+    const setup = await fixture(true, false);
+    if (!setup.agent) throw new Error("Missing bound agent.");
+    await expect(
+      setup.actions.settleFinanceMaintenanceCandidate(setup.candidate.id, revision(setup), {
+        principal: setup.agent,
+        requestId: crypto.randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await assertNoBoundEffects(setup);
+  });
+  it.each([
+    false,
+    true,
+  ])("latest unverified proof blocks bound no-batch approval even when its handshake expired=%s", async (expired) => {
+    const setup = await boundReview();
+    if (!setup.scheduleId) throw new Error("Missing bound host.");
+    const replacement = createFinanceConversationService({
+      db: database.db,
+      now: () => new Date(Date.now() - (expired ? 11 * 60_000 : 0)),
+    });
+    await replacement.issueChallenge(setup.human.principal, setup.scheduleId);
+    await expect(setup.actions.approve(setup.queued.review.id, setup.human)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    await assertNoBoundEffects(setup);
+  });
+  it("rolls back the actual no-batch approved effect loop if its bound grant loses execute before final receipt commit", async () => {
+    const setup = await boundReview();
+    await database.db.execute(
+      sql.raw(`CREATE FUNCTION drop_bound_execute_for_test() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      UPDATE access_tokens SET scopes='["finances:maintain","finances:write"]'::jsonb WHERE id='${setup.context.principal.actorId}'::uuid;
+      RETURN NEW; END $$`),
+    );
+    await database.db.execute(
+      sql`CREATE TRIGGER drop_bound_execute_test AFTER INSERT ON finance_profile_versions FOR EACH ROW EXECUTE FUNCTION drop_bound_execute_for_test()`,
+    );
+    try {
+      await expect(
+        setup.actions.approve(setup.queued.review.id, setup.human),
+      ).rejects.toMatchObject({ code: "forbidden" });
+      await assertNoBoundEffects(setup);
+      expect(
+        await database.db.query.financeAgentActionReviews.findFirst({
+          where: eq(financeAgentActionReviews.id, setup.queued.review.id),
+        }),
+      ).toMatchObject({ status: "pending" });
+    } finally {
+      await database.db.execute(
+        sql`DROP TRIGGER drop_bound_execute_test ON finance_profile_versions`,
+      );
+      await database.db.execute(sql`DROP FUNCTION drop_bound_execute_for_test()`);
+    }
   });
 });

@@ -4,7 +4,7 @@ import type {
   FinanceSpendingMonthlyBudget,
 } from "@personal-os/domain";
 import { type HTMLMotionProps, motion, useDragControls, useReducedMotion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { formatMoney } from "./format";
 import { spendingGroupVisual } from "./spending-visual";
@@ -40,6 +40,17 @@ function SpendingBubble(props: HTMLMotionProps<"button">) {
       }}
     />
   );
+}
+type MonthlyGroup = Extract<FinanceSpendingMonthlyBudget, { state: "qualified" }>["groups"][number];
+function monthlyBudgetLabel(
+  budget: MonthlyGroup | undefined,
+  monthlyBudget?: FinanceSpendingMonthlyBudget,
+) {
+  const limit = budget?.budgetCents;
+  if (!budget) return "Monthly budget comparison unavailable";
+  if (limit === null || limit === undefined) return "No monthly budget limit";
+  const overage = Math.max(0, budget.usedCents - limit);
+  return `Monthly budget used ${formatMoney(budget.usedCents / 100)} of ${formatMoney(limit / 100)}${monthlyBudget?.state === "qualified" && monthlyBudget.coverage !== "complete" ? "; observed usage, incomplete history" : ""}${limit === 0 && budget.usedCents <= 0 ? "; No utilization" : ""}${overage > 0 ? `; Over budget ${formatMoney(overage / 100)}` : ""}`;
 }
 type Position = { x: number; y: number; radius: number };
 /** Bounded deterministic relaxation; no idle simulation or offscreen animation loop. */
@@ -87,8 +98,10 @@ export function SpendingBubbles({
   layoutKey?: string;
   monthlyBudget?: FinanceSpendingMonthlyBudget;
 }) {
+  const descriptionId = useId();
   const reduced = useReducedMotion();
   const [arrange, setArrange] = useState(false);
+  const arranging = arrange && !reduced;
   const positions = useRef(new Map<string, Position>());
   const [nodes, setNodes] = useState<Position[]>([]);
   const [width, setWidth] = useState(300);
@@ -134,9 +147,9 @@ export function SpendingBubbles({
       <div className="flex gap-2">
         <Button
           variant="ghost"
-          aria-pressed={arrange}
+          aria-pressed={arranging}
           disabled={!!reduced}
-          onClick={() => setArrange(!arrange)}
+          onClick={() => setArrange(!arranging)}
         >
           Arrange
         </Button>
@@ -166,16 +179,13 @@ export function SpendingBubbles({
               )
             : null;
           const overage = hasLimit ? Math.max(0, budget.usedCents - limit) : 0;
-          const budgetLabel = hasLimit
-            ? `Monthly budget used ${formatMoney(budget.usedCents / 100)} of ${formatMoney(limit / 100)}${monthlyBudget?.state === "qualified" && monthlyBudget.coverage !== "complete" ? "; observed usage, incomplete history" : ""}${limit === 0 && budget.usedCents <= 0 ? "; No utilization" : ""}${overage > 0 ? `; Over budget ${formatMoney(overage / 100)}` : ""}`
-            : budget
-              ? "No monthly budget limit"
-              : "Monthly budget comparison unavailable";
+          const budgetLabel = monthlyBudgetLabel(budget, monthlyBudget);
           return (
             <SpendingBubble
               key={group.id}
               type="button"
-              drag={!reduced && arrange}
+              tabIndex={diameter < 44 ? -1 : 0}
+              drag={arranging}
               dragMomentum={false}
               dragElastic={0.12}
               dragConstraints={container}
@@ -222,7 +232,7 @@ export function SpendingBubbles({
               style={{
                 width: diameter,
                 height: diameter,
-                touchAction: arrange ? "none" : "pan-y",
+                touchAction: arranging ? "none" : "pan-y",
                 backgroundColor: visual.backgroundColor,
               }}
               className={`group absolute left-0 top-0 flex flex-col items-center justify-center gap-1 overflow-hidden rounded-full p-0 text-foreground ${overage > 0 ? "border-2 border-(--status-warning-foreground)" : "border border-transparent hover:border-foreground/30 focus-visible:border-foreground/60"}`}
@@ -258,9 +268,7 @@ export function SpendingBubbles({
                 <span className="relative max-w-full px-2 text-center text-xs">
                   <span className="block truncate">{group.label}</span>
                   {formatMoney(group.netCents / 100)}
-                  {overage > 0 ? (
-                    <span className="block">Over budget {formatMoney(overage / 100)}</span>
-                  ) : null}
+                  {overage > 0 ? <span className="block">Over budget</span> : null}
                 </span>
               ) : null}
             </SpendingBubble>
@@ -268,9 +276,60 @@ export function SpendingBubbles({
         })}
       </div>
       <p className="text-sm text-muted-foreground">
-        Circle area shows positive spending. Negative adjustments and zero-spend groups remain
-        available in List.
+        Circle size: selected-period spending. Fill: monthly budget used, when available. Negative
+        adjustments and zero-spend groups remain in List.
       </p>
+      <details>
+        <summary className="min-h-11 cursor-pointer py-3 text-sm">
+          All spending groups ({visible.length})
+        </summary>
+        <ul aria-label="Spending groups" className="grid gap-1 sm:grid-cols-2">
+          {visible.map((group, index) => {
+            const visual = spendingGroupVisual(group);
+            const VisualIcon = visual.Icon;
+            const budget =
+              monthlyBudget?.state === "qualified"
+                ? monthlyBudget.groups.find((item) => item.groupId === group.id)
+                : undefined;
+            const overage =
+              budget?.budgetCents !== null && budget?.budgetCents !== undefined
+                ? Math.max(0, budget.usedCents - budget.budgetCents)
+                : 0;
+            return (
+              <li key={group.id} className="min-w-0">
+                <Button
+                  variant="ghost"
+                  className="h-auto min-h-11 w-full justify-start whitespace-normal text-left"
+                  aria-label={`Open ${group.label} details`}
+                  aria-describedby={`${descriptionId}-${index}`}
+                  onClick={() => onSelect(group)}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="flex size-7 shrink-0 items-center justify-center rounded-full"
+                    style={{ backgroundColor: visual.backgroundColor }}
+                  >
+                    <VisualIcon className="size-4" />
+                  </span>
+                  <span className="min-w-0 flex-1 break-words">{group.label}</span>
+                  <span className="shrink-0 text-right tabular-nums">
+                    {formatMoney(group.netCents / 100)}
+                    {overage > 0 ? (
+                      <span className="block text-xs text-muted-foreground">
+                        Over budget {formatMoney(overage / 100)}
+                      </span>
+                    ) : null}
+                  </span>
+                </Button>
+                <span id={`${descriptionId}-${index}`} className="sr-only">
+                  Selected-period spending {formatMoney(group.netCents / 100)}.{" "}
+                  {monthlyBudgetLabel(budget, monthlyBudget)}.
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </details>
     </section>
   );
 }

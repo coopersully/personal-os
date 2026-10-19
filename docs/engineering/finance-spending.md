@@ -135,6 +135,18 @@ The current bucket schema has no persisted color or icon fields; the fallback do
 assignment or persisted bucket color support. Visual metadata does not change contribution totals or
 exact transaction references.
 
+Positive circles retain true selected-period area rather than growing to a minimum target size.
+Circles smaller than 44 px are excluded from the Tab order. A collapsed **All spending groups**
+disclosure supplies native buttons with full wrapping names, exact selected-period amounts, and
+at least 44 px controls for those positive groups. The same qualified monthly-budget description
+is available to each circle and disclosure action, including exact overage and incomplete-history
+caveats; labelled circles retain a visible Over budget indicator. Zero and negative adjustments
+remain available in List rather than gaining invented positive area.
+
+The visible legend distinguishes selected-period circle size from whole-month budget fill.
+Reduced motion disables effective Arrange mode, including when the preference changes while
+Arrange is active, and restores vertical touch scrolling. It does not inflate circle area or
+change source totals, filters, or drill-down identities.
 
 Qualified budget categories remain in List when the selected period has no activity, with exact
 zero selected-period amounts and empty source references. Monthly usage still covers the qualified

@@ -207,7 +207,7 @@ it("integrates receipt details without changing the claim summary totals", async
   );
   expect(
     await screen.findByText(
-      /40.00 \(currency unknown\) received of 120.00 \(currency unknown\) · 80.00 \(currency unknown\) remaining/,
+      /40.00 \(currency unknown\) recorded received of 120.00 \(currency unknown\) · 80.00 \(currency unknown\) remaining/,
     ),
   ).toBeVisible();
   expect(screen.getByLabelText("Reimbursement from Casey")).toHaveAttribute(
@@ -218,7 +218,7 @@ it("integrates receipt details without changing the claim summary totals", async
   expect(screen.getByRole("link", { name: "Open credit transaction 1" })).toBeVisible();
   expect(
     screen.getByText(
-      /40.00 \(currency unknown\) received of 120.00 \(currency unknown\) · 80.00 \(currency unknown\) remaining/,
+      /40.00 \(currency unknown\) recorded received of 120.00 \(currency unknown\) · 80.00 \(currency unknown\) remaining/,
     ),
   ).toBeVisible();
   expect(api.listFinanceReimbursements).toHaveBeenCalledTimes(1);

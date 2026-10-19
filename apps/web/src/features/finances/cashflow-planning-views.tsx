@@ -68,25 +68,28 @@ export function CashflowOccurrenceItem({
             ? `Expected schedule · ${row.occurrence.matchState.replaceAll("_", " ")}`
             : "Next source date only · schedule unconfirmed"}
         </ItemDescription>
-        <p className="text-xs text-muted-foreground">
-          {row.cadence ?? "Cadence not established"} ·{" "}
-          {row.scheduleTimezone
-            ? `Schedule timezone ${row.scheduleTimezone}`
-            : "Schedule timezone unconfirmed"}
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {row.recordedAt ? (
-            <>
-              Schedule statement recorded <time dateTime={row.recordedAt}>{row.recordedAt}</time>
-            </>
-          ) : (
-            "No confirmed schedule statement"
-          )}{" "}
-          ·{" "}
-          {row.lastObservedDate
-            ? `Source last observed ${formatDateOnly(row.lastObservedDate, { dateStyle: "medium" })}`
-            : "Observation date not recorded"}
-        </p>
+        <details className="text-xs text-muted-foreground">
+          <summary className="cursor-pointer">Schedule details</summary>
+          <p className="text-xs text-muted-foreground">
+            {row.cadence ?? "Cadence not established"} ·{" "}
+            {row.scheduleTimezone
+              ? `Schedule timezone ${row.scheduleTimezone}`
+              : "Schedule timezone unconfirmed"}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {row.recordedAt ? (
+              <>
+                Schedule statement recorded <time dateTime={row.recordedAt}>{row.recordedAt}</time>
+              </>
+            ) : (
+              "No confirmed schedule statement"
+            )}{" "}
+            ·{" "}
+            {row.lastObservedDate
+              ? `Source last observed ${formatDateOnly(row.lastObservedDate, { dateStyle: "medium" })}`
+              : "Observation date not recorded"}
+          </p>
+        </details>
         {row.currency && !financePlanningEvidenceCurrencySchema.safeParse(row.currency).success ? (
           <p className="text-xs text-muted-foreground">
             Planning currency units unsupported; inspect the original amount.

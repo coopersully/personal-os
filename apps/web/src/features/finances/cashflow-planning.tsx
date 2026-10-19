@@ -282,10 +282,16 @@ function OwnerCashflowPlanning({ user }: { user: Awaited<ReturnType<typeof api.g
       <div>
         <h2 className="text-lg font-semibold">Upcoming money</h2>
         <p className="text-sm text-muted-foreground">
-          Confirmed schedules expand into versioned occurrences. Unconfirmed records show only their
-          next source date. Occurrence dates use each schedule’s recorded timezone; today uses{" "}
-          {timezone}. Neither view proves fresh bank data.
+          Expected income and payments, with matched receipts kept separate. Unconfirmed records
+          show only their next source date.
         </p>
+        <details className="text-sm text-muted-foreground">
+          <summary className="cursor-pointer">Date scope</summary>
+          <p>
+            Occurrence dates use each schedule’s recorded timezone; today uses {timezone}. Neither
+            view proves fresh bank data.
+          </p>
+        </details>
       </div>
       {snapshot?.coverage.truncated ? (
         <p role="status" className="text-sm text-muted-foreground">
@@ -463,8 +469,8 @@ function OwnerCashflowPlanning({ user }: { user: Awaited<ReturnType<typeof api.g
               Review balance statements and movement inclusion
             </h3>
             <p className="text-sm text-muted-foreground">
-              State current or available balance, explicit validity, and whether each known movement
-              is included. This is your statement, not provider confirmation.
+              Confirm a balance and which movements it includes. This is your statement, not a fresh
+              bank check.
             </p>
             <div className="flex flex-wrap gap-2">
               {snapshot?.accounts

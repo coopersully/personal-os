@@ -41,6 +41,7 @@ it("distinguishes unknown and confirmed zero and shows anchored exact hypothetic
   expect(screen.getByText(/Progress unknown. Enter an amount/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("checkbox"));
   compare();
+  expect(screen.getByRole("region", { name: "Hypothetical goal results" })).toHaveFocus();
   const baseline = screen.getByRole("region", { name: "Hypothetical Baseline" });
   expect(within(baseline).getByText("Hypothetical completion: 2027-03-31")).toBeInTheDocument();
   fireEvent.click(within(baseline).getByText("Hypothetical dated contribution curve for Baseline"));
@@ -114,6 +115,7 @@ it("lazily renders at most 24 curve points and preserves access to the final hor
   }
   compare();
   expect(screen.queryByRole("table", { hidden: true })).not.toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "Hypothetical goal results" })).toHaveFocus();
   const baseline = screen.getByRole("region", { name: "Hypothetical Baseline" });
   fireEvent.click(within(baseline).getByText("Hypothetical dated contribution curve for Baseline"));
   const table = await within(baseline).findByRole("table");
@@ -182,7 +184,7 @@ it("uses only applicable saved evidence, preserves provenance and never asks for
     />,
   );
   expect(
-    screen.getByText(/Confirmed by you as of 2027-01-30 · EUR · Goal version 3/),
+    screen.getByText(/Saved progress confirmed by you as of 2027-01-30 · EUR/),
   ).toBeInTheDocument();
   expect(screen.getByLabelText("Confirmed goal progress")).toHaveValue("0");
   expect(screen.getByLabelText("Confirmed goal currency")).toHaveValue("EUR");

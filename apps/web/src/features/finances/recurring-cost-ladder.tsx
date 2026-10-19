@@ -136,11 +136,67 @@ export function RecurringCostLadder({
   return (
     <section aria-label="Recurring cost ladder" className="flex min-w-0 flex-col gap-5">
       <div>
-        <h2 className="text-lg font-semibold">Recurring cost ladder</h2>
+        <h2 className="text-lg font-semibold">Recurring costs</h2>
         <p className="text-sm text-muted-foreground">
-          Compare expected payments and the evidence behind each record.
+          See the cost of your bills and subscriptions. Only supported fixed-cost statements qualify
+          for equivalents.
         </p>
       </div>
+      {costs.length ? (
+        <section aria-label="Known recurring cost subset" className="flex flex-col gap-2">
+          <h3 className="font-medium">Estimated monthly costs</h3>
+          <p className="text-sm text-muted-foreground">
+            {projection.coverage.normalizedRecords} of {projection.coverage.totalRecords} records
+            included; {projection.coverage.excludedRecords} excluded. These totals cover only
+            supported fixed-cost statements.
+          </p>
+          {projection.totals.map((total) => (
+            <dl key={total.currencyCode} className="grid gap-2 text-sm sm:grid-cols-2">
+              <div>
+                <dt>Confirmed {total.currencyCode} monthly subset (rounded)</dt>
+                <dd>
+                  {total.confirmed
+                    ? money(total.confirmed.monthlyCents.numerator / 12, total.currencyCode)
+                    : "Unavailable: precision limit"}
+                </dd>
+              </div>
+              <div>
+                <dt>Suspected {total.currencyCode} monthly subset (rounded)</dt>
+                <dd>
+                  {total.suspected
+                    ? money(total.suspected.monthlyCents.numerator / 12, total.currencyCode)
+                    : "Unavailable: precision limit"}
+                </dd>
+              </div>
+              <div className="sm:col-span-2">
+                <details>
+                  <summary className="cursor-pointer">
+                    Annual equivalents ({total.currencyCode})
+                  </summary>
+                  <dl className="grid gap-2 sm:grid-cols-2">
+                    <div>
+                      <dt>Confirmed {total.currencyCode} annual subset</dt>
+                      <dd>
+                        {total.confirmed
+                          ? money(total.confirmed.annualCents, total.currencyCode)
+                          : "Unavailable: precision limit"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Suspected {total.currencyCode} annual subset</dt>
+                      <dd>
+                        {total.suspected
+                          ? money(total.suspected.annualCents, total.currencyCode)
+                          : "Unavailable: precision limit"}
+                      </dd>
+                    </div>
+                  </dl>
+                </details>
+              </div>
+            </dl>
+          ))}
+        </section>
+      ) : null}
       {costs.length === 0 ? (
         <Empty>
           <EmptyHeader>
@@ -192,7 +248,7 @@ export function RecurringCostLadder({
                           {item.source === "user" ? "User supplied" : "Inferred pattern"} ·{" "}
                           {cadenceLabels[item.cadence]} · {account?.name ?? "Account unavailable"}
                         </ItemDescription>
-                        <dl className="grid gap-3 text-sm sm:grid-cols-3">
+                        <dl className="grid gap-3 text-sm sm:grid-cols-2">
                           <div>
                             <dt className="text-muted-foreground">Expected payment</dt>
                             <dd className="tabular-nums">{expected}</dd>
@@ -205,48 +261,54 @@ export function RecurringCostLadder({
                                 : "Unavailable"}
                             </dd>
                           </div>
-                          <div>
-                            <dt className="text-muted-foreground">Annual equivalent</dt>
-                            <dd>
-                              {record?.normalized && currency
-                                ? money(record.normalized.annualCents, currency)
-                                : "Unavailable"}
-                            </dd>
-                          </div>
                         </dl>
-                        {record?.normalized ? (
-                          <p className="text-sm text-muted-foreground">
-                            {factors[item.cadence]} payments per year · Monthly equivalent is annual
-                            cost ÷ 12. Fixed amount assumed unchanged.
-                          </p>
-                        ) : null}
+                        <p className="text-sm text-muted-foreground">
+                          {record?.exclusionReasons.map((reason) => reasons[reason]).join(" · ")}
+                        </p>
                         {qualification?.state === "unknown" && item.planningEvidence ? (
                           <p className="text-sm text-muted-foreground">
                             Statement unavailable: {qualification.reason.replaceAll("_", " ")}.
                           </p>
                         ) : null}
-                        {qualification?.state === "applicable" ? (
-                          <p className="text-sm text-muted-foreground">
-                            Your{" "}
-                            {qualification.evidence.kind === "obligation"
-                              ? qualification.evidence.fixedness
-                              : ""}{" "}
-                            statement as of {qualification.evidence.asOf}.
-                          </p>
-                        ) : null}
-                        <p className="text-sm text-muted-foreground">
-                          {record?.exclusionReasons.map((reason) => reasons[reason]).join(" · ")}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          {item.nextExpectedDate
-                            ? `Next expected: ${item.nextExpectedDate}`
-                            : "Next date not established"}
-                          {item.lastObservedDate
-                            ? ` · Last observed: ${item.lastObservedDate}`
-                            : " · No observed date"}
-                        </p>
                         <details className="text-sm">
-                          <summary>Source record</summary>
+                          <summary className="cursor-pointer">
+                            Calculation and source details
+                          </summary>
+                          <dl>
+                            <div>
+                              <dt className="text-muted-foreground">Annual equivalent</dt>
+                              <dd>
+                                {record?.normalized && currency
+                                  ? money(record.normalized.annualCents, currency)
+                                  : "Unavailable"}
+                              </dd>
+                            </div>{" "}
+                          </dl>
+                          {record?.normalized ? (
+                            <p className="text-sm text-muted-foreground">
+                              {factors[item.cadence]} payments per year · Monthly equivalent is
+                              annual cost ÷ 12. Fixed amount assumed unchanged.
+                            </p>
+                          ) : null}
+                          {qualification?.state === "applicable" ? (
+                            <p className="text-sm text-muted-foreground">
+                              Your{" "}
+                              {qualification.evidence.kind === "obligation"
+                                ? qualification.evidence.fixedness
+                                : ""}{" "}
+                              statement as of {qualification.evidence.asOf}.
+                            </p>
+                          ) : null}
+
+                          <p className="text-sm text-muted-foreground">
+                            {item.nextExpectedDate
+                              ? `Next expected: ${item.nextExpectedDate}`
+                              : "Next date not established"}
+                            {item.lastObservedDate
+                              ? ` · Last observed: ${item.lastObservedDate}`
+                              : " · No observed date"}
+                          </p>
+                          <h4 className="font-medium">Source record</h4>
                           <p className="break-all">Record: {item.id}</p>
                           <p>Merchant: {item.merchant || "Not recorded"}</p>
                           <p>Service identity unavailable; price comparison unavailable.</p>
@@ -274,52 +336,6 @@ export function RecurringCostLadder({
           ) : null;
         })
       )}
-      {costs.length ? (
-        <section aria-label="Known recurring cost subset" className="flex flex-col gap-2">
-          <h3 className="font-medium">Known recurring cost subset</h3>
-          <p className="text-sm text-muted-foreground">
-            {projection.coverage.normalizedRecords} of {projection.coverage.totalRecords} records
-            included; {projection.coverage.excludedRecords} excluded. These totals cover only
-            supported fixed-cost statements.
-          </p>
-          {projection.totals.map((total) => (
-            <dl key={total.currencyCode} className="grid gap-2 text-sm sm:grid-cols-2">
-              <div>
-                <dt>Confirmed {total.currencyCode} annual subset</dt>
-                <dd>
-                  {total.confirmed
-                    ? money(total.confirmed.annualCents, total.currencyCode)
-                    : "Unavailable: precision limit"}
-                </dd>
-              </div>
-              <div>
-                <dt>Suspected {total.currencyCode} annual subset</dt>
-                <dd>
-                  {total.suspected
-                    ? money(total.suspected.annualCents, total.currencyCode)
-                    : "Unavailable: precision limit"}
-                </dd>
-              </div>
-              <div>
-                <dt>Confirmed {total.currencyCode} monthly subset (rounded)</dt>
-                <dd>
-                  {total.confirmed
-                    ? money(total.confirmed.monthlyCents.numerator / 12, total.currencyCode)
-                    : "Unavailable: precision limit"}
-                </dd>
-              </div>
-              <div>
-                <dt>Suspected {total.currencyCode} monthly subset (rounded)</dt>
-                <dd>
-                  {total.suspected
-                    ? money(total.suspected.monthlyCents.numerator / 12, total.currencyCode)
-                    : "Unavailable: precision limit"}
-                </dd>
-              </div>
-            </dl>
-          ))}
-        </section>
-      ) : null}
       {obligations.some((item) => item.kind === "savings") ? (
         <p className="text-sm text-muted-foreground">Savings contributions excluded.</p>
       ) : null}

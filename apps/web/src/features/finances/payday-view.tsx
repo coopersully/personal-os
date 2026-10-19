@@ -63,6 +63,112 @@ export function PaydayView({
   return (
     <section aria-label="Payday-to-payday" className="flex flex-col gap-4">
       <h2 className="font-semibold">Payday-to-payday</h2>
+      {qualified ? (
+        <>
+          <div className="flex flex-col gap-1">
+            <p className="text-lg font-semibold tabular-nums">
+              {money(qualified.endingBalanceMinorUnits)} estimated balance on{" "}
+              {qualified.endLocalDate}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              As of {qualified.asOfLocalDate} · {qualified.currencyCode}. Includes{" "}
+              {money(qualified.expectedEndPaydayIncomeMinorUnits)} of expected end-payday income,
+              not a confirmed receipt.
+            </p>
+            <p className="text-sm">Estimate only; not a safe-to-spend amount.</p>
+          </div>
+          <p>
+            {qualified.protectedFloor.status === "unknown"
+              ? "Protected floor unknown. No zero floor or affordability is assumed; a floor is optional."
+              : `User-confirmed floor ${money(qualified.protectedFloor.amountMinorUnits)}. Lowest stated/end-of-day margin ${money(qualified.protectedFloor.lowestEndOfDayMarginMinorUnits)}; this is not an intraday affordability guarantee.`}
+          </p>
+          <details className="min-w-0">
+            <summary className="cursor-pointer">Daily movements</summary>
+            <Table aria-label="Estimated cycle movements">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Local date</TableHead>
+                  <TableHead>Expected incoming</TableHead>
+                  <TableHead>Expected outgoing</TableHead>
+                  <TableHead>Actual not reflected in basis</TableHead>
+                  <TableHead>Estimated end-of-day balance</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {qualified.days.slice(currentPage * 24, (currentPage + 1) * 24).map((day) => (
+                  <TableRow key={day.localDate}>
+                    <TableCell>{day.localDate}</TableCell>
+                    <TableCell>{money(day.expectedIncomingMinorUnits)}</TableCell>
+                    <TableCell>{money(day.expectedOutgoingMinorUnits)}</TableCell>
+                    <TableCell>{money(day.unreflectedActualNetMinorUnits)}</TableCell>
+                    <TableCell>{money(day.estimatedEndOfDayBalanceMinorUnits)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <p>
+              Cycle movement page {currentPage + 1} of {pageCount}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="ghost"
+                disabled={currentPage === 0}
+                onClick={() => setPage(currentPage - 1)}
+              >
+                Previous cycle movements
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={currentPage + 1 === pageCount}
+                onClick={() => setPage(currentPage + 1)}
+              >
+                Next cycle movements
+              </Button>
+            </div>
+          </details>
+          <details className="min-w-0">
+            <summary className="cursor-pointer">How this estimate works</summary>
+            <dl className="grid gap-3 sm:grid-cols-3">
+              <div>
+                <dt>Opening stated balance</dt>
+                <dd>{money(qualified.openingBalanceMinorUnits)}</dd>
+              </div>
+              <div>
+                <dt>Estimated ending balance</dt>
+                <dd>{money(qualified.endingBalanceMinorUnits)}</dd>
+              </div>
+              <div>
+                <dt>Lowest stated or end-of-day estimate</dt>
+                <dd>
+                  {money(qualified.lowestEndOfDayBalance.amountMinorUnits)} ·{" "}
+                  {qualified.lowestEndOfDayBalance.localDate} ·{" "}
+                  {qualified.lowestEndOfDayBalance.basis === "opening"
+                    ? "Opening statement"
+                    : "End of day"}
+                </dd>
+              </div>
+            </dl>
+            <p>
+              Same-day incoming and outgoing movements are aggregated at end of day. Their intraday
+              order and any intraday low are unknown. These estimates are not a safe-to-spend
+              amount.
+            </p>
+            <h3 className="font-medium">Cycle source evidence</h3>
+            <ul>
+              {qualified.evidence.balances.map((basis) => (
+                <li key={basis.accountId}>
+                  Account {basis.accountId} · {basis.basis} · revision {basis.sourceRevision} ·
+                  stated {basis.asOfInstant} · valid until {basis.validUntilInstant}
+                </li>
+              ))}
+            </ul>
+            <p>
+              {qualified.evidence.occurrences.length} scheduled occurrence revisions;{" "}
+              {qualified.evidence.actualMovements.length} actual movement revisions.
+            </p>
+          </details>
+        </>
+      ) : null}
       <Field>
         <FieldLabel htmlFor={`${id}-selected-income`}>Income stream defining this cycle</FieldLabel>
         <NativeSelect
@@ -81,20 +187,23 @@ export function PaydayView({
           ))}
         </NativeSelect>
       </Field>
-      <div className="flex flex-wrap gap-2">
-        <Button variant="secondary" onClick={onConfirmSchedule}>
-          Confirm recurring schedule
-        </Button>
-        <Button variant="secondary" onClick={onReviewActuals}>
-          Review actual matches
-        </Button>
-        <Button variant="secondary" onClick={onConfirmBalance}>
-          Confirm balance and reflections
-        </Button>
-        <Button variant="ghost" onClick={onRefresh}>
-          Refresh cycle evidence
-        </Button>
-      </div>
+      <details open={!qualified}>
+        <summary className="cursor-pointer">Review or update cycle evidence</summary>
+        <div className="flex flex-wrap gap-2 pt-2">
+          <Button variant="secondary" onClick={onConfirmSchedule}>
+            Confirm recurring schedule
+          </Button>
+          <Button variant="secondary" onClick={onReviewActuals}>
+            Review actual matches
+          </Button>
+          <Button variant="secondary" onClick={onConfirmBalance}>
+            Confirm balance and reflections
+          </Button>
+          <Button variant="ghost" onClick={onRefresh}>
+            Refresh cycle evidence
+          </Button>
+        </div>
+      </details>
       {!selectedIncomeStreamId ? (
         <p>
           Choose the income source explicitly. Multiple income streams never select a payday
@@ -116,100 +225,6 @@ export function PaydayView({
       ) : null}
       {projection?.status === "estimated" && !qualified ? (
         <p>The loaded estimate belongs to another income source. Refresh this selected cycle.</p>
-      ) : null}
-      {qualified ? (
-        <>
-          <p>
-            Estimated cycle through {qualified.endLocalDate}, as of {qualified.asOfLocalDate}. The
-            ending estimate includes {money(qualified.expectedEndPaydayIncomeMinorUnits)} of
-            expected end-payday income, not a confirmed receipt.
-          </p>
-          <dl className="grid gap-3 sm:grid-cols-3">
-            <div>
-              <dt>Opening stated balance</dt>
-              <dd>{money(qualified.openingBalanceMinorUnits)}</dd>
-            </div>
-            <div>
-              <dt>Estimated ending balance</dt>
-              <dd>{money(qualified.endingBalanceMinorUnits)}</dd>
-            </div>
-            <div>
-              <dt>Lowest stated or end-of-day estimate</dt>
-              <dd>
-                {money(qualified.lowestEndOfDayBalance.amountMinorUnits)} ·{" "}
-                {qualified.lowestEndOfDayBalance.localDate} ·{" "}
-                {qualified.lowestEndOfDayBalance.basis === "opening"
-                  ? "Opening statement"
-                  : "End of day"}
-              </dd>
-            </div>
-          </dl>
-          <p>
-            Same-day incoming and outgoing movements are aggregated at end of day. Their intraday
-            order and any intraday low are unknown. These estimates are not a safe-to-spend amount.
-          </p>
-          <p>
-            {qualified.protectedFloor.status === "unknown"
-              ? "Protected floor unknown. No zero floor or affordability is assumed; a floor is optional."
-              : `User-confirmed floor ${money(qualified.protectedFloor.amountMinorUnits)}. Lowest stated/end-of-day margin ${money(qualified.protectedFloor.lowestEndOfDayMarginMinorUnits)}; this is not an intraday affordability guarantee.`}
-          </p>
-          <Table aria-label="Estimated cycle movements">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Local date</TableHead>
-                <TableHead>Expected incoming</TableHead>
-                <TableHead>Expected outgoing</TableHead>
-                <TableHead>Actual not reflected in basis</TableHead>
-                <TableHead>Estimated end-of-day balance</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {qualified.days.slice(currentPage * 24, (currentPage + 1) * 24).map((day) => (
-                <TableRow key={day.localDate}>
-                  <TableCell>{day.localDate}</TableCell>
-                  <TableCell>{money(day.expectedIncomingMinorUnits)}</TableCell>
-                  <TableCell>{money(day.expectedOutgoingMinorUnits)}</TableCell>
-                  <TableCell>{money(day.unreflectedActualNetMinorUnits)}</TableCell>
-                  <TableCell>{money(day.estimatedEndOfDayBalanceMinorUnits)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          <p>
-            Cycle movement page {currentPage + 1} of {pageCount}
-          </p>
-          <div className="flex gap-2">
-            <Button
-              variant="ghost"
-              disabled={currentPage === 0}
-              onClick={() => setPage(currentPage - 1)}
-            >
-              Previous cycle movements
-            </Button>
-            <Button
-              variant="ghost"
-              disabled={currentPage + 1 === pageCount}
-              onClick={() => setPage(currentPage + 1)}
-            >
-              Next cycle movements
-            </Button>
-          </div>
-          <details>
-            <summary>Cycle source evidence</summary>
-            <ul>
-              {qualified.evidence.balances.map((basis) => (
-                <li key={basis.accountId}>
-                  Account {basis.accountId} · {basis.basis} · revision {basis.sourceRevision} ·
-                  stated {basis.asOfInstant} · valid until {basis.validUntilInstant}
-                </li>
-              ))}
-            </ul>
-            <p>
-              {qualified.evidence.occurrences.length} scheduled occurrence revisions;{" "}
-              {qualified.evidence.actualMovements.length} actual movement revisions.
-            </p>
-          </details>
-        </>
       ) : null}
       {view?.schedule.unavailableSources.length ? (
         <p>

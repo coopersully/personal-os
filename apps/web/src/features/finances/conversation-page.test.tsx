@@ -754,3 +754,42 @@ it("keeps an answered contextual question read-only after a successful reload", 
   expect(screen.getByRole("button", { name: "Save answer" })).toBeDisabled();
   expect(api.answerFinanceContextualQuestion).not.toHaveBeenCalled();
 });
+it("shows the empty conversation honestly and rechecks it without fabricating messages", async () => {
+  api.getFinanceConversationHistory.mockResolvedValue({ messages: [], nextCursor: null });
+  show();
+  const user = userEvent.setup();
+  expect(await screen.findByText("No messages yet.")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Refresh conversation" }));
+  await waitFor(() =>
+    expect(toast.success).toHaveBeenCalledWith("Conversation loaded", { id: "toast-id" }),
+  );
+  expect(screen.getByText("No messages yet.")).toBeInTheDocument();
+  expect(screen.queryByRole("article")).not.toBeInTheDocument();
+  expect(api.markFinanceConversationRendered).not.toHaveBeenCalled();
+});
+it("retains the highest fetched cursor when refresh repeats older messages", async () => {
+  const newer = { ...message, id: "newer", sequence: "9007199254740994", text: "Newer history" };
+  api.getFinanceConversationHistory
+    .mockResolvedValueOnce({ messages: [message], nextCursor: message.sequence })
+    .mockResolvedValueOnce({ messages: [newer, message], nextCursor: null })
+    .mockResolvedValueOnce({ messages: [message], nextCursor: null })
+    .mockResolvedValue({ messages: [], nextCursor: null });
+  show();
+  const user = userEvent.setup();
+  await screen.findByText(message.text);
+  await user.click(screen.getByRole("button", { name: "Load more messages" }));
+  await screen.findByText(newer.text);
+  await user.click(screen.getByRole("button", { name: "Refresh conversation" }));
+  await waitFor(() => expect(api.getFinanceConversationHistory).toHaveBeenCalledTimes(3));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Refresh conversation" })).toBeEnabled(),
+  );
+  await user.click(screen.getByRole("button", { name: "Refresh conversation" }));
+  await waitFor(() => expect(api.getFinanceConversationHistory).toHaveBeenCalledTimes(4));
+  expect(api.getFinanceConversationHistory.mock.calls.slice(2)).toEqual([
+    [{ after: newer.sequence, limit: 50 }],
+    [{ after: newer.sequence, limit: 50 }],
+  ]);
+  expect(screen.getAllByRole("article")).toHaveLength(2);
+  expect(screen.getByText(newer.text)).toBeInTheDocument();
+});

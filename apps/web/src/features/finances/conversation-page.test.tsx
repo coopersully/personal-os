@@ -7,6 +7,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { createAppQueryClient } from "../../lib/query-client.js";
 import { FinanceActivityEntry } from "./activity-entry.js";
+import { FinanceAutomationsPage } from "./automations-page.js";
 import { FinanceConversationPage } from "./conversation-page.js";
 
 const api = vi.hoisted(() => ({
@@ -17,11 +18,14 @@ const api = vi.hoisted(() => ({
   markFinanceConversationRendered: vi.fn(),
   getFinanceContextualQuestion: vi.fn(),
   answerFinanceContextualQuestion: vi.fn(),
+  listAutomationHostSchedules: vi.fn(),
+  listAutomationHostConnections: vi.fn(),
 }));
 const toast = vi.hoisted(() => ({
   loading: vi.fn(() => "toast-id"),
   success: vi.fn(),
   error: vi.fn(),
+  dismiss: vi.fn(),
 }));
 vi.mock("../../api.js", () => ({ api }));
 vi.mock("sonner", () => ({ toast }));
@@ -41,6 +45,8 @@ beforeEach(() => {
   vi.resetAllMocks();
   toast.loading.mockReturnValue("toast-id");
   api.getFinanceConversationReadiness.mockResolvedValue({ canSend: true, reason: "ready" });
+  api.listAutomationHostSchedules.mockResolvedValue([]);
+  api.listAutomationHostConnections.mockResolvedValue([]);
   api.getFinanceConversationHistory.mockResolvedValue({ messages: [message], nextCursor: null });
   api.markFinanceConversationRendered.mockResolvedValue({});
   vi.stubGlobal(
@@ -59,6 +65,7 @@ function show(
   ownerId = "owner",
   client = createAppQueryClient({ queries: { retry: false } }),
 ) {
+  client.setQueryData(["me"], { id: ownerId });
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[route]}>
@@ -90,9 +97,9 @@ it("retains history while locked and marks only actually visible rendered sequen
   await waitFor(() =>
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["finance-conversation-unread", "owner"] }),
   );
-  expect(screen.getByRole("link", { name: "Open Automations" })).toHaveAttribute(
+  expect(screen.getByRole("link", { name: "Verify message access" })).toHaveAttribute(
     "href",
-    "/finances/automations",
+    "/finances/automations?returnTo=%2Ffinances%2Fchat",
   );
 });
 it("preserves failed draft and exact retry identity with one toast outcome and no inline result", async () => {
@@ -396,8 +403,10 @@ it("follows the actual Activity source link to a bounded message beyond the firs
     configurable: true,
     value: scroll,
   });
+  const contextClient = createAppQueryClient({ queries: { retry: false } });
+  contextClient.setQueryData(["me"], { id: "owner" });
   render(
-    <QueryClientProvider client={createAppQueryClient({ queries: { retry: false } })}>
+    <QueryClientProvider client={contextClient}>
       <MemoryRouter initialEntries={["/finances/activity"]}>
         <Routes>
           <Route
@@ -792,4 +801,242 @@ it("retains the highest fetched cursor when refresh repeats older messages", asy
   ]);
   expect(screen.getAllByRole("article")).toHaveLength(2);
   expect(screen.getByText(newer.text)).toBeInTheDocument();
+});
+
+it.each([
+  ["registration_missing", "Set up automation", "/finances/automations"],
+  ["registration_paused", "Review host setup", "/finances/automations"],
+  ["registration_revoked", "Register automation", "/finances/automations"],
+  ["connection_missing", "Connect host", "/settings?section=connections"],
+  ["connection_disconnected", "Reconnect host", "/settings?section=connections"],
+  ["connection_revoked", "Reconnect host", "/settings?section=connections"],
+  ["execution_not_authorized", "Review host permissions", "/settings?section=workspace-access"],
+  ["challenge_expired", "Verify message access again", "/finances/automations"],
+  ["challenge_required", "Verify message access", "/finances/automations"],
+  ["message_protocol_unavailable", "Review message verification", "/finances/automations"],
+  ["protocol_upgrade_required", "Review message verification", "/finances/automations"],
+])("keeps a draft locked with a precise recovery destination for %s", async (reason, action, href) => {
+  api.getFinanceConversationReadiness.mockResolvedValue({ canSend: false, reason });
+  const user = userEvent.setup();
+  show("/finances/chat?message=source-message");
+  const link = await screen.findByRole("link", { name: action });
+  const target = new URL(link.getAttribute("href") ?? "", "https://example.com");
+  expect(
+    `${target.pathname}${target.searchParams.has("section") ? `?section=${target.searchParams.get("section")}` : ""}`,
+  ).toBe(href);
+  expect(target.searchParams.get("returnTo")).toBe("/finances/chat?message=source-message");
+  await user.type(screen.getByLabelText("Message"), "Keep my own draft");
+  expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+  expect(screen.getByLabelText("Message")).toHaveValue("Keep my own draft");
+  expect(api.sendFinanceConversationMessage).not.toHaveBeenCalled();
+});
+
+it("retains a failed message and exact retry command across recovery remount, then clears only after success", async () => {
+  api.sendFinanceConversationMessage
+    .mockRejectedValueOnce(new Error("Unavailable"))
+    .mockResolvedValue({
+      ...message,
+      id: "saved",
+      authorKind: "user",
+      text: "My retained message",
+    });
+  const client = createAppQueryClient({ queries: { retry: false } });
+  const user = userEvent.setup();
+  let page = show("/finances/chat", "owner", client);
+  await user.type(screen.getByLabelText("Message"), "My retained message");
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(toast.error).toHaveBeenCalled());
+  const first = api.sendFinanceConversationMessage.mock.calls[0]?.[0];
+  page.unmount();
+  page = show("/finances/chat", "owner", client);
+  expect(screen.getByLabelText("Message")).toHaveValue("My retained message");
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() =>
+    expect(toast.success).toHaveBeenCalledWith(
+      "Message saved for the next run",
+      expect.any(Object),
+    ),
+  );
+  expect(api.sendFinanceConversationMessage.mock.calls[1]?.[0]).toEqual(first);
+  page.unmount();
+  show("/finances/chat", "owner", client);
+  expect(screen.getByLabelText("Message")).toHaveValue("");
+});
+
+it("retains separate contextual and general drafts across remount without changing the question link", async () => {
+  api.getFinanceContextualQuestion.mockResolvedValue({ state: "unavailable" });
+  const client = createAppQueryClient({ queries: { retry: false } });
+  const user = userEvent.setup();
+  let page = show("/finances/chat?question=question-a", "owner", client);
+  await user.type(screen.getByLabelText("Answer"), "My answer draft");
+  page.unmount();
+  page = show("/finances/chat", "owner", client);
+  expect(screen.getByLabelText("Message")).toHaveValue("");
+  await user.type(screen.getByLabelText("Message"), "A different general draft");
+  page.unmount();
+  show("/finances/chat?question=question-a", "owner", client);
+  expect(screen.getByLabelText("Answer")).toHaveValue("My answer draft");
+  expect(screen.getByRole("button", { name: "Save answer" })).toBeDisabled();
+  expect(api.answerFinanceContextualQuestion).not.toHaveBeenCalled();
+});
+
+it("does not expose another owner's draft and discards drafts when the auth cache is cleared", async () => {
+  const client = createAppQueryClient({ queries: { retry: false } });
+  const user = userEvent.setup();
+  let page = show("/finances/chat", "owner-a", client);
+  await user.type(screen.getByLabelText("Message"), "Owner A private draft");
+  page.unmount();
+  page = show("/finances/chat", "owner-b", client);
+  expect(screen.getByLabelText("Message")).toHaveValue("");
+  page.unmount();
+  client.clear();
+  show("/finances/chat", "owner-a", client);
+  expect(screen.getByLabelText("Message")).toHaveValue("");
+});
+
+it.each([
+  "resolve",
+  "reject",
+])("fences a late %s send after A to B to A and never restores its draft or retry key", async (outcome) => {
+  let finish!: (value: typeof message) => void;
+  let fail!: (reason: Error) => void;
+  api.sendFinanceConversationMessage.mockReturnValueOnce(
+    new Promise((resolve, reject) => {
+      finish = resolve;
+      fail = reject;
+    }),
+  );
+  const client = createAppQueryClient({ queries: { retry: false } });
+  const user = userEvent.setup();
+  let page = show("/finances/chat", "owner-a", client);
+  await user.type(screen.getByLabelText("Message"), "Old session message");
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(api.sendFinanceConversationMessage).toHaveBeenCalledTimes(1));
+  const oldCommand = api.sendFinanceConversationMessage.mock.calls[0]?.[0];
+  page.unmount();
+  act(() => {
+    client.setQueryData(["me"], { id: "owner-b" });
+    client.setQueryData(["me"], { id: "owner-a" });
+  });
+  page = show("/finances/chat", "owner-a", client);
+  expect(screen.getByLabelText("Message")).toHaveValue("");
+  await user.type(screen.getByLabelText("Message"), "New session draft");
+  await act(async () => {
+    if (outcome === "resolve") finish({ ...message, id: "old-accepted" });
+    else fail(new Error("old failure"));
+  });
+  expect(screen.getByLabelText("Message")).toHaveValue("New session draft");
+  expect(toast.success).not.toHaveBeenCalledWith(
+    "Message saved for the next run",
+    expect.any(Object),
+  );
+  expect(toast.error).not.toHaveBeenCalledWith(
+    "Couldn’t save. Your draft is retained; try again.",
+    expect.any(Object),
+  );
+  page.unmount();
+  show("/finances/chat", "owner-a", client);
+  expect(screen.getByLabelText("Message")).toHaveValue("New session draft");
+  api.sendFinanceConversationMessage.mockResolvedValue({ ...message, id: "new-accepted" });
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(api.sendFinanceConversationMessage).toHaveBeenCalledTimes(2));
+  expect(api.sendFinanceConversationMessage.mock.calls[1]?.[0].idempotencyKey).not.toBe(
+    oldCommand.idempotencyKey,
+  );
+});
+
+it("retains a draft after a scoped403 but discards it on401 session expiry", async () => {
+  const client = createAppQueryClient({ queries: { retry: false } });
+  const user = userEvent.setup();
+  const page = show("/finances/chat", "owner", client);
+  await screen.findByText(message.text);
+  await user.type(screen.getByLabelText("Message"), "A draft before access changes");
+  api.getFinanceConversationHistory.mockRejectedValue(
+    new ApiClientError({ status: 403, code: "forbidden", message: "denied" }),
+  );
+  await user.click(screen.getByRole("button", { name: "Refresh conversation" }));
+  await waitFor(() => expect(screen.queryByText(message.text)).not.toBeInTheDocument());
+  expect(screen.getByLabelText("Message")).toHaveValue("A draft before access changes");
+  api.getFinanceConversationHistory.mockRejectedValue(
+    new ApiClientError({ status: 401, code: "unauthorized", message: "expired" }),
+  );
+  await user.click(screen.getByRole("button", { name: "Refresh conversation" }));
+  await screen.findByText("Sign in again to open your Finance conversation.");
+  page.unmount();
+  api.getFinanceConversationHistory.mockResolvedValue({ messages: [], nextCursor: null });
+  show("/finances/chat", "owner", client);
+  expect(screen.getByLabelText("Message")).toHaveValue("");
+});
+
+it("preserves the contextual answer through actual Automations navigation and return", async () => {
+  const client = createAppQueryClient({ queries: { retry: false } });
+  client.setQueryData(["me"], { id: "owner" });
+  api.getFinanceConversationReadiness.mockResolvedValue({
+    canSend: false,
+    reason: "registration_paused",
+  });
+  api.getFinanceContextualQuestion.mockResolvedValue({ state: "unavailable" });
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={["/finances/chat?question=question-a"]}>
+        <Routes>
+          <Route path="/finances/chat" element={<FinanceConversationPage ownerId="owner" />} />
+          <Route path="/finances/automations" element={<FinanceAutomationsPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  const user = userEvent.setup();
+  await user.type(screen.getByLabelText("Answer"), "Keep this answer exactly");
+  await user.click(await screen.findByRole("link", { name: "Review host setup" }));
+  const back = await screen.findByRole("link", { name: "Return to conversation" });
+  expect(back).toHaveAttribute("href", "/finances/chat?question=question-a");
+  await user.click(back);
+  expect(screen.getByLabelText("Answer")).toHaveValue("Keep this answer exactly");
+  expect(api.answerFinanceContextualQuestion).not.toHaveBeenCalled();
+  expect(api.markFinanceConversationRendered).not.toHaveBeenCalled();
+});
+
+it.each([
+  "accepted",
+  "rejected",
+])("ignores a late %s contextual answer after the owner session changes", async (outcome) => {
+  let finish!: (value: { state: string }) => void;
+  let fail!: (reason: Error) => void;
+  const client = createAppQueryClient({ queries: { retry: false } });
+  api.getFinanceContextualQuestion.mockResolvedValue({
+    state: "available",
+    question: {
+      id: "q",
+      prompt: "Purpose?",
+      transactionId: "t",
+      status: "open",
+      work: { id: "q", revision: "1" },
+    },
+  });
+  api.answerFinanceContextualQuestion.mockReturnValue(
+    new Promise((resolve, reject) => {
+      finish = resolve;
+      fail = reject;
+    }),
+  );
+  const user = userEvent.setup();
+  const page = show("/finances/chat?question=q", "owner-a", client);
+  await screen.findByText("Purpose?");
+  await user.type(screen.getByLabelText("Answer"), "Old answer");
+  await user.click(screen.getByRole("button", { name: "Save answer" }));
+  await waitFor(() => expect(api.answerFinanceContextualQuestion).toHaveBeenCalledTimes(1));
+  page.unmount();
+  show("/finances/chat?question=q", "owner-b", client);
+  await user.type(screen.getByLabelText("Answer"), "New owner's draft");
+  await act(async () => {
+    if (outcome === "accepted") finish({ state: "accepted" });
+    else fail(new Error("Old answer failed"));
+  });
+  expect(screen.getByLabelText("Answer")).toHaveValue("New owner's draft");
+  expect(toast.success).not.toHaveBeenCalledWith("Answer saved", expect.any(Object));
+  expect(toast.error).not.toHaveBeenCalledWith(
+    "Couldn’t save. Your draft is retained; try again.",
+    expect.any(Object),
+  );
 });

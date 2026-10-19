@@ -2,43 +2,70 @@ import { ApiClientError } from "@personal-os/api-client";
 import type {
   FinanceAnswer,
   FinanceConversationMessage,
-  FinanceConversationReadiness,
   FinanceConversationSendInput,
 } from "@personal-os/domain";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { api } from "../../api.js";
+import {
+  type PreferenceSession,
+  registerSessionCleanup,
+  sameSession,
+  usePreferenceSession,
+} from "../workspace-settings/account-save-session.js";
+import { financeConversationRecovery, financeRecoveryHref } from "./automation-recovery.js";
 import { FinanceConversationComposer } from "./conversation-composer.js";
 import { FinanceConversationThread } from "./conversation-thread.js";
 
-const lockReasons: Record<FinanceConversationReadiness["reason"], string> = {
-  ready: "Automation is ready.",
-  registration_missing: "Set up an automation to send messages.",
-  registration_paused: "Resume an eligible automation.",
-  registration_revoked: "Register an eligible automation again.",
-  connection_missing: "Connect your automation host.",
-  connection_disconnected: "Reconnect your automation host.",
-  connection_revoked: "Reconnect your automation host.",
-  message_protocol_unavailable: "Your host needs messaging support.",
-  challenge_required: "Verify messaging with your automation host.",
-  challenge_expired: "Verify messaging again with your automation host.",
-  protocol_upgrade_required: "Update your automation host’s messaging support.",
-  execution_not_authorized: "Review your automation’s execution permissions.",
-};
+const draftCleanupClients = new WeakSet<QueryClient>();
 
 /** The shell must key this page by authenticated owner so local drafts never cross sessions. */
 export function FinanceConversationPage({ ownerId }: { ownerId: string }) {
-  return <OwnerConversation key={ownerId} ownerId={ownerId} />;
-}
-function OwnerConversation({ ownerId }: { ownerId: string }) {
   const client = useQueryClient();
+  const session = usePreferenceSession(client);
+  if (!draftCleanupClients.has(client)) {
+    draftCleanupClients.add(client);
+    registerSessionCleanup(client, () =>
+      client.removeQueries({ queryKey: ["finance-conversation-local-drafts"] }),
+    );
+  }
+  if (session.owner !== ownerId) return <p>Sign in again to open your Finance conversation.</p>;
+  return (
+    <OwnerConversation key={`${ownerId}:${session.epoch}`} ownerId={ownerId} session={session} />
+  );
+}
+function OwnerConversation({ ownerId, session }: { ownerId: string; session: PreferenceSession }) {
+  const client = useQueryClient();
+  const capturedSession = useRef({ ...session }).current;
+  const currentSession = () =>
+    sameSession(client, capturedSession) && capturedSession.owner === ownerId;
   const [params] = useSearchParams();
   const questionId = params.get("question");
   const targetMessageId = params.get("message");
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const draftStateKey = ["finance-conversation-local-drafts", ownerId, capturedSession.epoch];
+  // Memory only: recovery navigation retains drafts and exact retry commands for this owner.
+  // The application clears session queries on logout/expiry; nothing is stored in the browser.
+  const local = useQuery<{
+    drafts: Record<string, string>;
+    commands: Map<string, FinanceAnswer | FinanceConversationSendInput>;
+  }>({
+    queryKey: draftStateKey,
+    queryFn: skipToken,
+    enabled: false,
+    gcTime: Number.POSITIVE_INFINITY,
+    initialData: () => ({ drafts: {}, commands: new Map() }),
+  });
+  const [drafts, updateDrafts] = useState(local.data?.drafts ?? {});
+  const setDrafts = (update: (current: Record<string, string>) => Record<string, string>) =>
+    updateDrafts((current) => {
+      if (!currentSession()) return current;
+      const next = update(current);
+      client.setQueryData(draftStateKey, { drafts: next, commands: commands.current });
+      return next;
+    });
   const draftKey = questionId ?? "conversation";
   const text = drafts[draftKey] ?? "";
   const setText = (value: string) => setDrafts((current) => ({ ...current, [draftKey]: value }));
@@ -55,7 +82,9 @@ function OwnerConversation({ ownerId }: { ownerId: string }) {
       else next.delete(draftKey);
       return next;
     });
-  const commands = useRef(new Map<string, FinanceAnswer | FinanceConversationSendInput>());
+  const commands = useRef(
+    local.data?.commands ?? new Map<string, FinanceAnswer | FinanceConversationSendInput>(),
+  );
   const readThrough = useRef("0");
   const [loadedThrough, setLoadedThrough] = useState("0");
   const fetchedThrough = useRef("0");
@@ -256,7 +285,7 @@ function OwnerConversation({ ownerId }: { ownerId: string }) {
     }
   };
   const submit = async () => {
-    if (pending || !text.trim()) return;
+    if (!currentSession() || pending || !text.trim()) return;
     const contextual = Boolean(questionId);
     if (
       contextual
@@ -293,6 +322,10 @@ function OwnerConversation({ ownerId }: { ownerId: string }) {
       }
       if ("operationId" in command) {
         const result = await api.answerFinanceContextualQuestion(command);
+        if (!currentSession()) {
+          toast.dismiss(id);
+          return;
+        }
         if (result.state !== "accepted") {
           setAnswerBlocked(true);
           toast.error(
@@ -305,27 +338,37 @@ function OwnerConversation({ ownerId }: { ownerId: string }) {
         void question.refetch();
       } else {
         const message = await api.sendFinanceConversationMessage(command);
+        if (!currentSession()) {
+          toast.dismiss(id);
+          return;
+        }
         if (generation !== accessGeneration.current) {
           toast.error("Access changed. Reload the conversation before continuing.", { id });
           return;
         }
         merge([message]);
-        commands.current.delete(identity);
       }
+      commands.current.delete(identity);
       setDrafts((current) =>
         current[draftKey] === snapshot ? { ...current, [draftKey]: "" } : current,
       );
       toast.success(contextual ? "Answer saved" : "Message saved for the next run", { id });
       void initial.refetch();
     } catch (error) {
+      if (!currentSession()) {
+        toast.dismiss(id);
+        return;
+      }
       clearDeniedHistory(error);
       toast.error("Couldn’t save. Your draft is retained; try again.", { id });
       void readiness.refetch();
     } finally {
-      setPending(false);
+      if (currentSession()) setPending(false);
     }
   };
   const available = question.data?.state === "available" ? question.data.question : null;
+  const recovery = readiness.data ? financeConversationRecovery[readiness.data.reason] : null;
+  const returnTo = `/finances/chat${params.size ? `?${params.toString()}` : ""}`;
   return (
     <section aria-label="Finance chat" className="mx-auto grid w-full min-w-0 max-w-3xl gap-6 p-4">
       {accessDenied || !readiness.data?.canSend || readiness.isError ? (
@@ -339,12 +382,17 @@ function OwnerConversation({ ownerId }: { ownerId: string }) {
                 : readiness.isError
                   ? "Automation access could not be checked."
                   : readiness.data
-                    ? lockReasons[readiness.data.reason]
+                    ? recovery?.cause
                     : "Check automation access."}
           </p>
-          <Link className="text-sm underline underline-offset-4" to="/finances/automations">
-            Open Automations
-          </Link>
+          {!accessDenied && !readiness.isPending && !readiness.isError && recovery ? (
+            <Button asChild variant="secondary" className="justify-self-start">
+              <Link to={financeRecoveryHref(recovery.href, returnTo)}>{recovery.action}</Link>
+            </Button>
+          ) : null}
+          <p className="text-sm text-muted-foreground">
+            Your draft stays here while you check access. Existing questions can still be answered.
+          </p>
         </div>
       ) : null}
       {initial.isPending ? <p>Loading conversation…</p> : null}

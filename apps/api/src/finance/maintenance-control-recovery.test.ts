@@ -267,6 +267,24 @@ describe("server-only candidate control recovery", () => {
         reason: "economic_reconciliation_required",
       });
     }
+    for (const mismatchedActor of [
+      { id: randomUUID(), type: "agent" },
+      { id: f.token.id, type: "user" },
+    ]) {
+      f.rows.set(financeMutationRecords, [
+        {
+          id,
+          actorId: f.token.id,
+          actorType: "agent",
+          response: { financeEffectReceipt: { ...receipt, actor: mismatchedActor } },
+        },
+      ]);
+      expect(await f.resume()).toEqual({
+        state: "reconciliation_required",
+        reason: "economic_reconciliation_required",
+      });
+      expect(f.writes).toEqual([]);
+    }
     expect(f.writes).toEqual([]);
   });
   it("retains actual live execution authority and propagates unexpected authority storage failures", async () => {

@@ -807,9 +807,9 @@ it.each([
   ["registration_missing", "Set up automation", "/finances/automations"],
   ["registration_paused", "Review host setup", "/finances/automations"],
   ["registration_revoked", "Register automation", "/finances/automations"],
-  ["connection_missing", "Connect host", "/settings?section=connections"],
-  ["connection_disconnected", "Reconnect host", "/settings?section=connections"],
-  ["connection_revoked", "Reconnect host", "/settings?section=connections"],
+  ["connection_missing", "Connect host", "/settings?section=agent-connections"],
+  ["connection_disconnected", "Reconnect host", "/settings?section=agent-connections"],
+  ["connection_revoked", "Reconnect host", "/settings?section=agent-connections"],
   ["execution_not_authorized", "Review host permissions", "/settings?section=workspace-access"],
   ["challenge_expired", "Verify message access again", "/finances/automations"],
   ["challenge_required", "Verify message access", "/finances/automations"],
@@ -1039,4 +1039,40 @@ it.each([
     "Couldn’t save. Your draft is retained; try again.",
     expect.any(Object),
   );
+});
+
+it.each([
+  "unchanged",
+  "edited",
+])("reconciles an in-flight accepted send across a same-session remount with an %s draft", async (kind) => {
+  let finish!: (value: typeof message) => void;
+  api.sendFinanceConversationMessage.mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const client = createAppQueryClient({ queries: { retry: false } });
+  const user = userEvent.setup();
+  let page = show("/finances/chat", "owner", client);
+  await user.type(screen.getByLabelText("Message"), "Original pending message");
+  await user.click(screen.getByRole("button", { name: "Send message" }));
+  await waitFor(() => expect(api.sendFinanceConversationMessage).toHaveBeenCalledTimes(1));
+  page.unmount();
+  page = show("/finances/chat", "owner", client);
+  expect(screen.getByLabelText("Message")).toHaveValue("Original pending message");
+  if (kind === "edited") {
+    await user.clear(screen.getByLabelText("Message"));
+    await user.type(screen.getByLabelText("Message"), "Newer unsent draft");
+  }
+  await act(async () =>
+    finish({ ...message, id: "accepted-original", text: "Original pending message" }),
+  );
+  const expected = kind === "edited" ? "Newer unsent draft" : "";
+  expect(screen.getByLabelText("Message")).toHaveValue(expected);
+  page.unmount();
+  show("/finances/chat", "owner", client);
+  expect(screen.getByLabelText("Message")).toHaveValue(expected);
+  if (kind === "unchanged")
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+  expect(api.sendFinanceConversationMessage).toHaveBeenCalledTimes(1);
 });

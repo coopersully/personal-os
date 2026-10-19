@@ -461,7 +461,7 @@ it("routes an unavailable original connection to reconnection without offering v
   api.listAutomationHostSchedules.mockResolvedValue([{ ...status(), connectionAvailable: false }]);
   open();
   const reconnect = await screen.findByRole("link", { name: "Reconnect host" });
-  expect(reconnect).toHaveAttribute("href", "/settings?section=connections");
+  expect(reconnect).toHaveAttribute("href", "/settings?section=agent-connections");
   expect(screen.getByRole("button", { name: "Verify message access" })).toBeDisabled();
   expect(api.issueFinanceConversationChallenge).not.toHaveBeenCalled();
 });

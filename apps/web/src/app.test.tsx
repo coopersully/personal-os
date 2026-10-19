@@ -8181,6 +8181,19 @@ describe("ilo web app", () => {
     );
   });
 
+  it("returns from actual Connected agents settings to the original Finance question", async () => {
+    const target = "/finances/chat?question=question-a&message=message-a";
+    const view = setup(
+      `/settings?section=agent-connections&returnTo=${encodeURIComponent(target)}`,
+    );
+    const browser = userEvent.setup();
+    const back = await screen.findByRole("link", { name: "Return to conversation" });
+    expect(back).toHaveAttribute("href", target);
+    expect(await screen.findByDisplayValue("https://mcp.example.com/mcp")).toBeInTheDocument();
+    await browser.click(back);
+    await waitFor(() => expect(view.location.value).toBe(target));
+  });
+
   it("creates and revokes a connected-agent token", async () => {
     setup("/settings?section=connections");
     const browser = userEvent.setup();

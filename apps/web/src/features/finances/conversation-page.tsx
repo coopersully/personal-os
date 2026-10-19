@@ -58,14 +58,14 @@ function OwnerConversation({ ownerId, session }: { ownerId: string; session: Pre
     gcTime: Number.POSITIVE_INFINITY,
     initialData: () => ({ drafts: {}, commands: new Map() }),
   });
-  const [drafts, updateDrafts] = useState(local.data?.drafts ?? {});
-  const setDrafts = (update: (current: Record<string, string>) => Record<string, string>) =>
-    updateDrafts((current) => {
-      if (!currentSession()) return current;
-      const next = update(current);
-      client.setQueryData(draftStateKey, { drafts: next, commands: commands.current });
-      return next;
-    });
+  const drafts = local.data?.drafts ?? {};
+  const setDrafts = (update: (current: Record<string, string>) => Record<string, string>) => {
+    if (!currentSession()) return;
+    client.setQueryData<NonNullable<typeof local.data>>(draftStateKey, (current) => ({
+      drafts: update(current?.drafts ?? {}),
+      commands: commands.current,
+    }));
+  };
   const draftKey = questionId ?? "conversation";
   const text = drafts[draftKey] ?? "";
   const setText = (value: string) => setDrafts((current) => ({ ...current, [draftKey]: value }));

@@ -25,18 +25,18 @@ export const financeConversationRecovery: Record<
   connection_missing: {
     cause: "The original host connection is unavailable.",
     action: "Connect host",
-    href: "/settings?section=connections",
+    href: "/settings?section=agent-connections",
   },
   connection_disconnected: {
     cause: "The original host connection is disconnected or expired.",
     action: "Reconnect host",
-    href: "/settings?section=connections",
+    href: "/settings?section=agent-connections",
   },
   connection_revoked: {
     cause:
       "The original host connection was revoked. A replacement must be registered and verified.",
     action: "Reconnect host",
-    href: "/settings?section=connections",
+    href: "/settings?section=agent-connections",
   },
   execution_not_authorized: {
     cause: "Your host does not have Finance execution permission.",
@@ -66,7 +66,26 @@ export const financeConversationRecovery: Record<
   },
 };
 
+export function financeConversationReturnTo(value: string | null): string | null {
+  if (!value || !/^\/finances\/chat(?:[?#]|$)/.test(value)) return null;
+  try {
+    if (
+      [...decodeURI(value)].some((character) => {
+        const code = character.charCodeAt(0);
+        return code < 32 || code === 127 || character === "\\";
+      })
+    )
+      return null;
+    const parsed = new URL(value, "https://nohmi.invalid");
+    return parsed.origin === "https://nohmi.invalid" && parsed.pathname === "/finances/chat"
+      ? value
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function financeRecoveryHref(href: string, returnTo: string) {
-  const safeReturn = /^\/finances\/chat(?:[?#]|$)/.test(returnTo) ? returnTo : "/finances/chat";
+  const safeReturn = financeConversationReturnTo(returnTo) ?? "/finances/chat";
   return `${href}${href.includes("?") ? "&" : "?"}returnTo=${encodeURIComponent(safeReturn)}`;
 }

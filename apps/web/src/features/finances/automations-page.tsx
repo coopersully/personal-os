@@ -18,6 +18,7 @@ import { Separator } from "@/components/ui/separator";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
 import { SettingsFeedbackContext } from "../../lib/settings-feedback.js";
+import { financeConversationReturnTo } from "./automation-recovery.js";
 import {
   type AutomationAction,
   AutomationBinding,
@@ -36,9 +37,7 @@ const date = (value: string | null) => (value ? new Date(value).toLocaleString()
 export function FinanceAutomationsPage() {
   const client = useQueryClient();
   const [params] = useSearchParams();
-  const requestedReturn = params.get("returnTo");
-  const returnTo =
-    requestedReturn && /^\/finances\/chat(?:[?#]|$)/.test(requestedReturn) ? requestedReturn : null;
+  const returnTo = financeConversationReturnTo(params.get("returnTo"));
   const schedules = useQuery({
     queryKey: ["finance-host-schedules"],
     queryFn: api.listAutomationHostSchedules,
@@ -171,7 +170,7 @@ function Automation({
       <div className="flex flex-wrap gap-2">
         {status.connectionAvailable === false ? (
           <Button asChild variant="secondary">
-            <Link to="/settings?section=connections">Reconnect host</Link>
+            <Link to="/settings?section=agent-connections">Reconnect host</Link>
           </Button>
         ) : null}
         <HostPromptPanel status={status} />

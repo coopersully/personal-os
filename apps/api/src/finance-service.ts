@@ -142,6 +142,9 @@ import {
   requireFinanceExecution,
 } from "./finance/context.js";
 import { mirrorNewMaintenanceReviewQuestion } from "./finance/conversation-review-mirror.js";
+import type { FinanceExecutionFence } from "./finance/execution-binding.js";
+import { assertFinanceDerivedCompletionClaim } from "./finance/execution-claim-fence.js";
+import { guardFinanceExecutionTransaction } from "./finance/execution-owner-guard.js";
 import { createInboxService } from "./finance/inbox-service.js";
 import { createFinanceLedgerService } from "./finance/ledger-service.js";
 import { supersedeFinanceMaintenanceLineage } from "./finance/maintenance-rebuild.js";
@@ -200,6 +203,7 @@ type MaintenanceMutationAttribution = {
   runId: string;
 };
 type MutationContext = {
+  financeExecution?: FinanceExecutionFence;
   financeBudgetApproval?: FinanceBudgetApproval;
   /** Internal action-service capability; never derived from a token or MCP input. */
   financePreparedAction?: boolean;
@@ -5027,9 +5031,23 @@ export function createFinanceService({
       await assertMaintenanceScopeOwned(userId, scope);
       if (scope.type !== "all_outstanding") return { refreshed: false };
       if (context?.maintenanceClaim) {
+        const claim = context.maintenanceClaim;
         await db.transaction(async (tx) => {
+          await guardFinanceExecutionTransaction(tx, userId, {
+            runIds: [claim.runId],
+          });
+          if (context.financeExecution)
+            await assertFinanceDerivedCompletionClaim(tx, userId, claim.runId, {
+              claimId: claim.claimId,
+              financeExecution: context.financeExecution,
+            });
           await assertMaintenanceClaim(tx, context);
           await refreshCashflowIntelligence(userId, tx, context);
+          if (context.financeExecution)
+            await assertFinanceDerivedCompletionClaim(tx, userId, claim.runId, {
+              claimId: claim.claimId,
+              financeExecution: context.financeExecution,
+            });
         });
       } else {
         await refreshCashflowIntelligence(userId);
@@ -5906,7 +5924,13 @@ export function createFinanceService({
       userId: string;
     }) {
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, input.userId, { runIds: [input.runId] });
         await assertMaintenanceClaim(tx, input.context);
+        if (input.context.financeExecution && input.context.maintenanceClaim)
+          await assertFinanceDerivedCompletionClaim(tx, input.userId, input.runId, {
+            claimId: input.context.maintenanceClaim.claimId,
+            financeExecution: input.context.financeExecution,
+          });
         const [candidate] = await tx
           .select({ id: financeMaintenanceCandidates.id })
           .from(financeMaintenanceCandidates)
@@ -6228,12 +6252,18 @@ export function createFinanceService({
             });
           activeReviewIds.add(projectedReview.id);
         }
+        if (input.context.financeExecution && input.context.maintenanceClaim)
+          await assertFinanceDerivedCompletionClaim(tx, input.userId, input.runId, {
+            claimId: input.context.maintenanceClaim.claimId,
+            financeExecution: input.context.financeExecution,
+          });
         return { created: items.length, total: activeReviewIds.size };
       });
     },
     async beginMaintenanceCandidatePreparation(input: { runId: string; userId: string }) {
       return db.transaction(async (tx) => {
         await tx.execute(sql`set transaction isolation level repeatable read`);
+        await guardFinanceExecutionTransaction(tx, input.userId, { runIds: [input.runId] });
         const [run] = await tx
           .select({ id: workspaceMaintenanceRuns.id, scope: workspaceMaintenanceRuns.scope })
           .from(workspaceMaintenanceRuns)
@@ -6309,6 +6339,7 @@ export function createFinanceService({
     }) {
       const items = input.items.map(normalizeCandidateDraft);
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, input.userId, { runIds: [input.runId] });
         const [run] = await tx
           .select({ id: workspaceMaintenanceRuns.id })
           .from(workspaceMaintenanceRuns)
@@ -6399,6 +6430,7 @@ export function createFinanceService({
     async finalizeMaintenanceCandidatePreparation(input: { runId: string; userId: string }) {
       return db.transaction(async (tx) => {
         await tx.execute(sql`set transaction isolation level repeatable read`);
+        await guardFinanceExecutionTransaction(tx, input.userId, { runIds: [input.runId] });
         const [run] = await tx
           .select({ id: workspaceMaintenanceRuns.id, scope: workspaceMaintenanceRuns.scope })
           .from(workspaceMaintenanceRuns)

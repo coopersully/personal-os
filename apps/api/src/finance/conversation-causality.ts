@@ -5,7 +5,6 @@ import {
   financeContextualQuestions,
   financeConversationBatches,
   financeConversationBatchMessages,
-  financeConversationCapabilities,
   financeConversationMessages,
   type financeMaintenanceCandidateItems,
   financeReviewActionRequests,
@@ -13,14 +12,12 @@ import {
   financeTransactions,
   type workspaceMaintenanceRuns,
 } from "@personal-os/database";
-import {
-  FINANCE_CONVERSATION_PROTOCOL_VERSION,
-  type FinanceConversationCausalClaim,
-} from "@personal-os/domain";
+import type { FinanceConversationCausalClaim } from "@personal-os/domain";
 import { and, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
 import { requireWorkspaceExecution } from "../workspace-execution.js";
+import { requireCurrentFinanceExecutionProof } from "./execution-proof.js";
 import { requireHostRunAuthority } from "./host-run-authority.js";
 export type FinanceEffectTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 export async function lockFinanceEffectOwner(tx: FinanceEffectTransaction, userId: string) {
@@ -76,24 +73,12 @@ export async function requireFinanceEffectMessageProof(
   await requireHostRunAuthority(tx, run, principal, at);
   if (!run.authorizationConnectionId || !run.automationScheduleId)
     throw new AppError("forbidden", "Use the original registered Finance message host.");
-  const [proof] = await tx
-    .select({ id: financeConversationCapabilities.id })
-    .from(financeConversationCapabilities)
-    .where(
-      and(
-        eq(financeConversationCapabilities.userId, run.userId),
-        eq(financeConversationCapabilities.automationScheduleId, run.automationScheduleId),
-        eq(
-          financeConversationCapabilities.authorizationConnectionId,
-          run.authorizationConnectionId,
-        ),
-        eq(financeConversationCapabilities.protocolVersion, FINANCE_CONVERSATION_PROTOCOL_VERSION),
-        isNotNull(financeConversationCapabilities.verifiedAt),
-      ),
-    )
-    .limit(1);
-  if (!proof)
-    throw new AppError("forbidden", "Verify the original host's current Finance message protocol.");
+  await requireCurrentFinanceExecutionProof(
+    tx,
+    run.userId,
+    run.automationScheduleId,
+    run.authorizationConnectionId,
+  );
 }
 export function financeCandidateRecordIds(
   items: ReadonlyArray<typeof financeMaintenanceCandidateItems.$inferSelect>,

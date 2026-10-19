@@ -15,10 +15,12 @@ import { AppError } from "../errors.js";
 import type { Principal } from "../types.js";
 import { requireWorkspaceExecution } from "../workspace-execution.js";
 import { financeCandidateEffectKey } from "./candidate-effect-receipt.js";
+import { requireFinanceEffectMessageProof } from "./conversation-causality.js";
+import { loadCandidateExecutionPrincipal } from "./execution-binding.js";
 import {
-  loadFinanceEffectPrincipal,
-  requireFinanceEffectMessageProof,
-} from "./conversation-causality.js";
+  financeExecutionDecisionTime,
+  guardFinanceExecutionTransaction,
+} from "./execution-owner-guard.js";
 
 export function effectEvidenceCursor(
   owner: string,
@@ -65,7 +67,6 @@ export function decodeEffectEvidenceCursor(
 export function createFinanceConversationEvidenceService({
   db,
   cursorSecret,
-  now = () => new Date(),
 }: {
   db: Database;
   cursorSecret: string;
@@ -91,6 +92,10 @@ export function createFinanceConversationEvidenceService({
         cursorSecret,
       );
       return db.transaction(async (tx) => {
+        await guardFinanceExecutionTransaction(tx, principal.userId, {
+          actorIds: [principal.actorId],
+          runIds: [runId],
+        });
         const [run] = await tx
           .select()
           .from(workspaceMaintenanceRuns)
@@ -105,8 +110,9 @@ export function createFinanceConversationEvidenceService({
         if (!run) throw new AppError("not_found", "The Finance run was not found.");
         if (!run.authorizationConnectionId || !run.automationScheduleId)
           return { state: "unavailable", reason: "run_has_no_original_host" };
-        await requireFinanceEffectMessageProof(tx, run, principal, now());
-        await requireWorkspaceExecution(tx, principal, "finances", now());
+        const readAt = await financeExecutionDecisionTime(tx);
+        await requireFinanceEffectMessageProof(tx, run, principal, readAt);
+        await requireWorkspaceExecution(tx, principal, "finances", readAt);
         const [stored] = await tx
           .select()
           .from(financeMutationRecords)
@@ -129,12 +135,13 @@ export function createFinanceConversationEvidenceService({
         )
           return { state: "unavailable", reason: "original_run_binding_changed" };
         if (receipt.authorityBasis === "original_live_grant")
-          await loadFinanceEffectPrincipal(
+          await loadCandidateExecutionPrincipal(
             tx,
             run,
-            { ...principal, actorId: receipt.actor.id },
-            now(),
-            true,
+            receipt.candidateId,
+            receipt.candidateRevision,
+            principal,
+            { requireExecution: true, receiptOnly: true, successorReceiptRead: true },
           );
         if (
           receipt.runId !== runId ||

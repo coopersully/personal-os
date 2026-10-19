@@ -218,7 +218,11 @@ it("presents reimbursement states, amounts, and empty or failed results", async 
   renderWithQueryClient(<FinanceReimbursementList />);
   expect(await screen.findByText("Overdue")).toBeInTheDocument();
   expect(screen.getByText("Recently resolved")).toBeInTheDocument();
-  expect(screen.getByText(/\$40.00 received of \$120.00/)).toBeInTheDocument();
+  // This legacy fixture carries no source currency; never invent USD from an amount.
+  expect(
+    screen.getByText(/40\.00 \(currency unknown\) received of 120\.00 \(currency unknown\)/),
+  ).toBeInTheDocument();
+  expect(screen.queryByText(/\$40\.00 received of \$120\.00/)).not.toBeInTheDocument();
   expect(screen.getByText("Payer not set")).toBeInTheDocument();
   expect(screen.getByLabelText("Reimbursement from Casey")).toHaveAttribute(
     "aria-valuenow",

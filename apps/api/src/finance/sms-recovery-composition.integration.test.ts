@@ -313,7 +313,7 @@ describe.sequential("Finance SMS recovery composition", () => {
     expect(stored.receipts).toHaveLength(1);
   });
 
-  it("keeps recovery-first Finance locks through binding consumption and rejects a concurrent app answer", async () => {
+  it("serializes a concurrent app answer behind recovery-first binding consumption", async () => {
     const f = await fixture("Recovery first");
     const actualAdmission = createSmsAdmission({ enabled: () => true });
     let releaseConsume = () => {};
@@ -337,6 +337,7 @@ describe.sequential("Finance SMS recovery composition", () => {
       };
     };
     const recovering = recovery(finance(gatedAdmission)).runPage(f.userId, { limit: 10 });
+    let appAnswer: ReturnType<typeof manualAnswer> | undefined;
     try {
       await Promise.race([
         locked,
@@ -344,9 +345,12 @@ describe.sequential("Finance SMS recovery composition", () => {
           throw new Error("Recovery finished before SMS consumption.");
         }),
       ]);
-      await expect(manualAnswer(f)).rejects.toMatchObject({
-        code: "conflict",
-        details: { retryable: true },
+      appAnswer = manualAnswer(f);
+      await vi.waitFor(async () => {
+        const blocked = await database.pool.query(
+          "SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND cardinality(pg_blocking_pids(pid))>0 AND query ILIKE '%users%' AND query ILIKE '%no key update%'",
+        );
+        expect(blocked.rows).toHaveLength(1);
       });
       const pending = await rows(f.userId, f.binding.id);
       expect(pending.answers).toEqual([]);
@@ -355,6 +359,8 @@ describe.sequential("Finance SMS recovery composition", () => {
       releaseConsume();
       await recovering;
     }
+    if (!appAnswer) throw new Error("Missing serialized app answer.");
+    expect(await appAnswer).toMatchObject({ state: "blocked" });
 
     const stored = await rows(f.userId, f.binding.id);
     expect(stored.answers).toHaveLength(1);
@@ -384,7 +390,6 @@ describe.sequential("Finance SMS recovery composition", () => {
     const service = recovery();
     let recovering: ReturnType<typeof service.runPage> | undefined;
     let firstPage: Awaited<ReturnType<typeof service.runPage>> | undefined;
-    let timer: ReturnType<typeof setTimeout> | undefined;
     let cleanupRejection: PromiseRejectedResult | undefined;
     try {
       await Promise.race([
@@ -394,22 +399,20 @@ describe.sequential("Finance SMS recovery composition", () => {
         }),
       ]);
       recovering = service.runPage(f.userId, { limit: 10 });
-      firstPage = await Promise.race([
-        recovering,
-        new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(
-            () => reject(new Error("Recovery waited on the app answer lock.")),
-            2_000,
-          );
-        }),
-      ]);
+      await vi.waitFor(async () => {
+        const blocked = await database.pool.query(
+          "SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND cardinality(pg_blocking_pids(pid))>0 AND query ILIKE '%users%' AND query ILIKE '%no key update%'",
+        );
+        expect(blocked.rows).toHaveLength(1);
+      });
     } finally {
-      if (timer) clearTimeout(timer);
       releaseManual();
       const results = await Promise.allSettled([
         answering,
         recovering ?? Promise.resolve(undefined),
       ]);
+      const recovered = results[1];
+      if (recovered?.status === "fulfilled") firstPage = recovered.value;
       cleanupRejection = results.find(
         (result): result is PromiseRejectedResult => result.status === "rejected",
       );
@@ -419,19 +422,12 @@ describe.sequential("Finance SMS recovery composition", () => {
       claims: [
         {
           inboundMessageId: f.inbound.id,
-          children: [{ state: "uncertain", reason: "answer_uncertain", terminal: false }],
-        },
-      ],
-    });
-
-    await expect(service.runPage(f.userId, { limit: 10 })).resolves.toMatchObject({
-      claims: [
-        {
-          inboundMessageId: f.inbound.id,
           children: [{ state: "blocked", reason: "stale_revision", terminal: true }],
         },
       ],
     });
+
+    await expect(service.runPage(f.userId, { limit: 10 })).resolves.toMatchObject({ claims: [] });
     const stored = await rows(f.userId, f.binding.id);
     expect(stored.answers).toHaveLength(1);
     expect(stored.answers[0]).toMatchObject({ sourceKind: "app" });

@@ -609,7 +609,7 @@ export function createFinanceMaintenanceService({
     if (!claim) return null;
     const { claimId, run } = claim;
     const executionFence =
-      (await actions.getMaintenanceExecutionFence?.(run.userId, runId)) ?? null;
+      (await actions?.getMaintenanceExecutionFence?.(run.userId, runId)) ?? null;
     let controlOnly = false;
     let derivedCompletionOnly = false;
     if (executionFence && actions.resumeFinanceMaintenanceControl) {

@@ -35,6 +35,7 @@ import {
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, desc, eq, inArray } from "drizzle-orm";
+import { financeCandidateEffectKey } from "./finance/candidate-effect-receipt.js";
 import { financeCandidateActionFingerprint } from "./finance-action-identity.js";
 import type { SupportedActionKind } from "./finance-action-service.js";
 import { createFinanceActionService } from "./finance-action-service.js";
@@ -1162,8 +1163,15 @@ describe.sequential("finance action service", () => {
         requestId: "budget-authority-human-approval",
       }),
     ).resolves.toMatchObject({ status: "applied" });
+    const effect = await database.db.query.financeMutationRecords.findFirst({
+      where: eq(
+        financeMutationRecords.idempotencyKey,
+        financeCandidateEffectKey(fixture.candidate.id, fixture.candidate.revision),
+      ),
+    });
+    if (!effect) throw new Error("Missing canonical candidate effect receipt.");
     const audits = await database.db.query.auditEvents.findMany({
-      where: eq(auditEvents.requestId, "budget-authority-human-approval"),
+      where: eq(auditEvents.requestId, `finance-candidate-effect:${effect.id}`),
     });
     expect(audits).toEqual(
       expect.arrayContaining([
@@ -1291,7 +1299,7 @@ describe.sequential("finance action service", () => {
     await database.pool.query(`
       CREATE OR REPLACE FUNCTION fail_second_settlement_audit() RETURNS trigger AS $$
       BEGIN
-        IF NEW.request_id = 'settlement-rollback' AND EXISTS (
+        IF NEW.user_id = '${fixture.ownerId}'::uuid AND NEW.request_id LIKE 'finance-candidate-effect:%' AND EXISTS (
           SELECT 1 FROM audit_events WHERE request_id = NEW.request_id
         ) THEN
           RAISE EXCEPTION 'forced later settlement audit failure';

@@ -612,6 +612,9 @@ export function createAuthService(options: AuthServiceOptions) {
       };
     },
 
+    // Old-token-only revocation intentionally remains one UPDATE. Its row write
+    // serializes with canonical OAuth refresh's retained old-access SHARE; it
+    // never takes a later owner/grant lock or revokes an already-issued successor.
     async revokeAccessToken(userId: string, tokenId: string): Promise<void> {
       const [record] = await db
         .update(accessTokens)

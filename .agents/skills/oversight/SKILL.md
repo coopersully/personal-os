@@ -61,3 +61,28 @@ spending checks passed. The remaining fixes are still being tested before the fi
 An unchanged report could say: “No change since the last update. We are waiting for the final
 tests to finish.” This reporting rule does not create schedules, change their cadence, or grant
 implementation, acceptance or merge authority.
+
+## Keep delivery moving
+
+For changes to shared contracts, migrations, audit/idempotency, locking, authorization or UI modes,
+name an owner for affected existing transitive consumers and fixtures early. Run those existing
+consumer test files, including setup and teardown, alongside new tests before the final freeze;
+new happy-path tests alone are insufficient. Keep the affected list and evidence in the existing
+handoff record, and have independent review check for omissions. Focused proof does not replace
+required checks on the complete frozen candidate and actual target base.
+
+Name the composition worker at launch and maintain a separate rolling integration branch through
+normal merges of independently reviewed slices as they become source-ready, without waiting for
+unrelated slices. Distinguish source-inclusion prerequisites from actual merge, release and
+observation prerequisites: reviewed source may enter an authorized composition before its separate
+PR merges, but a required merged prerequisite must actually be merged and present. Never change a
+checkout while it is being tested; integrate after its resource owner has completed cleanup.
+
+After initial scope and checkout acknowledgement, give one bounded conditional grant naming exact
+prerequisite evidence, permitted effects and source restrictions, resource owner, retry bounds and
+stop conditions. The owner verifies and records those conditions before continuing or resuming;
+unchanged conditions require no additional acknowledgement. Re-read current ownership on resume:
+a recorded transfer overrides an older grant. Stop and return to Lead on changed scope, uncertain
+ownership, a new failure class, or a new product/security decision. This never grants blanket
+retries, duplicate effects, human financial approval, or another role's acceptance/merge authority.
+Use existing records rather than creating a new process artifact for each slice.

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { FinanceSpendingDashboard, FinanceSpendingMonthlyBudget } from "@personal-os/domain";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { type CSSProperties, createElement } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import {
@@ -342,6 +343,11 @@ it("defensively renders a zero target separately from null without infinite util
     /Monthly budget used \$2.50 of \$0.00; Over budget \$2.50/,
   );
   expect(selected()).toHaveClass("border-2");
+  expect(selected()).toHaveTextContent("Over budget");
+  fireEvent.click(screen.getByText("All spending groups (1)"));
+  expect(screen.getByRole("button", { name: "Open Food details" })).toHaveAccessibleDescription(
+    /Selected-period spending \$1.00.*Monthly budget used \$2.50 of \$0.00; Over budget \$2.50/,
+  );
   expect(fillAnimation.props.at(-1)).toMatchObject({ animate: { clipPath: "inset(0% 0 0 0)" } });
   for (const usedCents of [0, -100]) {
     rerender(
@@ -374,4 +380,70 @@ it("defensively renders a zero target separately from null without infinite util
   rerender(createElement(SpendingBubbles, { ...props, monthlyBudget }));
   expect(selected()).toHaveAccessibleName(/Monthly budget comparison unavailable/);
   expect(selected().querySelector("[data-budget-fill]")).toBeNull();
+});
+
+it("keeps tiny and long-named groups readable and selectable without inflating their area", async () => {
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(240);
+  const groups = [
+    {
+      id: "large",
+      label: "Home",
+      kind: "category",
+      netCents: 100000,
+      positiveAreaCents: 100000,
+      categories: [],
+    },
+    {
+      id: "tiny",
+      label: "A very long category name for a single small transaction",
+      kind: "category",
+      netCents: 1,
+      positiveAreaCents: 1,
+      categories: [],
+    },
+  ] as unknown as FinanceSpendingDashboard["groups"];
+  const select = vi.fn();
+  render(createElement(SpendingBubbles, { groups, onSelect: select }));
+  fireEvent.click(screen.getByText("All spending groups (2)"));
+  const key = screen.getByRole("list", { name: "Spending groups" });
+  const tiny = within(key).getByRole("button", {
+    name: "Open A very long category name for a single small transaction details",
+  });
+  expect(tiny).toHaveTextContent("A very long category name for a single small transaction");
+  expect(tiny).toHaveTextContent("$0.01");
+  expect(tiny).toHaveAccessibleDescription(
+    "Selected-period spending $0.01. Monthly budget comparison unavailable.",
+  );
+  tiny.focus();
+  await userEvent.keyboard("{Enter}");
+  expect(select).toHaveBeenCalledWith(groups[1]);
+  const smallCircle = screen.getByRole("button", { name: /A very long category name.*: \$0.01/ });
+  const largeCircle = screen.getByRole("button", { name: /Home: \$1,000.00/ });
+  expect(
+    Number.parseFloat(smallCircle.style.width) ** 2 /
+      Number.parseFloat(largeCircle.style.width) ** 2,
+  ).toBeCloseTo(1 / 100000, 8);
+  expect(smallCircle).toHaveAttribute("tabindex", "-1");
+  expect(screen.getByText(/Circle size: selected-period spending/)).toBeVisible();
+});
+it("restores touch scrolling when reduced motion disables an active arrangement", () => {
+  const groups = [
+    {
+      id: "food",
+      label: "Food",
+      kind: "category",
+      netCents: 100,
+      positiveAreaCents: 100,
+      categories: [],
+    },
+  ] as unknown as FinanceSpendingDashboard["groups"];
+  const props = { groups, onSelect: vi.fn() };
+  const { rerender } = render(createElement(SpendingBubbles, props));
+  fireEvent.click(screen.getByRole("button", { name: "Arrange" }));
+  expect(screen.getByRole("button", { name: /Food:/ }).style.touchAction).toBe("none");
+  fillAnimation.reduced = true;
+  rerender(createElement(SpendingBubbles, props));
+  expect(screen.getByRole("button", { name: "Arrange" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Arrange" })).toHaveAttribute("aria-pressed", "false");
+  expect(screen.getByRole("button", { name: /Food:/ }).style.touchAction).toBe("pan-y");
 });

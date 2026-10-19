@@ -160,7 +160,7 @@ it("uses the owner's local dates and preserves remaining amounts, currencies and
   ).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Open upcoming money" })).toHaveAttribute(
     "href",
-    "/finances/cashflow?cashflowFrom=2026-10-19&cashflowTo=2026-11-17&view=agenda",
+    "/finances/cashflow?cashflowFrom=2026-10-19&cashflowTo=2026-11-17&timeline=agenda",
   );
 });
 

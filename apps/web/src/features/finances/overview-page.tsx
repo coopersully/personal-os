@@ -418,7 +418,7 @@ function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: 
             row.inCurrentSchedule && ["expected", "partially_matched"].includes(row.matchState),
         )
         .sort((a, b) => a.localDate.localeCompare(b.localDate) || a.key.localeCompare(b.key));
-  const href = `/finances/cashflow?${new URLSearchParams({ cashflowFrom: range.from, cashflowTo: range.to, view: "agenda" })}`;
+  const href = `/finances/cashflow?${new URLSearchParams({ cashflowFrom: range.from, cashflowTo: range.to, timeline: "agenda" })}`;
   return (
     <>
       <p className="text-muted-foreground text-sm">

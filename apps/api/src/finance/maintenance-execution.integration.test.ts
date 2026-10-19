@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import {
   accessTokens,
+  auditEvents,
   automationHostSchedules,
   createDatabaseClient,
   type DatabaseClient,
@@ -21,6 +22,7 @@ import {
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq } from "drizzle-orm";
+import { createAutomationHostService } from "../automation-host-service.js";
 import { createOAuthService } from "../oauth-service.js";
 import { hashToken } from "../security.js";
 import { createWorkspaceMaintenanceService } from "../workspace-maintenance-service.js";
@@ -207,6 +209,125 @@ describe.sequential("Finance prospective execution binding storage and derived c
       connection,
     };
   }
+  it("rejects host changes for a submitted binding without writes, keeps same-host recovery inert, and preserves unbound legacy recovery", async () => {
+    const f = await fixture();
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ status: "awaiting_agent_challenge", leaseClaimId: null, leaseExpiresAt: null })
+      .where(eq(workspaceMaintenanceRuns.id, f.run.id));
+    const [run] = await database.db
+      .select()
+      .from(workspaceMaintenanceRuns)
+      .where(eq(workspaceMaintenanceRuns.id, f.run.id));
+    const [original] = await database.db
+      .select()
+      .from(automationHostSchedules)
+      .where(eq(automationHostSchedules.id, f.scheduleId));
+    if (!run || !original) throw new Error("host recovery fixture");
+    const replacementId = randomUUID();
+    await database.db.insert(automationHostSchedules).values({
+      ...original,
+      id: replacementId,
+      schedule: { ...original.schedule, id: replacementId, label: "Replacement" },
+    });
+    const service = createAutomationHostService({
+      db: database.db,
+      now: () => new Date(),
+      encryptionKey: Buffer.alloc(32, 1).toString("base64"),
+    });
+    const human = {
+      userId: f.userId,
+      actorId: f.userId,
+      actorType: "user" as const,
+      scopes: new Set(["finances:write" as const]),
+    };
+    const input = {
+      scheduleId: replacementId,
+      expectedScheduleId: f.scheduleId,
+      expectedConnectionId: f.connection,
+      expectedUpdatedAt: run.updatedAt.toISOString(),
+      hostChecked: true,
+    };
+    const beforeAudits = await database.db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.userId, f.userId));
+    await expect(service.recoverHostRun(human, run.id, input)).rejects.toThrow(
+      "retain its original host",
+    );
+    expect(
+      (
+        await database.db
+          .select()
+          .from(workspaceMaintenanceRuns)
+          .where(eq(workspaceMaintenanceRuns.id, run.id))
+      )[0],
+    ).toEqual(run);
+    expect(
+      await database.db.select().from(auditEvents).where(eq(auditEvents.userId, f.userId)),
+    ).toEqual(beforeAudits);
+    expect(
+      await service.recoverHostRun(human, run.id, { ...input, scheduleId: f.scheduleId }),
+    ).toEqual({ id: run.id });
+    expect(
+      (
+        await database.db
+          .select()
+          .from(workspaceMaintenanceRuns)
+          .where(eq(workspaceMaintenanceRuns.id, run.id))
+      )[0],
+    ).toEqual(run);
+    expect(
+      await database.db.select().from(auditEvents).where(eq(auditEvents.userId, f.userId)),
+    ).toEqual(beforeAudits);
+    const foreign = await fixture();
+    await expect(
+      service.recoverHostRun(
+        { ...human, userId: foreign.userId, actorId: foreign.userId },
+        run.id,
+        { ...input, scheduleId: foreign.scheduleId },
+      ),
+    ).rejects.toBeDefined();
+    const legacy = await fixture(false, false);
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ status: "awaiting_agent_challenge", leaseClaimId: null, leaseExpiresAt: null })
+      .where(eq(workspaceMaintenanceRuns.id, legacy.run.id));
+    const [legacyRun] = await database.db
+      .select()
+      .from(workspaceMaintenanceRuns)
+      .where(eq(workspaceMaintenanceRuns.id, legacy.run.id));
+    const [legacySchedule] = await database.db
+      .select()
+      .from(automationHostSchedules)
+      .where(eq(automationHostSchedules.id, legacy.scheduleId));
+    if (!legacyRun || !legacySchedule) throw new Error("legacy fixture");
+    const legacyReplacement = randomUUID();
+    await database.db.insert(automationHostSchedules).values({
+      ...legacySchedule,
+      id: legacyReplacement,
+      schedule: { ...legacySchedule.schedule, id: legacyReplacement },
+    });
+    await service.recoverHostRun(
+      { ...human, userId: legacy.userId, actorId: legacy.userId },
+      legacy.run.id,
+      {
+        ...input,
+        scheduleId: legacyReplacement,
+        expectedScheduleId: legacy.scheduleId,
+        expectedConnectionId: legacy.connection,
+        expectedUpdatedAt: legacyRun.updatedAt.toISOString(),
+      },
+    );
+    expect(
+      (
+        await database.db
+          .select()
+          .from(workspaceMaintenanceRuns)
+          .where(eq(workspaceMaintenanceRuns.id, legacy.run.id))
+      )[0]?.automationScheduleId,
+    ).toBe(legacyReplacement);
+  });
   it("reuses exact initialization, rejects forged attribution and direct rebinding, and erases with owner", async () => {
     const f = await fixture();
     await database.db.transaction(async (tx) => {

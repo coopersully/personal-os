@@ -7,6 +7,7 @@ import {
   type Database,
   financeAnswerContinuations,
   financeContextualAnswers,
+  financeMaintenanceExecutionBindings,
   financeReviewAnswers,
   users,
   workspaceMaintenanceRuns,
@@ -489,6 +490,34 @@ export function createAutomationHostService(options: {
         if (principal.actorType === "agent") {
           requireConnection(principal, run.authorizationConnectionId ?? "");
           await requireWorkspaceExecution(tx, principal, "finances", now());
+        }
+        const [executionBinding] = await tx
+          .select({
+            id: financeMaintenanceExecutionBindings.id,
+            scheduleId: financeMaintenanceExecutionBindings.automationScheduleId,
+            connectionId: financeMaintenanceExecutionBindings.authorizationConnectionId,
+          })
+          .from(financeMaintenanceExecutionBindings)
+          .where(
+            and(
+              eq(financeMaintenanceExecutionBindings.userId, principal.userId),
+              eq(financeMaintenanceExecutionBindings.runId, run.id),
+            ),
+          )
+          .limit(1)
+          .for("share");
+        if (executionBinding) {
+          if (
+            run.automationScheduleId !== schedule.id ||
+            run.authorizationConnectionId !== schedule.authorizationConnectionId ||
+            executionBinding.scheduleId !== schedule.id ||
+            executionBinding.connectionId !== schedule.authorizationConnectionId
+          )
+            throw new AppError(
+              "conflict",
+              "This submitted Finance candidate must retain its original host. Refresh its execution authorization instead.",
+            );
+          return { id: run.id };
         }
         await tx
           .update(workspaceMaintenanceRuns)

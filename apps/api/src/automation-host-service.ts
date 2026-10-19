@@ -916,9 +916,10 @@ export function createAutomationHostService(options: {
       return db.transaction(async (tx) => {
         await guardFinanceExecutionTransaction(tx, principal.userId, {
           actorIds: principal.actorType === "agent" ? [principal.actorId] : [],
-          connectionIds: principal.authorizationConnectionId
-            ? [principal.authorizationConnectionId]
-            : [],
+          connectionIds: [
+            input.tenantAuthorizationConnectionId,
+            ...(principal.authorizationConnectionId ? [principal.authorizationConnectionId] : []),
+          ],
           hostSchedules: true,
         });
         const tokens = await liveGrant(tx, principal.userId, input.tenantAuthorizationConnectionId);

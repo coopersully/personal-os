@@ -53,6 +53,7 @@ const api = vi.hoisted(() => ({
   getFinancePlaybook: vi.fn(),
   getFinanceSnapshot: vi.fn(),
   getFinanceStatus: vi.fn(),
+  listFinanceRecurringOccurrences: vi.fn(),
   getPlaidStatus: vi.fn(),
   listFinanceAccounts: vi.fn(),
   listFinanceGoals: vi.fn(),
@@ -134,6 +135,11 @@ beforeEach(() => {
   api.getMe.mockResolvedValue({
     id: "11111111-1111-4111-8111-111111111111",
     planningTimezone: "America/New_York",
+  });
+  api.listFinanceRecurringOccurrences.mockResolvedValue({
+    occurrences: [],
+    unavailableSources: [],
+    matchEvents: [],
   });
   api.getFinanceLedgerHealth.mockResolvedValue({ balanceOnlyAccounts: 0 });
   api.getFinanceSnapshot.mockResolvedValue(
@@ -1217,6 +1223,8 @@ it.each([
   if (state === "failed")
     api.getFinanceSnapshot.mockRejectedValue(new Error("Snapshot unavailable"));
   mount(<FinanceOverviewPage />);
+  // Authenticated identity settles before opening the owner-bound settings controls.
+  await screen.findByText("No unmatched scheduled money in this date range.");
   const entry = screen.getByRole("button", { name: "Workspace view settings" });
   expect(entry).toBeVisible();
   fireEvent.click(entry);

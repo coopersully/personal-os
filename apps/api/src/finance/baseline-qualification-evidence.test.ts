@@ -72,11 +72,16 @@ describe("baseline qualification evidence", () => {
 function evidenceFixture() {
   const id = "11111111-1111-4111-8111-111111111111";
   const categoryId = "22222222-2222-4222-8222-222222222222";
+  const versionId = "33333333-3333-4333-8333-333333333333";
+  const planId = "44444444-4444-4444-8444-444444444444";
+  const designationId = "55555555-5555-4555-8555-555555555555";
+  const accountId = "66666666-6666-4666-8666-666666666666";
+  const allocationId = "77777777-7777-4777-8777-777777777777";
   const stamp = new Date("2026-10-01T00:00:00Z");
   const version = {
-    id,
+    id: versionId,
     userId: id,
-    planId: id,
+    planId,
     version: 1,
     effectiveFrom: "2026-10",
     status: "retired",
@@ -91,7 +96,7 @@ function evidenceFixture() {
     updatedAt: stamp,
   };
   const allocation = {
-    id,
+    id: allocationId,
     allocationKey: "food",
     categoryId,
     legacyCategory: null,
@@ -100,7 +105,7 @@ function evidenceFixture() {
     createdAt: stamp,
     updatedAt: stamp,
   };
-  const account = { id, currencyCode: "USD", updatedAt: stamp };
+  const account = { id: accountId, currencyCode: "USD", updatedAt: stamp };
   const category = { id: categoryId, name: "Food", createdAt: stamp, updatedAt: stamp };
   const rows: unknown[][] = [[version], [], [allocation], [account], [category]];
   const tx = {
@@ -116,14 +121,19 @@ function evidenceFixture() {
     }),
   };
   const input = {
-    budgetVersionId: id,
-    accountIds: [id],
+    budgetVersionId: versionId,
+    accountIds: [accountId],
     currency: "USD",
     month: "2026-10",
     timezone: "UTC",
   };
   return {
     id,
+    versionId,
+    planId,
+    designationId,
+    accountId,
+    allocationId,
     categoryId,
     stamp,
     version,
@@ -140,9 +150,9 @@ it("preserves designated historical identity and fingerprints source changes sep
   const f = evidenceFixture();
   f.rows[1] = [
     {
-      id: f.id,
-      budgetVersionId: f.id,
-      planId: f.id,
+      id: f.designationId,
+      budgetVersionId: f.versionId,
+      planId: f.planId,
       periodFrom: "2026-10-01",
       periodThrough: "2026-10-31",
       timezone: "UTC",
@@ -151,16 +161,19 @@ it("preserves designated historical identity and fingerprints source changes sep
   ];
   const result = await f.read();
   expect(result.snapshot).toMatchObject({
-    sourceBaselineId: f.id,
+    sourceBaselineId: f.designationId,
+    budgetVersionId: f.versionId,
+    planId: f.planId,
+    accountIds: [f.accountId],
     allocations: [{ label: "Food", amountCents: 100 }],
     originalApproval: { actorType: "user", actorId: f.id },
   });
   const changed = evidenceFixture();
   changed.rows[1] = [
     {
-      id: changed.id,
-      budgetVersionId: changed.id,
-      planId: changed.id,
+      id: changed.designationId,
+      budgetVersionId: changed.versionId,
+      planId: changed.planId,
       periodFrom: "2026-10-01",
       periodThrough: "2026-10-31",
       timezone: "UTC",

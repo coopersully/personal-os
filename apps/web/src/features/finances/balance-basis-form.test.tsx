@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { createApiClient } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { BalanceBasisForm, type BalanceBasisFormProps } from "./balance-basis-form.js";
 
@@ -210,7 +210,13 @@ it("does not treat a nontruncated date window as a complete account-history revi
 });
 
 it("confirms an empty account history against the exact prior basis revision and awaits saved feedback", async () => {
-  const onSaved = vi.fn(async () => undefined);
+  let releaseSaved: () => void = () => {
+    throw new Error("Saved callback was not initialized");
+  };
+  const saved = new Promise<void>((resolve) => {
+    releaseSaved = resolve;
+  });
+  const onSaved = vi.fn(() => saved);
   const close = mount(false, true, {
     transactions: [],
     previousBasis: { accountId, basisRevision: 7 } as never,
@@ -220,8 +226,13 @@ it("confirms an empty account history against the exact prior basis revision and
   fill("Balance amount", "12");
   fill("Optional protected floor (blank means unknown)", "1.25");
   submit();
+  await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
+  expect(close).not.toHaveBeenCalled();
+  await act(async () => {
+    releaseSaved();
+    await saved;
+  });
   await waitFor(() => expect(close).toHaveBeenCalledOnce());
-  expect(onSaved).toHaveBeenCalledOnce();
   expect(api.confirmFinanceBalanceBasis).toHaveBeenCalledWith(
     expect.objectContaining({
       amountCents: 1200,

@@ -56,7 +56,7 @@ describe.sequential("tenant-bound host schedules", () => {
         authorizationConnectionId: connectionId,
         tokenHash: randomUUID(),
         scopes: ["finances:maintain"],
-        expiresAt: new Date("2026-10-10T15:00:00Z"),
+        expiresAt: new Date(Date.now() + 86_400_000),
       })
       .returning();
     if (!token) throw new Error("token");

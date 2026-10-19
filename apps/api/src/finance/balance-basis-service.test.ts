@@ -575,6 +575,7 @@ it.each([
 
 function projectionEvidenceFixture() {
   const f = actualsFixture();
+  const incomeStreamId = "f2000000-0000-4000-8000-000000000003";
   f.rows.finance_transactions = [];
   Object.assign(f.account, { contextualRevision: 1n });
   const basis = {
@@ -595,7 +596,7 @@ function projectionEvidenceFixture() {
   f.rows.finance_balance_inclusions = [];
   const payday = {
     key: "payday",
-    source: { kind: "income", id },
+    source: { kind: "income", id: incomeStreamId },
     inCurrentSchedule: true,
     localDate: "2026-10-30",
     scheduleVersionId: id,
@@ -632,7 +633,7 @@ function projectionEvidenceFixture() {
         from: "2026-10-01",
         to: "2026-10-31",
         accountIds: [id],
-        selectedIncomeStreamId: id,
+        selectedIncomeStreamId: incomeStreamId,
       }),
   };
 }
@@ -643,9 +644,22 @@ it("withholds a projection when the owner planning timezone is unavailable", asy
     projection: { status: "unavailable", reasons: [{ code: "balance_basis_unavailable" }] },
   });
 });
-it("does not select a historical or different income occurrence as the next payday", async () => {
+it.each([
+  [
+    "historical occurrence",
+    (f: ReturnType<typeof projectionEvidenceFixture>) => {
+      f.payday.localDate = "2026-10-17";
+    },
+  ],
+  [
+    "different income stream",
+    (f: ReturnType<typeof projectionEvidenceFixture>) => {
+      f.payday.source.id = "f2000000-0000-4000-8000-000000000004";
+    },
+  ],
+] as const)("does not select a %s as the next payday", async (_label, change) => {
   const f = projectionEvidenceFixture();
-  f.payday.localDate = "2026-10-17";
+  change(f);
   await expect(f.project()).resolves.toMatchObject({
     projection: { status: "unavailable", reasons: [{ code: "next_payday_unavailable" }] },
   });

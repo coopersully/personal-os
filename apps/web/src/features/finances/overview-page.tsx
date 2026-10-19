@@ -42,6 +42,7 @@ const maintenanceLabels = {
 };
 
 export function FinanceOverviewPage() {
+  const me = useQuery({ queryKey: ["me"], queryFn: api.getMe });
   const snapshot = useQuery({
     queryKey: ["finance-snapshot"],
     queryFn: async () => requireFinanceResult(await api.getFinanceSnapshot()),
@@ -78,10 +79,7 @@ export function FinanceOverviewPage() {
                     ? `${reviewCount} transaction review ${reviewCount === 1 ? "item" : "items"}`
                     : "No transaction review items"}
                 </ItemTitle>
-                <ItemDescription>
-                  Questions and exact approvals stay in Reviews. This count covers transaction
-                  review items; other decisions may still need you.
-                </ItemDescription>
+                <ItemDescription>Questions and exact approvals stay in Reviews.</ItemDescription>
               </ItemContent>
               <ItemActions>
                 <Button asChild size="sm" variant="outline">
@@ -362,7 +360,8 @@ export function FinanceOverviewPage() {
       <Button asChild variant="outline">
         <Link to="/finances/spending">Explore Spending</Link>
       </Button>
-      <FinanceOverviewSettings key="view-settings" />
+      <FinanceSourceState label="Account settings" query={me} />
+      {me.data && !accessDenied(me.error) ? <FinanceOverviewSettings key="view-settings" /> : null}
     </div>
   );
 }

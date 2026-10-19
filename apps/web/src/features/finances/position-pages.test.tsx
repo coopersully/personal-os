@@ -1483,3 +1483,32 @@ it.each([
   expect(screen.getByLabelText("Confirmed goal currency")).toHaveValue("EUR");
   expect(api.manageFinanceGoal).not.toHaveBeenCalled();
 });
+
+it("waits for initial owner identity before exposing Overview view settings", async () => {
+  let finishMe: ((value: unknown) => void) | undefined;
+  api.getMe.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishMe = resolve;
+      }),
+  );
+  api.getWorkspaceSettings.mockResolvedValue({
+    workspace: "finances",
+    revision: 1,
+    preferences: {},
+  });
+  api.getFinanceConfiguration.mockResolvedValue({
+    accounts: { state: "loaded", value: { accounts: [account] } },
+  });
+  mount(<FinanceOverviewPage />);
+  await screen.findByRole("region", { name: "Financial position" });
+  expect(screen.queryByRole("button", { name: "Workspace view settings" })).not.toBeInTheDocument();
+  await act(async () => finishMe?.({ id: "owner-a", planningTimezone: "America/New_York" }));
+  const entry = await screen.findByRole("button", { name: "Workspace view settings" });
+  fireEvent.click(entry);
+  await screen.findByRole("button", { name: "Cash account view selections" });
+  expect(entry).toHaveAttribute("aria-expanded", "true");
+  await waitFor(() => expect(api.getFinanceConfiguration).toHaveBeenCalled());
+  expect(entry).toBeVisible();
+  expect(screen.getByRole("link", { name: "Open Finance settings" })).toBeVisible();
+});

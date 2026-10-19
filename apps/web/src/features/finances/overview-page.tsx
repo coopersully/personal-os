@@ -1,4 +1,8 @@
+import { ApiClientError } from "@personal-os/api-client";
+import { cashflowScheduleRange, formatDateOnly } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { BankIcon, ReceiptIcon, WalletIcon } from "@/components/icons";
 import { KeyMetric, KeyMetrics } from "@/components/key-metrics";
@@ -15,7 +19,6 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 import { api } from "../../api.js";
-import { FinanceBentoSection } from "./bento-section.js";
 import { formatCompactMoney } from "./format";
 import { FinanceOverviewSettings } from "./overview-settings";
 import {
@@ -39,6 +42,7 @@ const maintenanceLabels = {
 };
 
 export function FinanceOverviewPage() {
+  const me = useQuery({ queryKey: ["me"], queryFn: api.getMe });
   const snapshot = useQuery({
     queryKey: ["finance-snapshot"],
     queryFn: async () => requireFinanceResult(await api.getFinanceSnapshot()),
@@ -47,9 +51,11 @@ export function FinanceOverviewPage() {
     queryKey: ["finance-budget-current"],
     queryFn: async () => requireFinanceResult(await api.getFinanceBudget()),
   });
-  const inbox = useQuery({
-    queryKey: ["finance-inbox"],
-    queryFn: async () => requireFinanceResult(await api.getFinanceInbox()),
+  const reviews = useQuery({
+    queryKey: ["agent-access-work-items", "finance-overview", me.data?.id],
+    queryFn: () => api.listAgentAccessWorkItems({ domain: "finances", limit: 10 }),
+    enabled: !!me.data && !accessDenied(me.error),
+    refetchInterval: 60_000,
   });
   const status = useQuery({ queryKey: ["finance-status"], queryFn: () => api.getFinanceStatus() });
   const playbook = useQuery({ queryKey: ["finance-playbook"], queryFn: api.getFinancePlaybook });
@@ -58,13 +64,119 @@ export function FinanceOverviewPage() {
     queryFn: () => api.getFinanceMaintenanceHistory({ limit: 3 }),
   });
   const plan = budget.data?.data;
-  const reviewCount = inbox.data?.data.filter((item) => item.status !== "resolved").length;
+  const reviewCount = reviews.data?.summary.byDomain.finances;
+  const reviewUnavailable = reviews.data?.unavailableDomains.includes("finances");
+  const reviewDenied = accessDenied(me.error) || accessDenied(reviews.error);
+  const reviewsKnown =
+    reviews.isSuccess && !reviewUnavailable && !reviewDenied && typeof reviewCount === "number";
   const latestReview = status.data?.details.latestReview;
   const nextPriority =
     playbook.data?.assessment.blockers[0] ?? playbook.data?.assessment.nextActions[0];
   return (
     <div className="flex flex-col gap-6">
-      <FinanceOverviewSettings />
+      <OverviewSection title="Needs you">
+        {!accessDenied(me.error) ? (
+          <FinanceSourceState label="Decisions" query={me.data ? reviews : me} />
+        ) : null}
+        {reviewDenied ? (
+          <p>Review access unavailable.</p>
+        ) : reviewUnavailable ? (
+          <p>Some Finance decisions could not be checked. Open Reviews to check status.</p>
+        ) : null}
+        {reviewsKnown ? (
+          <ItemGroup>
+            <Item>
+              <ItemContent>
+                <ItemTitle>
+                  {reviewCount
+                    ? `${reviewCount} ${reviewCount === 1 ? "item needs" : "items need"} review`
+                    : "No items need review"}
+                </ItemTitle>
+                <ItemDescription>Questions and exact approvals stay in Reviews.</ItemDescription>
+              </ItemContent>
+            </Item>
+          </ItemGroup>
+        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <Button asChild size="sm" variant="outline">
+            <Link to="/finances?review=open">Open Reviews</Link>
+          </Button>
+          <Button asChild size="sm" variant="ghost">
+            <Link to="/finances/chat">Discuss in Chat</Link>
+          </Button>
+          <Button asChild size="sm" variant="ghost">
+            <Link to="/finances/transactions?financeTask=correct">Correct a transaction</Link>
+          </Button>
+        </div>
+      </OverviewSection>
+      <OverviewSection title="What changed">
+        <p className="text-muted-foreground text-sm">
+          Recorded reviews and maintenance describe work already performed. Activity holds the
+          change history and evidence.
+        </p>
+        <Button asChild size="sm" variant="ghost">
+          <Link to="/finances/activity">Open Activity</Link>
+        </Button>
+        <FinanceSourceState label="Review history" query={status} />
+        <FinanceSourceState label="Maintenance history" query={maintenance} />
+        {latestReview ? (
+          <ItemGroup>
+            <Item>
+              <ItemContent>
+                <ItemTitle>Latest period review</ItemTitle>
+                <ItemDescription>
+                  {financeObservedAt(latestReview.completedAt)} ·{" "}
+                  {latestReview.status.replaceAll("_", " ")}
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <Button asChild size="sm" variant="outline">
+                  <Link to={`/finances/reviews/${latestReview.id}`}>Open review</Link>
+                </Button>
+              </ItemActions>
+            </Item>
+          </ItemGroup>
+        ) : status.isSuccess ? (
+          <p className="text-muted-foreground text-sm">No completed period review.</p>
+        ) : null}
+        {maintenance.data?.items.length ? (
+          <Collapsible>
+            <CollapsibleTrigger asChild>
+              <Button variant="ghost" size="sm">
+                Recent maintenance ({maintenance.data.items.length})
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <ItemGroup>
+                {maintenance.data.items.map((run) => (
+                  <Item key={run.run?.id ?? run.recovery?.legacyRunId}>
+                    <ItemContent>
+                      <ItemTitle>
+                        {run.run ? maintenanceLabels[run.run.status] : "Maintenance recovery"}
+                      </ItemTitle>
+                      <ItemDescription>
+                        {run.recovery?.reason ??
+                          run.nextAction?.reason ??
+                          (run.run?.status === "completed"
+                            ? "The recorded maintenance run completed."
+                            : "Inspect the recorded run and its evidence.")}
+                      </ItemDescription>
+                    </ItemContent>
+                    <ItemActions>
+                      <Button asChild size="sm" variant="ghost">
+                        <Link to="/finances/accounts">Review accounts</Link>
+                      </Button>
+                    </ItemActions>
+                  </Item>
+                ))}
+              </ItemGroup>
+            </CollapsibleContent>
+          </Collapsible>
+        ) : maintenance.isSuccess ? (
+          <p className="text-muted-foreground text-sm">No recorded maintenance runs.</p>
+        ) : null}
+      </OverviewSection>
+      <OverviewUpcomingMoney />
       <FinanceSourceState label="Financial position" query={snapshot} />
       {snapshot.data ? (
         <>
@@ -105,9 +217,9 @@ export function FinanceOverviewPage() {
           <FinancePositionMaterial result={snapshot.data} hideMetrics />
         </>
       ) : null}
-      <div className="finance-bento">
-        {inbox.isSuccess && reviewCount === 0 ? (
-          <FinanceBentoSection title="Next step">
+      <div className="grid gap-6 lg:grid-cols-2">
+        {reviewsKnown && reviewCount === 0 ? (
+          <OverviewSection title="Next step">
             <ItemGroup>
               <Item>
                 <ItemContent>
@@ -147,9 +259,9 @@ export function FinanceOverviewPage() {
                 </ItemActions>
               </Item>
             </ItemGroup>
-          </FinanceBentoSection>
+          </OverviewSection>
         ) : null}
-        <FinanceBentoSection title="Complete plan">
+        <OverviewSection title="Complete plan">
           <FinanceSourceState label="Complete plan" query={budget} />
           {plan ? (
             <ItemGroup>
@@ -199,8 +311,8 @@ export function FinanceOverviewPage() {
               </Button>
             </Empty>
           ) : null}
-        </FinanceBentoSection>
-        <FinanceBentoSection title="Near-term context">
+        </OverviewSection>
+        <OverviewSection title="Near-term context">
           <FinanceSourceState label="Cash-flow context" query={status} />
           {status.data ? (
             <ItemGroup>
@@ -233,8 +345,8 @@ export function FinanceOverviewPage() {
               </Item>
             </ItemGroup>
           ) : null}
-        </FinanceBentoSection>
-        <FinanceBentoSection title="Next wealth-building priority">
+        </OverviewSection>
+        <OverviewSection title="Next wealth-building priority">
           <FinanceSourceState label="Wealth-building priorities" query={playbook} />
           {nextPriority ? (
             <ItemGroup>
@@ -254,67 +366,125 @@ export function FinanceOverviewPage() {
               </Item>
             </ItemGroup>
           ) : null}
-        </FinanceBentoSection>
-        <FinanceBentoSection title="Recent review and maintenance">
-          <FinanceSourceState label="Maintenance history" query={maintenance} />
-          {latestReview ? (
-            <ItemGroup>
-              <Item>
-                <ItemContent>
-                  <ItemTitle>Latest period review</ItemTitle>
-                  <ItemDescription>
-                    {financeObservedAt(latestReview.completedAt)} ·{" "}
-                    {latestReview.status.replaceAll("_", " ")}
-                  </ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  <Button asChild size="sm" variant="outline">
-                    <Link to={`/finances/reviews/${latestReview.id}`}>Open review</Link>
-                  </Button>
-                </ItemActions>
-              </Item>
-            </ItemGroup>
-          ) : status.isSuccess ? (
-            <p className="text-muted-foreground text-sm">No completed period review.</p>
-          ) : null}
-          {maintenance.data?.items.length ? (
-            <Collapsible>
-              <CollapsibleTrigger asChild>
-                <Button variant="ghost" size="sm">
-                  Recent maintenance ({maintenance.data.items.length})
-                </Button>
-              </CollapsibleTrigger>
-              <CollapsibleContent>
-                <ItemGroup>
-                  {maintenance.data.items.map((run) => (
-                    <Item key={run.run?.id ?? run.recovery?.legacyRunId}>
-                      <ItemContent>
-                        <ItemTitle>
-                          {run.run ? maintenanceLabels[run.run.status] : "Maintenance recovery"}
-                        </ItemTitle>
-                        <ItemDescription>
-                          {run.recovery?.reason ??
-                            run.nextAction?.reason ??
-                            (run.run?.status === "completed"
-                              ? "The recorded maintenance run completed."
-                              : "Inspect the recorded run and its evidence.")}
-                        </ItemDescription>
-                      </ItemContent>
-                      <ItemActions>
-                        <Button asChild size="sm" variant="ghost">
-                          <Link to="/finances/accounts">Review accounts</Link>
-                        </Button>
-                      </ItemActions>
-                    </Item>
-                  ))}
-                </ItemGroup>
-              </CollapsibleContent>
-            </Collapsible>
-          ) : maintenance.isSuccess ? (
-            <p className="text-muted-foreground text-sm">No recorded maintenance runs.</p>
-          ) : null}
-        </FinanceBentoSection>
+        </OverviewSection>
       </div>
+      <Button asChild variant="outline">
+        <Link to="/finances/spending">Explore Spending</Link>
+      </Button>
+      <FinanceSourceState label="Account settings" query={me} />
+      {me.data && !accessDenied(me.error) ? <FinanceOverviewSettings key="view-settings" /> : null}
     </div>
+  );
+}
+
+// Overview is an open daily sequence; supporting material must not become a grid of raised cards.
+function OverviewSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section aria-label={title} className="flex min-w-0 flex-col gap-3">
+      <h2 className="font-medium">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+function accessDenied(error: unknown) {
+  return error instanceof ApiClientError && [401, 403].includes(error.status);
+}
+
+function OverviewUpcomingMoney() {
+  const me = useQuery({ queryKey: ["me"], queryFn: api.getMe });
+  return (
+    <OverviewSection title="Coming next">
+      <FinanceSourceState label="Planning context" query={me} />
+      {accessDenied(me.error) ? (
+        <p>Upcoming money access unavailable.</p>
+      ) : me.data ? (
+        me.data.planningTimezone ? (
+          <OwnerUpcomingMoney
+            key={me.data.id}
+            ownerId={me.data.id}
+            timezone={me.data.planningTimezone}
+          />
+        ) : (
+          <p>Set your planning timezone in Settings before viewing upcoming dates.</p>
+        )
+      ) : null}
+    </OverviewSection>
+  );
+}
+
+function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: string }) {
+  const [asOf] = useState(() => new Date().toISOString());
+  const range = cashflowScheduleRange(asOf, timezone);
+  const upcoming = useQuery({
+    queryKey: ["finance-recurring-occurrences", ownerId, timezone, range],
+    queryFn: () => api.listFinanceRecurringOccurrences(range),
+  });
+  const denied = accessDenied(upcoming.error);
+  const rows = denied
+    ? []
+    : (upcoming.data?.occurrences ?? [])
+        .filter(
+          (row) =>
+            row.inCurrentSchedule && ["expected", "partially_matched"].includes(row.matchState),
+        )
+        .sort((a, b) => a.localDate.localeCompare(b.localDate) || a.key.localeCompare(b.key));
+  const href = `/finances/cashflow?${new URLSearchParams({ cashflowFrom: range.from, cashflowTo: range.to, timeline: "agenda" })}`;
+  return (
+    <>
+      <p className="text-muted-foreground text-sm">
+        Next 30 days · {timezone} · Expected money, not posted transactions or a spendable balance.
+      </p>
+      <FinanceSourceState label="Upcoming money" query={upcoming} />
+      {denied ? (
+        <p>Upcoming money access unavailable.</p>
+      ) : upcoming.data ? (
+        <>
+          {rows.length ? (
+            <ItemGroup>
+              {rows.slice(0, 3).map((row) => (
+                <Item key={row.key}>
+                  <ItemContent>
+                    <ItemTitle>{row.displayName}</ItemTitle>
+                    <ItemDescription>
+                      {formatDateOnly(row.localDate, { dateStyle: "medium" })} ·{" "}
+                      {row.source.kind === "income" ? "Expected income" : "Expected outflow"}
+                      {row.matchState === "partially_matched"
+                        ? " · Remaining after partial match"
+                        : ""}
+                    </ItemDescription>
+                    <p className="text-sm tabular-nums">
+                      {row.remainingExpectedCents === null
+                        ? "Amount varies"
+                        : new Intl.NumberFormat(undefined, {
+                            style: "currency",
+                            currency: row.currencyCode,
+                          }).format(row.remainingExpectedCents / 100)}
+                      {` · ${row.currencyCode}`}
+                    </p>
+                  </ItemContent>
+                </Item>
+              ))}
+            </ItemGroup>
+          ) : (
+            <p>No unmatched scheduled money in this date range.</p>
+          )}
+          {rows.length > 3 ? (
+            <p className="text-muted-foreground text-sm">
+              Showing the next 3 of {rows.length} expected items.
+            </p>
+          ) : null}
+          {upcoming.data.unavailableSources.length ? (
+            <p className="text-sm">
+              {upcoming.data.unavailableSources.length} sources need schedule or amount confirmation
+              in Cash flow. This list is incomplete.
+            </p>
+          ) : null}
+        </>
+      ) : null}
+      <Button asChild size="sm" variant="outline">
+        <Link to={href}>Open upcoming money</Link>
+      </Button>
+    </>
   );
 }

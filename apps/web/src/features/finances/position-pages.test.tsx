@@ -41,6 +41,7 @@ vi.mock("./use-finance-workspace-readiness", () => ({
 
 const api = vi.hoisted(() => ({
   getMe: vi.fn(),
+  listAgentAccessWorkItems: vi.fn(),
   createFinanceAccount: vi.fn(),
   getFinanceConfiguration: vi.fn(),
   getWorkspaceSettings: vi.fn(),
@@ -53,6 +54,7 @@ const api = vi.hoisted(() => ({
   getFinancePlaybook: vi.fn(),
   getFinanceSnapshot: vi.fn(),
   getFinanceStatus: vi.fn(),
+  listFinanceRecurringOccurrences: vi.fn(),
   getPlaidStatus: vi.fn(),
   listFinanceAccounts: vi.fn(),
   listFinanceGoals: vi.fn(),
@@ -135,6 +137,11 @@ beforeEach(() => {
     id: "11111111-1111-4111-8111-111111111111",
     planningTimezone: "America/New_York",
   });
+  api.listFinanceRecurringOccurrences.mockResolvedValue({
+    occurrences: [],
+    unavailableSources: [],
+    matchEvents: [],
+  });
   api.getFinanceLedgerHealth.mockResolvedValue({ balanceOnlyAccounts: 0 });
   api.getFinanceSnapshot.mockResolvedValue(
     envelope({
@@ -173,6 +180,12 @@ beforeEach(() => {
     },
   });
   api.getFinanceInbox.mockResolvedValue(envelope([]));
+  api.listAgentAccessWorkItems.mockResolvedValue({
+    summary: { byDomain: { finances: 0 } },
+    unavailableDomains: [],
+    items: [],
+    nextCursor: null,
+  });
   api.getFinancePlaybook.mockResolvedValue({
     assessment: {
       blockers: ["Confirm income stability"],
@@ -344,8 +357,8 @@ describe("Finance position pages", () => {
     expect(screen.getByText("Proposed · Version 3")).toBeInTheDocument();
   });
 
-  it("waits for a successful empty Inbox before showing next-step guidance", async () => {
-    api.getFinanceInbox.mockRejectedValue(new Error("Inbox unavailable"));
+  it("waits for a successfully checked empty canonical Reviews queue before showing next-step guidance", async () => {
+    api.listAgentAccessWorkItems.mockRejectedValue(new Error("Review service unavailable"));
     mount(<FinanceOverviewPage />);
     expect(await screen.findByRole("region", { name: "Financial position" })).toBeVisible();
     expect(screen.queryByText("Review inbox unavailable")).not.toBeInTheDocument();
@@ -1217,6 +1230,8 @@ it.each([
   if (state === "failed")
     api.getFinanceSnapshot.mockRejectedValue(new Error("Snapshot unavailable"));
   mount(<FinanceOverviewPage />);
+  // Authenticated identity settles before opening the owner-bound settings controls.
+  await screen.findByText("No unmatched scheduled money in this date range.");
   const entry = screen.getByRole("button", { name: "Workspace view settings" });
   expect(entry).toBeVisible();
   fireEvent.click(entry);
@@ -1474,4 +1489,33 @@ it.each([
   expect(screen.getByLabelText("Current goal amount you confirm")).toHaveValue("123");
   expect(screen.getByLabelText("Confirmed goal currency")).toHaveValue("EUR");
   expect(api.manageFinanceGoal).not.toHaveBeenCalled();
+});
+
+it("waits for initial owner identity before exposing Overview view settings", async () => {
+  let finishMe: ((value: unknown) => void) | undefined;
+  api.getMe.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishMe = resolve;
+      }),
+  );
+  api.getWorkspaceSettings.mockResolvedValue({
+    workspace: "finances",
+    revision: 1,
+    preferences: {},
+  });
+  api.getFinanceConfiguration.mockResolvedValue({
+    accounts: { state: "loaded", value: { accounts: [account] } },
+  });
+  mount(<FinanceOverviewPage />);
+  await screen.findByRole("region", { name: "Financial position" });
+  expect(screen.queryByRole("button", { name: "Workspace view settings" })).not.toBeInTheDocument();
+  await act(async () => finishMe?.({ id: "owner-a", planningTimezone: "America/New_York" }));
+  const entry = await screen.findByRole("button", { name: "Workspace view settings" });
+  fireEvent.click(entry);
+  await screen.findByRole("button", { name: "Cash account view selections" });
+  expect(entry).toHaveAttribute("aria-expanded", "true");
+  await waitFor(() => expect(api.getFinanceConfiguration).toHaveBeenCalled());
+  expect(entry).toBeVisible();
+  expect(screen.getByRole("link", { name: "Open Finance settings" })).toBeVisible();
 });

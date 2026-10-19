@@ -280,7 +280,7 @@ export function SpendingBubbles({
         adjustments and zero-spend groups remain in List.
       </p>
       <details>
-        <summary className="flex min-h-11 cursor-pointer items-center text-sm">
+        <summary className="min-h-11 cursor-pointer py-3 text-sm">
           All spending groups ({visible.length})
         </summary>
         <ul aria-label="Spending groups" className="grid gap-1 sm:grid-cols-2">

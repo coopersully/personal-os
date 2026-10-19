@@ -467,7 +467,11 @@ function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: 
               ))}
             </ItemGroup>
           ) : (
-            <p>No unmatched scheduled money in this date range.</p>
+            <p>
+              {upcoming.data.unavailableSources.length
+                ? "Upcoming money cannot be fully determined yet."
+                : "No unmatched scheduled money in this date range."}
+            </p>
           )}
           {rows.length > 3 ? (
             <p className="text-muted-foreground text-sm">

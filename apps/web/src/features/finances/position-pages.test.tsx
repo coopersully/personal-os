@@ -41,6 +41,7 @@ vi.mock("./use-finance-workspace-readiness", () => ({
 
 const api = vi.hoisted(() => ({
   getMe: vi.fn(),
+  listAgentAccessWorkItems: vi.fn(),
   createFinanceAccount: vi.fn(),
   getFinanceConfiguration: vi.fn(),
   getWorkspaceSettings: vi.fn(),
@@ -179,6 +180,12 @@ beforeEach(() => {
     },
   });
   api.getFinanceInbox.mockResolvedValue(envelope([]));
+  api.listAgentAccessWorkItems.mockResolvedValue({
+    summary: { byDomain: { finances: 0 } },
+    unavailableDomains: [],
+    items: [],
+    nextCursor: null,
+  });
   api.getFinancePlaybook.mockResolvedValue({
     assessment: {
       blockers: ["Confirm income stability"],
@@ -350,8 +357,8 @@ describe("Finance position pages", () => {
     expect(screen.getByText("Proposed · Version 3")).toBeInTheDocument();
   });
 
-  it("waits for a successful empty Inbox before showing next-step guidance", async () => {
-    api.getFinanceInbox.mockRejectedValue(new Error("Inbox unavailable"));
+  it("waits for a successfully checked empty canonical Reviews queue before showing next-step guidance", async () => {
+    api.listAgentAccessWorkItems.mockRejectedValue(new Error("Review service unavailable"));
     mount(<FinanceOverviewPage />);
     expect(await screen.findByRole("region", { name: "Financial position" })).toBeVisible();
     expect(screen.queryByText("Review inbox unavailable")).not.toBeInTheDocument();

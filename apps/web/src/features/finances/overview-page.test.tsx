@@ -10,6 +10,7 @@ import { FinanceOverviewPage } from "./overview-page";
 
 const api = vi.hoisted(() => ({
   getMe: vi.fn(),
+  listAgentAccessWorkItems: vi.fn(),
   getFinanceSnapshot: vi.fn(),
   getFinanceBudget: vi.fn(),
   getFinanceInbox: vi.fn(),
@@ -75,6 +76,12 @@ beforeEach(() => {
   );
   api.getFinanceBudget.mockResolvedValue(envelope(null));
   api.getFinanceInbox.mockResolvedValue(envelope([]));
+  api.listAgentAccessWorkItems.mockResolvedValue({
+    summary: { byDomain: { finances: 0 } },
+    unavailableDomains: [],
+    items: [],
+    nextCursor: null,
+  });
   api.getFinanceStatus.mockResolvedValue({
     details: { latestReview: null, reimbursements: { outstanding: 0 } },
   });
@@ -91,22 +98,21 @@ afterEach(() => {
 });
 
 it("summarizes decisions without copying the first review question or authorizing it", async () => {
-  api.getFinanceInbox.mockResolvedValue({
-    ...envelope([
-      { id: "a", status: "open" },
-      { id: "b", status: "resolved" },
-    ]),
-    communication: {
-      requiredDisclosures: [],
-      nextQuestion: { prompt: "Private first review question" },
-    },
+  api.getFinanceInbox.mockResolvedValue(envelope([]));
+  api.listAgentAccessWorkItems.mockResolvedValue({
+    summary: { byDomain: { finances: 3 } },
+    unavailableDomains: [],
+    items: [{ id: "canonical-transaction", title: "Private first review question" }],
+    nextCursor: null,
   });
   mount();
-  expect(await screen.findByText("1 transaction review item")).toBeVisible();
+  expect(await screen.findByText("3 items need review")).toBeVisible();
   expect(screen.queryByText("Private first review question")).not.toBeInTheDocument();
+  expect(api.getFinanceInbox).not.toHaveBeenCalled();
+  expect(api.listAgentAccessWorkItems).toHaveBeenCalledWith({ domain: "finances", limit: 10 });
   expect(screen.getByRole("link", { name: "Open Reviews" })).toHaveAttribute(
     "href",
-    "/finances/review",
+    "/finances?review=open",
   );
   expect(screen.getByRole("link", { name: "Discuss in Chat" })).toHaveAttribute(
     "href",
@@ -185,12 +191,12 @@ it("distinguishes empty schedules, incomplete evidence and variable amounts", as
 });
 
 it("does not claim an empty schedule or all-clear decisions on failed reads", async () => {
-  api.getFinanceInbox.mockRejectedValue(new Error("offline"));
+  api.listAgentAccessWorkItems.mockRejectedValue(new Error("offline"));
   api.listFinanceRecurringOccurrences.mockRejectedValue(new Error("offline"));
   mount();
   expect(await screen.findByText("Upcoming money unavailable")).toBeVisible();
   expect(screen.getByText("Decisions unavailable")).toBeVisible();
-  expect(screen.queryByText("No transaction review items")).not.toBeInTheDocument();
+  expect(screen.queryByText("No items need review")).not.toBeInTheDocument();
   expect(
     screen.queryByText("No unmatched scheduled money in this date range."),
   ).not.toBeInTheDocument();
@@ -249,4 +255,74 @@ it("waits for a planning timezone without guessing upcoming dates", async () => 
   expect(
     screen.queryByText("No unmatched scheduled money in this date range."),
   ).not.toBeInTheDocument();
+});
+
+it("withholds an all-clear and next-step advice when canonical review coverage is unavailable", async () => {
+  api.listAgentAccessWorkItems.mockResolvedValue({
+    summary: { byDomain: { finances: 0 } },
+    unavailableDomains: ["finances"],
+    items: [],
+    nextCursor: null,
+  });
+  mount();
+  expect(await screen.findByText(/Some Finance decisions could not be checked/)).toBeVisible();
+  expect(screen.queryByText("No items need review")).not.toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Next step" })).not.toBeInTheDocument();
+});
+
+it("hides a cached decision count after denied access", async () => {
+  api.listAgentAccessWorkItems.mockResolvedValue({
+    summary: { byDomain: { finances: 3 } },
+    unavailableDomains: [],
+    items: [],
+    nextCursor: null,
+  });
+  const client = mount();
+  await screen.findByText("3 items need review");
+  api.listAgentAccessWorkItems.mockRejectedValue(
+    new ApiClientError({ status: 403, code: "forbidden", message: "Forbidden" }),
+  );
+  await client.invalidateQueries({ queryKey: ["agent-access-work-items"] });
+  expect(await screen.findByText("Review access unavailable.")).toBeVisible();
+  expect(screen.queryByText("3 items need review")).not.toBeInTheDocument();
+});
+
+it("does not reuse a previous owner's cached or late review count", async () => {
+  let finishOld: ((value: unknown) => void) | undefined;
+  api.listAgentAccessWorkItems.mockResolvedValueOnce({
+    summary: { byDomain: { finances: 3 } },
+    unavailableDomains: [],
+    items: [],
+    nextCursor: null,
+  });
+  const client = mount();
+  await screen.findByText("3 items need review");
+  api.listAgentAccessWorkItems.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishOld = resolve;
+      }),
+  );
+  const oldRefresh = client.invalidateQueries({ queryKey: ["agent-access-work-items"] });
+  await waitFor(() => expect(api.listAgentAccessWorkItems).toHaveBeenCalledTimes(2));
+  api.listAgentAccessWorkItems.mockResolvedValue({
+    summary: { byDomain: { finances: 1 } },
+    unavailableDomains: [],
+    items: [],
+    nextCursor: null,
+  });
+  act(() => client.setQueryData(["me"], { id: "owner-b", planningTimezone: "America/New_York" }));
+  await screen.findByText("1 item needs review");
+  await act(async () => {
+    finishOld?.({
+      summary: { byDomain: { finances: 4 } },
+      unavailableDomains: [],
+      items: [],
+      nextCursor: null,
+    });
+    await oldRefresh;
+  });
+  expect(screen.queryByText("3 items need review")).not.toBeInTheDocument();
+  expect(screen.queryByText("4 items need review")).not.toBeInTheDocument();
+  expect(screen.getByText("1 item needs review")).toBeVisible();
 });

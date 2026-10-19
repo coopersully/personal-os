@@ -51,9 +51,11 @@ export function FinanceOverviewPage() {
     queryKey: ["finance-budget-current"],
     queryFn: async () => requireFinanceResult(await api.getFinanceBudget()),
   });
-  const inbox = useQuery({
-    queryKey: ["finance-inbox"],
-    queryFn: async () => requireFinanceResult(await api.getFinanceInbox()),
+  const reviews = useQuery({
+    queryKey: ["agent-access-work-items", "finance-overview", me.data?.id],
+    queryFn: () => api.listAgentAccessWorkItems({ domain: "finances", limit: 10 }),
+    enabled: !!me.data && !accessDenied(me.error),
+    refetchInterval: 60_000,
   });
   const status = useQuery({ queryKey: ["finance-status"], queryFn: () => api.getFinanceStatus() });
   const playbook = useQuery({ queryKey: ["finance-playbook"], queryFn: api.getFinancePlaybook });
@@ -62,34 +64,43 @@ export function FinanceOverviewPage() {
     queryFn: () => api.getFinanceMaintenanceHistory({ limit: 3 }),
   });
   const plan = budget.data?.data;
-  const reviewCount = inbox.data?.data.filter((item) => item.status !== "resolved").length;
+  const reviewCount = reviews.data?.summary.byDomain.finances;
+  const reviewUnavailable = reviews.data?.unavailableDomains.includes("finances");
+  const reviewDenied = accessDenied(me.error) || accessDenied(reviews.error);
+  const reviewsKnown =
+    reviews.isSuccess && !reviewUnavailable && !reviewDenied && typeof reviewCount === "number";
   const latestReview = status.data?.details.latestReview;
   const nextPriority =
     playbook.data?.assessment.blockers[0] ?? playbook.data?.assessment.nextActions[0];
   return (
     <div className="flex flex-col gap-6">
       <OverviewSection title="Needs you">
-        <FinanceSourceState label="Decisions" query={inbox} />
-        {inbox.isSuccess ? (
+        {!accessDenied(me.error) ? (
+          <FinanceSourceState label="Decisions" query={me.data ? reviews : me} />
+        ) : null}
+        {reviewDenied ? (
+          <p>Review access unavailable.</p>
+        ) : reviewUnavailable ? (
+          <p>Some Finance decisions could not be checked. Open Reviews to check status.</p>
+        ) : null}
+        {reviewsKnown ? (
           <ItemGroup>
             <Item>
               <ItemContent>
                 <ItemTitle>
                   {reviewCount
-                    ? `${reviewCount} transaction review ${reviewCount === 1 ? "item" : "items"}`
-                    : "No transaction review items"}
+                    ? `${reviewCount} ${reviewCount === 1 ? "item needs" : "items need"} review`
+                    : "No items need review"}
                 </ItemTitle>
                 <ItemDescription>Questions and exact approvals stay in Reviews.</ItemDescription>
               </ItemContent>
-              <ItemActions>
-                <Button asChild size="sm" variant="outline">
-                  <Link to="/finances/review">Open Reviews</Link>
-                </Button>
-              </ItemActions>
             </Item>
           </ItemGroup>
         ) : null}
         <div className="flex flex-wrap gap-2">
+          <Button asChild size="sm" variant="outline">
+            <Link to="/finances?review=open">Open Reviews</Link>
+          </Button>
           <Button asChild size="sm" variant="ghost">
             <Link to="/finances/chat">Discuss in Chat</Link>
           </Button>
@@ -207,7 +218,7 @@ export function FinanceOverviewPage() {
         </>
       ) : null}
       <div className="grid gap-6 lg:grid-cols-2">
-        {inbox.isSuccess && reviewCount === 0 ? (
+        {reviewsKnown && reviewCount === 0 ? (
           <OverviewSection title="Next step">
             <ItemGroup>
               <Item>

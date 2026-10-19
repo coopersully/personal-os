@@ -18,10 +18,11 @@ describe("verified Finance conversation transport", () => {
     await f?.close();
   });
   it("keeps delivery, human reads, proof and original connection authority distinct", async () => {
+    f.advanceTime(Date.now() - new Date("2026-10-11T15:00:00Z").getTime());
     await f.setBypass(true);
     const auth = createAuthService({
       db: f.db,
-      now: () => new Date("2026-10-11T15:00:00Z"),
+      now: () => new Date(),
       sessionTtlDays: 30,
       registrationMode: "open",
     });
@@ -60,7 +61,7 @@ describe("verified Finance conversation transport", () => {
       expectedVersion: created.schedule.version,
       expectedState: "setup_pending",
       hostAutomationId: "actual-fixture-host",
-      nextExpectedAt: "2026-10-11T15:05:00Z",
+      nextExpectedAt: new Date(Date.now() + 5 * 60_000).toISOString(),
     });
     expect(await human.getFinanceConversationReadiness()).toMatchObject({ canSend: false });
     await expect(a.api.getFinanceConversationHistory()).rejects.toMatchObject({ status: 403 });
@@ -152,7 +153,7 @@ describe("verified Finance conversation transport", () => {
         runId: run.id,
         automationScheduleId: created.schedule.id,
         authorizationConnectionId: connection.id,
-        now: new Date("2026-10-11T15:00:00Z"),
+        now: new Date(),
       });
     });
     expect(

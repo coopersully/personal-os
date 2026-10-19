@@ -1,5 +1,9 @@
 import type { FinanceBudgetBaselineSnapshot } from "@personal-os/domain";
-import { baselinePeriod, baselineQualificationKind } from "./baseline-qualification-evidence.js";
+import {
+  baselinePeriod,
+  baselineQualificationKind,
+  prepareBaselineEvidence,
+} from "./baseline-qualification-evidence.js";
 import { createFinanceBudgetBaselineQualificationService } from "./baseline-qualification-service.js";
 
 describe("baseline qualification evidence", () => {
@@ -62,4 +66,244 @@ describe("baseline qualification evidence", () => {
     ).rejects.toMatchObject({ code: "forbidden" });
     expect(transaction).not.toHaveBeenCalled();
   });
+});
+
+// These rows model the historical evidence boundary without starting PostgreSQL.
+function evidenceFixture() {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const categoryId = "22222222-2222-4222-8222-222222222222";
+  const stamp = new Date("2026-10-01T00:00:00Z");
+  const version = {
+    id,
+    userId: id,
+    planId: id,
+    version: 1,
+    effectiveFrom: "2026-10",
+    status: "retired",
+    approvedAt: stamp,
+    approvedByActorId: id,
+    approvedByActorType: "user",
+    balanceDelta: 0,
+    expectedResources: 100,
+    allocatedTotal: 100,
+    resources: [{ amount: 100 }],
+    createdAt: stamp,
+    updatedAt: stamp,
+  };
+  const allocation = {
+    id,
+    allocationKey: "food",
+    categoryId,
+    legacyCategory: null,
+    kind: "spending",
+    amount: 100,
+    createdAt: stamp,
+    updatedAt: stamp,
+  };
+  const account = { id, currencyCode: "USD", updatedAt: stamp };
+  const category = { id: categoryId, name: "Food", createdAt: stamp, updatedAt: stamp };
+  const rows: unknown[][] = [[version], [], [allocation], [account], [category]];
+  const tx = {
+    select: vi.fn(() => {
+      const result = Promise.resolve(rows.shift());
+      const chain = {
+        from: () => chain,
+        where: () => chain,
+        orderBy: () => chain,
+        for: () => result,
+      };
+      return chain;
+    }),
+  };
+  const input = {
+    budgetVersionId: id,
+    accountIds: [id],
+    currency: "USD",
+    month: "2026-10",
+    timezone: "UTC",
+  };
+  return {
+    id,
+    categoryId,
+    stamp,
+    version,
+    allocation,
+    account,
+    category,
+    rows,
+    tx,
+    input,
+    read: () => prepareBaselineEvidence(tx as never, id, input),
+  };
+}
+it("preserves designated historical identity and fingerprints source changes separately from reviewed amounts", async () => {
+  const f = evidenceFixture();
+  f.rows[1] = [
+    {
+      id: f.id,
+      budgetVersionId: f.id,
+      planId: f.id,
+      periodFrom: "2026-10-01",
+      periodThrough: "2026-10-31",
+      timezone: "UTC",
+      confirmedAt: f.stamp,
+    },
+  ];
+  const result = await f.read();
+  expect(result.snapshot).toMatchObject({
+    sourceBaselineId: f.id,
+    allocations: [{ label: "Food", amountCents: 100 }],
+    originalApproval: { actorType: "user", actorId: f.id },
+  });
+  const changed = evidenceFixture();
+  changed.rows[1] = [
+    {
+      id: changed.id,
+      budgetVersionId: changed.id,
+      planId: changed.id,
+      periodFrom: "2026-10-01",
+      periodThrough: "2026-10-31",
+      timezone: "UTC",
+      confirmedAt: changed.stamp,
+    },
+  ];
+  changed.account.updatedAt = new Date("2026-10-02T00:00:00Z");
+  const newer = await changed.read();
+  expect(newer.fingerprint).toBe(result.fingerprint);
+  expect(newer.sourceFingerprint).not.toBe(result.sourceFingerprint);
+});
+it("accepts explicit legacy category evidence and unknown account currency without inventing category IDs", async () => {
+  const f = evidenceFixture();
+  Object.assign(f.allocation, { categoryId: null, legacyCategory: "Historical food" });
+  Object.assign(f.account, { currencyCode: null });
+  const result = await f.read();
+  expect(result.snapshot.allocations).toEqual([
+    {
+      key: "food",
+      categoryId: null,
+      legacyCategory: "Historical food",
+      label: "Historical food",
+      amountCents: 100,
+    },
+  ]);
+  expect(result.snapshot.currency).toBe("USD");
+  expect(f.tx.select).toHaveBeenCalledTimes(4);
+});
+it.each([
+  [
+    "missing owner version",
+    (f: ReturnType<typeof evidenceFixture>) => {
+      f.rows[0] = [];
+    },
+    "not_found",
+  ],
+  [
+    "wrong month",
+    (f: ReturnType<typeof evidenceFixture>) => {
+      f.version.effectiveFrom = "2026-09";
+    },
+    "conflict",
+  ],
+  [
+    "unapproved proposal",
+    (f: ReturnType<typeof evidenceFixture>) => {
+      f.version.status = "proposed";
+    },
+    "conflict",
+  ],
+  [
+    "missing approval",
+    (f: ReturnType<typeof evidenceFixture>) => {
+      Object.assign(f.version, { approvedAt: null });
+    },
+    "conflict",
+  ],
+  [
+    "unbalanced version",
+    (f: ReturnType<typeof evidenceFixture>) => {
+      f.version.balanceDelta = 1;
+    },
+    "conflict",
+  ],
+  [
+    "inconsistent totals",
+    (f: ReturnType<typeof evidenceFixture>) => {
+      f.version.expectedResources = 101;
+    },
+    "conflict",
+  ],
+  [
+    "different designated version",
+    (f: ReturnType<typeof evidenceFixture>) => {
+      f.rows[1] = [{ budgetVersionId: f.categoryId }];
+    },
+    "conflict",
+  ],
+  [
+    "empty allocations",
+    (f: ReturnType<typeof evidenceFixture>) => {
+      f.rows[2] = [];
+    },
+    "conflict",
+  ],
+  [
+    "empty resources",
+    (f: ReturnType<typeof evidenceFixture>) => {
+      f.version.resources = [];
+    },
+    "conflict",
+  ],
+  [
+    "allocation total drift",
+    (f: ReturnType<typeof evidenceFixture>) => {
+      f.allocation.amount = 99;
+    },
+    "conflict",
+  ],
+  [
+    "resource total drift",
+    (f: ReturnType<typeof evidenceFixture>) => {
+      f.version.resources = [{ amount: 99 }];
+    },
+    "conflict",
+  ],
+  [
+    "foreign account selection",
+    (f: ReturnType<typeof evidenceFixture>) => {
+      f.rows[3] = [];
+    },
+    "not_found",
+  ],
+  [
+    "known currency mismatch",
+    (f: ReturnType<typeof evidenceFixture>) => {
+      f.account.currencyCode = "EUR";
+    },
+    "invalid_request",
+  ],
+  [
+    "no spending allocation",
+    (f: ReturnType<typeof evidenceFixture>) => {
+      f.allocation.kind = "buffer";
+    },
+    "conflict",
+  ],
+  [
+    "lost historical category",
+    (f: ReturnType<typeof evidenceFixture>) => {
+      f.rows[4] = [];
+    },
+    "conflict",
+  ],
+  [
+    "no category identity",
+    (f: ReturnType<typeof evidenceFixture>) => {
+      Object.assign(f.allocation, { categoryId: null });
+    },
+    "conflict",
+  ],
+] as const)("withholds qualification for %s", async (_label, change, code) => {
+  const f = evidenceFixture();
+  change(f);
+  await expect(f.read()).rejects.toMatchObject({ code });
 });

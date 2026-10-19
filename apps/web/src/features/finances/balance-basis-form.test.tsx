@@ -4,7 +4,7 @@ import { createApiClient } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
-import { BalanceBasisForm } from "./balance-basis-form.js";
+import { BalanceBasisForm, type BalanceBasisFormProps } from "./balance-basis-form.js";
 
 const api = vi.hoisted(() => ({ confirmFinanceBalanceBasis: vi.fn() }));
 vi.mock("../../api.js", () => ({
@@ -13,7 +13,7 @@ vi.mock("../../api.js", () => ({
 }));
 const accountId = "11111111-1111-4111-8111-111111111111";
 const transactionId = "22222222-2222-4222-8222-222222222222";
-function mount(truncated = false, complete = true) {
+function mount(truncated = false, complete = true, overrides: Partial<BalanceBasisFormProps> = {}) {
   const close = vi.fn();
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
@@ -50,6 +50,7 @@ function mount(truncated = false, complete = true) {
           },
         ]}
         onClose={close}
+        {...overrides}
       />
     </QueryClientProvider>,
   );
@@ -206,4 +207,122 @@ it("does not treat a nontruncated date window as a complete account-history revi
   submit();
   expect(api.confirmFinanceBalanceBasis).not.toHaveBeenCalled();
   expect(screen.getByText(/Source transaction coverage is incomplete/)).toBeInTheDocument();
+});
+
+it("confirms an empty account history against the exact prior basis revision and awaits saved feedback", async () => {
+  const onSaved = vi.fn(async () => undefined);
+  const close = mount(false, true, {
+    transactions: [],
+    previousBasis: { accountId, basisRevision: 7 } as never,
+    onSaved,
+  });
+  statement();
+  fill("Balance amount", "12");
+  fill("Optional protected floor (blank means unknown)", "1.25");
+  submit();
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  expect(onSaved).toHaveBeenCalledOnce();
+  expect(api.confirmFinanceBalanceBasis).toHaveBeenCalledWith(
+    expect.objectContaining({
+      amountCents: 1200,
+      protectedFloorCents: 125,
+      expectedBasisRevision: 7,
+      reflections: [],
+    }),
+  );
+});
+it.each([
+  ["malformed amount", { amount: "1.234" }],
+  ["malformed floor", { floor: "1.234" }],
+  ["negative protected floor", { floor: "-1" }],
+  ["invalid currency", { currencyCode: "usd" }],
+])("keeps a %s statement editable without sending it", (_label, changes) => {
+  mount(false, true, { transactions: [] });
+  statement();
+  for (const [key, value] of Object.entries(changes)) {
+    const labels: Record<string, string> = {
+      amount: "Balance amount",
+      floor: "Optional protected floor (blank means unknown)",
+      currencyCode: "Balance currency code",
+    };
+    const label = labels[key];
+    if (!label) throw new Error("Missing fixture field label");
+    fill(label, value);
+  }
+  submit();
+  expect(api.confirmFinanceBalanceBasis).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Confirm my balance statement" })).toBeEnabled();
+});
+it("rejects a prior basis from another account", () => {
+  mount(false, true, {
+    transactions: [],
+    previousBasis: { accountId: transactionId, basisRevision: 4 } as never,
+  });
+  statement();
+  submit();
+  expect(api.confirmFinanceBalanceBasis).not.toHaveBeenCalled();
+  expect(screen.getByText("Reload the prior balance basis for this account.")).toBeInTheDocument();
+});
+it("renews the retry key only after a confirmed rejection, and keeps edited statement values", async () => {
+  api.confirmFinanceBalanceBasis.mockResolvedValueOnce({
+    outcome: "failed",
+    data: {},
+    communication: { headline: "Statement rejected", requiredDisclosures: [], optionalDetails: [] },
+  });
+  const close = mount(false, true, { transactions: [] });
+  statement();
+  submit();
+  await waitFor(() => expect(api.confirmFinanceBalanceBasis).toHaveBeenCalledOnce());
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Confirm my balance statement" })).toBeEnabled(),
+  );
+  expect(screen.getByLabelText("Balance amount")).toHaveValue("-12.34");
+  submit();
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  expect(api.confirmFinanceBalanceBasis.mock.calls[1]?.[0].idempotencyKey).not.toBe(
+    api.confirmFinanceBalanceBasis.mock.calls[0]?.[0].idempotencyKey,
+  );
+});
+it("uses a new key when the owner changes an uncertain statement", async () => {
+  api.confirmFinanceBalanceBasis.mockRejectedValueOnce(new Error("Response lost"));
+  const close = mount(false, true, { transactions: [] });
+  statement();
+  submit();
+  await waitFor(() => expect(api.confirmFinanceBalanceBasis).toHaveBeenCalledOnce());
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Confirm my balance statement" })).toBeEnabled(),
+  );
+  fill("Balance amount", "25.50");
+  submit();
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  expect(api.confirmFinanceBalanceBasis.mock.calls[1]?.[0]).toMatchObject({ amountCents: 2550 });
+  expect(api.confirmFinanceBalanceBasis.mock.calls[1]?.[0].idempotencyKey).not.toBe(
+    api.confirmFinanceBalanceBasis.mock.calls[0]?.[0].idempotencyKey,
+  );
+});
+it("allows dismissing an unsaved statement", () => {
+  const close = mount();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(close).toHaveBeenCalledOnce();
+});
+it("blocks a transaction from another account even after its reflection is explicitly selected", () => {
+  mount(false, true, {
+    transactions: [
+      {
+        id: transactionId,
+        accountId: transactionId,
+        merchant: "Foreign rent",
+        date: "2026-10-01",
+        transactionRevision: "2",
+        reimbursementRelationshipRevision: "3",
+      } as never,
+    ],
+  });
+  statement();
+  fill("Balance reflection for Foreign rent · 2026-10-01 · revision 2", "included");
+  submit();
+  expect(api.confirmFinanceBalanceBasis).not.toHaveBeenCalled();
+  expect(
+    screen.getByText("Reload transactions for this account before confirming."),
+  ).toBeInTheDocument();
 });

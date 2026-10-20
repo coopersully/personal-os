@@ -213,6 +213,13 @@ radial gradients to isolate the checklist from the desktop. Browser previews mir
 backdrops; the theme check permits only their exact selectors and colors. Standard cards remain
 flat and shadow-free. This is a ritual presentation treatment, not a shared component default.
 
+The approved real browser ritual retains the person's page underneath a full-viewport attention
+layer. A bounded 24 px backdrop blur is permitted only on `.browser-ritual`, with a theme-tinted
+background and readable secondary controls. The theme check permits that exact selector and
+radius; other blur utilities, other radii/selectors, and glass cards remain prohibited. Tracking
+owns this presentation exception; shared Dialog/Card defaults do not inherit it.
+
+
 ## Research-backed refinement
 
 For design-system reviews and cross-workspace UX refinements, consult current

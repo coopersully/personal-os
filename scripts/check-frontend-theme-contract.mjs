@@ -59,6 +59,9 @@ const stylesheetForDecorativeChecks = stylesheet
 // Ritual previews mirror the explicitly approved native sunrise/moonlight backdrop.
 // Keep this exception restricted to those two selectors and their exact colors.
 const stylesheetForRitualChecks = stylesheetForDecorativeChecks
+  // The real browser ritual isolates the retained page, matching native presentation.
+  // Permit only this selector and radius; cards and every other surface stay flat.
+  .replace(/(\.browser-ritual\s*\{\s*)backdrop-filter: blur\(24px\);/g, "$1")
   .replace(
     /(\.ritual-browser-preview\s*\{\s*)background: radial-gradient\(ellipse at 50% 100%, rgb\(255 210 64 \/ 65%\), transparent 65%\), rgb\(38 79 133\);/g,
     "$1",

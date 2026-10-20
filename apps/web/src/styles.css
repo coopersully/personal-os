@@ -7021,6 +7021,8 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   animation: ritual-element-enter var(--ritual-card-duration) cubic-bezier(0.22, 1, 0.36, 1) var(--ritual-card-delay) backwards;
 }
 .ritual-scroll { overscroll-behavior: contain; scrollbar-gutter: stable; }
+/* Approved ritual-only backdrop isolates the current page without capturing the screen. */
+.browser-ritual { backdrop-filter: blur(24px); }
 /* Browser chrome sits over the current page rather than a predictable native wallpaper. */
 .browser-ritual .ritual-surface[data-ritual-kind] { --ritual-chrome: var(--foreground); }
 .browser-ritual .ritual-logo .brand-symbol,

@@ -9655,8 +9655,21 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     mocks.getMe.mockResolvedValue({ ...user, canManageInvitations: true });
     mocks.listInvitations.mockRejectedValueOnce(new Error("Invitations unavailable"));
+    const invitationError = vi.spyOn(toast, "error");
     const unavailable = setup("/settings?section=invitations");
-    expect(await screen.findByText("Couldn’t load invitations.")).toBeInTheDocument();
+    try {
+      await waitFor(() =>
+        expect(invitationError).toHaveBeenCalledWith(
+          "Couldn’t load invitations.",
+          expect.anything(),
+        ),
+      );
+      expect(
+        screen.getByRole("heading", { name: "Invitations", level: 2 }).closest(".settings-section"),
+      ).not.toHaveTextContent("Couldn’t load invitations.");
+    } finally {
+      invitationError.mockRestore();
+    }
     unavailable.unmount();
 
     mocks.listInvitations.mockResolvedValue([]);
@@ -9887,11 +9900,26 @@ describe("ilo web app", () => {
 
     mocks.isTauri.mockReturnValue(true);
     mocks.listPinterestPins.mockRejectedValueOnce(new Error("Pinterest is unavailable"));
+    const previewError = vi.spyOn(toast, "error");
     const failedPreview = setup("/settings?section=wallpaper");
     expect(await screen.findByRole("heading", { name: "Wallpaper", level: 1 })).toBeInTheDocument();
     expect(screen.getByLabelText("Mosaic fit")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Wallpaper" })).toBeInTheDocument();
-    expect(await screen.findByText("Couldn’t load wallpaper preview.")).toBeInTheDocument();
+    try {
+      await waitFor(() =>
+        expect(previewError).toHaveBeenCalledWith(
+          "Couldn’t load wallpaper preview.",
+          expect.anything(),
+        ),
+      );
+      expect(
+        screen
+          .getByRole("heading", { name: "Pinterest wallpaper", level: 2 })
+          .closest(".settings-section"),
+      ).not.toHaveTextContent("Couldn’t load wallpaper preview.");
+    } finally {
+      previewError.mockRestore();
+    }
     expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeDisabled();
     expect(
       screen.queryByRole("img", { name: "Wallpaper rendered for your display" }),

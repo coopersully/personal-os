@@ -159,3 +159,63 @@ test("settings support field search, ritual history, and resumable setup replay"
   await page.goto("/today");
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
 });
+
+test("ritual skipping requires a continuous hold and shows streak impact", async ({ page }) => {
+  await page.addInitScript(() => {
+    const state = {
+      definitions: [],
+      serverNow: new Date().toISOString(),
+      snoozeCount: 0,
+      skipCount: 2,
+      streakCount: 10,
+      syncStatus: "saved",
+      current: {
+        id: "hold-test",
+        revision: 1,
+        status: "pending",
+        responses: [],
+        actions: [],
+        definition: {
+          kind: "morning",
+          title: "Morning ritual",
+          steps: [{ id: "brush", label: "Brush teeth", kind: "checkbox" }],
+        },
+      },
+    };
+    Object.assign(window, {
+      __TAURI_INTERNALS__: {
+        invoke: async (command: string, args?: { body?: { kind?: string } }) => {
+          if (command === "ritual_state") return structuredClone(state);
+          if (command === "ritual_mutate" && args?.body?.kind === "skip") {
+            state.current.status = "skipped";
+            localStorage.setItem("ritual-test-skipped", "true");
+            return { outcome: "applied", state: structuredClone(state) };
+          }
+          return null;
+        },
+      },
+    });
+  });
+  await page.goto("/#ritual");
+  await expect(page.getByText("10-day morning streak")).toBeVisible();
+  await page.getByRole("button", { name: "Skip for Today" }).click();
+  await expect(page.getByText(/2 times in the last 3 days/)).toBeVisible();
+  await expect(page.getByText(/end your 10-day streak/)).toBeVisible();
+  await page.clock.install();
+  const button = page.getByRole("button", { name: "Hold to skip today" });
+  await button.focus();
+  await page.keyboard.down("Space");
+  await page.clock.runFor(29000);
+  await expect(button).toHaveText("Hold to skip · 1s");
+  await page.keyboard.up("Space");
+  await expect(button).toHaveText("Hold to skip · 30s");
+  expect(await page.evaluate(() => localStorage.getItem("ritual-test-skipped"))).toBeNull();
+  const box = await button.boundingBox();
+  if (!box) throw new Error("Missing hold button");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.clock.runFor(30000);
+  await page.mouse.up();
+  await expect(page.getByText("You’re up to date.")).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("ritual-test-skipped"))).toBe("true");
+});

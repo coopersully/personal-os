@@ -1,5 +1,16 @@
 # nohmi — Implementation Log
 
+## 2026-10-20 — Ritual streaks and deliberate skipping
+
+- Main rituals show separate morning/evening streaks from retained completion history, including
+  history older than seven days. Optional steps and unscheduled days do not break continuity.
+- Skip confirmation shows applied skips in the last 72 hours and the streak at risk. A visible
+  30-second countdown and progress fill require an uninterrupted pointer or keyboard hold before
+  the shared checklist submits a skip. Release, blur, visibility changes, and cancellation reset it.
+- Offline cached streaks are labeled and cleared at the next occurrence; unavailable skip history
+  is disclosed. The existing durable native action queue still owns skip synchronization.
+- Source checkpoint only; no deployment or installed-desktop verification is implied.
+
 ## 2026-10-17 — Configurable ritual steps and optional follow-ups
 
 - Added optional step participation and everyday, weekday, weekend, or custom weekday inclusion.

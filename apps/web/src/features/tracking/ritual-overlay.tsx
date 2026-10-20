@@ -35,6 +35,7 @@ import {
   submitRitualResponse,
 } from "../desktop/ritual-bridge.js";
 import { RitualPreviewChecklist } from "./ritual-preview.js";
+import { RitualSkipConfirmation } from "./ritual-skip-confirmation.js";
 export function RitualOverlay() {
   const [state, setState] = useState<RitualState | null>(null);
   const [readyId, setReadyId] = useState<string | null>(null);
@@ -150,6 +151,7 @@ export function RitualChecklist({
 }) {
   const [state, setState] = useState(external);
   const [busy, setBusy] = useState(false);
+  const [confirmSkip, setConfirmSkip] = useState(false);
   const actionToast = useId();
   const showError = (message: string) => toast.error(message, { id: actionToast });
   const [challenge, setChallenge] = useState<{
@@ -249,6 +251,7 @@ export function RitualChecklist({
           : {}),
       });
       setState(result.state);
+      setConfirmSkip(false);
       if (requestingReminders && !preview && result.outcome === "applied") {
         const followUp = result.state.current?.optionalFollowUp;
         if (result.state.syncStatus === "queued")
@@ -363,7 +366,26 @@ export function RitualChecklist({
       <h1 className="sr-only">{occurrence.definition.title}</h1>
       <Card className="ritual-card">
         <CardContent className="ritual-scroll flex min-h-0 flex-col gap-5 overflow-y-auto text-left">
-          {challenge ? (
+          {!preview ? (
+            <p className="text-center text-sm text-muted-foreground">
+              {state.streakCount === undefined
+                ? "Streak history unavailable"
+                : `${state.streakCount}-day ${occurrence.definition.kind === "night" ? "evening" : "morning"} streak`}
+              {state.syncStatus === "queued" && state.streakCount !== undefined
+                ? " · Last synced"
+                : ""}
+            </p>
+          ) : null}
+          {confirmSkip ? (
+            <RitualSkipConfirmation
+              key={`${occurrence.id}:${occurrence.revision}:${state.skipCount}`}
+              count={state.syncStatus === "saved" ? state.skipCount : undefined}
+              streak={state.streakCount}
+              busy={busy}
+              onConfirm={() => void escapeAction("skip")}
+              onCancel={() => setConfirmSkip(false)}
+            />
+          ) : challenge ? (
             <section
               className="flex flex-col items-center gap-4 text-center"
               aria-label="Confirm snooze"
@@ -455,7 +477,7 @@ export function RitualChecklist({
           )}
         </CardContent>
         <CardFooter className="shrink-0 flex-col gap-3 text-center">
-          {!challenge && optional.length > 0 ? (
+          {!challenge && !confirmSkip && optional.length > 0 ? (
             <div className="flex w-full flex-col gap-2 text-left">
               <div className="flex flex-wrap items-end gap-3">
                 <Field orientation="horizontal" className="flex-1">
@@ -485,7 +507,7 @@ export function RitualChecklist({
               </p>
             </div>
           ) : null}
-          {!challenge ? (
+          {!challenge && !confirmSkip ? (
             <Button
               className="h-auto w-full flex-col gap-1 py-3"
               disabled={!ready}
@@ -533,7 +555,7 @@ export function RitualChecklist({
           >
             Close preview
           </Button>
-        ) : !challenge ? (
+        ) : !challenge && !confirmSkip ? (
           <div className="ritual-escapes flex shrink-0 justify-center gap-5 text-center">
             <Button
               size="sm"
@@ -549,7 +571,7 @@ export function RitualChecklist({
               variant="link"
               className="ritual-support-text text-xs font-normal text-muted-foreground"
               disabled={busy || dirty}
-              onClick={() => void escapeAction("skip")}
+              onClick={() => setConfirmSkip(true)}
             >
               Skip for Today
             </Button>

@@ -1282,9 +1282,13 @@ mod recovery_tests {
     #[test]
     fn sleep_catches_up_from_cached_horizon_without_stacking() {
         let mut data = json!({"state":{"current":{"id":"old","dueAt":"2026-09-29T06:00:00Z","expiresAt":"2026-09-29T21:00:00Z","status":"pending","responses":[{"value":"partial"}]},"upcoming":[{"id":"night","dueAt":"2026-09-29T21:00:00Z","expiresAt":"2026-09-30T06:00:00Z","status":"pending"},{"id":"morning","dueAt":"2026-09-30T06:00:00Z","expiresAt":"2026-09-30T21:00:00Z","status":"pending"}]}});
+        data["state"]["streakCount"] = json!(12);
+        data["state"]["skipCount"] = json!(1);
         data["queue"] = json!([{"path":"/v1/rituals/occurrences/old/responses/one"}]);
         advance_offline(&mut data, "2026-09-30T08:00:00Z");
         assert_eq!(data["state"]["current"]["id"], "morning");
+        assert!(data["state"].get("streakCount").is_none());
+        assert!(data["state"].get("skipCount").is_none());
         assert_eq!(data["localHistory"][0]["status"], "missed");
         assert_eq!(data["localHistory"][0]["responses"][0]["value"], "partial");
         advance_offline(&mut data, "2026-09-30T08:00:00Z");
@@ -1324,6 +1328,11 @@ fn advance_offline(data: &mut Value, now: &str) {
             history.push(old);
         }
         data["localHistory"] = json!(history);
+        // Counts refer to the last synchronized occurrence, not this new boundary.
+        if let Some(state) = data["state"].as_object_mut() {
+            state.remove("streakCount");
+            state.remove("skipCount");
+        }
         data["state"]["current"] = next;
         data["state"]["snoozeCount"] = json!(0);
         data["state"]["syncStatus"] = json!("queued");

@@ -1190,4 +1190,84 @@ describe.sequential("ritual account lifecycle", () => {
     expect(empty.status).toBe("completed");
     expect(empty.settledAt).toBe(empty.dueAt);
   });
+  it("counts separate streaks from retained history and recent applied skips", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({ displayName: "Streak", email: "streak@example.com", passwordHash: "unused" })
+      .returning();
+    const ctx = {
+      ...context(),
+      principal: { ...context().principal, userId: owner!.id, actorId: owner!.id },
+    };
+    clock = new Date("2026-11-01T05:00:00Z");
+    await service.saveDefinition(
+      "morning",
+      {
+        ...mutation(0),
+        kind: "morning",
+        title: "Morning",
+        enabled: true,
+        time: "06:00",
+        timeZone: "UTC",
+        steps: [{ id: "optional", label: "Optional", kind: "checkbox", optional: true }],
+      },
+      ctx,
+    );
+    for (let day = 1; day <= 10; day++) {
+      clock = new Date(`2026-11-${String(day).padStart(2, "0")}T12:00:00Z`);
+      const state = await service.current(ctx);
+      expect(state.streakCount).toBe(day - 1);
+      const completed = await service.act(
+        state.current!.id,
+        { ...mutation(state.current!.revision), kind: "complete" },
+        ctx,
+      );
+      expect(completed.state.streakCount).toBe(day);
+    }
+    clock = new Date("2026-11-11T12:00:00Z");
+    let state = await service.current(ctx);
+    expect(state.streakCount).toBe(10);
+    const skipped = await service.act(
+      state.current!.id,
+      { ...mutation(state.current!.revision), kind: "skip" },
+      ctx,
+    );
+    expect(skipped.state.skipCount).toBe(1);
+    expect(skipped.state.streakCount).toBe(0);
+    clock = new Date("2026-11-12T12:00:00Z");
+    state = await service.current(ctx);
+    expect(state.streakCount).toBe(0);
+    expect(state.skipCount).toBe(1);
+    clock = new Date("2026-11-15T12:00:00Z");
+    expect((await service.current(ctx)).skipCount).toBe(0);
+    expect((await service.current(context())).skipCount).toBe(0);
+    await service.saveDefinition(
+      "night",
+      {
+        ...mutation(0),
+        kind: "night",
+        title: "Evening",
+        enabled: true,
+        time: "18:00",
+        timeZone: "UTC",
+        steps: [{ id: "rest", label: "Rest", kind: "checkbox", optional: true }],
+      },
+      ctx,
+    );
+    clock = new Date("2026-11-15T19:00:00Z");
+    state = await service.current(ctx);
+    expect(state.current!.definition.kind).toBe("night");
+    expect(state.streakCount).toBe(0);
+    expect(state.skipCount).toBe(0);
+    const night = await service.act(
+      state.current!.id,
+      { ...mutation(state.current!.revision), kind: "complete" },
+      ctx,
+    );
+    expect(night.state.streakCount).toBe(1);
+    clock = new Date("2026-11-16T12:00:00Z");
+    state = await service.current(ctx);
+    expect(state.current!.definition.kind).toBe("morning");
+    expect(state.streakCount).toBe(0);
+  });
 });

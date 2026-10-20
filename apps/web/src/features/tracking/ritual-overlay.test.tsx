@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import type { RitualState } from "@personal-os/domain";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 import * as ritualBridge from "../desktop/ritual-bridge.js";
 import { RitualChecklist, RitualOverlay } from "./ritual-overlay.js";
@@ -171,6 +171,13 @@ it("Escape cancels the pending confirmation and a rejected skip explains the con
     expect.objectContaining({ kind: "cancel_snooze", challengeId: "escape" }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Skip for Today" }));
+  expect(action).toHaveBeenCalledTimes(2);
+  vi.useFakeTimers();
+  fireEvent.keyDown(screen.getByRole("button", { name: "Hold to skip today" }), { key: " " });
+  await act(async () => {
+    vi.advanceTimersByTime(30000);
+  });
+  vi.useRealTimers();
   await waitFor(() =>
     expect(toast.error).toHaveBeenCalledWith(
       "This ritual changed. Please try again.",
@@ -427,4 +434,21 @@ it.each([
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith(message, { id: loadingId }));
     expect(screen.queryByText(message)).not.toBeInTheDocument();
   }
+});
+
+it("shows the current ritual streak and lets users back out of skipping", () => {
+  const action = vi.fn();
+  render(
+    <RitualChecklist
+      state={{ ...state, streakCount: 12, skipCount: 1 }}
+      saveResponse={vi.fn()}
+      act={action}
+    />,
+  );
+  expect(screen.getByText("12-day morning streak")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Skip for Today" }));
+  expect(screen.getByText(/1 time in the last 3 days/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Go back" }));
+  expect(screen.getByRole("checkbox", { name: "Brush teeth" })).toBeInTheDocument();
+  expect(action).not.toHaveBeenCalled();
 });

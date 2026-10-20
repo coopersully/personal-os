@@ -117,6 +117,8 @@ export type RitualState = {
   upcoming?: RitualOccurrence[];
   serverNow: string;
   snoozeCount: number;
+  skipCount?: number;
+  streakCount?: number;
   syncStatus: "saved" | "queued" | "conflict";
 };
 const mutation = {
@@ -303,4 +305,32 @@ export function nextRitualReminderAt(
   return Date.parse(today) > Date.parse(now)
     ? today
     : boundary({ ...definition, time }, addLocalDays(date, 1));
+}
+
+/** Counts consecutive completed scheduled days, leaving today's pending ritual open. */
+export function ritualStreakCount(
+  definition: RitualDefinition,
+  current: Pick<RitualOccurrence, "scheduledLocalDate" | "status">,
+  history: { scheduledLocalDate: string; status: RitualOccurrence["status"]; hasSteps: boolean }[],
+): number {
+  const byDate = new Map(history.map((entry) => [entry.scheduledLocalDate, entry]));
+  const dates = history.map((entry) => entry.scheduledLocalDate).sort();
+  const first = dates[0];
+  if (!first) return 0;
+  let date = current.scheduledLocalDate;
+  let count = 0;
+  while (date >= first) {
+    const entry = byDate.get(date);
+    const pendingToday = date === current.scheduledLocalDate && current.status === "pending";
+    if (!pendingToday) {
+      if (entry?.hasSteps) {
+        if (entry.status !== "completed") break;
+        count++;
+      } else if (!entry && ritualDefinitionForDate(definition, date).steps.length) break;
+    }
+    const previous = new Date(`${date}T12:00:00Z`);
+    previous.setUTCDate(previous.getUTCDate() - 1);
+    date = previous.toISOString().slice(0, 10);
+  }
+  return count;
 }

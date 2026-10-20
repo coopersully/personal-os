@@ -326,6 +326,21 @@ make the reminder due shortly after acceptance. Expired/conflicting completions 
 explicit recovery flow. Delivery follows the person's existing reminder notification settings and
 OS permissions; accepting a reminder is not evidence of a displayed notification.
 
+Show the current ritual's streak at the top of its main checklist. Morning and evening have
+separate streaks of consecutive completed scheduled days. Today's pending ritual leaves the
+streak intact; skipped or missed scheduled days break it. Optional answers never gate a streak,
+and days with no scheduled steps neither add to nor break it. Streaks use retained history;
+an unrecorded scheduled day interrupts continuity. For unrecorded dates, use the current weekday
+schedule; recorded daily snapshots remain authoritative. Deleting history can reduce a streak.
+
+“Skip for Today” first shows this ritual's applied skip count over the last 72 hours and warns
+when a streak will end. Require a continuous 30-second pointer or keyboard hold, with a visible
+countdown and progress fill, before submitting the skip. Release, pointer exit/cancellation,
+focus loss, tab visibility changes, or leaving confirmation resets the hold. The hold is an
+interaction safeguard in the shared web/desktop checklist, not an API authorization boundary.
+Offline skip history is explicitly unavailable; cached streaks are labeled as last synchronized
+and are cleared when advancing to another occurrence.
+
 ### 6.7 Finances
 
 The first complete Finance release follows the [Finance MVP specification](finance-workspace-plan.md).

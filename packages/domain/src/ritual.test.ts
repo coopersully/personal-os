@@ -7,6 +7,7 @@ import {
   ritualDefinitionInputSchema,
   ritualIsAnswered,
   ritualStepSchema,
+  ritualStreakCount,
   upcomingRitualWindows,
 } from "./ritual.js";
 
@@ -229,4 +230,55 @@ it("resolves reminder times across midnight and daylight saving changes", async 
     "2026-11-01T05:30:00.000Z",
   );
   expect(nextRitualReminderAt(definition("night"), "25:00", "2026-10-18T03:00:00Z")).toBeNull();
+});
+
+describe("ritual streaks", () => {
+  const history = (dates: string[], status: RitualOccurrence["status"] = "completed") =>
+    dates.map((scheduledLocalDate) => ({ scheduledLocalDate, status, hasSteps: true }));
+  it("counts beyond a week and leaves today's pending ritual open", () => {
+    const entries = history(
+      Array.from({ length: 12 }, (_, i) => `2026-10-${String(i + 1).padStart(2, "0")}`),
+    );
+    expect(
+      ritualStreakCount(
+        definition("morning"),
+        { scheduledLocalDate: "2026-10-13", status: "pending" },
+        entries,
+      ),
+    ).toBe(12);
+  });
+  it.each(["skipped", "missed", "cancelled_configuration"] as const)("breaks on %s", (status) => {
+    expect(
+      ritualStreakCount(
+        definition("morning"),
+        { scheduledLocalDate: "2026-10-03", status: "pending" },
+        [...history(["2026-10-01"]), ...history(["2026-10-02"], status)],
+      ),
+    ).toBe(0);
+  });
+  it("breaks at an unrecorded scheduled day", () => {
+    expect(
+      ritualStreakCount(
+        definition("morning"),
+        { scheduledLocalDate: "2026-10-03", status: "pending" },
+        history(["2026-10-01"]),
+      ),
+    ).toBe(0);
+  });
+  it("ignores unscheduled weekend days and empty snapshots", () => {
+    const def = definition("morning");
+    const weekdays = {
+      ...def,
+      steps: def.steps.map((step) => ({ ...step, days: [1, 2, 3, 4, 5] })),
+    };
+    expect(
+      ritualStreakCount(weekdays, { scheduledLocalDate: "2026-10-05", status: "completed" }, [
+        ...history(["2026-10-02", "2026-10-05"]),
+        { scheduledLocalDate: "2026-10-03", status: "completed", hasSteps: false },
+      ]),
+    ).toBe(2);
+    expect(
+      ritualStreakCount(def, { scheduledLocalDate: "2026-10-05", status: "pending" }, []),
+    ).toBe(0);
+  });
 });

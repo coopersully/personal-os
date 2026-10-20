@@ -28,6 +28,7 @@ import {
   ritualAnswerIsValid,
   ritualDefinitionForDate,
   ritualIsAnswered,
+  ritualStreakCount,
   unfinishedOptionalRitualSteps,
   upcomingRitualWindows,
 } from "@personal-os/domain";
@@ -154,6 +155,21 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
       });
       occurrences.push(current);
     }
+    const history = current
+      ? await tx
+          .select({
+            scheduledLocalDate: ritualOccurrences.localDate,
+            status: sql<RitualOccurrence["status"]>`${ritualOccurrences.data}->>'status'`,
+            hasSteps: sql<boolean>`jsonb_array_length(${ritualOccurrences.data}->'definition'->'steps') > 0`,
+          })
+          .from(ritualOccurrences)
+          .where(
+            and(
+              eq(ritualOccurrences.userId, userId),
+              eq(ritualOccurrences.ritualId, current.ritualId),
+            ),
+          )
+      : [];
     const state: RitualState = {
       definitions: defs,
       upcoming: upcomingRitualWindows(defs, instant).map((window) => {
@@ -175,7 +191,15 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
       }),
       current,
       serverNow: instant,
-      snoozeCount: current ? countSnoozes(occurrences, current.ritualId, instant) : 0,
+      snoozeCount: current ? countActions(occurrences, current.ritualId, instant) : 0,
+      skipCount: current ? countActions(occurrences, current.ritualId, instant, "skip_applied") : 0,
+      streakCount: current
+        ? ritualStreakCount(
+            defs.find((d) => d.id === current.ritualId) ?? current.definition,
+            current,
+            history,
+          )
+        : 0,
       syncStatus: "saved",
     };
     return { state, occurrences };
@@ -184,7 +208,12 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
     const hash = createHash("sha256").update(`${userId}/${ritualId}/${date}`).digest("hex");
     return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
   }
-  function countSnoozes(occurrences: RitualOccurrence[], ritualId: string, at: string) {
+  function countActions(
+    occurrences: RitualOccurrence[],
+    ritualId: string,
+    at: string,
+    kind: "snooze_confirmed" | "skip_applied" = "snooze_confirmed",
+  ) {
     const end = Date.parse(at),
       start = end - 72 * 3600000;
     return occurrences
@@ -200,10 +229,7 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
       )
       .filter(
         ({ action, at }) =>
-          action.kind === "snooze_confirmed" &&
-          action.outcome === "applied" &&
-          at >= start &&
-          at <= end,
+          action.kind === kind && action.outcome === "applied" && at >= start && at <= end,
       ).length;
   }
   async function previous<T>(
@@ -533,7 +559,12 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
         const { state, occurrences } = await reconcile(tx, context.principal.userId);
         const occurrence = findOccurrence(occurrences, id);
         const instant = now().toISOString();
-        const count = countSnoozes(occurrences, occurrence.ritualId, instant);
+        const count = countActions(
+          occurrences,
+          occurrence.ritualId,
+          instant,
+          input.kind === "skip" ? "skip_applied" : "snooze_confirmed",
+        );
         const valid =
           occurrence.status === "pending" && occurrence.revision === input.expectedRevision;
         async function event(
@@ -696,11 +727,15 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
         }
         occurrence.revision++;
         await persist(tx, occurrence, context.principal.userId);
-        state.snoozeCount = countSnoozes(
+        state.snoozeCount = countActions(
           occurrences,
           occurrence.ritualId,
           new Date(now().getTime() + 1).toISOString(),
         );
+        state.skipCount = countActions(occurrences, occurrence.ritualId, instant, "skip_applied");
+        if (result.outcome === "applied" && input.kind === "complete")
+          state.streakCount = (state.streakCount ?? 0) + 1;
+        if (result.outcome === "applied" && input.kind === "skip") state.streakCount = 0;
         await remember(
           tx,
           context,

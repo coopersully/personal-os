@@ -304,6 +304,21 @@ Knowledge rather than a separate top-level workspace.
 
 #### Morning and evening rituals
 
+Enabled rituals also present automatically inside the signed-in browser application. A due,
+unexpired, unsnoozed occurrence opens the shared checklist in a modal over the existing page,
+with the page visible through a blurred backdrop. Keep the page mounted and restore its focus
+when the ritual is completed, snoozed, skipped, or settled by another client. Escape and outside
+clicks do not bypass the ritual. Authentication and standalone setup flows remain unobstructed;
+the desktop shell keeps its native presentation without a duplicate browser modal.
+
+The browser and desktop use the same account occurrence, revisions, answers, streaks, weekly
+progress, optional follow-ups, and snooze/skip policy. Browser writes require API acceptance and
+never claim to be queued offline. Refresh while visible and on focus/reconnection; recheck snooze
+and expiry using server time plus elapsed monotonic time. Read access denials and session expiry clear private state;
+read outages use deduplicated Sonner feedback and retry. Browser presentation covers only the
+open nohmi tab, with no screen capture or control over other tabs/apps. Use the shared browser
+interface for rapid visual iteration, then smoke-test native presentation on macOS.
+
 Ritual steps support required or optional participation and everyday, weekday, weekend, or custom
 weekday inclusion. Existing steps remain required every day. Resolve inclusion using the ritual's
 scheduled local date and time zone, then preserve the daily snapshot even if settings change.

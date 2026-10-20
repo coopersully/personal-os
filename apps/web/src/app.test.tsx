@@ -509,6 +509,7 @@ const mocks = vi.hoisted(() => ({
   getMailSetupContext: vi.fn(),
   getMailThread: vi.fn(),
   getMe: vi.fn(),
+  getCurrentRitual: vi.fn(),
   isTauri: vi.fn(),
   listAccessTokens: vi.fn(),
   listActivity: vi.fn(),
@@ -1712,6 +1713,13 @@ beforeEach(() => {
   // queued one-off implementations, which made later calendar tests render an
   // unrelated prior state instead of their documented defaults.
   vi.resetAllMocks();
+  mocks.getCurrentRitual.mockResolvedValue({
+    definitions: [],
+    current: null,
+    serverNow: new Date().toISOString(),
+    snoozeCount: 0,
+    syncStatus: "saved",
+  });
   mocks.listAgentAccessWorkItems.mockResolvedValue({
     items: [],
     nextCursor: null,
@@ -1754,12 +1762,19 @@ afterEach(() => {
 });
 
 describe("ilo web app", () => {
+  it("leaves automatic desktop ritual delivery to the native shell", async () => {
+    mocks.isTauri.mockReturnValue(true);
+    setup("/today");
+    expect(await screen.findByRole("heading", { name: "To take care of" })).toBeInTheDocument();
+    expect(mocks.getCurrentRitual).not.toHaveBeenCalled();
+  });
   it("renders the product landing page without requesting a session", async () => {
     setup("/");
     expect(
       await screen.findByRole("heading", { name: "Mail, tasks, calendar, and money." }),
     ).toBeInTheDocument();
     expect(mocks.getMe).not.toHaveBeenCalled();
+    expect(mocks.getCurrentRitual).not.toHaveBeenCalled();
     expect(
       within(screen.getByRole("navigation", { name: "Product navigation" })).getByRole("link", {
         name: "Login",
@@ -1776,6 +1791,7 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: "Already have an account? Sign in" }));
     await waitFor(() => expect(view.location.value).toBe("/login"));
     expect(await screen.findByRole("heading", { name: "Login" })).toBeInTheDocument();
+    expect(mocks.getCurrentRitual).not.toHaveBeenCalled();
   });
 
   it("returns to a protected destination after routed login", async () => {

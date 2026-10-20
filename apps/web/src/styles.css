@@ -7021,6 +7021,11 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   animation: ritual-element-enter var(--ritual-card-duration) cubic-bezier(0.22, 1, 0.36, 1) var(--ritual-card-delay) backwards;
 }
 .ritual-scroll { overscroll-behavior: contain; scrollbar-gutter: stable; }
+/* Browser chrome sits over the current page rather than a predictable native wallpaper. */
+.browser-ritual .ritual-surface[data-ritual-kind] { --ritual-chrome: var(--foreground); }
+.browser-ritual .ritual-logo .brand-symbol,
+.browser-ritual .ritual-support-text { opacity: 0.75; }
+
 @keyframes ritual-element-enter {
   from { opacity: 0; filter: blur(8px); transform: translateY(12px); }
   to { opacity: 1; filter: none; transform: translateY(0); }

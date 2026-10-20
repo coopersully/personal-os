@@ -367,3 +367,18 @@ export function ritualCompletionWeek(
     return { date, status: scheduled ? "not_recorded" : "not_scheduled" };
   });
 }
+
+/** A client can present a pending ritual only during its active, unsnoozed window. */
+export function ritualShouldPresent(
+  occurrence: Pick<RitualOccurrence, "status" | "dueAt" | "expiresAt" | "snoozedUntil"> | null,
+  now: string,
+): boolean {
+  const at = Date.parse(now);
+  return (
+    occurrence !== null &&
+    occurrence.status === "pending" &&
+    Date.parse(occurrence.dueAt) <= at &&
+    Date.parse(occurrence.expiresAt) > at &&
+    (occurrence.snoozedUntil === null || Date.parse(occurrence.snoozedUntil) <= at)
+  );
+}

@@ -336,3 +336,34 @@ describe("ritual completion week", () => {
     expect(week.every((day) => day.status === "not_recorded")).toBe(true);
   });
 });
+
+describe("ritual presentation", () => {
+  it("only presents pending, due, unexpired, unsnoozed occurrences", async () => {
+    const { ritualShouldPresent } = await import("./ritual.js");
+    const current = {
+      status: "pending" as const,
+      dueAt: "2026-10-20T06:00:00Z",
+      expiresAt: "2026-10-20T21:00:00Z",
+      snoozedUntil: null,
+    };
+    expect(ritualShouldPresent(null, "2026-10-20T07:00:00Z")).toBe(false);
+    expect(ritualShouldPresent(current, "2026-10-20T05:59:59Z")).toBe(false);
+    expect(ritualShouldPresent(current, current.dueAt)).toBe(true);
+    expect(ritualShouldPresent(current, current.expiresAt)).toBe(false);
+    expect(ritualShouldPresent({ ...current, status: "completed" }, "2026-10-20T07:00:00Z")).toBe(
+      false,
+    );
+    expect(
+      ritualShouldPresent(
+        { ...current, snoozedUntil: "2026-10-20T07:00:00Z" },
+        "2026-10-20T06:59:59Z",
+      ),
+    ).toBe(false);
+    expect(
+      ritualShouldPresent(
+        { ...current, snoozedUntil: "2026-10-20T07:00:00Z" },
+        "2026-10-20T07:00:00Z",
+      ),
+    ).toBe(true);
+  });
+});

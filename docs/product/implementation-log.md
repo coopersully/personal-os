@@ -1,5 +1,19 @@
 # nohmi — Implementation Log
 
+## 2026-10-20 — Real browser ritual presentation
+
+- Enabled rituals now present the shared checklist over the signed-in browser app with a blurred
+  backdrop, preserving the current page and restoring focus on dismissal through ritual actions.
+  Sign-in, standalone setup, and native desktop presentation keep their existing ownership.
+- Browser answers, completion, optional reminders, snoozes, and skips use the real owner-scoped
+  API and revisions. Polling and focus/reconnection refresh cross-client settlements; monotonic
+  elapsed time anchored to the server handles snooze/expiry independently of device clock skew.
+- Mutations cancel stale polls before adopting accepted state. Owner-scoped ephemeral query caches
+  and existing session-denial handling prevent late responses from restoring private state after
+  an account change. Read failures use deduplicated Sonner feedback and retry.
+- Browser delivery applies only to an open nohmi tab; writes require connectivity and API
+  acceptance. This is a source checkpoint, not deployment or a verified native macOS smoke test.
+
 ## 2026-10-20 — Ritual streaks, weekly progress, and deliberate skipping
 
 - Main rituals show separate morning/evening streaks from retained completion history, including

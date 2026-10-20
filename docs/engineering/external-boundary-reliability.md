@@ -169,3 +169,22 @@ Unit, database integration, and native tests establish acceptance and replay beh
 can still fail with green tests if notifications are disabled, the Mac is asleep, the coordinator
 cannot refresh, or the OS refuses presentation. A rebuilt desktop app and an authorized real-device
 notification smoke are required before claiming production notification delivery for this change.
+
+
+## Browser ritual presentation
+
+The authenticated ritual API remains the authority for browser and desktop occurrences, revisions,
+responses, and actions. The browser uses its existing session transport and the configured app/API
+origin; it introduces no provider, port, permission, or screen-capture dependency. Read the current
+state every ten seconds while visible and on focus/reconnection. Browser timers may be throttled
+or suspended, so anchor snooze/expiry to server time plus monotonic elapsed time and refresh on
+return. A closed tab cannot deliver a ritual.
+
+A successful mutation response is the commit evidence; browser writes do not cross the native
+queue and cannot claim offline acceptance. Cancel old reads before accepting mutation state and
+scope caches to the authenticated owner. Existing denial handling clears private ritual state on read 401/403 and expired-session mutations;
+late writes cannot populate a replacement account's cache. Read failures retain the last known
+window only until expiry, expose Sonner retry feedback without repeated polling toasts, and never
+claim completion. Mutation failures preserve the shared checklist's correction/retry behavior.
+Shared revisions resolve races with other tabs and desktop; refresh settles the other view.
+Actual browser background scheduling and native macOS window delivery still require runtime checks.

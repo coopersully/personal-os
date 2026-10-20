@@ -394,6 +394,7 @@ import { TasksAppBarControls } from "./features/tasks/workspace-header.js";
 import { TasksWorkspacePage } from "./features/tasks/workspace-page.js";
 import { textingSettingsNavigationItem } from "./features/texting/manifest.js";
 import { TextingSettings } from "./features/texting/page.js";
+import { BrowserRitual } from "./features/tracking/browser-ritual.js";
 import { RitualSettings } from "./features/tracking/ritual-settings.js";
 import type { SearchAction } from "./features/workspace-search/catalog.js";
 import { WorkspaceFinder } from "./features/workspace-search/search.js";
@@ -639,7 +640,12 @@ function AuthenticatedExperience({ user }: { user: User }) {
   if (user.setup.status === "not_started" || user.setup.status === "in_progress") {
     return <Navigate replace to="/setup" />;
   }
-  return <AuthenticatedApp user={user} />;
+  return (
+    <>
+      <AuthenticatedApp user={user} />
+      {!isTauri() ? <BrowserRitual key={user.id} userId={user.id} /> : null}
+    </>
+  );
 }
 
 type DeviceWeatherLocation = {
@@ -9134,7 +9140,7 @@ function EventInspector({
   });
   useEffect(() => {
     const handleEscape = (keyboardEvent: KeyboardEvent) => {
-      if (keyboardEvent.key === "Escape") close();
+      if (keyboardEvent.key === "Escape" && !keyboardEvent.defaultPrevented) close();
     };
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
@@ -9679,7 +9685,7 @@ function Modal({
   const modalRef = useRef<HTMLElement>(null);
   useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
+      if (event.key === "Escape" && !event.defaultPrevented) close();
     };
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);

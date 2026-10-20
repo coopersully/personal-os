@@ -70,7 +70,11 @@ export function RitualSettings({ timeZone }: { timeZone: string }) {
       <QueryFeedback query={query} title="Couldn’t refresh ritual settings." staleOnly />
       <SettingsSection
         title="Ritual view"
-        description="Configure your daily routines or review their history."
+        description={
+          isDesktop()
+            ? "Configure your daily routines or review their history."
+            : "Enabled rituals appear over your current page while nohmi is open in this browser."
+        }
       >
         <SegmentedControl
           aria-label="Choose ritual"

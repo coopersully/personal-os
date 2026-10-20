@@ -114,6 +114,16 @@ test("settings support field search, ritual history, and resumable setup replay"
   await page.getByRole("checkbox", { name: "Enable morning ritual" }).check();
   expect((await saved).status()).toBe(200);
   await page.reload();
+  const liveState = await (await page.request.get("/v1/rituals/current")).json();
+  if (
+    liveState.current?.status === "pending" &&
+    Date.parse(liveState.current.dueAt) <= Date.parse(liveState.serverNow)
+  ) {
+    const live = page.getByRole("dialog", { name: "Morning ritual", exact: true });
+    await expect(live).toBeVisible({ timeout: 15000 });
+    await live.getByRole("button", { name: "Complete Morning Ritual" }).click();
+    await expect(live).toHaveCount(0);
+  }
   await expect(page.getByLabel("Prompt", { exact: true }).first()).toHaveValue("Morning water");
   await expect(page.getByRole("checkbox", { name: "Enable morning ritual" })).toBeChecked();
   await expect(page.getByLabel("Morning reminder time")).toHaveValue("13:30");
@@ -241,4 +251,148 @@ test("ritual skipping requires a continuous hold and shows streak impact", async
   await page.mouse.up();
   await expect(page.getByText("You’re up to date.")).toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem("ritual-test-skipped"))).toBe("true");
+});
+
+test("browser rituals preserve the current page and save real answers and optional reminders", async ({
+  page,
+}) => {
+  await page.goto("/login");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page).toHaveURL(/\/today/);
+  await page.request.delete("/v1/rituals/morning/data");
+  await page.request.delete("/v1/rituals/night/data");
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await page.goto("/settings?section=rituals");
+  await page.getByRole("button", { name: "Search settings", exact: true }).click();
+  const search = page.getByRole("searchbox", { name: "Search all settings" });
+  await search.fill("calendar");
+  const before = page.url();
+  try {
+    const saved = await page.request.put("/v1/rituals/morning", {
+      data: {
+        requestId: crypto.randomUUID(),
+        deviceId: "browser-acceptance",
+        expectedRevision: 0,
+        kind: "morning",
+        title: "Browser morning",
+        enabled: true,
+        time: "00:00",
+        timeZone: "UTC",
+        steps: [
+          { id: "water", label: "Drink browser water", kind: "checkbox" },
+          { id: "stretch", label: "Browser optional stretch", kind: "checkbox", optional: true },
+        ],
+      },
+    });
+    expect(saved.ok()).toBe(true);
+    const ritual = page.getByRole("dialog", { name: "Morning ritual", exact: true });
+    await expect(ritual).toBeVisible({ timeout: 15000 });
+    await page.keyboard.press("Control+k");
+    await expect(page.getByRole("dialog")).toHaveCount(1);
+    await expect(ritual).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(ritual).toBeVisible();
+    await ritual.getByRole("button", { name: "Skip for Today" }).click();
+    await expect(ritual.getByRole("region", { name: "Confirm skip" })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(ritual.getByRole("region", { name: "Confirm skip" })).toHaveCount(0);
+    await expect(ritual.getByRole("region", { name: "Past 7 ritual days" })).toBeVisible();
+    await page.screenshot({
+      path: test.info().outputPath("browser-ritual.png"),
+      animations: "disabled",
+    });
+    await ritual.getByRole("checkbox", { name: "Drink browser water" }).click();
+    await expect(ritual.getByRole("checkbox", { name: "Drink browser water" })).toBeChecked();
+    await ritual.getByRole("checkbox", { name: "Remind me about these later" }).check();
+    await ritual.getByLabel("Reminder time").fill("23:59");
+    await ritual.getByRole("button", { name: "Complete Morning Ritual" }).click();
+    await expect(ritual).toHaveCount(0);
+    await expect(search).toBeVisible();
+    await expect(search).toHaveValue("calendar");
+    expect(page.url()).toBe(before);
+    const current = await (await page.request.get("/v1/rituals/current")).json();
+    expect(current.current.status).toBe("completed");
+    expect(
+      current.current.responses.some(
+        (answer: { stepId: string; value: unknown }) =>
+          answer.stepId === "water" && answer.value === true,
+      ),
+    ).toBe(true);
+    expect(current.current.optionalFollowUp.reminderIds).toHaveLength(1);
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Rituals", exact: true })).toBeVisible();
+    await expect(ritual).toHaveCount(0);
+  } finally {
+    const response = await page.request.get("/v1/rituals/current");
+    if (response.ok()) {
+      const current = (await response.json()).current;
+      if (current?.definition?.title === "Browser morning") {
+        for (const id of current.optionalFollowUp?.reminderIds ?? []) {
+          await page.request.delete(`/v1/reminders/${id}`);
+        }
+      }
+    }
+    await page.request.delete("/v1/rituals/morning/data");
+  }
+});
+
+test("browser snooze survives reload and another client can settle the same ritual", async ({
+  page,
+}) => {
+  await page.goto("/login");
+  await page.getByLabel("Email").fill("demo+full@nohmi.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page).toHaveURL(/\/today/);
+  await page.request.delete("/v1/rituals/morning/data");
+  await page.request.delete("/v1/rituals/night/data");
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  try {
+    const saved = await page.request.put("/v1/rituals/night", {
+      data: {
+        requestId: crypto.randomUUID(),
+        deviceId: "browser-acceptance",
+        expectedRevision: 0,
+        kind: "night",
+        title: "Browser evening",
+        enabled: true,
+        time: "00:01",
+        timeZone: "UTC",
+        steps: [{ id: "reflect", label: "Evening reflection", kind: "checkbox", optional: true }],
+      },
+    });
+    expect(saved.ok()).toBe(true);
+    const ritual = page.getByRole("dialog", { name: "Evening ritual", exact: true });
+    await expect(ritual).toBeVisible({ timeout: 15000 });
+    await ritual.getByRole("button", { name: "Snooze", exact: true }).click();
+    await expect(ritual).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+    await expect(ritual).toHaveCount(0);
+    const current = await (await page.request.get("/v1/rituals/current")).json();
+    expect(Date.parse(current.current.snoozedUntil)).toBeGreaterThan(Date.parse(current.serverNow));
+    const complete = await page.request.post(
+      `/v1/rituals/occurrences/${current.current.id}/actions`,
+      {
+        data: {
+          requestId: crypto.randomUUID(),
+          deviceId: "other-client",
+          expectedRevision: current.current.revision,
+          observedAt: new Date().toISOString(),
+          kind: "complete",
+        },
+      },
+    );
+    expect(complete.ok()).toBe(true);
+    expect((await complete.json()).state.current.status).toBe("completed");
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+    await expect(ritual).toHaveCount(0);
+  } finally {
+    await page.request.delete("/v1/rituals/night/data");
+  }
 });

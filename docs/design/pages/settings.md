@@ -219,6 +219,14 @@ clears its toast. Quiet-hour From and Until controls share a row on larger scree
 
 ## Ritual step configuration
 
+Enabled rituals run automatically over the person's current page while the signed-in browser
+app is open. Keep this capability clear in the Ritual view description. The browser uses real
+account state; the explicit Show ritual preview remains a separate, non-recording preview.
+Browser presentation preserves the underlying page and traps focus until completion, snoozing,
+skipping, expiry, or settlement from another client; it does not appear in sign-in or setup. Browser
+secondary controls use readable theme foreground over a tinted blurred backdrop; native ambient
+chrome remains separate because its wallpaper treatment has different contrast conditions.
+
 The immediate job is to define a realistic morning or evening checklist. Keep the ordered steps
 in the existing checklist, with Requirement (Required / Optional) and Include on (Every day /
 Weekdays / Weekends / Custom days) beside the step's response configuration. Reveal individual

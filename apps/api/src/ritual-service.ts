@@ -26,6 +26,7 @@ import {
   type RitualState,
   requiresSnoozeConfirmation,
   ritualAnswerIsValid,
+  ritualCompletionWeek,
   ritualDefinitionForDate,
   ritualIsAnswered,
   ritualStreakCount,
@@ -200,6 +201,13 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
             history,
           )
         : 0,
+      completionWeek: current
+        ? ritualCompletionWeek(
+            defs.find((d) => d.id === current.ritualId) ?? current.definition,
+            current.scheduledLocalDate,
+            history,
+          )
+        : [],
       syncStatus: "saved",
     };
     return { state, occurrences };
@@ -736,6 +744,13 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
         if (result.outcome === "applied" && input.kind === "complete")
           state.streakCount = (state.streakCount ?? 0) + 1;
         if (result.outcome === "applied" && input.kind === "skip") state.streakCount = 0;
+        if (result.outcome === "applied" && (input.kind === "complete" || input.kind === "skip")) {
+          state.completionWeek = (state.completionWeek ?? []).map((day) =>
+            day.date === occurrence.scheduledLocalDate
+              ? { ...day, status: input.kind === "complete" ? "completed" : "skipped" }
+              : day,
+          );
+        }
         await remember(
           tx,
           context,

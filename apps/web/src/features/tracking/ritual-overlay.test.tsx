@@ -452,3 +452,23 @@ it("shows the current ritual streak and lets users back out of skipping", () => 
   expect(screen.getByRole("checkbox", { name: "Brush teeth" })).toBeInTheDocument();
   expect(action).not.toHaveBeenCalled();
 });
+
+it("keeps the weekly completion strip alongside the streak and hides it in previews", () => {
+  const progressState = {
+    ...state,
+    streakCount: 0,
+    completionWeek: [
+      { date: "2026-10-19", status: "completed" as const },
+      { date: "2026-10-20", status: "pending" as const },
+    ],
+  };
+  const view = render(
+    <RitualChecklist state={progressState} saveResponse={vi.fn()} act={vi.fn()} />,
+  );
+  expect(screen.getByText("0-day morning streak")).toBeInTheDocument();
+  expect(screen.getByText("1 completed · Past 7 days")).toBeInTheDocument();
+  view.rerender(
+    <RitualChecklist state={progressState} saveResponse={vi.fn()} act={vi.fn()} preview />,
+  );
+  expect(screen.queryByRole("region", { name: "Past 7 ritual days" })).not.toBeInTheDocument();
+});

@@ -119,6 +119,7 @@ export type RitualState = {
   snoozeCount: number;
   skipCount?: number;
   streakCount?: number;
+  completionWeek?: RitualCompletionDay[];
   syncStatus: "saved" | "queued" | "conflict";
 };
 const mutation = {
@@ -333,4 +334,36 @@ export function ritualStreakCount(
     date = previous.toISOString().slice(0, 10);
   }
   return count;
+}
+
+export type RitualCompletionDay = {
+  date: string;
+  status: "completed" | "skipped" | "missed" | "pending" | "not_scheduled" | "not_recorded";
+};
+
+/** Seven logical ritual dates, ending with the current occurrence (including overnight rituals). */
+export function ritualCompletionWeek(
+  definition: RitualDefinition,
+  endingDate: string,
+  history: { scheduledLocalDate: string; status: RitualOccurrence["status"]; hasSteps: boolean }[],
+): RitualCompletionDay[] {
+  const byDate = new Map(history.map((entry) => [entry.scheduledLocalDate, entry]));
+  const end = localDateAt(new Date(`${endingDate}T12:00:00Z`), "UTC");
+  return Array.from({ length: 7 }, (_, index) => {
+    const local = addLocalDays(end, index - 6);
+    const date = localDateToIso(local);
+    const entry = byDate.get(date);
+    if (entry)
+      return {
+        date,
+        status:
+          !entry.hasSteps || entry.status === "cancelled_configuration"
+            ? "not_scheduled"
+            : entry.status,
+      };
+    const scheduled =
+      ritualDefinitionForDate(definition, date).steps.length > 0 &&
+      Date.parse(boundary(definition, local)) >= Date.parse(definition.enabledAt);
+    return { date, status: scheduled ? "not_recorded" : "not_scheduled" };
+  });
 }

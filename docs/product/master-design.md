@@ -333,6 +333,16 @@ and days with no scheduled steps neither add to nor break it. Streaks use retain
 an unrecorded scheduled day interrupts continuity. For unrecorded dates, use the current weekday
 schedule; recorded daily snapshots remain authoritative. Deleting history can reduce a streak.
 
+Keep the streak alongside a compact rolling seven-day completion strip at the top of the main
+ritual. Each morning/evening strip ends on that occurrence's scheduled local date, including
+night rituals that continue after midnight. Preserve visible completed days across streak breaks;
+show a completion count, dated days, and accessible completed, skipped, missed, pending,
+not-scheduled, and no-record states. Unscheduled days are neutral, and absent/deleted records
+must not be presented as verified misses or completions. Preview has no personal progress strip.
+Queued local completions update the current day and remain labeled as waiting to sync; clear
+cached weekly progress when offline advancement changes the current occurrence.
+
+
 “Skip for Today” first shows this ritual's applied skip count over the last 72 hours and warns
 when a streak will end. Require a continuous 30-second pointer or keyboard hold, with a visible
 countdown and progress fill, before submitting the skip. Release, pointer exit/cancellation,

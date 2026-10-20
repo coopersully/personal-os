@@ -166,8 +166,17 @@ test("ritual skipping requires a continuous hold and shows streak impact", async
       definitions: [],
       serverNow: new Date().toISOString(),
       snoozeCount: 0,
-      skipCount: 2,
-      streakCount: 10,
+      skipCount: 1,
+      streakCount: 1,
+      completionWeek: [
+        { date: "2026-10-14", status: "completed" },
+        { date: "2026-10-15", status: "not_recorded" },
+        { date: "2026-10-16", status: "completed" },
+        { date: "2026-10-17", status: "not_scheduled" },
+        { date: "2026-10-18", status: "skipped" },
+        { date: "2026-10-19", status: "completed" },
+        { date: "2026-10-20", status: "pending" },
+      ],
       syncStatus: "saved",
       current: {
         id: "hold-test",
@@ -197,10 +206,24 @@ test("ritual skipping requires a continuous hold and shows streak impact", async
     });
   });
   await page.goto("/#ritual");
-  await expect(page.getByText("10-day morning streak")).toBeVisible();
+  await expect(page.getByText("1-day morning streak")).toBeVisible();
+  const week = page.getByRole("region", { name: "Past 7 ritual days" });
+  await expect(week).toBeVisible();
+  await expect(week.getByRole("listitem")).toHaveCount(7);
+  await expect(week.getByText("3 completed · Past 7 days")).toBeVisible();
+  await expect(week.getByRole("listitem", { name: /October 20, 2026: Pending/ })).toBeVisible();
+  const viewport = page.viewportSize();
+  await page.setViewportSize({ width: 320, height: 844 });
+  const fits = await week.evaluate((element) => element.scrollWidth <= element.clientWidth);
+  expect(fits).toBe(true);
+  await page.screenshot({
+    path: test.info().outputPath("ritual-progress.png"),
+    animations: "disabled",
+  });
+  if (viewport) await page.setViewportSize(viewport);
   await page.getByRole("button", { name: "Skip for Today" }).click();
-  await expect(page.getByText(/2 times in the last 3 days/)).toBeVisible();
-  await expect(page.getByText(/end your 10-day streak/)).toBeVisible();
+  await expect(page.getByText(/1 time in the last 3 days/)).toBeVisible();
+  await expect(page.getByText(/end your 1-day streak/)).toBeVisible();
   await page.clock.install();
   const button = page.getByRole("button", { name: "Hold to skip today" });
   await button.focus();

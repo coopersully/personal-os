@@ -34,6 +34,7 @@ import {
   submitRitualAction,
   submitRitualResponse,
 } from "../desktop/ritual-bridge.js";
+import { RitualCompletionWeek } from "./ritual-completion-week.js";
 import { RitualPreviewChecklist } from "./ritual-preview.js";
 import { RitualSkipConfirmation } from "./ritual-skip-confirmation.js";
 export function RitualOverlay() {
@@ -375,6 +376,12 @@ export function RitualChecklist({
                 ? " · Last synced"
                 : ""}
             </p>
+          ) : null}
+          {!preview && state.completionWeek?.length ? (
+            <RitualCompletionWeek
+              days={state.completionWeek}
+              queued={state.syncStatus === "queued"}
+            />
           ) : null}
           {confirmSkip ? (
             <RitualSkipConfirmation

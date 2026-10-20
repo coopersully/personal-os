@@ -1,9 +1,14 @@
 # nohmi — Implementation Log
 
-## 2026-10-20 — Ritual streaks and deliberate skipping
+## 2026-10-20 — Ritual streaks, weekly progress, and deliberate skipping
 
 - Main rituals show separate morning/evening streaks from retained completion history, including
   history older than seven days. Optional steps and unscheduled days do not break continuity.
+- Added a dated seven-day completion strip alongside the streak, scoped to the current ritual.
+  Completed days stay visible across misses or skips; pending, unscheduled, and absent-record days
+  remain distinct. Queued completion/skip updates the local strip and discloses synchronization.
+  Preview excludes personal progress; native offline advancement clears the previous strip.
+
 - Skip confirmation shows applied skips in the last 72 hours and the streak at risk. A visible
   30-second countdown and progress fill require an uninterrupted pointer or keyboard hold before
   the shared checklist submits a skip. Release, blur, visibility changes, and cancellation reset it.

@@ -929,6 +929,7 @@ fn apply_offline(
                 }
                 current["status"] = json!("completed");
                 current["settledAt"] = json!(now);
+                mark_local_completion_day(state, "completed");
             }
             Ok(json!({"outcome": if done { "applied" } else { "conflict" }, "state":state}))
         }
@@ -944,12 +945,24 @@ fn apply_offline(
         Some("skip") => {
             current["status"] = json!("skipped");
             current["settledAt"] = json!(now);
+            mark_local_completion_day(state, "skipped");
             Ok(json!({"outcome":"applied","state":state}))
         }
         Some("cancel_snooze") => Ok(json!({"outcome":"applied","state":state})),
         _ => Err("Invalid ritual action".into()),
     }
 }
+fn mark_local_completion_day(state: &mut Value, status: &str) {
+    let date = state["current"]["scheduledLocalDate"].clone();
+    if let Some(days) = state.get_mut("completionWeek").and_then(Value::as_array_mut) {
+        for day in days {
+            if day["date"] == date {
+                day["status"] = json!(status);
+            }
+        }
+    }
+}
+
 fn delivery_health(stage: Option<&str>, at: chrono::DateTime<chrono::Utc>) -> Value {
     match stage {
         Some(stage @ ("identity" | "store_read" | "sync" | "store_write" | "presentation")) => {
@@ -1284,11 +1297,13 @@ mod recovery_tests {
         let mut data = json!({"state":{"current":{"id":"old","dueAt":"2026-09-29T06:00:00Z","expiresAt":"2026-09-29T21:00:00Z","status":"pending","responses":[{"value":"partial"}]},"upcoming":[{"id":"night","dueAt":"2026-09-29T21:00:00Z","expiresAt":"2026-09-30T06:00:00Z","status":"pending"},{"id":"morning","dueAt":"2026-09-30T06:00:00Z","expiresAt":"2026-09-30T21:00:00Z","status":"pending"}]}});
         data["state"]["streakCount"] = json!(12);
         data["state"]["skipCount"] = json!(1);
+        data["state"]["completionWeek"] = json!([]);
         data["queue"] = json!([{"path":"/v1/rituals/occurrences/old/responses/one"}]);
         advance_offline(&mut data, "2026-09-30T08:00:00Z");
         assert_eq!(data["state"]["current"]["id"], "morning");
         assert!(data["state"].get("streakCount").is_none());
         assert!(data["state"].get("skipCount").is_none());
+        assert!(data["state"].get("completionWeek").is_none());
         assert_eq!(data["localHistory"][0]["status"], "missed");
         assert_eq!(data["localHistory"][0]["responses"][0]["value"], "partial");
         advance_offline(&mut data, "2026-09-30T08:00:00Z");
@@ -1332,6 +1347,7 @@ fn advance_offline(data: &mut Value, now: &str) {
         if let Some(state) = data["state"].as_object_mut() {
             state.remove("streakCount");
             state.remove("skipCount");
+            state.remove("completionWeek");
         }
         data["state"]["current"] = next;
         data["state"]["snoozeCount"] = json!(0);
@@ -1793,4 +1809,33 @@ fn step_answered(current: &Value, step: &Value) -> bool {
                 })
             }
     })
+}
+
+
+#[cfg(test)]
+mod completion_week_tests {
+    use super::*;
+    #[test]
+    fn queued_completions_and_skips_update_only_the_current_day() {
+        for (kind, status) in [("complete", "completed"), ("skip", "skipped")] {
+            let mut data = json!({"state": {"current": {
+                "status": "pending", "revision": 1, "expiresAt": "2099-01-01T00:00:00Z",
+                "scheduledLocalDate": "2026-10-20", "definition": {"steps": []}
+            }, "completionWeek": [
+                {"date": "2026-10-19", "status": "completed"},
+                {"date": "2026-10-20", "status": "pending"}
+            ]}});
+            let result = apply_offline(&mut data, "/actions", "POST", &json!({"kind": kind})).unwrap();
+            assert_eq!(result["outcome"], "applied");
+            assert_eq!(data["state"]["completionWeek"][0]["status"], "completed");
+            assert_eq!(data["state"]["completionWeek"][1]["status"], status);
+            assert_eq!(data["state"]["syncStatus"], "queued");
+        }
+    }
+    #[test]
+    fn old_caches_do_not_fabricate_weekly_history() {
+        let mut state = json!({"current": {"scheduledLocalDate": "2026-10-20"}});
+        mark_local_completion_day(&mut state, "completed");
+        assert!(state.get("completionWeek").is_none());
+    }
 }

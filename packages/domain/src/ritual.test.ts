@@ -282,3 +282,57 @@ describe("ritual streaks", () => {
     ).toBe(0);
   });
 });
+
+describe("ritual completion week", () => {
+  it("keeps completed days visible across a skipped day and leaves today pending", async () => {
+    const { ritualCompletionWeek } = await import("./ritual.js");
+    const week = ritualCompletionWeek(definition("morning"), "2026-10-07", [
+      { scheduledLocalDate: "2026-10-01", status: "completed", hasSteps: true },
+      { scheduledLocalDate: "2026-10-02", status: "skipped", hasSteps: true },
+      { scheduledLocalDate: "2026-10-03", status: "missed", hasSteps: true },
+      { scheduledLocalDate: "2026-10-04", status: "completed", hasSteps: false },
+      { scheduledLocalDate: "2026-10-05", status: "cancelled_configuration", hasSteps: true },
+      { scheduledLocalDate: "2026-10-07", status: "pending", hasSteps: true },
+    ]);
+    expect(week.map((day) => day.status)).toEqual([
+      "completed",
+      "skipped",
+      "missed",
+      "not_scheduled",
+      "not_scheduled",
+      "not_recorded",
+      "pending",
+    ]);
+    expect(week.map((day) => day.date)).toEqual(
+      Array.from({ length: 7 }, (_, i) => `2026-10-0${i + 1}`),
+    );
+  });
+  it("excludes unscheduled days and dates before enabling, preserving historical snapshots", async () => {
+    const { ritualCompletionWeek } = await import("./ritual.js");
+    const def = {
+      ...definition("morning"),
+      enabledAt: "2026-10-02T12:00:00Z",
+      steps: [{ id: "one", label: "One", kind: "checkbox" as const, days: [1, 2, 3, 4, 5] }],
+    };
+    const week = ritualCompletionWeek(def, "2026-10-05", [
+      { scheduledLocalDate: "2026-10-03", status: "completed", hasSteps: true },
+      { scheduledLocalDate: "2026-10-05", status: "pending", hasSteps: true },
+    ]);
+    expect(week.map((day) => day.status)).toEqual([
+      "not_scheduled",
+      "not_scheduled",
+      "not_scheduled",
+      "not_scheduled",
+      "completed",
+      "not_scheduled",
+      "pending",
+    ]);
+  });
+  it("crosses month/year boundaries using logical ritual dates", async () => {
+    const { ritualCompletionWeek } = await import("./ritual.js");
+    const week = ritualCompletionWeek(definition("night"), "2027-01-02", []);
+    expect(week[0]?.date).toBe("2026-12-27");
+    expect(week[6]?.date).toBe("2027-01-02");
+    expect(week.every((day) => day.status === "not_recorded")).toBe(true);
+  });
+});

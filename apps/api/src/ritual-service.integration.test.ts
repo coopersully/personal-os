@@ -1217,12 +1217,15 @@ describe.sequential("ritual account lifecycle", () => {
       clock = new Date(`2026-11-${String(day).padStart(2, "0")}T12:00:00Z`);
       const state = await service.current(ctx);
       expect(state.streakCount).toBe(day - 1);
+      expect(state.completionWeek).toHaveLength(7);
+      expect(state.completionWeek?.at(-1)?.status).toBe("pending");
       const completed = await service.act(
         state.current!.id,
         { ...mutation(state.current!.revision), kind: "complete" },
         ctx,
       );
       expect(completed.state.streakCount).toBe(day);
+      expect(completed.state.completionWeek?.at(-1)?.status).toBe("completed");
     }
     clock = new Date("2026-11-11T12:00:00Z");
     let state = await service.current(ctx);
@@ -1234,6 +1237,10 @@ describe.sequential("ritual account lifecycle", () => {
     );
     expect(skipped.state.skipCount).toBe(1);
     expect(skipped.state.streakCount).toBe(0);
+    expect(skipped.state.completionWeek?.filter((day) => day.status === "completed")).toHaveLength(
+      6,
+    );
+    expect(skipped.state.completionWeek?.at(-1)?.status).toBe("skipped");
     clock = new Date("2026-11-12T12:00:00Z");
     state = await service.current(ctx);
     expect(state.streakCount).toBe(0);
@@ -1265,6 +1272,8 @@ describe.sequential("ritual account lifecycle", () => {
       ctx,
     );
     expect(night.state.streakCount).toBe(1);
+    expect(night.state.completionWeek?.filter((day) => day.status === "completed")).toHaveLength(1);
+    expect(night.state.completionWeek?.at(-1)?.status).toBe("completed");
     clock = new Date("2026-11-16T12:00:00Z");
     state = await service.current(ctx);
     expect(state.current!.definition.kind).toBe("morning");

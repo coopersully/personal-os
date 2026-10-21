@@ -7044,7 +7044,7 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   width: 124%;
   height: 124%;
   pointer-events: none;
-  image-rendering: pixelated;
+  image-rendering: auto;
 }
 .ritual-progress { color: var(--ritual-chrome-muted); animation: ritual-question-enter 460ms ease-out 80ms backwards; }
 .ritual-progress .text-muted-foreground { color: inherit; }

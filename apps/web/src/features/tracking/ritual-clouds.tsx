@@ -44,6 +44,7 @@ export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
     let field = new Float32Array(0);
     let variation = new Float32Array(0);
     let image: ImageData | undefined;
+    let pattern: CanvasPattern | null = null;
     const paint = () => {
       if (!image) return;
       const elapsed = timeline;
@@ -66,27 +67,38 @@ export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
         }
       }
       textureContext.putImageData(image, 0, 0);
+      pattern = context.createPattern(texture, "repeat");
     };
     const draw = () => {
-      if (!width || !height) return;
+      if (!width || !height || !pattern) return;
       const offset = (((timeline / 450) % width) + width) % width;
-      context.clearRect(0, 0, width, height);
-      context.drawImage(texture, -offset, 0);
-      context.drawImage(texture, width - offset, 0);
+      // One repeating fill has no separately antialiased tile edges. Scroll at
+      // display resolution while keeping the expensive density field small.
+      const scaleX = element.width / width;
+      const scaleY = element.height / height;
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      context.clearRect(0, 0, element.width, element.height);
+      context.setTransform(scaleX, 0, 0, scaleY, -offset * scaleX, 0);
+      context.fillStyle = pattern;
+      context.fillRect(offset, 0, width, height);
     };
     const resize = () => {
       const bounds = element.getBoundingClientRect();
       if (!bounds.width || !bounds.height) return;
-      const nextWidth = Math.min(800, Math.ceil(bounds.width / 2));
-      const nextHeight = Math.min(500, Math.ceil(bounds.height / 2));
-      if (width === nextWidth && height === nextHeight) return;
+      // A full Bayer period at the wrap keeps the dither phase continuous.
+      const nextWidth = Math.max(4, Math.min(800, Math.ceil(bounds.width / 8) * 4));
+      const nextHeight = Math.max(4, Math.min(500, Math.ceil(bounds.height / 8) * 4));
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      const displayWidth = Math.ceil(bounds.width * ratio);
+      const displayHeight = Math.ceil(bounds.height * ratio);
+      if (width === nextWidth && height === nextHeight && element.width === displayWidth && element.height === displayHeight) return;
       width = nextWidth;
       height = nextHeight;
       pixelsPerScreenPixel = width / bounds.width;
       texture.width = width;
       texture.height = height;
-      element.width = width;
-      element.height = height;
+      element.width = displayWidth;
+      element.height = displayHeight;
       image = context.createImageData(width, height);
       field = new Float32Array(width * height);
       variation = new Float32Array(width * height);

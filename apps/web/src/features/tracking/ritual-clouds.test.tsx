@@ -28,7 +28,9 @@ it("draws deterministic transparent clouds, dims them at night, and releases res
       data: new Uint8ClampedArray(width * height * 4),
     }),
     putImageData,
-    drawImage: vi.fn(),
+    createPattern: vi.fn(() => ({})),
+    setTransform: vi.fn(),
+    fillRect: vi.fn(),
     clearRect: vi.fn(),
   } as unknown as CanvasRenderingContext2D);
   const view = render(<RitualClouds kind="morning" />);
@@ -56,7 +58,8 @@ it("scrubs the sky when dragging the background without intercepting form contro
     },
   );
   const putImageData = vi.fn();
-  const drawImage = vi.fn();
+  const setTransform = vi.fn();
+  const fillRect = vi.fn();
   let nextFrame: FrameRequestCallback = () => {};
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
     nextFrame = callback;
@@ -70,7 +73,9 @@ it("scrubs the sky when dragging the background without intercepting form contro
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
     createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
     putImageData,
-    drawImage,
+    createPattern: vi.fn(() => ({})),
+    setTransform,
+    fillRect,
     clearRect: vi.fn(),
   } as unknown as CanvasRenderingContext2D);
   const view = render(
@@ -93,7 +98,10 @@ it("scrubs the sky when dragging the background without intercepting form contro
   expect(putImageData).toHaveBeenCalledTimes(1);
   nextFrame(performance.now() + 200);
   expect(putImageData).toHaveBeenCalledTimes(2);
-  expect(drawImage.mock.calls.at(-2)?.[1]).not.toBe(0);
+  expect(setTransform.mock.calls.at(-1)?.[4]).not.toBe(0);
+  expect(fillRect).toHaveBeenCalledTimes(2);
+  const canvas = view.container.querySelector("canvas")!;
+  expect(canvas.width).toBeGreaterThanOrEqual(200);
   expect(surface.style.cursor).toBe("grabbing");
   fireEvent.pointerUp(surface);
   expect(surface.style.cursor).toBe("");

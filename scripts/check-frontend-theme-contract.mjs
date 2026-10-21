@@ -56,20 +56,11 @@ const stylesheetForDecorativeChecks = stylesheet
     /(\.setup-navigation__fade\s*\{\s*)background: linear-gradient\(to bottom, transparent, var\(--canvas\) 62%\);/g,
     "$1",
   );
-// Ritual previews mirror the explicitly approved native sunrise/moonlight backdrop.
-// Keep this exception restricted to those two selectors and their exact colors.
-const stylesheetForRitualChecks = stylesheetForDecorativeChecks
-  // The real browser ritual isolates the retained page, matching native presentation.
-  // Permit only this selector and radius; cards and every other surface stay flat.
-  .replace(/(\.browser-ritual\s*\{\s*)backdrop-filter: blur\(24px\);/g, "$1")
-  .replace(
-    /(\.ritual-browser-preview\s*\{\s*)background: radial-gradient\(ellipse at 50% 100%, rgb\(255 210 64 \/ 65%\), transparent 65%\), rgb\(38 79 133\);/g,
-    "$1",
-  )
-  .replace(
-    /(\.ritual-browser-preview\[data-ritual-kind="night"\]\s*\{\s*)background: radial-gradient\(ellipse at 50% 0%, rgb\(240 248 255 \/ 65%\), transparent 65%\), rgb\(9 18 48\);/g,
-    "$1",
-  );
+// Ritual skies are solid; only the retained browser backdrop permits a bounded blur.
+const stylesheetForRitualChecks = stylesheetForDecorativeChecks.replace(
+  /(\.browser-ritual\s*\{\s*)backdrop-filter: blur\(24px\);/g,
+  "$1",
+);
 const stylesheetPatterns = [
   { name: "gradient", pattern: /(?:linear|radial|conic)-gradient\(/g },
   { name: "decorative shadow", pattern: /(?:box|text)-shadow\s*:/g },

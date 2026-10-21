@@ -384,6 +384,7 @@ export function RitualChecklist({
     !dirty &&
     !busy &&
     (!remindLater || !optional.length || !!reminderAt);
+  const mainScreen = !challenge && !confirmSkip && !confirmComplete;
   return (
     <div className="ritual-presentation">
       <RitualClouds kind={occurrence.definition.kind} />
@@ -391,14 +392,14 @@ export function RitualChecklist({
         <NohmiBrandMark symbol />
       </div>
       <h1 className="sr-only">{occurrence.definition.title}</h1>
-      {!preview ? (
+      {!preview && mainScreen ? (
         <TooltipProvider>
           <section
             className="ritual-progress flex w-full shrink-0 items-center justify-between gap-4"
             aria-label="Ritual progress"
           >
             <div>
-              {state.streakCount ? (
+              {state.streakCount !== undefined ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
@@ -617,29 +618,31 @@ export function RitualChecklist({
         ) : null}
       </section>
       <div className="ritual-support flex shrink-0 flex-col items-center gap-1">
-        <p
-          role="status"
-          className="ritual-support-text inline-flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground"
-        >
-          {busy || dirty ? (
-            <Spinner aria-hidden="true" className="size-3" />
-          ) : state.syncStatus === "conflict" ? (
-            <AlertTriangleIcon aria-hidden="true" className="size-3" />
-          ) : state.syncStatus === "queued" ? (
-            <ClockIcon aria-hidden="true" className="size-3" />
-          ) : (
-            <CheckIcon aria-hidden="true" className="size-3" />
-          )}
-          {preview
-            ? "Preview only"
-            : busy || dirty
-              ? "Saving"
-              : state.syncStatus === "queued"
-                ? "Saved on this Mac and waiting to sync"
-                : state.syncStatus === "conflict"
-                  ? "Changes need review in Ritual settings"
-                  : "Saved to your account"}
-        </p>
+        {mainScreen ? (
+          <p
+            role="status"
+            className="ritual-support-text inline-flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground"
+          >
+            {busy || dirty ? (
+              <Spinner aria-hidden="true" className="size-3" />
+            ) : state.syncStatus === "conflict" ? (
+              <AlertTriangleIcon aria-hidden="true" className="size-3" />
+            ) : state.syncStatus === "queued" ? (
+              <ClockIcon aria-hidden="true" className="size-3" />
+            ) : (
+              <CheckIcon aria-hidden="true" className="size-3" />
+            )}
+            {preview
+              ? "Preview only"
+              : busy || dirty
+                ? "Saving"
+                : state.syncStatus === "queued"
+                  ? "Saved on this Mac and waiting to sync"
+                  : state.syncStatus === "conflict"
+                    ? "Changes need review in Ritual settings"
+                    : "Saved to your account"}
+          </p>
+        ) : null}
         {preview ? (
           <Button
             size="sm"

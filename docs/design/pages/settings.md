@@ -247,9 +247,11 @@ completion form an unboxed action group below. Snooze and skip confirmations sit
 question card. A static procedural, ordered-dither cloud layer sits behind all content, at very
 low opacity in the evening, preserving the existing night sky and opaque question surface.
 
-Ritual progress uses a compact row: a fire glyph and nonzero streak number at the left, seven
+Ritual progress uses a compact row: a fire glyph and streak number, including zero, at the left, seven
 filled/empty completion circles at the right. Omit visible weekday labels and aggregate text;
 accessible names and tooltips retain dates, detailed status, and queued provenance. Completion
 shows required progress as a translucent left-to-right fill inside the button, with the optional
 completion count beneath it. Follow-up controls replace questions until Finish ritual or Go back;
-Escape also returns without completing. Keep Snooze and Skip for Today at the viewport bottom.
+Escape also returns without completing. Show progress and account-sync status only on the main
+question screen, hiding both during snooze, skip, and completion follow-ups. Use solid pastel-blue
+morning and deep-blue evening skies with dithered clouds, without gradient glows. Keep Snooze and Skip for Today at the viewport bottom.

@@ -132,6 +132,12 @@ test("settings support field search, ritual history, and resumable setup replay"
   await expect(page.getByLabel("Include on", { exact: true }).nth(1)).toHaveValue("weekdays");
   await page.getByRole("button", { name: "Show morning ritual" }).click();
   const preview = page.getByRole("dialog", { name: "Ritual preview" });
+  expect(
+    await preview.evaluate((element) => ({
+      image: getComputedStyle(element).backgroundImage,
+      color: getComputedStyle(element).backgroundColor,
+    })),
+  ).toEqual({ image: "none", color: "rgb(203, 220, 229)" });
   await expect(preview.getByRole("button", { name: "Complete Morning Ritual" })).toBeEnabled();
   await preview.getByRole("button", { name: "Complete Morning Ritual" }).click();
   await preview.getByRole("checkbox", { name: "Remind me about these later" }).check();
@@ -297,6 +303,7 @@ test("browser rituals preserve the current page and save real answers and option
     expect(saved.ok()).toBe(true);
     const ritual = page.getByRole("dialog", { name: "Morning ritual", exact: true });
     await expect(ritual).toBeVisible({ timeout: 15000 });
+    await expect(ritual.getByRole("button", { name: "0-day morning streak" })).toBeVisible();
     await page.keyboard.press("Control+k");
     await expect(page.getByRole("dialog")).toHaveCount(1);
     await expect(ritual).toBeVisible();
@@ -304,6 +311,8 @@ test("browser rituals preserve the current page and save real answers and option
     await expect(ritual).toBeVisible();
     await ritual.getByRole("button", { name: "Skip for Today" }).click();
     await expect(ritual.getByRole("region", { name: "Confirm skip" })).toBeVisible();
+    await expect(ritual.getByRole("region", { name: "Ritual progress" })).toHaveCount(0);
+    await expect(ritual.getByText("Saved to your account", { exact: true })).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(ritual.getByRole("region", { name: "Confirm skip" })).toHaveCount(0);
     await expect(ritual.getByRole("region", { name: "Past 7 ritual days" })).toBeVisible();
@@ -315,6 +324,8 @@ test("browser rituals preserve the current page and save real answers and option
     await expect(ritual.getByRole("checkbox", { name: "Drink browser water" })).toBeChecked();
     await expect(ritual.getByLabel("Reminder time")).toHaveCount(0);
     await ritual.getByRole("button", { name: "Complete Morning Ritual" }).click();
+    await expect(ritual.getByRole("region", { name: "Ritual progress" })).toHaveCount(0);
+    await expect(ritual.getByText("Saved to your account", { exact: true })).toHaveCount(0);
     await ritual.getByRole("checkbox", { name: "Remind me about these later" }).check();
     await ritual.getByLabel("Reminder time").fill("23:59");
     await ritual.getByRole("button", { name: "Finish ritual" }).click();

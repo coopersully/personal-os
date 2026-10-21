@@ -85,6 +85,8 @@ it("confirms unavailable history explicitly and preserves the displayed local co
   expect(screen.getByText(/Saved on this Mac/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Snooze" }));
   expect(await screen.findByText(/history is unavailable/)).toHaveTextContent("1 snoozes");
+  expect(screen.queryByRole("region", { name: "Ritual progress" })).not.toBeInTheDocument();
+  expect(screen.queryByText(/Saved on this Mac/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Snooze 10 minutes" }));
   await waitFor(() =>
     expect(action).toHaveBeenLastCalledWith(
@@ -359,6 +361,8 @@ it("completes optional steps without requiring answers and sends only an opted-i
   expect(screen.queryByLabelText("Reminder time")).not.toBeInTheDocument();
   fireEvent.click(finish);
   expect(action).not.toHaveBeenCalled();
+  expect(screen.queryByRole("region", { name: "Ritual progress" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Saved to your account")).not.toBeInTheDocument();
   fireEvent.keyDown(window, { key: "Escape" });
   expect(screen.queryByLabelText("Reminder time")).not.toBeInTheDocument();
   expect(action).not.toHaveBeenCalled();
@@ -459,6 +463,8 @@ it("shows the current ritual streak and lets users back out of skipping", () => 
   expect(screen.getByRole("button", { name: "12-day morning streak" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Skip for Today" }));
   expect(screen.getByText(/1 time in the last 3 days/)).toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Ritual progress" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Saved to your account")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Go back" }));
   expect(screen.getByRole("checkbox", { name: "Brush teeth" })).toBeInTheDocument();
   expect(action).not.toHaveBeenCalled();
@@ -476,11 +482,13 @@ it("keeps the weekly completion strip alongside the streak and hides it in previ
   const view = render(
     <RitualChecklist state={progressState} saveResponse={vi.fn()} act={vi.fn()} />,
   );
-  expect(screen.getByText("No current streak")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "0-day morning streak" })).toBeInTheDocument();
   expect(screen.queryByText("1 completed · Past 7 days")).not.toBeInTheDocument();
   const questions = screen.getByRole("region", { name: "Ritual questions" });
   expect(questions).toContainElement(screen.getByRole("checkbox", { name: "Brush teeth" }));
-  expect(questions).not.toContainElement(screen.getByText("No current streak"));
+  expect(questions).not.toContainElement(
+    screen.getByRole("button", { name: "0-day morning streak" }),
+  );
   expect(questions).not.toContainElement(
     screen.getByRole("region", { name: "Past 7 ritual days" }),
   );

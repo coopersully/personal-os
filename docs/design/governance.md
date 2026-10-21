@@ -208,9 +208,9 @@ design book.
 
 ## Ritual presentation exception
 
-Morning and evening ritual presentations use explicitly approved sky colors and sunrise/moonlight
-radial gradients to isolate the checklist from the desktop. Browser previews mirror those two
-backdrops; the theme check permits only their exact selectors and colors. Standard cards remain
+Morning and evening ritual presentations use solid sky colors: pastel blue for morning and deep
+blue for evening. Browser delivery, previews, and native backdrops share these colors with a
+transparent dithered cloud layer; gradients are not permitted. Standard cards remain
 flat and shadow-free. This is a ritual presentation treatment, not a shared component default.
 
 The approved real browser ritual retains the person's page underneath a full-viewport attention

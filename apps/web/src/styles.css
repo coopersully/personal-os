@@ -26,6 +26,8 @@
   --border-strong: #8d8d8d;
   --content-primary: #202020;
   --ritual-morning-content: #202020;
+  --ritual-morning-sky: #cbdce5;
+  --ritual-evening-sky: #091230;
   --ritual-evening-content: #f9f9f9;
   --content-secondary: #5b5b5b;
   --content-tertiary: #646464;
@@ -6985,11 +6987,12 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 }
 .ritual-surface {
   --ritual-chrome: var(--ritual-morning-content);
+  --ritual-sky: var(--ritual-morning-sky);
   height: 100dvh;
   display: grid;
   place-items: center;
   padding: 64px;
-  background: transparent;
+  background: var(--ritual-sky);
   color: var(--card-foreground);
   text-align: center;
 }
@@ -7046,8 +7049,7 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 }
 /* Approved ritual-only backdrop isolates the current page without capturing the screen. */
 .browser-ritual { backdrop-filter: blur(24px); }
-/* Browser chrome sits over the current page rather than a predictable native wallpaper. */
-.browser-ritual .ritual-surface[data-ritual-kind] { --ritual-chrome: var(--foreground); }
+
 .browser-ritual .ritual-logo .brand-symbol,
 .browser-ritual .ritual-support-text { opacity: 0.75; }
 
@@ -7063,11 +7065,13 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 }
 
 .ritual-browser-preview {
-  background: radial-gradient(ellipse at 50% 100%, rgb(255 210 64 / 65%), transparent 65%), rgb(38 79 133);
+  --ritual-chrome: var(--ritual-morning-content);
+  --ritual-sky: var(--ritual-morning-sky);
+  background: var(--ritual-sky);
   align-content: center;
 }
 .ritual-browser-preview[data-ritual-kind="night"] {
-  background: radial-gradient(ellipse at 50% 0%, rgb(240 248 255 / 65%), transparent 65%), rgb(9 18 48);
+  background: var(--ritual-sky);
 }
 
 .ritual-surface[data-ready="false"] { visibility: hidden; }
@@ -7076,7 +7080,7 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 .ritual-surface[data-ready="false"] .ritual-support { animation: none; }
 
 .ritual-surface[data-ritual-kind="night"],
-.ritual-browser-preview[data-ritual-kind="night"] { --ritual-chrome: var(--ritual-evening-content); }
+.ritual-browser-preview[data-ritual-kind="night"] { --ritual-chrome: var(--ritual-evening-content); --ritual-sky: var(--ritual-evening-sky); }
 .ritual-logo .brand-symbol,
 .ritual-support-text {
   color: var(--ritual-chrome, var(--ritual-morning-content));

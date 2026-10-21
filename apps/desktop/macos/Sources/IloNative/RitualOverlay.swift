@@ -60,7 +60,7 @@ func makeRitualBackdrop(frame: NSRect, kind: String, reduceMotion: Bool, reduceT
  let sky = NSView(frame: view.bounds)
  sky.wantsLayer = true
  sky.autoresizingMask = [.width, .height]
- sky.layer?.backgroundColor = NSColor(srgbRed: night ? 0.035 : 0.15, green: night ? 0.07 : 0.31, blue: night ? 0.19 : 0.52, alpha: 1).cgColor
+ sky.layer?.backgroundColor = NSColor(srgbRed: night ? 9.0/255 : 203.0/255, green: night ? 18.0/255 : 220.0/255, blue: night ? 48.0/255 : 229.0/255, alpha: 1).cgColor
  root.addSubview(sky)
  view.autoresizingMask = [.width, .height]
  root.addSubview(view)
@@ -72,38 +72,13 @@ func makeRitualBackdrop(frame: NSRect, kind: String, reduceMotion: Bool, reduceT
   skyFade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
   sky.layer?.add(skyFade, forKey: "ritual-sky-fade")
  }
- let tint = NSColor(srgbRed: night ? 0.035 : 0.15, green: night ? 0.07 : 0.31, blue: night ? 0.19 : 0.52, alpha: reduceTransparency ? 1 : (night ? 0.52 : 0.24))
- // Keep the color/glow above AppKit's private visual-effect layers.
+ let tint = NSColor(srgbRed: night ? 9.0/255 : 203.0/255, green: night ? 18.0/255 : 220.0/255, blue: night ? 48.0/255 : 229.0/255, alpha: reduceTransparency ? 1 : (night ? 0.52 : 0.24))
+ // Keep the solid sky color above AppKit's private visual-effect layers.
  let colorView = NSView(frame: view.bounds)
  colorView.autoresizingMask = [.width, .height]
  colorView.wantsLayer = true
  colorView.layer?.backgroundColor = tint.cgColor
  view.addSubview(colorView)
- let glow = CAGradientLayer()
- glow.type = .radial
- glow.frame = CGRect(x: -frame.width * 0.2, y: frame.height * (night ? 0.25 : -0.65), width: frame.width * 1.4, height: frame.height * 1.4)
- glow.startPoint = CGPoint(x: 0.5, y: 0.5)
- glow.endPoint = CGPoint(x: 1, y: 1)
- let light = night
-  ? NSColor(srgbRed: 0.94, green: 0.97, blue: 1, alpha: 0.90)
-  : NSColor(srgbRed: 1, green: 0.83, blue: 0.25, alpha: 0.95)
- glow.colors = [light.cgColor, light.withAlphaComponent(night ? 0.34 : 0.42).cgColor, light.withAlphaComponent(0).cgColor]
- glow.locations = [0, 0.35, 1]
- colorView.layer?.addSublayer(glow)
- if !reduceMotion {
-  let rise = CABasicAnimation(keyPath: "transform.translation.y")
-  rise.fromValue = frame.height * (night ? 0.55 : -0.55)
-  rise.toValue = 0
-  rise.duration = 3.6
-  rise.timingFunction = CAMediaTimingFunction(name: .easeOut)
-  glow.add(rise, forKey: "ritual-horizon-rise")
-  let fade = CABasicAnimation(keyPath: "opacity")
-  fade.fromValue = 0
-  fade.toValue = 1
-  fade.duration = 2.4
-  fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-  glow.add(fade, forKey: "ritual-horizon-fade")
- }
  window.contentView = root
  window.setFrame(frame, display: true)
  return window

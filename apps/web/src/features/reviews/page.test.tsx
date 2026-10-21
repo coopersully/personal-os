@@ -80,7 +80,7 @@ describe("Reviews", () => {
         {
           action: {
             label: "Review rule",
-            to: "/settings?section=mail&reviewRule=one",
+            to: "/settings?page=mail&reviewRule=one",
           },
           actionAt: null,
           domain: "mail",
@@ -132,7 +132,7 @@ describe("Reviews", () => {
     expect(screen.queryByRole("radio", { name: "Setup" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Review rule" })).toHaveAttribute(
       "href",
-      "/settings?section=mail&reviewRule=one",
+      "/settings?page=mail&reviewRule=one",
     );
     expect(screen.queryByText("Legacy setup item")).not.toBeInTheDocument();
 

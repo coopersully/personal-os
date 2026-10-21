@@ -337,7 +337,8 @@ Copy earns its space by changing a decision. Apply these rules mechanically:
   secondary surface/text tokens. See [Settings](pages/settings.md) for the full layout contract.
 - Settings forms compose shared `FieldGroup`, `Field`, and `FieldLabel`
   primitives. Consent uses a horizontal checkbox field with a separate label
-  and description; availability and errors use shared alerts.
+  and description; actual availability stays beside its control, while settings
+  errors and discrete action results use Sonner.
 - Connected providers use their recognizable service mark when one exists. Do
   not substitute a raw provider identifier; any necessary fallback name uses
   the provider's correct capitalization.
@@ -796,3 +797,37 @@ Settings controls and contextual Display menus use the same serialized save path
 Explicit URL choices remain temporary overrides. Device-specific shell geometry remains local.
 Tasks can save a default capture list and whether completed tasks appear in container views; explicit
 placement, lifecycle views, and URL filters take precedence.
+
+### Card surfaces and action hierarchy
+
+Nested shadcn Items use the secondary surface, visibly distinct from their containing Card
+in both themes. Default and outline Items inside Cards inherit the secondary variant.
+Primary buttons invert the neutral surface: dark fill/light text in light mode and light
+fill/dark text in dark mode. All shared Button sizes use pill radii (icon buttons are circles).
+Card-header icon actions use ghost styling; labeled actions use primary styling. Destructive
+actions retain their semantic treatment. These rules belong to the shared primitives and theme.
+
+Card headers, bodies, and footers share one continuous Card background in both themes;
+header and footer primitives do not add separate surface fills. Nested Items retain their
+distinct secondary surface.
+
+
+### Flat settings editing
+
+The accepted settings direction uses small secondary section labels above subsection
+Cards and concise divided rows with trailing values. Simple values edit in place
+without chevrons or dialogs; radios, switches, and checkboxes operate directly.
+Use a larger editor only for configuration that needs it. Headers and their icons
+are optional in component APIs; page introductions remain visible by default, with
+Profile’s in-card identity as the explicit exception.
+Preserve keyboard interaction, drafts, validation, and phone consent/verification.
+See [the settings contract](pages/settings.md#flat-settings-rows-and-optional-headers)
+for details and scope. All Settings routes use the shared layout and scoped control
+compositions, while domain-specific records and workflows retain their semantics.
+
+
+Settings composition follows the [typed decision model](pages/settings.md#platform-agnostic-settings-model):
+preferences, state, records, navigation, and commands have distinct interactions.
+Keep visual grouping shared and persistence domain-owned. Reference native platform
+patterns for hierarchy and behavior without importing their artwork or overriding
+nohmi's arrow/chevron, feedback, accessibility, and ownership contracts.

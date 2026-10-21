@@ -8,9 +8,8 @@ import type { ReactNode } from "react";
 import { api } from "@/api";
 import { QueryFeedback } from "@/components/async-state";
 import { MutationFeedback } from "@/components/mutation-feedback";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/settings-field";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
@@ -38,12 +37,9 @@ function PreferenceSection<W extends Workspace>({
     getDefaultWorkspacePreferences(workspace)) as WorkspacePreferences<W>;
   const disabled = !query.isSuccess || save.isPending || !!save.recovery;
   return (
-    <SettingsSection title="Workspace preferences">
+    <SettingsSection layout="rows" title="Workspace preferences">
       <QueryFeedback query={query} title="Couldn’t load preferences." />
       {!save.recovery ? <MutationFeedback feedback={save.feedback} /> : null}
-      <p className="text-sm text-muted-foreground">
-        Unconfigured preferences use this workspace’s product defaults.
-      </p>
       <WorkspacePreferenceRecovery
         workspace={workspace}
         formatValue={formatValue}
@@ -394,7 +390,7 @@ function TasksPreferences() {
           ).map(([key, label]) => (
             <Field orientation="horizontal" key={key}>
               <FieldLabel htmlFor={`task-details-${key}`}>{label}</FieldLabel>
-              <Checkbox
+              <Switch
                 id={`task-details-${key}`}
                 disabled={disabled}
                 checked={values.taskRowDetails.includes(key)}

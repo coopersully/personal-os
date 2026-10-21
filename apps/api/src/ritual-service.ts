@@ -60,9 +60,65 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
     });
   }
   async function definitions(tx: Tx, userId: string) {
-    return (
-      await tx.select().from(ritualDefinitions).where(eq(ritualDefinitions.userId, userId))
-    ).map((r) => r.data);
+    const [owner] = await tx
+      .select({ timeZone: users.planningTimezone })
+      .from(users)
+      .where(eq(users.id, userId));
+    const records = await tx
+      .select()
+      .from(ritualDefinitions)
+      .where(eq(ritualDefinitions.userId, userId));
+    const result: RitualDefinition[] = [];
+    for (const record of records) {
+      const before = record.data;
+      if (!owner || before.timeZone === owner.timeZone) {
+        result.push(before);
+        continue;
+      }
+      // Profile owns the schedule zone. Preserve historical occurrence snapshots;
+      // the revised schedule begins at the next boundary after this change.
+      const updated = {
+        ...before,
+        timeZone: owner.timeZone,
+        revision: before.revision + 1,
+        enabledAt: new Date(now().getTime() + 1).toISOString(),
+      };
+      await tx
+        .update(ritualDefinitions)
+        .set({ data: updated })
+        .where(and(eq(ritualDefinitions.id, record.id), eq(ritualDefinitions.userId, userId)));
+      await tx
+        .insert(ritualDefinitionRevisions)
+        .values({ userId, ritualId: record.id, revision: updated.revision, data: updated });
+      result.push(updated);
+    }
+    if (result.some((definition, index) => definition.revision !== records[index]?.data.revision)) {
+      const pending = await tx
+        .select()
+        .from(ritualOccurrences)
+        .where(
+          and(
+            eq(ritualOccurrences.userId, userId),
+            sql`${ritualOccurrences.data}->>'status' = 'pending'`,
+          ),
+        );
+      for (const record of pending) {
+        const open = record.data;
+        const next = upcomingRitualWindows(result, now().toISOString()).find(
+          (window) =>
+            window.ritualId !== open.ritualId ||
+            window.scheduledLocalDate !== open.scheduledLocalDate,
+        );
+        if (next && next.dueAt !== open.expiresAt) {
+          await persist(
+            tx,
+            { ...open, expiresAt: next.dueAt, revision: open.revision + 1 },
+            userId,
+          );
+        }
+      }
+    }
+    return result;
   }
   async function persist(tx: Tx, occurrence: RitualOccurrence, userId: string) {
     await tx
@@ -360,6 +416,15 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
         if (replay) return replay;
         const defs = await definitions(tx, context.principal.userId),
           before = defs.find((d) => d.kind === kind);
+        const [owner] = await tx
+          .select({ timeZone: users.planningTimezone })
+          .from(users)
+          .where(eq(users.id, context.principal.userId));
+        if (owner && input.timeZone !== owner.timeZone)
+          throw new AppError(
+            "invalid_request",
+            "Rituals use your profile time zone. Refresh before saving.",
+          );
         if (input.expectedRevision !== (before?.revision ?? 0))
           throw new AppError("conflict", "Ritual settings changed. Refresh before saving.");
         if (

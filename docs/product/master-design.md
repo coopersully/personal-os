@@ -321,7 +321,7 @@ interface for rapid visual iteration, then smoke-test native presentation on mac
 
 Ritual steps support required or optional participation and everyday, weekday, weekend, or custom
 weekday inclusion. Existing steps remain required every day. Resolve inclusion using the ritual's
-scheduled local date and time zone, then preserve the daily snapshot even if settings change.
+scheduled local date and profile planning time zone, then preserve the daily snapshot even if settings change. Morning and evening schedules share the profile time zone; they do not expose a separate ritual time-zone preference.
 Only scheduled required steps gate explicit completion. A day with no scheduled steps settles
 without opening the checklist; an all-optional day still permits voluntary participation.
 

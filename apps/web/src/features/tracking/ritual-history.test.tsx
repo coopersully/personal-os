@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 import { SettingsFeedbackContext } from "../../lib/settings-feedback.js";
+import { RitualDataAction } from "./ritual-data-action.js";
 import { RitualHistory } from "./ritual-history.js";
 import { RitualLocal } from "./ritual-local.js";
 
@@ -22,7 +23,7 @@ vi.mock("../../api.js", () => ({
   errorMessage: (e: Error) => e.message,
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), dismiss: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), dismiss: vi.fn() } }));
 const occurrence = {
   id: "one",
   status: "completed",
@@ -94,7 +95,7 @@ it("filters, paginates and exports complete response and escape history", async 
       nextCursor: cursor ? null : "2026-09-29T10:00:00Z",
     }),
   );
-  mount(<RitualHistory />);
+  mount(<><RitualHistory /><RitualDataAction /><RitualDataAction kind="morning" /><RitualDataAction kind="night" /></>);
   expect(await screen.findByText(/Morning ritual · 2026-09-29 · completed/)).toBeInTheDocument();
   expect(screen.getByText(/^Due /)).toHaveTextContent(
     new Date(occurrence.dueAt).toLocaleString(undefined, {
@@ -118,38 +119,46 @@ it("filters, paginates and exports complete response and escape history", async 
   );
   fireEvent.click(await screen.findByRole("button", { name: "More history" }));
   expect(await screen.findByText(/Morning ritual · 2026-09-28/)).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Export rituals" }));
+  fireEvent.click(screen.getByRole("button", { name: "Export Rituals" }));
+  expect(screen.getByRole("dialog", { name: "Export Rituals?" })).toBeInTheDocument();
+  fireEvent.click(screen.getAllByRole("button", { name: "Export Rituals" }).at(-1)!);
   await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledWith(expect.any(Blob)));
   expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
 });
 it("requires explicit deletion and keeps failure visible for retry", async () => {
-  mount(<RitualHistory />);
+  mount(<><RitualHistory /><RitualDataAction /><RitualDataAction kind="morning" /><RitualDataAction kind="night" /></>);
   await screen.findByText(/Morning ritual · 2026-09-29/);
-  fireEvent.click(screen.getByRole("button", { name: "Delete morning data" }));
+  fireEvent.click(screen.getAllByRole("button", { name: "Delete Data" })[0]!);
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(mocks.remove).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Delete evening data" }));
+  fireEvent.click(screen.getAllByRole("button", { name: "Delete Data" })[1]!);
   mocks.remove.mockRejectedValueOnce(new Error("Deletion unavailable"));
   fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
-  expect(await screen.findByText(/Couldn’t delete ritual history/)).toBeInTheDocument();
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("delete ritual history"), expect.anything()));
+  expect(screen.queryByText(/Couldn’t delete ritual history/)).not.toBeInTheDocument();
   mocks.history.mockResolvedValue({ items: [], nextCursor: null });
-  fireEvent.click(screen.getByRole("button", { name: "Delete evening data" }));
+  fireEvent.click(screen.getAllByRole("button", { name: "Delete Data" })[1]!);
   fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
   expect(await screen.findByText("Your ritual history will appear here.")).toBeInTheDocument();
   expect(screen.queryByText(/Couldn’t delete ritual history/)).not.toBeInTheDocument();
   expect(mocks.remove).toHaveBeenLastCalledWith("night");
   mocks.export.mockRejectedValueOnce(new Error("Export unavailable"));
-  fireEvent.click(screen.getByRole("button", { name: "Export rituals" }));
-  expect(await screen.findByText(/Couldn’t export ritual history/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Export Rituals" }));
+  expect(screen.getByRole("dialog", { name: "Export Rituals?" })).toBeInTheDocument();
+  fireEvent.click(screen.getAllByRole("button", { name: "Export Rituals" }).at(-1)!);
+  await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("export ritual history"), expect.anything()));
+  expect(screen.queryByText(/Couldn’t export ritual history/)).not.toBeInTheDocument();
   mocks.export.mockResolvedValue({ occurrences: [] });
-  fireEvent.click(screen.getByRole("button", { name: "Export rituals" }));
+  fireEvent.click(screen.getByRole("button", { name: "Export Rituals" }));
+  expect(screen.getByRole("dialog", { name: "Export Rituals?" })).toBeInTheDocument();
+  fireEvent.click(screen.getAllByRole("button", { name: "Export Rituals" }).at(-1)!);
   await waitFor(() =>
     expect(screen.queryByText(/Couldn’t export ritual history/)).not.toBeInTheDocument(),
   );
 });
 it("reports unavailable account history", async () => {
   mocks.history.mockRejectedValue(new Error("History unavailable"));
-  mount(<RitualHistory />);
+  mount(<><RitualHistory /><RitualDataAction /><RitualDataAction kind="morning" /><RitualDataAction kind="night" /></>);
   expect(await screen.findByRole("status")).toHaveTextContent("Couldn’t load ritual history");
 });
 it("exports pending native evidence and only discards after explicit confirmation", async () => {
@@ -219,7 +228,7 @@ it("distinguishes optional not done from accepted and queued follow-ups", async 
     ],
     nextCursor: null,
   });
-  mount(<RitualHistory />);
+  mount(<><RitualHistory /><RitualDataAction /><RitualDataAction kind="morning" /><RitualDataAction kind="night" /></>);
   expect(await screen.findByText("Stretch: Optional · Not done")).toBeInTheDocument();
   expect(screen.getByText(/Stretch: Optional · Reminder scheduled/)).toBeInTheDocument();
   expect(screen.getByText(/Stretch: Optional · Reminder waiting to sync/)).toBeInTheDocument();

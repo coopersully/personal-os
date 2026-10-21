@@ -121,8 +121,8 @@ test("settings support field search, ritual history, and resumable setup replay"
   ) {
     const live = page.getByRole("dialog", { name: "Morning ritual", exact: true });
     await expect(live).toBeVisible({ timeout: 15000 });
-    await live.getByRole("button", { name: "Complete Morning Ritual" }).click();
-    await live.getByRole("button", { name: "Finish ritual" }).click();
+    await live.getByRole("button", { name: "Done" }).click();
+    await live.getByRole("button", { name: "Done" }).click();
     await expect(live).toHaveCount(0);
   }
   await expect(page.getByLabel("Prompt", { exact: true }).first()).toHaveValue("Morning water");
@@ -137,14 +137,14 @@ test("settings support field search, ritual history, and resumable setup replay"
       image: getComputedStyle(element).backgroundImage,
       color: getComputedStyle(element).backgroundColor,
     })),
-  ).toEqual({ image: "none", color: "rgb(203, 220, 229)" });
-  await expect(preview.getByRole("button", { name: "Complete Morning Ritual" })).toBeEnabled();
-  await preview.getByRole("button", { name: "Complete Morning Ritual" }).click();
+  ).toEqual({ image: "none", color: "rgb(135, 206, 250)" });
+  await expect(preview.getByRole("button", { name: "Done" })).toBeEnabled();
+  await preview.getByRole("button", { name: "Done" }).click();
   await preview.getByRole("checkbox", { name: "Remind me about these later" }).check();
   await expect(preview.getByLabel("Reminder time")).toHaveValue("13:30");
   await preview.getByLabel("Reminder time").fill("14:00");
   expect(await preview.evaluate((e) => e.scrollWidth <= e.clientWidth + 1)).toBe(true);
-  await preview.getByRole("button", { name: "Finish ritual" }).click();
+  await preview.getByRole("button", { name: "Done" }).click();
   await expect(preview).toHaveCount(0);
   await page.getByRole("radio", { name: "History and data", exact: true }).click();
   await expect(page.getByRole("region", { name: "Ritual history" })).toBeVisible();
@@ -323,12 +323,12 @@ test("browser rituals preserve the current page and save real answers and option
     await ritual.getByRole("checkbox", { name: "Drink browser water" }).click();
     await expect(ritual.getByRole("checkbox", { name: "Drink browser water" })).toBeChecked();
     await expect(ritual.getByLabel("Reminder time")).toHaveCount(0);
-    await ritual.getByRole("button", { name: "Complete Morning Ritual" }).click();
+    await ritual.getByRole("button", { name: "Done" }).click();
     await expect(ritual.getByRole("region", { name: "Ritual progress" })).toHaveCount(0);
     await expect(ritual.getByText("Saved to your account", { exact: true })).toHaveCount(0);
     await ritual.getByRole("checkbox", { name: "Remind me about these later" }).check();
     await ritual.getByLabel("Reminder time").fill("23:59");
-    await ritual.getByRole("button", { name: "Finish ritual" }).click();
+    await ritual.getByRole("button", { name: "Done" }).click();
     await expect(ritual).toHaveCount(0);
     await expect(search).toBeVisible();
     await expect(search).toHaveValue("calendar");

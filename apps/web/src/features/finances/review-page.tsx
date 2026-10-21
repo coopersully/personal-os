@@ -12,6 +12,7 @@ import { useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { CircleCheckIcon } from "@/components/icons";
 import { SearchableSelect } from "@/components/searchable-select";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/settings-field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,7 +25,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
 import {
   Item,
   ItemActions,

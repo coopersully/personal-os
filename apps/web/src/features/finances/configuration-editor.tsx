@@ -34,8 +34,8 @@ export function FinanceConfigurationEditor() {
   const profile = query.data.profile.value;
   return (
     <div className="settings-stack">
-      <SettingsSection title="Household" description="Your financial household and location.">
-        <div className="grid gap-4 sm:grid-cols-2">
+      <SettingsSection layout="rows" title="Household" description="Your financial household and location.">
+        <div className="flex flex-col">
           <Setting
             id="jurisdiction"
             label="Country and state or region"
@@ -58,8 +58,8 @@ export function FinanceConfigurationEditor() {
           />
         </div>
       </SettingsSection>
-      <SettingsSection title="Income">
-        <div className="grid gap-4 sm:grid-cols-2">
+      <SettingsSection layout="rows" title="Income">
+        <div className="flex flex-col">
           <Setting
             id="expectedMonthlyTakeHome"
             label="Expected monthly take-home"
@@ -130,8 +130,8 @@ export function FinanceConfigurationEditor() {
       </SettingsSection>
       <FinanceIncomeEditor />
       <FinanceConfigurationCollections profile={profile} />
-      <SettingsSection title="Reserves and preferences">
-        <div className="grid gap-4 sm:grid-cols-2">
+      <SettingsSection layout="rows" title="Reserves and preferences">
+        <div className="flex flex-col">
           <Setting
             id="liquidReserves"
             label="Liquid reserves"

@@ -41,7 +41,7 @@ export function MailConfiguration({
           title="Accounts & sync"
           action={
             <Button asChild variant="ghost" size="sm">
-              <Link to="/settings?section=connections">Manage accounts</Link>
+              <Link to="/settings?page=connections">Manage accounts</Link>
             </Button>
           }
         >
@@ -54,7 +54,7 @@ export function MailConfiguration({
                 metadata={<ConnectionHealthBadge health={account.health} />}
                 actions={
                   <SettingsRecordAction asChild label={`Manage ${account.label}`}>
-                    <Link to="/settings?section=connections">
+                    <Link to="/settings?page=connections">
                       <ChevronRightIcon />
                     </Link>
                   </SettingsRecordAction>

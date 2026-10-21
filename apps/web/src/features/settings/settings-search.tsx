@@ -13,13 +13,18 @@ import {
 } from "@/components/ui/dialog";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { settingsPath } from "@/features/settings/settings-routes";
 import { settingMatchScore, settingsFieldId, settingsFields } from "./settings-fields.js";
 
 export const settingsDescriptions = {
   security: "Manage your password, signed-in devices, permissions, and approvals.",
   setup: "Choose your setup preferences or revisit the guided experience.",
   profile: "Your profile, connected accounts, and workspace attention.",
+  "ritual-morning": "Configure your morning routine.",
+  "ritual-evening": "Configure your evening routine.",
+  "ritual-history": "Review past ritual entries.",
   rituals: "Shape your morning and evening routines.",
+  "completed-outcomes": "Review outcomes you’ve finished.",
   goals: "Choose the outcomes you want to work toward.",
   motives: "Keep what matters to you close to your plans.",
   reviews: "Review decisions and requests that need your approval.",
@@ -46,9 +51,13 @@ const searchTerms: Record<keyof typeof settingsDescriptions, string> = {
   setup: "onboarding workspaces welcome getting started",
   profile:
     "password security time zone timezone workday first last name email address location logout",
+  "ritual-morning": "morning routine checklist",
+  "ritual-evening": "evening night routine checklist",
+  "ritual-history": "past entries answers history",
   rituals:
     "checklist steps morning evening night schedule time zone timezone history tracking responses",
   goals: "priorities targets outcomes",
+  "completed-outcomes": "finished goals history completed",
   motives: "values purpose motivation",
   reviews: "approvals pending requests",
   appearance: "theme light dark system color mode",
@@ -161,7 +170,7 @@ export function SettingsSearch({ groups }: { groups: SettingsSearchGroup[] }) {
               {fieldResults.map(({ field, section }) => (
                 <Link
                   key={settingsFieldId(field)}
-                  to={`/settings?section=${field.section}&field=${encodeURIComponent(settingsFieldId(field))}`}
+                  to={`${settingsPath(field.section)}&field=${encodeURIComponent(settingsFieldId(field))}`}
                   className="settings-search-result"
                   onClick={() => {
                     fieldNavigation.current = true;
@@ -193,7 +202,7 @@ export function SettingsSearch({ groups }: { groups: SettingsSearchGroup[] }) {
                 {group.items.map(({ id, label, icon: SectionIcon }) => (
                   <Link
                     key={id}
-                    to={`/settings?section=${id}`}
+                    to={settingsPath(id)}
                     className="settings-search-result"
                     onClick={() => {
                       setOpen(false);

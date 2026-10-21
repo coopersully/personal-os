@@ -57,7 +57,7 @@ it("opens a setting field without modifying the underlying workspace filters whi
   expect(screen.getByLabelText("Current route")).toHaveTextContent("/calendar?view=week");
   await user.click(await screen.findByRole("option", { name: /Show weekends/ }));
   expect(screen.getByLabelText("Current route")).toHaveTextContent(
-    "/settings?section=calendar&field=calendar%3Ashow-weekends",
+    "/settings?page=calendar&field=calendar%3Ashow-weekends",
   );
 });
 it("launches creation and reviews through existing destinations", async () => {

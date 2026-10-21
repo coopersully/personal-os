@@ -60,7 +60,7 @@ func makeRitualBackdrop(frame: NSRect, kind: String, reduceMotion: Bool, reduceT
  let sky = NSView(frame: view.bounds)
  sky.wantsLayer = true
  sky.autoresizingMask = [.width, .height]
- sky.layer?.backgroundColor = NSColor(srgbRed: night ? 9.0/255 : 203.0/255, green: night ? 18.0/255 : 220.0/255, blue: night ? 48.0/255 : 229.0/255, alpha: 1).cgColor
+ sky.layer?.backgroundColor = NSColor(srgbRed: night ? 16.0/255 : 135.0/255, green: night ? 22.0/255 : 206.0/255, blue: night ? 34.0/255 : 250.0/255, alpha: 1).cgColor
  root.addSubview(sky)
  view.autoresizingMask = [.width, .height]
  root.addSubview(view)
@@ -72,7 +72,7 @@ func makeRitualBackdrop(frame: NSRect, kind: String, reduceMotion: Bool, reduceT
   skyFade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
   sky.layer?.add(skyFade, forKey: "ritual-sky-fade")
  }
- let tint = NSColor(srgbRed: night ? 9.0/255 : 203.0/255, green: night ? 18.0/255 : 220.0/255, blue: night ? 48.0/255 : 229.0/255, alpha: reduceTransparency ? 1 : (night ? 0.52 : 0.24))
+ let tint = NSColor(srgbRed: night ? 16.0/255 : 135.0/255, green: night ? 22.0/255 : 206.0/255, blue: night ? 34.0/255 : 250.0/255, alpha: reduceTransparency ? 1 : (night ? 0.52 : 0.24))
  // Keep the solid sky color above AppKit's private visual-effect layers.
  let colorView = NSView(frame: view.bounds)
  colorView.autoresizingMask = [.width, .height]

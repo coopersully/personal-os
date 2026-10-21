@@ -30,6 +30,7 @@ import {
   ResponsiveDialogTitle,
   ResponsiveDialogTrigger,
 } from "@/components/responsive-dialog";
+import { Field, FieldGroup, FieldLabel } from "@/components/settings-field";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -40,7 +41,6 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";

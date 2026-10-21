@@ -12,7 +12,7 @@ function Location() {
 }
 function setup() {
   render(
-    <MemoryRouter initialEntries={["/settings?section=rituals"]}>
+    <MemoryRouter initialEntries={["/settings?page=rituals"]}>
       <TooltipProvider>
         <SettingsSearch
           groups={[
@@ -55,7 +55,7 @@ describe("Settings search", () => {
     await user.click(screen.getByRole("button", { name: "Search settings" }));
     await user.type(screen.getByRole("searchbox"), "working hours");
     const start = screen.getByRole("link", { name: "Day start Account" });
-    expect(start).toHaveAttribute("href", "/settings?section=profile&field=profile%3Aday-start");
+    expect(start).toHaveAttribute("href", "/settings?page=profile&field=profile%3Aday-start");
     expect(screen.getByRole("link", { name: "Day end Account" })).toBeInTheDocument();
     await user.click(start);
     expect(screen.getByLabelText("Location")).toHaveTextContent("field=profile%3Aday-start");

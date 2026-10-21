@@ -1,3 +1,6 @@
+import { RecordDateEditor } from "./features/settings/record-date-editor";
+import { GoalProgressEditor } from "./features/settings/goal-progress-editor.js";
+import { settingsPath } from "@/features/settings/settings-routes";
 import {
   DayTimeline,
   localDateTimeAt,
@@ -7,6 +10,7 @@ import {
   type TodayTimelineDensity,
 } from "./features/calendar/day-timeline.js";
 import { calendarEventColorStyle } from "./features/calendar/event-color.js";
+import { settingsParents, settingsRoute } from "./features/settings/settings-routes";
 
 export {
   positionTimelineEvents,
@@ -124,6 +128,7 @@ import {
   ClockIcon,
   CloudIcon,
   CompassIcon,
+  ArrowRightIcon,
   CopyIcon,
   CopyPlusIcon,
   EditIcon,
@@ -147,8 +152,8 @@ import {
   MoonIcon,
   PaintBrushIcon,
   PauseIcon,
-  PinIcon,
   PlayIcon,
+  PinIcon,
   PlugIcon,
   PlusIcon,
   PulseIcon,
@@ -179,6 +184,15 @@ import {
   ResponsiveDialogTitle,
 } from "@/components/responsive-dialog";
 import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
+import {
+  Field as ShadcnField,
+  FieldContent as ShadcnFieldContent,
+  FieldDescription as ShadcnFieldDescription,
+  FieldGroup as ShadcnFieldGroup,
+  FieldLabel as ShadcnFieldLabel,
+  FieldLegend as ShadcnFieldLegend,
+  FieldSet as ShadcnFieldSet,
+} from "@/components/settings-field";
 import { SidebarItemMeta } from "@/components/sidebar-item-meta";
 import { TodayWorkspaceIcon, todayWeatherIcon } from "@/components/today-workspace-icon";
 import {
@@ -195,15 +209,7 @@ import {
 } from "@/components/ui/avatar";
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
 import { Button as ShadcnButton } from "@/components/ui/button";
-import {
-  Card as ShadcnCard,
-  CardAction as ShadcnCardAction,
-  CardContent as ShadcnCardContent,
-  CardDescription as ShadcnCardDescription,
-  CardHeader as ShadcnCardHeader,
-  CardTitle as ShadcnCardTitle,
-} from "@/components/ui/card";
-import { Checkbox as ShadcnCheckbox } from "@/components/ui/checkbox";
+import { Card as ShadcnCard, CardContent as ShadcnCardContent } from "@/components/ui/card";
 import {
   Collapsible as ShadcnCollapsible,
   CollapsibleContent as ShadcnCollapsibleContent,
@@ -245,15 +251,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Field as ShadcnField,
-  FieldContent as ShadcnFieldContent,
-  FieldDescription as ShadcnFieldDescription,
-  FieldGroup as ShadcnFieldGroup,
-  FieldLabel as ShadcnFieldLabel,
-  FieldLegend as ShadcnFieldLegend,
-  FieldSet as ShadcnFieldSet,
-} from "@/components/ui/field";
 import { Input as ShadcnInput } from "@/components/ui/input";
 import {
   InputGroup,
@@ -319,6 +316,7 @@ import { useConfirmAction } from "./components/confirm-action.js";
 import { FeedbackForm } from "./components/feedback-form.js";
 import { MobileWorkspaceDock } from "./components/mobile-workspace-dock.js";
 import { MutationFeedback } from "./components/mutation-feedback.js";
+import { RecordSummaryTrial } from "./features/settings/record-summary-trial.js";
 import { SettingsRecord, SettingsRecordAction } from "./components/settings-record.js";
 import { WorkspaceAppBar } from "./components/workspace-app-bar.js";
 import { WorkspaceHeaderControlsSlot } from "./components/workspace-header-controls.js";
@@ -378,12 +376,11 @@ import {
   WorkspaceSettings,
   type WorkspaceSettingsActions,
 } from "./features/settings/agent-access.js";
+import { ProfileChoice } from "./features/settings/profile-choice.js";
+import { ProfileInlineField } from "./features/settings/profile-inline-field.js";
+import { ProfileRow, ProfileSection } from "./features/settings/profile-rows.js";
 import { RelatedSettings } from "./features/settings/related-settings.js";
-import {
-  SettingsBento,
-  SettingsPageLayout,
-  SettingsSection,
-} from "./features/settings/settings-layout.js";
+import { SettingsPageLayout, SettingsSection } from "./features/settings/settings-layout.js";
 import { SettingsSearch, settingsDescriptions } from "./features/settings/settings-search.js";
 import { SetupSettings } from "./features/settings/setup-settings.js";
 import { useSettingsSidebarCounts } from "./features/settings/sidebar-counts.js";
@@ -1753,16 +1750,16 @@ function WorkspaceRoutes({
       <Route path="/mail/review" element={<LegacyReviewRedirect workspace="mail" />} />
       <Route
         path="/automations"
-        element={<Navigate replace to="/settings?section=workspace-access" />}
+        element={<Navigate replace to="/settings?page=security&subpage=workspace-access" />}
       />
       <Route path="/activity" element={<LegacySettingsRedirect section="activity" />} />
-      <Route path="/reviews" element={<Navigate replace to="/settings?section=profile" />} />
+      <Route path="/reviews" element={<Navigate replace to="/settings?page=profile" />} />
       <Route path="/goals" element={<LegacySettingsRedirect section="goals" />} />
       <Route path="/motives" element={<LegacySettingsRedirect section="motives" />} />
       <Route path="/finances/review/*" element={<LegacyReviewRedirect workspace="finances" />} />
       <Route
         path="/finances/profile"
-        element={<Navigate replace to="/settings?section=finances#guidance" />}
+        element={<Navigate replace to="/settings?page=finances#guidance" />}
       />
       <Route
         path="/finances/*"
@@ -1786,6 +1783,7 @@ function LegacySettingsRedirect({ section }: { section: SettingsSectionId }) {
 }
 
 function SidebarNavigationItem({
+  contextMenu,
   badge,
   count,
   icon: Icon,
@@ -1793,11 +1791,15 @@ function SidebarNavigationItem({
   label,
   onNavigate,
   path,
-}: NavigationItemDefinition & { isActive?: boolean; onNavigate: () => void }) {
+}: NavigationItemDefinition & {
+  isActive?: boolean;
+  onNavigate: () => void;
+  contextMenu?: ReactNode;
+}) {
   const location = useLocation();
   const isActive = explicitIsActive ?? location.pathname === path;
   const workspaceId = workspaceIdForPath(path);
-  return (
+  const row = (
     <ShadcnSidebarMenuItem>
       <ShadcnSidebarMenuButton
         className={badge || count !== undefined ? "sidebar-item-with-meta" : undefined}
@@ -1817,14 +1819,22 @@ function SidebarNavigationItem({
       <SidebarItemMeta attention={Boolean(badge)} count={count} label={label} />
     </ShadcnSidebarMenuItem>
   );
+  return contextMenu ? (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+      <ContextMenuContent><ContextMenuLabel>{label}</ContextMenuLabel><ContextMenuSeparator />{contextMenu}</ContextMenuContent>
+    </ContextMenu>
+  ) : (
+    row
+  );
 }
 
 const navigationIcons = {
   Profile: UserCircleIcon,
-  "Security & access": LockIcon,
-  "Activity log": PulseIcon,
+  "Security & Access": LockIcon,
+  "Activity Log": PulseIcon,
   Account: UserCircleIcon,
-  "Connected agents": PlugIcon,
+  "Connected Agents": PlugIcon,
   Appearance: PaintBrushIcon,
   Calendar: CalendarIcon,
   Calendars: CalendarIcon,
@@ -1840,7 +1850,7 @@ const navigationIcons = {
   Tasks: ListChecksIcon,
   Today: HouseIcon,
   Wallpaper: ImageIcon,
-  "Workspace access": ShieldCheckIcon,
+  "Workspace Access": ShieldCheckIcon,
   Activity: PulseIcon,
   Reviews: ShieldCheckIcon,
 } as const;
@@ -1867,7 +1877,7 @@ function NavigationIcon({
       />
     );
   }
-  return <OutlineIcon aria-hidden="true" className={className} />;
+  return <OutlineIcon aria-hidden="true" className={className} weight={active ? "Filled" : "Outline"} data-navigation-icon-weight={active ? "fill" : "regular"} />;
 }
 
 function WorkspaceAppBarForRoute({
@@ -3208,7 +3218,7 @@ function CalendarPage({
     toast.warning(`Reconnect ${reconnectingAccounts.length === 1 ? "an account" : "accounts"}`, {
       action: {
         label: "Review connections",
-        onClick: () => navigate("/settings?section=connections"),
+        onClick: () => navigate("/settings?page=connections"),
       },
       description: `${reconnectingAccountLabels} needs authorization before new information can sync.`,
       id: toastId,
@@ -3439,7 +3449,7 @@ function CalendarAccountsControl() {
             ) : null}
             {attentionCount > 0 ? (
               <ShadcnButton asChild className="w-full">
-                <Link to="/settings?section=connections">
+                <Link to="/settings?page=connections">
                   {reconnectAccountsLabel(attentionCount)}
                 </Link>
               </ShadcnButton>
@@ -5272,7 +5282,7 @@ function MonthCalendarView({
   );
 }
 
-function GoalsPage() {
+function GoalsPage({ completedOnly = false }: { completedOnly?: boolean }) {
   const { confirm, confirmation } = useConfirmAction();
   const queryClient = useQueryClient();
   const goals = useQuery({ queryFn: api.listGoals, queryKey: ["goals"] });
@@ -5314,49 +5324,75 @@ function GoalsPage() {
     return <InlineError error={goals.error} retry={goals.refetch} />;
   return (
     <div className="settings-stack">
+      {!completedOnly ? <h2 className="px-1 text-xs font-medium text-muted-foreground">Goals</h2> : null}
       <QueryFeedback query={goals} title="Couldn’t refresh goals." staleOnly />
       <Dialog open={creating} onOpenChange={setCreating}>
-        <ShadcnCard>
-          <ShadcnCardHeader>
-            <ShadcnCardTitle>Active outcomes</ShadcnCardTitle>
-            <ShadcnCardAction>
-              <DialogTrigger asChild>
-                <SettingsRecordAction label="Add goal">
-                  <PlusIcon />
-                </SettingsRecordAction>
-              </DialogTrigger>
-            </ShadcnCardAction>
-            <ShadcnCardDescription>
-              Keep the list short enough to make tradeoffs clear.
-            </ShadcnCardDescription>
-          </ShadcnCardHeader>
-          <ShadcnCardContent>
-            {goals.data.length === 0 ? (
-              <EmptyState icon={<TargetIcon />} title="Set a direction">
-                Create one outcome you want your daily decisions to support.
-              </EmptyState>
-            ) : (
-              <ShadcnItemGroup>
-                {goals.data.map((goal) => (
-                  <GoalItem
-                    goal={goal}
-                    key={goal.id}
-                    onDelete={() =>
-                      confirm({
-                        title: "Delete goal?",
-                        description: "This permanently deletes the goal.",
-                        actionLabel: "Delete goal",
-                        onConfirm: () => remove.mutate(goal.id),
-                      })
-                    }
-                    onUpdate={(input) => update.mutate({ id: goal.id, input })}
-                    pending={update.isPending || remove.isPending}
-                  />
-                ))}
-              </ShadcnItemGroup>
-            )}
-          </ShadcnCardContent>
-        </ShadcnCard>
+        {!completedOnly ? <SettingsSection
+          layout="rows"
+          title="Active Outcomes"
+          icon={<TargetIcon />}
+          description="Outcomes you’re working toward. Share them as context with authorized agents to help connect daily decisions to what matters to you."
+          action={
+            <DialogTrigger asChild>
+              <SettingsRecordAction label="Add goal">
+                <PlusIcon />
+              </SettingsRecordAction>
+            </DialogTrigger>
+          }
+        >
+          {goals.data.filter((goal) => goal.status !== "completed").length === 0 ? (
+            <EmptyState icon={<TargetIcon />} title="Set a direction">
+              Create one outcome you want your daily decisions to support.
+            </EmptyState>
+          ) : (
+            <ShadcnItemGroup className="gap-0 overflow-hidden rounded-[inherit]">
+              {goals.data.filter((goal) => goal.status !== "completed").map((goal) => (
+                <GoalItem
+                  goal={goal}
+                  key={goal.id}
+                  onDelete={() =>
+                    confirm({
+                      title: "Delete goal?",
+                      description: "This permanently deletes the goal.",
+                      actionLabel: "Delete goal",
+                      onConfirm: () => remove.mutate(goal.id),
+                    })
+                  }
+                  onUpdate={(input) => update.mutateAsync({ id: goal.id, input })}
+                  pending={update.isPending || remove.isPending}
+                />
+              ))}
+            </ShadcnItemGroup>
+          )}
+        </SettingsSection> : null}
+        {!completedOnly ? <div className="flex justify-end">
+          <ShadcnButton asChild variant="secondary" size="sm">
+            <Link to={settingsSectionPath("completed-outcomes")}>Completed Outcomes <ArrowRightIcon aria-hidden="true" /></Link>
+          </ShadcnButton>
+        </div> : null}
+        {completedOnly ? (
+          <SettingsSection layout="rows" title="Completed Outcomes" icon={<CheckIcon />} description="Outcomes you’ve finished. Keep them as a record of progress and context you can share with agents, separate from your current priorities.">
+            <ShadcnItemGroup className="gap-0 overflow-hidden rounded-[inherit]">
+              {!goals.data.some((goal) => goal.status === "completed") ? <p className="p-4 text-sm text-muted-foreground">No completed outcomes yet.</p> : null}
+              {goals.data.filter((goal) => goal.status === "completed").map((goal) => (
+                <GoalItem
+                  goal={goal}
+                  key={goal.id}
+                  onDelete={() =>
+                    confirm({
+                      title: "Delete goal?",
+                      description: "This permanently deletes the goal.",
+                      actionLabel: "Delete goal",
+                      onConfirm: () => remove.mutate(goal.id),
+                    })
+                  }
+                  onUpdate={(input) => update.mutateAsync({ id: goal.id, input })}
+                  pending={update.isPending || remove.isPending}
+                />
+              ))}
+            </ShadcnItemGroup>
+          </SettingsSection>
+        ) : null}
         <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>New goal</DialogTitle>
@@ -5427,60 +5463,46 @@ function GoalItem({
 }: {
   goal: Goal;
   onDelete: () => void;
-  onUpdate: (input: Parameters<typeof api.updateGoal>[1]) => void;
+  onUpdate: (input: Parameters<typeof api.updateGoal>[1]) => Promise<unknown>;
   pending: boolean;
 }) {
   return (
-    <SettingsRecord
+    <RecordSummaryTrial
+      editing={{ pending, description: goal.description ?? "", saveTitle: (title) => onUpdate({ title }), saveDescription: (description) => onUpdate({ description: description || null }) }}
+      kind="Goal"
       title={goal.title}
+      progress={goal.progress}
+      inactive={goal.status === "paused"}
+      completed={goal.status === "completed"}
+      value={null}
+      summary={[goal.status === "paused" ? "Paused" : null, goal.targetDate ? `Target ${formatCalendarDate(goal.targetDate)}` : null].filter(Boolean).join(" · ")}
+      details={
+        <div className="space-y-5">
+          <dl className="space-y-2 text-sm">
+            <dt className="settings-detail-heading">Target date</dt>
+            <dd className="text-muted-foreground"><RecordDateEditor value={goal.targetDate ?? ""} pending={pending} onSave={(targetDate) => onUpdate({ targetDate: targetDate || null })} /></dd>
+          </dl>
+          <GoalProgressEditor value={goal.progress} pending={pending} onSave={(progress) => { void onUpdate({ progress, ...(progress === 100 ? { status: "completed" } : goal.status === "completed" ? { status: "active" } : {}) }).catch(() => {}); }} />
+        </div>
+      }
       description={goal.description ?? "No supporting context yet."}
       actions={
         <>
+          <ShadcnButton variant="destructive" aria-label={`Remove ${goal.title}`} disabled={pending} onClick={onDelete}>
+            Delete
+          </ShadcnButton>
           {goal.status === "active" || goal.status === "paused" ? (
-            <SettingsRecordAction
-              label={goal.status === "paused" ? "Resume" : "Pause"}
+            <ShadcnButton variant="secondary"
               disabled={pending}
-              onClick={() => onUpdate({ status: goal.status === "paused" ? "active" : "paused" })}
+              onClick={() => { void onUpdate({ status: goal.status === "paused" ? "active" : "paused" }).catch(() => {}); }}
             >
-              {goal.status === "paused" ? <PlayIcon /> : <PauseIcon />}
-            </SettingsRecordAction>
-          ) : null}
-          <SettingsRecordAction
-            label={`Remove ${goal.title}`}
-            disabled={pending}
-            onClick={onDelete}
-          >
-            <TrashIcon />
-          </SettingsRecordAction>
-        </>
-      }
-      metadata={
-        <>
-          <ShadcnBadge variant="secondary">
-            {goal.status.charAt(0).toUpperCase() + goal.status.slice(1)}
-          </ShadcnBadge>
-          <ShadcnBadge asChild variant="secondary">
-            <button
-              type="button"
-              title="Advance progress by 10%"
-              disabled={pending}
-              onClick={() =>
-                onUpdate({
-                  progress: Math.min(100, goal.progress + 10),
-                  ...(goal.progress >= 90 ? { status: "completed" } : {}),
-                })
-              }
-            >
-              {goal.progress}%
-            </button>
-          </ShadcnBadge>
-          {goal.targetDate ? (
-            <span>
-              Target <time dateTime={goal.targetDate}>{formatCalendarDate(goal.targetDate)}</time>
-            </span>
+              {goal.status === "paused" ? <PlayIcon aria-hidden="true" /> : <PauseIcon aria-hidden="true" />}
+              {goal.status === "paused" ? "Resume" : "Pause"}
+            </ShadcnButton>
           ) : null}
         </>
       }
+
     />
   );
 }
@@ -5519,72 +5541,67 @@ function MotivesPage() {
     return <InlineError error={motives.error} retry={motives.refetch} />;
   return (
     <div className="settings-stack">
+      <h2 className="px-1 text-xs font-medium text-muted-foreground">Motives</h2>
       <QueryFeedback query={motives} title="Couldn’t refresh motives." staleOnly />
       <Dialog open={creating} onOpenChange={setCreating}>
-        <ShadcnCard>
-          <ShadcnCardHeader>
-            <ShadcnCardTitle>Decision context</ShadcnCardTitle>
-            <ShadcnCardAction>
-              <DialogTrigger asChild>
-                <SettingsRecordAction label="Add motive">
-                  <PlusIcon />
-                </SettingsRecordAction>
-              </DialogTrigger>
-            </ShadcnCardAction>
-            <ShadcnCardDescription>
-              Keep only the principles you want surfaced during planning.
-            </ShadcnCardDescription>
-          </ShadcnCardHeader>
-          <ShadcnCardContent>
-            {motives.data.length === 0 ? (
-              <EmptyState icon={<CompassIcon />} title="Name what matters">
-                Add a value or reason that should inform your priorities.
-              </EmptyState>
-            ) : (
-              <ShadcnItemGroup>
-                {motives.data.map((motive) => (
-                  <SettingsRecord
-                    key={motive.id}
-                    title={motive.title}
-                    description={motive.detail ?? "No additional context."}
-                    metadata={
-                      <ShadcnBadge variant="secondary">
-                        {motive.isActive ? "Active" : "Paused"}
-                      </ShadcnBadge>
-                    }
-                    actions={
-                      <>
-                        <SettingsRecordAction
-                          label={motive.isActive ? "Pause" : "Resume"}
-                          disabled={update.isPending}
-                          onClick={() =>
-                            update.mutate({ id: motive.id, input: { isActive: !motive.isActive } })
-                          }
-                        >
-                          {motive.isActive ? <PauseIcon /> : <PlayIcon />}
-                        </SettingsRecordAction>
-                        <SettingsRecordAction
-                          label={`Remove ${motive.title}`}
-                          disabled={remove.isPending}
-                          onClick={() =>
-                            confirm({
-                              title: "Delete motive?",
-                              description: "This permanently deletes the motive.",
-                              actionLabel: "Delete motive",
-                              onConfirm: () => remove.mutate(motive.id),
-                            })
-                          }
-                        >
-                          <TrashIcon />
-                        </SettingsRecordAction>
-                      </>
-                    }
-                  />
-                ))}
-              </ShadcnItemGroup>
-            )}
-          </ShadcnCardContent>
-        </ShadcnCard>
+        <SettingsSection
+          layout="rows"
+          title="Decision Context"
+          icon={<CompassIcon />}
+          description="Values and reasons behind your priorities. Share this context with authorized agents to help them understand what matters to you."
+          action={
+            <DialogTrigger asChild>
+              <SettingsRecordAction label="Add motive">
+                <PlusIcon />
+              </SettingsRecordAction>
+            </DialogTrigger>
+          }
+        >
+          {motives.data.length === 0 ? (
+            <EmptyState icon={<CompassIcon />} title="Name what matters">
+              Add a value or reason that should inform your priorities.
+            </EmptyState>
+          ) : (
+            <ShadcnItemGroup className="gap-0 overflow-hidden rounded-[inherit]">
+              {motives.data.map((motive) => (
+                <RecordSummaryTrial
+                  editing={{ pending: update.isPending, description: motive.detail ?? "", saveTitle: (title) => update.mutateAsync({ id: motive.id, input: { title } }), saveDescription: (detail) => update.mutateAsync({ id: motive.id, input: { detail: detail || null } }) }}
+                  inactive={!motive.isActive}
+                  kind="Motive"
+                  key={motive.id}
+                  title={motive.title}
+                  summary={motive.detail}
+                  value={motive.isActive ? null : "Paused"}
+                  description={motive.detail ?? "No additional context."}
+                  actions={
+                    <>
+                      <ShadcnButton
+                        variant="destructive"
+                        aria-label={`Remove ${motive.title}`}
+                        disabled={remove.isPending}
+                        onClick={() =>
+                          confirm({
+                            title: "Delete motive?",
+                            description: "This permanently deletes the motive.",
+                            actionLabel: "Delete motive",
+                            onConfirm: () => remove.mutate(motive.id),
+                          })
+                        }
+                      >Delete</ShadcnButton>
+                      <ShadcnButton variant="secondary"
+                        disabled={update.isPending}
+                        onClick={() => update.mutate({ id: motive.id, input: { isActive: !motive.isActive } })}
+                      >
+                        {motive.isActive ? <PauseIcon aria-hidden="true" /> : <PlayIcon aria-hidden="true" />}
+                        {motive.isActive ? "Pause" : "Resume"}
+                      </ShadcnButton>
+                    </>
+                  }
+                />
+              ))}
+            </ShadcnItemGroup>
+          )}
+        </SettingsSection>
         <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>New motive</DialogTitle>
@@ -5714,7 +5731,7 @@ function MailAccountsControl() {
             ) : null}
             {attentionCount > 0 ? (
               <ShadcnButton asChild className="w-full">
-                <Link to="/settings?section=connections">
+                <Link to="/settings?page=connections">
                   {reconnectAccountsLabel(attentionCount)}
                 </Link>
               </ShadcnButton>
@@ -5734,7 +5751,7 @@ function MailAccountsControl() {
                 key={account.id}
                 orientation="horizontal"
               >
-                <ShadcnCheckbox
+                <ShadcnSwitch
                   aria-label={`${selected ? "Hide" : "Show"} ${accountLabel}`}
                   checked={selected}
                   disabled={selected && selectedIds.size === 1}
@@ -5934,6 +5951,10 @@ function MailSyncButton({
 }
 
 type SettingsSectionId =
+  | "ritual-morning"
+  | "ritual-evening"
+  | "ritual-history"
+  | "completed-outcomes"
   | "security"
   | "setup"
   | "activity"
@@ -5964,10 +5985,14 @@ const secondarySettings: Array<{
   label: string;
   parent: SettingsSectionId;
 }> = [
+  { icon: SunIcon, id: "ritual-morning", label: "Morning", parent: "rituals" },
+  { icon: MoonIcon, id: "ritual-evening", label: "Evening", parent: "rituals" },
+  { icon: ActivityIcon, id: "ritual-history", label: "History", parent: "rituals" },
+  { icon: CheckIcon, id: "completed-outcomes", label: "Completed Outcomes", parent: "goals" },
   { icon: SparklesIcon, id: "setup", label: "Setup", parent: "profile" },
-  { icon: PlugIcon, id: "agent-connections", label: "Connected agents", parent: "connections" },
-  { icon: ShieldCheckIcon, id: "workspace-access", label: "Workspace access", parent: "security" },
-  { icon: LockIcon, id: "sessions", label: "Signed-in devices", parent: "security" },
+  { icon: PlugIcon, id: "agent-connections", label: "Connected Agents", parent: "connections" },
+  { icon: ShieldCheckIcon, id: "workspace-access", label: "Workspace Access", parent: "security" },
+  { icon: LockIcon, id: "sessions", label: "Signed-In Devices", parent: "security" },
   { icon: UserIcon, id: "invitations", label: "Invitations", parent: "security" },
 ];
 const settingsNavigation: Array<{
@@ -5979,15 +6004,14 @@ const settingsNavigation: Array<{
     items: [
       { icon: UserIcon, id: "profile", label: "Profile" },
       { icon: CloudIcon, id: "connections", label: "Connections" },
-      { icon: LockIcon, id: "security", label: "Security & access" },
-      { icon: ActivityIcon, id: "activity", label: "Activity log" },
+      { icon: LockIcon, id: "security", label: "Security & Access" },
+      { icon: ActivityIcon, id: "activity", label: "Activity Log" },
     ],
   },
   {
     label: "Personal",
     items: [
-      { icon: TargetIcon, id: "goals", label: "Goals" },
-      { icon: CompassIcon, id: "motives", label: "Motives" },
+      { icon: TargetIcon, id: "goals", label: "Goals & Motives" },
       { icon: SparklesIcon, id: "rituals", label: "Rituals" },
     ],
   },
@@ -6007,8 +6031,8 @@ const settingsNavigation: Array<{
       { icon: PulseIcon, id: "notifications", label: "Notifications" },
       { ...textingSettingsNavigationItem, id: "texting", label: "Texting" },
       { icon: ImageIcon, id: "wallpaper", label: "Wallpaper" },
-      { icon: MonitorIcon, id: "desktop", label: "Desktop app" },
-      { icon: SparklesIcon, id: "pet", label: "Desktop pet" },
+      { icon: MonitorIcon, id: "desktop", label: "Desktop App" },
+      { icon: SparklesIcon, id: "pet", label: "Desktop Pet" },
     ],
   },
 ];
@@ -6018,7 +6042,7 @@ const settingsSectionIds = new Set<SettingsSectionId>([
   "reviews",
 ]);
 function settingsParent(section: SettingsSectionId): SettingsSectionId {
-  return secondarySettings.find((item) => item.id === section)?.parent ?? section;
+  return (settingsParents[section] as SettingsSectionId | undefined) ?? section;
 }
 function searchableSettingsNavigation(canManageInvitations: boolean) {
   return [
@@ -6035,7 +6059,7 @@ function searchableSettingsNavigation(canManageInvitations: boolean) {
 }
 
 function settingsSectionFromSearch(search: string): SettingsSectionId {
-  const requestedSection = new URLSearchParams(search).get("section");
+  const requestedSection = settingsRoute(search);
   return requestedSection === "account"
     ? "profile"
     : requestedSection === "calendars"
@@ -6048,7 +6072,7 @@ function settingsSectionFromSearch(search: string): SettingsSectionId {
 }
 
 export function settingsSectionPath(section: SettingsSectionId): string {
-  return `/settings?section=${section}`;
+  return settingsPath(section);
 }
 
 function settingsSectionLabel(section: SettingsSectionId): string {
@@ -6085,7 +6109,10 @@ function settingsSectionPages(
       const badge = workspaceActionBadge(id, workspaceActions);
       return {
         ...(badge ? { badge } : {}),
-        count: id === "connections" || id === "agent-connections" ? counts[id] : undefined,
+        count:
+          id === "connections" || id === "agent-connections" || id === "goals" || id === "motives"
+            ? counts[id]
+            : undefined,
         icon,
         label,
         path: settingsSectionPath(id),
@@ -6131,7 +6158,34 @@ function SettingsSidebarNavigation({
                     <SidebarNavigationItem
                       {...(badge ? { badge } : {})}
                       count={
-                        id === "connections" || id === "agent-connections" ? counts[id] : undefined
+                        id === "connections" ||
+                        id === "agent-connections" ||
+                        id === "goals" ||
+                        id === "motives"
+                          ? counts[id]
+                          : undefined
+                      }
+                      contextMenu={
+                        secondarySettings.some(
+                          (child) =>
+                            child.parent === id &&
+                            (child.id !== "invitations" || canManageInvitations),
+                        )
+                          ? secondarySettings
+                              .filter(
+                                (child) =>
+                                  child.parent === id &&
+                                  (child.id !== "invitations" || canManageInvitations),
+                              )
+                              .map(({ id: childId, label: childLabel, icon: ChildIcon }) => (
+                                <ContextMenuItem key={childId} asChild>
+                                  <Link to={settingsSectionPath(childId)} onClick={onNavigate}>
+                                    <ChildIcon aria-hidden="true" />
+                                    {childLabel}
+                                  </Link>
+                                </ContextMenuItem>
+                              ))
+                          : undefined
                       }
                       icon={icon}
                       isActive={settingsParent(section) === id}
@@ -6167,43 +6221,73 @@ function SettingsPageContent({
   user: User;
 }) {
   const location = useLocation();
-  const requestedSection = new URLSearchParams(location.search).get("section");
-  if (requestedSection === "agents" || requestedSection === "automations") {
-    const next = new URLSearchParams(location.search);
-    next.set("section", "workspace-access");
-    return <Navigate replace to={`/settings?${next.toString()}`} />;
-  }
-  if (requestedSection === "calendars") {
-    const next = new URLSearchParams(location.search);
-    next.set("section", "calendar");
-    return <Navigate replace to={`/settings?${next.toString()}`} />;
-  }
   const section = settingsSectionFromSearch(location.search);
+  const canonical = new URLSearchParams(location.search);
+  const destination = new URLSearchParams(settingsSectionPath(section).split("?")[1]);
+  canonical.delete("section");
+  canonical.delete("page");
+  canonical.delete("subpage");
+  for (const [key, value] of canonical) destination.append(key, value);
+  if (location.search !== `?${destination}`) {
+    return <Navigate replace to={`/settings?${destination}${location.hash}`} />;
+  }
   const legacyRule = new URLSearchParams(location.search).get("reviewRule");
   if (section === "mail" && legacyRule)
     return (
       <Navigate
         replace
-        to={`/settings?section=mail&review=${encodeURIComponent(`mail-rule:${legacyRule}`)}`}
+        to={`/settings?page=mail&review=${encodeURIComponent(`mail-rule:${legacyRule}`)}`}
       />
     );
   if (section === "reviews") {
     const next = new URLSearchParams(location.search);
     next.delete("section");
+    next.delete("page");
+    next.delete("subpage");
     return <Navigate replace to={`/reviews${next.size ? `?${next}` : ""}`} />;
   }
   if (section === "wallpaper" && !isTauri()) {
-    return <Navigate replace to="/settings?section=appearance" />;
+    return <Navigate replace to="/settings?page=appearance" />;
   }
   if (["pet", "notifications"].includes(section) && !isTauri()) {
-    return <Navigate replace to="/settings?section=desktop" />;
+    return <Navigate replace to="/settings?page=desktop" />;
   }
   if (section === "invitations" && user.canManageInvitations !== true) {
-    return <Navigate replace to="/settings?section=profile" />;
+    return <Navigate replace to="/settings?page=profile" />;
   }
+  const SectionIcon =
+    [...settingsNavigation.flatMap((group) => group.items), ...secondarySettings].find(
+      (item) => item.id === section,
+    )?.icon ?? SettingsIcon;
+  const ParentIcon =
+    settingsNavigation
+      .flatMap((group) => group.items)
+      .find((item) => item.id === settingsParent(section))?.icon ?? SectionIcon;
   return (
     <SettingsPageLayout
       key={section}
+      back={
+        settingsParent(section) !== section
+          ? {
+              to: settingsSectionPath(settingsParent(section)),
+              label: `Back to ${settingsSectionLabel(settingsParent(section))}`,
+            }
+          : undefined
+      }
+      showHeader={section !== "profile" && section !== "goals" && section !== "motives"}
+      section={section}
+      icon={
+        settingsParent(section) !== section ? (
+          <>
+            <ParentIcon weight="Filled" />
+            <span className="settings-page__subpage-icon">
+              <SectionIcon weight="Filled" />
+            </span>
+          </>
+        ) : (
+          <SectionIcon weight="Filled" />
+        )
+      }
       actions={
         section === "calendar" ||
         section === "tasks" ||
@@ -6218,13 +6302,6 @@ function SettingsPageContent({
         <SettingsSearch groups={searchableSettingsNavigation(user.canManageInvitations === true)} />
       }
     >
-      {settingsParent(section) !== section ? (
-        <ShadcnButton asChild variant="ghost" size="sm">
-          <Link to={settingsSectionPath(settingsParent(section))}>
-            Back to {settingsSectionLabel(settingsParent(section))}
-          </Link>
-        </ShadcnButton>
-      ) : null}
       {section === "mail" ? (
         <div className="settings-stack">
           <WorkspacePreferencesSection workspace="mail" />
@@ -6263,7 +6340,7 @@ function SettingsPageContent({
             title="Assistants"
             items={[
               {
-                label: "Connected agents",
+                label: "Connected Agents",
                 description: "Manage assistant connections, credentials, and granted permissions.",
                 section: "agent-connections",
               },
@@ -6278,12 +6355,12 @@ function SettingsPageContent({
             title="Access"
             items={[
               {
-                label: "Signed-in devices",
+                label: "Signed-In Devices",
                 description: "Review active sessions and revoke devices you no longer use.",
                 section: "sessions",
               },
               {
-                label: "Workspace access",
+                label: "Workspace Access",
                 description: "Inspect permissions by workspace and manage approval policy.",
                 section: "workspace-access",
               },
@@ -6318,29 +6395,13 @@ function SettingsPageContent({
           <ThemeSettings user={user} />
         </div>
       ) : null}
-      {section === "rituals" ? <RitualSettings timeZone={user.planningTimezone} /> : null}
-      {section === "goals" ? <GoalsPage /> : null}
-      {section === "motives" ? <MotivesPage /> : null}
-      {section === "profile" ? (
-        <div className="settings-stack">
-          <ProfileSettings user={user} />
-          <RelatedSettings
-            title="Account preferences"
-            items={[
-              {
-                label: "Setup",
-                description: "Change setup preferences or revisit the guided experience.",
-                section: "setup",
-              },
-              {
-                label: "Security & access",
-                description: "Manage your password, devices, and permissions.",
-                section: "security",
-              },
-            ]}
-          />
-        </div>
-      ) : null}
+      {section === "rituals" ? <RitualSettings view="overview" timeZone={user.planningTimezone} /> : null}
+      {section === "ritual-morning" ? <RitualSettings view="morning" content="checklist" timeZone={user.planningTimezone} /> : null}
+      {section === "ritual-evening" ? <RitualSettings view="night" content="checklist" timeZone={user.planningTimezone} /> : null}
+      {section === "ritual-history" ? <RitualSettings view="history" timeZone={user.planningTimezone} /> : null}
+      {section === "completed-outcomes" ? <GoalsPage completedOnly /> : null}
+      {section === "goals" ? <div className="settings-stack"><GoalsPage /><MotivesPage /></div> : null}
+      {section === "profile" ? <ProfileSettings user={user} /> : null}
       {section === "setup" ? <SetupSettings user={user} /> : null}
       {section === "invitations" ? <InvitationsSettings /> : null}
       {section === "sessions" ? <SessionsSettings /> : null}
@@ -6423,7 +6484,7 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
                     size="sm"
                   >
                     <ShadcnItemMedia variant="default">
-                      <ShadcnCheckbox
+                      <ShadcnSwitch
                         aria-label={
                           calendar.isSelected ? `Hide ${calendar.name}` : `Show ${calendar.name}`
                         }
@@ -6517,6 +6578,7 @@ function ConnectorsSettings() {
     queryKey: ["x-bookmarks", "folders"],
   });
   const [showICloud, setShowICloud] = useState(false);
+  const [icloudStep, setICloudStep] = useState<1 | 2>(1);
   const [connectMenuOpen, setConnectMenuOpen] = useState(false);
   const [icloudReconnectAccount, setICloudReconnectAccount] = useState<CalendarAccount | null>(
     null,
@@ -6632,6 +6694,7 @@ function ConnectorsSettings() {
               <DropdownMenuItem
                 onSelect={() => {
                   setICloudReconnectAccount(null);
+                  setICloudStep(1);
                   setShowICloud(true);
                 }}
               >
@@ -6668,95 +6731,126 @@ function ConnectorsSettings() {
       <QueryFeedback query={query} title="Couldn’t load connected accounts." />
       <QueryFeedback query={xAccount} title="Couldn’t load X bookmarks account." />
       <QueryFeedback query={xFolders} title="Couldn’t load bookmark folders." />
-      {showICloud ? (
-        <FeedbackForm
-          feedback={icloudConnect.feedback}
-          className="icloud-connect-panel"
-          onSubmit={(event) => {
-            event.preventDefault();
-            icloudConnect.mutate(new FormData(event.currentTarget));
-          }}
-        >
-          <ShadcnAlert>
-            <CloudIcon />
-            <ShadcnAlertTitle>Add iCloud</ShadcnAlertTitle>
-            <ShadcnAlertDescription>
-              Use an app-specific password—not your Apple Account password. It is encrypted and can
-              be revoked from Apple at any time.
-            </ShadcnAlertDescription>
-          </ShadcnAlert>
-          <ShadcnFieldGroup className="icloud-connect-panel__fields">
-            <ShadcnField>
-              <ShadcnFieldLabel htmlFor="icloud-email">Apple Account email</ShadcnFieldLabel>
-              <ShadcnInput
-                autoComplete="email"
-                id="icloud-email"
-                name="email"
-                placeholder="name@icloud.com"
-                defaultValue={icloudReconnectAccount?.email ?? ""}
-                required
-                type="email"
-              />
-            </ShadcnField>
-            <ShadcnField>
-              <ShadcnFieldLabel htmlFor="icloud-app-password">
-                App-specific password
-              </ShadcnFieldLabel>
-              <ShadcnInput
-                autoComplete="off"
-                id="icloud-app-password"
-                name="appSpecificPassword"
-                placeholder="xxxx-xxxx-xxxx-xxxx"
-                required
-                type="password"
-              />
-            </ShadcnField>
-          </ShadcnFieldGroup>
-          <ShadcnFieldSet>
-            <ShadcnFieldLegend variant="label">Services to connect</ShadcnFieldLegend>
-            <ShadcnFieldGroup className="icloud-service-options">
-              <ShadcnField orientation="horizontal">
-                <ShadcnCheckbox defaultChecked id="icloud-mail" name="mail" />
-                <ShadcnFieldContent>
-                  <ShadcnFieldLabel htmlFor="icloud-mail">Mail</ShadcnFieldLabel>
-                  <ShadcnFieldDescription>
-                    Read mailboxes and message content through IMAP.
-                  </ShadcnFieldDescription>
-                </ShadcnFieldContent>
-              </ShadcnField>
-              <ShadcnField orientation="horizontal">
-                <ShadcnCheckbox defaultChecked id="icloud-calendar" name="calendar" />
-                <ShadcnFieldContent>
-                  <ShadcnFieldLabel htmlFor="icloud-calendar">Calendar</ShadcnFieldLabel>
-                  <ShadcnFieldDescription>
-                    Read and edit calendars through CalDAV.
-                  </ShadcnFieldDescription>
-                </ShadcnFieldContent>
-              </ShadcnField>
-            </ShadcnFieldGroup>
-          </ShadcnFieldSet>
-          <div className="icloud-connect-panel__footer">
-            <a href="https://account.apple.com/account/manage" rel="noreferrer" target="_blank">
-              Create an app-specific password <ExternalLinkIcon className="size-[13px]" />
-            </a>
-            <div>
-              <ShadcnButton
-                onClick={() => {
-                  setShowICloud(false);
-                  setICloudReconnectAccount(null);
-                }}
-                type="button"
-                variant="ghost"
-              >
-                Cancel
-              </ShadcnButton>
-              <ShadcnButton disabled={icloudConnect.isPending} type="submit">
-                {icloudConnect.isPending ? "Connecting iCloud" : "Add iCloud"}
-              </ShadcnButton>
+      <Dialog
+        open={showICloud}
+        onOpenChange={(open) => {
+          if (!icloudConnect.isPending) setShowICloud(open);
+        }}
+      >
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Add iCloud</DialogTitle>
+            <DialogDescription>
+              {icloudStep === 1
+                ? "Step 1 of 2 · Enter your Apple Account credentials."
+                : "Step 2 of 2 · Choose services to connect."}
+            </DialogDescription>
+          </DialogHeader>
+          <FeedbackForm
+            feedback={icloudConnect.feedback}
+            className="icloud-connect-panel"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (icloudStep === 1) setICloudStep(2);
+              else icloudConnect.mutate(new FormData(event.currentTarget));
+            }}
+          >
+            <ShadcnAlert>
+              <CloudIcon />
+              <ShadcnAlertDescription>
+                Use an app-specific password—not your Apple Account password. It is encrypted and
+                can be revoked from Apple at any time.
+              </ShadcnAlertDescription>
+            </ShadcnAlert>
+            <fieldset hidden={icloudStep !== 1}>
+              <ShadcnFieldGroup className="icloud-connect-panel__fields">
+                <ShadcnField>
+                  <ShadcnFieldLabel htmlFor="icloud-email">Apple Account email</ShadcnFieldLabel>
+                  <ShadcnInput
+                    autoComplete="email"
+                    id="icloud-email"
+                    name="email"
+                    placeholder="name@icloud.com"
+                    defaultValue={icloudReconnectAccount?.email ?? ""}
+                    required
+                    type="email"
+                  />
+                </ShadcnField>
+                <ShadcnField>
+                  <ShadcnFieldLabel htmlFor="icloud-app-password">
+                    App-specific password
+                  </ShadcnFieldLabel>
+                  <ShadcnInput
+                    autoComplete="off"
+                    id="icloud-app-password"
+                    name="appSpecificPassword"
+                    placeholder="xxxx-xxxx-xxxx-xxxx"
+                    required
+                    type="password"
+                  />
+                </ShadcnField>
+              </ShadcnFieldGroup>
+            </fieldset>
+            <ShadcnFieldSet hidden={icloudStep !== 2}>
+              <ShadcnFieldLegend variant="label">Services to connect</ShadcnFieldLegend>
+              <ShadcnFieldGroup className="icloud-service-options">
+                <ShadcnField orientation="horizontal">
+                  <ShadcnSwitch defaultChecked id="icloud-mail" name="mail" />
+                  <ShadcnFieldContent>
+                    <ShadcnFieldLabel htmlFor="icloud-mail">Mail</ShadcnFieldLabel>
+                    <ShadcnFieldDescription>
+                      Read mailboxes and message content through IMAP.
+                    </ShadcnFieldDescription>
+                  </ShadcnFieldContent>
+                </ShadcnField>
+                <ShadcnField orientation="horizontal">
+                  <ShadcnSwitch defaultChecked id="icloud-calendar" name="calendar" />
+                  <ShadcnFieldContent>
+                    <ShadcnFieldLabel htmlFor="icloud-calendar">Calendar</ShadcnFieldLabel>
+                    <ShadcnFieldDescription>
+                      Read and edit calendars through CalDAV.
+                    </ShadcnFieldDescription>
+                  </ShadcnFieldContent>
+                </ShadcnField>
+              </ShadcnFieldGroup>
+            </ShadcnFieldSet>
+            <div className="icloud-connect-panel__footer">
+              <a href="https://account.apple.com/account/manage" rel="noreferrer" target="_blank">
+                Create an app-specific password <ExternalLinkIcon className="size-[13px]" />
+              </a>
+              <div>
+                <ShadcnButton
+                  onClick={() => {
+                    setShowICloud(false);
+                    setICloudReconnectAccount(null);
+                  }}
+                  type="button"
+                  variant="ghost"
+                >
+                  Cancel
+                </ShadcnButton>
+                {icloudStep === 2 ? (
+                  <ShadcnButton
+                    type="button"
+                    variant="secondary"
+                    disabled={icloudConnect.isPending}
+                    onClick={() => setICloudStep(1)}
+                  >
+                    Back
+                  </ShadcnButton>
+                ) : null}
+                <ShadcnButton disabled={icloudConnect.isPending} type="submit">
+                  {icloudConnect.isPending
+                    ? "Connecting iCloud"
+                    : icloudStep === 1
+                      ? "Continue"
+                      : "Add iCloud"}
+                </ShadcnButton>
+              </div>
             </div>
-          </div>
-        </FeedbackForm>
-      ) : null}
+          </FeedbackForm>
+        </DialogContent>
+      </Dialog>
       {xAccount.data ? (
         <XBookmarksConnectorRow
           account={xAccount.data}
@@ -6798,6 +6892,7 @@ function ConnectorsSettings() {
                         googleConnect.mutate({ accountId: account.id });
                       } else {
                         setICloudReconnectAccount(account);
+                        setICloudStep(1);
                         setShowICloud(true);
                       }
                     },
@@ -7152,7 +7247,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
   });
   const adjustments = (
     <>
-      <SettingsSection title="Layout">
+      <SettingsSection layout="rows" title="Layout">
         <ShadcnField>
           <ShadcnFieldLabel>Layout</ShadcnFieldLabel>
           <SegmentedControl
@@ -7174,7 +7269,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
           </ShadcnFieldDescription>
         </ShadcnField>
       </SettingsSection>
-      <SettingsSection title="Appearance">
+      <SettingsSection layout="rows" title="Appearance">
         <ShadcnFieldGroup className="pinterest-wallpaper__controls">
           <ShadcnField>
             <ShadcnFieldLabel>Mosaic fit</ShadcnFieldLabel>
@@ -7316,10 +7411,10 @@ function PinterestWallpaperDesktopSettingsPanel() {
           </ShadcnField>
         </ShadcnFieldGroup>
       </SettingsSection>
-      <SettingsSection title="Framing">
+      <SettingsSection layout="rows" title="Framing">
         <ShadcnFieldGroup className="pinterest-wallpaper__controls">
           <ShadcnField orientation="horizontal">
-            <ShadcnCheckbox
+            <ShadcnSwitch
               checked={paddingLinked}
               id="pinterest-padding-linked"
               onCheckedChange={(checked) => {
@@ -7416,7 +7511,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
           )}
           {desktopEnvironment.data ? (
             <ShadcnField orientation="horizontal">
-              <ShadcnCheckbox
+              <ShadcnSwitch
                 checked={showDesktopOverlay}
                 id="pinterest-desktop-overlay"
                 onCheckedChange={(checked) => setShowDesktopOverlay(checked === true)}
@@ -7504,7 +7599,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
         </SettingsSection>
       </div>
       <div className="wallpaper-editor__settings settings-stack">
-        <SettingsSection
+        <SettingsSection layout="rows"
           description="Paste a public board URL and nohmi will compose a fresh tiled collage from its Pins each day."
           title="Pinterest wallpaper"
         >
@@ -7559,7 +7654,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
               </ShadcnField>
             </FeedbackForm>
             <ShadcnField orientation="horizontal">
-              <ShadcnCheckbox
+              <ShadcnSwitch
                 checked={value?.enabled ?? false}
                 disabled={!value?.boardUrl || update.isPending}
                 id="pinterest-daily"
@@ -7754,14 +7849,7 @@ function ConnectorRow({
           </div>
         </>
       }
-      identity={
-        <ConnectedAccountIdentity
-          avatarUrl={account.avatarUrl}
-          label={account.label}
-          provider={account.provider}
-          size="default"
-        />
-      }
+      identity={<BrandMark brand={account.provider} className="size-5" />}
       state={health.state}
       status={<ConnectionHealthBadge health={health} />}
       subtitle={account.email ?? "Connected account"}
@@ -7848,33 +7936,20 @@ function ConnectorCapabilityBadge({
 }
 
 function ProfileSettings({ user }: { user: User }) {
-  const formRef = useRef<HTMLFormElement>(null);
-  const [editRevision, setEditRevision] = useState(0);
-  const attempted = useRef("");
-  const saving = useRef(false);
-  const revisionRef = useRef(0);
   const queryClient = useQueryClient();
-  const [homeLocation, setHomeLocation] = useState<HomeLocation | null>(user.homeLocation);
-  const [homeLocationValid, setHomeLocationValid] = useState(true);
-  const [planningTimezone, setPlanningTimezone] = useState(user.planningTimezone);
+  const [firstName, lastName] = splitProfileName(user.displayName);
+  const save = async (input: Parameters<typeof api.updateUser>[0]) => {
+    const nextUser = await api.updateUser(input);
+    queryClient.setQueryData(["me"], nextUser);
+  };
   const update = useFeedbackMutation({
     feedback: { action: "save your profile", form: true },
-    mutationFn: (input: {
-      displayName: string;
-      email?: string;
-      planningTimezone: string;
-      homeLocation: HomeLocation | null;
-      workdayEndMinute: number;
-      workdayStartMinute: number;
-    }) => api.updateUser(input),
+    mutationFn: (input: Parameters<typeof api.updateUser>[0]) => api.updateUser(input),
     onSuccess: (nextUser) => {
       queryClient.setQueryData(["me"], nextUser);
     },
-    onSettled: () => {
-      saving.current = false;
-    },
   });
-  const resendVerification = useFeedbackMutation({
+  const resend = useFeedbackMutation({
     feedback: {
       action: "send a confirmation email",
       safeToRetry: true,
@@ -7882,236 +7957,137 @@ function ProfileSettings({ user }: { user: User }) {
     },
     mutationFn: api.resendEmailVerification,
   });
-  const timeZones = Array.from(
-    new Set([
-      planningTimezone,
-      user.planningTimezone,
-      "America/New_York",
-      "America/Chicago",
-      "America/Denver",
-      "America/Los_Angeles",
-      "Europe/London",
-      "UTC",
-    ]),
-  );
-
-  // Keep requests serialized. When one completes, the effect reads the latest
-  // form values rather than replaying an obsolete draft.
-  useEffect(() => {
-    if (!editRevision || update.isPending || !homeLocationValid) return;
-    const timer = window.setTimeout(() => {
-      const form = formRef.current;
-      if (!form || saving.current || document.activeElement === form.elements.namedItem("email"))
-        return;
-      const values = new FormData(form);
-      if (
-        !form.checkValidity() ||
-        String(values.get("workdayEnd")) <= String(values.get("workdayStart"))
-      )
-        return;
-      const signature = JSON.stringify([
-        Array.from(values.entries()),
-        homeLocation,
-        planningTimezone,
-      ]);
-      if (attempted.current === signature) return;
-      form.requestSubmit();
-    }, 500);
-    return () => window.clearTimeout(timer);
-  }, [editRevision, update.isPending, homeLocationValid, homeLocation, planningTimezone]);
-  const edited = () => {
-    revisionRef.current += 1;
-    setEditRevision(revisionRef.current);
-  };
-  const [firstName, lastName] = splitProfileName(user.displayName);
   return (
-    <div className="flex flex-col gap-4">
-      <AccountIdentity user={user} />
-      <AccountOverview />
-      <div className="flex flex-col gap-6">
-        <FeedbackForm
-          ref={formRef}
-          onChange={edited}
-          feedback={update.feedback}
-          fieldNames={{
-            displayName: "firstName",
-            workdayStartMinute: "workdayStart",
-            workdayEndMinute: "workdayEnd",
-          }}
-          validate={(form) => {
-            const values = new FormData(form);
-            const errors: Record<string, string> = {};
-            if (String(values.get("workdayEnd")) <= String(values.get("workdayStart")))
-              errors.workdayEnd = "Day end must be after day start.";
-            if (!homeLocationValid)
-              errors.homeLocation = "Choose a place from the results, or clear this field.";
-            return errors;
-          }}
-          className="profile-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (saving.current) return;
-            const form = new FormData(event.currentTarget);
-            attempted.current = JSON.stringify([
-              Array.from(form.entries()),
-              homeLocation,
-              planningTimezone,
-            ]);
-            saving.current = true;
-            update.mutate({
-              displayName: [form.get("firstName"), form.get("lastName")]
-                .map((value) => String(value).trim())
-                .filter(Boolean)
-                .join(" "),
-              ...(String(form.get("email")) !== user.email
-                ? { email: String(form.get("email")) }
-                : {}),
-              planningTimezone,
-              homeLocation,
-              workdayEndMinute: timeToMinute(String(form.get("workdayEnd"))),
-              workdayStartMinute: timeToMinute(String(form.get("workdayStart"))),
-            });
-          }}
+    <div className="settings-stack">
+      <ProfileSection title="Profile">
+        <AccountIdentity user={user} />
+        <ProfileInlineField
+          id="profile-first-name"
+          label="First name"
+          value={firstName}
+          autoComplete="given-name"
+          required
+          fieldName="displayName"
+          validate={(value) => (value ? undefined : "Enter your first name.")}
+          save={(value) => save({ displayName: [value, lastName].filter(Boolean).join(" ") })}
+        />
+        <ProfileInlineField
+          id="profile-last-name"
+          label="Last name"
+          value={lastName}
+          autoComplete="family-name"
+          fieldName="displayName"
+          save={(value) => save({ displayName: [firstName, value].filter(Boolean).join(" ") })}
+        />
+        <ProfileInlineField
+          id="profile-email"
+          label="Email"
+          value={user.email}
+          type="email"
+          autoComplete="email"
+          required
+          fieldName="email"
+          save={(value) => save({ email: value })}
         >
           {!user.emailVerified ? (
-            <ShadcnAlert role="status" variant="warning">
-              <MailIcon />
-              <ShadcnAlertTitle>Email confirmation needed</ShadcnAlertTitle>
-              <ShadcnAlertDescription>
-                Confirm this address to keep account recovery available and unlock connected
-                accounts.
-              </ShadcnAlertDescription>
-              <ShadcnAlertAction>
-                <ShadcnButton
-                  disabled={resendVerification.isPending}
-                  onClick={() => resendVerification.mutate()}
-                  type="button"
-                  variant="outline"
-                >
-                  {resendVerification.isPending ? "Sending…" : "Resend confirmation"}
-                </ShadcnButton>
-              </ShadcnAlertAction>
-            </ShadcnAlert>
+            <div className="flex items-center justify-end gap-2">
+              <span className="text-xs text-muted-foreground">Confirmation needed</span>
+              <ShadcnButton
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={resend.isPending}
+                onClick={() => resend.mutate()}
+              >
+                Resend confirmation
+              </ShadcnButton>
+            </div>
           ) : null}
-          <SettingsBento>
-            <SettingsSection
-              title="Personal details"
-              description="How you appear in nohmi and where we contact you."
-            >
-              <ShadcnFieldGroup>
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="profile-first-name">First name</ShadcnFieldLabel>
-                  <ShadcnInput
-                    autoComplete="given-name"
-                    defaultValue={firstName}
-                    id="profile-first-name"
-                    name="firstName"
-                    required
-                  />
-                </ShadcnField>
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="profile-last-name">Last name</ShadcnFieldLabel>
-                  <ShadcnInput
-                    autoComplete="family-name"
-                    defaultValue={lastName}
-                    id="profile-last-name"
-                    name="lastName"
-                  />
-                </ShadcnField>
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="profile-email">Email</ShadcnFieldLabel>
-                  <ShadcnInput
-                    autoComplete="email"
-                    defaultValue={user.email}
-                    id="profile-email"
-                    name="email"
-                    onBlur={edited}
-                    required
-                    type="email"
-                  />
-                </ShadcnField>
-              </ShadcnFieldGroup>
-            </SettingsSection>
-            <SettingsSection
-              title="Daily defaults"
-              description="Anchor your schedule to your local day."
-            >
-              <ShadcnFieldGroup className="form-grid">
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="profile-workday-start">Day start</ShadcnFieldLabel>
-                  <ShadcnInput
-                    defaultValue={minuteToTime(user.workdayStartMinute)}
-                    id="profile-workday-start"
-                    name="workdayStart"
-                    required
-                    type="time"
-                  />
-                </ShadcnField>
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="profile-workday-end">Day end</ShadcnFieldLabel>
-                  <ShadcnInput
-                    defaultValue={minuteToTime(user.workdayEndMinute)}
-                    id="profile-workday-end"
-                    name="workdayEnd"
-                    required
-                    type="time"
-                  />
-                </ShadcnField>
-                <HomeLocationField
-                  savedLocation={user.homeLocation}
-                  onChange={(location) => {
-                    edited();
-                    setHomeLocation(location);
-                    if (location?.timezone) setPlanningTimezone(location.timezone);
-                  }}
-                  onValidityChange={setHomeLocationValid}
-                />
-                <ShadcnField className="profile-form__full-row">
-                  <ShadcnFieldLabel htmlFor="profile-timezone">Time zone</ShadcnFieldLabel>
-                  <ShadcnNativeSelect
-                    id="profile-timezone"
-                    name="planningTimezone"
-                    onChange={(event) => setPlanningTimezone(event.target.value)}
-                    value={planningTimezone}
-                  >
-                    {timeZones.map((timeZone) => (
-                      <NativeSelectOption key={timeZone} value={timeZone}>
-                        {timeZone.replace("_", " ")}
-                      </NativeSelectOption>
-                    ))}
-                  </ShadcnNativeSelect>
-                  <ShadcnFieldDescription>
-                    Home Location supplies this default. Choose a different zone when your day
-                    should stay anchored elsewhere.
-                  </ShadcnFieldDescription>
-                </ShadcnField>
-              </ShadcnFieldGroup>
-            </SettingsSection>
-          </SettingsBento>
-          <MutationFeedback feedback={resendVerification.feedback} />
-          {update.isPending ? (
-            <p role="status" className="text-sm text-muted-foreground">
-              Saving changes…
-            </p>
-          ) : null}
-          {update.isError ? (
-            <ShadcnButton type="submit" variant="secondary">
-              Retry saving
-            </ShadcnButton>
-          ) : null}
-        </FeedbackForm>
-        <TextingSettings profile />
-      </div>
+        </ProfileInlineField>
+        <TextingSettings profile inline />
+      </ProfileSection>
+      <ProfileSection title="Daily defaults">
+        <ProfileChoice
+          id="profile-workday-start"
+          label="Day start"
+          value={minuteToTime(user.workdayStartMinute)}
+          kind="time"
+          validate={(value) =>
+            timeToMinute(value) >= user.workdayEndMinute
+              ? "Day start must be before day end."
+              : undefined
+          }
+          save={(value) => save({ workdayStartMinute: timeToMinute(value) })}
+        />
+        <ProfileChoice
+          id="profile-workday-end"
+          label="Day end"
+          value={minuteToTime(user.workdayEndMinute)}
+          kind="time"
+          validate={(value) =>
+            timeToMinute(value) <= user.workdayStartMinute
+              ? "Day end must be after day start."
+              : undefined
+          }
+          save={(value) => save({ workdayEndMinute: timeToMinute(value) })}
+        />
+        <div className="settings-inline-row px-4 py-0">
+          <HomeLocationField
+            savedLocation={user.homeLocation}
+            onChange={() => {}}
+            onValidityChange={() => {}}
+            onCommit={(location) =>
+              update.mutate({
+                homeLocation: location,
+                ...(location?.timezone ? { planningTimezone: location.timezone } : {}),
+              })
+            }
+          />
+        </div>
+        <ProfileChoice
+          id="profile-timezone"
+          label="Time zone"
+          kind="zone"
+          value={user.planningTimezone}
+          save={(value) => save({ planningTimezone: value })}
+        />
+      </ProfileSection>
+      <AccountOverview />
+      <ProfileSection title="Account">
+        <ProfileRow
+          icon={
+            <span className="profile-destination-icon">
+              <SparklesIcon weight="Filled" />
+            </span>
+          }
+          label="Setup"
+          to="/settings?page=profile&subpage=setup"
+        />
+        <ProfileRow
+          icon={
+            <span className="profile-destination-icon">
+              <LockIcon weight="Filled" />
+            </span>
+          }
+          label="Security & Access"
+          to="/settings?page=security"
+        />
+      </ProfileSection>
     </div>
   );
 }
 
 function ProfileSecurity({ user }: { user: User }) {
+  const [action, setAction] = useState<"password" | null>(null);
   const queryClient = useQueryClient();
+  const { confirm, confirmation } = useConfirmAction();
   const passwordReset = useFeedbackMutation({
     feedback: { action: "send a password reset link", safeToRetry: true },
     mutationFn: () => api.requestPasswordReset({ email: user.email }),
-    onSuccess: () => toast.success(`Password reset link sent to ${user.email}.`),
+    onSuccess: () => {
+      setAction(null);
+      toast.success(`Password reset link sent to ${user.email}.`);
+    },
   });
   const logout = useFeedbackMutation({
     feedback: { action: "log out", safeToRetry: true },
@@ -8127,52 +8103,51 @@ function ProfileSecurity({ user }: { user: User }) {
   });
   return (
     <div className="settings-stack">
-      <SettingsSection title="Security" description="Manage your password and this session.">
-        <ShadcnItemGroup aria-label="Account actions">
-          <ShadcnItem size="sm" variant="secondary">
-            <ShadcnItemMedia variant="icon">
-              <KeyIcon aria-hidden="true" />
-            </ShadcnItemMedia>
-            <ShadcnItemContent>
-              <ShadcnItemTitle>Change password</ShadcnItemTitle>
-              <ShadcnItemDescription>
-                We’ll email you a secure link to choose a new password.
-              </ShadcnItemDescription>
-            </ShadcnItemContent>
-            <ShadcnItemActions>
-              <ShadcnButton
-                disabled={passwordReset.isPending}
-                onClick={() => passwordReset.mutate()}
-                size="sm"
-                type="button"
-                variant="secondary"
-              >
-                {passwordReset.isPending ? "Sending…" : "Send link"}
-              </ShadcnButton>
-            </ShadcnItemActions>
-          </ShadcnItem>
-          <ShadcnItem size="sm" variant="secondary">
-            <ShadcnItemMedia variant="icon">
-              <LogOutIcon aria-hidden="true" />
-            </ShadcnItemMedia>
-            <ShadcnItemContent>
-              <ShadcnItemTitle>Log out</ShadcnItemTitle>
-              <ShadcnItemDescription>End this session on this device.</ShadcnItemDescription>
-            </ShadcnItemContent>
-            <ShadcnItemActions>
-              <ShadcnButton
-                disabled={logout.isPending}
-                onClick={() => logout.mutate()}
-                size="sm"
-                type="button"
-                variant="destructive"
-              >
-                {logout.isPending ? "Logging out…" : "Log out"}
-              </ShadcnButton>
-            </ShadcnItemActions>
-          </ShadcnItem>
-        </ShadcnItemGroup>
-      </SettingsSection>
+      <ProfileSection title="Security">
+        <ProfileRow
+          label="Password"
+          value="Change"
+          onClick={() => setAction("password")}
+        />
+        <div className="settings-command-row">
+          <ShadcnButton
+            variant="destructive"
+            disabled={logout.isPending}
+            onClick={() => confirm({
+              title: "Logout?",
+              description: "You’ll be logged out on this device. You can sign in again at any time.",
+              actionLabel: "Logout",
+              onConfirm: () => logout.mutate(),
+            })}
+          >
+            {logout.isPending ? "Logging out…" : "Logout"}
+          </ShadcnButton>
+        </div>
+      </ProfileSection>
+      <Dialog
+        open={action !== null}
+        onOpenChange={(open) => {
+          if (!open) setAction(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change password</DialogTitle>
+            <DialogDescription>
+              {`We’ll send a secure password reset link to ${user.email}.`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <ShadcnButton variant="secondary" onClick={() => setAction(null)}>
+              Cancel
+            </ShadcnButton>
+            <ShadcnButton disabled={passwordReset.isPending} onClick={() => passwordReset.mutate()}>
+              {passwordReset.isPending ? "Sending…" : "Send link"}
+            </ShadcnButton>
+          </div>
+        </DialogContent>
+      </Dialog>
+      {confirmation}
       <MutationFeedback feedback={passwordReset.feedback} />
       <MutationFeedback feedback={logout.feedback} />
     </div>
@@ -8185,10 +8160,12 @@ function splitProfileName(displayName: string): [firstName: string, lastName: st
 }
 
 function HomeLocationField({
+  onCommit,
   onChange,
   onValidityChange,
   savedLocation,
 }: {
+  onCommit: (location: WeatherLocationOption | null) => void;
   onChange: (location: WeatherLocationOption | null) => void;
   onValidityChange: (valid: boolean) => void;
   savedLocation: HomeLocation | null;
@@ -8220,8 +8197,8 @@ function HomeLocationField({
   }, [locations.data, selectedLocation]);
   const query = searchValue.trim();
   return (
-    <ShadcnField>
-      <ShadcnFieldLabel htmlFor="profile-home-location">Home Location</ShadcnFieldLabel>
+    <ShadcnField orientation="horizontal" className="justify-between">
+      <ShadcnFieldLabel htmlFor="profile-home-location">Home</ShadcnFieldLabel>
       <Combobox
         autoHighlight
         filter={null}
@@ -8266,6 +8243,7 @@ function HomeLocationField({
             setOpen(false);
           }
           onChange(nextValue);
+          if (reason === "item-press" || reason === "clear-press") onCommit(nextValue);
           onValidityChange(
             nextValue !== null || reason === "clear-press" || reason === "input-clear",
           );
@@ -8274,13 +8252,18 @@ function HomeLocationField({
         value={selectedLocation}
       >
         <ComboboxInput
-          aria-describedby="profile-home-location-description"
+          className="settings-value-input"
           name="homeLocation"
           autoComplete="off"
           id="profile-home-location"
           placeholder="Search by city, ZIP, or region"
-          showClear
-        />
+          showClear={false}
+          showTrigger={false}
+        >
+          <InputGroupAddon align="inline-start">
+            <MapPinIcon aria-hidden="true" />
+          </InputGroupAddon>
+        </ComboboxInput>
         <ComboboxContent aria-busy={locations.isFetching || undefined}>
           {query.length < 2 ? (
             <p className="px-2 py-2 text-sm text-muted-foreground">Type at least two characters.</p>
@@ -8309,15 +8292,13 @@ function HomeLocationField({
           </ComboboxList>
         </ComboboxContent>
       </Combobox>
-      <ShadcnFieldDescription id="profile-home-location-description">
-        Used when this device cannot share its location.
-      </ShadcnFieldDescription>
     </ShadcnField>
   );
 }
 
 function InvitationsSettings() {
   const queryClient = useQueryClient();
+  const [creating, setCreating] = useState(false);
   const invitations = useQuery({ queryFn: api.listInvitations, queryKey: ["invitations"] });
   const [latestCode, setLatestCode] = useState<string | null>(null);
   const create = useFeedbackMutation({
@@ -8328,6 +8309,7 @@ function InvitationsSettings() {
         expiresInDays: Number(form.get("expiresInDays")),
       }),
     onSuccess: (invitation) => {
+      setCreating(false);
       setLatestCode(invitation.code);
       void queryClient.invalidateQueries({ queryKey: ["invitations"] });
     },
@@ -8347,6 +8329,12 @@ function InvitationsSettings() {
     <SettingsSection
       description="Issue single-use invitation codes for the private beta. The code is shown only once, so copy it before you leave this page."
       title="Invitations"
+      action={
+        <ShadcnButton type="button" onClick={() => setCreating(true)}>
+          <PlusIcon />
+          New invitation
+        </ShadcnButton>
+      }
     >
       <QueryFeedback query={invitations} title="Couldn’t load invitations." staleOnly />
       {invitations.isError && !invitations.data ? (
@@ -8357,30 +8345,43 @@ function InvitationsSettings() {
         />
       ) : (
         <>
-          <FeedbackForm
-            feedback={create.feedback}
-            className="profile-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              create.mutate(new FormData(event.currentTarget));
+          <Dialog
+            open={creating}
+            onOpenChange={(open) => {
+              if (!create.isPending) setCreating(open);
             }}
           >
-            <ShadcnFieldGroup className="form-grid">
-              <EmailField id="invite-email" label="Friend’s email (optional)" name="email" />
-              <ShadcnField>
-                <ShadcnFieldLabel htmlFor="invite-expiry">Expires after</ShadcnFieldLabel>
-                <ShadcnNativeSelect defaultValue="14" id="invite-expiry" name="expiresInDays">
-                  <NativeSelectOption value="7">7 days</NativeSelectOption>
-                  <NativeSelectOption value="14">14 days</NativeSelectOption>
-                  <NativeSelectOption value="30">30 days</NativeSelectOption>
-                </ShadcnNativeSelect>
-              </ShadcnField>
-            </ShadcnFieldGroup>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>New invitation</DialogTitle>
+                <DialogDescription>Choose a recipient and expiry.</DialogDescription>
+              </DialogHeader>
+              <FeedbackForm
+                feedback={create.feedback}
+                className="profile-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  create.mutate(new FormData(event.currentTarget));
+                }}
+              >
+                <ShadcnFieldGroup className="form-grid">
+                  <EmailField id="invite-email" label="Friend’s email (optional)" name="email" />
+                  <ShadcnField>
+                    <ShadcnFieldLabel htmlFor="invite-expiry">Expires after</ShadcnFieldLabel>
+                    <ShadcnNativeSelect defaultValue="14" id="invite-expiry" name="expiresInDays">
+                      <NativeSelectOption value="7">7 days</NativeSelectOption>
+                      <NativeSelectOption value="14">14 days</NativeSelectOption>
+                      <NativeSelectOption value="30">30 days</NativeSelectOption>
+                    </ShadcnNativeSelect>
+                  </ShadcnField>
+                </ShadcnFieldGroup>
 
-            <ShadcnButton disabled={create.isPending} type="submit">
-              {create.isPending ? "Creating invitation…" : "Create invitation"}
-            </ShadcnButton>
-          </FeedbackForm>
+                <ShadcnButton disabled={create.isPending} type="submit">
+                  {create.isPending ? "Creating invitation…" : "Create invitation"}
+                </ShadcnButton>
+              </FeedbackForm>
+            </DialogContent>
+          </Dialog>
           {latestCode ? (
             <ShadcnAlert>
               <CircleCheckIcon />

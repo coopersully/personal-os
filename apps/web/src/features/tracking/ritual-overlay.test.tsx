@@ -124,7 +124,7 @@ it("keeps unsaved text after failure and enables explicit completion only after 
     state: { ...current, current: { ...current.current!, status: "completed", revision: 10 } },
   }));
   render(<RitualChecklist state={state} saveResponse={response} act={action} />);
-  expect(screen.getByRole("button", { name: "0 of 2 tasks completed" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Done" })).toBeDisabled();
   fireEvent.change(screen.getByRole("textbox", { name: "Journal" }), {
     target: { value: "Keep this answer" },
   });
@@ -139,12 +139,10 @@ it("keeps unsaved text after failure and enables explicit completion only after 
   fireEvent.change(screen.getByRole("textbox", { name: "Journal" }), {
     target: { value: "Keep this answer too" },
   });
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "1 of 2 tasks completed" })).toBeDisabled(),
-  );
+  await waitFor(() => expect(screen.getByRole("button", { name: "Done" })).toBeDisabled());
   fireEvent.click(screen.getByRole("checkbox", { name: "Brush teeth" }));
-  const complete = await screen.findByRole("button", { name: "Complete Morning Ritual" });
-  expect(complete).toBeEnabled();
+  const complete = await screen.findByRole("button", { name: "Done" });
+  await waitFor(() => expect(complete).toBeEnabled());
   expect(action).not.toHaveBeenCalled();
   fireEvent.click(complete);
   expect(await screen.findByRole("heading", { name: "All done." })).toBeInTheDocument();
@@ -200,7 +198,9 @@ it("adopts a newer remote correction without resubmitting an already saved local
   } as RitualState;
   const response = vi.fn().mockResolvedValue(saved);
   const view = render(<RitualChecklist state={state} saveResponse={response} act={vi.fn()} />);
-  fireEvent.change(screen.getByLabelText("Journal"), { target: { value: "Local answer" } });
+  fireEvent.change(screen.getByRole("textbox", { name: "Journal" }), {
+    target: { value: "Local answer" },
+  });
   await waitFor(() => expect(screen.getByRole("button", { name: "Snooze" })).toBeEnabled());
   expect(response).toHaveBeenCalledTimes(1);
   const remote = {
@@ -212,7 +212,9 @@ it("adopts a newer remote correction without resubmitting an already saved local
     },
   } as RitualState;
   view.rerender(<RitualChecklist state={remote} saveResponse={response} act={vi.fn()} />);
-  await waitFor(() => expect(screen.getByLabelText("Journal")).toHaveValue("Remote correction"));
+  await waitFor(() =>
+    expect(screen.getByRole("textbox", { name: "Journal" })).toHaveValue("Remote correction"),
+  );
   await new Promise((resolve) => setTimeout(resolve, 350));
   expect(response).toHaveBeenCalledTimes(1);
 });
@@ -232,9 +234,13 @@ it("keeps newer typing while an older answer finishes saving", async () => {
       current: { ...state.current!, revision: 3, responses: [{ ...input, stepId }] },
     }));
   render(<RitualChecklist state={state} saveResponse={response} act={vi.fn()} />);
-  fireEvent.change(screen.getByLabelText("Journal"), { target: { value: "First" } });
+  fireEvent.change(screen.getByRole("textbox", { name: "Journal" }), {
+    target: { value: "First" },
+  });
   await waitFor(() => expect(response).toHaveBeenCalledTimes(1));
-  fireEvent.change(screen.getByLabelText("Journal"), { target: { value: "Second" } });
+  fireEvent.change(screen.getByRole("textbox", { name: "Journal" }), {
+    target: { value: "Second" },
+  });
   finish({
     ...state,
     current: {
@@ -248,13 +254,15 @@ it("keeps newer typing while an older answer finishes saving", async () => {
     "journal",
     expect.objectContaining({ value: "Second", expectedRevision: 2 }),
   );
-  expect(screen.getByLabelText("Journal")).toHaveValue("Second");
+  expect(screen.getByRole("textbox", { name: "Journal" })).toHaveValue("Second");
 });
 
 it("does not retry a failed draft at the same revision, but resumes after a newer authoritative state", async () => {
   const response = vi.fn().mockRejectedValue(new Error("Revision conflict"));
   const view = render(<RitualChecklist state={state} saveResponse={response} act={vi.fn()} />);
-  fireEvent.change(screen.getByLabelText("Journal"), { target: { value: "Unsaved answer" } });
+  fireEvent.change(screen.getByRole("textbox", { name: "Journal" }), {
+    target: { value: "Unsaved answer" },
+  });
   await waitFor(() =>
     expect(toast.error).toHaveBeenCalledWith(
       expect.stringContaining("save your ritual answers"),
@@ -267,7 +275,7 @@ it("does not retry a failed draft at the same revision, but resumes after a newe
   );
   await new Promise((resolve) => setTimeout(resolve, 800));
   expect(response).toHaveBeenCalledTimes(1);
-  expect(screen.getByLabelText("Journal")).toHaveValue("Unsaved answer");
+  expect(screen.getByRole("textbox", { name: "Journal" })).toHaveValue("Unsaved answer");
   const refreshed = { ...state, current: { ...state.current!, revision: 2 } } as RitualState;
   response.mockImplementation(async (stepId, input) => ({
     ...refreshed,
@@ -356,7 +364,7 @@ it("completes optional steps without requiring answers and sends only an opted-i
   };
   const action = vi.fn().mockResolvedValue({ outcome: "applied", state: optionalState });
   render(<RitualChecklist state={optionalState} saveResponse={vi.fn()} act={action} />);
-  const finish = screen.getByRole("button", { name: "Complete Morning Ritual" });
+  const finish = screen.getByRole("button", { name: "Done" });
   expect(finish).toBeEnabled();
   expect(screen.queryByLabelText("Reminder time")).not.toBeInTheDocument();
   fireEvent.click(finish);
@@ -366,11 +374,11 @@ it("completes optional steps without requiring answers and sends only an opted-i
   fireEvent.keyDown(window, { key: "Escape" });
   expect(screen.queryByLabelText("Reminder time")).not.toBeInTheDocument();
   expect(action).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Complete Morning Ritual" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
   expect(screen.getByLabelText("Reminder time")).toHaveValue("15:30");
   fireEvent.click(screen.getByRole("checkbox", { name: "Remind me about these later" }));
   fireEvent.change(screen.getByLabelText("Reminder time"), { target: { value: "16:45" } });
-  fireEvent.click(screen.getByRole("button", { name: "Finish ritual" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
   await waitFor(() =>
     expect(action).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -379,12 +387,10 @@ it("completes optional steps without requiring answers and sends only an opted-i
       }),
     ),
   );
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Complete Morning Ritual" })).toBeEnabled(),
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Complete Morning Ritual" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Done" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
   fireEvent.click(screen.getByRole("checkbox", { name: "Remind me about these later" }));
-  fireEvent.click(screen.getByRole("button", { name: "Finish ritual" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
   await waitFor(() => expect(action).toHaveBeenCalledTimes(2));
   expect(action.mock.calls[1]![0]).not.toHaveProperty("optionalReminderAt");
 });
@@ -427,9 +433,9 @@ it.each([
           },
         });
   render(<RitualChecklist state={initial} saveResponse={vi.fn()} act={action} />);
-  fireEvent.click(screen.getByRole("button", { name: "Complete Morning Ritual" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
   fireEvent.click(screen.getByRole("checkbox", { name: "Remind me about these later" }));
-  fireEvent.click(screen.getByRole("button", { name: "Finish ritual" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
   expect(toast.loading).toHaveBeenCalledWith("Finishing ritual…", expect.anything());
   const loadingId = vi.mocked(toast.loading).mock.calls[0]![1]!.id;
   if (outcome === "failure") {
@@ -462,6 +468,7 @@ it("shows the current ritual streak and lets users back out of skipping", () => 
   );
   expect(screen.getByRole("button", { name: "12-day morning streak" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Skip for Today" }));
+  expect(screen.getByRole("heading", { name: "12-day current streak" })).toBeInTheDocument();
   expect(screen.getByText(/1 time in the last 3 days/)).toBeInTheDocument();
   expect(screen.queryByRole("region", { name: "Ritual progress" })).not.toBeInTheDocument();
   expect(screen.queryByText("Saved to your account")).not.toBeInTheDocument();
@@ -492,7 +499,7 @@ it("keeps the weekly completion strip alongside the streak and hides it in previ
   expect(questions).not.toContainElement(
     screen.getByRole("region", { name: "Past 7 ritual days" }),
   );
-  expect(questions).not.toContainElement(screen.getByRole("region", { name: "Ritual actions" }));
+  expect(questions).toContainElement(screen.getByRole("region", { name: "Ritual actions" }));
   expect(view.container.querySelector("canvas")).toHaveAttribute("aria-hidden", "true");
   view.rerender(
     <RitualChecklist state={progressState} saveResponse={vi.fn()} act={vi.fn()} preview />,
@@ -531,8 +538,8 @@ it("fills required progress independently of completed optional steps", () => {
       act={vi.fn()}
     />,
   );
-  expect(screen.getByRole("button", { name: "1 of 2 tasks completed" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Done" })).toBeDisabled();
   expect(view.container.querySelector(".ritual-button-progress")).toHaveStyle({ width: "50%" });
-  expect(screen.getByText("1 of 1 optional completed")).toBeInTheDocument();
+  expect(screen.getByText("1 required left")).toBeInTheDocument();
   expect(screen.queryByLabelText("Reminder time")).not.toBeInTheDocument();
 });

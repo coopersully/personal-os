@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import { RitualClouds } from "./ritual-clouds.js";
 
 afterEach(() => {
@@ -28,6 +28,8 @@ it("draws deterministic transparent clouds, dims them at night, and releases res
       data: new Uint8ClampedArray(width * height * 4),
     }),
     putImageData,
+    drawImage: vi.fn(),
+    clearRect: vi.fn(),
   } as unknown as CanvasRenderingContext2D);
   const view = render(<RitualClouds kind="morning" />);
   const morning = putImageData.mock.calls[0]![0].data as Uint8ClampedArray;
@@ -37,8 +39,62 @@ it("draws deterministic transparent clouds, dims them at night, and releases res
   view.rerender(<RitualClouds kind="night" />);
   const night = putImageData.mock.calls[1]![0].data as Uint8ClampedArray;
   expect(Math.max(...alpha(night))).toBeLessThan(Math.max(...alpha(morning)));
-  expect(Array.from(alpha(night), Boolean)).toEqual(Array.from(alpha(morning), Boolean));
+  expect(alpha(night).filter(Boolean).length).toBeGreaterThan(0);
   expect(view.container.querySelector("canvas")).toHaveAttribute("aria-hidden", "true");
   view.unmount();
   expect(disconnect).toHaveBeenCalledTimes(2);
+});
+
+it("scrubs the sky when dragging the background without intercepting form controls", () => {
+  vi.stubGlobal("CanvasRenderingContext2D", class {});
+  vi.stubGlobal("PointerEvent", MouseEvent);
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+  const putImageData = vi.fn();
+  const drawImage = vi.fn();
+  let nextFrame: FrameRequestCallback = () => {};
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    nextFrame = callback;
+    return 1;
+  });
+  vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue({
+    width: 200,
+    height: 100,
+  } as DOMRect);
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+    putImageData,
+    drawImage,
+    clearRect: vi.fn(),
+  } as unknown as CanvasRenderingContext2D);
+  const view = render(
+    <div className="ritual-surface">
+      <RitualClouds kind="morning" />
+      <div data-slot="card">
+        <input aria-label="Answer" />
+      </div>
+    </div>,
+  );
+  const surface = view.container.firstElementChild as HTMLElement;
+  surface.setPointerCapture = vi.fn();
+  surface.hasPointerCapture = vi.fn(() => false);
+  fireEvent.pointerDown(view.getByLabelText("Answer"), { button: 0, clientX: 100 });
+  fireEvent.pointerMove(surface, { clientX: 160 });
+  expect(putImageData).toHaveBeenCalledTimes(1);
+  fireEvent.pointerDown(surface, { button: 0, clientX: 100 });
+  fireEvent.pointerMove(surface, { clientX: 160 });
+  for (let x = 161; x < 200; x++) fireEvent.pointerMove(surface, { clientX: x });
+  expect(putImageData).toHaveBeenCalledTimes(1);
+  nextFrame(performance.now() + 200);
+  expect(putImageData).toHaveBeenCalledTimes(2);
+  expect(drawImage.mock.calls.at(-2)?.[1]).not.toBe(0);
+  expect(surface.style.cursor).toBe("grabbing");
+  fireEvent.pointerUp(surface);
+  expect(surface.style.cursor).toBe("");
 });

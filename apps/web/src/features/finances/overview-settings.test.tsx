@@ -151,7 +151,7 @@ it("discovers another hook's retained attempt without opening view settings firs
   await screen.findByText("Your change: None selected");
   expect(screen.getByRole("link", { name: "Open Finance settings" })).toHaveAttribute(
     "href",
-    "/settings?section=finances",
+    "/settings?page=finances",
   );
   fireEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
   await screen.findByText("Latest: Everyday checking");
@@ -218,7 +218,7 @@ it("keeps non-account preference recovery visible without offering an unrelated 
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Open Finance settings" })).toHaveAttribute(
     "href",
-    "/settings?section=finances",
+    "/settings?page=finances",
   );
   expect(screen.getByRole("button", { name: "Refresh latest settings" })).toBeEnabled();
   expect(update).toHaveBeenCalledTimes(1);

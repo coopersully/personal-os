@@ -1,3 +1,4 @@
+import { settingsPath } from "@/features/settings/settings-routes";
 import { useIsMutating, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -6,9 +7,16 @@ import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "../../components/settings-field.js";
 import { Badge } from "../../components/ui/badge.js";
 import { Button } from "../../components/ui/button.js";
-import { Checkbox } from "../../components/ui/checkbox.js";
 import {
   Collapsible,
   CollapsibleContent,
@@ -28,14 +36,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../../components/ui/dialog.js";
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "../../components/ui/field.js";
 import { Input } from "../../components/ui/input.js";
 import {
   Item,
@@ -430,7 +430,7 @@ function DesktopSettingsContent({
                     {["tasks", "reminders", "calendar", "finances", "mail", "goals", "motives"].map(
                       (workspace) => (
                         <Field orientation="horizontal" key={workspace}>
-                          <Checkbox
+                          <Switch
                             id={`widget-${workspace}`}
                             checked={draft.widgetWorkspaces.includes(workspace)}
                             onCheckedChange={(checked) =>
@@ -532,7 +532,7 @@ function DesktopSettingsContent({
           </>
         ) : null}
         {section === "pet" ? (
-          <SettingsSection title="Companion">
+          <SettingsSection layout="rows" title="Companion">
             <FieldGroup>
               <Toggle
                 label="Show desktop pet"
@@ -591,7 +591,7 @@ function DesktopSettingsContent({
                 <FieldLegend>Show in quick access</FieldLegend>
                 {["tasks", "reminders", "calendar", "finances"].map((workspace) => (
                   <Field orientation="horizontal" key={workspace}>
-                    <Checkbox
+                    <Switch
                       id={`pet-${workspace}`}
                       checked={draft.petWorkspaces.includes(workspace)}
                       onCheckedChange={(checked) =>
@@ -623,7 +623,7 @@ function DesktopSettingsContent({
           </SettingsSection>
         ) : null}
         {section === "pet" ? (
-          <SettingsSection title="Sleep">
+          <SettingsSection layout="rows" title="Sleep">
             <FieldGroup>
               <Toggle
                 label="Sleep when idle"
@@ -661,7 +661,7 @@ function DesktopSettingsContent({
           </SettingsSection>
         ) : null}
         {section === "pet" ? (
-          <SettingsSection title="Quick access content">
+          <SettingsSection layout="rows" title="Quick access content">
             <FieldGroup>
               <Toggle
                 label="Show rituals"
@@ -741,7 +741,7 @@ function DesktopSettingsContent({
           </SettingsSection>
         ) : null}
         {section === "pet" ? (
-          <SettingsSection title="Shoo">
+          <SettingsSection layout="rows" title="Shoo">
             <FieldGroup>
               <Toggle
                 label="Shake to shoo"
@@ -925,7 +925,7 @@ function DesktopSettingsContent({
           </Button>
         ) : null}
         {["tasks", "calendar", "mail", "finances"].includes(section) ? (
-          <SettingsSection title="Notifications">
+          <SettingsSection layout="rows" title="Notifications">
             <FieldGroup>
               {section === "tasks" ? (
                 <>
@@ -968,7 +968,7 @@ function DesktopSettingsContent({
                     <FieldDescription>No selection uses all selected calendars.</FieldDescription>
                     {calendars.data?.map((calendar) => (
                       <Field orientation="horizontal" key={calendar.id}>
-                        <Checkbox
+                        <Switch
                           id={`notify-calendar-${calendar.id}`}
                           checked={draft.notifications.calendarIds.includes(calendar.id)}
                           onCheckedChange={(checked) =>
@@ -1003,7 +1003,7 @@ function DesktopSettingsContent({
                     {[...new Set(mailboxes.data?.map((mailbox) => mailbox.accountId) ?? [])].map(
                       (accountId, index) => (
                         <Field orientation="horizontal" key={accountId}>
-                          <Checkbox
+                          <Switch
                             id={`notify-mail-${accountId}`}
                             checked={draft.notifications.mailAccountIds.includes(accountId)}
                             onCheckedChange={(checked) =>
@@ -1052,7 +1052,7 @@ function DesktopSettingsContent({
               .map((workspace) => (
                 <Item variant="secondary" key={workspace.id} asChild>
                   <Link
-                    to={`/settings?section=${workspace.id}&field=${workspace.id}:notifications`}
+                    to={`${settingsPath(workspace.id)}&field=${workspace.id}:notifications`}
                   >
                     {workspace.id !== "today" ? (
                       <WorkspaceIcon workspace={workspace.id} size="sm" />

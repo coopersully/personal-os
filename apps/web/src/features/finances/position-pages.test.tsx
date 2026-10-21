@@ -1179,7 +1179,7 @@ it.each([
   expect(screen.getByText(/Saved account display selections do not change/)).toBeVisible();
   expect(screen.getByRole("link", { name: "Open Finance settings" })).toHaveAttribute(
     "href",
-    "/settings?section=finances",
+    "/settings?page=finances",
   );
   if (state === "failed") {
     expect(await screen.findByText("Financial position unavailable")).toBeVisible();

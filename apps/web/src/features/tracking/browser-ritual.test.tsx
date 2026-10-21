@@ -122,15 +122,13 @@ it("saves real answers, completes the same occurrence, and restores the underlyi
   draft.focus();
   await screen.findByRole("dialog");
   fireEvent.click(screen.getByRole("checkbox", { name: "Drink water" }));
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Complete Morning Ritual" })).toBeEnabled(),
-  );
+  await waitFor(() => expect(screen.getByRole("button", { name: "Done" })).toBeEnabled());
   expect(mocks.response).toHaveBeenCalledWith(
     "today",
     "water",
     expect.objectContaining({ expectedRevision: 1, value: true, submitted: true }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Complete Morning Ritual" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   await waitFor(() => expect(draft).toHaveFocus());
   expect(mocks.action).toHaveBeenCalledWith(
@@ -264,8 +262,8 @@ it("does not let an old poll reopen a completed ritual", async () => {
       }),
   );
   const pending = client.refetchQueries({ queryKey: ["ritual-current", "owner"] });
-  fireEvent.click(screen.getByRole("button", { name: "Complete Morning Ritual" }));
-  fireEvent.click(screen.getByRole("button", { name: "Finish ritual" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   await act(async () => {
     resolve(initial);
@@ -286,8 +284,8 @@ it("does not restore private state after an account change while a write is pend
   );
   const { client, rerender } = setup();
   await screen.findByRole("dialog");
-  fireEvent.click(screen.getByRole("button", { name: "Complete Morning Ritual" }));
-  fireEvent.click(screen.getByRole("button", { name: "Finish ritual" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
   await waitFor(() => expect(mocks.action).toHaveBeenCalledOnce());
   rerender(
     <QueryClientProvider client={client}>

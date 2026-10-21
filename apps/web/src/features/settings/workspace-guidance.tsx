@@ -8,23 +8,27 @@ import { useState } from "react";
 import { QueryFeedback } from "@/components/async-state";
 import { FeedbackForm } from "@/components/feedback-form";
 import { MutationFeedback } from "@/components/mutation-feedback";
+import { Field, FieldDescription, FieldLabel } from "@/components/settings-field";
 import { Button } from "@/components/ui/button";
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useFeedbackMutation } from "@/lib/use-feedback-mutation";
 import { api } from "../../api.js";
 import { CalendarProfilePreferenceFields } from "../calendar/profile-preference-fields";
 import { MailProfilePreferenceFields } from "../mail/profile-preference-fields";
+import { ProfileRow } from "./profile-rows";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SettingsSection } from "./settings-layout";
 
 export function WorkspaceGuidance({ domain }: { domain: "calendar" | "mail" | "tasks" }) {
+  const [editing, setEditing] = useState(false);
   const query = useQuery({
     queryKey: ["domain-profile", domain],
     queryFn: () => api.getDomainProfile(domain),
   });
   return (
     <SettingsSection
+      layout="rows"
       title="Preferences & guidance"
       description="Describe how this workspace should support you."
     >
@@ -32,9 +36,19 @@ export function WorkspaceGuidance({ domain }: { domain: "calendar" | "mail" | "t
       {query.isPending ? (
         <p>Loading guidance…</p>
       ) : query.data ? (
-        <GuidanceForm key={domain} profile={query.data} />
+        <>
+          <ProfileRow label="Guidance" value="Configure" onClick={() => setEditing(true)} />
+          <Dialog open={editing} onOpenChange={setEditing}>
+            <DialogContent className="max-h-[85dvh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Workspace guidance</DialogTitle>
+              </DialogHeader>
+              <GuidanceForm key={domain} profile={query.data} />
+            </DialogContent>
+          </Dialog>
+        </>
       ) : query.isSuccess ? (
-        <p className="text-sm text-muted-foreground">
+        <p className="px-4 py-3 text-sm text-muted-foreground">
           No guidance has been configured yet. Use the setup section below to establish your
           preferences.
         </p>

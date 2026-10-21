@@ -15,11 +15,17 @@ import {
 import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { NohmiBrandMark } from "../../components/brand-marks.js";
-import { AlertTriangleIcon, CheckIcon, ClockIcon, FireIcon } from "../../components/icons.js";
+import {
+  AlertTriangleIcon,
+  CheckIcon,
+  ClockIcon,
+  FireIcon,
+  LockIcon,
+} from "../../components/icons.js";
+import { Field, FieldLabel, FieldLegend, FieldSet } from "../../components/settings-field.js";
 import { Button } from "../../components/ui/button.js";
-import { Card, CardContent } from "../../components/ui/card.js";
+import { Card, CardContent, CardFooter } from "../../components/ui/card.js";
 import { Checkbox } from "../../components/ui/checkbox.js";
-import { Field, FieldLabel, FieldLegend, FieldSet } from "../../components/ui/field.js";
 import { Input } from "../../components/ui/input.js";
 import { RadioGroup, RadioGroupItem } from "../../components/ui/radio-group.js";
 import { Toaster } from "../../components/ui/sonner.js";
@@ -42,6 +48,7 @@ import {
 } from "../desktop/ritual-bridge.js";
 import { RitualClouds } from "./ritual-clouds.js";
 import { RitualCompletionWeek } from "./ritual-completion-week.js";
+import { RitualEscapeSummary } from "./ritual-escape-summary.js";
 import { RitualPreviewChecklist } from "./ritual-preview.js";
 import { RitualSkipConfirmation } from "./ritual-skip-confirmation.js";
 export function RitualOverlay() {
@@ -162,6 +169,7 @@ export function RitualChecklist({
   const [confirmSkip, setConfirmSkip] = useState(false);
   const [confirmComplete, setConfirmComplete] = useState(false);
   const actionToast = useId();
+  const completionHint = useId();
   const showError = (message: string) => toast.error(message, { id: actionToast });
   const [challenge, setChallenge] = useState<{
     count: number;
@@ -375,18 +383,94 @@ export function RitualChecklist({
       : "Today";
   const optionalTotal = occurrence.definition.steps.length - required.length;
   const optionalComplete = optionalTotal - optional.length;
-  const completionLabel = ritualIsAnswered(occurrence)
-    ? `Complete ${occurrence.definition.kind === "night" ? "Evening" : "Morning"} Ritual`
-    : `${complete} of ${required.length} tasks completed`;
+  const requirementsMet = ritualIsAnswered(occurrence);
   const dirty = Object.entries(texts).some(([id, value]) => value !== answers[id]?.value);
   const ready =
-    ritualIsAnswered(occurrence) &&
-    !dirty &&
-    !busy &&
-    (!remindLater || !optional.length || !!reminderAt);
+    requirementsMet && !dirty && !busy && (!remindLater || !optional.length || !!reminderAt);
   const mainScreen = !challenge && !confirmSkip && !confirmComplete;
+  const actions = (
+    <section
+      aria-label="Ritual actions"
+      className="ritual-actions flex w-full shrink-0 flex-col gap-3 text-center"
+    >
+      {confirmComplete && optional.length > 0 ? (
+        <div className="flex w-full flex-col gap-2 text-left">
+          <div className="flex flex-wrap items-end gap-3">
+            <Field orientation="horizontal" className="flex-1">
+              <Checkbox
+                id="ritual-remind-later"
+                checked={remindLater}
+                disabled={busy}
+                onCheckedChange={(value) => setRemindLater(value === true)}
+              />
+              <FieldLabel htmlFor="ritual-remind-later">Remind me about these later</FieldLabel>
+            </Field>
+            <Field className="w-auto">
+              <FieldLabel htmlFor="ritual-reminder-time">Reminder time</FieldLabel>
+              <Input
+                id="ritual-reminder-time"
+                type="time"
+                value={reminderTime}
+                disabled={!remindLater || busy}
+                onChange={(event) => setReminderTime(event.target.value)}
+              />
+            </Field>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {remindLater
+              ? `${reminderDay} · ${occurrence.timeZone}. Reminders need account sync and follow your notification settings.`
+              : "Unfinished optional steps will be marked not done for today."}
+          </p>
+        </div>
+      ) : null}
+      {!challenge && !confirmSkip ? (
+        <>
+          <Button
+            aria-label={preview ? "Close Preview" : "Done"}
+            aria-describedby={preview ? undefined : completionHint}
+            className="relative h-auto w-full flex-col gap-1 overflow-hidden py-3"
+            disabled={!preview && !ready}
+            onClick={() => {
+              if (preview) { void escapeAction("skip"); return; }
+              if (!ready) return;
+              if (optional.length && !confirmComplete) setConfirmComplete(true);
+              else void escapeAction("complete");
+            }}
+          >
+            {!preview ? <span
+              aria-hidden="true"
+              className="ritual-button-progress"
+              style={{ width: `${required.length ? (complete / required.length) * 100 : 100}%` }}
+            /> : null}
+            <span className="relative inline-flex items-center gap-2">
+              {!preview && !requirementsMet ? <LockIcon aria-hidden="true" className="size-4" /> : null}
+              {preview ? "Close Preview" : "Done"}
+            </span>
+            {!preview ? <span
+              id={completionHint}
+              className="relative text-xs font-normal text-primary-foreground/70"
+            >
+              {requirementsMet
+                ? `${complete} required completed · ${optionalComplete} optional completed`
+                : `${required.length - complete} required left`}
+            </span> : null}
+          </Button>
+          {confirmComplete ? (
+            <Button variant="ghost" disabled={busy} onClick={() => setConfirmComplete(false)}>
+              Go back
+            </Button>
+          ) : null}
+        </>
+      ) : null}
+    </section>
+  );
   return (
     <div className="ritual-presentation">
+      <div
+        className="ritual-glow"
+        data-ritual-kind={occurrence.definition.kind}
+        aria-hidden="true"
+      />
       <RitualClouds kind={occurrence.definition.kind} />
       <div className="ritual-logo">
         <NohmiBrandMark symbol />
@@ -444,23 +528,24 @@ export function RitualChecklist({
         />
       ) : challenge ? (
         <section
-          className="flex flex-col items-center gap-4 text-center"
+          className="flex flex-col items-center gap-7 text-center"
           aria-label="Confirm snooze"
         >
-          <p>
+          <RitualEscapeSummary streak={state.streakCount}>
             {challenge.unavailable
-              ? `Recent snooze history is unavailable. This device has recorded ${challenge.count} snoozes in the last 3 days. Snooze another 10 minutes?`
-              : `You’ve snoozed your ${occurrence.definition.kind === "night" ? "evening" : "morning"} ritual ${challenge.count} times in the last 3 days. Snooze another 10 minutes?`}
-          </p>
+              ? `Recent snooze history is unavailable. This device has recorded ${challenge.count} snoozes in the last 3 days.`
+              : `You’ve snoozed your ${occurrence.definition.kind === "night" ? "evening" : "morning"} ritual ${challenge.count} times in the last 3 days.`}{" "}
+            Snooze another 10 minutes, or go back to continue your ritual now.
+          </RitualEscapeSummary>
           <div className="flex flex-wrap justify-center gap-2">
-            <Button disabled={busy} onClick={() => void escapeAction("confirm_snooze")}>
+            <Button
+              variant="secondary"
+              disabled={busy}
+              onClick={() => void escapeAction("confirm_snooze")}
+            >
               Snooze 10 minutes
             </Button>
-            <Button
-              variant="ghost"
-              disabled={busy}
-              onClick={() => void escapeAction("cancel_snooze")}
-            >
+            <Button disabled={busy} onClick={() => void escapeAction("cancel_snooze")}>
               Go back
             </Button>
           </div>
@@ -482,28 +567,49 @@ export function RitualChecklist({
         <Card className="ritual-card" role="region" aria-label="Ritual questions">
           <CardContent className="ritual-scroll min-h-0 overflow-y-auto text-left">
             <ul className="flex flex-col gap-5">
-              {occurrence.definition.steps.map((step) => (
-                <li key={step.id} className="flex flex-col gap-2">
+              {occurrence.definition.steps.map((step, index) => (
+                <li
+                  key={step.id}
+                  className="flex flex-col gap-2"
+                  style={{ animationDelay: `${260 + Math.min(index, 7) * 35}ms` }}
+                >
                   <Field orientation={step.kind === "checkbox" ? "horizontal" : "vertical"}>
                     {step.kind === "checkbox" ? (
                       <>
                         <Checkbox
                           id={step.id}
+                          aria-required={!step.optional}
                           disabled={busy}
                           checked={answers[step.id]?.value === true}
                           onCheckedChange={(v) => void respond(step.id, v === true, true)}
                         />
-                        <FieldLabel htmlFor={step.id}>{step.label}</FieldLabel>
+                        <FieldLabel htmlFor={step.id}>
+                          {step.label}
+                          {!step.optional ? (
+                            <span aria-hidden="true" className="text-destructive">
+                              *
+                            </span>
+                          ) : null}
+                        </FieldLabel>
                       </>
                     ) : (
                       <>
                         {step.kind !== "multiple_choice" ? (
-                          <FieldLabel htmlFor={step.id}>{step.label}</FieldLabel>
+                          <FieldLabel htmlFor={step.id}>
+                            {step.label}
+                            {!step.optional ? (
+                              <span aria-hidden="true" className="text-destructive">
+                                *
+                              </span>
+                            ) : null}
+                          </FieldLabel>
                         ) : null}
                         {step.kind === "short_text" ? (
                           <Textarea
                             id={step.id}
                             maxLength={5000}
+                            required={!step.optional}
+                            placeholder="Your answer…"
                             value={texts[step.id] ?? String(answers[step.id]?.value ?? "")}
                             onChange={(e) =>
                               setTexts((old) => ({ ...old, [step.id]: e.target.value }))
@@ -511,9 +617,18 @@ export function RitualChecklist({
                           />
                         ) : step.kind === "multiple_choice" ? (
                           <FieldSet>
-                            <FieldLegend>{step.label}</FieldLegend>
+                            <FieldLegend>
+                              {step.label}
+                              {!step.optional ? (
+                                <span aria-hidden="true" className="text-destructive">
+                                  {" "}
+                                  *
+                                </span>
+                              ) : null}
+                            </FieldLegend>
                             <RadioGroup
                               aria-label={step.label}
+                              aria-required={!step.optional}
                               value={String(answers[step.id]?.value ?? "")}
                               disabled={busy}
                               onValueChange={(value) => void respond(step.id, value, true)}
@@ -530,6 +645,14 @@ export function RitualChecklist({
                           <Input
                             id={step.id}
                             type={step.kind}
+                            required={!step.optional}
+                            placeholder={
+                              step.kind === "number"
+                                ? "Enter a number"
+                                : step.kind === "time"
+                                  ? "HH:MM"
+                                  : "YYYY-MM-DD"
+                            }
                             step={step.kind === "number" ? "any" : undefined}
                             value={texts[step.id] ?? String(answers[step.id]?.value ?? "")}
                             onChange={(e) =>
@@ -540,83 +663,14 @@ export function RitualChecklist({
                       </>
                     )}
                   </Field>
-                  {step.optional ? (
-                    <span className="text-xs text-muted-foreground">Optional</span>
-                  ) : null}
                 </li>
               ))}
             </ul>
           </CardContent>
+          <CardFooter className="shrink-0">{actions}</CardFooter>
         </Card>
       )}
-      <section
-        aria-label="Ritual actions"
-        className="ritual-actions flex w-full shrink-0 flex-col gap-3 text-center"
-      >
-        {confirmComplete && optional.length > 0 ? (
-          <div className="flex w-full flex-col gap-2 text-left">
-            <div className="flex flex-wrap items-end gap-3">
-              <Field orientation="horizontal" className="flex-1">
-                <Checkbox
-                  id="ritual-remind-later"
-                  checked={remindLater}
-                  disabled={busy}
-                  onCheckedChange={(value) => setRemindLater(value === true)}
-                />
-                <FieldLabel htmlFor="ritual-remind-later">Remind me about these later</FieldLabel>
-              </Field>
-              <Field className="w-auto">
-                <FieldLabel htmlFor="ritual-reminder-time">Reminder time</FieldLabel>
-                <Input
-                  id="ritual-reminder-time"
-                  type="time"
-                  value={reminderTime}
-                  disabled={!remindLater || busy}
-                  onChange={(event) => setReminderTime(event.target.value)}
-                />
-              </Field>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {remindLater
-                ? `${reminderDay} · ${occurrence.timeZone}. Reminders need account sync and follow your notification settings.`
-                : "Unfinished optional steps will be marked not done for today."}
-            </p>
-          </div>
-        ) : null}
-        {!challenge && !confirmSkip ? (
-          <>
-            <Button
-              aria-label={confirmComplete ? "Finish ritual" : completionLabel}
-              className="relative h-auto w-full overflow-hidden py-3"
-              disabled={!ready}
-              onClick={() => {
-                if (!ready) return;
-                if (optional.length && !confirmComplete) setConfirmComplete(true);
-                else void escapeAction("complete");
-              }}
-            >
-              <span
-                aria-hidden="true"
-                className="ritual-button-progress"
-                style={{ width: `${required.length ? (complete / required.length) * 100 : 100}%` }}
-              />
-              <span className="relative">
-                {confirmComplete ? "Finish ritual" : completionLabel}
-              </span>
-            </Button>
-            {optionalTotal > 0 ? (
-              <p className="text-xs">
-                {optionalComplete} of {optionalTotal} optional completed
-              </p>
-            ) : null}
-            {confirmComplete ? (
-              <Button variant="ghost" disabled={busy} onClick={() => setConfirmComplete(false)}>
-                Go back
-              </Button>
-            ) : null}
-          </>
-        ) : null}
-      </section>
+      {!mainScreen ? actions : null}
       <div className="ritual-support flex shrink-0 flex-col items-center gap-1">
         {mainScreen ? (
           <p
@@ -643,16 +697,7 @@ export function RitualChecklist({
                     : "Saved to your account"}
           </p>
         ) : null}
-        {preview ? (
-          <Button
-            size="sm"
-            variant="link"
-            className="ritual-support-text text-xs font-normal text-muted-foreground"
-            onClick={() => void escapeAction("skip")}
-          >
-            Close preview
-          </Button>
-        ) : !challenge && !confirmSkip && !confirmComplete ? (
+        {!preview && !challenge && !confirmSkip && !confirmComplete ? (
           <div className="ritual-escapes flex shrink-0 justify-center gap-5 text-center">
             <Button
               size="sm"

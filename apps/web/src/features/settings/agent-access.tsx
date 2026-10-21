@@ -22,6 +22,15 @@ import { QueryFeedback } from "../../components/async-state.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { ReadinessPanel } from "../../components/readiness-panel.js";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "../../components/settings-field.js";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
 import { Badge } from "../../components/ui/badge.js";
 import { Button } from "../../components/ui/button.js";
@@ -33,7 +42,7 @@ import {
   CardHeader,
   CardTitle,
 } from "../../components/ui/card.js";
-import { Checkbox } from "../../components/ui/checkbox.js";
+import { Switch } from "../../components/ui/switch.js";
 import {
   Collapsible,
   CollapsibleContent,
@@ -47,15 +56,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../../components/ui/dialog.js";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "../../components/ui/field.js";
 import { Input } from "../../components/ui/input.js";
 import {
   InputGroup,
@@ -366,7 +366,7 @@ function AgentAccessSettings({
             </CardDescription>
             <CardAction>
               <Button asChild size="sm" variant="outline">
-                <Link to="/settings?section=agent-connections">Connected agents</Link>
+                <Link to="/settings?page=connections&subpage=agent-connections">Connected agents</Link>
               </Button>
             </CardAction>
           </CardHeader>
@@ -741,9 +741,9 @@ function WorkspaceSettingsStatus({
         : (step?.userAction ?? plan?.nextAction ?? `${label} setup has not started.`);
   const action =
     !error && !loading && step?.id === "connect_agent"
-      ? { label: "Connect agent", to: "/settings?section=agent-connections" }
+      ? { label: "Connect agent", to: "/settings?page=connections&subpage=agent-connections" }
       : !error && !loading && step?.id === "review_guidance" && plan?.domain === "finances"
-        ? { label: "Review guidance", to: "/settings?section=finances#guidance" }
+        ? { label: "Review guidance", to: "/settings?page=finances#guidance" }
         : null;
   return (
     <Alert role="status" variant={error ? "destructive" : "info"}>
@@ -1109,7 +1109,7 @@ function TokenAccess({
                       <FieldGroup className="token-permissions">
                         {selectableScopes.map((scope) => (
                           <Field key={scope} orientation="horizontal">
-                            <Checkbox
+                            <Switch
                               checked={scopes.includes(scope)}
                               id={`scope-${scope}`}
                               onCheckedChange={(checked) =>

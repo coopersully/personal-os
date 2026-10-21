@@ -46,6 +46,12 @@ import {
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
 } from "@/components/responsive-dialog";
+import {
+  Field as ShadcnField,
+  FieldDescription as ShadcnFieldDescription,
+  FieldGroup as ShadcnFieldGroup,
+  FieldLabel as ShadcnFieldLabel,
+} from "@/components/settings-field";
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
 import {
   Card as ShadcnCard,
@@ -76,12 +82,6 @@ import {
   DropdownMenuSeparator as ShadcnDropdownMenuSeparator,
   DropdownMenuTrigger as ShadcnDropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Field as ShadcnField,
-  FieldDescription as ShadcnFieldDescription,
-  FieldGroup as ShadcnFieldGroup,
-  FieldLabel as ShadcnFieldLabel,
-} from "@/components/ui/field";
 import { Input as ShadcnInput } from "@/components/ui/input";
 import {
   Item as ShadcnItem,

@@ -3,9 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import { CurrencyInput } from "@/components/currency-input";
 import { DateInput } from "@/components/date-input";
 import { PlusIcon, TrashIcon } from "@/components/icons";
+import { Field, FieldLabel } from "@/components/settings-field";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Item, ItemContent, ItemGroup } from "@/components/ui/item";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
@@ -171,6 +171,7 @@ function Collection({
   const rows = field.value ?? [];
   return (
     <SettingsSection
+      layout={rows.length ? "content" : "rows"}
       title={title}
       action={
         <Button
@@ -202,7 +203,7 @@ function Collection({
             <ItemContent>
               <fieldset
                 aria-label={`${kind} entry`}
-                className="grid gap-3 sm:grid-cols-2"
+                className="flex min-w-0 flex-col"
                 onBlur={(event) => {
                   if (!event.currentTarget.contains(event.relatedTarget as Node | null))
                     commitRows();
@@ -292,7 +293,7 @@ function Collection({
                 ) : null}
                 {kind === "priorities" ? (
                   <Field orientation="horizontal">
-                    <Checkbox
+                    <Switch
                       id={`${kind}-${row.id}-protected`}
                       checked={row.protected}
                       onCheckedChange={(checked) => update(row.id, { protected: checked === true })}
@@ -321,7 +322,7 @@ function Collection({
         ))}
       </ItemGroup>
       {!rows.length ? (
-        <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
+        <div className="flex min-h-12 items-center justify-between gap-3 px-4 py-2 text-sm text-muted-foreground">
           <span>{field.value === null ? "Not recorded" : "None"}</span>
           {field.value === null ? (
             <Button

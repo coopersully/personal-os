@@ -56,32 +56,30 @@ it("prefills only today's matching definition without writing account data", asy
     dateTo: date,
   });
 });
-it("supports all six responses locally and closes native completion with its exit animation", async () => {
+it("supports all six responses locally and keeps the preview close action available", async () => {
   mocks.desktop.mockReturnValue(true);
   const state = await makeRitualPreview(definition);
-  render(<RitualPreviewChecklist initialState={state} onClose={vi.fn()} />);
+  const close = vi.fn();
+  render(<RitualPreviewChecklist initialState={state} onClose={close} />);
   expect(screen.getByText("Preview only")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("checkbox", { name: "Teeth" }));
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "1 of 6 tasks completed" })).toBeDisabled(),
-  );
+  await waitFor(() => expect(screen.getByRole("button", { name: "Close Preview" })).toBeEnabled());
   for (const [label, value] of [
     ["Reflection", "A good day"],
     ["Bedtime", "22:30"],
     ["Day", "2026-09-29"],
     ["Minutes", "10"],
   ]) {
-    fireEvent.change(screen.getByLabelText(label!), { target: { value } });
+    fireEvent.change(screen.getByLabelText(new RegExp(label!)), { target: { value } });
     await waitFor(() => expect(screen.getByRole("radio", { name: "Good" })).toBeEnabled());
   }
-  await waitFor(
-    () => expect(screen.getByRole("button", { name: "5 of 6 tasks completed" })).toBeDisabled(),
-    { timeout: 2500 },
-  );
+  await waitFor(() => expect(screen.getByRole("button", { name: "Close Preview" })).toBeEnabled(), {
+    timeout: 2500,
+  });
   fireEvent.click(screen.getByRole("radio", { name: "Good" }));
-  const complete = await screen.findByRole("button", { name: "Complete Evening Ritual" });
+  const complete = await screen.findByRole("button", { name: "Close Preview" });
   fireEvent.click(complete);
-  await waitFor(() => expect(mocks.close).toHaveBeenCalledWith(null, true));
+  await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
   expect(mocks.history).toHaveBeenCalledTimes(1);
 });
 it("closes a preview through its escape or close control", async () => {
@@ -90,6 +88,6 @@ it("closes a preview through its escape or close control", async () => {
   render(<RitualPreviewChecklist initialState={state} onClose={close} />);
   fireEvent.keyDown(window, { key: "Escape" });
   expect(close).toHaveBeenCalledTimes(1);
-  fireEvent.click(screen.getByRole("button", { name: "Close preview" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close Preview" }));
   await waitFor(() => expect(close).toHaveBeenCalledTimes(2));
 });

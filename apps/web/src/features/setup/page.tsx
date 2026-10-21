@@ -176,7 +176,7 @@ export function SetupPage({ user }: { user: User }) {
   const stepIndex = Math.max(0, steps.indexOf(currentStep));
   const exitSetup = () => {
     setCompletionSucceeded(false);
-    setPendingDestination(replaying ? "/settings?section=setup" : "/today");
+    setPendingDestination(replaying ? "/settings?page=profile&subpage=setup" : "/today");
     if (replaying) setCompletionSucceeded(true);
     else save.mutate({ action: "dismiss" });
   };
@@ -184,7 +184,7 @@ export function SetupPage({ user }: { user: User }) {
     setCompletionSucceeded(false);
     setPendingDestination(
       replaying && redirectDestination === "/today"
-        ? "/settings?section=setup"
+        ? "/settings?page=profile&subpage=setup"
         : redirectDestination,
     );
     save.mutate(replaying ? { action: "preferences", selectedWorkspaces } : { action: "complete" });
@@ -288,7 +288,7 @@ export function SetupPage({ user }: { user: User }) {
         {currentStep === "ready" ? (
           <ReadyStep
             complete={() => completeSetup()}
-            connectAgent={() => completeSetup("/settings?section=agent-connections")}
+            connectAgent={() => completeSetup("/settings?page=connections&subpage=agent-connections")}
             connectedAccounts={connectors.data?.length ?? 0}
             financeAccounts={finances.data?.accounts.length ?? 0}
             pending={save.isPending}

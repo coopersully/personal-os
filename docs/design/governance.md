@@ -208,9 +208,10 @@ design book.
 
 ## Ritual presentation exception
 
-Morning and evening ritual presentations use solid sky colors: pastel blue for morning and deep
+Morning and evening ritual presentations use solid sky colors: pastel blue for morning and near-black
 blue for evening. Browser delivery, previews, and native backdrops share these colors with a
-transparent dithered cloud layer; gradients are not permitted. Standard cards remain
+transparent dithered cloud layer. A scoped radial sun/moon glow behind the card fades in over
+30 seconds; all other decorative gradients remain prohibited. Standard cards remain
 flat and shadow-free. This is a ritual presentation treatment, not a shared component default.
 
 The approved real browser ritual retains the person's page underneath a full-viewport attention

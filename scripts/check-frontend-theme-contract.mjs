@@ -56,11 +56,13 @@ const stylesheetForDecorativeChecks = stylesheet
     /(\.setup-navigation__fade\s*\{\s*)background: linear-gradient\(to bottom, transparent, var\(--canvas\) 62%\);/g,
     "$1",
   );
-// Ritual skies are solid; only the retained browser backdrop permits a bounded blur.
-const stylesheetForRitualChecks = stylesheetForDecorativeChecks.replace(
-  /(\.browser-ritual\s*\{\s*)backdrop-filter: blur\(24px\);/g,
-  "$1",
-);
+// The approved shared ritual glow is bounded to its decorative sky layer.
+const stylesheetForRitualChecks = stylesheetForDecorativeChecks
+  .replace(/(\.browser-ritual\s*\{\s*)backdrop-filter: blur\(24px\);/g, "$1")
+  .replace(
+    /(\.ritual-glow\s*\{[^}]*?)background: radial-gradient\(ellipse at 50% 50%, var\(--ritual-glow-color\) 0%, transparent 65%\);/g,
+    "$1",
+  );
 const stylesheetPatterns = [
   { name: "gradient", pattern: /(?:linear|radial|conic)-gradient\(/g },
   { name: "decorative shadow", pattern: /(?:box|text)-shadow\s*:/g },

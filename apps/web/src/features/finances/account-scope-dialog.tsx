@@ -1,6 +1,11 @@
 import type { FinanceAccount, FinanceTransaction } from "@personal-os/domain";
 import type { ReactNode } from "react";
 import { ActionButton as ShadcnButton } from "@/components/action-button";
+import {
+  Field as ShadcnField,
+  FieldGroup as ShadcnFieldGroup,
+  FieldLabel as ShadcnFieldLabel,
+} from "@/components/settings-field";
 import { Checkbox as ShadcnCheckbox } from "@/components/ui/checkbox";
 import {
   Dialog as ShadcnDialog,
@@ -9,11 +14,6 @@ import {
   DialogHeader as ShadcnDialogHeader,
   DialogTitle as ShadcnDialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Field as ShadcnField,
-  FieldGroup as ShadcnFieldGroup,
-  FieldLabel as ShadcnFieldLabel,
-} from "@/components/ui/field";
 import { formatMoney } from "./format";
 
 export function AccountScopeDialog({

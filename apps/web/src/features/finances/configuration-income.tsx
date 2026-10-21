@@ -8,8 +8,8 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CurrencyInput } from "@/components/currency-input";
 import { DateInput } from "@/components/date-input";
+import { Field, FieldLabel } from "@/components/settings-field";
 import { Button } from "@/components/ui/button";
-import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { api } from "../../api.js";
@@ -65,7 +65,7 @@ export function FinanceIncomeEditor() {
   const query = useFinanceConfiguration();
   if (query.data?.income.state !== "loaded")
     return (
-      <SettingsSection title="Payroll details">
+      <SettingsSection layout="rows" title="Payroll details">
         <p role="alert">
           Payroll details could not load.{" "}
           <Button variant="secondary" onClick={() => void query.refetch()}>
@@ -77,11 +77,11 @@ export function FinanceIncomeEditor() {
   const profile = query.data.income.value;
   const accounts = query.data.accounts;
   return (
-    <SettingsSection
+    <SettingsSection layout="rows"
       title="Payroll details"
       description="Paycheck amounts and timing. Monthly estimates and reliable budget income are separate."
     >
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="flex flex-col">
         {fields.map((field) => (
           <IncomeField key={field.key} field={field} profile={profile} />
         ))}
@@ -202,11 +202,11 @@ function IncomeField({
           ))}
         </NativeSelect>
       ) : field.kind === "currency" ? (
-        <CurrencyInput {...common} onValueChange={change} />
+        <CurrencyInput {...common} placeholder="Not set" onValueChange={change} />
       ) : field.kind === "date" ? (
         <DateInput {...common} onValueChange={change} onValueCommit={commit} />
       ) : (
-        <Input {...common} onChange={(e) => change(e.target.value)} />
+        <Input {...common} placeholder="Not set" onChange={(e) => change(e.target.value)} />
       )}
       {save.isError ? (
         <div role="alert" className="text-sm text-destructive">

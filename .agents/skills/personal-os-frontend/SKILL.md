@@ -140,6 +140,55 @@ or chat surface.
 - Update the page specification when a change establishes or revises a reusable
   interaction rule. UI and its specification must land together.
 
+## Settings composition and inline editing
+
+Read [the settings page contract](../../../docs/design/pages/settings.md#flat-settings-rows-and-optional-headers)
+and [engineering standards](../../../docs/engineering/settings-ui-standards.md) before
+changing settings. This is the accepted standard across every Settings route.
+Use the shared Settings layout/control context; do not create page-local imitations
+or change workspace forms outside Settings as a side effect.
+
+- Small secondary labels sit above subsection Cards. Short setting labels sit
+  at the start of divided rows; values and controls sit at the end.
+- Simple values edit where the text was, without chevrons or dialogs. Commit
+  on Enter/meaningful blur, cancel on Escape, preserve rejected drafts, and
+  suppress unchanged/duplicate writes. Radios, switches, and checkboxes are direct.
+- Complex configuration opens a dialog. Phone uses two steps: number, country, and
+  consent first, then verification. Chevrons indicate modals; arrows indicate page navigation, not
+  direct selectors; Home has no clear icon. A typed draft is not a verified number.
+- Settings choices use compact checked menus for up to six options; larger sets
+  and time entry use searchable shadcn Combobox controls with at most six suggestions.
+  Keep values right-aligned, with a leading clock for times.
+  Keep value icons adjacent at text size, and reserve equal 32px leading slots for
+  framed and unframed icons. Summary rows reuse workspace glyphs/colors, provider BrandMark artwork, and framed
+  destination icons; never invent substitute logos or mismatch the destination.
+- Settings inline editors share an 18rem editing width (constrained on small screens).
+  Resting values and adjacent icons shrink together against the trailing edge.
+  Focus uses standard InputGroup addon padding and start-aligned text. Reuse
+  `settings-value-input`; never add field-specific width overrides.
+- Page headers remain visible by default; Profile uses its in-card identity,
+  and Goals uses a small label above its outcome sections.
+  Header/icon APIs remain optional. Page headers center the solid
+  icon above the title in a borderless frame. Subsection identity headers are
+  start-aligned and may use an avatar instead. Use title case for Settings titles and
+  section labels. Do not add generic description-only subsection headers.
+- Cards have one continuous surface; nested record Items use a distinct secondary
+  surface. Buttons are pill-shaped, primary actions contrast with the background,
+  and card-header icon actions are ghost.
+- Preserve search reveal paths, accessible labels, focus, error delivery through
+  Sonner, and the existing persistence/verification authority.
+
+Before choosing a control, classify the content as a preference, read-only state,
+record, navigation, or command using the [decision table](../../../docs/design/pages/settings.md#platform-agnostic-settings-model).
+Keep scope, effective value/source, availability, and commit policy explicit. Small
+choice sets can use direct radios/groups; larger sets use searchable Comboboxes.
+Do not hide dependent settings just to reduce visual density. Keep resting icons
+adjacent to end-aligned values; test long text and larger text without clipping.
+Use bounded modals for related decisions and actual dependent steps, routes for
+persistent detail pages, and shared domain adapters for all writes. The
+[System Settings study](../../../docs/design/references/system-settings/README.md)
+is evidence, not a mandate to copy Apple styling or private architecture.
+
 ## Menus and selection semantics
 
 Apply the app-wide [menu standards](../../../docs/design/system.md#menus-and-selection-controls-all-workspaces).
@@ -205,3 +254,209 @@ shared primitives; follow WAI-ARIA APG keyboard conventions for composite
 widgets. Automated checks do not replace keyboard, focus, zoom, reduced-motion,
 responsive, realistic-state, and assistive-technology inspection appropriate
 to the change.
+
+Settings routes use `settingsPath` / `settingsRoute`: `?page=<page>` or
+`?page=<parent>&subpage=<child>`. Register parent relationships centrally; retain
+legacy redirects and deep-link parameters. Subpage Back is an accessible icon
+button at the header Card's top-left, linking to the parent. Focused inline
+editors retain standard shadcn InputGroup padding; compact padding applies only
+to unfocused values across every Settings page.
+
+Settings scalar rows use a 48px minimum height and 8px vertical padding, with
+32px input controls and native-sized checkbox/switch glyphs. Keep descriptions
+2px below their title. Center the trailing control across the combined title
+and description, allow wrapping to grow the row, and avoid padding twice in
+inline-edit wrappers. This applies to Profile and every other Settings page.
+
+Use SettingsIconSlot for leading artwork: a transparent 32px footprint with a
+centered 16px glyph when there is no visible frame. Subpage headers combine the
+parent icon with a smaller bottom-right subpage badge. Settings sidebar context
+menus list authorized direct subpages; collection counts reflect saved records.
+
+For a Settings-wide visual pass, inspect every accessible route and its lower
+sections, then record permission/platform coverage gaps explicitly. Apply the
+visual-audit rubric in settings-ui-standards.md. Preserve record and preview
+exceptions as explicit design questions; do not silently classify them as scalar
+preferences. Never fit a settings row grid inside a second multi-column grid.
+
+### Meaningful icons, clear commands, and ongoing standards work
+
+Update the settings standard and frontend skill as accepted refinements emerge;
+the user should not need to request documentation each time. Capture the intent
+(reduce scanning effort, avoid misleading affordances, keep consequences clear),
+not only the latest pixel adjustment. Keep inferred motivations separate from
+unapproved design proposals. Challenge proposals when they obscure meaning,
+accessibility, authority, or consequences.
+
+Ordinary scalar settings and commands do not need decorative icons. Reserve
+leading icons for meaningful identity or special destinations; a framed leading
+icon means navigation to a subpage or another page. Provider artwork remains
+unframed with the shared optical footprint. This rule concerns row-leading
+icons, not page-header artwork or useful input addons such as a clock.
+
+Use concise, explicit labels. A command says what clicking it will do: “Logout”,
+not “Session”. Add a short description only when scope or consequences need
+explanation. Standard setting labels use foreground, including labels nested
+inside FieldContent; descriptions and values use their secondary tokens.
+
+Disruptive/destructive commands use the semantic destructive Button treatment
+(red text plus distinct surface/hover), with no decorative leading icon.
+Use the shared useConfirmAction flow for dangerous commands: an explicit action
+title, concise consequence/scope, Cancel initially focused, a clearly named
+destructive confirmation, and focus restored on dismissal. Opening/canceling
+must never execute the operation. Use Sonner for outcomes. Match friction to
+consequence: logout is reversible; permanent deletion is not. Do not add long
+holds or typed confirmations to every disruptive action.
+
+### Settings flatness and summary spacing
+
+Prefer full-width divided rows over nested cards for compact settings records.
+Do not add a secondary item surface solely because data is a record. Keep title
+and description separate from the trailing value with deliberate whitespace;
+truncate previews before they crowd values, and expose full text in details.
+See the settings standard for the Goals/Motives trial; do not generalize its
+exact preview width to all controls without checking narrow layouts.
+
+Reuse ProfileRow and the existing settings divider treatment for compact record
+rows. Detail dialogs place object mutation actions in the bottom full-width footer and keep
+read-only metadata separate. Preserve object identity without requiring ornamental
+icons or artwork; text-heavy Goals and Motives are valid.
+
+Inactive is not disabled: apply shared reduced emphasis while preserving interaction,
+focus visibility, and a textual state cue. Omit default/redundant statuses when the
+row appearance or section already explains them. Use labeled shadcn progress in
+Goal details; favor labeled footer buttons over unexplained icon controls.
+
+Explanatory subsection headers may use framed icons, titles, and concise purpose
+copy above their flat rows. Agent-related copy must distinguish available context
+from autonomous behavior or granted authority. Dialogs use the shared elevated
+surface/border/shadow. Prefer direct inline numeric editing over arbitrary increment
+buttons, using InputGroup with units and commit/cancel validation behavior.
+
+
+Settings rows expose shared default, inactive, and danger variants. Inactive
+means faded content on the unchanged card surface, with unchanged dividers and
+geometry; it does not mean disabled interaction. Retain the Paused label and
+keyboard access. Danger uses destructive text and the semantic danger surface
+for explicit consequential commands. Do not invent per-record background colors.
+In-card subsection headers always end with the same full-width 1px border-token
+divider (40% strength) as settings rows. Their icon frames use that same neutral
+border and a faint neutral background, never a colored accent fill; page headers
+retain their separate styling.
+
+
+### Modal action standard
+Modal actions live in a full-width bottom footer: equal-width buttons in a grid,
+or one full-width button. Use explicit text labels; do not hide object mutations
+in a top-right icon toolbar. Order actions by promotion from left to right, with
+one recommended primary action on the far right. Goal/Motive details use Delete,
+Pause/Resume, Close in that order (omit unavailable actions).
+Dangerous actions are never promoted: use the quiet destructive treatment on the
+left and primary Cancel/Go Back on the right. Focus the safe action when opening
+a destructive confirmation, explain the consequence, and preserve Escape and
+focus return. This supersedes the earlier top-right object-action trial.
+Apply the same promotion ordering throughout the app. The shared DialogFooter
+provides equal-width geometry; callers own semantic order and variants.
+
+
+State-changing buttons whose labels switch (such as Pause/Resume) pair their
+visible action label with the matching semantic icon. The icon describes the next
+action, is decorative to assistive technology, and supplements rather than replaces
+the label. Keep compact progress editors to a single label/value row and slim bar;
+place layout/control-scope wrappers outside that row so inherited grid rules
+cannot accidentally stack the label and value.
+
+
+Goals uses a small external Goals label above the Active Outcomes and Completed
+Outcomes sections rather than a duplicate page hero. Goal detail content follows
+Success looks like, Target date, Progress; all three share the same heading
+typography and foreground. Use spacing to separate modal content and actions,
+not incidental horizontal rules. Preserve intentional row/subsection dividers in
+settings lists; this is not a global removal of meaningful separators.
+
+Goals and Motives use matching quiet page labels, framed sections, and editable
+detail dialogs. Inline title/context/date edits save on blur or Enter, allow
+Escape cancellation, and preserve failed drafts. Keep domain labels meaningful:
+"Success looks like" for Goals, "Why it matters" for Motives.
+
+
+Goals and Motives now share one Settings destination at `?page=goals`, labeled
+Goals & Motives, with separate Goals and Motives groups. Legacy Motives URLs
+redirect here; sidebar totals include both record types. Both dialogs use the
+same inline InputGroup editors with standard focused width/padding and commit
+behavior. Prose keeps start alignment beneath its heading. Target dates open a
+shadcn Calendar in a Popover, persist local date-only values, and allow clearing.
+
+
+Completed outcomes live at `?page=goals&subpage=completed-outcomes`.
+Keep a quiet, end-aligned navigation button below the Goals card, with the
+standard parent back action and sidebar context-menu entry on the subpage.
+Settings sidebar glyphs use outline weight when unselected and filled weight
+when selected, matching navigation throughout the app.
+
+
+Rituals is a navigation overview with Morning, Evening, and History subpages
+under `page=rituals`, using the shared back action and sidebar context menu.
+Export Rituals belongs on the overview and requires confirmation. Each routine
+places Delete Data to the left of Preview Morning Ritual/Preview Evening Ritual
+below its settings. There is no separate Data subpage.
+
+
+Ritual checklists use compact flat rows with full-width shared dividers, a
+drag handle, concise summary, and a row trigger for the step editor. Do not nest
+record cards inside the checklist card. Routine previews are end-aligned buttons
+directly below routine settings, not dedicated sections. Omit the read-only
+profile time zone from routine settings; scheduling still uses the profile zone.
+
+
+Ritual step editors reuse compact shared settings fields within the modal,
+with destructive Delete at the footer’s left and primary Done at the right.
+Deletion uses the shared safe-default confirmation and remains unavailable for
+the final step. Sortable rows highlight as one full-width surface using semantic
+hover/focus tokens; their text trigger must not add a second pill highlight.
+Dragging uses a neutral raised row surface and retains keyboard reordering.
+
+
+Before settings refinements, apply the accepted motivations/rubric in
+`docs/engineering/settings-ui-standards.md`, not just the newest appended example.
+Carry durable user decisions into that contract and the page spec automatically;
+remove superseded rules. Preserve user intent: flat, compact, predictable,
+clearly labeled, safe by default, and visually verified in the relevant states.
+Export Rituals requires an explicit neutral confirmation. Routine Delete Data
+requires destructive confirmation and sits left of its Preview action.
+
+
+### Ritual overview and checklist ownership
+
+The Rituals overview contains separate Morning Ritual and Evening Ritual sections.
+Each uses the shared framed subsection header with a short explanation of its purpose,
+then compact rows for enabled state, available-from time, and reminder time. The final
+row navigates to that routine's Checklist subpage. Delete Data and Preview Morning/Evening
+Ritual sit below the respective section, right-aligned with deletion on the left.
+The routine subpages contain only editable checklist rows and their step dialogs;
+do not duplicate schedule controls or preview actions there. History remains a separate
+subpage, and confirmed Export Rituals stays on the overview. This supersedes earlier
+placement of schedule and data controls on the routine subpages: everyday configuration
+should be visible together, while detailed checklist editing gets its own focused space.
+
+
+### Binary settings and explicit dependencies
+
+Use the shared Switch for all binary on/off preferences, including permissions,
+visibility, enablement, and consent. Checkboxes remain appropriate for completing
+tasks or selecting members of a multi-select set (such as specific weekdays).
+Keep dependent settings visible and retain their values when their prerequisite
+is off. Disable editing, fade the controls and labels, and provide a keyboard-
+accessible tooltip naming the prerequisite and how to enable it. Never imply
+that a disabled dependency is missing configuration or silently clear it.
+
+Ritual overview headers explain that the ritual covers the screen at its scheduled
+time, its morning/evening purpose, and the available snooze/skip escape. Show the
+current streak and seven dated completion indicators using the shared domain logic.
+Call the editable collection “Steps,” because it includes actions and questions,
+not only checkboxes. The bottom navigation row opens the routine's Steps subpage.
+
+Ritual header thumbnails align to the top trailing edge. Header progress uses compact
+icon summaries (“0-day streak” and “7 days”), with the completed-day count in the
+week badge tooltip. Full previews replace the normal completion footer with an
+always-available Close Preview button; omit duplicate bottom links and corner X.

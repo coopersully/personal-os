@@ -27,6 +27,12 @@ function setup() {
 }
 it("warns about skips and streak loss; a click cannot skip", () => {
   const { button, onConfirm } = setup();
+  expect(screen.getByRole("heading", { name: "8-day current streak" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Go back" })).toHaveAttribute(
+    "data-variant",
+    "default",
+  );
+  expect(button).toHaveAttribute("data-variant", "secondary");
   expect(screen.getByText(/2 times in the last 3 days/)).toBeInTheDocument();
   expect(screen.getByText(/end your 8-day streak/)).toBeInTheDocument();
   fireEvent.click(button);

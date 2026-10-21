@@ -117,15 +117,15 @@ it("saves Task sorting and toggles individual row details without losing sibling
   await select(user, "Sort by", "priority", { taskSort: "priority" });
   await select(user, "Group by", "project", { taskGroup: "project" });
   await select(user, "List and project sorting", "name", { taskContainerSort: "name" });
-  await user.click(screen.getByRole("checkbox", { name: "Notes" }));
+  await user.click(screen.getByRole("switch", { name: "Notes" }));
   await waitFor(() =>
     expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
       "tasks",
       expect.objectContaining({ preferences: { taskRowDetails: ["estimate", "notes"] } }),
     ),
   );
-  await waitFor(() => expect(screen.getByRole("checkbox", { name: "Estimates" })).toBeEnabled());
-  await user.click(screen.getByRole("checkbox", { name: "Estimates" }));
+  await waitFor(() => expect(screen.getByRole("switch", { name: "Estimates" })).toBeEnabled());
+  await user.click(screen.getByRole("switch", { name: "Estimates" }));
   await waitFor(() =>
     expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
       "tasks",

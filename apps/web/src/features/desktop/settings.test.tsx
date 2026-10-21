@@ -354,8 +354,8 @@ describe("desktop preferences", () => {
     await screen.findByRole("switch", { name: "Show desktop pet" });
     await userEvent.click(screen.getByRole("switch", { name: "Show desktop pet" }));
     fireEvent.change(screen.getByLabelText("Pet color"), { target: { value: "#123456" } });
-    await userEvent.click(screen.getByRole("checkbox", { name: "Tasks" }));
-    await userEvent.click(screen.getByRole("checkbox", { name: "Finances" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Tasks" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Finances" }));
     await userEvent.click(screen.getByRole("button", { name: "Reset pet position" }));
     expect(mocks.invoke).toHaveBeenCalledWith("desktop_native_action", {
       action: "reset_pet_position",
@@ -482,7 +482,7 @@ describe("desktop preferences", () => {
       const id = workspace.toLowerCase();
       expect(
         screen.getByRole("link", { name: `${workspace} Notification settings` }),
-      ).toHaveAttribute("href", `/settings?section=${id}&field=${id}:notifications`);
+      ).toHaveAttribute("href", `/settings?page=${id}&field=${id}:notifications`);
     }
     for (const label of [
       "Enable notifications",
@@ -501,13 +501,13 @@ describe("desktop preferences", () => {
     view.unmount();
     view = mount({ section: "calendar" });
     await userEvent.click(await screen.findByRole("switch", { name: "Upcoming events" }));
-    await userEvent.click(await screen.findByRole("checkbox", { name: "Personal" }));
+    await userEvent.click(await screen.findByRole("switch", { name: "Personal" }));
     fireEvent.change(screen.getByLabelText("Minutes before an event"), { target: { value: "30" } });
     await waitFor(() => expect(status.settings.notifications.advanceMinutes).toBe(30));
     view.unmount();
     mount({ section: "mail" });
     await userEvent.click(await screen.findByRole("switch", { name: "New mail" }));
-    await userEvent.click(await screen.findByRole("checkbox", { name: "cooper@example.com" }));
+    await userEvent.click(await screen.findByRole("switch", { name: "cooper@example.com" }));
     await waitFor(() =>
       expect(status.settings.notifications.mailAccountIds).toEqual(["account-1"]),
     );
@@ -733,7 +733,7 @@ describe("desktop preferences", () => {
       ),
     ).toHaveAttribute("role", "status");
     expect(screen.queryByText(/healthy@example\.com:/)).not.toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: "healthy@example.com" })).toBeEnabled();
+    expect(screen.getByRole("switch", { name: "healthy@example.com" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Save preferences" })).not.toBeInTheDocument();
   });
 
@@ -813,7 +813,7 @@ describe("background setup", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Set up notifications" })).toHaveAttribute(
       "href",
-      "/settings?section=notifications",
+      "/settings?page=notifications",
     );
   });
 
@@ -882,7 +882,7 @@ describe("background setup", () => {
     expect(await screen.findByText(/Enable automatic rituals on this Mac/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Routine settings" })).toHaveAttribute(
       "href",
-      "/settings?section=rituals",
+      "/settings?page=rituals",
     );
   });
 
@@ -953,7 +953,7 @@ describe("background setup", () => {
     await userEvent.click(screen.getByRole("button", { name: "Review checks" }));
     expect(screen.getByRole("link", { name: "Routine settings" })).toHaveAttribute(
       "href",
-      "/settings?section=rituals",
+      "/settings?page=rituals",
     );
   });
 

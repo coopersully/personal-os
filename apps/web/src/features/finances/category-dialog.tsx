@@ -11,7 +11,7 @@ import {
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
 } from "@/components/responsive-dialog";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { Field, FieldLabel } from "@/components/settings-field";
 import { Input } from "@/components/ui/input";
 import { useFeedbackMutation } from "@/lib/use-feedback-mutation";
 

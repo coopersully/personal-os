@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { settingsFieldId, settingsFields } from "./settings-fields.js";
+import { settingsRoute } from "./settings-routes";
 
 const controlSelector = 'input, select, textarea, button, a[href], [role="slider"], [tabindex]';
 const visible = (element: HTMLElement) =>
@@ -21,7 +22,8 @@ export function SettingsFieldFocus() {
     if (!navigationKey) return;
     const field = settingsFields.find(
       (item) =>
-        settingsFieldId(item) === params.get("field") && item.section === params.get("section"),
+        settingsFieldId(item) === params.get("field") &&
+        item.section === settingsRoute(location.search),
     );
     if (!field) return;
     const revealed = new Set<string>();

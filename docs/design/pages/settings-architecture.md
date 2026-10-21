@@ -36,7 +36,7 @@ history with connections. Do not claim aggregate history coverage that the API d
 
 ## Workspace page anatomy
 
-Use the shared bento SettingsSection and secondary SettingsRecord compositions. Lead with supported
+Use the shared stacked SettingsSection and secondary SettingsRecord compositions. Lead with supported
 configuration, not an agent introduction, capability brochure, or a repeated page title:
 
 1. Sources and synchronization where supported: actual accounts, health and canonical management.
@@ -56,3 +56,27 @@ Check desktop/mobile navigation, legacy redirects and query preservation, field 
 secondary pages, permission/platform visibility, setup recovery, and populated/empty/error states.
 Cover version-preserving guidance changes, failed writes, rule review and pause behavior.
 This is the target structure; implementation evidence belongs in tests and the implementation log.
+
+## Presentation and editing architecture
+
+The [platform-agnostic settings model](settings.md#platform-agnostic-settings-model)
+separates preferences, effective state, records, navigation, and commands. The
+[engineering composition model](../../engineering/settings-ui-standards.md#typed-composition-and-ownership-model)
+assigns navigation, groups, typed rows, editor state, and domain persistence to distinct
+owners. It builds on the existing architecture; it does not move workspace-owned
+configuration into centralized Settings or introduce a second source of truth.
+
+
+```mermaid
+flowchart TD
+  Shell[Navigation shell and search] --> Page[Page identity and scoped groups]
+  Page --> Row[Typed rows and specialized previews]
+  Row --> Editor[Inline editor or bounded workflow]
+  Row --> Detail[Persistent detail route]
+  Editor --> Domain[Domain adapter: authority, validation, persistence]
+  Detail --> Domain
+  Domain --> State[Saved and effective state]
+  State --> Row
+```
+
+This diagram describes the nohmi design boundary, not Apple's private implementation.

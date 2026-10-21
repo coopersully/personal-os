@@ -131,7 +131,7 @@ export function ConnectionRecoveryAlert({
         information can sync.
       </AlertDescription>
       <AlertAction>
-        <a href="/settings?section=connections">Review connections</a>
+        <a href="/settings?page=connections">Review connections</a>
       </AlertAction>
     </Alert>
   );

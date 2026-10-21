@@ -14,6 +14,13 @@ const render = (ui: ReactElement) =>
     </SettingsFeedbackContext.Provider>,
   );
 
+function openSubpage(view: "morning" | "night" | "history", timeZone = "UTC") {
+  cleanup();
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <RitualSettings view={view} timeZone={timeZone} />
+  </QueryClientProvider>);
+}
+
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), dismiss: vi.fn() } }));
 beforeEach(() => vi.mocked(toast.error).mockClear());
 
@@ -59,7 +66,7 @@ it("allows retrying a failed preview without implying settings were saved", asyn
       <RitualSettings timeZone="UTC" />
     </QueryClientProvider>,
   );
-  const show = await screen.findByRole("button", { name: "Show morning ritual" });
+  const show = await screen.findByRole("button", { name: "Preview Morning Ritual" });
   fireEvent.click(show);
   await waitFor(() =>
     expect(toast.error).toHaveBeenCalledWith(
@@ -125,8 +132,8 @@ it("offers opt-in defaults and saves explicit steps", async () => {
     </QueryClientProvider>,
   );
   expect(await screen.findByDisplayValue("06:00")).toBeInTheDocument();
-  expect(screen.getByDisplayValue("21:00")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("checkbox", { name: "Enable morning ritual" }));
+  expect(screen.queryByDisplayValue("21:00")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("switch", { name: "Enable morning ritual" }));
   await waitFor(() =>
     expect(mocks.save).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -152,17 +159,17 @@ it("autosaves reordered custom steps and retains edits when saving fails", async
   );
   await screen.findByDisplayValue("06:00");
   fireEvent.change(screen.getAllByLabelText("Available from")[0]!, { target: { value: "07:15" } });
-  fireEvent.change(screen.getAllByLabelText("Time zone")[0]!, {
-    target: { value: "Europe/London" },
-  });
   fireEvent.click(screen.getByRole("button", { name: "Add step" }));
-  fireEvent.change(screen.getAllByLabelText("Prompt")[2]!, { target: { value: "Water" } });
-  fireEvent.change(screen.getAllByRole("combobox", { name: "Response type" })[2]!, {
+  fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Water" } });
+  fireEvent.change(screen.getByRole("combobox", { name: "Response type" }), {
     target: { value: "number" },
   });
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
   fireEvent.keyDown(screen.getByRole("button", { name: "Reorder step 3" }), { key: "ArrowUp" });
   fireEvent.keyDown(screen.getByRole("button", { name: "Reorder step 1" }), { key: "ArrowDown" });
-  fireEvent.click(screen.getAllByRole("button", { name: "Remove step" })[2]!);
+  fireEvent.click(screen.getByRole("button", { name: "Edit step 3" }));
+  fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+  fireEvent.click(screen.getByRole("button", { name: "Delete step" }));
   await waitFor(() =>
     expect(toast.error).toHaveBeenCalledWith(
       expect.stringContaining("save ritual settings"),
@@ -174,7 +181,7 @@ it("autosaves reordered custom steps and retains edits when saving fails", async
   expect(mocks.save).toHaveBeenLastCalledWith(
     expect.objectContaining({
       time: "07:15",
-      timeZone: "Europe/London",
+      timeZone: "America/New_York",
       steps: [
         expect.objectContaining({ label: "Water", kind: "number" }),
         expect.objectContaining({ label: "Brush your teeth", kind: "checkbox" }),
@@ -227,8 +234,10 @@ it("recovers from an unavailable server and retains definition revisions", async
   mocks.list.mockResolvedValue({ rituals: [definition] });
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   expect(await screen.findByDisplayValue("05:45")).toBeInTheDocument();
-  expect(screen.getAllByRole("button", { name: "Remove step" })[0]).toBeDisabled();
-  fireEvent.click(screen.getByRole("checkbox", { name: "Enable morning ritual" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit step 1" }));
+  expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  fireEvent.click(screen.getByRole("switch", { name: "Enable morning ritual" }));
   await waitFor(() =>
     expect(mocks.save).toHaveBeenCalledWith(
       expect.objectContaining({ expectedRevision: 4, enabled: false, time: "05:45" }),
@@ -248,12 +257,15 @@ it("edits multiple choices and shows a full-screen preview without recording res
     </QueryClientProvider>,
   );
   await screen.findByDisplayValue("06:00");
-  fireEvent.change(screen.getAllByRole("combobox", { name: "Response type" })[0]!, {
+  expect(screen.queryByRole("combobox", { name: "Response type" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Edit step 1" }));
+  fireEvent.change(screen.getByRole("combobox", { name: "Response type" }), {
     target: { value: "multiple_choice" },
   });
   fireEvent.change(screen.getByLabelText("Choices"), { target: { value: "Happy\nCalm\nTired" } });
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
   await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Show morning ritual" })).toBeEnabled(),
+    expect(screen.getByRole("button", { name: "Preview Morning Ritual" })).toBeEnabled(),
   );
   expect(mocks.save).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -262,9 +274,9 @@ it("edits multiple choices and shows a full-screen preview without recording res
       ]),
     }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Show morning ritual" }));
+  fireEvent.click(screen.getByRole("button", { name: "Preview Morning Ritual" }));
   expect(await screen.findByRole("dialog", { name: "Ritual preview" })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Close preview" }));
+  fireEvent.click(screen.getByRole("button", { name: "Close Preview" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 });
 
@@ -295,13 +307,12 @@ it("resets the editor after deleting its history and definition", async () => {
     </QueryClientProvider>,
   );
   await screen.findByDisplayValue("07:00");
-  fireEvent.click(screen.getByRole("radio", { name: "History and data" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Delete morning data" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Delete Data" }));
   fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
   await waitFor(() => expect(mocks.remove).toHaveBeenCalledWith("morning"));
-  await waitFor(() => expect(screen.getByDisplayValue("06:00")).toBeInTheDocument());
-  fireEvent.click(screen.getByRole("radio", { name: "Morning" }));
-  expect(screen.getByRole("checkbox", { name: "Enable morning ritual" })).not.toBeChecked();
+  openSubpage("morning");
+  await screen.findByDisplayValue("06:00");
+  expect(screen.getByRole("switch", { name: "Enable morning ritual" })).not.toBeChecked();
 });
 
 it("refreshes conflicting settings and rebases local edits onto the latest revision", async () => {
@@ -337,14 +348,12 @@ it("refreshes conflicting settings and rebases local edits onto the latest revis
       expect.anything(),
     ),
   );
-  await waitFor(() =>
-    expect(screen.getAllByLabelText("Time zone")[0]).toHaveValue("Europe/London"),
-  );
+  expect(screen.queryByRole("textbox", { name: "Time zone" })).not.toBeInTheDocument();
   expect(screen.getByDisplayValue("07:15")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Retry saving" }));
   await waitFor(() =>
     expect(mocks.save).toHaveBeenLastCalledWith(
-      expect.objectContaining({ expectedRevision: 3, time: "07:15", timeZone: "Europe/London" }),
+      expect.objectContaining({ expectedRevision: 3, time: "07:15", timeZone: "UTC" }),
     ),
   );
 });
@@ -375,7 +384,7 @@ it("adopts external changes to clean settings without saving them back", async (
   expect(mocks.save).not.toHaveBeenCalled();
 });
 
-it("inherits the existing shared zone when creating the second ritual", async () => {
+it("uses the profile zone for both rituals rather than a separately stored zone", async () => {
   const morning = {
     id: "morning",
     kind: "morning",
@@ -397,16 +406,16 @@ it("inherits the existing shared zone when creating the second ritual", async ()
     </QueryClientProvider>,
   );
   await screen.findByDisplayValue("06:00");
-  expect(screen.getAllByLabelText("Time zone")[1]).toHaveValue("Europe/London");
+  expect(screen.queryByRole("textbox", { name: "Time zone" })).not.toBeInTheDocument();
   const updated = { ...morning, revision: 2, timeZone: "Asia/Tokyo" };
   mocks.list.mockResolvedValue({ rituals: [updated] });
   await client.invalidateQueries({ queryKey: ["rituals"] });
-  await waitFor(() => expect(screen.getAllByLabelText("Time zone")[1]).toHaveValue("Asia/Tokyo"));
-  fireEvent.click(screen.getByRole("radio", { name: "Evening" }));
-  fireEvent.click(screen.getByRole("checkbox", { name: "Enable evening ritual" }));
+  expect(screen.queryByText(/America\/New York/)).not.toBeInTheDocument();
+  openSubpage("night", "America/New_York");
+  fireEvent.click(await screen.findByRole("switch", { name: "Enable evening ritual" }));
   await waitFor(() =>
     expect(mocks.save).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "night", enabled: true, timeZone: "Asia/Tokyo" }),
+      expect.objectContaining({ kind: "night", enabled: true, timeZone: "America/New_York" }),
     ),
   );
 });
@@ -447,7 +456,8 @@ it("autosaves optional steps, custom days, and independent reminder defaults", a
   );
   const time = await screen.findByLabelText("Morning reminder time");
   fireEvent.change(time, { target: { value: "13:45" } });
-  fireEvent.change(screen.getAllByLabelText("Requirement")[0]!, { target: { value: "optional" } });
+  fireEvent.click(screen.getByRole("button", { name: "Edit step 1" }));
+  fireEvent.click(screen.getAllByRole("switch", { name: "Required" })[0]!);
   fireEvent.change(screen.getAllByLabelText("Include on")[0]!, { target: { value: "custom" } });
   fireEvent.click(screen.getByRole("checkbox", { name: "Monday" }));
   await waitFor(() =>
@@ -461,6 +471,24 @@ it("autosaves optional steps, custom days, and independent reminder defaults", a
       }),
     ),
   );
-  fireEvent.click(screen.getByRole("radio", { name: "Evening" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  openSubpage("night");
   expect(await screen.findByLabelText("Evening reminder time")).toHaveValue("22:00");
+});
+
+it("locks dependent schedule fields until the ritual is enabled and keeps their values", async () => {
+  mocks.list.mockResolvedValue({ rituals: [] });
+  openSubpage("morning");
+  const toggle = await screen.findByRole("switch", { name: "Enable morning ritual" });
+  const time = screen.getByDisplayValue("06:00");
+  const reminder = screen.getByLabelText("Morning reminder time");
+  expect(time).toBeDisabled();
+  expect(reminder).toBeDisabled();
+  expect(screen.getByLabelText("Turn on Enable morning ritual to change its schedule and reminder time.")).toHaveAttribute("tabindex", "0");
+  fireEvent.click(toggle);
+  expect(time).toBeEnabled();
+  expect(reminder).toBeEnabled();
+  fireEvent.click(toggle);
+  expect(time).toBeDisabled();
+  expect(time).toHaveValue("06:00");
 });

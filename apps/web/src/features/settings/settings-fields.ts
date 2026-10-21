@@ -131,7 +131,7 @@ export const settingsFields: SettingsField[] = [
     { reveal: ["Add goal"] },
   ),
   ...fields(
-    "motives",
+    "goals",
     [
       ["Motive", "motive-title", "values purpose"],
       ["Context", "motive-detail", "motivation details"],
@@ -158,14 +158,19 @@ export const settingsFields: SettingsField[] = [
     ["Day end", "profile-workday-end", "working hours workday end time"],
     ["Home Location", "profile-home-location", "city weather address"],
     ["Time zone", "profile-timezone", "timezone local time"],
-  ]),
+  ]).map((field) => ({
+    ...field,
+    reveal: ["First name", "Last name", "Email"].includes(field.label)
+      ? [`Edit ${field.label}`]
+      : [],
+  })),
   ...fields(
     "profile",
     [
       ["Phone number", "texting-phone", "mobile verified texting contact"],
       ["Phone country", "texting-country", "country code"],
     ],
-    { reveal: ["Add phone number", "Change number"] },
+    { reveal: ["Edit Phone"] },
   ),
   ...fields("security", [["Change password", "Send link", "reset password security"]]),
   ...fields("setup", [
@@ -178,7 +183,7 @@ export const settingsFields: SettingsField[] = [
   ...fields("appearance", [["Color mode", "Color mode", "theme light dark system appearance"]]),
   ...["morning", "night"].flatMap((kind) =>
     fields(
-      "rituals",
+      kind === "morning" ? "ritual-morning" : "ritual-evening",
       [
         [
           `${kind === "morning" ? "Morning" : "Evening"} ritual enabled`,
@@ -296,15 +301,27 @@ export const settingsFields: SettingsField[] = [
     ],
     { desktopOnly: true },
   ),
-  ...fields("invitations", [["Expires after", "invite-expiry", "invitation expiry duration"]]),
-  ...fields("texting", [
-    ["Country", "Country", "phone dialing code"],
-    ["Mobile number", "Mobile number", "phone sms"],
+  ...fields(
+    "invitations",
+    [
+      ["Expires after", "invite-expiry", "invitation expiry duration"],
+      ["Recipient", "invite-email", "invitation email"],
+    ],
+    { reveal: ["New invitation"] },
+  ),
+  ...fields(
+    "texting",
+    [
+      ["Country", "texting-country", "phone dialing code"],
+      ["Mobile number", "texting-phone", "phone sms"],
 
-    ["Allow agent text messages", "texting-consent", "consent sms opt in"],
-  ]),
+      ["Allow agent text messages", "texting-consent", "consent sms opt in"],
+    ],
+    { reveal: ["Edit Phone"] },
+  ),
   ...fields("texting", [["Verification code", "texting-code", "otp sms"]], {
-    fallbackTarget: "Mobile number",
+    reveal: ["Edit Phone"],
+    fallbackTarget: "texting-phone",
   }),
   ...fields("agent-connections", [["nohmi MCP URL", "nohmi MCP URL", "endpoint server assistant"]]),
   ...fields(

@@ -125,7 +125,7 @@ function OverviewSettings() {
               </Button>
             ) : null}
             <Button asChild variant="outline">
-              <Link to="/settings?section=finances">Open Finance settings</Link>
+              <Link to="/settings?page=finances">Open Finance settings</Link>
             </Button>
           </div>
           {!scope ? recovery : null}

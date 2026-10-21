@@ -1,6 +1,7 @@
 import type * as React from "react";
 
 import { cn } from "@/lib/utils";
+import { CardActionContext, CardSurfaceContext } from "./card-context";
 
 function Card({
   className,
@@ -8,15 +9,17 @@ function Card({
   ...props
 }: React.ComponentProps<"div"> & { size?: "default" | "sm" }) {
   return (
-    <div
-      data-slot="card"
-      data-size={size}
-      className={cn(
-        "group/card flex min-w-0 flex-col gap-(--card-spacing) overflow-hidden rounded-xl border border-transparent bg-card py-(--card-spacing) text-sm text-card-foreground [--card-spacing:--spacing(4)] has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:[--card-spacing:--spacing(3)] data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl",
-        className,
-      )}
-      {...props}
-    />
+    <CardSurfaceContext.Provider value={true}>
+      <div
+        data-slot="card"
+        data-size={size}
+        className={cn(
+          "group/card flex min-w-0 flex-col gap-(--card-spacing) overflow-hidden rounded-xl border border-transparent bg-card py-(--card-spacing) text-sm text-card-foreground [--card-spacing:--spacing(4)] has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:[--card-spacing:--spacing(3)] data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl",
+          className,
+        )}
+        {...props}
+      />
+    </CardSurfaceContext.Provider>
   );
 }
 
@@ -58,11 +61,13 @@ function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
 
 function CardAction({ className, ...props }: React.ComponentProps<"div">) {
   return (
-    <div
-      data-slot="card-action"
-      className={cn("col-start-2 row-span-2 row-start-1 self-start justify-self-end", className)}
-      {...props}
-    />
+    <CardActionContext.Provider value={true}>
+      <div
+        data-slot="card-action"
+        className={cn("col-start-2 row-span-2 row-start-1 self-start justify-self-end", className)}
+        {...props}
+      />
+    </CardActionContext.Provider>
   );
 }
 
@@ -77,7 +82,7 @@ function CardFooter({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="card-footer"
       className={cn(
-        "flex items-center rounded-b-xl bg-muted/70 p-(--card-spacing)",
+        "flex items-center rounded-b-xl p-(--card-spacing)",
         className,
       )}
       {...props}

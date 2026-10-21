@@ -134,6 +134,7 @@ export function RitualPreview({ state, onClose }: { state: RitualState; onClose:
       }}
     >
       <DialogContent
+        showCloseButton={false}
         className="ritual-browser-preview inset-0 left-0 top-0 h-dvh w-screen max-w-none translate-x-0 translate-y-0 rounded-none sm:max-w-none"
         data-ritual-kind={state.current?.definition.kind}
       >

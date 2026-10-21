@@ -41,7 +41,12 @@ describe.sequential("ritual account lifecycle", () => {
     await migrateDatabase(database.db, resolve("packages/database/migrations"));
     const [user] = await database.db
       .insert(users)
-      .values({ displayName: "Ritual", email: "ritual@example.com", passwordHash: "unused" })
+      .values({
+        planningTimezone: "America/New_York",
+        displayName: "Ritual",
+        email: "ritual@example.com",
+        passwordHash: "unused",
+      })
       .returning();
     userId = user!.id;
     service = createRitualService({ db: database.db, now: () => clock });
@@ -975,65 +980,47 @@ describe.sequential("ritual account lifecycle", () => {
     const definitions = await service.list(context());
     const morning = definitions.find((d) => d.kind === "morning")!;
     const evening = definitions.find((d) => d.kind === "night")!;
-    const input = { ...morning, ...mutation(morning.revision), timeZone: "Europe/London" };
-    await service.saveDefinition("morning", input, context());
+    await database.db
+      .update(users)
+      .set({ planningTimezone: "Europe/London" })
+      .where(eq(users.id, userId));
     const updated = await service.list(context());
     expect(updated.map((d) => d.timeZone)).toEqual(["Europe/London", "Europe/London"]);
     expect(updated.find((d) => d.kind === "night")?.revision).toBe(evening.revision + 1);
+    expect(updated.find((d) => d.kind === "morning")?.revision).toBe(morning.revision + 1);
     const preserved = (await service.current(context())).current!;
     expect(preserved.id).toBe(open.id);
     expect(preserved.timeZone).toBe("America/New_York");
     expect(preserved.definition.timeZone).toBe("America/New_York");
     expect(preserved.expiresAt).toBe("2026-11-05T21:00:00.000Z");
-    const audit = await database.db
-      .select()
-      .from(auditEvents)
-      .where(eq(auditEvents.userId, userId));
-    const cascade = audit.filter((entry) => entry.after?.requestId === input.requestId);
-    expect(cascade).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          action: "ritual.definition_zone_changed",
-          entityId: evening.id,
-          before: {
-            revision: evening.revision,
-            timeZone: evening.timeZone,
-            enabledAt: evening.enabledAt,
-          },
-          after: expect.objectContaining({
-            revision: evening.revision + 1,
-            timeZone: "Europe/London",
-          }),
-        }),
-        expect.objectContaining({
-          action: "ritual.occurrence_expiry_changed",
-          entityId: open.id,
-          before: { revision: open.revision, expiresAt: open.expiresAt },
-          after: expect.objectContaining({
-            revision: preserved.revision,
-            expiresAt: preserved.expiresAt,
-          }),
-        }),
-      ]),
-    );
-    expect(JSON.stringify(cascade)).not.toContain('"steps"');
-    expect(JSON.stringify(cascade)).not.toContain('"responses"');
-    await service.saveDefinition("morning", input, context());
     expect(await service.list(context())).toEqual(updated);
     await expect(
       service.saveDefinition(
-        "night",
-        { ...evening, ...mutation(evening.revision), title: "Stale edit" },
+        "morning",
+        {
+          ...updated.find((d) => d.kind === "morning")!,
+          ...mutation(morning.revision + 1),
+          timeZone: "America/New_York",
+        },
         context(),
       ),
-    ).rejects.toThrow(/changed/);
+    ).rejects.toThrow(/profile time zone/);
     clock = new Date("2026-11-05T21:00:00Z");
     expect((await service.current(context())).current?.timeZone).toBe("Europe/London");
+    await database.db
+      .update(users)
+      .set({ planningTimezone: "America/New_York" })
+      .where(eq(users.id, userId));
   });
   it("snapshots weekday steps and atomically creates only opted-in optional reminders once", async () => {
     const [owner] = await database.db
       .insert(users)
-      .values({ displayName: "Optional", email: "optional@example.com", passwordHash: "unused" })
+      .values({
+        planningTimezone: "America/New_York",
+        displayName: "Optional",
+        email: "optional@example.com",
+        passwordHash: "unused",
+      })
       .returning();
     const ctx = {
       ...context(),
@@ -1131,7 +1118,12 @@ describe.sequential("ritual account lifecycle", () => {
   it("keeps invalid reminder completion atomic, recovers a late sync, and settles empty days", async () => {
     const [owner] = await database.db
       .insert(users)
-      .values({ displayName: "Later", email: "later@example.com", passwordHash: "unused" })
+      .values({
+        planningTimezone: "America/New_York",
+        displayName: "Later",
+        email: "later@example.com",
+        passwordHash: "unused",
+      })
       .returning();
     const ctx = {
       ...context(),

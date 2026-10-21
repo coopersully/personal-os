@@ -7741,9 +7741,9 @@ html.pet-window #root {
 .ritual-surface, .ritual-browser-preview { touch-action: pan-y; }
 
 /* Profile records use the same setting controls as other pages. */
-.profile-setting-row { min-height: 3rem; padding: 0.5rem 1rem; border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent); }
+.profile-setting-row { min-height: 3rem; padding: 0.5rem 1rem; border-bottom: 1px solid var(--settings-divider-color); }
 .profile-setting-row:last-child { border-bottom: 0; }
-.account-profile-identity { border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent); border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.account-profile-identity { border-bottom: 1px solid var(--settings-divider-color); border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 .profile-destination-icon { display: flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; border-radius: var(--radius); background: var(--secondary); color: var(--muted-foreground); }
 .profile-workspace-icon { border: 0; }
 
@@ -7763,7 +7763,7 @@ html.pet-window #root {
   gap: 0.125rem 1rem;
   min-height: 3rem;
   padding-block: 0.5rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+  border-bottom: 1px solid var(--settings-divider-color);
 }
 .settings-panel [data-settings-row]:last-child { border-bottom: 0; }
 .settings-panel [data-settings-row] > * { grid-column: 2; grid-row: 1; width: auto; justify-self: end; min-width: 0; max-width: 100%; }
@@ -7860,7 +7860,7 @@ html.pet-window #root {
 }
 
 /* Wrappers must not add padding or border height to the shared 48px field. */
-.settings-inline-row { box-shadow: inset 0 -1px color-mix(in srgb, var(--border) 40%, transparent); }
+.settings-inline-row { box-shadow: inset 0 -1px var(--settings-divider-color); }
 .settings-inline-row:last-child { box-shadow: none; }
 
 /* A divider is paint, not another pixel of row height. */
@@ -7869,7 +7869,7 @@ html.pet-window #root {
   min-height: var(--settings-row-height);
   padding-block: var(--settings-row-padding);
   border-block-width: 0;
-  box-shadow: inset 0 -1px color-mix(in srgb, var(--border) 40%, transparent);
+  box-shadow: inset 0 -1px var(--settings-divider-color);
   flex-grow: 0;
 }
 .settings-panel :is([data-settings-row], .settings-navigation-row):last-child { box-shadow: none; }
@@ -7930,7 +7930,7 @@ html.pet-window #root {
 }
 [data-settings-variant="danger"] .text-muted-foreground { color: inherit; }
 .settings-subsection__header {
-  box-shadow: inset 0 -1px color-mix(in srgb, var(--border) 40%, transparent);
+  box-shadow: inset 0 -1px var(--settings-divider-color);
 }
 .settings-subsection__icon {
   display: flex;
@@ -7940,7 +7940,7 @@ html.pet-window #root {
   width: 3rem;
   height: 3rem;
   border-radius: var(--radius-lg);
-  border: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
+  border: 1px solid var(--settings-divider-color);
   background: color-mix(in srgb, var(--border) 8%, transparent);
   color: var(--foreground);
 }
@@ -8008,4 +8008,18 @@ html.pet-window #root {
 .ritual-sky-preview:is(:hover, :focus-visible):not(:disabled) .ritual-sky-preview__action { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
   .ritual-sky-preview__scene, .ritual-sky-preview__action { transition: none; }
+}
+
+
+:root { --settings-divider-color: color-mix(in srgb, var(--border) 40%, transparent); }
+.settings-divider-before { box-shadow: inset 0 1px var(--settings-divider-color); }
+.settings-panel .settings-dependent [data-settings-row] { padding-inline-start: 2rem; }
+.settings-dependent[data-disabled] [data-settings-row] > :is([data-slot="field-label"], [data-slot="field-description"]) { opacity: 0.45; }
+
+/* Auth utility navigation adapts to its pane, keeping one readable row. */
+.auth-footer { container: auth-footer / inline-size; }
+.auth-footer__help { display: none; }
+@container auth-footer (width < 22rem) {
+  .auth-footer__links { display: none; }
+  .auth-footer__help { display: block; }
 }

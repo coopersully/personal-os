@@ -460,3 +460,35 @@ Ritual header thumbnails align to the top trailing edge. Header progress uses co
 icon summaries (“0-day streak” and “7 days”), with the completed-day count in the
 week badge tooltip. Full previews replace the normal completion footer with an
 always-available Close Preview button; omit duplicate bottom links and corner X.
+
+
+All settings separators use the same shared divider token and one-pixel treatment:
+subsection header, ordinary row, navigation row, and dependency boundary. Never stack
+a row separator with a wrapper border. Disabling content must not fade its divider.
+Directly nested dependent rows indent their contents by one extra spacing step while
+their separators remain edge-to-edge. Ritual headers use their trailing preview as
+the visual anchor and omit the leading icon; the title and description stay in-card.
+Thumbnail sky dragging must not accidentally activate preview on pointer release;
+an ordinary click or keyboard activation must still open it.
+
+Ritual previews focus the first question on opening. Their date trigger offers
+seven weekdays via the shared checked menu and evaluates the nearest matching date
+in the ritual time zone; do not use a calendar for weekday preview. A brief initial
+tooltip explains this trigger without taking focus and dismisses automatically.
+
+Shared Card slots own their padding; do not add a root gap that doubles Header/Content
+or Content/Footer spacing. Content removes top padding beside a Header and bottom
+padding beside a Footer. Ritual headers place the icon-free date above time at the
+trailing edge. Preview weekday hints dismiss once and cannot reopen on selection;
+previews omit redundant status copy below the card.
+
+Ritual History uses a compact open search/filter/sort toolbar, bounded week/month
+navigation (default this week), flat standard settings rows, and ten-row pagination.
+Search and sort the complete selected period before paginating, not only loaded
+cursor pages. Keep verbose answers and activity in the row's detail dialog.
+
+Preserve the shared Button size padding on textual menu/popover triggers; do not
+strip padding to imitate a text link, since this also collapses hover/expanded/focus
+surfaces. Lower-priority utility navigation changes semantic foreground, not hit-area
+geometry. Public documents remain accessible while authenticated; root/auth entry
+routes send existing sessions to Today, preserving validated protected-link targets.

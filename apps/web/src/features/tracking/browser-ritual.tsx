@@ -145,7 +145,7 @@ export function BrowserRitual({ userId }: { userId: string }) {
           previousFocus.current =
             document.activeElement instanceof HTMLElement ? document.activeElement : null;
           const question = document.querySelector<HTMLElement>(
-            '[aria-label="Ritual questions"] :is(button, input, textarea, select):not([disabled])',
+            '[aria-label="Ritual questions"] [data-slot="card-content"] :is(button, input, textarea, select):not([disabled])',
           );
           if (question) {
             event.preventDefault();

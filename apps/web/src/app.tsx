@@ -317,6 +317,7 @@ import { FeedbackForm } from "./components/feedback-form.js";
 import { MobileWorkspaceDock } from "./components/mobile-workspace-dock.js";
 import { MutationFeedback } from "./components/mutation-feedback.js";
 import { RecordSummaryTrial } from "./features/settings/record-summary-trial.js";
+import { AuthFooter } from "./components/auth-footer.js";
 import { SettingsRecord, SettingsRecordAction } from "./components/settings-record.js";
 import { WorkspaceAppBar } from "./components/workspace-app-bar.js";
 import { WorkspaceHeaderControlsSlot } from "./components/workspace-header-controls.js";
@@ -531,15 +532,6 @@ export function selectTodayTasks(
 }
 export function App() {
   const location = useLocation();
-  const tokenQuery = new URLSearchParams(location.search);
-  if (
-    location.pathname === "/" &&
-    !isTauri() &&
-    !tokenQuery.get("verifyEmail") &&
-    !tokenQuery.get("resetPassword")
-  ) {
-    return <ProductLanding />;
-  }
   if (location.pathname === "/downloads") {
     return (
       <>
@@ -587,6 +579,9 @@ function AppContent({ me }: { me: UseQueryResult<User> }) {
         <Spinner label="Opening nohmi" />
       </main>
     );
+  }
+  if (location.pathname === "/" && !isTauri()) {
+    return me.data ? <Navigate replace to="/today" /> : <ProductLanding />;
   }
   if (me.isError && isUnauthorized(me.error)) {
     if (isAuthenticationPath(location.pathname)) return <AuthScreen />;
@@ -1057,18 +1052,7 @@ function AuthLayout({ children }: { children: ReactNode }) {
           </Link>
         </header>
         <section className="auth-form-wrap">{children}</section>
-        <nav
-          aria-label="About nohmi and policies"
-          className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted-foreground"
-        >
-          <a href="/about/">About nohmi</a>
-          <a href="/docs/">Guide</a>
-          <a href="/privacy/">Privacy policy</a>
-          <a href="/terms/">Terms of use</a>
-          <a href="/data-use/">Data use</a>
-          <a href="/sms/">SMS</a>
-          <a href="/support/">Support</a>
-        </nav>
+        <AuthFooter />
       </div>
       <ShadcnCard aria-hidden="true" className="auth-brand-panel">
         <ShadcnCardContent>

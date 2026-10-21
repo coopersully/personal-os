@@ -8,8 +8,8 @@ export function DependentSetting({ enabled, reason, children }: {
   children: ReactNode;
 }) {
   return <TooltipProvider><Tooltip><TooltipTrigger asChild>
-    <div tabIndex={enabled ? undefined : 0} aria-label={enabled ? undefined : reason}>
-      <fieldset disabled={!enabled} className="min-w-0 border-0 p-0 disabled:opacity-45">{children}</fieldset>
+    <div className="settings-dependent" data-disabled={!enabled || undefined} tabIndex={enabled ? undefined : 0} aria-label={enabled ? undefined : reason}>
+      <fieldset disabled={!enabled} className="min-w-0 border-0 p-0">{children}</fieldset>
     </div>
   </TooltipTrigger>{!enabled ? <TooltipContent>{reason}</TooltipContent> : null}</Tooltip></TooltipProvider>;
 }

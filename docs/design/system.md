@@ -831,3 +831,14 @@ preferences, state, records, navigation, and commands have distinct interactions
 Keep visual grouping shared and persistence domain-owned. Reference native platform
 patterns for hierarchy and behavior without importing their artwork or overriding
 nohmi's arrow/chevron, feedback, accessibility, and ownership contracts.
+
+Card spacing belongs to the shared Card slots: Header, Content, and Footer use
+the same padding token, with no additional root gap or vertical padding. Content
+omits top padding when a header exists and bottom padding when a footer exists,
+so adjoining slots provide one spacing interval rather than doubling it.
+
+Text buttons that trigger menus or popovers retain the shared Button size padding.
+Do not strip their horizontal padding to make them resemble plain text: the hover,
+expanded, and focus surfaces must surround the label with the same breathing room
+as other controls. Use a quiet semantic foreground for lower-priority navigation
+while preserving this geometry; icon-only buttons use the standard icon size.

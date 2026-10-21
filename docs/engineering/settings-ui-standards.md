@@ -524,3 +524,45 @@ Ritual header thumbnails align to the top trailing edge. Header progress uses co
 icon summaries (“0-day streak” and “7 days”), with the completed-day count in the
 week badge tooltip. Full previews replace the normal completion footer with an
 always-available Close Preview button; omit duplicate bottom links and corner X.
+
+
+All settings separators use the same shared divider token and one-pixel treatment:
+subsection header, ordinary row, navigation row, and dependency boundary. Never stack
+a row separator with a wrapper border. Disabling content must not fade its divider.
+Directly nested dependent rows indent their contents by one extra spacing step while
+their separators remain edge-to-edge. Ritual headers use their trailing preview as
+the visual anchor and omit the leading icon; the title and description stay in-card.
+Thumbnail sky dragging must not accidentally activate preview on pointer release;
+an ordinary click or keyboard activation must still open it.
+
+Ritual cards share a morning/evening greeting, current local date and time, and compact
+completed/total counts for all steps, required steps, and optional steps. Full previews
+allow choosing a weekday from a checked menu, filter steps by its nearest date’s
+schedule, and reset local answers when switching dates. Preview exploration never
+writes occurrence history or account responses.
+
+Keep ritual card orientation compact: personalize the greeting with the profile’s
+first name, align the quiet date/time beside it where space permits, and put
+completed/total, required, and optional counts in one secondary summary line.
+Allow narrow layouts to wrap naturally rather than crowding the greeting.
+
+Preview weekday selection is a seven-option checked menu, not a calendar: use the
+nearest matching weekday to today in the ritual time zone to evaluate step schedules.
+Focus the first question when rituals and previews open. Show a short, automatically
+dismissing tooltip on preview opening explaining that the date changes the weekday;
+keep this instructional hint from taking keyboard focus.
+
+Card spacing belongs to the shared Card slots: Header, Content, and Footer use
+the same padding token, with no additional root gap or vertical padding. Content
+omits top padding when a header exists and bottom padding when a footer exists,
+so adjoining slots provide one spacing interval rather than doubling it.
+
+Ritual History uses an open search/filter/sort toolbar above a flat divided row list,
+not a separate card of filter settings or nested record cards. Default to the current
+Monday–Sunday week in the profile time zone; allow week/month selection and adjacent
+period navigation. Each row summarizes ritual, date, completed steps, and status, with
+a chevron opening the answer/activity dialog and a full-width Close footer action.
+Search (including answers) and status filtering operate over the complete selected
+period before sorting and ten-row pagination; never silently search only loaded pages.
+Keep the request bounded by the selected period and resolve its API cursors, reset
+pagination when criteria change, and distinguish an empty period from no matches.

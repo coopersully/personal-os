@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import { api } from "../../api.js";
 import { useConfirmAction } from "../../components/confirm-action.js";
 import { QueryFeedback } from "../../components/async-state.js";
-import { ChevronRightIcon, MenuIcon, PlusIcon, SunIcon, MoonIcon, ActivityIcon } from "../../components/icons.js";
+import { ChevronRightIcon, MenuIcon, PlusIcon, ActivityIcon } from "../../components/icons.js";
 import {
   Field,
   FieldDescription,
@@ -301,7 +301,7 @@ function RitualForm({
   return (
     <SettingsBento>
       {content !== "checklist" ? <div className="flex flex-col gap-4">
-        <SettingsSection layout="rows" title={`${label} Ritual`} icon={kind === "morning" ? <SunIcon /> : <MoonIcon />} headerAside={<RitualSkyPreview kind={kind} disabled={!input.success || busy || dirty || opening} onPreview={() => void show()} />} headerContent={content === "schedule" ? <RitualSettingsProgress definition={definition ?? previewDefinition} /> : null} description={kind === "morning" ? "Start your day with intention. At your chosen time, the ritual covers your screen and guides you through your steps before you continue. You can snooze or skip when needed." : "Wind down and prepare for tomorrow. At your chosen time, the ritual covers your screen for a moment of reflection and your evening steps. You can snooze or skip when needed."}>
+        <SettingsSection layout="rows" title={`${label} Ritual`} headerAside={<RitualSkyPreview kind={kind} disabled={!input.success || busy || dirty || opening} onPreview={() => void show()} />} headerContent={content === "schedule" ? <RitualSettingsProgress definition={definition ?? previewDefinition} /> : null} description={kind === "morning" ? "Start your day with intention. At your chosen time, the ritual covers your screen and guides you through your steps before you continue. You can snooze or skip when needed." : "Wind down and prepare for tomorrow. At your chosen time, the ritual covers your screen for a moment of reflection and your evening steps. You can snooze or skip when needed."}>
           <FieldGroup>
             <Field orientation="horizontal">
               <Switch
@@ -313,7 +313,7 @@ function RitualForm({
                 Enable {label.toLowerCase()} ritual
               </FieldLabel>
             </Field>
-            <div className="border-t border-border/40"><DependentSetting enabled={draft.enabled} reason={`Turn on Enable ${label.toLowerCase()} ritual to change its schedule and reminder time.`}>
+            <DependentSetting enabled={draft.enabled} reason={`Turn on Enable ${label.toLowerCase()} ritual to change its schedule and reminder time.`}>
             <Field>
               <FieldLabel htmlFor={`${kind}-time`}>Available from</FieldLabel>
               <Input
@@ -336,9 +336,9 @@ function RitualForm({
               />
               <FieldDescription>Default for optional steps you choose to do later</FieldDescription>
             </Field>
-            </DependentSetting></div>
+            </DependentSetting>
           </FieldGroup>
-          {content === "schedule" ? <div className="border-t border-border/40"><ProfileRow label="Steps" value={`${draft.steps.length} steps`} to={settingsPath(kind === "morning" ? "ritual-morning" : "ritual-evening")} /></div> : null}
+          {content === "schedule" ? <div className="settings-divider-before"><ProfileRow label="Steps" value={`${draft.steps.length} steps`} to={settingsPath(kind === "morning" ? "ritual-morning" : "ritual-evening")} /></div> : null}
         </SettingsSection>
         <div className="flex justify-end gap-2">
             <RitualDataAction kind={kind} disabled={busy || dirty || opening} />

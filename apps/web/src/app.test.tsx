@@ -1768,12 +1768,13 @@ describe("ilo web app", () => {
     expect(await screen.findByRole("heading", { name: "To take care of" })).toBeInTheDocument();
     expect(mocks.getCurrentRitual).not.toHaveBeenCalled();
   });
-  it("renders the product landing page without requesting a session", async () => {
+  it("renders the public landing page for a visitor after checking their session", async () => {
+    mocks.getMe.mockRejectedValue(new Error("unauthorized"));
     setup("/");
     expect(
       await screen.findByRole("heading", { name: "Mail, tasks, calendar, and money." }),
     ).toBeInTheDocument();
-    expect(mocks.getMe).not.toHaveBeenCalled();
+    expect(mocks.getMe).toHaveBeenCalled();
     expect(mocks.getCurrentRitual).not.toHaveBeenCalled();
     expect(
       within(screen.getByRole("navigation", { name: "Product navigation" })).getByRole("link", {
@@ -1781,6 +1782,12 @@ describe("ilo web app", () => {
       }),
     ).toHaveAttribute("href", "/login");
     expect(screen.getAllByRole("link", { name: "Sign up" })[0]).toHaveAttribute("href", "/signup");
+  });
+
+  it.each(["/", "/login", "/signup", "/forgot-password"])("redirects an already authenticated visitor from %s to Today", async (path) => {
+    const view = setup(path);
+    expect(await screen.findByRole("heading", { name: "To take care of" })).toBeInTheDocument();
+    expect(view.location.value).toBe("/today");
   });
 
   it("opens sign-up directly and keeps auth mode in the URL", async () => {
@@ -1800,7 +1807,7 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     const view = setup("/settings?page=security");
     await screen.findByRole("heading", { name: "Login" });
-    expect(view.location.value).toBe("/login?next=%2Fsettings%3Fsection%3Dsecurity");
+    expect(view.location.value).toBe("/login?next=%2Fsettings%3Fpage%3Dsecurity");
     await browser.type(screen.getByLabelText("Email"), "test@example.com");
     await browser.type(screen.getByLabelText("Password", { exact: true }), "LocalTestOnly123!");
     await browser.click(screen.getByRole("button", { name: "Log in" }));
@@ -2847,9 +2854,8 @@ describe("ilo web app", () => {
 
   it.each(["verifyEmail", "resetPassword"])("ignores an empty %s token", async (parameter) => {
     const landing = setup(`/?${parameter}=`);
-    expect(
-      await screen.findByRole("heading", { name: "Mail, tasks, calendar, and money." }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "To take care of" })).toBeInTheDocument();
+    expect(landing.location.value).toBe("/today");
     landing.unmount();
     const login = setup(`/login?${parameter}=`);
     expect(await screen.findByRole("heading", { name: "To take care of" })).toBeInTheDocument();

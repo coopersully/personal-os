@@ -46,6 +46,7 @@ import {
   submitRitualAction,
   submitRitualResponse,
 } from "../desktop/ritual-bridge.js";
+import { RitualCardHeader } from "./ritual-card-header.js";
 import { RitualClouds } from "./ritual-clouds.js";
 import { RitualCompletionWeek } from "./ritual-completion-week.js";
 import { RitualEscapeSummary } from "./ritual-escape-summary.js";
@@ -158,9 +159,11 @@ export function RitualChecklist({
   saveResponse,
   act,
   preview = false,
+  onPreviewDateChange,
 }: {
   state: RitualState;
   preview?: boolean;
+  onPreviewDateChange?: ((date: string) => void) | undefined;
   saveResponse: (stepId: string, input: RitualResponseInput) => Promise<RitualState>;
   act: (input: RitualActionInput) => Promise<RitualActionResult>;
 }) {
@@ -195,6 +198,31 @@ export function RitualChecklist({
       setState(external);
   }, [external, busy]);
   const occurrence = state.current;
+  const questionsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (
+      !occurrence?.id ||
+      !occurrence.scheduledLocalDate ||
+      challenge ||
+      confirmSkip ||
+      confirmComplete
+    )
+      return;
+    const frame = window.requestAnimationFrame(() => {
+      questionsRef.current
+        ?.querySelector<HTMLElement>(
+          "button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled])",
+        )
+        ?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [occurrence?.id, occurrence?.scheduledLocalDate, challenge, confirmSkip, confirmComplete]);
+  const draftDate = useRef(occurrence?.scheduledLocalDate);
+  useEffect(() => {
+    if (draftDate.current === occurrence?.scheduledLocalDate) return;
+    draftDate.current = occurrence?.scheduledLocalDate;
+    setTexts({});
+  }, [occurrence?.scheduledLocalDate]);
   function input() {
     return {
       requestId: crypto.randomUUID(),
@@ -431,29 +459,38 @@ export function RitualChecklist({
             className="relative h-auto w-full flex-col gap-1 overflow-hidden py-3"
             disabled={!preview && !ready}
             onClick={() => {
-              if (preview) { void escapeAction("skip"); return; }
+              if (preview) {
+                void escapeAction("skip");
+                return;
+              }
               if (!ready) return;
               if (optional.length && !confirmComplete) setConfirmComplete(true);
               else void escapeAction("complete");
             }}
           >
-            {!preview ? <span
-              aria-hidden="true"
-              className="ritual-button-progress"
-              style={{ width: `${required.length ? (complete / required.length) * 100 : 100}%` }}
-            /> : null}
+            {!preview ? (
+              <span
+                aria-hidden="true"
+                className="ritual-button-progress"
+                style={{ width: `${required.length ? (complete / required.length) * 100 : 100}%` }}
+              />
+            ) : null}
             <span className="relative inline-flex items-center gap-2">
-              {!preview && !requirementsMet ? <LockIcon aria-hidden="true" className="size-4" /> : null}
+              {!preview && !requirementsMet ? (
+                <LockIcon aria-hidden="true" className="size-4" />
+              ) : null}
               {preview ? "Close Preview" : "Done"}
             </span>
-            {!preview ? <span
-              id={completionHint}
-              className="relative text-xs font-normal text-primary-foreground/70"
-            >
-              {requirementsMet
-                ? `${complete} required completed · ${optionalComplete} optional completed`
-                : `${required.length - complete} required left`}
-            </span> : null}
+            {!preview ? (
+              <span
+                id={completionHint}
+                className="relative text-xs font-normal text-primary-foreground/70"
+              >
+                {requirementsMet
+                  ? `${complete} required completed · ${optionalComplete} optional completed`
+                  : `${required.length - complete} required left`}
+              </span>
+            ) : null}
           </Button>
           {confirmComplete ? (
             <Button variant="ghost" disabled={busy} onClick={() => setConfirmComplete(false)}>
@@ -565,7 +602,20 @@ export function RitualChecklist({
         </section>
       ) : (
         <Card className="ritual-card" role="region" aria-label="Ritual questions">
-          <CardContent className="ritual-scroll min-h-0 overflow-y-auto text-left">
+          <RitualCardHeader
+            kind={occurrence.definition.kind}
+            timeZone={occurrence.timeZone}
+            date={occurrence.scheduledLocalDate}
+            required={required.length}
+            requiredDone={complete}
+            optional={optionalTotal}
+            optionalDone={optionalComplete}
+            onDateChange={preview ? onPreviewDateChange : undefined}
+          />
+          <CardContent
+            ref={questionsRef}
+            className="ritual-scroll min-h-0 overflow-y-auto text-left"
+          >
             <ul className="flex flex-col gap-5">
               {occurrence.definition.steps.map((step, index) => (
                 <li
@@ -671,55 +721,55 @@ export function RitualChecklist({
         </Card>
       )}
       {!mainScreen ? actions : null}
-      <div className="ritual-support flex shrink-0 flex-col items-center gap-1">
-        {mainScreen ? (
-          <p
-            role="status"
-            className="ritual-support-text inline-flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground"
-          >
-            {busy || dirty ? (
-              <Spinner aria-hidden="true" className="size-3" />
-            ) : state.syncStatus === "conflict" ? (
-              <AlertTriangleIcon aria-hidden="true" className="size-3" />
-            ) : state.syncStatus === "queued" ? (
-              <ClockIcon aria-hidden="true" className="size-3" />
-            ) : (
-              <CheckIcon aria-hidden="true" className="size-3" />
-            )}
-            {preview
-              ? "Preview only"
-              : busy || dirty
+      {!preview ? (
+        <div className="ritual-support flex shrink-0 flex-col items-center gap-1">
+          {mainScreen && !preview ? (
+            <p
+              role="status"
+              className="ritual-support-text inline-flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground"
+            >
+              {busy || dirty ? (
+                <Spinner aria-hidden="true" className="size-3" />
+              ) : state.syncStatus === "conflict" ? (
+                <AlertTriangleIcon aria-hidden="true" className="size-3" />
+              ) : state.syncStatus === "queued" ? (
+                <ClockIcon aria-hidden="true" className="size-3" />
+              ) : (
+                <CheckIcon aria-hidden="true" className="size-3" />
+              )}
+              {busy || dirty
                 ? "Saving"
                 : state.syncStatus === "queued"
                   ? "Saved on this Mac and waiting to sync"
                   : state.syncStatus === "conflict"
                     ? "Changes need review in Ritual settings"
                     : "Saved to your account"}
-          </p>
-        ) : null}
-        {!preview && !challenge && !confirmSkip && !confirmComplete ? (
-          <div className="ritual-escapes flex shrink-0 justify-center gap-5 text-center">
-            <Button
-              size="sm"
-              variant="link"
-              className="ritual-support-text text-xs font-normal text-muted-foreground"
-              disabled={busy || dirty}
-              onClick={() => void escapeAction("snooze")}
-            >
-              Snooze
-            </Button>
-            <Button
-              size="sm"
-              variant="link"
-              className="ritual-support-text text-xs font-normal text-muted-foreground"
-              disabled={busy || dirty}
-              onClick={() => setConfirmSkip(true)}
-            >
-              Skip for Today
-            </Button>
-          </div>
-        ) : null}
-      </div>
+            </p>
+          ) : null}
+          {!preview && !challenge && !confirmSkip && !confirmComplete ? (
+            <div className="ritual-escapes flex shrink-0 justify-center gap-5 text-center">
+              <Button
+                size="sm"
+                variant="link"
+                className="ritual-support-text text-xs font-normal text-muted-foreground"
+                disabled={busy || dirty}
+                onClick={() => void escapeAction("snooze")}
+              >
+                Snooze
+              </Button>
+              <Button
+                size="sm"
+                variant="link"
+                className="ritual-support-text text-xs font-normal text-muted-foreground"
+                disabled={busy || dirty}
+                onClick={() => setConfirmSkip(true)}
+              >
+                Skip for Today
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

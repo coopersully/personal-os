@@ -64,7 +64,7 @@ export function RitualPreviewChecklist({
   const ref = useRef(state);
   useEffect(() => {
     const dismiss = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !event.defaultPrevented) {
         event.preventDefault();
         onClose();
       }
@@ -80,6 +80,22 @@ export function RitualPreviewChecklist({
   return (
     <RitualChecklist
       state={state}
+      onPreviewDateChange={(date) => {
+        const current = ref.current.current;
+        if (!current || date === current.scheduledLocalDate) return;
+        const definition = ref.current.definitions.find((item) => item.id === current.ritualId);
+        if (!definition) return;
+        store({
+          ...ref.current,
+          current: {
+            ...current,
+            scheduledLocalDate: date,
+            definition: ritualDefinitionForDate(definition, date),
+            responses: [],
+            revision: current.revision + 1,
+          },
+        });
+      }}
       preview
       saveResponse={async (stepId, input) => {
         const current = ref.current.current!;
@@ -134,6 +150,7 @@ export function RitualPreview({ state, onClose }: { state: RitualState; onClose:
       }}
     >
       <DialogContent
+        onOpenAutoFocus={(event) => event.preventDefault()}
         showCloseButton={false}
         className="ritual-browser-preview inset-0 left-0 top-0 h-dvh w-screen max-w-none translate-x-0 translate-y-0 rounded-none sm:max-w-none"
         data-ritual-kind={state.current?.definition.kind}

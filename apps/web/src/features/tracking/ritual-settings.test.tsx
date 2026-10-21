@@ -16,9 +16,13 @@ const render = (ui: ReactElement) =>
 
 function openSubpage(view: "morning" | "night" | "history", timeZone = "UTC") {
   cleanup();
-  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-    <RitualSettings view={view} timeZone={timeZone} />
-  </QueryClientProvider>);
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <RitualSettings view={view} timeZone={timeZone} />
+    </QueryClientProvider>,
+  );
 }
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), dismiss: vi.fn() } }));
@@ -36,6 +40,7 @@ vi.mock("../desktop/bridge.js", () => ({ isDesktop: () => mocks.desktop }));
 vi.mock("./ritual-local.js", () => ({ RitualLocal: () => null }));
 vi.mock("../../api.js", () => ({
   api: {
+    getMe: async () => ({ displayName: "Alex Morgan" }),
     listRituals: mocks.list,
     saveRitual: mocks.save,
     listRitualHistory: mocks.history,
@@ -484,7 +489,11 @@ it("locks dependent schedule fields until the ritual is enabled and keeps their 
   const reminder = screen.getByLabelText("Morning reminder time");
   expect(time).toBeDisabled();
   expect(reminder).toBeDisabled();
-  expect(screen.getByLabelText("Turn on Enable morning ritual to change its schedule and reminder time.")).toHaveAttribute("tabindex", "0");
+  expect(
+    screen.getByLabelText(
+      "Turn on Enable morning ritual to change its schedule and reminder time.",
+    ),
+  ).toHaveAttribute("tabindex", "0");
   fireEvent.click(toggle);
   expect(time).toBeEnabled();
   expect(reminder).toBeEnabled();

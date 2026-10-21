@@ -105,4 +105,48 @@ it("scrubs the sky when dragging the background without intercepting form contro
   expect(surface.style.cursor).toBe("grabbing");
   fireEvent.pointerUp(surface);
   expect(surface.style.cursor).toBe("");
+  const openPreview = vi.fn();
+  view.rerender(<button className="ritual-sky-preview" onClick={openPreview}><RitualClouds kind="morning" /></button>);
+  const thumbnail = view.container.firstElementChild as HTMLElement;
+  thumbnail.setPointerCapture = vi.fn();
+  thumbnail.hasPointerCapture = vi.fn(() => false);
+  fireEvent.pointerDown(thumbnail, { button: 0, clientX: 20 });
+  fireEvent.pointerMove(thumbnail, { clientX: 120 });
+  fireEvent.pointerUp(thumbnail);
+  fireEvent.click(thumbnail, { detail: 1 });
+  expect(openPreview).not.toHaveBeenCalled();
+  fireEvent.pointerDown(thumbnail, { button: 0, clientX: 20 });
+  fireEvent.pointerUp(thumbnail);
+  fireEvent.click(thumbnail, { detail: 1 });
+  expect(openPreview).toHaveBeenCalledTimes(1);
+});
+
+it("yields during large texture setup and cancels unfinished work on unmount", () => {
+  vi.useFakeTimers();
+  try {
+    vi.stubGlobal("CanvasRenderingContext2D", class {});
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    let clock = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => ++clock);
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 1600, height: 1000,
+    } as DOMRect);
+    const paint = vi.fn();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+      createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+      putImageData: paint,
+      createPattern: vi.fn(() => ({})),
+      setTransform: vi.fn(), fillRect: vi.fn(), clearRect: vi.fn(),
+    } as unknown as CanvasRenderingContext2D);
+    const view = render(<RitualClouds kind="night" />);
+    expect(paint).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    view.unmount();
+    vi.runAllTimers();
+    expect(paint).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
 });

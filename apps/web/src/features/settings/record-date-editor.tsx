@@ -20,7 +20,7 @@ export function RecordDateEditor({ value, pending, onSave }: {
   };
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
-      <Button variant="ghost" className="h-8 px-0 text-muted-foreground" disabled={pending || saving} aria-label="Edit Target date">
+      <Button variant="ghost" className="text-muted-foreground" disabled={pending || saving} aria-label="Edit Target date">
         <CalendarIcon aria-hidden="true" />
         {selected ? format(selected, "MMM d, yyyy") : "Not set"}
       </Button>

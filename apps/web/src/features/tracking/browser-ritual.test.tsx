@@ -10,6 +10,7 @@ import { BrowserRitual } from "./browser-ritual.js";
 const mocks = vi.hoisted(() => ({ read: vi.fn(), response: vi.fn(), action: vi.fn() }));
 vi.mock("../../api.js", () => ({
   api: {
+    getMe: async () => ({ displayName: "Alex Morgan" }),
     getCurrentRitual: mocks.read,
     saveRitualResponse: mocks.response,
     recordRitualAction: mocks.action,

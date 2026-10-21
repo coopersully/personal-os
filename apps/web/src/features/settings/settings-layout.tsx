@@ -105,9 +105,10 @@ export function SettingsSection({
   title: string;
 }) {
   const headingId = useId();
+  const hasHeader = Boolean(icon || headerAside);
   return (
     <section className="settings-subsection" aria-labelledby={headingId}>
-      {!icon ? (
+      {!hasHeader ? (
       <div className="settings-subsection__label">
         <h2 id={headingId}>{title}</h2>
         {action ? <CardAction>{action}</CardAction> : null}
@@ -120,9 +121,9 @@ export function SettingsSection({
             : "settings-section"
         }
       >
-        {icon ? (
+        {hasHeader ? (
           <CardHeader className="settings-subsection__header flex flex-row items-start gap-3 p-4">
-            <span className="settings-subsection__icon" aria-hidden="true">{icon}</span>
+            {icon ? <span className="settings-subsection__icon" aria-hidden="true">{icon}</span> : null}
             <div className="min-w-0 flex-1 space-y-1">
               <h2 id={headingId} className="text-sm font-semibold">{title}</h2>
               {description ? <p className="text-sm leading-relaxed text-muted-foreground">{description}</p> : null}

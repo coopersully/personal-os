@@ -79,7 +79,7 @@ it("covers the current page and requires ritual actions instead of Escape or an 
   setup();
   const dialog = await screen.findByRole("dialog", { name: "Morning ritual" });
   expect(screen.getByRole("checkbox", { name: "Drink water" })).toBeInTheDocument();
-  expect(screen.getByText("3-day morning streak")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "3-day morning streak" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
   const shortcut = vi.fn();
   window.addEventListener("keydown", shortcut);
@@ -265,6 +265,7 @@ it("does not let an old poll reopen a completed ritual", async () => {
   );
   const pending = client.refetchQueries({ queryKey: ["ritual-current", "owner"] });
   fireEvent.click(screen.getByRole("button", { name: "Complete Morning Ritual" }));
+  fireEvent.click(screen.getByRole("button", { name: "Finish ritual" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   await act(async () => {
     resolve(initial);
@@ -286,6 +287,7 @@ it("does not restore private state after an account change while a write is pend
   const { client, rerender } = setup();
   await screen.findByRole("dialog");
   fireEvent.click(screen.getByRole("button", { name: "Complete Morning Ritual" }));
+  fireEvent.click(screen.getByRole("button", { name: "Finish ritual" }));
   await waitFor(() => expect(mocks.action).toHaveBeenCalledOnce());
   rerender(
     <QueryClientProvider client={client}>

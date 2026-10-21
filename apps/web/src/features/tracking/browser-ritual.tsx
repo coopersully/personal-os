@@ -141,9 +141,16 @@ export function BrowserRitual({ userId }: { userId: string }) {
           if (event.metaKey || event.ctrlKey) event.stopPropagation();
         }}
         onInteractOutside={(event) => event.preventDefault()}
-        onOpenAutoFocus={() => {
+        onOpenAutoFocus={(event) => {
           previousFocus.current =
             document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          const question = document.querySelector<HTMLElement>(
+            '[aria-label="Ritual questions"] :is(button, input, textarea, select):not([disabled])',
+          );
+          if (question) {
+            event.preventDefault();
+            question.focus({ preventScroll: true });
+          }
         }}
         onCloseAutoFocus={(event) => {
           event.preventDefault();

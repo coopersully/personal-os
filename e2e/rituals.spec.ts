@@ -122,6 +122,7 @@ test("settings support field search, ritual history, and resumable setup replay"
     const live = page.getByRole("dialog", { name: "Morning ritual", exact: true });
     await expect(live).toBeVisible({ timeout: 15000 });
     await live.getByRole("button", { name: "Complete Morning Ritual" }).click();
+    await live.getByRole("button", { name: "Finish ritual" }).click();
     await expect(live).toHaveCount(0);
   }
   await expect(page.getByLabel("Prompt", { exact: true }).first()).toHaveValue("Morning water");
@@ -132,11 +133,12 @@ test("settings support field search, ritual history, and resumable setup replay"
   await page.getByRole("button", { name: "Show morning ritual" }).click();
   const preview = page.getByRole("dialog", { name: "Ritual preview" });
   await expect(preview.getByRole("button", { name: "Complete Morning Ritual" })).toBeEnabled();
+  await preview.getByRole("button", { name: "Complete Morning Ritual" }).click();
   await preview.getByRole("checkbox", { name: "Remind me about these later" }).check();
   await expect(preview.getByLabel("Reminder time")).toHaveValue("13:30");
   await preview.getByLabel("Reminder time").fill("14:00");
   expect(await preview.evaluate((e) => e.scrollWidth <= e.clientWidth + 1)).toBe(true);
-  await preview.getByRole("button", { name: "Complete Morning Ritual" }).click();
+  await preview.getByRole("button", { name: "Finish ritual" }).click();
   await expect(preview).toHaveCount(0);
   await page.getByRole("radio", { name: "History and data", exact: true }).click();
   await expect(page.getByRole("region", { name: "Ritual history" })).toBeVisible();
@@ -216,16 +218,21 @@ test("ritual skipping requires a continuous hold and shows streak impact", async
     });
   });
   await page.goto("/#ritual");
-  await expect(page.getByText("1-day morning streak")).toBeVisible();
+  await expect(page.getByRole("button", { name: "1-day morning streak" })).toBeVisible();
   const week = page.getByRole("region", { name: "Past 7 ritual days" });
   await expect(week).toBeVisible();
   await expect(week.getByRole("listitem")).toHaveCount(7);
-  await expect(week.getByText("3 completed · Past 7 days")).toBeVisible();
+  await expect(week.locator(".ritual-day-dot-complete")).toHaveCount(3);
   await expect(week.getByRole("listitem", { name: /October 20, 2026: Pending/ })).toBeVisible();
   const viewport = page.viewportSize();
   await page.setViewportSize({ width: 320, height: 844 });
   const fits = await week.evaluate((element) => element.scrollWidth <= element.clientWidth);
   expect(fits).toBe(true);
+  expect(
+    await page
+      .getByRole("region", { name: "Ritual progress" })
+      .evaluate((element) => element.scrollWidth <= element.clientWidth),
+  ).toBe(true);
   await page.screenshot({
     path: test.info().outputPath("ritual-progress.png"),
     animations: "disabled",
@@ -306,9 +313,11 @@ test("browser rituals preserve the current page and save real answers and option
     });
     await ritual.getByRole("checkbox", { name: "Drink browser water" }).click();
     await expect(ritual.getByRole("checkbox", { name: "Drink browser water" })).toBeChecked();
+    await expect(ritual.getByLabel("Reminder time")).toHaveCount(0);
+    await ritual.getByRole("button", { name: "Complete Morning Ritual" }).click();
     await ritual.getByRole("checkbox", { name: "Remind me about these later" }).check();
     await ritual.getByLabel("Reminder time").fill("23:59");
-    await ritual.getByRole("button", { name: "Complete Morning Ritual" }).click();
+    await ritual.getByRole("button", { name: "Finish ritual" }).click();
     await expect(ritual).toHaveCount(0);
     await expect(search).toBeVisible();
     await expect(search).toHaveValue("calendar");

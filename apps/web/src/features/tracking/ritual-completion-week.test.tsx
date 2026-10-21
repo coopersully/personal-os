@@ -17,7 +17,8 @@ it("shows seven dated days and retains completed days after a break", () => {
   render(<RitualCompletionWeek days={days} queued={false} />);
   const region = screen.getByRole("region", { name: "Past 7 ritual days" });
   expect(within(region).getAllByRole("listitem")).toHaveLength(7);
-  expect(screen.getByText("2 completed · Past 7 days")).toBeInTheDocument();
+  expect(screen.queryByText(/completed · Past 7 days/)).not.toBeInTheDocument();
+  expect(region.querySelectorAll(".ritual-day-dot-complete")).toHaveLength(2);
   for (const status of [
     "Completed",
     "Skipped",
@@ -37,5 +38,5 @@ it("shows seven dated days and retains completed days after a break", () => {
 });
 it("marks queued local progress as awaiting synchronization", () => {
   render(<RitualCompletionWeek days={days} queued />);
-  expect(screen.getByText("2 completed · Past 7 days · Waiting to sync")).toBeInTheDocument();
+  expect(screen.getByText("Waiting to sync")).toHaveClass("sr-only");
 });

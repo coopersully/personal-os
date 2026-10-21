@@ -6994,6 +6994,8 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   text-align: center;
 }
 .ritual-presentation {
+  position: relative;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -7020,7 +7022,28 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   --card-spacing: 1.75rem;
   animation: ritual-element-enter var(--ritual-card-duration) cubic-bezier(0.22, 1, 0.36, 1) var(--ritual-card-delay) backwards;
 }
+/* A shared decorative layer: no motion, screen capture, or input handling. */
+.ritual-clouds {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  image-rendering: pixelated;
+}
+.ritual-progress { color: var(--ritual-chrome); }
+.ritual-progress .text-muted-foreground { color: inherit; }
+
+.ritual-actions { color: var(--ritual-chrome); }
+.ritual-actions .text-muted-foreground { color: inherit; }
+.ritual-actions > div { padding-inline: 0.25rem; }
 .ritual-scroll { overscroll-behavior: contain; scrollbar-gutter: stable; }
+@media (max-height: 640px) {
+  .ritual-surface { padding: 24px 16px; overflow-y: auto; align-items: start; }
+  .ritual-presentation { max-height: none; }
+  .ritual-card { max-height: 60dvh; flex-shrink: 0; }
+}
 /* Approved ritual-only backdrop isolates the current page without capturing the screen. */
 .browser-ritual { backdrop-filter: blur(24px); }
 /* Browser chrome sits over the current page rather than a predictable native wallpaper. */
@@ -7625,4 +7648,32 @@ html.pet-window #root {
 /* Leave the outer edge available for native resizing beside the overlay scrollbar. */
 .pet-section-scroll [data-slot="scroll-area-scrollbar"][data-orientation="vertical"] {
   right: 6px !important;
+}
+
+/* Ritual progress is quiet chrome; questions retain the main surface. */
+.ritual-day-dot {
+  width: 12px;
+  height: 12px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  opacity: 0.45;
+}
+.ritual-day-dot-complete { background: currentColor; opacity: 1; }
+.ritual-button-progress {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  background: currentColor;
+  opacity: 0.18;
+  transition: width 220ms ease-out;
+  pointer-events: none;
+}
+.ritual-escapes {
+  position: fixed;
+  inset-inline: 0;
+  bottom: max(12px, env(safe-area-inset-bottom));
+}
+.ritual-follow-up { color: var(--ritual-chrome); }
+@media (prefers-reduced-motion: reduce) {
+  .ritual-button-progress { transition: none; }
 }

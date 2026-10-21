@@ -356,10 +356,17 @@ it("completes optional steps without requiring answers and sends only an opted-i
   render(<RitualChecklist state={optionalState} saveResponse={vi.fn()} act={action} />);
   const finish = screen.getByRole("button", { name: "Complete Morning Ritual" });
   expect(finish).toBeEnabled();
+  expect(screen.queryByLabelText("Reminder time")).not.toBeInTheDocument();
+  fireEvent.click(finish);
+  expect(action).not.toHaveBeenCalled();
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(screen.queryByLabelText("Reminder time")).not.toBeInTheDocument();
+  expect(action).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Complete Morning Ritual" }));
   expect(screen.getByLabelText("Reminder time")).toHaveValue("15:30");
   fireEvent.click(screen.getByRole("checkbox", { name: "Remind me about these later" }));
   fireEvent.change(screen.getByLabelText("Reminder time"), { target: { value: "16:45" } });
-  fireEvent.click(finish);
+  fireEvent.click(screen.getByRole("button", { name: "Finish ritual" }));
   await waitFor(() =>
     expect(action).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -368,9 +375,12 @@ it("completes optional steps without requiring answers and sends only an opted-i
       }),
     ),
   );
-  await waitFor(() => expect(finish).toBeEnabled());
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Complete Morning Ritual" })).toBeEnabled(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Complete Morning Ritual" }));
   fireEvent.click(screen.getByRole("checkbox", { name: "Remind me about these later" }));
-  fireEvent.click(finish);
+  fireEvent.click(screen.getByRole("button", { name: "Finish ritual" }));
   await waitFor(() => expect(action).toHaveBeenCalledTimes(2));
   expect(action.mock.calls[1]![0]).not.toHaveProperty("optionalReminderAt");
 });
@@ -413,8 +423,9 @@ it.each([
           },
         });
   render(<RitualChecklist state={initial} saveResponse={vi.fn()} act={action} />);
-  fireEvent.click(screen.getByRole("checkbox", { name: "Remind me about these later" }));
   fireEvent.click(screen.getByRole("button", { name: "Complete Morning Ritual" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Remind me about these later" }));
+  fireEvent.click(screen.getByRole("button", { name: "Finish ritual" }));
   expect(toast.loading).toHaveBeenCalledWith("Finishing ritual…", expect.anything());
   const loadingId = vi.mocked(toast.loading).mock.calls[0]![1]!.id;
   if (outcome === "failure") {
@@ -445,7 +456,7 @@ it("shows the current ritual streak and lets users back out of skipping", () => 
       act={action}
     />,
   );
-  expect(screen.getByText("12-day morning streak")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "12-day morning streak" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Skip for Today" }));
   expect(screen.getByText(/1 time in the last 3 days/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Go back" }));
@@ -465,10 +476,55 @@ it("keeps the weekly completion strip alongside the streak and hides it in previ
   const view = render(
     <RitualChecklist state={progressState} saveResponse={vi.fn()} act={vi.fn()} />,
   );
-  expect(screen.getByText("0-day morning streak")).toBeInTheDocument();
-  expect(screen.getByText("1 completed · Past 7 days")).toBeInTheDocument();
+  expect(screen.getByText("No current streak")).toBeInTheDocument();
+  expect(screen.queryByText("1 completed · Past 7 days")).not.toBeInTheDocument();
+  const questions = screen.getByRole("region", { name: "Ritual questions" });
+  expect(questions).toContainElement(screen.getByRole("checkbox", { name: "Brush teeth" }));
+  expect(questions).not.toContainElement(screen.getByText("No current streak"));
+  expect(questions).not.toContainElement(
+    screen.getByRole("region", { name: "Past 7 ritual days" }),
+  );
+  expect(questions).not.toContainElement(screen.getByRole("region", { name: "Ritual actions" }));
+  expect(view.container.querySelector("canvas")).toHaveAttribute("aria-hidden", "true");
   view.rerender(
     <RitualChecklist state={progressState} saveResponse={vi.fn()} act={vi.fn()} preview />,
   );
   expect(screen.queryByRole("region", { name: "Past 7 ritual days" })).not.toBeInTheDocument();
+});
+
+it("fills required progress independently of completed optional steps", () => {
+  const current = state.current!;
+  const response = (stepId: string) => ({
+    id: stepId,
+    requestId: stepId,
+    stepId,
+    value: true,
+    submitted: true,
+    observedAt: "2026-10-20T07:00:00Z",
+    recordedAt: "2026-10-20T07:00:00Z",
+  });
+  const view = render(
+    <RitualChecklist
+      state={{
+        ...state,
+        current: {
+          ...current,
+          definition: {
+            ...current.definition,
+            steps: [
+              ...current.definition.steps,
+              { id: "stretch", label: "Stretch", kind: "checkbox", optional: true },
+            ],
+          },
+          responses: [response("teeth"), response("stretch")],
+        },
+      }}
+      saveResponse={vi.fn()}
+      act={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole("button", { name: "1 of 2 tasks completed" })).toBeDisabled();
+  expect(view.container.querySelector(".ritual-button-progress")).toHaveStyle({ width: "50%" });
+  expect(screen.getByText("1 of 1 optional completed")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Reminder time")).not.toBeInTheDocument();
 });

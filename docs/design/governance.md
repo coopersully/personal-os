@@ -220,6 +220,10 @@ radius; other blur utilities, other radii/selectors, and glass cards remain proh
 owns this presentation exception; shared Dialog/Card defaults do not inherit it.
 
 
+Ritual skies also permit a transparent procedural cloud canvas behind the content. Ordered
+dithering replaces blur, remains static with no animation loop, and uses lower opacity at night.
+This exception is confined to the shared ritual presentation; ordinary cards remain opaque.
+
 ## Research-backed refinement
 
 For design-system reviews and cross-workspace UX refinements, consult current

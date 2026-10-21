@@ -37,6 +37,7 @@ import MailSource from "reicon-react/icons/Envelope";
 import EyeSource from "reicon-react/icons/Eye";
 import EyeOffSource from "reicon-react/icons/EyeSlash";
 import FileTextSource from "reicon-react/icons/FileText";
+import FireSource from "reicon-react/icons/Fire";
 import ForwardSource from "reicon-react/icons/Forward";
 import LocationFixedSource from "reicon-react/icons/Gps";
 import GridSource from "reicon-react/icons/Grid";
@@ -127,6 +128,7 @@ export type Icon = ForwardRefExoticComponent<
     RefAttributes<SVGSVGElement>
 >;
 
+export const FireIcon: Icon = FireSource;
 export const ActivityIcon: Icon = ActivitySource;
 export const CircleAlertIcon: Icon = CircleAlertSource;
 export const AlertTriangleIcon: Icon = AlertTriangleSource;

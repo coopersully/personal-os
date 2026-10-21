@@ -15,9 +15,9 @@ import {
 import { useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { NohmiBrandMark } from "../../components/brand-marks.js";
-import { AlertTriangleIcon, CheckIcon, ClockIcon } from "../../components/icons.js";
+import { AlertTriangleIcon, CheckIcon, ClockIcon, FireIcon } from "../../components/icons.js";
 import { Button } from "../../components/ui/button.js";
-import { Card, CardContent, CardFooter } from "../../components/ui/card.js";
+import { Card, CardContent } from "../../components/ui/card.js";
 import { Checkbox } from "../../components/ui/checkbox.js";
 import { Field, FieldLabel, FieldLegend, FieldSet } from "../../components/ui/field.js";
 import { Input } from "../../components/ui/input.js";
@@ -25,6 +25,12 @@ import { RadioGroup, RadioGroupItem } from "../../components/ui/radio-group.js";
 import { Toaster } from "../../components/ui/sonner.js";
 import { Spinner } from "../../components/ui/spinner.js";
 import { Textarea } from "../../components/ui/textarea.js";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "../../components/ui/tooltip.js";
 import { classifyMutationError } from "../../lib/feedback.js";
 import {
   readRitualState,
@@ -34,6 +40,7 @@ import {
   submitRitualAction,
   submitRitualResponse,
 } from "../desktop/ritual-bridge.js";
+import { RitualClouds } from "./ritual-clouds.js";
 import { RitualCompletionWeek } from "./ritual-completion-week.js";
 import { RitualPreviewChecklist } from "./ritual-preview.js";
 import { RitualSkipConfirmation } from "./ritual-skip-confirmation.js";
@@ -153,6 +160,7 @@ export function RitualChecklist({
   const [state, setState] = useState(external);
   const [busy, setBusy] = useState(false);
   const [confirmSkip, setConfirmSkip] = useState(false);
+  const [confirmComplete, setConfirmComplete] = useState(false);
   const actionToast = useId();
   const showError = (message: string) => toast.error(message, { id: actionToast });
   const [challenge, setChallenge] = useState<{
@@ -253,6 +261,7 @@ export function RitualChecklist({
       });
       setState(result.state);
       setConfirmSkip(false);
+      if (result.outcome === "applied") setConfirmComplete(false);
       if (requestingReminders && !preview && result.outcome === "applied") {
         const followUp = result.state.current?.optionalFollowUp;
         if (result.state.syncStatus === "queued")
@@ -331,6 +340,17 @@ export function RitualChecklist({
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [challenge, busy]);
+  useEffect(() => {
+    if (!confirmComplete) return;
+    const back = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) {
+        event.preventDefault();
+        setConfirmComplete(false);
+      }
+    };
+    window.addEventListener("keydown", back);
+    return () => window.removeEventListener("keydown", back);
+  }, [confirmComplete, busy]);
   if (occurrence?.status !== "pending")
     return (
       <div className="flex flex-col items-center gap-3 py-8">
@@ -353,6 +373,11 @@ export function RitualChecklist({
       localDateToIso(localDateAt(new Date(), occurrence.timeZone))
       ? "Tomorrow"
       : "Today";
+  const optionalTotal = occurrence.definition.steps.length - required.length;
+  const optionalComplete = optionalTotal - optional.length;
+  const completionLabel = ritualIsAnswered(occurrence)
+    ? `Complete ${occurrence.definition.kind === "night" ? "Evening" : "Morning"} Ritual`
+    : `${complete} of ${required.length} tasks completed`;
   const dirty = Object.entries(texts).some(([id, value]) => value !== answers[id]?.value);
   const ready =
     ritualIsAnswered(occurrence) &&
@@ -361,61 +386,100 @@ export function RitualChecklist({
     (!remindLater || !optional.length || !!reminderAt);
   return (
     <div className="ritual-presentation">
+      <RitualClouds kind={occurrence.definition.kind} />
       <div className="ritual-logo">
         <NohmiBrandMark symbol />
       </div>
       <h1 className="sr-only">{occurrence.definition.title}</h1>
-      <Card className="ritual-card">
-        <CardContent className="ritual-scroll flex min-h-0 flex-col gap-5 overflow-y-auto text-left">
-          {!preview ? (
-            <p className="text-center text-sm text-muted-foreground">
-              {state.streakCount === undefined
-                ? "Streak history unavailable"
-                : `${state.streakCount}-day ${occurrence.definition.kind === "night" ? "evening" : "morning"} streak`}
-              {state.syncStatus === "queued" && state.streakCount !== undefined
-                ? " · Last synced"
-                : ""}
-            </p>
-          ) : null}
-          {!preview && state.completionWeek?.length ? (
-            <RitualCompletionWeek
-              days={state.completionWeek}
-              queued={state.syncStatus === "queued"}
-            />
-          ) : null}
-          {confirmSkip ? (
-            <RitualSkipConfirmation
-              key={`${occurrence.id}:${occurrence.revision}:${state.skipCount}`}
-              count={state.syncStatus === "saved" ? state.skipCount : undefined}
-              streak={state.streakCount}
-              busy={busy}
-              onConfirm={() => void escapeAction("skip")}
-              onCancel={() => setConfirmSkip(false)}
-            />
-          ) : challenge ? (
-            <section
-              className="flex flex-col items-center gap-4 text-center"
-              aria-label="Confirm snooze"
+      {!preview ? (
+        <TooltipProvider>
+          <section
+            className="ritual-progress flex w-full shrink-0 items-center justify-between gap-4"
+            aria-label="Ritual progress"
+          >
+            <div>
+              {state.streakCount ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      className="gap-1.5 px-1"
+                      aria-label={`${state.streakCount}-day ${occurrence.definition.kind === "night" ? "evening" : "morning"} streak`}
+                    >
+                      <FireIcon aria-hidden="true" className="size-5" />
+                      <span className="text-lg font-medium">{state.streakCount}</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {state.streakCount}-day streak
+                    {state.syncStatus === "queued" ? " · Last synced" : ""}
+                  </TooltipContent>
+                </Tooltip>
+              ) : (
+                <span className="sr-only">
+                  {state.streakCount === undefined
+                    ? "Streak history unavailable"
+                    : "No current streak"}
+                </span>
+              )}
+            </div>
+            {state.completionWeek?.length ? (
+              <RitualCompletionWeek
+                days={state.completionWeek}
+                queued={state.syncStatus === "queued"}
+              />
+            ) : null}
+          </section>
+        </TooltipProvider>
+      ) : null}
+      {confirmSkip ? (
+        <RitualSkipConfirmation
+          key={`${occurrence.id}:${occurrence.revision}:${state.skipCount}`}
+          count={state.syncStatus === "saved" ? state.skipCount : undefined}
+          streak={state.streakCount}
+          busy={busy}
+          onConfirm={() => void escapeAction("skip")}
+          onCancel={() => setConfirmSkip(false)}
+        />
+      ) : challenge ? (
+        <section
+          className="flex flex-col items-center gap-4 text-center"
+          aria-label="Confirm snooze"
+        >
+          <p>
+            {challenge.unavailable
+              ? `Recent snooze history is unavailable. This device has recorded ${challenge.count} snoozes in the last 3 days. Snooze another 10 minutes?`
+              : `You’ve snoozed your ${occurrence.definition.kind === "night" ? "evening" : "morning"} ritual ${challenge.count} times in the last 3 days. Snooze another 10 minutes?`}
+          </p>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button disabled={busy} onClick={() => void escapeAction("confirm_snooze")}>
+              Snooze 10 minutes
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={busy}
+              onClick={() => void escapeAction("cancel_snooze")}
             >
-              <p>
-                {challenge.unavailable
-                  ? `Recent snooze history is unavailable. This device has recorded ${challenge.count} snoozes in the last 3 days. Snooze another 10 minutes?`
-                  : `You’ve snoozed your ${occurrence.definition.kind === "night" ? "evening" : "morning"} ritual ${challenge.count} times in the last 3 days. Snooze another 10 minutes?`}
-              </p>
-              <div className="flex flex-wrap justify-center gap-2">
-                <Button disabled={busy} onClick={() => void escapeAction("confirm_snooze")}>
-                  Snooze 10 minutes
-                </Button>
-                <Button
-                  variant="ghost"
-                  disabled={busy}
-                  onClick={() => void escapeAction("cancel_snooze")}
-                >
-                  Go back
-                </Button>
-              </div>
-            </section>
-          ) : (
+              Go back
+            </Button>
+          </div>
+        </section>
+      ) : confirmComplete ? (
+        <section
+          aria-label="Finish optional steps"
+          className="ritual-follow-up flex w-full flex-col gap-4 text-left"
+        >
+          <h2 className="text-lg font-medium">
+            {optional.length} optional {optional.length === 1 ? "step left" : "steps left"}
+          </h2>
+          <p className="text-sm">
+            You can finish your ritual now. Choose whether to get a reminder for the remaining
+            steps.
+          </p>
+        </section>
+      ) : (
+        <Card className="ritual-card" role="region" aria-label="Ritual questions">
+          <CardContent className="ritual-scroll min-h-0 overflow-y-auto text-left">
             <ul className="flex flex-col gap-5">
               {occurrence.definition.steps.map((step) => (
                 <li key={step.id} className="flex flex-col gap-2">
@@ -481,54 +545,77 @@ export function RitualChecklist({
                 </li>
               ))}
             </ul>
-          )}
-        </CardContent>
-        <CardFooter className="shrink-0 flex-col gap-3 text-center">
-          {!challenge && !confirmSkip && optional.length > 0 ? (
-            <div className="flex w-full flex-col gap-2 text-left">
-              <div className="flex flex-wrap items-end gap-3">
-                <Field orientation="horizontal" className="flex-1">
-                  <Checkbox
-                    id="ritual-remind-later"
-                    checked={remindLater}
-                    disabled={busy}
-                    onCheckedChange={(value) => setRemindLater(value === true)}
-                  />
-                  <FieldLabel htmlFor="ritual-remind-later">Remind me about these later</FieldLabel>
-                </Field>
-                <Field className="w-auto">
-                  <FieldLabel htmlFor="ritual-reminder-time">Reminder time</FieldLabel>
-                  <Input
-                    id="ritual-reminder-time"
-                    type="time"
-                    value={reminderTime}
-                    disabled={!remindLater || busy}
-                    onChange={(event) => setReminderTime(event.target.value)}
-                  />
-                </Field>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {remindLater
-                  ? `${reminderDay} · ${occurrence.timeZone}. Reminders need account sync and follow your notification settings.`
-                  : "Unfinished optional steps will be marked not done for today."}
-              </p>
+          </CardContent>
+        </Card>
+      )}
+      <section
+        aria-label="Ritual actions"
+        className="ritual-actions flex w-full shrink-0 flex-col gap-3 text-center"
+      >
+        {confirmComplete && optional.length > 0 ? (
+          <div className="flex w-full flex-col gap-2 text-left">
+            <div className="flex flex-wrap items-end gap-3">
+              <Field orientation="horizontal" className="flex-1">
+                <Checkbox
+                  id="ritual-remind-later"
+                  checked={remindLater}
+                  disabled={busy}
+                  onCheckedChange={(value) => setRemindLater(value === true)}
+                />
+                <FieldLabel htmlFor="ritual-remind-later">Remind me about these later</FieldLabel>
+              </Field>
+              <Field className="w-auto">
+                <FieldLabel htmlFor="ritual-reminder-time">Reminder time</FieldLabel>
+                <Input
+                  id="ritual-reminder-time"
+                  type="time"
+                  value={reminderTime}
+                  disabled={!remindLater || busy}
+                  onChange={(event) => setReminderTime(event.target.value)}
+                />
+              </Field>
             </div>
-          ) : null}
-          {!challenge && !confirmSkip ? (
+            <p className="text-xs text-muted-foreground">
+              {remindLater
+                ? `${reminderDay} · ${occurrence.timeZone}. Reminders need account sync and follow your notification settings.`
+                : "Unfinished optional steps will be marked not done for today."}
+            </p>
+          </div>
+        ) : null}
+        {!challenge && !confirmSkip ? (
+          <>
             <Button
-              className="h-auto w-full flex-col gap-1 py-3"
+              aria-label={confirmComplete ? "Finish ritual" : completionLabel}
+              className="relative h-auto w-full overflow-hidden py-3"
               disabled={!ready}
               onClick={() => {
-                if (ready) void escapeAction("complete");
+                if (!ready) return;
+                if (optional.length && !confirmComplete) setConfirmComplete(true);
+                else void escapeAction("complete");
               }}
             >
-              {ready
-                ? `Complete ${occurrence.definition.kind === "night" ? "Evening" : "Morning"} Ritual`
-                : `${complete} of ${required.length} tasks completed`}
+              <span
+                aria-hidden="true"
+                className="ritual-button-progress"
+                style={{ width: `${required.length ? (complete / required.length) * 100 : 100}%` }}
+              />
+              <span className="relative">
+                {confirmComplete ? "Finish ritual" : completionLabel}
+              </span>
             </Button>
-          ) : null}
-        </CardFooter>
-      </Card>
+            {optionalTotal > 0 ? (
+              <p className="text-xs">
+                {optionalComplete} of {optionalTotal} optional completed
+              </p>
+            ) : null}
+            {confirmComplete ? (
+              <Button variant="ghost" disabled={busy} onClick={() => setConfirmComplete(false)}>
+                Go back
+              </Button>
+            ) : null}
+          </>
+        ) : null}
+      </section>
       <div className="ritual-support flex shrink-0 flex-col items-center gap-1">
         <p
           role="status"
@@ -562,7 +649,7 @@ export function RitualChecklist({
           >
             Close preview
           </Button>
-        ) : !challenge && !confirmSkip ? (
+        ) : !challenge && !confirmSkip && !confirmComplete ? (
           <div className="ritual-escapes flex shrink-0 justify-center gap-5 text-center">
             <Button
               size="sm"

@@ -234,7 +234,22 @@ weekday checkboxes only for Custom days and retain at least one day. Each ritual
 owns its default reminder time. Changes autosave; failed saves use Sonner and preserve edits.
 
 During a ritual, mark optional steps explicitly and count required progress separately. Show
-“Remind me about these later” only while optional steps are unfinished, with its editable time
+“Remind me about these later” only in a completion follow-up after Complete is pressed with
+unfinished optional steps, with its editable time
 beside it and the actual day/time-zone context underneath. Unchecking it must not leave a reminder
 request in the completion payload. Preview uses today's scheduled steps and never creates
 reminders. History distinguishes optional not done from reminders scheduled or awaiting sync.
+
+Ritual presentations share the same composition across browser delivery, previews, and desktop,
+for morning and evening. The single raised card contains only the questions. Streak and seven-day
+completion progress form a separate, unboxed group above it; optional follow-up preferences and
+completion form an unboxed action group below. Snooze and skip confirmations sit outside the
+question card. A static procedural, ordered-dither cloud layer sits behind all content, at very
+low opacity in the evening, preserving the existing night sky and opaque question surface.
+
+Ritual progress uses a compact row: a fire glyph and nonzero streak number at the left, seven
+filled/empty completion circles at the right. Omit visible weekday labels and aggregate text;
+accessible names and tooltips retain dates, detailed status, and queued provenance. Completion
+shows required progress as a translucent left-to-right fill inside the button, with the optional
+completion count beneath it. Follow-up controls replace questions until Finish ritual or Go back;
+Escape also returns without completing. Keep Snooze and Skip for Today at the viewport bottom.

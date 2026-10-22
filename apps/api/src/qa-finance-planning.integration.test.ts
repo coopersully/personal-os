@@ -1,8 +1,14 @@
 import { resolve } from "node:path";
 import { createDatabaseClient, migrateDatabase } from "@personal-os/database";
-import { financeBudgetVersionSchema } from "@personal-os/domain";
+import {
+  addLocalDays,
+  financeBudgetVersionSchema,
+  localDateAt,
+  localDateToIso,
+} from "@personal-os/domain";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
+import { createFinanceService } from "./finance-service.js";
 import { loadQaFixtures, qaFixtureAccounts } from "./qa-fixtures.js";
 
 it("reloads canonical planning fixtures without completing empty, recovery or onboarding personas", async () => {
@@ -43,6 +49,19 @@ it("reloads canonical planning fixtures without completing empty, recovery or on
             where: (row, { eq }) => eq(row.userId, account.id),
           });
           expect(schedules).toHaveLength(5);
+          const id = (record: number) =>
+            `${account.id.slice(0, 8)}-0000-4000-8000-${record.toString(16).padStart(12, "0")}`;
+          const today = localDateAt(now, "America/New_York");
+          const cashflow = await createFinanceService({
+            db: database.db,
+            now: () => now,
+          }).getFinanceCashflowProjection(account.id, {
+            from: localDateToIso(today),
+            to: localDateToIso(addLocalDays(today, 30)),
+            selectedIncomeStreamId: id(470),
+            accountIds: [id(400), id(401)],
+          });
+          expect(cashflow.projection.status).not.toBe("unavailable");
         } else {
           expect(profile.data).toBeNull();
           expect(budget.data).toBeNull();

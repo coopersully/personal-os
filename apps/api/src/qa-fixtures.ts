@@ -2026,6 +2026,7 @@ export async function loadQaFixtures(
               basisId,
               transactionId: movement.id,
               transactionContextualRevision: 1n,
+              reimbursementRelationshipRevision: 1n,
               reflection: movement.pending ? "not_included" : "included",
               recordedAt: now,
             });

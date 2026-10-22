@@ -57,6 +57,7 @@ import { createFinanceBudgetBaselineQualificationService } from "./finance/basel
 import { loadFinanceAuthorization } from "./finance/context.js";
 import { assessMail, type MailAssessmentSnapshot } from "./mail-assessment.js";
 import { MAIL_PLAYBOOK } from "./mail-playbook.js";
+import { financeHistoryFixture } from "./qa-finance-history.js";
 import { financePlanningFixture } from "./qa-finance-planning.js";
 import { demoPlanningStory } from "./qa-planning-story.js";
 import { hashPassword } from "./security.js";
@@ -2031,6 +2032,22 @@ export async function loadQaFixtures(
             updatedAt: now,
           });
         }
+      }
+      if (account.key === "demo-full") {
+        for (const [record, name] of [
+          [1900, "AMTRAK"],
+          [1901, "HUDSON TABLE"],
+        ] as const)
+          data.financeMerchants.push({
+            id: fixtureId(account, record),
+            userId: account.id,
+            displayName: name,
+            normalizedName: name.toLowerCase(),
+            isUserConfirmed: true,
+            createdAt: now,
+            updatedAt: now,
+          });
+        data.financeTransactions.push(...financeHistoryFixture(account.id, now));
       }
       // Complete canonical references before snapshotting balances: startup learning
       // must not enrich these transactions and invalidate their reflection revisions.

@@ -118,3 +118,9 @@ USD baseline scoped to checking, savings and the credit card. Spending can compa
 monthly usage against approved category allocations. Transfer legs retain their incoming/outgoing
 evidence. The loaded QA persona intentionally lacks this confirmation. Manual-source historical
 coverage remains uncertified; that qualification is separate from the available budget comparison.
+
+The full demo additionally seeds four completed calendar months of posted transactions relative
+to the reload date: twice-monthly payroll, rent, weekly groceries, weekday coffee, weekend dining,
+subscriptions, and variable travel (including one larger trip). Monthly amounts and weekday
+activity vary deterministically for Trends and Rhythm. Current-month records and partial QA
+personas are unchanged; current balances remain explicit statements, not a fabricated roll-forward.

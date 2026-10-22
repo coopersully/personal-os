@@ -99,6 +99,31 @@ it("reloads canonical planning fixtures without completing empty, recovery or on
                 spending.monthlyBudget.groups.find((group) => group.budgetCents === 95_000),
               ).toMatchObject({ usedCents: 17_249 });
             }
+            const history = await createFinanceSpendingService({
+              db: database.db,
+              now: () => now,
+            }).readSpending(account.id, {
+              scope: { ...spending.snapshot.scope, from: "2026-08-01", through: "2026-11-30" },
+              grouping: "auto",
+              includeUncategorized: true,
+            });
+            const monthly = new Map<string, number>();
+            const weekdays = new Set<number>();
+            for (const contribution of history.snapshot.contributions) {
+              const month = contribution.date.slice(0, 7);
+              monthly.set(month, (monthly.get(month) ?? 0) + contribution.netCents);
+              weekdays.add(new Date(`${contribution.date}T12:00:00Z`).getUTCDay());
+            }
+            expect([...monthly.keys()].sort()).toEqual([
+              "2026-08",
+              "2026-09",
+              "2026-10",
+              "2026-11",
+            ]);
+            expect(new Set(monthly.values()).size).toBe(4);
+            expect([...monthly.values()].every((amount) => amount > 350_000)).toBe(true);
+            expect(weekdays.size).toBe(7);
+            expect(history.snapshot.contributions.length).toBeGreaterThan(80);
           } else expect(spending.monthlyBudget?.state).toBe("unavailable");
         } else {
           expect(profile.data).toBeNull();

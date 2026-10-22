@@ -34,6 +34,15 @@ final class NativeCompanion {
   static let shared = NativeCompanion()
   private let notifications = NotificationController()
   private let pet = PetController()
+  private let macActivity = MacActivityMonitor()
+  private let activePanel = ActiveReminderPanelController()
+  private lazy var activeReminders = ActiveReminderRouter(notifications: notifications, presenter: activePanel,
+    activity: { [weak self] in self?.macActivity.sample() ?? MacActivityState(isActive: false, isAvailable: false, shouldHide: true) },
+    makeStore: { identity in
+      let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        .appendingPathComponent("nohmi/active-reminders", isDirectory: true)
+      return try ActiveReminderStore(url: root.appendingPathComponent("\(stableID(identity)).json"), identity: identity)
+    })
   private var settings: NativeSettings?
   private var snapshot: NativeSnapshot?
   private var appearance = PetAppearanceState()
@@ -45,6 +54,8 @@ final class NativeCompanion {
   private var wakeObservers: [NSObjectProtocol] = []
   init() {
     notifications.onAction = Self.emit
+    activeReminders.action = Self.emit
+    notifications.onActiveComplete = { [weak self] info in self?.activeReminders.notificationComplete(info) }
     pet.action = Self.emit
     for name in [NSWorkspace.didWakeNotification, NSWorkspace.sessionDidBecomeActiveNotification] {
       wakeObservers.append(
@@ -74,6 +85,9 @@ final class NativeCompanion {
     }
     var result: [String: Any] = [
       "ok": true, "accessibilityPermission": PetDock.authorized,
+      "activeRemindersActive": activeReminders.isActive,
+      "activeRemindersAvailable": macActivity.sample().isAvailable,
+      "activeRemindersError": activeReminders.lastError ?? "",
       "dockGeometryAvailable": PetDock.shared.frame().map { rect in
         NSScreen.screens.contains {
           PetDock.resolve(rect, screen: $0.frame, desktopTop: NSScreen.screens.first?.frame.maxY ?? 0) != nil
@@ -93,6 +107,7 @@ final class NativeCompanion {
     return result
   }
   func clear(preservingColdResponses: Bool = false) {
+    activeReminders.clear()
     appearance.clear()
     pet.clearOverlay()
     RitualBackdrop.shared.hide()
@@ -192,8 +207,25 @@ final class NativeCompanion {
       visibleSettings.petEnabled = petShouldBeVisible(
         enabled: s.petEnabled, hasSnapshot: snapshot != nil)
       pet.configure(visibleSettings, preserveAppearance: appearance.active)
+      activeReminders.configure(preferences: s.notifications, calendar: snapshot?.calendar ?? .current, enabled: s.activeRemindersEnabled ?? true)
       if let snapshot { publish(snapshot) }
       return status()
+    case "active_reminders_snapshot":
+      guard let raw = object["inventory"], let settings, let snapshot else { throw NativeError.message("Sign in before publishing active reminders.") }
+      var inventory = try JSONDecoder().decode(ActiveReminderInventory.self, from: JSONSerialization.data(withJSONObject: raw))
+      inventory.serverUrl = try canonicalOrigin(inventory.serverUrl)
+      guard inventory.serverUrl == settings.serverUrl, inventory.accountId == snapshot.accountId else { throw NativeError.message("Invalid active reminder account.") }
+      do { try activeReminders.ingest(inventory) } catch { activeReminders.lastError = "Active reminders could not be restored. System notifications remain enabled."; throw error }
+      return ["ok": true]
+    case "active_reminder_action_result":
+      activeReminders.actionResult(object)
+      return ["ok": true]
+    case "active_reminders_error":
+      activeReminders.lastError = "Active reminders could not refresh. Check your connection."
+      return ["ok": true]
+    case "active_reminders_clear":
+      activeReminders.clear()
+      return ["ok": true]
     case "snapshot":
       guard let raw = object["snapshot"], let settings else {
         throw NativeError.message("Configure before publishing a snapshot")
@@ -215,6 +247,7 @@ final class NativeCompanion {
       pet.configure(settings, preserveAppearance: appearance.active)
       publish(s)
       Self.emit(["action": "pet_snapshot_changed"])
+      Self.emit(["action": "active_reminders_refresh"])
       return ["ok": true, "widgetsAvailable": SharedSnapshotStore.container != nil]
     case "clear":
       clear()
@@ -337,6 +370,7 @@ final class NativeCompanion {
   private func publish(_ s: NativeSnapshot) {
     guard let settings else { return }
     notifications.reconcile(s, preferences: settings.notifications)
+    activeReminders.configure(preferences: settings.notifications, calendar: s.calendar, enabled: settings.activeRemindersEnabled ?? true)
     do {
       try SharedSnapshotStore.write(
         s, workspaces: settings.widgetWorkspaces ?? ["tasks", "reminders", "calendar"])

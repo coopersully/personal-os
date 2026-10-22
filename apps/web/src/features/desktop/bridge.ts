@@ -33,6 +33,7 @@ export type DesktopSettings = {
   petSleepAfterSeconds?: number;
   petWorkspaces: string[];
   widgetWorkspaces: string[];
+  activeRemindersEnabled?: boolean;
   notifications: NotificationSettings;
 };
 export type DesktopStatus = {
@@ -45,6 +46,8 @@ export type DesktopStatus = {
     error?: string;
     accessibilityPermission?: boolean;
     dockGeometryAvailable?: boolean;
+    activeRemindersAvailable?: boolean;
+    activeRemindersError?: string;
     notificationPermission?: string;
     notificationPermissionPending?: boolean;
     testNotificationStatus?: "idle" | "sending" | "accepted" | "failed";

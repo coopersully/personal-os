@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-struct NotificationPreferences: Codable {
+struct NotificationPreferences: Codable, Equatable {
   var enabled = false
   var tasks = true
   var reminders = true
@@ -33,6 +33,7 @@ struct NativeSettings: Codable {
   var petSleepAfterSeconds: Double? = nil
   var petWorkspaces: [String]
   var widgetWorkspaces: [String]?
+  var activeRemindersEnabled: Bool? = nil
   var notifications: NotificationPreferences
 }
 struct WorkItem: Codable, Identifiable {

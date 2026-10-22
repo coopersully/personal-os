@@ -35,6 +35,11 @@ export const settingsFields: SettingsField[] = [
     ],
   ]),
   ...fields("tasks", [
+    [
+      "Use active reminders for new items",
+      "Use active reminders for new items",
+      "active reminder default persistent card overlay",
+    ],
     ["Default capture list", "tasks-default-capture-list", "inbox new task"],
     ["Show completed tasks in lists and projects", "tasks-show-completed", "visibility done"],
     [
@@ -262,6 +267,11 @@ export const settingsFields: SettingsField[] = [
     ["Show in quick access", "Show in quick access", "workspace shortcuts"],
   ]),
   ...fields("notifications", [
+    [
+      "Pause active reminders on this Mac",
+      "Pause active reminders on this Mac",
+      "active reminder pause overlay card",
+    ],
     ["Enable notifications", "Enable notifications", "alerts"],
     ["Play notification sounds", "Play notification sounds", "audio mute"],
     ["Show message previews", "Show message previews", "privacy"],

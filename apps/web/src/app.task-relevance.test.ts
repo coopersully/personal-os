@@ -17,6 +17,7 @@ import {
 import { loadAllTaskContainerPages } from "./features/tasks/page.js";
 
 const taskBase: Task = {
+  activeReminder: false,
   cancelledAt: null,
   completedAt: null,
   createdAt: "2026-08-12T03:00:00.000Z",

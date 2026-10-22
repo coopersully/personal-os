@@ -26,6 +26,7 @@ it.each([
   "success",
 ])("reports Undo %s after the trashed task row unmounts", async (outcome) => {
   const task: Task = {
+    activeReminder: false,
     id: "task",
     title: "Plan trip",
     lifecycle: "open",

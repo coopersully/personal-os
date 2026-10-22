@@ -47,7 +47,7 @@ Use actual macOS login status, not the requested preference, as evidence of star
 approval. Pending approval offers **Open Login Items** with the next instruction;
 missing installation and unavailable status stay explicit. Enabling startup saves only
 that preference and preserves unrelated settings. Native preference writes are serialized with
-startup registration. Global Notifications contains only OS permissions, master enablement,
+startup registration. Global Notifications contains device-local active-card pause, OS permissions, master enablement,
 sound, previews, and quiet hours; workspace links open and focus the owning notification card. Notification readiness
 requires both the nohmi setting and OS alert permission. The notification page offers
 permission, system settings, and a test alert; permission is not proof of delivery.
@@ -434,3 +434,34 @@ completion and stale-data guards remain the pet's action boundary.
 Calendar colors in quick access are scoped to the snapshot's server and account. Provider all-day
 boundaries retain their date-only meaning through the native snapshot; local all-day events use the
 account time zone. An all-day occasion remains visible through the end of its local calendar day.
+
+
+## Active reminders (2026-10-22 source implementation)
+
+Tasks and reminders store an `activeReminder` flag. The account creation default starts off and is
+available in Tasks settings on web and desktop. A new item can inherit that default or explicitly
+select On/Off; changing the default leaves existing items alone. Desktop Notifications separately
+pauses cards on the current Mac while ordinary system notification preferences continue to apply.
+
+The native companion presents one compact, non-activating card stack, centered initially on the
+pointer display. Its header accepts the first mouse event from another foreground app and supports
+free dragging, 24-point edge snapping, and account/display-specific saved placement. Previous/Next
+reaches every pending item; three decorative layers communicate the stack without opening separate
+windows. The card remains until completion, source retirement, or explicit presentation pause.
+Opening the source does not complete it. Lock/display sleep hides cards; return requires fresh
+confirmation before revealing them again. Pending completion stays visible; failure/conflict leaves
+an actionable retry state. Settings failures use Sonner; card action failures remain on their card.
+
+Elapsed input under 120 seconds is only one activity signal: session, loginwindow/lock and display
+state also gate presentation. Quiet hours, source enablement, OS permission, and preview privacy
+remain authoritative. With previews off, titles are hidden. Custom cards can appear during macOS
+Focus; do not imply they automatically inherit Focus suppression. Existing cards may remain during
+quiet hours, but hidden/new cards wait for the window to end.
+
+While away, ordinary OS delivery remains scheduled. Returning reveals a still-incomplete opted-in
+item after authenticated refresh. A prepared active delivery retains an OS fallback at eligible
+fire time plus five seconds until the card is visible on the active Space and its receipt is saved.
+Rare crash/cancellation duplicates remain possible; exactly-once delivery is not promised. The
+[design](../../superpowers/specs/2026-10-22-active-reminders-design.md) and
+[native probe evidence](../../superpowers/specs/2026-10-22-active-reminders-native-evidence.md)
+record the contract and distinguish local observations from signed-release certification.

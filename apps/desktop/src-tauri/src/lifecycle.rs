@@ -177,6 +177,14 @@ pub async fn action(app: tauri::AppHandle, value: Value) {
                 }
             }
         }
+        "active_reminder_complete" => {
+            crate::active_reminders::complete(app.clone(), value).await;
+        }
+        "active_reminders_refresh" => {
+            app.state::<crate::active_reminders::ActiveReminderRuntime>()
+                .refresh
+                .notify_one();
+        }
         "hide" => hide(&app),
         "ritual_refresh" => {
             app.state::<crate::ritual::RitualRuntime>()
@@ -184,6 +192,9 @@ pub async fn action(app: tauri::AppHandle, value: Value) {
                 .notify_one();
         }
         "refresh" => {
+            app.state::<crate::active_reminders::ActiveReminderRuntime>()
+                .refresh
+                .notify_one();
             app.state::<DesktopState>().refresh.notify_one();
             app.state::<crate::ritual::RitualRuntime>()
                 .refresh
@@ -304,7 +315,14 @@ pub fn setup(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         {
             let _ = app.emit("desktop-native-error", error);
         }
-        crate::coordinator::run(app).await;
+        if cfg!(target_os = "macos") {
+            tokio::join!(
+                crate::coordinator::run(app.clone()),
+                crate::active_reminders::run(app)
+            );
+        } else {
+            crate::coordinator::run(app).await;
+        }
     });
     Ok(())
 }

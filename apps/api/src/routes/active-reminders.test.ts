@@ -53,6 +53,13 @@ it("admits user sessions, validates bodies and rejects agents before reading pri
     (await app.request("/v1/active-reminders/preferences", patch({ defaultActiveReminder: true })))
       .status,
   ).toBe(400);
+  expect(
+    (
+      await app.request("/v1/active-reminders/preferences", {
+        headers: { "x-nohmi-account": "other" },
+      })
+    ).status,
+  ).toBe(409);
   principal = { ...principal, actorType: "agent" };
   service.getPreferences.mockClear();
   service.listCandidates.mockClear();

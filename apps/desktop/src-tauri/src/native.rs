@@ -80,6 +80,9 @@ pub async fn call(app: &tauri::AppHandle, value: Value) -> Result<Value, String>
     {
         let _ = app;
         let operation = value["op"].as_str().unwrap_or("");
+        if operation.starts_with("active_reminder") {
+            return Err("Active reminder cards are available only on macOS.".into());
+        }
         if operation.starts_with("ritual_") {
             return Err("Desktop ritual presentation is available only on macOS. Configure rituals and view account history in Settings.".into());
         }

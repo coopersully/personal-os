@@ -1,8 +1,9 @@
 # Active reminders design
 
-Status: implementation proposal. The core interaction and away/return behavior are approved;
-the concrete defaults and delivery strategy below are recommendations for review. No feature
-implementation or runtime verification is claimed by this document.
+Status: approved by Cooper on 2026-10-22 for inline implementation, including the recommended
+first-release scope, defaults, activity threshold, and safety fallback. See the native evidence
+record for observations and remaining release certification limits. This specification is not
+a claim that the branch is deployed.
 
 ## Intent and approved behavior
 
@@ -12,7 +13,7 @@ dragged out of the way. The setting belongs to the item, with a configurable def
 When the person is away, deliver the normal system notification. On return, show the card if the
 item is still incomplete. Opening a card or dismissing its system notification is not completion.
 
-## Recommended first release
+## Approved first release
 
 - Support timed reminders and tasks on macOS 14+, using the existing Swift/AppKit companion and
   Rust/Tauri host. Calendar, mail, finance notifications, Windows cards, and mobile cards are
@@ -70,6 +71,8 @@ Add session-authenticated endpoints:
   response `{ defaultActiveReminder: false, revision: 0 }`.
 - `PATCH /v1/active-reminders/preferences` with `{ defaultActiveReminder, expectedRevision }` →
   saved preference. First insert uses expected revision 0; stale saves return the normal conflict.
+  Browser preference reads/writes may bind an expected owner with `X-Nohmi-Account`; a mismatch
+  fails closed before reading or saving another signed-in account’s preference.
 - `GET /v1/desktop/active-reminders?cursor=...&limit=100` →
   `{ generatedAt, items: ActiveReminderCandidate[], nextCursor }`.
 
@@ -167,7 +170,7 @@ after resolution, Dock, menu-bar, or monitor changes; if the display disappears,
 remaining pointer display. Keep it above ordinary app windows and available across Spaces without
 activating nohmi or stealing typing focus. Validate full-screen behavior in the native probe.
 
-No close, dismiss, or snooze action in this first release: the requested promise is persistence
+Active-item system notifications expose Open and Complete. No card close, dismiss, or snooze action in this first release: the requested promise is persistence
 until completion. Opening the item leaves the card present. Device pause is the explicit escape
 hatch. Mark complete shows pending, disables duplicate submits, and removes the card only after
 the server confirms completion. On failure, retain the card with **Try again**; a revision conflict

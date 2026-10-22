@@ -63,6 +63,7 @@ pub struct DesktopSettings {
     pub pet_sleep_after_seconds: f64,
     pub pet_workspaces: Vec<String>,
     pub widget_workspaces: Vec<String>,
+    pub active_reminders_enabled: bool,
     pub notifications: NotificationSettings,
 }
 impl Default for DesktopSettings {
@@ -85,6 +86,7 @@ impl Default for DesktopSettings {
             pet_sleep_after_seconds: 3.0,
             pet_workspaces: vec!["tasks".into(), "reminders".into(), "calendar".into()],
             widget_workspaces: vec!["tasks".into(), "reminders".into(), "calendar".into()],
+            active_reminders_enabled: true,
             notifications: NotificationSettings::default(),
         }
     }

@@ -14,10 +14,10 @@ UNUserNotificationCenter; existing dependencies only.
 
 **Spec:** [Active reminders design](../specs/2026-10-22-active-reminders-design.md).
 
-Status: proposed execution plan; no implementation tasks have started. Cooper approved the core
-interaction and away/return behavior and requested this plan. Review the proposed defaults and
-native delivery tradeoff before executing. Recommended execution is native in this chat because
-the work is sequential across one API/native contract; an independent whole-branch review follows.
+Status: execution authorized by Cooper on 2026-10-22, using native inline execution in this chat.
+Implementation and verification progress are recorded in the execution ledger; the native evidence
+record distinguishes development-host observations from remaining release certification limits.
+The approved design remains the feature contract.
 
 ## Global Constraints
 

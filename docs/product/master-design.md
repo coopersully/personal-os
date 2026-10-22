@@ -475,13 +475,18 @@ ship general routing, maintenance dispatch, global bypass, or SMS-bound reviews.
 
 ### 6.10 Desktop overlay, widgets, notifications, and mobile
 
-Active reminders are an approved target interaction, not yet an implemented capability. A task or
-reminder can opt into a persistent, draggable nohmi card, with a configurable creation default.
-When the person is actively using their Mac, the card replaces ordinary system presentation and
-stays until completion. While away, ordinary system notification delivery continues; returning
-reveals a card only if the item is still incomplete. Completing the source item on another client
-also retires its card. Concrete defaults, native delivery safeguards, and first-release scope are
-proposed in [the active-reminders design](../superpowers/specs/2026-10-22-active-reminders-design.md).
+The macOS companion implements active reminder cards for timed tasks and reminders. An item’s
+`activeReminder` flag controls a persistent, draggable card, with an account creation default
+(initially off) in Tasks settings. New items inherit that default unless explicitly overridden;
+existing items retain their flag. Desktop Notifications settings separately pause cards on one Mac.
+While the person is away, ordinary system delivery continues. Returning reveals a card only after
+fresh confirmation that the item remains incomplete; successful completion on another client also
+retires it. Cards respect native notification enablement, source selection, permission, quiet hours,
+and preview privacy. They can appear during macOS Focus, which is disclosed in settings. The native
+process must remain running; Quit and sleep retain the lifecycle limits below. See the
+[active-reminders design](../superpowers/specs/2026-10-22-active-reminders-design.md) and
+[native evidence](../superpowers/specs/2026-10-22-active-reminders-native-evidence.md) for delivery
+safeguards and the distinction between local source verification and release certification.
 
 Closing the main desktop window keeps enabled pet, routine presentation, and notification
 refresh active in the menu-bar process. Explicit **Quit nohmi** stops that process until the next

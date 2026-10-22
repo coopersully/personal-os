@@ -339,6 +339,11 @@ function DesktopSettingsContent({
   });
   useSettingsError(query.data?.native.error, query.data?.native.error ?? "macOS needs attention.");
   useSettingsError(
+    query.isFetchedAfterMount ? query.data?.native.activeRemindersError : undefined,
+    query.data?.native.activeRemindersError ||
+      "Active reminders could not refresh. nohmi will retry while it is running.",
+  );
+  useSettingsError(
     query.data?.wallpaperError,
     "Wallpaper could not refresh. nohmi will retry while it is running.",
   );
@@ -797,6 +802,18 @@ function DesktopSettingsContent({
                 Open Accessibility settings
               </Button>
             </FieldGroup>
+          </SettingsSection>
+        ) : null}
+        {section === "notifications" ? (
+          <SettingsSection title="Active reminder cards">
+            <Toggle
+              label="Pause active reminders on this Mac"
+              value={!(draft.activeRemindersEnabled ?? true)}
+              onChange={(paused) => update({ activeRemindersEnabled: !paused })}
+            />
+            <FieldDescription>
+              System notifications follow your notification settings while cards are paused.
+            </FieldDescription>
           </SettingsSection>
         ) : null}
         {section === "notifications" ? (

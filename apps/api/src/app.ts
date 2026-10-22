@@ -855,7 +855,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use(
     "*",
     cors({
-      allowHeaders: ["Content-Type", "Authorization", "X-Request-Id"],
+      allowHeaders: ["Content-Type", "Authorization", "X-Request-Id", "X-Nohmi-Account"],
       allowMethods: ["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"],
       credentials: true,
       origin: dependencies.config.allowedOrigins,

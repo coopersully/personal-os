@@ -385,6 +385,20 @@ describe.sequential("ilo API", () => {
     ).toBe(403);
   });
 
+  it("allows owner-bound active reminder preferences in browser preflights", async () => {
+    const response = await app.request("/v1/active-reminders/preferences", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://app.example.com",
+        "Access-Control-Request-Method": "PATCH",
+        "Access-Control-Request-Headers": "content-type,x-nohmi-account",
+      },
+    });
+    expect(response.headers.get("access-control-allow-headers")?.toLowerCase()).toContain(
+      "x-nohmi-account",
+    );
+  });
+
   describe("task lists", () => {
     let listAgentToken = "";
     let listReadToken = "";

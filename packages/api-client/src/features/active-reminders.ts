@@ -4,14 +4,21 @@ export function createActiveReminderApiClient(
   toQuery: (query: object) => string,
 ) {
   return {
-    getActiveReminderPreferences(): Promise<ActiveReminderPreferences> {
-      return request("/v1/active-reminders/preferences");
+    getActiveReminderPreferences(expectedAccountId?: string): Promise<ActiveReminderPreferences> {
+      return request(
+        "/v1/active-reminders/preferences",
+        expectedAccountId ? { headers: { "x-nohmi-account": expectedAccountId } } : undefined,
+      );
     },
-    saveActiveReminderPreferences(input: {
-      defaultActiveReminder: boolean;
-      expectedRevision: number;
-    }): Promise<ActiveReminderPreferences> {
+    saveActiveReminderPreferences(
+      input: {
+        defaultActiveReminder: boolean;
+        expectedRevision: number;
+      },
+      expectedAccountId?: string,
+    ): Promise<ActiveReminderPreferences> {
       return request("/v1/active-reminders/preferences", {
+        ...(expectedAccountId ? { headers: { "x-nohmi-account": expectedAccountId } } : {}),
         method: "PATCH",
         body: JSON.stringify(input),
       });

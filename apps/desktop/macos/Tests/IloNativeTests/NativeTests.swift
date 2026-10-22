@@ -516,3 +516,24 @@ extension NativeTests {
       ["old-task"])
   }
 }
+
+extension NativeTests {
+  @MainActor
+  func testActiveFallbackSurvivesOrdinaryReconcileButNotOwnerRevocation() async {
+    let scheduler = ControlledNotificationScheduler()
+    let queue = NotificationDeliveryQueue(submit: scheduler.submit, remove: scheduler.remove)
+    var ownerCurrent = true
+    let accepted = expectation(description: "Active fallback submitted")
+    scheduler.started = { _ in accepted.fulfill() }
+    queue.enqueue(request("active"), currency: { ownerCurrent })
+    await fulfillment(of: [accepted], timeout: 2)
+    queue.invalidate()
+    scheduler.finish("active")
+    await queue.drain()
+    XCTAssertEqual(scheduler.pending["same"], "active")
+    ownerCurrent = false
+    queue.enqueue(request("revoked"), currency: { ownerCurrent })
+    await queue.drain()
+    XCTAssertEqual(scheduler.pending["same"], "active")
+  }
+}

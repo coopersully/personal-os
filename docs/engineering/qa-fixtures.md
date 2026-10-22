@@ -116,8 +116,8 @@ ledger transactions; planning fixtures do not manufacture posted spending or his
 The full demo also has Essentials and Lifestyle budget buckets and a confirmed current-month
 USD baseline scoped to checking, savings and the credit card. Spending can compare observed
 monthly usage against approved category allocations. Transfer legs retain their incoming/outgoing
-evidence. The loaded QA persona intentionally lacks this confirmation. Manual-source historical
-coverage remains uncertified; that qualification is separate from the available budget comparison.
+evidence. The loaded QA persona intentionally lacks this confirmation. The full demo now carries explicit synthetic account/date coverage through yesterday;
+other manual-source history remains uncertified. Coverage is separate from budget confirmation.
 
 The full demo additionally seeds four completed calendar months of posted transactions relative
 to the reload date: twice-monthly payroll, rent, weekly groceries, weekday coffee, weekend dining,
@@ -167,3 +167,7 @@ runtime. An installed release with older assets is not evidence for local change
 The app must launch from a valid macOS bundle with its declared sound resources;
 launching the debug executable directly can crash UserNotifications. An unsigned QA
 bundle cannot prove signed widget installation, login registration, or release delivery.
+
+Full-demo coverage records certify all four accounts from the start of its four history months
+through yesterday in America/New_York. Rhythm shows populated historical days and confirmed zeros;
+today stays provisional and future days stay unknown. Reload recreates both records and coverage.

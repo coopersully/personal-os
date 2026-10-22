@@ -7891,7 +7891,7 @@ html.pet-window #root {
 }
 
 .settings-page__icon { position: relative; }
-.settings-page__subpage-icon { position: absolute; right: -0.375rem; bottom: -0.375rem; display: flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; border-radius: 0.5rem; background: var(--secondary); box-shadow: 0 0 0 3px var(--card); }
+.settings-page__subpage-icon { position: absolute; right: -0.375rem; bottom: -0.375rem; display: flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; border-radius: var(--radius-lg); background: var(--secondary); box-shadow: 0 0 0 3px var(--card); }
 .settings-page__subpage-icon svg { width: 0.875rem; height: 0.875rem; }
 
 /* Row cards own no inset: individual rows own spacing and edge-to-edge dividers. */
@@ -8029,7 +8029,7 @@ html.pet-window #root {
 [data-slot="input-group-addon"] .action-count-badge { right: .125rem; bottom: .125rem; }
 
 /* Count badges sit above search dividers, adjacent buttons, and their state surfaces. */
-.action-count-badge { z-index: 2; width: 1rem; min-width: 1rem; height: 1rem; padding: 0; border-radius: 9999px; }
+.action-count-badge { z-index: 2; width: 1rem; min-width: 1rem; height: 1rem; padding: 0; border-radius: 999px; }
 
 /* Joined search actions retain a fixed divider independent of their state surface. */
 [data-slot="input-group"]:has(.search-data-controls) { isolation: isolate; }

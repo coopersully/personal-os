@@ -11,6 +11,7 @@ import {
   excludedReimbursementCentsByAllocation,
 } from "../finance-allocation-projections.js";
 import { type RecognitionInput, resolveFinanceSpendingEvidence } from "./recognition.js";
+import { type SpendingCoverageInterval, spendingDateCoverage } from "./spending-coverage.js";
 
 export type SpendingEvidenceInput = Omit<
   RecognitionInput,
@@ -22,6 +23,7 @@ export type SpendingEvidenceInput = Omit<
   asOf: string;
   /** Supplied by the owning loader, never inferred from record count. */
   coverage: "complete" | "partial" | "unknown";
+  coverageIntervals?: SpendingCoverageInterval[];
 };
 
 export function financeSpendingLocalDate(value: string, timezone: string): string {
@@ -267,6 +269,19 @@ export function projectFinanceSpending(
   for (let date = scope.from; date <= scope.through; ) {
     const items = contributions.filter((item) => item.date === date);
     const netCents = items.reduce((sum, item) => sum + item.netCents, 0);
+    const certified =
+      input.coverageIntervals === undefined
+        ? coverage
+        : spendingDateCoverage({
+            userId: input.userId,
+            accounts: accounts
+              .filter((row) => scope.accountIds === null || scope.accountIds.includes(row.id))
+              .map((row) => ({ id: row.id, currencyCode: row.currencyCode })),
+            date,
+            timezone: scope.timezone,
+            asOf: input.asOf,
+            intervals: input.coverageIntervals,
+          });
     bins.push({
       date,
       netCents,
@@ -275,7 +290,12 @@ export function projectFinanceSpending(
       pendingCents: items
         .filter((item) => item.pending)
         .reduce((sum, item) => sum + item.netCents, 0),
-      coverage: date > today ? "unknown" : coverage,
+      coverage:
+        date > today
+          ? "unknown"
+          : certified === "complete" && qualifications.length
+            ? "partial"
+            : certified,
       provisional: date === today || items.some((item) => item.pending),
       future: date > today,
       drillDown: {
@@ -297,7 +317,14 @@ export function projectFinanceSpending(
     schemaVersion: 1,
     scope,
     asOf: input.asOf,
-    coverage,
+    coverage:
+      input.coverageIntervals === undefined
+        ? coverage
+        : bins.every((row) => row.coverage === "complete")
+          ? "complete"
+          : bins.some((row) => row.coverage !== "unknown")
+            ? "partial"
+            : "unknown",
     contributions,
     bins,
     netCents: totals.reduce((a, b) => a + b, 0),

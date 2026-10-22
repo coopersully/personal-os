@@ -68,10 +68,16 @@ adjustments. Categories outside configured buckets appear in Other spending. Hid
 spending discloses its excluded net amount. Unsupported currencies are disclosed by source-history
 IDs for selected accounts and never converted or summed into USD.
 
-Sync freshness and historical coverage are separate. Current sync is not proof of complete history;
-the current source schema has no certified coverage interval. The dashboard therefore reports unknown
-history, or partial history with unavailable/stale source evidence, even though it loads the complete
-stored snapshot. It does not claim an empty stored day is confirmed zero.
+Sync freshness and historical coverage are separate. Current sync is not proof of complete history.
+`finance_transaction_coverage` stores explicit complete account/date intervals with owner, time zone,
+USD currency, evidence reference, and recording time. Every selected account must have matching
+interval evidence for a day to be complete, including accounts with no transactions. Partial account
+coverage stays partial; absent, future-recorded, foreign-owner, currency/time-zone-mismatched evidence
+stays unknown. Future days remain unknown and unresolved recognition downgrades complete days.
+The snapshot aggregates these daily statuses, so selecting dates outside a certified interval never
+inherits completeness from neighboring days. A zero-spend day is confirmed zero only with coverage.
+The full demo supplies synthetic interval evidence through yesterday; normal sync/import paths that
+have not explicitly recorded this evidence remain unknown. No provider certification is implied.
 
 Spending display contracts extend the existing revisioned workspace preference API, preserving
 omitted fields and conflicts. URL overrides do not silently rewrite defaults. View/grouping, pending,

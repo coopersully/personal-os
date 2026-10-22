@@ -6275,3 +6275,38 @@ export const financeMaintenanceExecutionReceipts = pgTable(
     ),
   ],
 );
+
+/** Explicit complete transaction intervals, supplied by a statement/import writer. */
+export const financeTransactionCoverage = pgTable(
+  "finance_transaction_coverage",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id").notNull(),
+    fromDate: date("from_date").notNull(),
+    throughDate: date("through_date").notNull(),
+    timezone: text("timezone").notNull(),
+    currencyCode: text("currency_code").notNull(),
+    evidenceRef: text("evidence_ref").notNull(),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    foreignKey({
+      name: "finance_transaction_coverage_account_fk",
+      columns: [table.userId, table.accountId],
+      foreignColumns: [financeAccounts.userId, financeAccounts.id],
+    }).onDelete("cascade"),
+    index("finance_transaction_coverage_owner_account_idx").on(table.userId, table.accountId),
+    check(
+      "finance_transaction_coverage_period_check",
+      sql`${table.fromDate} <= ${table.throughDate}`,
+    ),
+    check("finance_transaction_coverage_currency_check", sql`${table.currencyCode} ~ '^[A-Z]{3}$'`),
+    check(
+      "finance_transaction_coverage_evidence_check",
+      sql`length(trim(${table.evidenceRef})) > 0 AND length(trim(${table.timezone})) > 0`,
+    ),
+  ],
+);

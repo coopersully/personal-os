@@ -32,6 +32,7 @@ import {
   financeRecurringObligations,
   financeRecurringScheduleVersions,
   financeReviewCases,
+  financeTransactionCoverage,
   financeTransactions,
   goals,
   mailboxes,
@@ -216,6 +217,7 @@ type FixtureData = {
   financeProfiles: Array<typeof financeProfiles.$inferInsert>;
   financeRecurringObligations: Array<typeof financeRecurringObligations.$inferInsert>;
   financeReviewCases: Array<typeof financeReviewCases.$inferInsert>;
+  financeTransactionCoverage: (typeof financeTransactionCoverage.$inferInsert)[];
   financeTransactions: Array<typeof financeTransactions.$inferInsert>;
   goals: Array<typeof goals.$inferInsert>;
   mailDrafts: Array<typeof mailDrafts.$inferInsert>;
@@ -269,6 +271,7 @@ function emptyFixtureData(): FixtureData {
     financeProfiles: [],
     financeRecurringObligations: [],
     financeReviewCases: [],
+    financeTransactionCoverage: [],
     financeTransactions: [],
     goals: [],
     mailDrafts: [],
@@ -2048,6 +2051,24 @@ export async function loadQaFixtures(
             updatedAt: now,
           });
         data.financeTransactions.push(...financeHistoryFixture(account.id, now));
+        const todayIso = localDateToIso(localDateAt(now, "America/New_York"));
+        const fromDate = new Date(
+          Date.UTC(Number(todayIso.slice(0, 4)), Number(todayIso.slice(5, 7)) - 5, 1),
+        )
+          .toISOString()
+          .slice(0, 10);
+        for (const record of [400, 401, 402, 403])
+          data.financeTransactionCoverage.push({
+            id: fixtureId(account, 4000 + record),
+            userId: account.id,
+            accountId: fixtureId(account, record),
+            fromDate,
+            throughDate: localDateToIso(addLocalDays(localDateAt(now, "America/New_York"), -1)),
+            timezone: "America/New_York",
+            currencyCode: "USD",
+            evidenceRef: "qa-fixture:full-demo-complete-ledger:v1",
+            recordedAt: now,
+          });
       }
       // Complete canonical references before snapshotting balances: startup learning
       // must not enrich these transactions and invalidate their reflection revisions.
@@ -2209,6 +2230,8 @@ export async function loadQaFixtures(
       await transaction.insert(financeMerchants).values(data.financeMerchants);
     if (data.financeMerchantAliases.length)
       await transaction.insert(financeMerchantAliases).values(data.financeMerchantAliases);
+    if (data.financeTransactionCoverage.length)
+      await transaction.insert(financeTransactionCoverage).values(data.financeTransactionCoverage);
     if (data.financeTransactions.length)
       await transaction.insert(financeTransactions).values(data.financeTransactions);
     if (data.financeClassificationDecisions.length)

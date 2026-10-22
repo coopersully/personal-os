@@ -107,6 +107,21 @@ it("reloads canonical planning fixtures without completing empty, recovery or on
               grouping: "auto",
               includeUncategorized: true,
             });
+            expect(history.snapshot.coverage).toBe("complete");
+            expect(history.snapshot.bins.every((bin) => bin.coverage === "complete")).toBe(true);
+            expect(history.source.reasons).not.toContain("historical_coverage_not_certified");
+            const outsideCoverage = await createFinanceSpendingService({
+              db: database.db,
+              now: () => now,
+            }).readSpending(account.id, {
+              scope: { ...history.snapshot.scope, from: "2026-07-31", through: "2026-08-01" },
+              grouping: "auto",
+              includeUncategorized: true,
+            });
+            expect(outsideCoverage.snapshot.bins.map((bin) => bin.coverage)).toEqual([
+              "unknown",
+              "complete",
+            ]);
             const monthly = new Map<string, number>();
             const weekdays = new Set<number>();
             for (const contribution of history.snapshot.contributions) {
@@ -124,7 +139,10 @@ it("reloads canonical planning fixtures without completing empty, recovery or on
             expect([...monthly.values()].every((amount) => amount > 350_000)).toBe(true);
             expect(weekdays.size).toBe(7);
             expect(history.snapshot.contributions.length).toBeGreaterThan(80);
-          } else expect(spending.monthlyBudget?.state).toBe("unavailable");
+          } else {
+            expect(spending.monthlyBudget?.state).toBe("unavailable");
+            expect(spending.snapshot.coverage).toBe("unknown");
+          }
         } else {
           expect(profile.data).toBeNull();
           expect(budget.data).toBeNull();

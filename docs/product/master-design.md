@@ -476,9 +476,11 @@ ship general routing, maintenance dispatch, global bypass, or SMS-bound reviews.
 ### 6.10 Desktop overlay, widgets, notifications, and mobile
 
 The macOS companion implements active reminder cards for timed tasks and reminders. An item’s
-`activeReminder` flag controls a persistent, draggable card, with an account creation default
+`activeReminder` flag controls its own compact, persistent, draggable and resizable card, with an account creation default
 (initially off) in Tasks settings. New items inherit that default unless explicitly overridden;
-existing items retain their flag. Desktop Notifications settings separately pause cards on one Mac.
+existing items retain their flag. All due items appear independently without pagination; completing
+one reclaims its screen area while the other cards keep their positions and sizes. Desktop
+Notifications settings separately pause cards on one Mac.
 While the person is away, ordinary system delivery continues. Returning reveals a card only after
 fresh confirmation that the item remains incomplete; successful completion on another client also
 retires it. Cards respect native notification enablement, source selection, permission, quiet hours,

@@ -5,7 +5,7 @@
 The `cooper/active-reminders` branch adds a resolved active-reminder flag to tasks and reminders,
 a revision-bound account default for new items, and a device pause switch. Historical items remain
 off. The separate owner-bound desktop feed pages beyond the daily brief and pet limits. macOS
-routes eligible due items to one persistent, draggable card stack while preserving ordinary system
+routes eligible due items to independent compact, draggable and resizable native cards while preserving ordinary system
 delivery when away; an incomplete item can appear after return. Completion waits for the existing
 API's revision-bound acknowledgement.
 
@@ -20,7 +20,7 @@ full-screen visibility and saved dragging with disposable synthetic items. See t
 [native evidence and remaining certification limits](../superpowers/specs/2026-10-22-active-reminders-native-evidence.md).
 Physical display sleep, the release-signed app, minimum-supported macOS and a real installed-client
 API journey still need release certification. This records branch-local implementation, not a
-merged or deployed release. The full native suite passes (76 Rust/115 Swift), as do type checks,
+merged or deployed release. The full native suite passes (76 Rust/120 Swift), as do type checks,
 lint and production builds. Browser acceptance records 151 passed, two skipped and one Finance
 chat-history failure; the active-reminder desktop/mobile cases pass. The full verifier remains
 unsuccessful because of the recorded Finance/database-test failures, so this branch is not release

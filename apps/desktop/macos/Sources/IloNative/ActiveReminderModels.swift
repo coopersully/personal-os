@@ -14,6 +14,7 @@ struct ActiveReminderCandidate: Codable, Equatable, Identifiable {
       && ((kind == "task" && (revision ?? 0) > 0)
         || (kind == "reminder" && parseDate(updatedAt) != nil))
   }
+  var cardID: String { "\(kind):\(id)" }
   var sourceRevision: String { kind == "task" ? String(revision ?? 0) : (updatedAt ?? "") }
   func occurrenceID(identity: String) -> String { stableID(identity, kind, id, dueAt) }
 }

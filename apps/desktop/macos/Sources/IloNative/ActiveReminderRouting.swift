@@ -18,7 +18,8 @@ protocol ActiveReminderNotificationSink: AnyObject {
   func ensureActiveOrdinary(
     _ alert: PlannedAlert, item: ActiveReminderCandidate, inventory: ActiveReminderInventory,
     preferences: NotificationPreferences)
-  func handoffActiveOrdinary(_ alert: PlannedAlert, item: ActiveReminderCandidate,
+  func handoffActiveOrdinary(
+    _ alert: PlannedAlert, item: ActiveReminderCandidate,
     inventory: ActiveReminderInventory, preferences: NotificationPreferences)
   func takeActiveOwnership(_ id: String)
   func prepareActiveFallback(
@@ -52,7 +53,6 @@ final class ActiveReminderRouter {
   private var routingEpoch = 0
   private var needsRevalidation = false
   private var previousActivity = false
-  private var selected: String?
   var action: (([String: Any]) -> Void)?
   var lastError: String?
   var isActive: Bool { activity().isActive }
@@ -69,10 +69,6 @@ final class ActiveReminderRouter {
     if let panel = presenter as? ActiveReminderPanelController {
       panel.complete = { [weak self] item in self?.complete(item) }
       panel.open = { [weak self] item in self?.open(item) }
-      panel.select = { [weak self] id in
-        self?.selected = id
-        self?.render()
-      }
     }
     if startTimer {
       timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -134,7 +130,8 @@ final class ActiveReminderRouter {
       (presenter as? ActiveReminderPanelController)?.store = store
     }
     let validIDs = Set(next.items.map { $0.occurrenceID(identity: next.identity) })
-    let ordinaryIDs = Set((next.ordinaryItems ?? []).map { $0.occurrenceID(identity: next.identity) })
+    let ordinaryIDs = Set(
+      (next.ordinaryItems ?? []).map { $0.occurrenceID(identity: next.identity) })
     if let previous = inventory {
       for item in previous.items {
         let id = item.occurrenceID(identity: previous.identity)
@@ -162,7 +159,8 @@ final class ActiveReminderRouter {
     }
     for item in next.ordinaryItems ?? [] {
       if preferences.enabled && sourceEnabled(item) {
-        notifications.handoffActiveOrdinary(alert(item, inventory: next, at: now()),
+        notifications.handoffActiveOrdinary(
+          alert(item, inventory: next, at: now()),
           item: item, inventory: next, preferences: preferences)
       } else {
         notifications.retireActiveOccurrence(item.occurrenceID(identity: next.identity))
@@ -191,7 +189,6 @@ final class ActiveReminderRouter {
     acknowledged = []
     pending = [:]
     errors = [:]
-    selected = nil
     lastError = nil
   }
   private func alert(
@@ -317,12 +314,16 @@ final class ActiveReminderRouter {
       presenter.hide()
       return
     }
-    if !items.contains(where: { $0.id == selected }) { selected = items.first?.id }
-    let selectedItem = items.first { $0.id == selected } ?? items[0]
+    let cardErrors = Dictionary(
+      uniqueKeysWithValues: items.compactMap { item -> (String, String)? in
+        guard let error = errors[item.occurrenceID(identity: inventory.identity)] else {
+          return nil
+        }
+        return (item.cardID, error)
+      })
     try presenter.show(
-      items, selected: selected, preview: preferences.preview,
-      pending: Set(pending.values.map(\.id)),
-      error: errors[selectedItem.occurrenceID(identity: inventory.identity)],
+      items, preview: preferences.preview,
+      pending: Set(pending.values.map(\.cardID)), errors: cardErrors,
       stale: !inventory.isFresh(at: now()))
   }
   private func render() {

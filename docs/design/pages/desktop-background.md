@@ -443,14 +443,20 @@ available in Tasks settings on web and desktop. A new item can inherit that defa
 select On/Off; changing the default leaves existing items alone. Desktop Notifications separately
 pauses cards on the current Mac while ordinary system notification preferences continue to apply.
 
-The native companion presents one compact, non-activating card stack, centered initially on the
-pointer display. Its header accepts the first mouse event from another foreground app and supports
-free dragging, 24-point edge snapping, and account/display-specific saved placement. Previous/Next
-reaches every pending item; three decorative layers communicate the stack without opening separate
-windows. The card remains until completion, source retirement, or explicit presentation pause.
-Opening the source does not complete it. Lock/display sleep hides cards; return requires fresh
-confirmation before revealing them again. Pending completion stays visible; failure/conflict leaves
-an actionable retry state. Settings failures use Sonner; card action failures remain on their card.
+The native companion presents each due task or reminder in its own compact, non-activating window.
+Match the shared TaskItem/ReminderItem row grammar: leading completion checkbox, 15-point title,
+and quiet due metadata. The title opens the source; completion stays pending until acknowledgement.
+There is no pagination, decorative stack, or dismissal control. Every pending item occupies its own
+screen area, so completing an item reclaims space without rearranging the others.
+
+Cards start at 320 × 88 points, with new arrivals placed in free visible space. Each can be dragged
+and resized independently (minimum 240 × 72), using native edges or the visible corner grip. Keep
+24-point edge snapping and save size/normalized position per account, item, and persistent display
+UUID. Refreshes and sibling completion preserve existing windows and geometry. When a display
+vanishes, fit the card onto an available display. If the screen fills, retain all windows with
+reachable drag handles rather than hiding items behind pagination. Lock/display sleep hides all
+cards; return requires fresh confirmation. Failure/conflict remains on the originating card with an
+actionable completion retry. Settings failures use Sonner.
 
 Elapsed input under 120 seconds is only one activity signal: session, loginwindow/lock and display
 state also gate presentation. Quiet hours, source enablement, OS permission, and preview privacy

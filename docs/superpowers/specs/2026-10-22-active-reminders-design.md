@@ -157,18 +157,18 @@ typography, radius, border, and elevation. Solid readable content takes priority
 Decorative means theme, subtle entrance, and polished placement; no perpetual animation or pet
 dependency. Honor reduced motion, increased contrast, reduced transparency, and keyboard access.
 
-Show one compact stack, initially centered in the pointer's current display's visible frame.
-The front card shows source type, privacy-safe content, due context, **Mark complete**, and
-**Open in nohmi**. With preview disabled, hide titles even when the desktop is unlocked.
-Show three visible card layers and an accessible pending count; all due items remain reachable
-through previous/next controls. Order by eligible due time, then kind/id; do not steal selection
-when a new item arrives. Do not make one native window per item.
+Presentation revised by Cooper on 2026-10-22: show each pending task/reminder in its own compact
+native window, matching the app's shared completion-checkbox, title and due-metadata rows. Keep
+all pending items visible without pagination or decorative stacked layers. New cards use unoccupied
+screen space; completion reclaims that area without moving siblings. On a full screen retain every
+window with reachable drag handles, rather than introducing a hidden queue.
 
-Drag the stack freely; on release within 24 points of a visible-frame edge, snap to that edge.
-Persist normalized placement per account and display. Keep placement inside usable screen bounds
-after resolution, Dock, menu-bar, or monitor changes; if the display disappears, recenter on the
-remaining pointer display. Keep it above ordinary app windows and available across Spaces without
-activating nohmi or stealing typing focus. Validate full-screen behavior in the native probe.
+Each card starts at 320 × 88 points and can be moved and resized independently down to 240 × 72.
+Use native resize edges and a visible corner grip. Snap within 24 points of a visible-frame edge.
+Persist normalized position and size per account, item and display UUID, and restore to that display
+when available. Fit to usable bounds on monitor/resolution changes. Stay above ordinary app windows
+and available across Spaces without activating nohmi or stealing typing focus. Preview-off titles
+remain hidden. Pending/error/completion state belongs to the originating card.
 
 Active-item system notifications expose Open and Complete. No card close, dismiss, or snooze action in this first release: the requested promise is persistence
 until completion. Opening the item leaves the card present. Device pause is the explicit escape

@@ -102,3 +102,29 @@ failed the existing Finance post-lock expiry assertion in
 The retry was stopped at that failure. No Finance production timing or authority rule was changed.
 A green full-suite/coverage receipt remains required before release, alongside the native
 certification checks above. Failed-run logs and browser traces remain in the ignored local worktree.
+
+## Independent compact cards revision (2026-10-22)
+
+Cooper replaced the original single-stack presentation with one independent window per item.
+The native rows follow the app's shared TaskItem/ReminderItem completion/title/due grammar and
+start at 320 × 88 points. Each has a native drag strip, resize edges and an accessible grow area;
+minimum size is 240 × 72. New arrivals occupy free space and sibling retirement does not reflow
+existing cards. Size, normalized position and the last display UUID are saved per item/account.
+Legacy receipt/placement stores still decode.
+
+Focused regressions first failed on the old single-window API and on missing native hit areas.
+The final native suite passes 76 Rust and 120 Swift tests, including independent windows/sizes,
+geometry round-trip, cross-display drag render behavior, header/grow-area hit testing, event-based
+resizing with minimum sizes, and per-card pending/error/acknowledgement isolation. A disposable
+four-item app rendered the compact product views with accessible completion and grow areas.
+Fixture completion removed only the chosen window; recorded sibling frames stayed unchanged.
+Initial computer-use attempts exposed missing native hit areas and corner interception by the
+window edge. Native AppKit overlays, event-coordinate tracking and a 24-point inner grow-area target
+fixed those boundaries. The running product-source preview then shrank one card from 320 × 88 to
+280 × 72, enlarged it to 360 × 112, moved it, and completed it. Recorded sibling frames stayed
+unchanged throughout. This passes the local single-display drag/resize smoke; physical multi-display
+and the existing signed-release gates remain manual acceptance work. The preview process was
+stopped and its temporary pointer/frame diagnostics erased. No permission settings were changed.
+
+This bounded revision changes native presentation only; the earlier full-suite Finance failures
+remain recorded above. It does not claim a new green full repository release gate.

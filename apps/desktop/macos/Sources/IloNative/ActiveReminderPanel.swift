@@ -4,8 +4,8 @@ import SwiftUI
 protocol ActiveReminderPresenting: AnyObject {
   var isVisible: Bool { get }
   func show(
-    _ items: [ActiveReminderCandidate], selected: String?, preview: Bool,
-    pending: Set<String>, error: String?, stale: Bool) throws
+    _ items: [ActiveReminderCandidate], preview: Bool,
+    pending: Set<String>, errors: [String: String], stale: Bool) throws
   func hide()
 }
 private final class ActiveReminderWindow: NSPanel {
@@ -14,122 +14,204 @@ private final class ActiveReminderWindow: NSPanel {
 }
 final class ActiveReminderDragView: NSView {
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-  var pointer: () -> CGPoint = { NSEvent.mouseLocation }
+  var pointer: ((NSEvent) -> CGPoint)?
+  private func location(_ event: NSEvent) -> CGPoint {
+    pointer?(event) ?? window?.convertPoint(toScreen: event.locationInWindow)
+      ?? NSEvent.mouseLocation
+  }
   private var origin: (CGPoint, CGRect)?
   override func mouseDown(with event: NSEvent) {
-    if let window { origin = (pointer(), window.frame) }
+    if let window { origin = (location(event), window.frame) }
   }
   override func mouseDragged(with event: NSEvent) {
     guard let (point, frame) = origin else { return }
-    let current = pointer()
+    let current = location(event)
     window?.setFrameOrigin(
       CGPoint(x: frame.minX + current.x - point.x, y: frame.minY + current.y - point.y))
   }
   override func mouseUp(with event: NSEvent) { origin = nil }
 }
-private struct ActiveReminderDragArea: NSViewRepresentable {
-  func makeNSView(context: Context) -> ActiveReminderDragView { ActiveReminderDragView() }
-  func updateNSView(_ view: ActiveReminderDragView, context: Context) {}
+
+final class ActiveReminderResizeView: NSView {
+  var pointer: ((NSEvent) -> CGPoint)?
+  private func location(_ event: NSEvent) -> CGPoint {
+    pointer?(event) ?? window?.convertPoint(toScreen: event.locationInWindow)
+      ?? NSEvent.mouseLocation
+  }
+  private var origin: (CGPoint, CGRect)?
+  override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+  override func resetCursorRects() { addCursorRect(bounds, cursor: .crosshair) }
+  override func mouseDown(with event: NSEvent) {
+    if let window { origin = (location(event), window.frame) }
+  }
+  override func mouseDragged(with event: NSEvent) {
+    guard let window, let (point, frame) = origin else { return }
+    let current = location(event)
+    let width = max(
+      window.contentMinSize.width, min(window.maxSize.width, frame.width + current.x - point.x))
+    let height = max(
+      window.contentMinSize.height, min(window.maxSize.height, frame.height - current.y + point.y))
+    window.setFrame(
+      CGRect(x: frame.minX, y: frame.maxY - height, width: width, height: height), display: true)
+  }
+  override func mouseUp(with event: NSEvent) { origin = nil }
+  override func draw(_ dirtyRect: NSRect) {
+    NSColor.tertiaryLabelColor.setStroke()
+    for offset in [4.0, 8.0, 12.0, 20.0] {
+      let path = NSBezierPath()
+      path.move(to: CGPoint(x: bounds.maxX - offset, y: bounds.minY + 2))
+      path.line(to: CGPoint(x: bounds.maxX - 2, y: bounds.minY + offset))
+      path.stroke()
+    }
+  }
 }
+
+/// Native counterpart of TaskItem/ReminderItem's shared CommitmentItem grammar:
+/// leading completion control, 15pt title, quiet due metadata and compact spacing.
 private struct ActiveReminderCard: View {
   var item: ActiveReminderCandidate
-  var count: Int
-  var index: Int
   var preview: Bool
   var pending: Bool
   var error: String?
   var stale: Bool
   var complete: () -> Void
   var open: () -> Void
-  var previous: () -> Void
-  var next: () -> Void
   var body: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      HStack {
-        Text(item.kind == "task" ? "Task" : "Reminder").font(.subheadline).foregroundStyle(
-          .secondary)
+    VStack(spacing: 0) {
+      HStack(spacing: 5) {
+        Text(item.kind == "task" ? "Task" : "Reminder")
         Spacer()
-        Text("nohmi").font(.subheadline.weight(.medium))
+        Text("nohmi")
       }
-      .overlay(
-        ActiveReminderDragArea().frame(maxWidth: .infinity, maxHeight: .infinity)
-          .accessibilityHidden(true)
-      )
-      .help("Drag to move this reminder")
-      Text(preview ? item.title : (item.kind == "task" ? "A task is due" : "A reminder is due"))
-        .font(.title3.weight(.semibold)).lineLimit(3).fixedSize(horizontal: false, vertical: true)
-      if let due = parseDate(item.dueAt) {
-        (Text("Due ") + Text(due, format: .relative(presentation: .numeric))).font(.caption)
-          .foregroundStyle(.secondary)
-      }
-      if let error {
-        Text(error).font(.caption).foregroundStyle(.red).lineLimit(3)
-      } else if stale {
-        Text("Couldn’t refresh. Reconnect to check this item.").font(.caption).foregroundStyle(
-          .secondary)
-      }
-      HStack {
-        Button(
-          pending ? "Completing…" : (error == nil ? "Mark complete" : "Try again"), action: complete
-        )
-        .buttonStyle(.plain)
-        .padding(.horizontal, 12).padding(.vertical, 8)
-        .foregroundStyle(Color(nsColor: .windowBackgroundColor))
-        .background(Color.primary, in: RoundedRectangle(cornerRadius: 10))
-        .opacity(pending || stale ? 0.55 : 1).disabled(pending || stale)
-        Button("Open in nohmi", action: open).buttonStyle(.bordered)
-      }
-      if count > 1 {
-        HStack {
-          Button("Previous", action: previous).disabled(index == 0)
-          Spacer()
-          Text("\(index + 1) of \(count)").font(.caption).accessibilityLabel(
-            "Active reminder \(index + 1) of \(count)")
-          Spacer()
-          Button("Next", action: next).disabled(index == count - 1)
-        }.buttonStyle(.plain)
-      }
-    }
-    .padding(22).frame(maxWidth: .infinity, alignment: .leading)
-    .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 22))
-    .overlay(
-      RoundedRectangle(cornerRadius: 22).stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-    )
-    .background {
-      ZStack {
-        if count > 2 {
-          RoundedRectangle(cornerRadius: 22).fill(Color(nsColor: .controlBackgroundColor)).padding(
-            .horizontal, 12
-          ).offset(y: 12)
-        }
-        if count > 1 {
-          RoundedRectangle(cornerRadius: 22).fill(Color(nsColor: .separatorColor)).padding(
-            .horizontal, 6
-          ).offset(y: 6)
-        }
+      .font(.system(size: 10)).foregroundStyle(.secondary)
+      .padding(.horizontal, 12).frame(height: 20)
+      .help("Drag to move")
+      ScrollView {
+        HStack(alignment: .top, spacing: 8) {
+          Button(action: complete) {
+            ZStack {
+              RoundedRectangle(cornerRadius: 3).stroke(Color.secondary.opacity(0.65), lineWidth: 1)
+                .frame(width: 16, height: 16)
+              if pending { ProgressView().controlSize(.mini).scaleEffect(0.65) }
+            }.frame(width: 24, height: 24)
+          }
+          .buttonStyle(.plain).disabled(pending || stale)
+          .accessibilityLabel(
+            pending
+              ? "Completing"
+              : (error == nil ? "Complete \(item.kind)" : "Retry completing \(item.kind)")
+          )
+          .help(error == nil ? "Mark complete" : "Try again")
+          .keyboardShortcut(.return, modifiers: .command)
+          VStack(alignment: .leading, spacing: 3) {
+            Button(action: open) {
+              Text(preview ? item.title : "A \(item.kind) is due")
+                .font(.system(size: 15)).multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+            }.buttonStyle(.plain).help("Open \(item.kind) in nohmi")
+            if let due = parseDate(item.dueAt) {
+              (Text("Due ") + Text(due, format: .relative(presentation: .numeric)))
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            if let error {
+              Text(error).font(.system(size: 11)).foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
+            } else if stale {
+              Text("Reconnect to update").font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+          }
+        }.padding(.leading, 7).padding(.trailing, 24).padding(.bottom, 10)
       }
     }
-    .padding(.bottom, count > 1 ? 12 : 0)
-    .fixedSize(horizontal: false, vertical: true)
-    .padding(2)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .background(Color(nsColor: .windowBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
+
   }
 }
-final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting, NSWindowDelegate {
-  let panel: NSPanel = ActiveReminderWindow(
-    contentRect: CGRect(x: 0, y: 0, width: 390, height: 300),
-    styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+
+/// One window per record: refreshes and completion never move a sibling card.
+final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting {
+  private var windows: [String: ActiveReminderCardWindow] = [:]
+  var panels: [String: NSPanel] { windows.mapValues(\.panel) }
   var complete: ((ActiveReminderCandidate) -> Void)?
   var open: ((ActiveReminderCandidate) -> Void)?
-  var select: ((String) -> Void)?
   var store: ActiveReminderStore?
-  private var displayID: String?
+  private let mouseButtons: () -> Int
+  var lastError: String?
+  var isVisible: Bool {
+    !windows.isEmpty && windows.values.allSatisfy { $0.panel.isVisible && $0.panel.isOnActiveSpace }
+  }
+  init(mouseButtons: @escaping () -> Int = { NSEvent.pressedMouseButtons }) {
+    self.mouseButtons = mouseButtons
+    super.init()
+  }
+  func show(
+    _ items: [ActiveReminderCandidate], preview: Bool,
+    pending: Set<String>, errors: [String: String], stale: Bool
+  ) throws {
+    let valid = Set(items.map(\.cardID))
+    for key in Array(windows.keys) where !valid.contains(key) {
+      windows.removeValue(forKey: key)?.close()
+    }
+    guard !items.isEmpty else { return }
+    guard
+      let screen = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) })
+        ?? NSScreen.main
+    else {
+      hide()
+      throw NativeError.message("No display is available for active reminders.")
+    }
+    var failure: Error?
+    for item in items {
+      let window: ActiveReminderCardWindow
+      if let existing = windows[item.cardID] {
+        window = existing
+      } else {
+        let occupied = windows.values.map { $0.panel.frame }
+        let savedScreen =
+          NSScreen.screens.first { PetDisplays.id($0) == store?.cardDisplay(card: item.cardID) }
+          ?? screen
+        window = ActiveReminderCardWindow(
+          item: item, screen: savedScreen, occupied: occupied,
+          store: store, mouseButtons: mouseButtons)
+        windows[item.cardID] = window
+      }
+      do {
+        try window.show(
+          item: item, preview: preview, pending: pending.contains(item.cardID),
+          error: errors[item.cardID], stale: stale,
+          complete: { [weak self] in self?.complete?(item) },
+          open: { [weak self] in self?.open?(item) })
+      } catch { failure = error }
+    }
+    if let failure { throw failure }
+  }
+  func hide() { for window in windows.values { window.panel.orderOut(nil) } }
+  func reset() {
+    for window in windows.values { window.close() }
+    windows = [:]
+    store = nil
+  }
+  deinit { for window in windows.values { window.close() } }
+}
+
+private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
+  let panel: NSPanel = ActiveReminderWindow(
+    contentRect: .zero,
+    styleMask: [.borderless, .nonactivatingPanel, .resizable], backing: .buffered, defer: false)
+  private let cardID: String
+  private let store: ActiveReminderStore?
+  private let mouseButtons: () -> Int
   private var signature = ""
   private var arranging = false
   private var settle: DispatchWorkItem?
-  private let mouseButtons: () -> Int
-  var lastError: String?
-  var isVisible: Bool { panel.isVisible && panel.isOnActiveSpace }
-  init(mouseButtons: @escaping () -> Int = { NSEvent.pressedMouseButtons }) {
+  init(
+    item: ActiveReminderCandidate, screen: NSScreen, occupied: [CGRect],
+    store: ActiveReminderStore?, mouseButtons: @escaping () -> Int
+  ) {
+    cardID = item.cardID
+    self.store = store
     self.mouseButtons = mouseButtons
     super.init()
     panel.level = .floating
@@ -137,66 +219,68 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting, N
     panel.hidesOnDeactivate = false
     panel.isReleasedWhenClosed = false
     panel.isMovable = true
-    panel.isMovableByWindowBackground = true
     panel.isOpaque = false
     panel.backgroundColor = .clear
     panel.hasShadow = true
+    panel.contentMinSize = NSSize(width: 240, height: 72)
+    panel.maxSize = screen.visibleFrame.size
     panel.delegate = self
-    panel.setAccessibilityLabel("nohmi active reminders")
-  }
-  private func id(_ screen: NSScreen) -> String { PetDisplays.id(screen) }
-  func show(
-    _ items: [ActiveReminderCandidate], selected: String?, preview: Bool, pending: Set<String>,
-    error: String?, stale: Bool
-  ) throws {
-    guard !items.isEmpty,
-      let screen = (displayID == nil ? nil : NSScreen.screens.first(where: {
-        $0.frame.contains(CGPoint(x: panel.frame.midX, y: panel.frame.midY))
-      })) ?? NSScreen.screens.first(where: { id($0) == displayID })
-        ?? NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) })
-        ?? NSScreen.main
-    else {
-      hide()
-      throw NativeError.message("No display is available for active reminders.")
+    panel.setAccessibilityLabel("nohmi \(item.kind)")
+    let area = screen.visibleFrame
+    let frame: CGRect
+    if let saved = store?.cardPlacement(card: cardID, display: PetDisplays.id(screen)) {
+      let size = CGSize(width: max(240, saved.width), height: max(72, saved.height))
+      frame = CGRect(
+        x: area.minX + max(0, area.width - size.width) * saved.x,
+        y: area.minY + max(0, area.height - size.height) * saved.y, width: size.width,
+        height: size.height)
+    } else {
+      frame = ActiveReminderPlacement.unoccupied(in: area, occupied: occupied)
     }
-    let index = items.firstIndex { $0.id == selected } ?? 0
-    let item = items[index]
-    let nextSignature =
-      items.map { "\($0.id):\($0.sourceRevision):\($0.title):\($0.dueAt)" }.joined(separator: "|")
-      + "\(index)|\(preview)|\(pending.sorted())|\(error ?? "")|\(stale)"
-    if signature != nextSignature {
+    arranging = true
+    panel.setFrame(ActiveReminderPlacement.fit(frame, in: area, snap: false), display: false)
+    arranging = false
+  }
+  func show(
+    item: ActiveReminderCandidate, preview: Bool, pending: Bool, error: String?, stale: Bool,
+    complete: @escaping () -> Void, open: @escaping () -> Void
+  ) throws {
+    let next =
+      "\(item.sourceRevision)|\(item.title)|\(item.dueAt)|\(preview)|\(pending)|\(error ?? "")|\(stale)"
+    if signature != next {
+      let container = NSView(
+        frame: CGRect(origin: .zero, size: panel.contentRect(forFrameRect: panel.frame).size))
       let hosting = NSHostingView(
         rootView: ActiveReminderCard(
-          item: item, count: items.count, index: index,
-          preview: preview, pending: pending.contains(item.id), error: error, stale: stale,
-          complete: { [weak self] in self?.complete?(item) },
-          open: { [weak self] in self?.open?(item) },
-          previous: { [weak self] in if index > 0 { self?.select?(items[index - 1].id) } },
-          next: { [weak self] in if index + 1 < items.count { self?.select?(items[index + 1].id) } }
-        ).frame(width: 386))
-      panel.contentView = hosting
-      panel.setContentSize(
-        NSSize(width: 390, height: max(160, min(480, hosting.fittingSize.height))))
-      signature = nextSignature
+          item: item, preview: preview,
+          pending: pending, error: error, stale: stale, complete: complete, open: open))
+      hosting.frame = container.bounds
+      hosting.autoresizingMask = [.width, .height]
+      container.addSubview(hosting)
+      let header = ActiveReminderDragView(
+        frame: CGRect(
+          x: 0, y: container.bounds.height - 20,
+          width: container.bounds.width, height: 20))
+      header.autoresizingMask = [.width, .minYMargin]
+      header.toolTip = "Drag to move this card"
+      container.addSubview(header)
+      let grip = ActiveReminderResizeView(
+        frame: CGRect(x: container.bounds.width - 24, y: 0, width: 24, height: 24))
+      grip.autoresizingMask = [.minXMargin, .maxYMargin]
+      grip.toolTip = "Drag to resize this card"
+      grip.setAccessibilityElement(true)
+      grip.setAccessibilityRole(.growArea)
+      grip.setAccessibilityLabel("Resize \(item.kind)")
+      container.addSubview(grip)
+      panel.contentView = container
+      signature = next
     }
-    if displayID == nil || mouseButtons() & 1 == 0 {
+    if mouseButtons() & 1 == 0, let screen = currentScreen() {
+      panel.maxSize = screen.visibleFrame.size
       arranging = true
-      let screenID = id(screen)
-      if displayID == nil {
-        displayID = screenID
-        let area = screen.visibleFrame
-        let point = store?.placement(display: screenID) ?? ActiveReminderPoint(x: 0.5, y: 0.5)
-        let frame = CGRect(
-          x: area.minX + max(0, area.width - panel.frame.width) * point.x,
-          y: area.minY + max(0, area.height - panel.frame.height) * point.y,
-          width: panel.frame.width, height: panel.frame.height)
-        panel.setFrame(ActiveReminderPlacement.fit(frame, in: area, snap: false), display: true)
-      } else {
-        displayID = screenID
-        panel.setFrame(
-          ActiveReminderPlacement.fit(panel.frame, in: screen.visibleFrame, snap: false),
-          display: true)
-      }
+      panel.setFrame(
+        ActiveReminderPlacement.fit(panel.frame, in: screen.visibleFrame, snap: false),
+        display: false)
       arranging = false
     }
     if !panel.isVisible { panel.orderFrontRegardless() }
@@ -204,42 +288,41 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting, N
       throw NativeError.message("The active reminder card could not appear.")
     }
   }
-  func hide() { panel.orderOut(nil) }
-  func reset() {
-    hide()
-    displayID = nil
-    signature = ""
-    store = nil
-    settle?.cancel()
+  private func currentScreen() -> NSScreen? {
+    NSScreen.screens.first { $0.frame.contains(CGPoint(x: panel.frame.midX, y: panel.frame.midY)) }
+      ?? NSScreen.screens.first { $0.frame.intersects(panel.frame) } ?? NSScreen.main
   }
-  func windowDidMove(_ notification: Notification) {
+  func close() {
+    settle?.cancel()
+    panel.delegate = nil
+    panel.close()
+  }
+  func windowDidMove(_ notification: Notification) { scheduleSave() }
+  func windowDidResize(_ notification: Notification) { scheduleSave() }
+  private func scheduleSave() {
     guard !arranging else { return }
     settle?.cancel()
-    let work = DispatchWorkItem { [weak self] in self?.savePosition() }
+    let work = DispatchWorkItem { [weak self] in self?.saveGeometry() }
     settle = work
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
   }
-  private func savePosition() {
+  private func saveGeometry() {
     if mouseButtons() & 1 != 0 {
-      windowDidMove(Notification(name: NSWindow.didMoveNotification))
+      scheduleSave()
       return
     }
-    guard
-      let screen = NSScreen.screens.first(where: {
-        $0.frame.contains(CGPoint(x: panel.frame.midX, y: panel.frame.midY))
-      })
-    else { return }
+    guard let screen = currentScreen() else { return }
     let area = screen.visibleFrame
     arranging = true
     panel.setFrame(ActiveReminderPlacement.fit(panel.frame, in: area, snap: true), display: true)
     arranging = false
-    displayID = id(screen)
     do {
-      try store?.savePlacement(
-        display: id(screen),
-        point: ActiveReminderPoint(
+      try store?.saveCardPlacement(
+        card: cardID, display: PetDisplays.id(screen),
+        geometry: ActiveReminderCardGeometry(
           x: (panel.frame.minX - area.minX) / max(1, area.width - panel.frame.width),
-          y: (panel.frame.minY - area.minY) / max(1, area.height - panel.frame.height)))
-    } catch { lastError = "Active reminder position could not be saved." }
+          y: (panel.frame.minY - area.minY) / max(1, area.height - panel.frame.height),
+          width: panel.frame.width, height: panel.frame.height))
+    } catch { /* Geometry failure must not retire an incomplete card. */  }
   }
 }

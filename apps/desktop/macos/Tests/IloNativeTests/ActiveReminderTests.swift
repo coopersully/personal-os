@@ -45,17 +45,139 @@ final class ActiveReminderTests: XCTestCase {
     var pressed = 0
     let presenter = ActiveReminderPanelController(mouseButtons: { pressed })
     defer { presenter.hide() }
-    let item = ActiveReminderCandidate(id: "11111111-1111-4111-8111-111111111111",
-      kind: "task", title: "Fixture", dueAt: "2026-10-22T12:00:00Z", activeReminder: true, revision: 1)
-    try presenter.show([item], selected: nil, preview: true, pending: [], error: nil, stale: false)
+    let item = ActiveReminderCandidate(
+      id: "11111111-1111-4111-8111-111111111111",
+      kind: "task", title: "Fixture", dueAt: "2026-10-22T12:00:00Z", activeReminder: true,
+      revision: 1)
+    try presenter.show([item], preview: true, pending: [], errors: [:], stale: false)
     pressed = 1
     let draggedOrigin = CGPoint(x: 10000, y: 10000)
-    presenter.panel.setFrameOrigin(draggedOrigin)
-    try presenter.show([item], selected: nil, preview: true, pending: [], error: nil, stale: false)
-    XCTAssertEqual(presenter.panel.frame.origin, draggedOrigin)
+    presenter.panels[item.cardID]!.setFrameOrigin(draggedOrigin)
+    try presenter.show([item], preview: true, pending: [], errors: [:], stale: false)
+    XCTAssertEqual(presenter.panels[item.cardID]!.frame.origin, draggedOrigin)
     pressed = 0
-    try presenter.show([item], selected: nil, preview: true, pending: [], error: nil, stale: false)
-    XCTAssertNotEqual(presenter.panel.frame.origin, draggedOrigin)
+    try presenter.show([item], preview: true, pending: [], errors: [:], stale: false)
+    XCTAssertNotEqual(presenter.panels[item.cardID]!.frame.origin, draggedOrigin)
+  }
+  @MainActor
+  func testEveryItemHasItsOwnVisibleMovableResizablePanel() throws {
+    let presenter = ActiveReminderPanelController()
+    defer { presenter.reset() }
+    let items = (1...3).map { index in
+      ActiveReminderCandidate(
+        id: "00000000-0000-4000-8000-00000000000\(index)", kind: index == 2 ? "reminder" : "task",
+        title: "Item \(index)", dueAt: "2026-10-22T12:00:00Z", activeReminder: true,
+        revision: index == 2 ? nil : 1, updatedAt: index == 2 ? "2026-10-22T11:00:00Z" : nil)
+    }
+    try presenter.show(items, preview: true, pending: [], errors: [:], stale: false)
+    XCTAssertEqual(presenter.panels.count, 3)
+    let first = try XCTUnwrap(presenter.panels[items[0].cardID])
+    let second = try XCTUnwrap(presenter.panels[items[1].cardID])
+    XCTAssertTrue(
+      presenter.panels.values.allSatisfy { $0.isVisible && $0.styleMask.contains(.resizable) })
+    XCTAssertFalse(first.frame.intersects(second.frame))
+    let content = try XCTUnwrap(first.contentView)
+    content.layoutSubtreeIfNeeded()
+    let gripPoint = CGPoint(
+      x: content.bounds.maxX - 8,
+      y: content.isFlipped ? content.bounds.maxY - 8 : 8)
+    XCTAssertTrue(content.hitTest(gripPoint) is ActiveReminderResizeView)
+    let innerGrip = CGPoint(
+      x: content.bounds.maxX - 22,
+      y: content.isFlipped ? content.bounds.maxY - 22 : 22)
+    XCTAssertTrue(content.hitTest(innerGrip) is ActiveReminderResizeView)
+    let headerPoint = CGPoint(
+      x: content.bounds.midX,
+      y: content.isFlipped ? 8 : content.bounds.maxY - 8)
+    XCTAssertTrue(content.hitTest(headerPoint) is ActiveReminderDragView)
+    let secondFrame = second.frame
+    first.setContentSize(NSSize(width: 370, height: 130))
+    let resized = first.frame
+    try presenter.show(
+      Array(items.reversed()), preview: true, pending: [], errors: [:], stale: false)
+    XCTAssertEqual(first.frame.size, resized.size)
+    XCTAssertEqual(second.frame, secondFrame)
+    try presenter.show(
+      Array(items.dropFirst()), preview: true, pending: [], errors: [:], stale: false)
+    XCTAssertNil(presenter.panels[items[0].cardID])
+    XCTAssertTrue(presenter.panels[items[1].cardID] === second)
+    XCTAssertEqual(second.frame, secondFrame)
+    presenter.hide()
+    XCTAssertTrue(presenter.panels.values.allSatisfy { !$0.isVisible })
+  }
+  func testCardGeometryPersistsIndependentlyAndReadsLegacyStore() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let url = root.appendingPathComponent("store.json")
+    try Data(#"{"identity":"owner","receipts":{},"placements":{"display":{"x":0.2,"y":0.3}}}"#.utf8)
+      .write(to: url)
+    let store = try ActiveReminderStore(url: url, identity: "owner")
+    try store.saveCardPlacement(
+      card: "task:one", display: "display",
+      geometry: ActiveReminderCardGeometry(x: 0.1, y: 0.2, width: 310, height: 100))
+    try store.saveCardPlacement(
+      card: "reminder:two", display: "display",
+      geometry: ActiveReminderCardGeometry(x: 0.8, y: 0.9, width: 400, height: 160))
+    let loaded = try ActiveReminderStore(url: url, identity: "owner")
+    XCTAssertEqual(loaded.cardDisplay(card: "task:one"), "display")
+    XCTAssertEqual(loaded.cardPlacement(card: "task:one", display: "display")?.width, 310)
+    XCTAssertEqual(loaded.cardPlacement(card: "reminder:two", display: "display")?.height, 160)
+    XCTAssertNil(
+      try ActiveReminderStore(url: url, identity: "other").cardPlacement(
+        card: "task:one", display: "display"))
+  }
+  @MainActor
+  func testResizeGripKeepsTopLeftAndHonorsMinimumSize() throws {
+    _ = NSApplication.shared
+    let window = NSPanel(
+      contentRect: CGRect(x: 100, y: 100, width: 320, height: 88),
+      styleMask: [.borderless, .nonactivatingPanel, .resizable], backing: .buffered, defer: false)
+    defer { window.close() }
+    window.contentMinSize = NSSize(width: 240, height: 72)
+    let grip = ActiveReminderResizeView(frame: CGRect(x: 300, y: 0, width: 16, height: 16))
+    window.contentView?.addSubview(grip)
+    var point = CGPoint(x: 400, y: 100)
+    grip.pointer = { _ in point }
+    let event = try XCTUnwrap(
+      NSEvent.mouseEvent(
+        with: .leftMouseDown, location: .zero,
+        modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil,
+        eventNumber: 1, clickCount: 1, pressure: 1))
+    grip.mouseDown(with: event)
+    point = CGPoint(x: 450, y: 50)
+    grip.mouseDragged(with: event)
+    XCTAssertEqual(window.frame, CGRect(x: 100, y: 50, width: 370, height: 138))
+    point = CGPoint(x: 0, y: 400)
+    grip.mouseDragged(with: event)
+    XCTAssertEqual(window.frame.width, 240)
+    XCTAssertEqual(window.frame.height, 72)
+    XCTAssertEqual(window.frame.maxY, 188)
+    grip.mouseUp(with: event)
+    point = .zero
+    grip.mouseDragged(with: event)
+    XCTAssertEqual(window.frame.width, 240)
+  }
+  @MainActor
+  func testResizeUsesEventCoordinatesRatherThanTheLaterGlobalCursor() throws {
+    _ = NSApplication.shared
+    let window = NSPanel(
+      contentRect: CGRect(x: 100, y: 100, width: 320, height: 88),
+      styleMask: [.borderless, .nonactivatingPanel, .resizable], backing: .buffered, defer: false)
+    defer { window.close() }
+    window.contentMinSize = NSSize(width: 240, height: 72)
+    let grip = ActiveReminderResizeView(frame: CGRect(x: 300, y: 0, width: 16, height: 16))
+    window.contentView?.addSubview(grip)
+    func event(_ point: CGPoint) throws -> NSEvent {
+      try XCTUnwrap(
+        NSEvent.mouseEvent(
+          with: .leftMouseDown, location: point,
+          modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil,
+          eventNumber: 1, clickCount: 1, pressure: 1))
+    }
+    grip.mouseDown(with: try event(CGPoint(x: 310, y: 8)))
+    grip.mouseDragged(with: try event(CGPoint(x: 350, y: -22)))
+    XCTAssertEqual(window.frame, CGRect(x: 100, y: 70, width: 360, height: 118))
   }
   func testOccurrenceChangesWhenDueTimeChanges() throws {
     let a = try JSONDecoder().decode(
@@ -145,8 +267,10 @@ private final class ActiveTestSink: ActiveReminderNotificationSink {
     _ alert: PlannedAlert, item: ActiveReminderCandidate, inventory: ActiveReminderInventory,
     preferences: NotificationPreferences
   ) {}
-  func handoffActiveOrdinary(_ alert: PlannedAlert, item: ActiveReminderCandidate,
-    inventory: ActiveReminderInventory, preferences: NotificationPreferences) { handedOff.append(item) }
+  func handoffActiveOrdinary(
+    _ alert: PlannedAlert, item: ActiveReminderCandidate,
+    inventory: ActiveReminderInventory, preferences: NotificationPreferences
+  ) { handedOff.append(item) }
   func takeActiveOwnership(_ id: String) {}
   func prepareActiveFallback(
     _ alert: PlannedAlert, item: ActiveReminderCandidate, inventory: ActiveReminderInventory,
@@ -167,14 +291,16 @@ private final class ActiveTestPresenter: ActiveReminderPresenting {
   var items: [ActiveReminderCandidate] = []
   var pending = Set<String>()
   var error: String?
+  var errors: [String: String] = [:]
   var stale = false
   func show(
-    _ items: [ActiveReminderCandidate], selected: String?, preview: Bool, pending: Set<String>,
-    error: String?, stale: Bool
+    _ items: [ActiveReminderCandidate], preview: Bool, pending: Set<String>,
+    errors: [String: String], stale: Bool
   ) throws {
     self.items = items
     self.pending = pending
-    self.error = error
+    self.errors = errors
+    self.error = items.compactMap { errors[$0.cardID] }.first
     self.stale = stale
     isVisible = true
   }
@@ -182,24 +308,90 @@ private final class ActiveTestPresenter: ActiveReminderPresenting {
 }
 final class ActiveReminderLifecycleTests: XCTestCase {
   @MainActor
+  func testTwoCardsKeepCompletionAndFailureOnTheirOwnItem() throws {
+    let time = Date(timeIntervalSince1970: 1_792_670_400)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let sink = ActiveTestSink()
+    let presenter = ActiveTestPresenter()
+    let router = ActiveReminderRouter(
+      notifications: sink, presenter: presenter,
+      activity: { MacActivityState(isActive: true, isAvailable: true, shouldHide: false) },
+      now: { time },
+      makeStore: {
+        try ActiveReminderStore(url: root.appendingPathComponent("store"), identity: $0)
+      },
+      startTimer: false)
+    var preferences = NotificationPreferences()
+    preferences.enabled = true
+    router.configure(preferences: preferences, calendar: .current, enabled: true)
+    let items = (1...2).map { index in
+      ActiveReminderCandidate(
+        id: "00000000-0000-4000-8000-00000000000\(index)", kind: index == 1 ? "task" : "reminder",
+        title: "Item \(index)", dueAt: ISO8601DateFormatter().string(from: time),
+        activeReminder: true,
+        revision: index == 1 ? 1 : nil,
+        updatedAt: index == 2 ? ISO8601DateFormatter().string(from: time) : nil)
+    }
+    try router.ingest(
+      ActiveReminderInventory(
+        serverUrl: "https://fixture.test", accountId: "owner",
+        generation: 1, generatedAt: ISO8601DateFormatter().string(from: time), items: items))
+    var requests: [[String: Any]] = []
+    router.action = {
+      if $0["action"] as? String == "active_reminder_complete" { requests.append($0) }
+    }
+    router.complete(items[0])
+    XCTAssertEqual(presenter.pending, [items[0].cardID])
+    var result = try XCTUnwrap(requests.last)
+    result["outcome"] = "failed"
+    router.actionResult(result)
+    XCTAssertNotNil(presenter.errors[items[0].cardID])
+    XCTAssertNil(presenter.errors[items[1].cardID])
+    router.complete(items[1])
+    XCTAssertEqual(presenter.pending, [items[1].cardID])
+    result = try XCTUnwrap(requests.last)
+    result["outcome"] = "completed"
+    router.actionResult(result)
+    XCTAssertEqual(presenter.items.map(\.cardID), [items[0].cardID])
+    XCTAssertNotNil(presenter.errors[items[0].cardID])
+  }
+  @MainActor
   func testFlagOffHandsCurrentSourceToOrdinaryWithoutCancellingItsPendingRequest() throws {
     let time = Date(timeIntervalSince1970: 1_792_670_400)
-    let sink = ActiveTestSink(); let panel = ActiveTestPresenter()
-    let router = ActiveReminderRouter(notifications: sink, presenter: panel,
-      activity: { MacActivityState.evaluate(inputAge: 200, onConsole: true, loginDone: true, locked: false, displayAwake: true, frontmost: "fixture") },
-      now: { time }, makeStore: { try ActiveReminderStore(url:
-        FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString), identity: $0) },
+    let sink = ActiveTestSink()
+    let panel = ActiveTestPresenter()
+    let router = ActiveReminderRouter(
+      notifications: sink, presenter: panel,
+      activity: {
+        MacActivityState.evaluate(
+          inputAge: 200, onConsole: true, loginDone: true, locked: false, displayAwake: true,
+          frontmost: "fixture")
+      },
+      now: { time },
+      makeStore: {
+        try ActiveReminderStore(
+          url:
+            FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString),
+          identity: $0)
+      },
       startTimer: false)
-    var item = ActiveReminderCandidate(id: "11111111-1111-4111-8111-111111111111", kind: "task",
+    var item = ActiveReminderCandidate(
+      id: "11111111-1111-4111-8111-111111111111", kind: "task",
       title: "Old title", dueAt: ISO8601DateFormatter().string(from: time.addingTimeInterval(2)),
       activeReminder: true, revision: 1)
-    var inventory = ActiveReminderInventory(serverUrl: "https://app.test", accountId: "a",
+    var inventory = ActiveReminderInventory(
+      serverUrl: "https://app.test", accountId: "a",
       generation: 1, generatedAt: ISO8601DateFormatter().string(from: time), items: [item])
-    var preferences = NotificationPreferences(); preferences.enabled = true
+    var preferences = NotificationPreferences()
+    preferences.enabled = true
     router.configure(preferences: preferences, calendar: .current, enabled: true)
     try router.ingest(inventory)
-    item.activeReminder = false; item.revision = 2; item.title = "Current title"
-    inventory.items = []; inventory.ordinaryItems = [item]
+    item.activeReminder = false
+    item.revision = 2
+    item.title = "Current title"
+    inventory.items = []
+    inventory.ordinaryItems = [item]
     try router.ingest(inventory)
     XCTAssertEqual(sink.handedOff, [item])
     XCTAssertTrue(sink.retired.isEmpty)
@@ -283,7 +475,7 @@ final class ActiveReminderLifecycleTests: XCTestCase {
     XCTAssertEqual(
       actions.filter { $0["action"] as? String == "active_reminder_complete" }.count, 1)
     XCTAssertTrue(panel.isVisible)
-    XCTAssertTrue(panel.pending.contains(item.id))
+    XCTAssertTrue(panel.pending.contains(item.cardID))
     var result = submitted
     result["accountId"] = "other"
     result["outcome"] = "completed"
@@ -390,7 +582,7 @@ extension ActiveReminderTests {
     XCTAssertTrue(header.acceptsFirstMouse(for: nil))
     window.contentView?.addSubview(header)
     var point = CGPoint(x: 200, y: 200)
-    header.pointer = { point }
+    header.pointer = { _ in point }
     let event = try XCTUnwrap(
       NSEvent.mouseEvent(
         with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0,

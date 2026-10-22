@@ -5,7 +5,41 @@ struct ActiveReminderPoint: Codable {
   var x: Double
   var y: Double
 }
+struct ActiveReminderCardGeometry: Codable {
+  var x: Double
+  var y: Double
+  var width: Double
+  var height: Double
+}
 struct ActiveReminderPlacement {
+  static func unoccupied(in area: CGRect, occupied: [CGRect]) -> CGRect {
+    for size in [CGSize(width: 320, height: 88), CGSize(width: 240, height: 72)] {
+      let centered = fit(
+        CGRect(
+          x: area.midX - size.width / 2, y: area.midY - size.height / 2,
+          width: size.width, height: size.height), in: area, snap: false)
+      if !occupied.contains(where: { $0.intersects(centered.insetBy(dx: -6, dy: -6)) }) {
+        return centered
+      }
+      var y = area.maxY - size.height - 12
+      while y >= area.minY {
+        var x = area.minX + 12
+        while x + size.width <= area.maxX {
+          let frame = CGRect(origin: CGPoint(x: x, y: y), size: size)
+          if !occupied.contains(where: { $0.intersects(frame.insetBy(dx: -6, dy: -6)) }) {
+            return frame
+          }
+          x += size.width + 12
+        }
+        y -= size.height + 12
+      }
+    }
+    // A finite screen can fill up; keep every window present and its drag handle reachable.
+    let offset = Double(occupied.count % 12) * 24
+    return fit(
+      CGRect(x: area.minX + offset, y: area.maxY - 88 - offset, width: 240, height: 88),
+      in: area, snap: false)
+  }
   static func fit(_ frame: CGRect, in area: CGRect, snap: Bool) -> CGRect {
     var frame = frame
     frame.size.width = min(frame.width, area.width)
@@ -32,6 +66,8 @@ final class ActiveReminderStore {
     var identity: String
     var receipts: [String: Double] = [:]
     var placements: [String: ActiveReminderPoint] = [:]
+    var cards: [String: [String: ActiveReminderCardGeometry]]? = nil
+    var cardDisplays: [String: String]? = nil
   }
   private let url: URL
   private var data: DataModel
@@ -68,6 +104,28 @@ final class ActiveReminderStore {
     var next = data
     next.placements[display] = ActiveReminderPoint(
       x: min(1, max(0, point.x)), y: min(1, max(0, point.y)))
+    try save(next)
+  }
+  func cardDisplay(card: String) -> String? { data.cardDisplays?[card] }
+  func cardPlacement(card: String, display: String) -> ActiveReminderCardGeometry? {
+    data.cards?[card]?[display]
+  }
+  func saveCardPlacement(card: String, display: String, geometry: ActiveReminderCardGeometry) throws
+  {
+    guard [geometry.x, geometry.y, geometry.width, geometry.height].allSatisfy(\.isFinite),
+      geometry.width > 0, geometry.height > 0
+    else { return }
+    var next = data
+    var cards = next.cards ?? [:]
+    var displays = cards[card] ?? [:]
+    displays[display] = ActiveReminderCardGeometry(
+      x: min(1, max(0, geometry.x)),
+      y: min(1, max(0, geometry.y)), width: geometry.width, height: geometry.height)
+    cards[card] = displays
+    next.cards = cards
+    var displayIDs = next.cardDisplays ?? [:]
+    displayIDs[card] = display
+    next.cardDisplays = displayIDs
     try save(next)
   }
   private func save(_ next: DataModel) throws {

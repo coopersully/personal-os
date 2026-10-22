@@ -22,7 +22,7 @@ export function RitualSkyPreview({
       <span className="ritual-sky-preview__scene" data-ritual-kind={kind} aria-hidden="true">
         <span className="ritual-glow" data-ritual-kind={kind} />
         <RitualClouds kind={kind} />
-        <span className="ritual-sky-preview__card relative flex h-3/4 w-2/5 flex-col gap-1 rounded-md bg-card p-1.5 shadow-sm ring-1 ring-border/40">
+        <span className="ritual-sky-preview__card relative flex h-3/4 w-2/5 flex-col gap-1 rounded-md bg-card p-1.5">
           <span className="h-1.5 w-full rounded-sm bg-muted" />
           <span className="h-1.5 w-3/4 rounded-sm bg-muted" />
           <span className="mt-auto h-2 w-full rounded-full bg-primary" />
@@ -30,7 +30,7 @@ export function RitualSkyPreview({
       </span>
       <span
         aria-hidden="true"
-        className="ritual-sky-preview__action rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground shadow-sm"
+        className="ritual-sky-preview__action rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground"
       >
         Preview
       </span>

@@ -71,7 +71,8 @@ Use 16px gaps between equal workspace cards, 32px square icon slots with 14–16
 of card padding, and 16px outer radii. Desktop hero and control sections use two columns;
 narrow screens stack them and workspace cards reduce from four to two to one column. The square
 brand panel scales with its column, growing beyond square when narrow text requires it. Preserve
-text at zoom rather than clipping to a fixed height.
+text at zoom rather than clipping to a fixed height. Invitation code slots share available form
+width at 320px; coarse-pointer controls retain at least 44px targets without enlarging glyphs.
 
 The desktop public header uses the existing scroll-driven docking treatment, with reduced-motion
 and older-browser fallbacks. Narrow screens keep a stable flat header. The light-blue footer groups

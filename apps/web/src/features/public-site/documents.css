@@ -342,3 +342,29 @@
     break-after: avoid;
   }
 }
+/* The eight-character input must fit its form even on a 320px viewport. */
+.auth-shell [data-slot="input-otp-group"] {
+  flex: 1;
+  min-width: 0;
+}
+.auth-shell [data-slot="input-otp-slot"] {
+  flex: 1;
+  min-width: 0;
+}
+@media (pointer: coarse) {
+  .public-site [data-slot="button"],
+  .public-site [data-slot="navigation-menu-link"],
+  .auth-shell button,
+  .auth-shell [data-slot="input-otp-slot"] {
+    min-height: 2.75rem;
+  }
+  .auth-shell button {
+    min-width: 2.75rem;
+  }
+  .public-footer a,
+  .auth-shell nav a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.75rem;
+  }
+}

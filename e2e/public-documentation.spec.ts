@@ -123,6 +123,16 @@ test("sign-up is directly addressable and browser history restores the auth page
   page,
 }) => {
   await page.goto("/signup");
+  const originalViewport = page.viewportSize();
+  await page.setViewportSize({ width: 320, height: 740 });
+  const inputBounds = await page.locator("[data-input-otp-container]").boundingBox();
+  const lastSlot = await page.locator('[data-slot="input-otp-slot"]').last().boundingBox();
+  expect(inputBounds).not.toBeNull();
+  expect(lastSlot).not.toBeNull();
+  if (!inputBounds || !lastSlot) throw new Error("Invitation input did not render.");
+  expect(lastSlot.x + lastSlot.width).toBeLessThanOrEqual(inputBounds.x + inputBounds.width + 1);
+  await page.screenshot({ path: test.info().outputPath("signup-narrow.png"), fullPage: true });
+  if (originalViewport) await page.setViewportSize(originalViewport);
   await expect(page.getByLabel("confirm password", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "create account", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "already have an account? sign in" }).click();

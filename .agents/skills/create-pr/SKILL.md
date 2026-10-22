@@ -21,8 +21,9 @@ auto-merge, or mutate another Linear Project.
   existing PR unless the readiness gate supports changing it.
 - Detect an open PR for the current branch before creating one. Refine it instead of opening a
   duplicate.
-- Treat `pnpm verify` as the required pre-review verifier. A maintainer may explicitly authorize a
-  narrower check, but the gap remains visible.
+- Follow `docs/engineering/development-handbook.md` and `delivery-verification.md`: focused
+  checks support draft publication and review convergence; complete frozen-candidate verification
+  is required before merge. Publishing never supplies missing acceptance evidence.
 - Keep title/body-only drafting requests read-only: report proposed relationships, but do not create
   or update Linear issues, branches, commits, or PRs.
 - Prefer connected GitHub and Linear tools for their records. Use local `git` and `gh` for branch,
@@ -92,8 +93,10 @@ GitHub issue as a substitute for required Nohmi Linear coverage.
 ### 4. Verify
 
 - Run focused checks while implementing.
-- Run `pnpm lint` before pushing.
-- Run `pnpm verify` before requesting review or publishing as ready.
+- Run changed-file formatting/lint and affected contract checks before pushing; retain full lint
+  in final verification. See `docs/engineering/verification-efficiency.md`.
+- Early review and draft publication need focused evidence with gaps recorded. After convergence,
+  freeze/commit and obtain complete local or equivalent hosted verification before merge.
 - Fix failures and rerun the relevant stage, then the required verifier.
 - Record every exact command, outcome, what it proves, and any explicitly authorized gap.
 - Re-inspect the final diff for unrelated changes, secrets, generated output, and accidental churn.
@@ -143,7 +146,8 @@ Re-read the published PR, head SHA, checks, and every direct Linear issue. Confi
 - only intended files were committed and current docs match the change;
 - the Work map links the live Nohmi Project, milestone when present, and every direct issue;
 - every direct issue has the structured PR backlink and least advanced supported status;
-- `pnpm verify` passed or the explicitly authorized gap is documented;
+- focused publication evidence is current and pending final verification is explicit; complete
+  frozen-candidate verification is required before merge, not each draft update;
 - title, body, diff, verification, docs, and Linear comments make no unsupported claim; and
 - every reported artifact has a real URL.
 

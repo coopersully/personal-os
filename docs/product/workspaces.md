@@ -1,5 +1,11 @@
 # nohmi workspaces and interfaces
 
+> October 18 Finance experience revision: the consolidated [design](../superpowers/specs/2026-10-18-finance-experience-design.md)
+> and [implementation plan](../superpowers/plans/2026-10-18-finance-experience.md) define the target for setup,
+> Spending, Chat, Automations, Activity, and manual workflow coverage. They supersede conflicting
+> earlier targets below, including ungated setup and agent budget self-approval. This is not a
+> declaration that the redesigned experience has shipped.
+
 - Status: Target product contract; current implementation is recorded separately
 - Last reconciled: 2026-09-10
 
@@ -197,6 +203,14 @@ without obscuring provider truth.
 
 ## Finances
 
+Finances is designed as an automated financial assistant with a strong analytical foundation. Use
+available authorized context to make money understandable through visual exploration, explainable
+patterns, evidence-backed forecasts, and hypothetical scenarios. Collect additional context for a
+clear user benefit, not merely because it might be interesting. Manual operation remains supported;
+agent maintenance is the intended way to keep the workspace useful and current. See
+[Finance intelligence and visual exploration](finance-workspace-plan.md#finance-intelligence-and-visual-exploration)
+for the durable motivation, evidence standards, and human decision boundary.
+
 The [Finance MVP specification](finance-workspace-plan.md) defines the first complete delivery
 journey against this larger target. Both Codex and Claude must support separately verified
 maintenance and two-way Finance SMS at launch, including durable answers and continuation after
@@ -303,14 +317,25 @@ and Generous sensitivity when enabled. These preferences belong in Calendar sett
 
 ### Finance configuration and prerequisites
 
-Finance setup is an editable configuration surface, not a sequential questionnaire. Opening it
-loads existing settings without starting execution. Profile, accounts/records, and budget can be
-worked on independently. Setup and Finance Settings share fields and mutation contracts; versioned
-financial facts, effective-dated payroll, and workspace preferences keep their authoritative stores.
-Explicit preparation, approval, and record-check actions remain separate. Missing capability
-prerequisites explain what is required and link to the relevant section with a return path; they
-never block unrelated records or hide an existing budget. Failed reads are unavailable, not missing
-user input. See [the Finance page contract](../design/pages/finances.md#financial-setup-contract).
+Finance's resumable setup gate merged in
+[PR #270 — Complete the Finance workspace and guarded agent workflows](https://github.com/coopersully/personal-os/pull/270).
+Ordinary workspace entry requires recorded completion or the persisted migration-time existing-access
+grant. Loading and failed reads grant neither. Existing access preserves read/correction workflows
+without manufacturing completion or messaging authority. The
+[onboarding contract](../design/pages/finance-onboarding-review.md) owns the exact readiness rules.
+
+People review financial context and display preferences, connect a usable or syncing source, and
+choose automation now or later. Unknown answers remain valid where supported; a budget is never a
+setup prerequisite. Manual-later completion keeps Chat visible with sending locked until its own
+registration, verification, and capability requirements pass. Completed setup does not restart when
+sources or messaging later fail.
+
+Profile, accounts/records, and budget retain independent canonical editors. Setup and Finance
+Settings share fields and mutation contracts; versioned financial facts, effective-dated payroll,
+and workspace preferences keep their authoritative stores. Explicit preparation, exact human budget
+approval, and record-check actions remain separate. This replaces the earlier ungated-access target,
+not the independence of the underlying records. Source implementation does not establish production
+or external-host acceptance; see the [implementation log](implementation-log.md).
 
 Finance navigation and disclosure: Financial profile owns durable planning inputs; Accounts owns
 connection health and account corrections; Transactions owns pending activity and transaction

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "../common.js";
 import { financeMutationMetaSchema, financeProvenanceSchema } from "./common.js";
+import { financeConfirmObligationPlanningEvidenceInputSchema } from "./planning-evidence.js";
 
 export const financeEconomicEventKindSchema = z.enum([
   "purchase",
@@ -169,12 +170,20 @@ export const manageFinanceRuleInputSchema = z.union([
 ]);
 export type ManageFinanceRuleInput = z.infer<typeof manageFinanceRuleInputSchema>;
 
-export const manageFinanceRecurringItemInputSchema = z.object({
-  idempotencyKey: z.string().trim().min(1).max(200),
-  itemId: idSchema,
-  itemType: z.enum(["income", "obligation"]),
-  operation: z.enum(["pause", "resume", "cancel"]),
-});
+export const manageFinanceRecurringItemInputSchema = z.discriminatedUnion("operation", [
+  z.object({
+    idempotencyKey: z.string().trim().min(1).max(200),
+    itemId: idSchema,
+    itemType: z.enum(["income", "obligation"]),
+    operation: z.enum(["pause", "resume", "cancel"]),
+  }),
+  financeConfirmObligationPlanningEvidenceInputSchema.omit({ obligationId: true }).extend({
+    idempotencyKey: z.string().trim().min(1).max(200),
+    itemId: idSchema,
+    itemType: z.literal("obligation"),
+    operation: z.literal("confirm_cost"),
+  }),
+]);
 export type ManageFinanceRecurringItemInput = z.infer<typeof manageFinanceRecurringItemInputSchema>;
 
 export const financeAccountConnectionSchema = z.object({

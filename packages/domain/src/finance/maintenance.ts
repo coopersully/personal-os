@@ -2,6 +2,7 @@ import { z } from "zod";
 import { idSchema } from "../common.js";
 import { maintenanceRunSchema, maintenanceScopeSchema } from "../maintenance.js";
 import { financeInteractionQuestionSchema } from "./common.js";
+import { financeConversationBatchSchema } from "./conversation.js";
 import { financeWorkflowUnavailableSchema } from "./workflow-contracts.js";
 
 /** The only live Finance maintenance entrypoint; historical judgments are evidence only. */
@@ -47,6 +48,7 @@ export const financeMaintenanceNextActionSchema = z.discriminatedUnion("tool", [
   }),
 ]);
 export const financeMaintenancePayloadSchema = z.object({
+  conversationBatch: financeConversationBatchSchema.nullable().optional(),
   run: maintenanceRunSchema.nullable(),
   challengeId: idSchema.nullable(),
   nextAction: financeMaintenanceNextActionSchema.nullable(),
@@ -73,7 +75,7 @@ export const financeSetupInputSchema = z.discriminatedUnion("operation", [
     sessionId: idSchema,
   }),
   z.object({
-    approvalSource: z.enum(["user_instruction", "agent_self_approval"]),
+    approvalSource: z.literal("user_instruction"),
     budgetVersionId: idSchema,
     expectedProfileVersionId: idSchema.nullable().optional(),
     expectedVersion: z.number().int().positive(),

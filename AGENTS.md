@@ -25,8 +25,26 @@ personal agent skills and routine definitions. Keep changes small, explicit, and
 - When a product conversation settles a durable decision, update the nearest canonical document in
   the same documentation change and keep target scope separate from implementation claims.
 
+## Merge authority
+
+Merge only when Cooper explicitly authorizes merging the identified work, for example “get this
+merged,” “merge it when safe,” or “ship it.” Record that scope and continue through the gates without
+asking again later. Implementing, tracking, publishing a PR, or handing off context alone does not
+authorize merge. Without merge authority, stop at the requested reviewed/published state and report
+readiness. A later pause/revocation or changed scope supersedes the grant. Assigned workers still
+never merge; their authorized orchestrator owns it. Ordinary contribution owners may merge their
+own scoped work only with this explicit grant and independent review. No bypass or deferred auto-merge.
+
 ## Linear Routing
 
+- Implementation and durable repository changes MUST be tracked in Linear from intake through
+  completion. Match/create the direct Nohmi issue before implementation when possible; reconcile
+  already-started work immediately. Update material scope, progress, blockers, PR links and final
+  acceptance without repetitive status comments. This standing instruction authorizes bounded
+  in-project tracking for assigned work; it does not authorize unrelated taxonomy or assignment changes.
+  Pure discussion/read-only review needs no new issue unless it yields assigned follow-up work.
+  If Linear is unavailable or ambiguous, preserve work and report the tracking gap; no merge until
+  traceability is restored. Do not silently skip tracking.
 - This repository belongs exclusively to the `Nohmi` Project in the Cooper Sullivan Linear workspace.
 - Any Linear issue created from this repository, its branches, commits, pull requests, docs, or task history must be created directly in the live `Nohmi` Project. Repository-derived updates may target only issues already assigned to that Project.
 - Never route repository work to `Cooper Sullivan Games`, `Notepad++ for Mac`, `Portfolio`, `Upper Thought`, another Project, or no Project.
@@ -47,7 +65,7 @@ personal agent skills and routine definitions. Keep changes small, explicit, and
 - A head or orchestrator never implements, and a worker never merges or enables auto-merge.
   These boundaries remain in force when invoking another skill, including `ship-it`.
 - Only an assigned orchestrator with user-authorized merge scope may merge after all documented
-  gates pass, including current CodeRabbit coverage and zero unresolved review threads.
+  gates pass, including current independent deep-review acceptance and zero unresolved review threads.
 - Ordinary contribution tasks retain their existing workflows unless assigned a network role.
 
 ## Codex Local Environment
@@ -70,7 +88,14 @@ personal agent skills and routine definitions. Keep changes small, explicit, and
 
 ## Validation
 
-Run the deterministic verification action before opening a pull request:
+Apply `docs/engineering/acceptance-contract.md` and `docs/engineering/code-standards.md` to new
+and materially changed behavior. Record evidence for applicable requirements; migration exceptions
+require explicit approval, bounded scope, an owner and an exit condition. These documents define
+policy, not proof that all gates are already automated. Preserve existing role and merge boundaries.
+
+Use `docs/engineering/development-handbook.md` to select the next required step and reuse valid
+evidence. Run complete verification on the frozen candidate after review convergence and before
+merge; draft publication and early review use focused checks:
 
 ```bash
 pnpm verify

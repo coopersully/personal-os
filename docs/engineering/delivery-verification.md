@@ -1,10 +1,15 @@
 # Delivery verification
 
-Ship one frozen candidate with complete evidence. This contract applies to ship-it and its
+Ship one frozen candidate with complete evidence. Use [verification efficiency](verification-efficiency.md)
+for focused iteration and [acceptance](acceptance-contract.md) for review/production gates. This contract applies to ship-it and its
 create-pr, catchup, review-remediation, and network callers. Focused checks run during implementation;
 full verification runs after review findings converge. A full run against a changing checkout is
 not acceptance evidence. Stage and commit the candidate before starting it; keep external metadata
 and private evidence outside the source tree.
+
+Draft publication and early review require focused evidence, not a separate full run. This sequencing
+applies to ordinary contributions as well as handoff/network callers; see the
+[development handbook](development-handbook.md). Final acceptance still requires every stage below.
 
 ## Verification equivalence
 
@@ -30,6 +35,28 @@ failure classification, source evidence, and focused reproduction/recovery resul
 or unexplained failure is not an environment diagnosis. If the defect is real, fix and reverify the
 new candidate. If isolated reproduction passes and evidence establishes runner contention, use
 successful equivalent hosted gates; do not keep rerunning the whole local suite to obtain lucky green.
+
+## Opt in to complete hosted verification
+
+Apply the repository label `ci:full` to the PR before its next genuine opened, reopened, or
+synchronize event (normally the final source or catchup push). CI reads the label from that PR
+event payload and selects full scope: repository contracts, lint, Node quality, both browser
+projects, Terraform, and the existing macOS/Windows native matrix. The normal PR merge checkout,
+head/base association, read-only permissions, source aggregate and metadata gate remain unchanged.
+Other PRs retain their classified scope.
+
+Adding or removing a label alone starts no workflow, cancels no source run and supplies no evidence.
+Do not create empty commits or close/reopen a PR solely to trigger CI. A retry retains its original
+event payload: labeling an already frozen candidate and rerunning an earlier unlabeled event does
+not opt it in. Use the complete local verifier when there is no genuine next candidate event.
+Labels are operator-managed; CI neither creates nor applies them. Removing the label affects only
+future genuine PR events and never cancels an existing full run.
+
+A full-scope configuration is not successful execution. Collect every distinct successful job,
+matrix member and exact candidate identity required above, then check the normal metadata gate.
+Hosted capacity, permissions, provider outages and native dependencies can still block delivery.
+Existing failure diagnosis and bounded retry rules continue to apply; a failed metadata gate after
+source recovery needs the documented metadata rerun, not a PR-body edit.
 
 ## Shared local capacity
 
@@ -95,3 +122,12 @@ must additionally prove GitHub Actions read permission, source-run discovery, bo
 required-check publication. Scheduler creation must be verified on its host; a checkpoint alone
 cannot wake a chat. A provider outage, inaccessible fork run, or exhausted review quota can still
 block delivery despite green local tests. Persist the exact gap and next trigger, never infer success.
+
+## Ownership through production
+
+The repository handoff skill owns delivery through production acceptance and reconciliation;
+ship-it is its protected-merge engine and compatibility entrypoint. Keep all existing merge gates.
+Use repository deep-review instead of the retired personal refine-pr workflow. A readiness verdict
+of TERMINAL after merge ends only the merge operation. Retain the owner and dedicated wakeup until
+the reviewed production plan is verified or explicitly blocked. Offline acceptance and checkpoint
+validation do not authenticate provider evidence; inspect the recorded receipts.

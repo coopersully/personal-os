@@ -38,7 +38,7 @@
     "react-markdown": "^10.1.0",
     "react-plaid-link": "^5.0.0",
     "react-resizable-panels": "^4.12.3",
-    "react-router-dom": "^7.6.3",
+    "react-router-dom": "^7.18.2",
     "recharts": "^2.15.4",
     "rehype-raw": "^7.0.0",
     "rehype-sanitize": "^6.0.0",

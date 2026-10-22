@@ -8,6 +8,10 @@ Use [agent handoffs](agent-handoffs.md) for packet, evidence, and revision forma
 [research note](autonomous-development-research.md) explains the design precedents and deferred
 runtime work; it is background for maintainers, not required context for every worker.
 
+Use [epic planning and launch](epic-delivery.md) and the repository `oversight` skill for intake,
+admission and Codex section setup. Oversight is the common coordination procedure performed by
+these existing roles, not a fourth supervisor. Planning alone never activates the network.
+
 ## Three roles
 
 | Role | Owns | Delegates |
@@ -121,7 +125,7 @@ identity before editing. These conventions do not provide an OS or credential sa
 Give the reviewer current requirements, policy, candidate SHA/diff, and raw verification evidence in
 a fresh context, without the worker's conclusions. Review that exact candidate; do not run a review
 against files another worker is still changing. Return findings to the implementing owner and repeat
-affected review after changes. CodeRabbit and the orchestrator's own acceptance remain required.
+affected review after changes. Independent deep-review and the orchestrator's own acceptance remain required.
 
 ## Executor readiness and shared resources
 
@@ -180,7 +184,7 @@ Use these network states; map them to existing Linear statuses rather than creat
 ## Worker handoff and remediation
 
 Workers report PR URL, exact pushed head, base, acceptance evidence, changed docs, test commands and
-results mapped to each acceptance ID, self-review findings/dispositions, CodeRabbit state, remaining
+results mapped to each acceptance ID, self-review findings/dispositions, advisory bot feedback when present, remaining
 feedback, and blockers. Include packet revision and a resumable next action; a PR URL or process
 exit alone is not a completed handoff.
 They use `create-pr`, `catchup`, and `resolve-pr-comments` within their assignment. They do not invoke
@@ -207,9 +211,9 @@ applicable checks remain waiting. Do not rerun unchanged local verification sole
 edit when its candidate source and verifier inputs are unchanged; retain the original evidence and
 refresh hosted checks. Source/base/verifier-input changes follow the full existing verification gate.
 
-If drafts skip CodeRabbit review, move a ready candidate through the authorized review-ready workflow
-and wait for substantive current-diff coverage. A green skipped review is not acceptance. Independent
-review still examines the integrated journey and exact destinations/contracts, even after tests pass.
+Move a ready candidate through the authorized review-ready workflow
+and obtain independent deep-review acceptance for the current candidate. Optional bot status cannot
+establish acceptance. Independent review examines the integrated journey and exact destinations/contracts, even after tests pass.
 
 ## Merge gates: all must be true
 
@@ -223,9 +227,11 @@ Only the assigned orchestrator merges the assigned PR after verifying:
 3. Focused verification and a complete local or equivalent hosted verification set passed for the candidate head. There are no failed or
    pending selected CI jobs; required checks succeed with the expected provider identity. Discover
    the expected set from current workflow scope and live rules, not just the jobs that appeared.
-4. CodeRabbit completed a substantive review covering the current diff, with no unresolved findings.
-   Validate bot identity and review coverage. A summary, pending/skipped/rate-limited review,
-   historical approval, or absence of comments is not a completed current review.
+4. Independent deep-review covers the current diff and acceptance contract, with no unresolved required findings.
+   CodeRabbit is optional advisory feedback; its absence, skipped review or rate limit is not a gate.
+   Handle actual bot findings and preserve any check required by live GitHub rules.
+   Validate independent reviewer identity and current-candidate acceptance coverage. Historical
+   approval, an author claim, or absence of comments is not independent acceptance.
 5. Every review thread is resolved, including outdated threads; actionable top-level comments and
    review summaries are addressed with evidence. Resolve only handled or demonstrably inapplicable
    findings. An unresolved disagreement goes back to the reviewer or head; do not dismiss it merely
@@ -242,11 +248,13 @@ only; missing data and unknown states do not pass this network's gate. The evalu
 references; it does not authenticate them. Ship-it’s read-only collector and private Git-common-directory checkpoints may support the network registry, but never
 replace its role, acceptance, dependency, or cross-host ownership gates.
 
-Immediately before merge, re-read PR head/base, all checks, review surfaces, CodeRabbit coverage,
+Immediately before merge, re-read PR head/base, all checks, review surfaces, independent deep-review acceptance,
 rules, and Linear eligibility, requirements, and links. Rebuild the decision if anything changed.
 Merge only the reviewed SHA using
 the provider's expected-head condition (for example `gh pr merge <PR> --squash
---match-head-commit <SHA>`). Serialize network merges into the same base. Head matching alone does
+--match-head-commit <SHA>`). Serialize all participating merges into the same base using ship-it checkpoint
+`<repository-url>#merge:<base>` in the shared Git common directory; a separate network lock is not
+equivalent. Reconcile legacy network merge claims before adopting that shared claim. Head matching alone does
 not atomically lock the base or reviews: rely on live branch protection to enforce up-to-date checks
 and conversation resolution where available, and pause unattended merging if an equivalent gate
 cannot be enforced. Do not claim Markdown role instructions create a credential-level boundary.
@@ -280,7 +288,7 @@ within the user's capacity/budget limits; it must not disable gates to improve t
 Pausing the head stops new intake. Pausing an outcome stops new dispatches and merges for that
 outcome; instruct active workers to checkpoint and stop. Resume from live evidence. Enabling the
 network requires an explicit queue scope, reachable task registry, available host tools, and verified
-GitHub/Linear/CodeRabbit access. Creating these instructions alone does not start unattended work.
+GitHub/Linear access and independent review capability. Creating these instructions alone does not start unattended work.
 
 ## Useful oversight reports
 
@@ -301,3 +309,12 @@ with focused checks, freeze/commit the candidate, then obtain complete local or 
 verification. This replaces duplicate full-suite invocations in the steps above; it does not waive
 any required check, unexplained failure, or issue-specific acceptance. Local `pnpm verify` uses the
 shared host runner. Metadata-only changes refresh metadata gates, not unchanged source verification.
+
+## Delivery handoff and acceptance
+
+The repository `handoff`/`ship-it` workflow preserves these roles. An assigned orchestrator retains
+acceptance, merge, production observation and reconciliation ownership; workers perform all repairs
+and never merge. Use repository `deep-review` for independent current-candidate standards coverage.
+Apply the [acceptance contract](acceptance-contract.md) and retain delivery ownership after merge
+until the reviewed production criteria and full issue scope are satisfied. A handoff does not
+convert a worker into an orchestrator or authorize new production effects.

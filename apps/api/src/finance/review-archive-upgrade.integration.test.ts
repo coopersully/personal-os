@@ -64,19 +64,17 @@ it("upgrades a database that already applied the first published 0105 archive", 
       .values({ institution: "Test bank", name: "Checking", provider: "manual", userId: owner.id })
       .returning();
     if (!account) throw new Error("Archive upgrade account was not created.");
-    const transactions = await database.db
-      .insert(financeTransactions)
-      .values(
-        ["Before upgrade", "After upgrade"].map((merchant) => ({
-          accountId: account.id,
-          amount: 1200,
-          direction: "expense" as const,
-          merchant,
-          transactionDate: "2026-10-08",
-          userId: owner.id,
-        })),
-      )
-      .returning();
+    // Seed only columns published in the original 0105 schema.
+    const transactions: { id: string }[] = [];
+    for (const merchant of ["Before upgrade", "After upgrade"]) {
+      const result = await database.pool.query<{ id: string }>(
+        `INSERT INTO finance_transactions
+          (user_id, account_id, amount_cents, direction, merchant, transaction_date)
+         VALUES ($1, $2, 1200, 'expense', $3, '2026-10-08') RETURNING id`,
+        [owner.id, account.id, merchant],
+      );
+      transactions.push(...result.rows);
+    }
     if (!transactions[0] || !transactions[1]) throw new Error("Transactions were not created.");
     // The fixture is deliberately still on original 0105. Use only its columns;
     // the current ORM schema also contains fields introduced by later migrations.

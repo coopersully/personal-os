@@ -77,3 +77,14 @@ The calculation adapter can consume verified upstream reservation facts only whe
 references; overlapping commitment/protection references block spendable with `incomplete_evidence`
 instead of subtracting the same reservation twice. Stale, unavailable or qualified funding also
 keeps spendable unavailable. This evidence does not grant execution authority.
+
+
+## Agent Cash flow window reads
+
+The existing `get_finance_cashflow` MCP read accepts an optional explicit `window` using the canonical Cash flow projection query: `from`, `to`, optional `accountIds`, and nullable `selectedIncomeStreamId`. The date window is one through 366 calendar dates; account scope is at most 100 IDs. Omitted scope and an explicit empty account list remain distinct. Calling with `{}` retains the existing legacy alerts, forecast, income and obligations response and performs no additional canonical reads. Those legacy fields retain their existing owner-wide scope even when a separate qualified window is requested.
+
+An explicit window adds `qualifiedCashflow`, the canonical occurrence/match view and qualified payday projection. Unavailable reasons remain unavailable, including missing balance statements or schedule evidence. Legacy forecast values never substitute for an unavailable qualified projection.
+
+`rawCashflowContext` carries separate current schedules, balance bases, dated source snapshots and balance-statement source snapshots. Schedules are restricted to the explicit account set when provided. Balance-statement source evidence covers capped all-known account history, not just the requested date window; preserve its `complete`/`truncated` coverage and server transaction limit. Other source caps and unavailable responses remain canonical. These independent reads do not claim to form one atomic projection snapshot, and raw context does not establish confirmation or qualified arithmetic.
+
+All calls retain the current owner's `finances:read` authority. This intent introduces no new mutation grant or confirmation tool. Explicit schedule statements, occurrence matching/reversal and balance-basis confirmation remain authenticated-human consent boundaries in the canonical services, as do recurring-cost and saved-goal progress confirmations. The occurrence-list API is represented by the exact `qualifiedCashflow.schedule` result rather than a second MCP intent.

@@ -556,6 +556,7 @@ const mocks = vi.hoisted(() => ({
   getExecutionPolicySettings: vi.fn(),
   getFinanceBudgetPace: vi.fn(),
   getFinanceLedgerHealth: vi.fn(),
+  getFinanceOnboarding: vi.fn(),
   getFinanceGuidedSetup: vi.fn(),
   getFinanceStatus: vi.fn(),
   getFinanceProfile: vi.fn(),
@@ -927,6 +928,24 @@ function defaults() {
     possibleDuplicates: 0,
     staleAccounts: 0,
     unresolvedReviews: 0,
+  });
+  mocks.getFinanceOnboarding.mockResolvedValue({
+    revision: 0,
+    completedAt: null,
+    existingAccess: true,
+    source: { state: "usable", summary: "Existing source", recoveryHref: "/finances/accounts" },
+    contextReview: "needs_review",
+    questions: [],
+    displayPreferences: { reviewed: false, summary: [] },
+    automationChoice: null,
+    manualVisibility: "auto",
+    automation: {
+      registrationCount: 0,
+      authorizedRegistrationWithCadence: false,
+      chatVerification: "pending",
+      canSendChat: false,
+      historyAvailable: false,
+    },
   });
   mocks.getFinanceGuidedSetup.mockResolvedValue({
     accountSources: [],
@@ -8001,15 +8020,10 @@ describe("ilo web app", () => {
     expect(await screen.findByRole("button", { name: "Calendar view: day" })).toBeInTheDocument();
   }, 30_000);
 
-  it("navigates Calendar through Tasks and Today to Settings activity", async () => {
-    const view = setup("/calendar");
+  it("filters Tasks across active and history views and opens reminder dialogs", async () => {
+    setup("/tasks");
     const browser = userEvent.setup();
-    expect(await screen.findByRole("button", { name: "Calendar view: week" })).toBeInTheDocument();
-    await browser.click(
-      within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
-        name: "Tasks",
-      }),
-    );
+    expect(await screen.findByRole("button", { name: "Tasks view: Inbox" })).toBeInTheDocument();
     await browser.click(screen.getByRole("link", { name: "All" }));
     await browser.click(screen.getByRole("button", { name: "Filters" }));
     await browser.selectOptions(screen.getByLabelText("Type"), "reminder");
@@ -8039,7 +8053,18 @@ describe("ilo web app", () => {
     expect(screen.getByRole("button", { name: "Tasks view: All tasks" })).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Open Test reminder" }));
     await browser.click(screen.getByRole("button", { name: "Close" }));
+  });
 
+  it("navigates Calendar through Tasks and Today to Settings activity", async () => {
+    setup("/calendar");
+    const browser = userEvent.setup();
+    expect(await screen.findByRole("button", { name: "Calendar view: week" })).toBeInTheDocument();
+    await browser.click(
+      within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
+        name: "Tasks",
+      }),
+    );
+    expect(await screen.findByRole("button", { name: "Tasks view: Inbox" })).toBeInTheDocument();
     await browser.click(
       within(screen.getByRole("navigation", { name: "Workspace navigation" })).getByRole("link", {
         name: "Today at a Glance",
@@ -8059,6 +8084,12 @@ describe("ilo web app", () => {
     expect(screen.getByText(/Connector ·/)).toBeInTheDocument();
     expect(screen.getByText(/System ·/)).toBeInTheDocument();
     expect(screen.getByText(/You ·/)).toBeInTheDocument();
+  });
+
+  it("keeps Activity search results and URL state aligned", async () => {
+    const view = setup("/settings?section=activity");
+    const browser = userEvent.setup();
+    expect(await screen.findByText("Reminder · created")).toBeInTheDocument();
     const activitySearch = screen.getByRole("searchbox", { name: "Search activity" });
     await browser.type(activitySearch, "system");
     expect(view.location.value).toBe("/settings?page=activity&q=system");
@@ -8114,6 +8145,19 @@ describe("ilo web app", () => {
     await waitFor(() =>
       expect(mocks.deleteConnector).toHaveBeenCalledWith(secondId, expect.anything()),
     );
+  });
+
+  it("returns from actual Connected agents settings to the original Finance question", async () => {
+    const target = "/finances/chat?question=question-a&message=message-a";
+    const view = setup(
+      `/settings?section=agent-connections&returnTo=${encodeURIComponent(target)}`,
+    );
+    const browser = userEvent.setup();
+    const back = await screen.findByRole("link", { name: "Return to conversation" });
+    expect(back).toHaveAttribute("href", target);
+    expect(await screen.findByDisplayValue("https://mcp.example.com/mcp")).toBeInTheDocument();
+    await browser.click(back);
+    await waitFor(() => expect(view.location.value).toBe(target));
   });
 
   it("creates and revokes a connected-agent token", async () => {
@@ -9957,6 +10001,10 @@ describe("ilo web app", () => {
     await browser.keyboard("{Escape}");
     expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeDisabled();
     finishSave?.();
+    await waitFor(() => {
+      expect(pendingSave.queryClient.isMutating()).toBe(0);
+      expect(pendingSave.queryClient.isFetching()).toBe(0);
+    });
     pendingSave.unmount();
   }, 10_000);
 

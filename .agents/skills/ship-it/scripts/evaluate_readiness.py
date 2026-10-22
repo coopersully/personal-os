@@ -4,8 +4,9 @@ import re
 import sys
 from pathlib import Path
 
+from acceptance import review_problems
+
 PENDING = {"IN_PROGRESS", "PENDING", "QUEUED", "WAITING"}
-FAILED = {"ACTION_REQUIRED", "CANCELLED", "ERROR", "FAILURE", "STALE", "TIMED_OUT"}
 GITHUB_MERGE_STATES = {
     "BEHIND",
     "BLOCKED",
@@ -104,7 +105,6 @@ def evaluate(state):
         "base": "evidenceHeadSha",
         "verification": "headSha",
         "ci": "headSha",
-        "codeRabbit": "headSha",
         "feedback": "headSha",
         "selfReview": "headSha",
         "linear": "headSha",
@@ -167,7 +167,6 @@ def evaluate(state):
         )
 
     feedback = state.get("feedback") or {}
-    rabbit = state.get("codeRabbit") or {}
     if feedback.get("collectionComplete") is not True:
         return result(
             "BLOCK",
@@ -175,18 +174,6 @@ def evaluate(state):
             ["feedback_collection_incomplete"],
             ["Complete review feedback collection is unverified"],
         )
-    rabbit_status = str(rabbit.get("status") or "MISSING").upper()
-    if rabbit_status not in PENDING | FAILED | {"SUCCESS", "MISSING"}:
-        return result("BLOCK", head, ["coderabbit_status_unverified"],
-                      ["CodeRabbit status is unsupported; substantive success is required"])
-    if rabbit_status == "SUCCESS" and rabbit.get("coverageVerified") is not True:
-        return result(
-            "BLOCK",
-            head,
-            ["coderabbit_coverage_unverified"],
-            ["Current-diff CodeRabbit coverage is unverified"],
-        )
-
     ci = state.get("ci") or {}
     checks = ci.get("checks") or []
     required = ci.get("expectedRequiredChecks") or []
@@ -353,32 +340,16 @@ def evaluate(state):
             f"Checks are not successful: {', '.join(sorted(set(failed_checks)))}"
         )
 
-    rabbit_status = str(rabbit.get("status") or "MISSING").upper()
-    rabbit_findings = rabbit.get("actionableFindings")
-    if ((type(rabbit_findings) is int and rabbit_findings > 0)
-            or (rabbit_status == "SUCCESS"
-                and (type(rabbit_findings) is not int or rabbit_findings != 0))):
-        remediation_codes.append("coderabbit_findings")
-        remediation_reasons.append("CodeRabbit has actionable findings")
-    if rabbit_status in FAILED:
-        remediation_codes.append("coderabbit_failed")
-        remediation_reasons.append("CodeRabbit did not complete successfully")
-    elif rabbit_status == "MISSING":
-        remediation_codes.append("coderabbit_missing")
-        remediation_reasons.append("Request substantive CodeRabbit review for the current head")
-
     if remediation_codes:
         return result("REMEDIATE", head, remediation_codes, remediation_reasons)
     approval_pending = (feedback.get("requiredApprovalsSatisfied") is not True
                         or feedback.get("approvalsCurrent") is not True)
-    if pending_checks or rabbit_status in PENDING or approval_pending:
+    if pending_checks or approval_pending:
         reasons = []
         if approval_pending:
             reasons.append("Waiting for eligible current approval; never manufacture approval")
         if pending_checks:
             reasons.append(f"Checks pending: {', '.join(sorted(set(pending_checks)))}")
-        if rabbit_status in PENDING:
-            reasons.append("CodeRabbit is pending")
         return result("WAIT", head, ["external_checks_pending"], reasons)
     if pr.get("mergeable") not in {"MERGEABLE", "UNKNOWN"}:
         return result(
@@ -394,6 +365,10 @@ def evaluate(state):
             ["mergeability_pending"],
             ["GitHub is still calculating mergeability"],
         )
+
+    acceptance_errors = review_problems(state)
+    if acceptance_errors:
+        return result("BLOCK", head, ["acceptance_incomplete"], acceptance_errors)
 
     if merge.get("normalMergeAllowed") is True:
         if pr.get("mergeStateStatus") != "CLEAN":

@@ -303,16 +303,19 @@ test("Finance account selection recovery stays readable after reopening and navi
     await expect(dialog.getByText("Latest: Everyday checking", { exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
     await openSettingsSection(page, !!info.project.use.isMobile, "Finances");
-    await expect(page.getByText("Your change: None selected")).toBeVisible();
-    await expect(page.getByText("Latest: Everyday checking", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Refresh latest settings" }).click();
-    await expect(page.getByRole("button", { name: "Use latest settings" })).toBeEnabled();
+    const preferences = page.locator(".settings-section").filter({
+      has: page.getByRole("heading", { name: "Workspace preferences", exact: true }),
+    });
+    await expect(preferences.getByText("Your change: None selected")).toBeVisible();
+    await expect(preferences.getByText("Latest: Everyday checking", { exact: true })).toBeVisible();
+    await preferences.getByRole("button", { name: "Refresh latest settings" }).click();
+    await expect(preferences.getByRole("button", { name: "Use latest settings" })).toBeEnabled();
     expect(writes).toBe(1);
     await page.screenshot({
       path: info.outputPath("finance-contextual-recovery.png"),
       fullPage: true,
     });
-    await page.getByRole("button", { name: "Use latest settings" }).click();
+    await preferences.getByRole("button", { name: "Use latest settings" }).click();
     await expect(page.getByText("Your change: None selected")).toHaveCount(0);
     expect(writes).toBe(1);
     const latest = (await (await page.request.get(path)).json()) as WorkspaceSettings<"finances">;

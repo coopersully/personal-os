@@ -6,6 +6,11 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { FinanceLinkedTransaction, FinanceTransactionControls } from "./transaction-controls.js";
 
+const workspaceReadiness = vi.hoisted(() => vi.fn());
+vi.mock("./use-finance-workspace-readiness", () => ({
+  useFinanceWorkspaceReadiness: workspaceReadiness,
+}));
+
 const api = vi.hoisted(() => ({
   getFinanceTransaction: vi.fn(),
   getWorkspaceSettings: vi
@@ -17,6 +22,16 @@ const api = vi.hoisted(() => ({
     preferences: input.preferences,
   })),
 }));
+beforeEach(() => {
+  workspaceReadiness.mockReturnValue({
+    manualCreationVisible: true,
+    readiness: { workspaceAccessible: true },
+    isPending: false,
+    isError: false,
+    error: null,
+    reload: vi.fn(),
+  });
+});
 function render(ui: React.ReactNode) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -240,4 +255,73 @@ it("restores saved view and grouping and saves an explicit ungrouped choice", as
       preferences: { financeTransactionGroup: "none" },
     }),
   );
+});
+
+it.each([
+  null,
+  "GENERAL_MERCHANDISE",
+])("resolves the linked source category ID before legacy text %s without changing its native amount", async (category) => {
+  api.getFinanceTransaction.mockResolvedValue({
+    outcome: "completed",
+    data: {
+      id: "source",
+      merchant: "Canonical source",
+      amount: 24,
+      date: "2026-09-03",
+      categoryId: "food",
+      category,
+      direction: "expense",
+      pending: false,
+    },
+  });
+  render(
+    <MemoryRouter>
+      <FinanceLinkedTransaction
+        id="source"
+        categories={[
+          {
+            id: "food",
+            name: "Meals & groceries",
+            color: null,
+            group: "Spending",
+            isSystem: false,
+            slug: "food",
+          },
+        ]}
+        categoryReadState="ready"
+        onBreakdown={vi.fn()}
+        onCategorize={vi.fn()}
+      />
+    </MemoryRouter>,
+  );
+  expect(await screen.findByText("Meals & groceries")).toBeVisible();
+  expect(screen.queryByText("Shopping")).not.toBeInTheDocument();
+  expect(screen.getByText(/\$24.00/)).toBeVisible();
+});
+it("keeps a linked source with loading taxonomy distinct from uncategorized", async () => {
+  api.getFinanceTransaction.mockResolvedValue({
+    outcome: "completed",
+    data: {
+      id: "source",
+      merchant: "Canonical source",
+      amount: 24,
+      date: "2026-09-03",
+      categoryId: "food",
+      category: null,
+      direction: "expense",
+      pending: false,
+    },
+  });
+  render(
+    <MemoryRouter>
+      <FinanceLinkedTransaction
+        id="source"
+        categoryReadState="loading"
+        onBreakdown={vi.fn()}
+        onCategorize={vi.fn()}
+      />
+    </MemoryRouter>,
+  );
+  expect(await screen.findByText("Loading category…")).toBeVisible();
+  expect(screen.queryByText("Uncategorized")).not.toBeInTheDocument();
 });

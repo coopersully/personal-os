@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "../common.js";
 import { financeMutationMetaSchema, financePositiveMoneySchema } from "./common.js";
+import {
+  financeConfirmGoalPlanningEvidenceInputSchema,
+  financeGoalPlanningEvidenceSchema,
+} from "./planning-evidence.js";
 
 export const financeMonthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/);
 
@@ -108,7 +112,7 @@ export type ReviseFinanceBudgetInput = z.infer<typeof reviseFinanceBudgetInputSc
 
 export const approveFinanceBudgetInputSchema = financeMutationMetaSchema.and(
   z.object({
-    approvalSource: z.enum(["user_instruction", "agent_self_approval"]),
+    approvalSource: z.literal("user_instruction"),
     budgetVersionId: idSchema,
     expectedProfileVersionId: idSchema.nullable().optional(),
     expectedVersion: z.number().int().positive(),
@@ -117,6 +121,7 @@ export const approveFinanceBudgetInputSchema = financeMutationMetaSchema.and(
 export type ApproveFinanceBudgetInput = z.infer<typeof approveFinanceBudgetInputSchema>;
 
 export const financeGoalSchema = z.object({
+  planningEvidence: financeGoalPlanningEvidenceSchema.nullable().optional(),
   createdAt: isoDateTimeSchema,
   currentAmount: financePositiveMoneySchema,
   deadline: z.iso.date().nullable(),
@@ -131,6 +136,10 @@ export const financeGoalSchema = z.object({
 export type FinanceGoal = z.infer<typeof financeGoalSchema>;
 
 export const manageFinanceGoalInputSchema = z.discriminatedUnion("operation", [
+  financeConfirmGoalPlanningEvidenceInputSchema.extend({
+    operation: z.literal("confirm_progress"),
+    idempotencyKey: z.string().min(1).max(200),
+  }),
   z.object({
     deadline: z.iso.date().nullable(),
     idempotencyKey: z.string().min(1).max(200),

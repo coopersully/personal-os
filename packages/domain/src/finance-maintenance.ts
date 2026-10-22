@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "./common.js";
 import { materialSourceReferenceSchema } from "./feature-contracts.js";
+import { financeConversationCausalClaimSchema } from "./finance/conversation.js";
 import { financePositionEvidenceCheckpointSchema } from "./finance/workflow-contracts.js";
 import {
   applyFinanceCategorizationsInputSchema,
@@ -552,6 +553,7 @@ export const financeLedgerChallengeFindingInputSchema = z
 
 export const submitFinanceLedgerChallengeInputSchema = z
   .object({
+    conversationEvidence: financeConversationCausalClaimSchema.optional(),
     candidateRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
     challengeId: idSchema,
     checked: z

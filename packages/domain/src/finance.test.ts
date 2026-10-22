@@ -180,6 +180,36 @@ describe("canonical Finance contracts", () => {
     );
   });
 
+  it("names immutable host prompt inspection and issuance as actual typed capabilities", () => {
+    expect(
+      financeCapabilityManifest.filter((item) =>
+        item.capability.startsWith("workflow.host_prompt_"),
+      ),
+    ).toEqual([
+      {
+        apiOperation: "getAutomationHostPromptHistory",
+        capability: "workflow.host_prompt_history",
+        mcpTool: "get_finance_host_prompt_history",
+        mode: "read",
+        requiredScope: "finances:maintain",
+      },
+      {
+        apiOperation: "getAutomationHostPrompt",
+        capability: "workflow.host_prompt_read",
+        mcpTool: "get_finance_host_prompt",
+        mode: "read",
+        requiredScope: "finances:maintain",
+      },
+      {
+        apiOperation: "issueAutomationHostPrompt",
+        capability: "workflow.host_prompt_issue",
+        mcpTool: "issue_finance_host_prompt",
+        mode: "write",
+        requiredScope: "finances:execute",
+      },
+    ]);
+  });
+
   it("requires a complete budget version to balance to the cent", () => {
     const base = {
       allocations: [],

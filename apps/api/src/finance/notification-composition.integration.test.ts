@@ -279,7 +279,7 @@ describe.sequential("Finance notification composition", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("holds real Finance locks through queued delivery before one provider submission", async () => {
+  it("serializes an app answer behind queued delivery before one provider submission", async () => {
     const owner = await createOwner("Delivery lock race");
     const first = await createQuestion(owner, "First");
     const second = await createQuestion(owner, "Second");
@@ -303,11 +303,15 @@ describe.sequential("Finance notification composition", () => {
       return resolved;
     };
     const delivery = notifications(gatedResolver).deliver(owner.principal, claim);
+    let answering: ReturnType<typeof answer> | undefined;
     try {
       await locked;
-      await expect(answer(owner, second.question.work)).rejects.toMatchObject({
-        code: "conflict",
-        details: { retryable: true },
+      answering = answer(owner, second.question.work);
+      await vi.waitFor(async () => {
+        const blocked = await database.pool.query(
+          "SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND cardinality(pg_blocking_pids(pid))>0 AND query ILIKE '%users%' AND query ILIKE '%no key update%'",
+        );
+        expect(blocked.rows).toHaveLength(1);
       });
       expect(send).not.toHaveBeenCalled();
       expect(await database.db.select().from(textMessages)).toEqual([]);
@@ -315,6 +319,8 @@ describe.sequential("Finance notification composition", () => {
       releaseResolver();
       await delivery;
     }
+    if (!answering) throw new Error("Missing serialized answer.");
+    expect(await answering).toMatchObject({ state: "accepted" });
 
     expect(send).toHaveBeenCalledTimes(1);
     expect(await database.db.select().from(textMessages)).toHaveLength(1);

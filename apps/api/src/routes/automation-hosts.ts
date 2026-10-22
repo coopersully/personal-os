@@ -13,12 +13,39 @@ export function registerAutomationHostRoutes({
   hosts: ReturnType<typeof createAutomationHostService>;
 }) {
   app.use("/v1/automation-hosts/*", async (c, next) => {
-    if (c.req.path.endsWith("/observe") || c.req.path.endsWith("/continuations"))
+    if (
+      (/\/prompts(?:\/[^/]+)?$/.test(c.req.path) && c.get("principal").actorType === "agent") ||
+      c.req.path.endsWith("/observe") ||
+      c.req.path.endsWith("/continuations")
+    )
       return requireScope("finances:maintain")(c, next);
     return requireFeatureAccess("finances")(c, next);
   });
   app.use("/v1/automation-hosts", requireFeatureAccess("finances"));
   const id = (value: string) => idSchema.parse(value);
+  const version = (value: string) => z.coerce.number().int().positive().parse(value);
+  app.get("/v1/automation-hosts/:id/prompts", async (c) =>
+    c.json(await hosts.promptHistory(c.get("principal"), id(c.req.param("id")), c.req.query())),
+  );
+  app.get("/v1/automation-hosts/:id/prompts/:version", async (c) =>
+    c.json(
+      await hosts.getPrompt(
+        c.get("principal"),
+        id(c.req.param("id")),
+        version(c.req.param("version")),
+      ),
+    ),
+  );
+  app.put("/v1/automation-hosts/:id/prompts/:version", async (c) =>
+    c.json(
+      await hosts.issuePrompt(
+        c.get("principal"),
+        id(c.req.param("id")),
+        version(c.req.param("version")),
+        await parseBody(c, z.unknown()),
+      ),
+    ),
+  );
   app.get("/v1/automation-hosts/:id/continuations", requireScope("finances:maintain"), async (c) =>
     c.json(
       await hosts.continuations(

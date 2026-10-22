@@ -5,9 +5,14 @@ description: Verify personal-os changes at the appropriate unit, API integration
 
 # personal-os testing
 
-The repository requires `pnpm verify` before handoff. It runs environment
+Final acceptance requires complete local or equivalent hosted verification under
+`docs/engineering/delivery-verification.md`; iteration and early handoffs use focused evidence.
+The local `pnpm verify` runs environment
 checks, linting, type checks, high-threshold coverage, production builds, and
 desktop/mobile Playwright acceptance tests.
+
+Use `docs/engineering/development-handbook.md` and its offline planner to identify missing steps
+and reusable receipts. This does not replace this skill's authority, role or acceptance gates.
 
 ## Choose the narrowest effective layer
 
@@ -28,6 +33,12 @@ When a migration transforms existing data, add a targeted preservation test.
 Avoid tests that only mirror component internals or generated UI primitives.
 
 ## Run proportionate verification
+
+Follow `docs/engineering/verification-efficiency.md` for iteration. Use the shared verification
+planner for package/consumer scope, then select behavior-specific tests. Share current-candidate
+receipts with reviewers; only one execution owner runs checks. The planner never grants merge
+readiness or replaces the final verification contract.
+
 
 Run the nearest focused test while iterating, then run `pnpm verify` for the
 complete change. Do not lower coverage thresholds or exclude product code to

@@ -2,6 +2,83 @@
  * A missing ordinary operation must get an adapter; it cannot be waived by the inventory test.
  */
 export const workspaceApiExceptions = {
+  confirmFinanceRecurringSchedule: {
+    kind: "owner_consent",
+    reason:
+      "Only the authenticated human may record an explicit recurring schedule statement; agent projection reads cannot provide that consent.",
+  },
+  manageFinanceOccurrenceMatch: {
+    kind: "owner_consent",
+    reason:
+      "Only the authenticated human may confirm or reverse an occurrence match against exact source revisions; agent read context cannot mutate match evidence.",
+  },
+  confirmFinanceBalanceBasis: {
+    kind: "owner_consent",
+    reason:
+      "Only the authenticated human may confirm the account balance basis and historical inclusion statement; agents cannot manufacture this evidence.",
+  },
+  listFinanceRecurringOccurrences: {
+    kind: "equivalent",
+    tool: "get_finance_cashflow",
+    reason:
+      "An explicit window returns the exact canonical recurring-occurrence view as qualifiedCashflow.schedule, including match history and unavailable sources.",
+  },
+  getFinanceConversationUnread: {
+    kind: "owner_interaction",
+    reason:
+      "Only the human reads agent-message attention above their own rendered cursor; agent delivery ACK never marks messages read or exposes live private history.",
+  },
+  getFinanceActivityEvidence: {
+    kind: "owner_interaction",
+    reason:
+      "Bounded private Activity audit/source evidence belongs to the authenticated human; agent financial readback is separately bound to original run authority.",
+  },
+  getFinanceConversationMessageContext: {
+    kind: "owner_interaction",
+    reason:
+      "Only the authenticated human resolves a bounded owner-scoped source message in Chat; agents consume original run batches and cannot inspect live history through source links.",
+  },
+  listFinanceActivity: {
+    kind: "owner_interaction",
+    reason:
+      "Private causal Activity history belongs to the human owner; agents receive only run-bound evidence and cannot inspect the live conversation through Activity.",
+  },
+  getFinanceConversationHostReadiness: {
+    kind: "owner_interaction",
+    reason:
+      "The human inspects the selected host original-connection proof; hosts complete only an actually issued protocol challenge and cannot self-report verification.",
+  },
+  getFinanceConversationReadiness: {
+    kind: "owner_interaction",
+    reason:
+      "The human UI reads its own sending readiness; hosts prove capability through the challenge exchange and consume only an existing run batch.",
+  },
+  getFinanceConversationHistory: {
+    kind: "owner_interaction",
+    reason:
+      "Live conversation history belongs to the human owner; agents receive only the fixed batch captured by canonical maintenance, never a pre-start queue scan.",
+  },
+  sendFinanceConversationMessage: {
+    kind: "owner_interaction",
+    reason:
+      "Only the authenticated human composes user messages; agent replies are bound to delivered source messages in an existing run.",
+  },
+  markFinanceConversationRendered: {
+    kind: "owner_interaction",
+    reason:
+      "Only the human UI can advance its rendered read cursor; agent delivery acknowledgment is a separate operation and cannot mark messages read.",
+  },
+  issueFinanceConversationChallenge: {
+    kind: "owner_interaction",
+    reason:
+      "Only the human initiates a capability challenge for the chosen host; an agent may exchange an issued challenge but cannot manufacture human intent.",
+  },
+
+  confirmFinanceBudgetBaselineQualification: {
+    kind: "owner_consent",
+    reason:
+      "Only an authenticated human may confirm the exact reviewed baseline fingerprint; agent preparation cannot provide owner consent or activate a budget.",
+  },
   saveAutomationHostFireToken: {
     kind: "owner_consent",
     reason:
@@ -75,6 +152,18 @@ export const workspaceApiExceptions = {
 } as const;
 
 export const runtimeScenarios = [
+  {
+    id: "finance-qualified-cashflow",
+    file: "cashflow-window.integration.test.ts",
+    purpose:
+      "Authenticated explicit-window cash flow, exact account scope, unknown qualification and human-statement read boundaries",
+  },
+  {
+    id: "finance-conversation",
+    file: "conversation.integration.test.ts",
+    purpose:
+      "Authenticated original-host message proof, fixed-batch delivery, exact acknowledgment, causal reply, separate human rendered state and authority loss",
+  },
   {
     id: "finance-ledger",
     file: "ledger.integration.test.ts",

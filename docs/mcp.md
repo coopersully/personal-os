@@ -406,8 +406,9 @@ uncertain income, exceptional resources, and liquid reserves do not silently fun
 Bookkeeping remains available during setup. When setup requests budget approval, the host reads
 `get_finance_budget` and presents the exact proposal, including all resources, allocations,
 rationale, and assumptions. `approve_finance_budget` binds the displayed budget version and
-`expectedProfileVersionId`. Appropriately scoped agents use `agent_self_approval` with enabled
-review bypass; authenticated owners use `user_instruction`. Setup approval additionally binds
+`expectedProfileVersionId`. Every activation requires authenticated human `user_instruction`
+approval in nohmi. Agents may create and revise proposals but cannot activate them with execution
+scope, review bypass, a prior policy, or conversation text. Setup approval additionally binds
 the setup session version. Changed profiles and superseding proposals require fresh inspection.
 
 `get_finance_snapshot` provides the ownership-qualified position; `get_finance_budget` returns
@@ -479,7 +480,17 @@ create/match an internal reimbursement case; they never initiate a payment or
 any other external financial activity. The deprecated `resolve_finance_review`
 compatibility alias only translates legacy categorization answers. Legacy action-review
 approval/dismissal is available to the signed-in owner or explicitly authorized Finance execution
-agents with enabled review bypass and exact current work references. Canonical connection,
+agents with enabled review bypass and exact current work references, except active budget changes:
+those always require the authenticated owner. Legacy category allocations and complete plan writes
+have the same human boundary. Legacy `PUT /v1/finances/budget-plan` and `POST /v1/finances/budgets` submissions from humans
+also return a pending review; only approval of that durable review applies the plan. Approval
+revalidates the monthly plan and full allocation revision, including proposals for absent categories,
+and replaying an applied review returns its recorded result
+without replacing newer allocations. Bucket organization remains ordinary bookkeeping. Answering a budget
+evidence question queues the completed proposal; it does not approve it. Maintenance retains the
+exact reviewed candidate and human approval identity separately from its executing agent, and
+revalidates all item fingerprints and source revisions before writing. New monthly baselines accept
+only human-approved versions; existing historical actor provenance remains readable. Canonical connection,
 import, account correction, and typed transaction-relationship tools have their own scoped API
 contracts and are available to authorized MCP callers; no relationship operation moves money.
 

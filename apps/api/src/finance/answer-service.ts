@@ -31,7 +31,8 @@ import {
   lockContextualQuestion,
   maxContextualRevision,
 } from "./contextual-question-store.js";
-
+import { recordFinanceConversationAcceptedAnswer } from "./conversation-service.js";
+import { guardFinanceExecutionTransaction } from "./execution-owner-guard.js";
 import type { AdmitSmsAnswer } from "./sms-answer-port.js";
 
 type Consume = (accepted: FinanceDomainOutcome & { state: "accepted" }) => Promise<void>;
@@ -104,6 +105,10 @@ async function answerCore(
   const sourceKind = input.source.kind;
   if (input.work.kind !== "question") return outcome(input.operationId, "unavailable");
   return contextualTransaction(options.db, executor, async (tx) => {
+    await guardFinanceExecutionTransaction(tx, context.principal.userId, {
+      actorIds: context.principal.actorType === "agent" ? [context.principal.actorId] : [],
+      hostSchedules: true,
+    });
     const authority = await loadFinanceAuthorization({ db: tx, ...context });
     return executeFinanceAdmittedMutation<Prepared, FinanceDomainOutcome>(
       tx,
@@ -197,6 +202,17 @@ async function answerCore(
           sourceKind: "manual_question",
           contextualQuestionId: question.id,
         });
+        if (context.principal.actorType === "user") {
+          await recordFinanceConversationAcceptedAnswer(writeTx, {
+            userId: context.principal.userId,
+            operationId: input.operationId,
+            caseId: question.reviewCaseId,
+            questionId: question.id,
+            transactionId: question.transactionId,
+            text: input.text,
+            recordedAt,
+          });
+        }
         await writeTx.insert(auditEvents).values(
           auditValues({
             ...context,

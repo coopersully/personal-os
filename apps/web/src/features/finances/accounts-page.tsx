@@ -6,7 +6,7 @@ import type {
 } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
 import { CurrencyInput } from "@/components/currency-input";
 import { HistoryIcon } from "@/components/icons";
@@ -45,6 +45,7 @@ import { Switch } from "@/components/ui/switch";
 import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import { api } from "../../api.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
+import { SettingsFeedbackContext } from "../../lib/settings-feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { financeAccountNeedsConnectionAttention } from "./attention";
 import {
@@ -57,10 +58,19 @@ import {
   FinanceSourceState,
   refreshFinancePosition,
 } from "./position-material.js";
+import { useFinanceWorkspaceReadiness } from "./use-finance-workspace-readiness";
 import { FinanceCreateButton } from "./workspace-header";
 
 export function FinanceAccountsPage() {
   const client = useQueryClient();
+  const workspace = useFinanceWorkspaceReadiness();
+  const task = new URLSearchParams(useLocation().search).get("financeTask");
+  const canImport =
+    workspace.manualCreationVisible === true &&
+    !workspace.isError &&
+    !workspace.isPending &&
+    workspace.readiness?.workspaceAccessible === true &&
+    !task;
   const health = useQuery({
     queryKey: ["finance-ledger-health"],
     queryFn: () => api.getFinanceLedgerHealth(),
@@ -77,19 +87,21 @@ export function FinanceAccountsPage() {
   const [editing, setEditing] = useState<FinanceAccount | null>(null);
   return (
     <div className="flex flex-col gap-5">
-      <WorkspaceHeaderControls label="Account controls">
-        <Button
-          asChild
-          size="icon"
-          variant="ghost"
-          aria-label="Import records"
-          title="Import records"
-        >
-          <Link to="/finances/imports">
-            <HistoryIcon />
-          </Link>
-        </Button>
-      </WorkspaceHeaderControls>
+      {canImport ? (
+        <WorkspaceHeaderControls label="Account controls">
+          <Button
+            asChild
+            size="icon"
+            variant="ghost"
+            aria-label="Import records"
+            title="Import records"
+          >
+            <Link to="/finances/imports">
+              <HistoryIcon />
+            </Link>
+          </Button>
+        </WorkspaceHeaderControls>
+      ) : null}
       <Card>
         <CardHeader>
           <CardTitle>Accounts</CardTitle>
@@ -488,16 +500,32 @@ function AccountEditor({
 }
 
 export function ManualAccountEditor({ onClose }: { onClose: () => void }) {
+  return (
+    <SettingsFeedbackContext.Provider value={true}>
+      <ManualAccountForm onClose={onClose} />
+    </SettingsFeedbackContext.Provider>
+  );
+}
+
+function ManualAccountForm({ onClose }: { onClose: () => void }) {
   const client = useQueryClient();
   const [name, setName] = useState("");
   const [institution, setInstitution] = useState("");
   const [kind, setKind] = useState<FinanceAccountKind>("cash");
   const [balance, setBalance] = useState("");
+  const [currencyCode, setCurrencyCode] = useState("");
   const create = useFeedbackMutation({
-    feedback: { action: "create this account", safeToRetry: false, form: true },
+    feedback: {
+      action: "create this account",
+      safeToRetry: false,
+      form: true,
+      pending: "Adding account…",
+      success: "Account added",
+    },
     mutationFn: () =>
       api.createFinanceAccount({
         balance: balance.trim() === "" ? null : Number(balance),
+        currencyCode: currencyCode.trim() || null,
         institution: institution.trim(),
         kind,
         name: name.trim(),
@@ -557,8 +585,24 @@ export function ManualAccountEditor({ onClose }: { onClose: () => void }) {
                 </Field>
                 <AccountKindField value={kind} onChange={setKind} />
                 <Field>
+                  <FieldLabel htmlFor="new-account-currency">Currency code</FieldLabel>
+                  <Input
+                    id="new-account-currency"
+                    name="currencyCode"
+                    value={currencyCode}
+                    maxLength={3}
+                    pattern="[A-Z]{3}"
+                    placeholder="EUR"
+                    onChange={(event) => setCurrencyCode(event.target.value.toUpperCase())}
+                  />
+                  <FieldDescription>
+                    Use a three-letter currency code. Leave blank if unknown.
+                  </FieldDescription>
+                </Field>
+                <Field>
                   <FieldLabel htmlFor="new-account-balance">Balance</FieldLabel>
                   <CurrencyInput
+                    currencyCode={/^[A-Z]{3}$/.test(currencyCode) ? currencyCode : null}
                     name="balance"
                     id="new-account-balance"
                     min={Number.NEGATIVE_INFINITY}

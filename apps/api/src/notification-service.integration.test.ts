@@ -93,7 +93,8 @@ describe.sequential("durable notifications", () => {
     await container.stop();
   });
   beforeEach(async () => {
-    await database.db.execute(sql`TRUNCATE notification_test_work, users CASCADE`);
+    await database.db.execute(sql`DELETE FROM notification_test_work`);
+    await database.db.delete(users);
     current = new Date("2026-03-08T12:00:00Z");
     for (const userId of [owner, other]) {
       await database.db.insert(users).values({

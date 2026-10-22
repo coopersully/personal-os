@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 for (const width of [390, 1100]) {
-  test(`auth decoration stays separate from the form and field spacing matches at ${width}px`, async ({
+  test(`auth branding stays separate from the form and field spacing matches at ${width}px`, async ({
     page,
   }) => {
     await page.setViewportSize({ width, height: 588 });
@@ -40,22 +40,18 @@ for (const width of [390, 1100]) {
       expect(panelBox.x).toBeGreaterThanOrEqual(width / 2);
       expect(headerBox.x).toBe(width - panelBox.x - panelBox.width);
       expect(headerBox.y).toBe(panelBox.y);
-      const tiles = panel.locator(".brand-pattern__tile");
-      expect(await tiles.count()).toBeGreaterThan(1);
-      await expect(panel.locator(".auth-brand-graphic__orbit")).toHaveCount(0);
-      const durations = await tiles.evaluateAll((elements) =>
-        elements.map((element) => getComputedStyle(element).animationDuration),
-      );
-      expect(new Set(durations).size).toBeGreaterThan(1);
+      await expect(panel.getByRole("heading", { name: "a personal harness." })).toBeVisible();
+      await expect(panel.locator(".brand-pattern__tile")).toHaveCount(0);
+      await expect(panel).toHaveCSS("animation-name", "none");
       await page.emulateMedia({ reducedMotion: "reduce" });
-      await expect(tiles.first()).toHaveCSS("animation-name", "none");
+      await expect(panel).toHaveCSS("animation-name", "none");
     } else {
       await expect(panel).toBeHidden();
       expect(Math.abs(formBox.x + formBox.width / 2 - width / 2)).toBeLessThanOrEqual(1);
       expect(Math.abs(headerBox.x + headerBox.width / 2 - width / 2)).toBeLessThanOrEqual(1);
     }
     const labelGaps = await page.evaluate(() => {
-      return ["Email", "Password"].map((name) => {
+      return ["email", "password"].map((name) => {
         const label = [...document.querySelectorAll("label")].find(
           (item) => item.textContent === name,
         );
@@ -71,7 +67,7 @@ for (const width of [390, 1100]) {
     const inviteLink = page.getByRole("button", { name: "Have an invite? Create an account" });
     await expect(inviteLink.locator("svg")).toHaveCount(0);
     await inviteLink.click();
-    const title = page.getByRole("heading", { name: "Redeem Invite Code" });
+    const title = page.getByRole("heading", { name: "create account" });
     await expect(title).toBeVisible();
     const titleBox = await title.boundingBox();
     expect(titleBox).not.toBeNull();
@@ -107,7 +103,7 @@ for (const width of [390, 1100]) {
 for (const theme of ["light", "dark"]) {
   test(`autofilled login inputs retain their tonal surface in ${theme} mode`, async ({ page }) => {
     await page.goto("/login");
-    const email = page.getByRole("textbox", { name: "Email", exact: true });
+    const email = page.getByRole("textbox", { name: "email", exact: true });
     await expect(email).toBeVisible();
     await page.evaluate((mode) => {
       document.documentElement.classList.toggle("dark", mode === "dark");
@@ -120,7 +116,7 @@ for (const theme of ["light", "dark"]) {
     );
     const labelColor = await page
       .locator("label")
-      .filter({ hasText: /^Email$/ })
+      .filter({ hasText: /^email$/ })
       .evaluate((element) => getComputedStyle(element).color);
     expect(placeholderColor).not.toBe(labelColor);
     await email.fill("sam@example.com");
@@ -163,7 +159,7 @@ for (const theme of ["light", "dark"]) {
     await password.fill("Example-password-123!");
     await password.hover();
     await expect(password).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
-    await page.getByRole("button", { name: "Show password", exact: true }).click();
+    await page.getByRole("button", { name: "show password", exact: true }).click();
     await expect(password).toHaveAttribute("type", "text");
   });
 }

@@ -354,11 +354,13 @@
 @media (pointer: coarse) {
   .public-site [data-slot="button"],
   .public-site [data-slot="navigation-menu-link"],
-  .auth-shell button,
+  .auth-shell .auth-form > button,
+  .auth-shell [data-slot="input-group-button"],
   .auth-shell [data-slot="input-otp-slot"] {
     min-height: 2.75rem;
   }
-  .auth-shell button {
+  .auth-shell .auth-form > button,
+  .auth-shell [data-slot="input-group-button"] {
     min-width: 2.75rem;
   }
   .public-footer a,

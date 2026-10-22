@@ -8083,7 +8083,7 @@ function ConnectorCapabilityBadge({
 function ProfileSettings({ user }: { user: User }) {
   const queryClient = useQueryClient();
   const [firstName, lastName] = splitProfileName(user.displayName);
-  const saveQueue = useRef(Promise.resolve());
+  const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
   const save = (
     input:
       | Parameters<typeof api.updateUser>[0]
@@ -8095,6 +8095,7 @@ function ProfileSettings({ user }: { user: User }) {
         const current = queryClient.getQueryData<User>(["me"]) ?? user;
         const nextUser = await api.updateUser(typeof input === "function" ? input(current) : input);
         queryClient.setQueryData(["me"], nextUser);
+        return nextUser;
       });
     saveQueue.current = saving;
     return saving;
@@ -8107,7 +8108,7 @@ function ProfileSettings({ user }: { user: User }) {
     });
   const update = useFeedbackMutation({
     feedback: { action: "save your profile", form: true },
-    mutationFn: (input: Parameters<typeof api.updateUser>[0]) => api.updateUser(input),
+    mutationFn: (input: Parameters<typeof api.updateUser>[0]) => save(input),
     onSuccess: (nextUser) => {
       queryClient.setQueryData(["me"], nextUser);
     },

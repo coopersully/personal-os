@@ -6292,6 +6292,35 @@ describe("ilo web app", () => {
     );
   });
 
+  it("serializes Home and name edits through the same profile cache owner", async () => {
+    const browser = userEvent.setup();
+    let resolveHome: (value: typeof user) => void = () => {};
+    mocks.updateUser
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveHome = resolve;
+          }),
+      )
+      .mockImplementation(async (input) => ({ ...user, ...input }));
+    setup("/settings?page=profile");
+    await browser.type(await screen.findByLabelText("Home"), "New York");
+    await browser.click(
+      await screen.findByRole("option", { name: "New York, New York, United States" }),
+    );
+    await waitFor(() => expect(mocks.updateUser).toHaveBeenCalledTimes(1));
+    await browser.click(screen.getByRole("button", { name: "Edit First name" }));
+    await browser.clear(screen.getByLabelText("First name"));
+    await browser.type(screen.getByLabelText("First name"), "Taylor{Enter}");
+    expect(mocks.updateUser).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveHome(user);
+    });
+    await waitFor(() =>
+      expect(mocks.updateUser).toHaveBeenNthCalledWith(2, { displayName: "Taylor User" }),
+    );
+  });
+
   it("persists an empty Home when its text is cleared and blurred", async () => {
     mocks.getMe.mockResolvedValue({
       ...user,

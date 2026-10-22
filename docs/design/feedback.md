@@ -23,8 +23,12 @@ Errors always reach Sonner, including validation, load, autosave, and native fai
 unchanged polling failures. Background autosave success stays silent.
 
 Field correction/retry controls and actual configuration/permission state may remain inline.
-They supplement required Sonner error announcements; they are not an alternative. These settings
-rules override the generic surface defaults below. Tests must verify the Sonner call and verify
+They supplement required Sonner error announcements; they are not an alternative. For dataset
+loads, a neutral availability/freshness label and persistent Retry control may remain at the data
+boundary; keep the failure explanation in Sonner, never duplicate it in a paragraph or Alert.
+Successful absence uses Empty; failed reads never masquerade as an empty collection. Follow the
+[data-page state matrix](system.md#data-page-state-and-recovery-contract).
+These settings rules override the generic surface defaults below. Tests must verify the Sonner call and verify
 that the same action-result message is absent from the page content.
 
 ## Definitions and selection

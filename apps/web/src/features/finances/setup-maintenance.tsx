@@ -101,7 +101,7 @@ export function SetupMaintenance({
         </Button>
         {run?.nextAction?.tool === "get_finance_ledger_challenge" ? (
           <Button asChild variant="ghost">
-            <Link to="/settings?section=agent-connections">Connected agents</Link>
+            <Link to="/settings?page=connections&subpage=agent-connections">Connected agents</Link>
           </Button>
         ) : null}
       </div>

@@ -397,7 +397,7 @@ export function MailPage({ user }: { user: User }) {
             </EmptyHeader>
             <EmptyContent>
               <Button asChild>
-                <Link to="/settings?section=connections">Connect a mailbox</Link>
+                <Link to="/settings?page=connections">Connect a mailbox</Link>
               </Button>
             </EmptyContent>
           </Empty>

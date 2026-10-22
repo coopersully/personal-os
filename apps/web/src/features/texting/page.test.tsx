@@ -59,7 +59,7 @@ describe("Texting settings", () => {
 
     await user.type(await screen.findByLabelText("Mobile number"), "5555550123");
     expect(screen.getByLabelText("Country")).toHaveAttribute("data-slot", "native-select");
-    const consent = screen.getByRole("checkbox", { name: "Allow agent text messages" });
+    const consent = screen.getByRole("switch", { name: "Allow agent text messages" });
     expect(consent).not.toBeChecked();
     expect(consent).toHaveAccessibleDescription(/Message frequency varies/);
     expect(consent).toHaveAccessibleDescription(/HELP for help/);
@@ -83,7 +83,7 @@ describe("Texting settings", () => {
     expect(mocks.checkTextingVerification).toHaveBeenCalledWith("challenge-1", { code: "1234" });
     expect(await screen.findByText(/Ready/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Change number" }));
-    expect(screen.getByRole("checkbox", { name: "Allow agent text messages" })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: "Allow agent text messages" })).not.toBeChecked();
   });
 
   it("does not start verification without consent", async () => {
@@ -189,13 +189,13 @@ describe("Texting settings", () => {
     expect(await screen.findByText("Canada")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Go to Agent Texting" })).toHaveAttribute(
       "href",
-      "/settings?section=texting",
+      "/settings?page=texting",
     );
     await user.click(screen.getByRole("button", { name: "Change number" }));
     expect(screen.getByLabelText("Country")).toHaveValue("CA");
     await user.type(screen.getByLabelText("Mobile number"), "4165550123");
     expect(mocks.startTextingVerification).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("checkbox"));
+    await user.click(screen.getByRole("switch"));
     await user.click(screen.getByRole("button", { name: "Send verification code" }));
     expect(await screen.findByLabelText("Verification code")).toBeInTheDocument();
     expect(mocks.disconnectTexting).not.toHaveBeenCalled();
@@ -228,13 +228,13 @@ describe("Texting settings", () => {
     renderSettings(false, true);
     await user.click(await screen.findByRole("button", { name: "Change number" }));
     await user.type(screen.getByLabelText("Mobile number"), "5555550124");
-    await user.click(screen.getByRole("checkbox"));
+    await user.click(screen.getByRole("switch"));
     await user.click(screen.getByRole("button", { name: "Send verification code" }));
     const cancel = screen.getByRole("button", { name: "Cancel number change" });
     expect(cancel).toBeDisabled();
     expect(screen.getByLabelText("Mobile number")).toBeDisabled();
     expect(screen.getByLabelText("Country")).toBeDisabled();
-    expect(screen.getByRole("checkbox")).toBeDisabled();
+    expect(screen.getByRole("switch")).toBeDisabled();
     await user.click(cancel);
     expect(screen.getByLabelText("Mobile number")).toBeInTheDocument();
     await act(async () => resolveStart?.({ id: "new-challenge" }));
@@ -251,7 +251,7 @@ describe("Texting settings", () => {
     mocks.checkTextingVerification.mockRejectedValueOnce(new Error("Provider rejected code"));
     renderSettings();
     await user.type(await screen.findByLabelText("Mobile number"), "5555550123");
-    await user.click(screen.getByRole("checkbox"));
+    await user.click(screen.getByRole("switch"));
     await user.click(screen.getByRole("button", { name: "Send verification code" }));
     await user.type(await screen.findByLabelText("Verification code"), "1234");
     await user.click(screen.getByRole("button", { name: "Verify and connect" }));

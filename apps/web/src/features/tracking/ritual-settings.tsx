@@ -1,4 +1,6 @@
+import { ReorderHandle } from "@/components/reorder-handle";
 import {
+  defaultRitualReminderTime,
   type RitualDefinition,
   type RitualState,
   type RitualStep,
@@ -9,25 +11,36 @@ import { Reorder, useDragControls } from "motion/react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "../../api.js";
-import { QueryFeedback } from "../../components/async-state.js";
-import { MenuIcon, PlusIcon, TrashIcon } from "../../components/icons.js";
-import { SegmentedControl, SegmentedControlItem } from "../../components/segmented-control.js";
-import { SettingsRecordAction, SettingsRecordContent } from "../../components/settings-record.js";
-import { Button } from "../../components/ui/button.js";
+import { useConfirmAction } from "../../components/confirm-action.js";
+import { DataViewLoading, DataViewRecovery } from "@/components/data-view-state";
+import { ChevronRightIcon, PlusIcon, ActivityIcon } from "../../components/icons.js";
 import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "../../components/ui/card.js";
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "../../components/settings-field.js";
+import { SettingsRecordAction } from "../../components/settings-record.js";
+import { Button } from "../../components/ui/button.js";
+import { Card, CardContent } from "../../components/ui/card.js";
+import { DependentSetting } from "../../components/dependent-setting.js";
+import { Switch } from "../../components/ui/switch.js";
+import { RitualSkyPreview } from "./ritual-sky-preview.js";
+import { RitualSettingsProgress } from "./ritual-settings-progress.js";
 import { Checkbox } from "../../components/ui/checkbox.js";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "../../components/ui/field.js";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "../../components/ui/dialog.js";
 import { Input } from "../../components/ui/input.js";
-import { Item, ItemGroup } from "../../components/ui/item.js";
+import { ItemGroup } from "../../components/ui/item.js";
 import { NativeSelect, NativeSelectOption } from "../../components/ui/native-select.js";
-import { Spinner } from "../../components/ui/spinner.js";
 import { Textarea } from "../../components/ui/textarea.js";
 import { classifyMutationError } from "../../lib/feedback.js";
 import { useSettingsError } from "../../lib/settings-feedback.js";
@@ -37,12 +50,14 @@ import {
   ritualDeviceId,
   showRitualPreview,
 } from "../desktop/ritual-bridge.js";
+import { ProfileRow, ProfileSection } from "../settings/profile-rows.js";
+import { settingsPath } from "../settings/settings-routes.js";
 import { SettingsBento, SettingsSection } from "../settings/settings-layout.js";
+import { RitualDataAction } from "./ritual-data-action.js";
 import { RitualHistory } from "./ritual-history.js";
 import { RitualLocal } from "./ritual-local.js";
 import { makeRitualPreview, RitualPreview } from "./ritual-preview.js";
 
-const kinds = ["morning", "night"] as const;
 const responseTypes: { value: RitualStep["kind"]; label: string }[] = [
   { value: "checkbox", label: "Checkbox" },
   { value: "short_text", label: "Short entry" },
@@ -51,57 +66,26 @@ const responseTypes: { value: RitualStep["kind"]; label: string }[] = [
   { value: "number", label: "Number entry" },
   { value: "multiple_choice", label: "Multiple choice" },
 ];
-export function RitualSettings({ timeZone }: { timeZone: string }) {
+export function RitualSettings({ timeZone, view = "morning", content = "all" }: { timeZone: string; content?: "all" | "checklist"; view?: "overview" | "morning" | "night" | "history" }) {
   const query = useQuery({ queryKey: ["rituals"], queryFn: api.listRituals });
-  const [selected, setSelected] = useState<"morning" | "night" | "history">("morning");
-  if (query.isPending) return <p>Loading rituals…</p>;
-  if (query.isError && !query.data)
-    return (
-      <Card>
-        <CardContent>
-          <QueryFeedback query={query} title="Couldn’t load ritual settings." />
-          <Button onClick={() => void query.refetch()}>Retry</Button>
-        </CardContent>
-      </Card>
-    );
+  // History owns its own collection query; a definitions failure must not block it.
+  if (view === "history") return <RitualHistory />;
+  if (query.isPending) return <DataViewLoading label="Loading ritual settings" />;
+  if (!query.data)
+    return <DataViewRecovery query={query} title="Couldn’t load ritual settings." unavailableLabel="Ritual settings unavailable" />;
   return (
     <div className="settings-stack">
-      <QueryFeedback query={query} title="Couldn’t refresh ritual settings." staleOnly />
-      <SettingsSection
-        title="Ritual view"
-        description="Configure your daily routines or review their history."
-      >
-        <SegmentedControl
-          aria-label="Choose ritual"
-          value={selected}
-          onValueChange={(value) => {
-            if (value === "morning" || value === "night" || value === "history") setSelected(value);
-          }}
-        >
-          <SegmentedControlItem value="morning">Morning</SegmentedControlItem>
-          <SegmentedControlItem value="night">Evening</SegmentedControlItem>
-          <SegmentedControlItem value="history">History and data</SegmentedControlItem>
-        </SegmentedControl>
-      </SettingsSection>
-      {kinds.map((kind) => (
-        <div key={kind} hidden={selected !== kind}>
-          <RitualForm
-            kind={kind}
-            definition={query.data.rituals.find((d) => d.kind === kind)}
-            timeZone={query.data.rituals[0]?.timeZone ?? timeZone}
-          />
-        </div>
-      ))}
-      {selected === "history" ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>History and data</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <RitualHistory />
-          </CardContent>
-        </Card>
+      <DataViewRecovery query={query} title="Couldn’t refresh ritual settings." unavailableLabel="Ritual settings unavailable" />
+      {view === "overview" ? (
+        <>
+          {(["morning", "night"] as const).map((kind) => <RitualForm key={kind} kind={kind} content="schedule" definition={query.data.rituals.find((d) => d.kind === kind)} timeZone={timeZone} />)}
+          <ProfileSection title="History"><ProfileRow label="Ritual History" icon={<span className="settings-subsection__icon"><ActivityIcon /></span>} to={settingsPath("ritual-history")} /></ProfileSection>
+          <div className="flex justify-end"><RitualDataAction /></div>
+        </>
+      ) : view === "morning" || view === "night" ? (
+        <RitualForm key={view} kind={view} content={content} definition={query.data.rituals.find((d) => d.kind === view)} timeZone={timeZone} />
       ) : null}
+
     </div>
   );
 }
@@ -117,8 +101,9 @@ function initialDraft(
         ? "Good evening"
         : (definition?.title ?? `Good ${kind === "morning" ? "morning" : "evening"}`),
     enabled: definition?.enabled ?? false,
+    reminderTime: defaultRitualReminderTime(definition ?? { kind }),
     time: definition?.time ?? (kind === "morning" ? "06:00" : "21:00"),
-    timeZone: definition?.timeZone ?? timeZone,
+    timeZone,
     steps: definition?.steps ?? [
       { id: crypto.randomUUID(), label: "Brush your teeth", kind: "checkbox" as const },
       { id: crypto.randomUUID(), label: "Journal", kind: "short_text" as const },
@@ -127,10 +112,12 @@ function initialDraft(
 }
 function RitualForm({
   kind,
+  content,
   definition,
   timeZone,
 }: {
   kind: "morning" | "night";
+  content: "all" | "schedule" | "checklist";
   definition?: RitualDefinition | undefined;
   timeZone: string;
 }) {
@@ -164,7 +151,14 @@ function RitualForm({
       const local = draftRef.current;
       const rebased = { ...remote };
       // Keep edited fields; adopt remote updates to everything still untouched locally.
-      for (const key of ["title", "enabled", "time", "timeZone", "steps"] as const) {
+      for (const key of [
+        "title",
+        "enabled",
+        "time",
+        "reminderTime",
+        "timeZone",
+        "steps",
+      ] as const) {
         if (JSON.stringify(local[key]) !== JSON.stringify(base[key])) {
           Object.assign(rebased, { [key]: local[key] });
         }
@@ -173,12 +167,12 @@ function RitualForm({
       saved.current = JSON.stringify(remote);
       setDraft(rebased);
     }
-    if (!busy && !definition) {
+    if (!busy) {
       const base = JSON.parse(saved.current) as typeof draft;
       if (base.timeZone !== timeZone) {
         const local = draftRef.current;
         saved.current = JSON.stringify({ ...base, timeZone });
-        if (local.timeZone === base.timeZone) setDraft({ ...local, timeZone });
+        setDraft({ ...local, timeZone });
       }
     }
     previousDefinitionId.current = definition?.id;
@@ -302,63 +296,51 @@ function RitualForm({
   }
   return (
     <SettingsBento>
-      <div className="flex flex-col gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>{label} ritual</CardTitle>
-            <CardDescription>Set the start of your daily routine</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <FieldGroup>
-              <Field orientation="horizontal">
-                <Checkbox
-                  id={`${kind}-enabled`}
-                  checked={draft.enabled}
-                  onCheckedChange={(v) => patch({ enabled: v === true })}
-                />
-                <FieldLabel htmlFor={`${kind}-enabled`}>
-                  Enable {label.toLowerCase()} ritual
-                </FieldLabel>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${kind}-time`}>Available from</FieldLabel>
-                <Input
-                  id={`${kind}-time`}
-                  type="time"
-                  value={draft.time}
-                  onChange={(e) => patch({ time: e.target.value })}
-                />
-                <FieldDescription>Stays available until you complete or skip it</FieldDescription>
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${kind}-zone`}>Time zone</FieldLabel>
-                <Input
-                  id={`${kind}-zone`}
-                  value={draft.timeZone}
-                  onChange={(e) => patch({ timeZone: e.target.value })}
-                />
-                <FieldDescription>
-                  Applies to both rituals from the next scheduled time
-                </FieldDescription>
-              </Field>
-            </FieldGroup>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>{isDesktop() ? "This Mac" : "Show ritual"}</CardTitle>
-            <CardDescription>
-              Replay the full experience anytime, including after completion
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            <Button
-              variant="outline"
-              disabled={!input.success || busy || dirty || opening}
-              onClick={() => void show()}
-            >
-              {opening ? <Spinner /> : null}Show {label.toLowerCase()} ritual
-            </Button>
+      {content !== "checklist" ? <div className="flex flex-col gap-4">
+        <SettingsSection layout="rows" title={`${label} Ritual`} headerAside={<RitualSkyPreview kind={kind} disabled={!input.success || busy || dirty || opening} onPreview={() => void show()} />} headerContent={content === "schedule" ? <RitualSettingsProgress definition={definition ?? previewDefinition} /> : null} description={kind === "morning" ? "Start your day with intention. At your chosen time, the ritual covers your screen and guides you through your steps before you continue. You can snooze or skip when needed." : "Wind down and prepare for tomorrow. At your chosen time, the ritual covers your screen for a moment of reflection and your evening steps. You can snooze or skip when needed."}>
+          <FieldGroup>
+            <Field orientation="horizontal">
+              <Switch
+                id={`${kind}-enabled`}
+                checked={draft.enabled}
+                onCheckedChange={(v) => patch({ enabled: v === true })}
+              />
+              <FieldLabel htmlFor={`${kind}-enabled`}>
+                Enable {label.toLowerCase()} ritual
+              </FieldLabel>
+            </Field>
+            <DependentSetting enabled={draft.enabled} reason={`Turn on Enable ${label.toLowerCase()} ritual to change its schedule and reminder time.`}>
+            <Field>
+              <FieldLabel htmlFor={`${kind}-time`}>Available from</FieldLabel>
+              <Input
+                id={`${kind}-time`}
+                type="time"
+                disabled={!draft.enabled}
+                value={draft.time}
+                onChange={(e) => patch({ time: e.target.value })}
+              />
+              <FieldDescription>Stays available until you complete or skip it</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`${kind}-reminder-time`}>{label} reminder time</FieldLabel>
+              <Input
+                id={`${kind}-reminder-time`}
+                type="time"
+                disabled={!draft.enabled}
+                value={draft.reminderTime}
+                onChange={(event) => patch({ reminderTime: event.target.value })}
+              />
+              <FieldDescription>Default for optional steps you choose to do later</FieldDescription>
+            </Field>
+            </DependentSetting>
+          </FieldGroup>
+          {content === "schedule" ? <div className="settings-divider-before"><ProfileRow label="Steps" value={`${draft.steps.length} steps`} to={settingsPath(kind === "morning" ? "ritual-morning" : "ritual-evening")} /></div> : null}
+        </SettingsSection>
+        <div className="flex justify-end gap-2">
+            <RitualDataAction kind={kind} disabled={busy || dirty || opening} />
+
+        </div>
+        <div className="flex flex-col items-start gap-3 empty:hidden">
             {isDesktop() ? (
               <>
                 <RitualLocal />
@@ -372,7 +354,7 @@ function RitualForm({
                     {dirty || busy ? (
                       "Background settings"
                     ) : (
-                      <a href="/settings?section=desktop">Background settings</a>
+                      <a href="/settings?page=desktop">Background settings</a>
                     )}
                   </Button>
                   {dirty || busy ? (
@@ -399,35 +381,33 @@ function RitualForm({
             {dirty && !input.success ? (
               <p>Complete each ritual step with a label and valid answer options to save.</p>
             ) : null}
-          </CardContent>
-        </Card>
-      </div>
-      <Card className="settings-bento__main">
-        <CardHeader>
-          <CardTitle>Checklist</CardTitle>
-          <CardAction>
-            <SettingsRecordAction
-              label="Add step"
-              disabled={draft.steps.length >= 20}
-              onClick={() =>
-                patch({
-                  steps: [...draft.steps, { id: crypto.randomUUID(), label: "", kind: "checkbox" }],
-                })
-              }
-            >
-              <PlusIcon />
-            </SettingsRecordAction>
-          </CardAction>
-          <CardDescription>Add the things you want to do or track, in order</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-5">
+          </div>
+      </div> : null}
+      {content !== "schedule" ? <SettingsSection
+        layout="rows"
+        title="Steps"
+        action={
+          <SettingsRecordAction
+            label="Add step"
+            disabled={draft.steps.length >= 20}
+            onClick={() =>
+              patch({
+                steps: [...draft.steps, { id: crypto.randomUUID(), label: "", kind: "checkbox" }],
+              })
+            }
+          >
+            <PlusIcon />
+          </SettingsRecordAction>
+        }
+      >
+        <div className="flex flex-col gap-5">
           <Reorder.Group
             as="div"
             axis="y"
             values={draft.steps}
             onReorder={(steps) => patch({ steps })}
           >
-            <ItemGroup>
+            <ItemGroup className="gap-0">
               {draft.steps.map((step, index) => (
                 <SortableStep
                   key={step.id}
@@ -470,6 +450,21 @@ function RitualForm({
                         ))}
                       </NativeSelect>
                     </Field>
+                    <Field>
+                      <FieldLabel htmlFor={`${kind}-${step.id}-requirement`}>
+                        Required
+                      </FieldLabel>
+                      <Switch
+                        id={`${kind}-${step.id}-requirement`}
+                        checked={!step.optional}
+                        onCheckedChange={(required) => update(step.id, { optional: !required })}
+                      />
+                    </Field>
+                    <StepDays
+                      id={`${kind}-${step.id}`}
+                      days={step.days}
+                      onChange={(days) => update(step.id, { days })}
+                    />
                     {step.kind === "multiple_choice" ? (
                       <Field>
                         <FieldLabel htmlFor={`${kind}-${step.id}-options`}>Choices</FieldLabel>
@@ -488,8 +483,9 @@ function RitualForm({
               ))}
             </ItemGroup>
           </Reorder.Group>
-        </CardContent>
-      </Card>
+        </div>
+      </SettingsSection> : null}
+      {content === "checklist" && error ? <Button variant="secondary" onClick={() => void retrySaving()}>Retry saving</Button> : null}
       {preview ? <RitualPreview state={preview} onClose={() => setPreview(null)} /> : null}
     </SettingsBento>
   );
@@ -511,56 +507,131 @@ function SortableStep({
   remove: () => void;
 }) {
   const controls = useDragControls();
+  const [open, setOpen] = useState(!step.label);
+  const [dragging, setDragging] = useState(false);
+  const { confirm, confirmation } = useConfirmAction();
   return (
-    <Item variant="secondary" className="settings-record" asChild>
-      <Reorder.Item
-        as="div"
-        role="listitem"
-        value={step}
-        dragListener={false}
-        dragControls={controls}
-        className="relative cursor-grab items-start active:cursor-grabbing"
-        onPointerDown={(event) => {
-          if (
-            !(event.target instanceof Element) ||
-            event.target.closest(
-              "input,textarea,select,label,button,a,[role=combobox],[role=radio],[role=checkbox],[contenteditable=true]",
-            )
-          )
-            return;
-          controls.start(event);
+    <Reorder.Item
+      as="div"
+      role="listitem"
+      value={step}
+      dragListener={false}
+      dragControls={controls}
+      data-dragging={dragging || undefined}
+      onDragStart={() => setDragging(true)}
+      onDragEnd={() => setDragging(false)}
+      className="ritual-step-row settings-inline-row relative flex min-h-12 items-center gap-2 px-4 py-2"
+    >
+      <Dialog open={open} onOpenChange={setOpen}>
+              <ReorderHandle controls={controls} label={`Reorder step ${index + 1}`}
+                onMove={move} canMoveUp={index > 0} canMoveDown={index < count - 1} />
+          <DialogTrigger asChild>
+            <Button variant="ghost" aria-label={`Edit step ${index + 1}`}
+              className="ritual-step-trigger h-auto min-h-12 min-w-0 flex-1 justify-between gap-8 rounded-none px-0 py-2 text-left">
+              <span className="min-w-0">
+                <span className="block truncate font-medium">{step.label || `New step ${index + 1}`}</span>
+                <span className="block truncate text-xs font-normal text-muted-foreground">
+                  {`${responseTypes.find((type) => type.value === step.kind)?.label ?? step.kind} · ${step.optional ? "Optional" : "Required"} · ${!step.days || step.days.length === 7 ? "Every day" : step.days.map((day) => dayNames[day]?.slice(0, 3)).join(", ")}`}
+                </span>
+              </span>
+              <ChevronRightIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+            </Button>
+          </DialogTrigger>
+          <DialogContent showCloseButton={false} className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Edit Step {index + 1}</DialogTitle>
+              <DialogDescription>
+                Changes save automatically. Close to return to your routine.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="settings-panel ritual-step-editor">{children}</div>
+            <DialogFooter>
+              <Button variant="destructive" disabled={count === 1} onClick={() => confirm({
+                title: "Delete step?",
+                description: "This removes the step from this routine. Past ritual entries are kept.",
+                actionLabel: "Delete step",
+                onConfirm: remove,
+              })}>Delete</Button>
+              <DialogClose asChild>
+                <Button type="button">Done</Button>
+              </DialogClose>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        {confirmation}
+      </Reorder.Item>
+  );
+}
+
+const weekdays = [1, 2, 3, 4, 5];
+const weekends = [0, 6];
+const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+function StepDays({
+  id,
+  days,
+  onChange,
+}: {
+  id: string;
+  days: number[] | undefined;
+  onChange: (days: number[] | undefined) => void;
+}) {
+  const [custom, setCustom] = useState(false);
+  const selected = days?.slice().sort().join(",");
+  const mode = custom
+    ? "custom"
+    : !days || days.length === 7
+      ? "daily"
+      : selected === weekdays.join(",")
+        ? "weekdays"
+        : selected === weekends.join(",")
+          ? "weekends"
+          : "custom";
+  return (
+    <Field>
+      <FieldLabel htmlFor={`${id}-days`}>Include on</FieldLabel>
+      <NativeSelect
+        id={`${id}-days`}
+        value={mode}
+        onChange={(event) => {
+          const mode = event.target.value;
+          setCustom(mode === "custom");
+          onChange(
+            mode === "daily"
+              ? undefined
+              : mode === "weekdays"
+                ? weekdays
+                : mode === "weekends"
+                  ? weekends
+                  : (days ?? weekdays),
+          );
         }}
       >
-        <SettingsRecordContent
-          title={`Step ${index + 1}`}
-          actions={
-            <SettingsRecordAction label="Remove step" disabled={count === 1} onClick={remove}>
-              <TrashIcon />
-            </SettingsRecordAction>
-          }
-          leading={
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="cursor-grab touch-none active:cursor-grabbing"
-              aria-label={`Reorder step ${index + 1}`}
-              aria-description="Drag to reorder or use the up and down arrow keys"
-              onPointerDown={(event) => controls.start(event)}
-              onKeyDown={(event) => {
-                const offset = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
-                if (offset) {
-                  event.preventDefault();
-                  if (index + offset >= 0 && index + offset < count) move(offset);
+        <NativeSelectOption value="daily">Every day</NativeSelectOption>
+        <NativeSelectOption value="weekdays">Weekdays</NativeSelectOption>
+        <NativeSelectOption value="weekends">Weekends</NativeSelectOption>
+        <NativeSelectOption value="custom">Custom days</NativeSelectOption>
+      </NativeSelect>
+      {mode === "custom" ? (
+        <fieldset className="flex flex-wrap gap-3" aria-label="Days of the week">
+          {[1, 2, 3, 4, 5, 6, 0].map((day) => (
+            <Field key={day} orientation="horizontal" className="w-auto">
+              <Checkbox
+                id={`${id}-day-${day}`}
+                checked={days?.includes(day) ?? true}
+                disabled={days?.length === 1 && days.includes(day)}
+                onCheckedChange={(checked) =>
+                  onChange(
+                    checked
+                      ? [...(days ?? []), day].sort()
+                      : days?.filter((value) => value !== day),
+                  )
                 }
-              }}
-            >
-              <MenuIcon />
-            </Button>
-          }
-        >
-          {children}
-        </SettingsRecordContent>
-      </Reorder.Item>
-    </Item>
+              />
+              <FieldLabel htmlFor={`${id}-day-${day}`}>{dayNames[day]}</FieldLabel>
+            </Field>
+          ))}
+        </fieldset>
+      ) : null}
+    </Field>
   );
 }

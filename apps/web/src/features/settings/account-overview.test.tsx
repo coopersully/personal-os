@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import { toast } from "sonner";
 import { MemoryRouter } from "react-router-dom";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AccountOverview } from "./account-overview";
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getIloSetup: vi.fn(),
   listAgentAccessWorkItems: vi.fn(),
 }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), dismiss: vi.fn() } }));
 vi.mock("../../api.js", () => ({ api: mocks, errorMessage: (e: Error) => e.message }));
 function mount() {
   render(
@@ -36,15 +38,16 @@ beforeEach(() => {
 });
 it("shows live workspace counts and honest empty connections", async () => {
   mount();
-  expect(await screen.findByText("2 items need your attention")).toBeInTheDocument();
-  expect(await screen.findByText("No accounts connected yet.")).toBeInTheDocument();
+  expect(await screen.findByText("2 pending")).toBeInTheDocument();
+  expect(await screen.findByRole("link", { name: "Manage connections" })).toBeInTheDocument();
   for (const workspace of ["Calendar", "Tasks", "Mail", "Finances"]) {
-    expect(
-      screen.getByRole("link", { name: `Workspace settings for ${workspace}` }),
-    ).toHaveAttribute("href", `/settings?section=${workspace.toLowerCase()}`);
+    expect(screen.getByRole("link", { name: workspace })).toHaveAttribute(
+      "href",
+      `/settings?page=${workspace.toLowerCase()}`,
+    );
   }
   expect(screen.queryByRole("link", { name: / reviews$/ })).not.toBeInTheDocument();
-  expect(screen.getByRole("status", { name: "Tasks: Action required" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Tasks" })).toHaveTextContent("2 pending");
   expect(
     screen.queryByRole("status", { name: "Calendar: Action required" }),
   ).not.toBeInTheDocument();
@@ -65,10 +68,12 @@ it("surfaces setup actions and unavailable domains without claiming all clear", 
   });
   mocks.listConnectors.mockRejectedValue(new Error("Unavailable"));
   mount();
-  expect(await screen.findByText("Setup needs your attention")).toBeInTheDocument();
-  expect(screen.getByRole("status", { name: "Mail: Action required" })).toBeInTheDocument();
-  expect(await screen.findByText("Attention status unavailable")).toBeInTheDocument();
-  expect(await screen.findByText("Couldn’t check connected accounts.")).toBeInTheDocument();
+  expect(await screen.findByText("Setup needed")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Mail" })).toHaveTextContent("Setup needed");
+  expect(await screen.findByText("Unavailable")).toBeInTheDocument();
+  await screen.findByRole("region", { name: "Connections unavailable" });
+  expect(toast.error).toHaveBeenCalledWith("Couldn’t check connected accounts.", expect.any(Object));
+  expect(screen.queryByText("Couldn’t check connected accounts.")).not.toBeInTheDocument();
   expect(screen.queryByText("No accounts connected yet.")).not.toBeInTheDocument();
 });
 
@@ -77,14 +82,15 @@ it("surfaces provider reconnection errors beside the affected account", async ()
     {
       id: "provider",
       label: "Personal Google",
+      provider: "google",
       email: "demo@example.com",
       health: { state: "reconnect" },
     },
   ]);
   mount();
   expect(await screen.findByText("Reconnect required")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Manage Personal Google" })).toHaveAttribute(
+  expect(screen.getByRole("link", { name: "Personal Google" })).toHaveAttribute(
     "href",
-    "/settings?section=connections",
+    "/settings?page=connections",
   );
 });

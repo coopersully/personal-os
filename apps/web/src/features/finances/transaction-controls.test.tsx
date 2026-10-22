@@ -62,17 +62,16 @@ it("applies transaction filters from the header and clears only filter parameter
   expect(screen.getByLabelText("Location")).toHaveTextContent("reviewState=resolved");
   expect(screen.getByLabelText("Location")).not.toHaveTextContent("review=resolved");
   expect(screen.getByLabelText("Location")).not.toHaveTextContent("transactionId");
-  expect(
-    screen.getByRole("button", { name: "Filters (3 active)" }).querySelector("[data-slot=badge]"),
-  ).toHaveTextContent("3");
+  expect(screen.getByRole("button", { name: "Filters (3 active)" })).toHaveTextContent("3");
   await user.click(screen.getByRole("button", { name: "Filters (3 active)" }));
   expect(screen.getByLabelText("Search")).toHaveValue("groceries");
   expect(screen.getByLabelText("Review")).toHaveValue("resolved");
   await user.click(screen.getByRole("button", { name: "Clear filters" }));
   expect(screen.getByLabelText("Location")).toHaveTextContent("?sortBy=amount");
-  expect(
-    screen.getByRole("button", { name: "Filters" }).querySelector("[data-slot=badge]"),
-  ).toBeNull();
+  expect(screen.getByRole("button", { name: "Filters" })).toHaveAttribute(
+    "data-filter-active",
+    "false",
+  );
 });
 it("exposes mutually exclusive sort choices in the header", async () => {
   const onSort = vi.fn();

@@ -3,6 +3,7 @@ import { addLocalDays, localDateAt, localDateTimeToUtc, localDateToIso } from ".
 
 const key = z.string().min(1).max(100);
 const instant = z.iso.datetime({ offset: true });
+const wallTime = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 export const ritualStepSchema = z
   .object({
     id: key.refine(
@@ -11,6 +12,14 @@ export const ritualStepSchema = z
     ),
     label: z.string().trim().min(1).max(240),
     kind: z.enum(["checkbox", "short_text", "time", "date", "number", "multiple_choice"]),
+    optional: z.boolean().optional(),
+    // Sunday = 0. Omission preserves the original everyday behavior.
+    days: z
+      .array(z.number().int().min(0).max(6))
+      .min(1)
+      .max(7)
+      .refine((days) => new Set(days).size === days.length, "Choose distinct days.")
+      .optional(),
     options: z.array(z.string().trim().min(1).max(240)).min(2).max(12).optional(),
   })
   .refine(
@@ -27,7 +36,8 @@ export const ritualDefinitionInputSchema = z.object({
   kind: z.enum(["morning", "night"]),
   title: z.string().trim().min(1).max(240),
   enabled: z.boolean(),
-  time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  time: wallTime,
+  reminderTime: wallTime.optional(),
   timeZone: z
     .string()
     .max(100)
@@ -91,6 +101,12 @@ export type RitualOccurrence = RitualWindow & {
   revision: number;
   snoozedUntil: string | null;
   settledAt: string | null;
+  optionalFollowUp?: {
+    dueAt: string;
+    stepIds: string[];
+    // Absent while a desktop completion is queued for synchronization.
+    reminderIds?: string[];
+  };
   responses: RitualResponse[];
   actions: RitualAction[];
 };
@@ -101,6 +117,9 @@ export type RitualState = {
   upcoming?: RitualOccurrence[];
   serverNow: string;
   snoozeCount: number;
+  skipCount?: number;
+  streakCount?: number;
+  completionWeek?: RitualCompletionDay[];
   syncStatus: "saved" | "queued" | "conflict";
 };
 const mutation = {
@@ -122,6 +141,7 @@ export const ritualActionInputSchema = z.object({
   displayedCount: z.number().int().min(0).optional(),
   requireConfirmation: z.boolean().optional(),
   historyUnavailable: z.boolean().optional(),
+  optionalReminderAt: instant.optional(),
 });
 export type RitualActionInput = z.infer<typeof ritualActionInputSchema>;
 export type RitualActionResult =
@@ -242,7 +262,123 @@ export function ritualAnswerIsValid(step: RitualStep, value: string | boolean): 
 export function ritualIsAnswered(occurrence: RitualOccurrence): boolean {
   const values = latestRitualResponses(occurrence);
   return occurrence.definition.steps.every((step) => {
+    if (step.optional) return true;
     const response = values[step.id];
     return response?.submitted && ritualAnswerIsValid(step, response.value);
   });
+}
+
+/** Resolve the checklist once, at its scheduled local date, for immutable daily history. */
+export function ritualDefinitionForDate(
+  definition: RitualDefinition,
+  date: string,
+): RitualDefinition {
+  const weekday = new Date(`${date}T12:00:00Z`).getUTCDay();
+  return {
+    ...definition,
+    steps: definition.steps.filter((step) => !step.days || step.days.includes(weekday)),
+  };
+}
+
+export function unfinishedOptionalRitualSteps(occurrence: RitualOccurrence): RitualStep[] {
+  const answers = latestRitualResponses(occurrence);
+  return occurrence.definition.steps.filter((step) => {
+    const answer = answers[step.id];
+    return step.optional && !(answer?.submitted && ritualAnswerIsValid(step, answer.value));
+  });
+}
+
+export function defaultRitualReminderTime(
+  definition: Pick<RitualDefinition, "kind" | "reminderTime">,
+): string {
+  return definition.reminderTime ?? (definition.kind === "morning" ? "12:00" : "22:00");
+}
+
+/** Next wall-clock occurrence; the UI explicitly labels a next-day reminder. */
+export function nextRitualReminderAt(
+  definition: RitualDefinition,
+  time: string,
+  now: string,
+): string | null {
+  if (!wallTime.safeParse(time).success) return null;
+  const date = localDateAt(new Date(now), definition.timeZone);
+  const today = boundary({ ...definition, time }, date);
+  return Date.parse(today) > Date.parse(now)
+    ? today
+    : boundary({ ...definition, time }, addLocalDays(date, 1));
+}
+
+/** Counts consecutive completed scheduled days, leaving today's pending ritual open. */
+export function ritualStreakCount(
+  definition: RitualDefinition,
+  current: Pick<RitualOccurrence, "scheduledLocalDate" | "status">,
+  history: { scheduledLocalDate: string; status: RitualOccurrence["status"]; hasSteps: boolean }[],
+): number {
+  const byDate = new Map(history.map((entry) => [entry.scheduledLocalDate, entry]));
+  const dates = history.map((entry) => entry.scheduledLocalDate).sort();
+  const first = dates[0];
+  if (!first) return 0;
+  let date = current.scheduledLocalDate;
+  let count = 0;
+  while (date >= first) {
+    const entry = byDate.get(date);
+    const pendingToday = date === current.scheduledLocalDate && current.status === "pending";
+    if (!pendingToday) {
+      if (entry?.hasSteps) {
+        if (entry.status !== "completed") break;
+        count++;
+      } else if (!entry && ritualDefinitionForDate(definition, date).steps.length) break;
+    }
+    const previous = new Date(`${date}T12:00:00Z`);
+    previous.setUTCDate(previous.getUTCDate() - 1);
+    date = previous.toISOString().slice(0, 10);
+  }
+  return count;
+}
+
+export type RitualCompletionDay = {
+  date: string;
+  status: "completed" | "skipped" | "missed" | "pending" | "not_scheduled" | "not_recorded";
+};
+
+/** Seven logical ritual dates, ending with the current occurrence (including overnight rituals). */
+export function ritualCompletionWeek(
+  definition: RitualDefinition,
+  endingDate: string,
+  history: { scheduledLocalDate: string; status: RitualOccurrence["status"]; hasSteps: boolean }[],
+): RitualCompletionDay[] {
+  const byDate = new Map(history.map((entry) => [entry.scheduledLocalDate, entry]));
+  const end = localDateAt(new Date(`${endingDate}T12:00:00Z`), "UTC");
+  return Array.from({ length: 7 }, (_, index) => {
+    const local = addLocalDays(end, index - 6);
+    const date = localDateToIso(local);
+    const entry = byDate.get(date);
+    if (entry)
+      return {
+        date,
+        status:
+          !entry.hasSteps || entry.status === "cancelled_configuration"
+            ? "not_scheduled"
+            : entry.status,
+      };
+    const scheduled =
+      ritualDefinitionForDate(definition, date).steps.length > 0 &&
+      Date.parse(boundary(definition, local)) >= Date.parse(definition.enabledAt);
+    return { date, status: scheduled ? "not_recorded" : "not_scheduled" };
+  });
+}
+
+/** A client can present a pending ritual only during its active, unsnoozed window. */
+export function ritualShouldPresent(
+  occurrence: Pick<RitualOccurrence, "status" | "dueAt" | "expiresAt" | "snoozedUntil"> | null,
+  now: string,
+): boolean {
+  const at = Date.parse(now);
+  return (
+    occurrence !== null &&
+    occurrence.status === "pending" &&
+    Date.parse(occurrence.dueAt) <= at &&
+    Date.parse(occurrence.expiresAt) > at &&
+    (occurrence.snoozedUntil === null || Date.parse(occurrence.snoozedUntil) <= at)
+  );
 }

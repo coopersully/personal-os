@@ -113,7 +113,7 @@ describe("connection health presentation", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Personal Google");
     expect(screen.getByRole("link", { name: "Review connections" })).toHaveAttribute(
       "href",
-      "/settings?section=connections",
+      "/settings?page=connections",
     );
     expect(screen.queryByText(/raw-provider-canary/u)).not.toBeInTheDocument();
   });

@@ -11,6 +11,7 @@ import {
 } from "./ui/dialog.js";
 
 type ConfirmationOptions = {
+  intent?: "default" | "destructive";
   title: string;
   description: string;
   actionLabel: string;
@@ -68,14 +69,10 @@ export function useConfirmAction() {
               <DialogDescription>{options.description}</DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <DialogClose asChild>
-                <Button ref={cancel} type="button" variant="outline">
-                  Cancel
-                </Button>
-              </DialogClose>
+              {options.intent === "default" ? <DialogClose asChild><Button ref={cancel} variant="secondary">Cancel</Button></DialogClose> : null}
               <Button
                 type="button"
-                variant="destructive"
+                variant={options.intent === "default" ? "default" : "destructive"}
                 onClick={() => {
                   const execute = action.current;
                   dismiss();
@@ -84,6 +81,9 @@ export function useConfirmAction() {
               >
                 {options.actionLabel}
               </Button>
+              {options.intent !== "default" ? <DialogClose asChild>
+                <Button ref={cancel}>Cancel</Button>
+              </DialogClose> : null}
             </DialogFooter>
           </DialogContent>
         ) : null}

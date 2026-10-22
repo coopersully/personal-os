@@ -238,7 +238,7 @@ describe("FloatingMailComposer", () => {
     await userEvent.click(screen.getByRole("button", { name: "Reconnect account" }));
     await waitFor(() =>
       expect(screen.getByLabelText("Current route")).toHaveTextContent(
-        "/settings?section=connections",
+        "/settings?page=connections",
       ),
     );
   });
@@ -287,7 +287,7 @@ describe("FloatingMailComposer", () => {
     resolveDraft?.(draft);
     await waitFor(() =>
       expect(screen.getByLabelText("Current route")).toHaveTextContent(
-        "/settings?section=connections",
+        "/settings?page=connections",
       ),
     );
   });
@@ -830,7 +830,7 @@ describe("FloatingMailComposer", () => {
     else
       await waitFor(() =>
         expect(screen.getByLabelText("Current route")).toHaveTextContent(
-          "/settings?section=connections",
+          "/settings?page=connections",
         ),
       );
     expect(create).not.toHaveBeenCalled();

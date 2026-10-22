@@ -264,7 +264,7 @@ colors, raw color utilities, or a second spacing scale.
 | Spacing | Use the shared 4 px rhythm. Block gaps are 24–32 px; row gaps are 8–12 px; dense metadata gaps are 4–8 px. |
 | Shape | Shared `--radius` owns component roundness. Use cards and controls from `src/components/ui`; do not invent parallel primitives. |
 | Color | Primary actions, selection, and current context use the monochrome ink scale. Warning, destructive, info, and success use semantic status tokens only. |
-| Effects | No decorative gradients, borders, elevation shadows, blur, glass, or translucent product surfaces. Hierarchy comes from spacing, type, and opaque tonal fields. A surface-colored edge fade with bounded backdrop blur is allowed only when it separates fixed navigation from scrolling content, as in Setup and Calendar. |
+| Effects | No decorative gradients, borders, elevation shadows, blur, glass, or translucent product surfaces. Hierarchy comes from spacing, type, and opaque tonal fields. A surface-colored edge fade with bounded backdrop blur is allowed only when it separates fixed navigation from scrolling content, as in Setup and Calendar. The approved full-viewport browser ritual may use a 24 px backdrop blur only on `.browser-ritual` to isolate the retained page; shared cards and dialogs remain flat (see the ritual exception in governance). |
 | Icons | Icons clarify an existing label or stand in only when the action has a familiar, accessible name. Icon-only actions require an accessible label and tooltip. |
 | Navigation | Active navigation keeps the same geometry as inactive navigation and uses the solid form of its icon; inactive items use the outline form. |
 | Motion | Motion confirms a spatial change and stays brief. It never conveys the only signal of urgency, completion, or error. Respect reduced motion. |
@@ -340,7 +340,8 @@ Copy earns its space by changing a decision. Apply these rules mechanically:
   secondary surface/text tokens. See [Settings](pages/settings.md) for the full layout contract.
 - Settings forms compose shared `FieldGroup`, `Field`, and `FieldLabel`
   primitives. Consent uses a horizontal checkbox field with a separate label
-  and description; availability and errors use shared alerts.
+  and description; actual availability stays beside its control, while settings
+  errors and discrete action results use Sonner.
 - Connected providers use their recognizable service mark when one exists. Do
   not substitute a raw provider identifier; any necessary fallback name uses
   the provider's correct capitalization.
@@ -781,7 +782,7 @@ Transaction filters use the same responsive dialog/drawer pattern as Tasks, with
 header filter and sort buttons. Sort choices are radio menu items; clearing filters preserves
 unrelated URL state. Workspace-wide search remains the shared workspace finder.
 
-Top-navigation filter triggers show the number of active filters in a bottom-end badge. The shared ActionButton owns badge geometry; each domain counts applied filters, excluding sort/display preferences. Zero active filters render no badge. Keep the full accessible filter label and tooltip.
+Top-navigation filters use the shared data-view filter treatment below. Applied-filter counts exclude sort/display preferences; keep full accessible labels.
 
 ### Key metrics and monetary entry
 
@@ -799,3 +800,254 @@ Settings controls and contextual Display menus use the same serialized save path
 Explicit URL choices remain temporary overrides. Device-specific shell geometry remains local.
 Tasks can save a default capture list and whether completed tasks appear in container views; explicit
 placement, lifecycle views, and URL filters take precedence.
+
+### Card surfaces and action hierarchy
+
+Nested shadcn Items use the secondary surface, visibly distinct from their containing Card
+in both themes. Default and outline Items inside Cards inherit the secondary variant.
+Primary buttons invert the neutral surface: dark fill/light text in light mode and light
+fill/dark text in dark mode. All shared Button sizes use pill radii (icon buttons are circles).
+Card-header icon actions use ghost styling; labeled actions use primary styling. Destructive
+actions retain their semantic treatment. These rules belong to the shared primitives and theme.
+
+Card headers, bodies, and footers share one continuous Card background in both themes;
+header and footer primitives do not add separate surface fills. Nested Items retain their
+distinct secondary surface.
+
+
+### Flat settings editing
+
+The accepted settings direction uses small secondary section labels above subsection
+Cards and concise divided rows with trailing values. Simple values edit in place
+without chevrons or dialogs; radios, switches, and checkboxes operate directly.
+Use a larger editor only for configuration that needs it. Headers and their icons
+are optional in component APIs; page introductions remain visible by default, with
+Profile’s in-card identity as the explicit exception.
+Preserve keyboard interaction, drafts, validation, and phone consent/verification.
+See [the settings contract](pages/settings.md#flat-settings-rows-and-optional-headers)
+for details and scope. All Settings routes use the shared layout and scoped control
+compositions, while domain-specific records and workflows retain their semantics.
+
+
+Settings composition follows the [typed decision model](pages/settings.md#platform-agnostic-settings-model):
+preferences, state, records, navigation, and commands have distinct interactions.
+Keep visual grouping shared and persistence domain-owned. Reference native platform
+patterns for hierarchy and behavior without importing their artwork or overriding
+nohmi's arrow/chevron, feedback, accessibility, and ownership contracts.
+
+Card spacing belongs to the shared Card slots: Header, Content, and Footer use
+the same padding token, with no additional root gap or vertical padding. Content
+omits top padding when a header exists and bottom padding when a footer exists,
+so adjoining slots provide one spacing interval rather than doubling it.
+
+Text buttons that trigger menus or popovers retain the shared Button size padding.
+Do not strip their horizontal padding to make them resemble plain text: the hover,
+expanded, and focus surfaces must surround the label with the same breathing room
+as other controls. Use a quiet semantic foreground for lower-priority navigation
+while preserving this geometry; icon-only buttons use the standard icon size.
+
+## Flexible data views and filter controls
+
+Use shared `FilterTrigger`, `FilterChip`, `SortTrigger`, `DataChoice`, and `FilterBar`
+from `components/data-view-controls`. Dataset filters have a leading filter glyph;
+unconstrained defaults are quiet dashed triggers with a plus, applied constraints are
+filled secondary chips. Applied filters precede inactive controls in DOM and keyboard
+order. Sorting has its own glyph and radio menu; it is not an applied filter. Keep
+view switches, grouping, and default-setting editors distinct from dataset filters.
+Existing advanced forms retain draft/apply behavior and domain-specific choices.
+
+Bound toolbars rather than adding an unlimited horizontal strip: show a small set
+(two on mobile, five on desktop), then a searchable More Filters dialog/drawer.
+Retain full accessible names when visible labels truncate. Long option sets need a
+searchable combobox; short mutually exclusive lists use shadcn radio menus. This
+shared treatment applies to Tasks, Finances, Reviews, Today, workspace search, and
+Calendar/Mail account-source filters. Preserve their URL and saved-preference contracts.
+
+Use `components/data-table` for configurable record views. Ritual History is its
+first consumer: desktop has shared shadcn table anatomy and full-width row dividers;
+mobile has labelled stacked records with the same fields and detail actions. Offer
+column visibility/order/width, density, wrapping, and reset through Table Options.
+Persist only layout preferences on the device, scoped by account. Table configuration
+must not mutate underlying records or reduce audit evidence to editable generic CRUD.
+
+Keep search/filter/sort on the server before cursor pagination. Reset cursors when
+criteria or page size changes; request only a bounded page (10/25/50/100 for history).
+Do not imply that sorting the loaded page sorts the full dataset. Selection and CSV
+export explicitly cover the current page or selected rows on that page, use visible
+columns in their chosen order, and escape spreadsheet formula text. Keep history
+answers and interaction evidence accessible through row details, with outcome,
+required/optional completion, and confirmed snoozes available as separate columns.
+Do not promise arbitrary unlimited data in the browser: bounded requests, responsive
+filter overflow, and local table scrolling are the scaling contract. Background layout
+saves are silent; storage/download failures and download initiation use Sonner.
+
+Keep record-table chrome outside the table surface: a quiet contextual caption and
+secondary overflow menu sit above the card; the card begins with column headings.
+Put Export and Table Options in that overflow menu rather than exposing parallel
+buttons. Selection actions appear only after selection; select-all lives in the
+table header (mobile offers Select Page in the menu). Show the result range once
+in a compact pagination footer alongside page size. Avoid repeating row counts or
+creating a second header band inside the table card.
+
+For compact record toolbars, keep the shrinking search input, one Filters trigger
+(with an applied count), and an icon-sized Sort trigger on one row, including mobile.
+Use `FilterBar collapsed` to put all criteria in its searchable responsive dialog.
+Table Options must fit the dialog width; allow vertical scrolling only, shrink
+labels/controls, and never require horizontal scrolling for configuration.
+
+Reorderable lists use the shared `ReorderHandle`: the same leading grip glyph,
+ghost button, grab/grabbing cursor, and handle-only pointer/touch drag. Up/Down
+arrow keys on the focused handle provide the equivalent reorder action with bounds.
+Use Motion Reorder groups/items with quiet shared drag-state treatment, preserve
+input/row-action interactions, and avoid separate up/down action-button pairs.
+This list pattern does not replace spatial event dragging in the calendar.
+
+Mobile table records need a distinguishing title, not just the desktop first-cell
+label. Combine the object name with meaningful identity context such as its date;
+keep that title first even when desktop columns are reordered. Avoid repeating
+title metadata as a separate field. Ritual History uses “Evening Ritual · date”
+above four default details: Status, Required, Optional, Snoozes. Extra configured
+columns remain available. Desktop keeps the ritual name and date in separate columns.
+Use DataColumn `mobileCell` and `mobileHidden` for this domain-owned presentation.
+
+When dataset actions sit beside a search field, append them inside its shadcn
+InputGroup using `SearchDataControls` (inline-end addon and InputGroupButton).
+Use icon-only triggers with full accessible names/tooltips, an applied-filter count,
+and a secondary selected treatment for a non-default sort. Avoid separate floating
+pills, repeated borders, or another toolbar row. Filter dialogs keep readable labels.
+This follows the app’s existing Calendar and Settings input-addon action pattern.
+
+Tables default to Compact density. Desktop cells use small consistent vertical
+padding and grow for actual wrapped content; never stretch rows to fill the page.
+Mobile records keep a distinguishing title above a tight two-column detail grid;
+in Compact density, short labels and values share a baseline rather than consuming
+two lines per field. Omit duplicated metadata, keep long text bounded with details
+accessible, and retain Comfortable spacing and wrapping as explicit user choices.
+Density must preserve readable labels, meaningful identifiers, keyboard focus, and
+usable touch targets; it does not mean shrinking type or removing necessary context.
+
+Column reordering uses rounded shadcn Item anatomy with a quiet secondary surface
+for hover/focus/drag, preserving text color and avoiding bright rectangular inversions.
+Never use a foreground/content token as a dragged-row background. Compact mobile
+status cells may use `CompactStatus` glyphs, retaining a label on tap/focus and an
+accessible name; desktop retains text badges. Counts use `CompletionCount`: the
+completed and total use the same normal text size and color.
+CSV values remain plain ratios and full status labels.
+
+Treat mobile table rows as composed records, not wrapped desktop columns. Build an
+identity block with a prominent name and subordinate distinguishing context (date,
+account, or identifier), then cluster related facts in a deliberate reading order.
+Keep each short label close to its value; avoid distributing unrelated facts across
+a grid solely because they were adjacent columns on desktop. Use `mobileOrder` for
+domain-owned grouping while preserving desktop column ordering and visibility.
+Ritual history groups Required + Optional completion first, Status + Snoozes second.
+Keep the title/date together and omit repeated metadata. In progress ratios, make
+completed and total the same normal text, separated by a spaced slash. Compact
+density minimizes unnecessary spacing without flattening identity and detail into
+one undifferentiated line.
+
+Search action sections and filter forms: keep filter and sort in separate appended
+sections divided from the search input and one another. Use standard action-count
+badges for active filters/non-default sorting; no inline count text or standalone
+floating pills. Filter dialogs use the standard search InputGroup above flat Settings
+Field rows with full-width dividers and plain end-aligned values; avoid filter-chip
+controls inside the form itself. Mobile metadata uses consistent text size/line height
+and a predictable value column per group. Completion ratios are plain “done / total”
+text without different sizes, colors, or weights within the ratio. This replaces
+earlier experiments with subordinate denominators and undivided search actions.
+
+Settings value columns reserve up to the standard editor width, capped at 60%
+of the row on narrow surfaces. Keep editor-width tokens as lengths and constrain
+the row track, so nested controls do not repeatedly shrink a percentage width.
+
+Search action dividers use the surrounding body/background color. Count badges
+are circular and paint above dividers and every button hover/focus/selected surface;
+never clip the badges themselves at input or action boundaries. The joined action
+surface inherits the search group’s outer end corners and clips state fills there;
+keep counters inset within each action and portalled menus/tooltips outside that
+clip. Check both the single-action and filter-plus-sort compositions. Keep hover and keyboard focus visible
+without covering the badge. Every sort option has a direction/field icon; filter
+options get domain icons when meaningful (dates, morning/evening, statuses). Filter
+value triggers retain standard horizontal padding in idle, hover, focus, and open
+states; plain text styling is not zero-padding button styling.
+
+- Joined search actions use stable inset separators independent of hover/open backgrounds, consistent hit areas and inset keyboard focus. Count badges stay above state surfaces. Rows open from their non-interactive area; checkboxes and other embedded controls retain independent actions, with a primary keyboard-accessible opener.
+- Historical detail views separate a compact outcome summary, numbered question/answer pairs, and a single chronological activity log. Retain draft and action-outcome evidence; align timestamps separately from content. Nearby calendar dates use Today, Yesterday, or Tomorrow in the relevant time zone, with explicit dates farther away.
+
+### Data-page state and recovery contract
+
+The purpose of a table/data page is to find, compare, and inspect records. Its chrome
+must serve that job in the current state, rather than remaining visible merely because
+the populated table uses it. State is scoped to the affected dataset, not automatically
+the whole page. Domain owners supply truthful copy and recovery actions; shared owners
+supply layout and interaction through `data-view-controls`, `data-table`, and
+`data-view-state`. This contract is accepted; Ritual History is the reference consumer,
+not evidence that every existing data page has been migrated.
+
+| State | Material and explanation | Useful controls |
+| --- | --- | --- |
+| Initial loading | Bounded Skeleton rows and an accessible busy label; no premature zero count or empty message | Keep navigation and entered criteria; withhold export/selection/pagination until rows exist |
+| Loaded records | Compact flat table or deliberately composed mobile records | Joined search/filter/sort, contextual selection, overflow options, one pagination footer |
+| No matches | Name the query scope; never imply the whole account is empty | Keep editable search/filters and an explicit clear/broaden action |
+| Empty period | Name the date-range scope; earlier records may exist | Keep period navigation and an all-time/broaden action |
+| Confirmed empty collection | Quiet Empty title plus at most one useful sentence | Offer create/connect/setup only when that is the actual next step and permitted; do not invent an action for read-only history |
+| Initial load unavailable | Distinct availability/retry region, never the empty dashed container or a success-zero count | Keep criteria/navigation; safe Retry with pending/disabled feedback; announce the error via Sonner in settings |
+| Refresh failed with cached data | Keep last available rows and label their freshness honestly | Keep inspection and scope controls, with Retry; withhold operations that require confirmed current state |
+| Access denied / expired session | Follow authoritative permission/session recovery; remove denied cached material | Sign in or request the correct access when supported; do not claim Retry alone repairs permissions |
+| Empty later cursor page | Do not infer a globally empty collection | Retain Previous Page or another bounded recovery path |
+
+Use shared shadcn Empty composition for successful absence and Skeleton for loading.
+Empty views omit table headings, row selection, Export, Table Options, Sort, page size,
+page counters, and meaningless “0–0 of 0” summaries. Keep any control needed to broaden
+or undo the current scope. Do not hide a search with entered text or active filters in a
+way that traps the person; changing state must not silently clear them or saved layout.
+A clearly named “Show all history” action may explicitly clear view criteria without
+altering records. Navigation and escape remain available. Do not automatically create,
+connect, enable, delete, or reset user preferences as an empty/error recovery action.
+
+One title identifies the state; add a concise sentence only if it explains scope or the
+next step. Avoid duplicate date/count/status copy, giant illustrations, multiple cards,
+redundant disabled controls, and generic instructional essays. Keep the same hierarchy
+and actions on mobile, allow text wrapping, and keep skeleton/empty height bounded rather
+than stretching it to fill the screen. When filtering removes a focused transient control,
+retain a sensible focus target; primary recovery actions need visible keyboard focus.
+
+Query failures are not evidence of absence. Preserve criteria, drafts, column preferences,
+and valid cached records across retry; recovery must restore the populated view without
+requiring a reload. Never show raw server diagnostics. Settings use one deduplicated Sonner
+error owner (including load errors), with no duplicate inline error paragraph/Alert. A neutral
+availability/freshness label plus a persistent recovery control may remain at the dataset
+boundary so dismissing a toast does not remove the way forward; it is actual state, not
+repeated action-result copy. Full-page route errors retain their separate ErrorPage contract.
+Do not claim a refresh succeeded before the authoritative query returns. Keep export and
+selection scope honest during partial, stale, or paginated views.
+
+Verify state transitions as well as screenshots: populated → no matches → broaden →
+populated; initial failure → retry → recovered; retained data → failed refresh; pending
+requests; mobile and keyboard recovery. Tests must assert absence of irrelevant chrome,
+preserved criteria, Sonner delivery without duplicate error copy, and no accidental mutation.
+
+A recovery action must restore the controls appropriate to the recovered state. Never use
+one-way presentation flags to hide a toolbar after an empty state. In period-based views,
+keep the current scope visible in All Time as well as bounded periods and provide an
+explicit return to the default period. Returning rows restore Sort, Table Options,
+selection, and pagination; clearing criteria does not reset layout preferences.
+Collection initial-failure branches must render recovery, not just a toast and a blank
+region. Hide zero-count badges when they merely repeat absence, and never derive a zero
+from an unavailable inventory. Verify these branches on each consumer, not only the shared
+component. Data pages include read-only activity and history, record lists such as Goals
+and Motives, account/source inventories, and permission-scoped device/credential lists;
+they share state behavior without being forced into identical table or CRUD layouts.
+
+When a collection depends on several independent sources, absence requires successful
+reads of every source that contributes records. Pending or failed account/credential
+reads cannot establish zero. Retain valid nonempty cached material with recovery, but
+do not restate a cached empty result as current absence after a failed refresh. Empty
+creation paths should not duplicate identical header and body actions.
+
+Applying the data-view standard means checking the populated composition as well
+as shared absence/recovery components. Activity uses the same joined toolbar,
+compact table/mobile records, options, and bounded pagination. When only a bounded
+recent API window is available, label that limit honestly; local filtering and
+pagination do not imply access to older records. A shared error component alone
+does not make a legacy feed conform to the complete table pattern.

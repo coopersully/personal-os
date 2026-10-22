@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/api";
 import { ActionButton as Button } from "@/components/action-button";
+import { DataChoice, FilterTrigger } from "@/components/data-view-controls";
 import { SearchIcon } from "@/components/icons";
 import {
   ResponsiveDialog,
@@ -22,7 +23,6 @@ import {
   ComboboxList,
 } from "@/components/ui/combobox";
 import { InputGroupAddon } from "@/components/ui/input-group";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { parseCalendarDateQuery } from "../calendar/search-date";
@@ -189,32 +189,33 @@ function FinderInput({
         <span className="text-xs text-muted-foreground">
           Entire workspace · Available synced content
         </span>
-        <Button
-          size="sm"
-          variant="ghost"
+        <FilterTrigger
+          label={includeArchived ? "Including archive" : "Excluding archive"}
+          active={!includeArchived}
           aria-pressed={includeArchived}
           onClick={() => {
             setArchiveOverride(!includeArchived);
             setOffset(0);
           }}
-        >
-          {includeArchived ? "Including archive" : "Excluding archive"}
-        </Button>
+        />
       </div>
-      <NativeSelect
-        aria-label="Search result type"
+      <DataChoice
+        label="Result type"
+        ariaLabel="Search result type"
         value={filter}
-        onChange={(event) => {
-          setFilter(event.target.value);
+        active={filter !== "all"}
+        choices={[
+          ["all", "All results"],
+          ["content", "Content"],
+          ["settings", "Settings"],
+          ["actions", "Navigation and actions"],
+          ["reviews", "Reviews"],
+        ]}
+        onChange={(value) => {
+          setFilter(value);
           setOffset(0);
         }}
-      >
-        <NativeSelectOption value="all">All results</NativeSelectOption>
-        <NativeSelectOption value="content">Content</NativeSelectOption>
-        <NativeSelectOption value="settings">Settings</NativeSelectOption>
-        <NativeSelectOption value="actions">Navigation and actions</NativeSelectOption>
-        <NativeSelectOption value="reviews">Reviews</NativeSelectOption>
-      </NativeSelect>
+      />
       <div role="status" className="px-2 text-xs text-muted-foreground">
         {query.trim() && needsRecords && (!current || records.isPending)
           ? "Searching…"

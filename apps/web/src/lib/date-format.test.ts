@@ -4,6 +4,7 @@ import {
   formatMaterialDateTime,
   formatOrdinalDate,
   formatRelativeMaterialDateTime,
+  formatRelativeCalendarDate,
   ordinalSuffix,
 } from "./date-format.js";
 
@@ -64,4 +65,15 @@ describe("formatCalendarDate", () => {
     expect(formatCalendarDate("2026-11-01")).toBe("Nov 1, 2026");
     expect(formatCalendarDate("invalid")).toBe("invalid");
   });
+});
+
+it("labels calendar dates relative to the requested zone across DST", () => {
+  const now = new Date("2026-11-02T04:30:00Z");
+  expect(formatRelativeCalendarDate("2026-11-01", "America/New_York", { now })).toBe("Today");
+  expect(formatRelativeCalendarDate("2026-10-31", "America/New_York", { now })).toBe("Yesterday");
+  expect(formatRelativeCalendarDate("2026-11-02", "America/New_York", { now })).toBe("Tomorrow");
+  expect(formatRelativeCalendarDate("2026-11-02", "UTC", { now })).toBe("Today");
+  expect(formatRelativeCalendarDate("2026-10-29", "UTC", { now })).toBe("Thu, Oct 29");
+  expect(formatRelativeCalendarDate("2025-10-29", "UTC", { now })).toBe("Wed, Oct 29, 2025");
+  expect(formatRelativeCalendarDate("invalid", "UTC", { now })).toBe("invalid");
 });

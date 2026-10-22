@@ -57,6 +57,12 @@ function mount(props: Parameters<typeof DesktopSettingsPanel>[0] = {}) {
     fireEvent.click(screen.getByRole("button", { name: "Server settings" }));
   return { ...rendered, cache };
 }
+async function openPetColor() {
+  if (!screen.queryByLabelText("Pet color")) {
+    await userEvent.click(await screen.findByRole("button", { name: "Edit Pet color" }));
+  }
+  return screen.findByLabelText("Pet color");
+}
 async function save() {
   const connect = screen.queryByRole("button", { name: "Connect to server" });
   if (connect && !connect.hasAttribute("disabled")) await userEvent.click(connect);
@@ -203,13 +209,11 @@ describe("desktop preferences", () => {
     expect(screen.getByRole("button", { name: "Server settings" })).toHaveFocus();
   });
 
-  it("promotes hosted nohmi and keeps custom server controls in an advanced disclosure", async () => {
+  it("keeps hosted and custom server choices in flat rows with an explicit connect action", async () => {
     mount({ connectionOnly: true });
     expect(await screen.findByText("Recommended")).toBeInTheDocument();
     expect(screen.getByText("nohmi-api.coopersully.me")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Custom API server")).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Advanced server settings" }));
     expect(screen.getByLabelText("Custom API server")).toHaveValue("");
   });
 
@@ -256,7 +260,6 @@ describe("desktop preferences", () => {
   it("allows custom server testing and switching before login without authenticated queries", async () => {
     const { cache } = mount({ connectionOnly: true });
     await screen.findByText("Recommended");
-    await userEvent.click(screen.getByRole("button", { name: "Advanced server settings" }));
     const server = screen.getByLabelText("Custom API server");
     cache.setQueryData(["private"], "previous account");
     expect(screen.queryByRole("switch", { name: "Open at login" })).not.toBeInTheDocument();
@@ -280,7 +283,6 @@ describe("desktop preferences", () => {
   it("invalidates the connection test when the address changes or Hosted nohmi is selected", async () => {
     mount({ connectionOnly: true });
     await screen.findByText("Recommended");
-    await userEvent.click(screen.getByRole("button", { name: "Advanced server settings" }));
     const server = screen.getByLabelText("Custom API server");
     fireEvent.change(server, { target: { value: "https://custom.example.com" } });
     await userEvent.click(screen.getByRole("button", { name: "Test connection" }));
@@ -353,9 +355,9 @@ describe("desktop preferences", () => {
     mount({ section: "pet" });
     await screen.findByRole("switch", { name: "Show desktop pet" });
     await userEvent.click(screen.getByRole("switch", { name: "Show desktop pet" }));
-    fireEvent.change(screen.getByLabelText("Pet color"), { target: { value: "#123456" } });
-    await userEvent.click(screen.getByRole("checkbox", { name: "Tasks" }));
-    await userEvent.click(screen.getByRole("checkbox", { name: "Finances" }));
+    fireEvent.change(await openPetColor(), { target: { value: "#123456" } });
+    await userEvent.click(screen.getByRole("switch", { name: "Tasks" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Finances" }));
     await userEvent.click(screen.getByRole("button", { name: "Reset pet position" }));
     expect(mocks.invoke).toHaveBeenCalledWith("desktop_native_action", {
       action: "reset_pet_position",
@@ -372,9 +374,20 @@ describe("desktop preferences", () => {
     expect(saved.notifications).toEqual(settings.notifications);
   });
 
+  it("keeps color compact until opened and returns focus when dismissed", async () => {
+    mount({ section: "pet" });
+    const trigger = await screen.findByRole("button", { name: "Edit Pet color" });
+    expect(screen.queryByLabelText("Pet color")).not.toBeInTheDocument();
+    expect(trigger).toHaveTextContent(settings.petColor.toUpperCase());
+    expect(await openPetColor()).toHaveValue(settings.petColor.toUpperCase());
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByLabelText("Pet color")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
   it("previews a burst of colors without replaying each value to disk", async () => {
     mount({ section: "pet" });
-    const input = await screen.findByLabelText("Pet color");
+    const input = await openPetColor();
     for (let index = 1; index <= 30; index++) {
       fireEvent.change(input, { target: { value: `#${index.toString(16).padStart(6, "0")}` } });
     }
@@ -394,6 +407,22 @@ describe("desktop preferences", () => {
     fireEvent.keyDown(slider, { key: "ArrowRight" });
     await waitFor(() => expect(status.settings.petScale).toBe(1.05));
     expect(status.settings.petColor).toBe(settings.petColor);
+  });
+
+  it("groups native notification guidance and actions in the subsection header", async () => {
+    status.native.notificationPermission = "notDetermined";
+    mount({ section: "notifications" });
+    const allow = await screen.findByRole("button", { name: "Allow notifications" });
+    const header = allow.closest(".settings-subsection__header");
+    expect(header).toContainElement(screen.getByText("macOS permission: Not requested"));
+    expect(header).toContainElement(screen.getByRole("button", { name: "Test notification" }));
+    expect(header).toContainElement(
+      screen.getByRole("button", { name: "macOS notification settings" }),
+    );
+    expect(header).toHaveTextContent("Notifications work with the window closed");
+    expect(header).not.toContainElement(
+      screen.getByRole("switch", { name: "Enable notifications" }),
+    );
   });
 
   it("keeps draft notification choices when requesting permission refreshes native status", async () => {
@@ -480,9 +509,10 @@ describe("desktop preferences", () => {
     expect(screen.queryByRole("button", { name: "Save preferences" })).not.toBeInTheDocument();
     for (const workspace of ["Calendar", "Tasks", "Mail", "Finances"]) {
       const id = workspace.toLowerCase();
-      expect(
-        screen.getByRole("link", { name: `${workspace} Notification settings` }),
-      ).toHaveAttribute("href", `/settings?section=${id}&field=${id}:notifications`);
+      expect(screen.getByRole("link", { name: workspace })).toHaveAttribute(
+        "href",
+        `/settings?page=${id}&field=${id}:notifications`,
+      );
     }
     for (const label of [
       "Enable notifications",
@@ -490,8 +520,8 @@ describe("desktop preferences", () => {
       "Show message previews",
     ])
       await userEvent.click(screen.getByRole("switch", { name: label }));
-    fireEvent.change(screen.getByLabelText("From"), { target: { value: "22:00" } });
-    fireEvent.change(screen.getByLabelText("Until"), { target: { value: "07:00" } });
+    fireEvent.change(screen.getByLabelText("Quiet hours start"), { target: { value: "22:00" } });
+    fireEvent.change(screen.getByLabelText("Quiet hours end"), { target: { value: "07:00" } });
     await waitFor(() => expect(status.settings.notifications.quietEnd).toBe("07:00"));
     view.unmount();
     view = mount({ section: "tasks" });
@@ -501,13 +531,13 @@ describe("desktop preferences", () => {
     view.unmount();
     view = mount({ section: "calendar" });
     await userEvent.click(await screen.findByRole("switch", { name: "Upcoming events" }));
-    await userEvent.click(await screen.findByRole("checkbox", { name: "Personal" }));
+    await userEvent.click(await screen.findByRole("switch", { name: "Personal" }));
     fireEvent.change(screen.getByLabelText("Minutes before an event"), { target: { value: "30" } });
     await waitFor(() => expect(status.settings.notifications.advanceMinutes).toBe(30));
     view.unmount();
     mount({ section: "mail" });
     await userEvent.click(await screen.findByRole("switch", { name: "New mail" }));
-    await userEvent.click(await screen.findByRole("checkbox", { name: "cooper@example.com" }));
+    await userEvent.click(await screen.findByRole("switch", { name: "cooper@example.com" }));
     await waitFor(() =>
       expect(status.settings.notifications.mailAccountIds).toEqual(["account-1"]),
     );
@@ -529,14 +559,14 @@ describe("desktop preferences", () => {
 
   it("preserves an unsaved appearance and delivers retry through Sonner only", async () => {
     mount({ section: "pet" });
-    await screen.findByLabelText("Pet color");
+    await openPetColor();
     const original = mocks.invoke.getMockImplementation()!;
     let fail = true;
     mocks.invoke.mockImplementation(async (command, args) => {
       if (command === "desktop_save_pet_appearance" && fail) throw new Error("Could not write");
       return original(command, args);
     });
-    fireEvent.change(screen.getByLabelText("Pet color"), { target: { value: "#123456" } });
+    fireEvent.change(await openPetColor(), { target: { value: "#123456" } });
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByLabelText("Pet color")).toHaveValue("#123456"));
     expect(mocks.success).not.toHaveBeenCalled();
@@ -733,7 +763,7 @@ describe("desktop preferences", () => {
       ),
     ).toHaveAttribute("role", "status");
     expect(screen.queryByText(/healthy@example\.com:/)).not.toBeInTheDocument();
-    expect(screen.getByRole("checkbox", { name: "healthy@example.com" })).toBeEnabled();
+    expect(screen.getByRole("switch", { name: "healthy@example.com" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Save preferences" })).not.toBeInTheDocument();
   });
 
@@ -741,9 +771,9 @@ describe("desktop preferences", () => {
     settings.notifications.quietStart = "22:00";
     settings.notifications.quietEnd = "07:00";
     mount({ section: "notifications" });
-    await screen.findByLabelText("From");
-    fireEvent.change(screen.getByLabelText("From"), { target: { value: "" } });
-    fireEvent.change(screen.getByLabelText("Until"), { target: { value: "" } });
+    await screen.findByLabelText("Quiet hours start");
+    fireEvent.change(screen.getByLabelText("Quiet hours start"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Quiet hours end"), { target: { value: "" } });
     const saved = await save();
     expect(saved.notifications.quietStart).toBeNull();
     expect(saved.notifications.quietEnd).toBeNull();
@@ -813,7 +843,7 @@ describe("background setup", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Set up notifications" })).toHaveAttribute(
       "href",
-      "/settings?section=notifications",
+      "/settings?page=notifications",
     );
   });
 
@@ -850,7 +880,7 @@ describe("background setup", () => {
 
   it("enables startup without discarding automatically saved pet preferences", async () => {
     mount({ section: "pet" });
-    fireEvent.change(await screen.findByLabelText("Pet color"), { target: { value: "#123456" } });
+    fireEvent.change(await openPetColor(), { target: { value: "#123456" } });
     await waitFor(() => expect(status.settings.petColor).toBe("#123456"));
     await userEvent.click(screen.getByRole("button", { name: "Review checks" }));
     await userEvent.click(screen.getByRole("button", { name: "Enable launch at login" }));
@@ -858,19 +888,19 @@ describe("background setup", () => {
       expect(status.settings).toMatchObject({ petColor: "#123456", launchAtLogin: true }),
     );
     await userEvent.keyboard("{Escape}");
-    expect(screen.getByLabelText("Pet color")).toHaveValue("#123456");
+    expect(await openPetColor()).toHaveValue("#123456");
   });
 
   it("refreshes OS status on return without resetting an edited preference", async () => {
     mount({ section: "pet" });
-    fireEvent.change(await screen.findByLabelText("Pet color"), { target: { value: "#123456" } });
+    fireEvent.change(await openPetColor(), { target: { value: "#123456" } });
     status = {
       ...status,
       native: { ...status.native, loginStatus: "enabled", launchAtLogin: true },
     };
     fireEvent.focus(window);
     await waitFor(() => expect(screen.getByText("1 of 4 complete")).toBeInTheDocument());
-    expect(screen.getByLabelText("Pet color")).toHaveValue("#123456");
+    expect(await openPetColor()).toHaveValue("#123456");
   });
 
   it("does not report a morning routine ready when automatic delivery is paused", async () => {
@@ -882,7 +912,7 @@ describe("background setup", () => {
     expect(await screen.findByText(/Enable automatic rituals on this Mac/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Routine settings" })).toHaveAttribute(
       "href",
-      "/settings?section=rituals",
+      "/settings?page=rituals",
     );
   });
 
@@ -948,12 +978,12 @@ describe("background setup", () => {
 
   it("allows setup navigation after preferences are automatically saved", async () => {
     mount({ section: "pet" });
-    fireEvent.change(await screen.findByLabelText("Pet color"), { target: { value: "#123456" } });
+    fireEvent.change(await openPetColor(), { target: { value: "#123456" } });
     await waitFor(() => expect(status.settings.petColor).toBe("#123456"));
     await userEvent.click(screen.getByRole("button", { name: "Review checks" }));
     expect(screen.getByRole("link", { name: "Routine settings" })).toHaveAttribute(
       "href",
-      "/settings?section=rituals",
+      "/settings?page=rituals",
     );
   });
 
@@ -1064,12 +1094,14 @@ it("keeps ritual cards opt-in and autosaves the preference", async () => {
 
 it("retains half-entered quiet hours across an unrelated autosave", async () => {
   mount({ section: "notifications" });
-  fireEvent.change(await screen.findByLabelText("From"), { target: { value: "22:00" } });
+  fireEvent.change(await screen.findByLabelText("Quiet hours start"), {
+    target: { value: "22:00" },
+  });
   await userEvent.click(screen.getByRole("switch", { name: "Show message previews" }));
   await waitFor(() => expect(status.settings.notifications.preview).toBe(true));
-  expect(screen.getByLabelText("From")).toHaveValue("22:00");
+  expect(screen.getByLabelText("Quiet hours start")).toHaveValue("22:00");
   expect(status.settings.notifications.quietStart).toBeNull();
-  fireEvent.change(screen.getByLabelText("Until"), { target: { value: "07:00" } });
+  fireEvent.change(screen.getByLabelText("Quiet hours end"), { target: { value: "07:00" } });
   await waitFor(() =>
     expect(status.settings.notifications).toMatchObject({ quietStart: "22:00", quietEnd: "07:00" }),
   );

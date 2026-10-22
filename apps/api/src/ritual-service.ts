@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   auditEvents,
   type Database,
+  reminders,
   ritualActions,
   ritualDefinitionRevisions,
   ritualDefinitions,
@@ -25,10 +26,14 @@ import {
   type RitualState,
   requiresSnoozeConfirmation,
   ritualAnswerIsValid,
+  ritualCompletionWeek,
+  ritualDefinitionForDate,
   ritualIsAnswered,
+  ritualStreakCount,
+  unfinishedOptionalRitualSteps,
   upcomingRitualWindows,
 } from "@personal-os/domain";
-import { and, desc, eq, gte, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, lt, lte, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import type { Principal } from "./types.js";
@@ -55,9 +60,65 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
     });
   }
   async function definitions(tx: Tx, userId: string) {
-    return (
-      await tx.select().from(ritualDefinitions).where(eq(ritualDefinitions.userId, userId))
-    ).map((r) => r.data);
+    const [owner] = await tx
+      .select({ timeZone: users.planningTimezone })
+      .from(users)
+      .where(eq(users.id, userId));
+    const records = await tx
+      .select()
+      .from(ritualDefinitions)
+      .where(eq(ritualDefinitions.userId, userId));
+    const result: RitualDefinition[] = [];
+    for (const record of records) {
+      const before = record.data;
+      if (!owner || before.timeZone === owner.timeZone) {
+        result.push(before);
+        continue;
+      }
+      // Profile owns the schedule zone. Preserve historical occurrence snapshots;
+      // the revised schedule begins at the next boundary after this change.
+      const updated = {
+        ...before,
+        timeZone: owner.timeZone,
+        revision: before.revision + 1,
+        enabledAt: new Date(now().getTime() + 1).toISOString(),
+      };
+      await tx
+        .update(ritualDefinitions)
+        .set({ data: updated })
+        .where(and(eq(ritualDefinitions.id, record.id), eq(ritualDefinitions.userId, userId)));
+      await tx
+        .insert(ritualDefinitionRevisions)
+        .values({ userId, ritualId: record.id, revision: updated.revision, data: updated });
+      result.push(updated);
+    }
+    if (result.some((definition, index) => definition.revision !== records[index]?.data.revision)) {
+      const pending = await tx
+        .select()
+        .from(ritualOccurrences)
+        .where(
+          and(
+            eq(ritualOccurrences.userId, userId),
+            sql`${ritualOccurrences.data}->>'status' = 'pending'`,
+          ),
+        );
+      for (const record of pending) {
+        const open = record.data;
+        const next = upcomingRitualWindows(result, now().toISOString()).find(
+          (window) =>
+            window.ritualId !== open.ritualId ||
+            window.scheduledLocalDate !== open.scheduledLocalDate,
+        );
+        if (next && next.dueAt !== open.expiresAt) {
+          await persist(
+            tx,
+            { ...open, expiresAt: next.dueAt, revision: open.revision + 1 },
+            userId,
+          );
+        }
+      }
+    }
+    return result;
   }
   async function persist(tx: Tx, occurrence: RitualOccurrence, userId: string) {
     await tx
@@ -126,15 +187,18 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
           ) ?? null)
         : null);
     if (window && !current) {
-      const definition = defs.find((d) => d.id === window.ritualId)!;
+      const definition = ritualDefinitionForDate(
+        defs.find((d) => d.id === window.ritualId)!,
+        window.scheduledLocalDate,
+      );
       current = {
         ...window,
         id: occurrenceId(userId, window.ritualId, window.scheduledLocalDate),
         definition,
-        status: "pending",
+        status: definition.steps.length ? "pending" : "completed",
         revision: 1,
         snoozedUntil: null,
-        settledAt: null,
+        settledAt: definition.steps.length ? null : window.dueAt,
         responses: [],
         actions: [],
       };
@@ -148,22 +212,58 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
       });
       occurrences.push(current);
     }
+    const history = current
+      ? await tx
+          .select({
+            scheduledLocalDate: ritualOccurrences.localDate,
+            status: sql<RitualOccurrence["status"]>`${ritualOccurrences.data}->>'status'`,
+            hasSteps: sql<boolean>`jsonb_array_length(${ritualOccurrences.data}->'definition'->'steps') > 0`,
+          })
+          .from(ritualOccurrences)
+          .where(
+            and(
+              eq(ritualOccurrences.userId, userId),
+              eq(ritualOccurrences.ritualId, current.ritualId),
+            ),
+          )
+      : [];
     const state: RitualState = {
       definitions: defs,
-      upcoming: upcomingRitualWindows(defs, instant).map((window) => ({
-        ...window,
-        id: occurrenceId(userId, window.ritualId, window.scheduledLocalDate),
-        definition: defs.find((d) => d.id === window.ritualId) as RitualDefinition,
-        status: "pending" as const,
-        revision: 1,
-        snoozedUntil: null,
-        settledAt: null,
-        responses: [],
-        actions: [],
-      })),
+      upcoming: upcomingRitualWindows(defs, instant).map((window) => {
+        const definition = ritualDefinitionForDate(
+          defs.find((d) => d.id === window.ritualId)!,
+          window.scheduledLocalDate,
+        );
+        return {
+          ...window,
+          id: occurrenceId(userId, window.ritualId, window.scheduledLocalDate),
+          definition,
+          status: definition.steps.length ? ("pending" as const) : ("completed" as const),
+          revision: 1,
+          snoozedUntil: null,
+          settledAt: definition.steps.length ? null : window.dueAt,
+          responses: [],
+          actions: [],
+        };
+      }),
       current,
       serverNow: instant,
-      snoozeCount: current ? countSnoozes(occurrences, current.ritualId, instant) : 0,
+      snoozeCount: current ? countActions(occurrences, current.ritualId, instant) : 0,
+      skipCount: current ? countActions(occurrences, current.ritualId, instant, "skip_applied") : 0,
+      streakCount: current
+        ? ritualStreakCount(
+            defs.find((d) => d.id === current.ritualId) ?? current.definition,
+            current,
+            history,
+          )
+        : 0,
+      completionWeek: current
+        ? ritualCompletionWeek(
+            defs.find((d) => d.id === current.ritualId) ?? current.definition,
+            current.scheduledLocalDate,
+            history,
+          )
+        : [],
       syncStatus: "saved",
     };
     return { state, occurrences };
@@ -172,7 +272,12 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
     const hash = createHash("sha256").update(`${userId}/${ritualId}/${date}`).digest("hex");
     return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
   }
-  function countSnoozes(occurrences: RitualOccurrence[], ritualId: string, at: string) {
+  function countActions(
+    occurrences: RitualOccurrence[],
+    ritualId: string,
+    at: string,
+    kind: "snooze_confirmed" | "skip_applied" = "snooze_confirmed",
+  ) {
     const end = Date.parse(at),
       start = end - 72 * 3600000;
     return occurrences
@@ -188,10 +293,7 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
       )
       .filter(
         ({ action, at }) =>
-          action.kind === "snooze_confirmed" &&
-          action.outcome === "applied" &&
-          at >= start &&
-          at <= end,
+          action.kind === kind && action.outcome === "applied" && at >= start && at <= end,
       ).length;
   }
   async function previous<T>(
@@ -314,6 +416,15 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
         if (replay) return replay;
         const defs = await definitions(tx, context.principal.userId),
           before = defs.find((d) => d.kind === kind);
+        const [owner] = await tx
+          .select({ timeZone: users.planningTimezone })
+          .from(users)
+          .where(eq(users.id, context.principal.userId));
+        if (owner && input.timeZone !== owner.timeZone)
+          throw new AppError(
+            "invalid_request",
+            "Rituals use your profile time zone. Refresh before saving.",
+          );
         if (input.expectedRevision !== (before?.revision ?? 0))
           throw new AppError("conflict", "Ritual settings changed. Refresh before saving.");
         if (
@@ -521,7 +632,12 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
         const { state, occurrences } = await reconcile(tx, context.principal.userId);
         const occurrence = findOccurrence(occurrences, id);
         const instant = now().toISOString();
-        const count = countSnoozes(occurrences, occurrence.ritualId, instant);
+        const count = countActions(
+          occurrences,
+          occurrence.ritualId,
+          instant,
+          input.kind === "skip" ? "skip_applied" : "snooze_confirmed",
+        );
         const valid =
           occurrence.status === "pending" && occurrence.revision === input.expectedRevision;
         async function event(
@@ -558,6 +674,57 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
           );
         if (valid) {
           if (input.kind === "complete" && ritualIsAnswered(occurrence)) {
+            const optional = unfinishedOptionalRitualSteps(occurrence);
+            if (input.optionalReminderAt && optional.length) {
+              const requestedAt = Date.parse(input.optionalReminderAt);
+              const observedAt = Date.parse(input.observedAt);
+              if (
+                !Number.isFinite(requestedAt) ||
+                requestedAt <= observedAt ||
+                requestedAt > observedAt + 26 * 3600000
+              ) {
+                throw new AppError(
+                  "invalid_request",
+                  "Choose a reminder time within the next day.",
+                );
+              }
+              // A queued completion may synchronize after the chosen time. Preserve
+              // the follow-up by making it due shortly after acceptance, never in the past.
+              const dueAt = new Date(Math.max(requestedAt, now().getTime() + 60000));
+              const reminderIds: string[] = [];
+              for (const step of optional) {
+                const reminderId = randomUUID();
+                await tx.insert(reminders).values({
+                  id: reminderId,
+                  userId: context.principal.userId,
+                  title: step.label,
+                  kind: "reminder",
+                  dueAt,
+                  timezone: occurrence.timeZone,
+                  notes: `${occurrence.definition.kind === "morning" ? "Morning" : "Evening"} ritual · ${occurrence.scheduledLocalDate}`,
+                });
+                await tx.insert(auditEvents).values(
+                  auditValues({
+                    ...context,
+                    action: "reminder.created",
+                    entityType: "reminder",
+                    entityId: reminderId,
+                    before: null,
+                    after: {
+                      occurrenceId: occurrence.id,
+                      dueAt: dueAt.toISOString(),
+                      source: "ritual",
+                    },
+                  }),
+                );
+                reminderIds.push(reminderId);
+              }
+              occurrence.optionalFollowUp = {
+                dueAt: dueAt.toISOString(),
+                stepIds: optional.map((step) => step.id),
+                reminderIds,
+              };
+            }
             await event("complete_applied", "applied");
             occurrence.status = "completed";
             occurrence.settledAt = instant;
@@ -633,11 +800,22 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
         }
         occurrence.revision++;
         await persist(tx, occurrence, context.principal.userId);
-        state.snoozeCount = countSnoozes(
+        state.snoozeCount = countActions(
           occurrences,
           occurrence.ritualId,
           new Date(now().getTime() + 1).toISOString(),
         );
+        state.skipCount = countActions(occurrences, occurrence.ritualId, instant, "skip_applied");
+        if (result.outcome === "applied" && input.kind === "complete")
+          state.streakCount = (state.streakCount ?? 0) + 1;
+        if (result.outcome === "applied" && input.kind === "skip") state.streakCount = 0;
+        if (result.outcome === "applied" && (input.kind === "complete" || input.kind === "skip")) {
+          state.completionWeek = (state.completionWeek ?? []).map((day) =>
+            day.date === occurrence.scheduledLocalDate
+              ? { ...day, status: input.kind === "complete" ? "completed" : "skipped" }
+              : day,
+          );
+        }
         await remember(
           tx,
           context,
@@ -659,38 +837,63 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
         kind?: string | undefined;
         dateFrom?: string | undefined;
         dateTo?: string | undefined;
+        status?: RitualOccurrence["status"] | undefined;
+        search?: string | undefined;
+        sort?: "newest" | "oldest" | undefined;
       },
     ) {
       return locked(context, async (tx) => {
         await reconcile(tx, context.principal.userId);
         const [cursorTime, cursorId] = query.cursor?.split("|") ?? [];
+        const oldest = query.sort === "oldest";
+        const compare = oldest ? gt : lt;
+        const order = oldest ? asc : desc;
+        const term = query.search?.trim().replace(/[\\%_]/g, "\\$&");
+        const pattern = `%${term}%`;
+        const scope = and(
+          eq(ritualOccurrences.userId, context.principal.userId),
+          query.kind
+            ? sql`${ritualOccurrences.data}->'definition'->>'kind' = ${query.kind}`
+            : undefined,
+          query.dateFrom ? gte(ritualOccurrences.localDate, query.dateFrom) : undefined,
+          query.dateTo ? lte(ritualOccurrences.localDate, query.dateTo) : undefined,
+          query.status ? sql`${ritualOccurrences.data}->>'status' = ${query.status}` : undefined,
+          term
+            ? or(
+                sql`${ritualOccurrences.data}->'definition'->>'title' ILIKE ${pattern}`,
+                sql`EXISTS (SELECT 1 FROM jsonb_array_elements(${ritualOccurrences.data}->'definition'->'steps') step WHERE step->>'label' ILIKE ${pattern})`,
+                sql`EXISTS (SELECT 1 FROM jsonb_array_elements(${ritualOccurrences.data}->'responses') response WHERE response->>'value' ILIKE ${pattern})`,
+                sql`${ritualOccurrences.localDate} ILIKE ${pattern}`,
+              )
+            : undefined,
+        );
+        const [aggregate] = await tx
+          .select({ total: sql<number>`count(*)::int` })
+          .from(ritualOccurrences)
+          .where(scope);
         const rows = await tx
           .select()
           .from(ritualOccurrences)
           .where(
             and(
-              eq(ritualOccurrences.userId, context.principal.userId),
+              scope,
               cursorTime
                 ? or(
-                    lt(ritualOccurrences.dueAt, new Date(cursorTime)),
+                    compare(ritualOccurrences.dueAt, new Date(cursorTime)),
                     cursorId
                       ? and(
                           eq(ritualOccurrences.dueAt, new Date(cursorTime)),
-                          lt(ritualOccurrences.id, cursorId),
+                          compare(ritualOccurrences.id, cursorId),
                         )
                       : undefined,
                   )
                 : undefined,
-              query.kind
-                ? sql`${ritualOccurrences.data}->'definition'->>'kind' = ${query.kind}`
-                : undefined,
-              query.dateFrom ? gte(ritualOccurrences.localDate, query.dateFrom) : undefined,
-              query.dateTo ? lte(ritualOccurrences.localDate, query.dateTo) : undefined,
             ),
           )
-          .orderBy(desc(ritualOccurrences.dueAt), desc(ritualOccurrences.id))
+          .orderBy(order(ritualOccurrences.dueAt), order(ritualOccurrences.id))
           .limit(query.limit + 1);
         return {
+          total: aggregate?.total ?? 0,
           items: rows.slice(0, query.limit).map((r) => compactResponses(r.data)),
           nextCursor:
             rows.length > query.limit

@@ -3,6 +3,7 @@ import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { DataViewEmpty, DataViewRecovery } from "@/components/data-view-state";
 import {
   ApprovalHandIcon,
   ChevronDownIcon,
@@ -18,10 +19,18 @@ import {
 } from "@/components/icons";
 import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
 import { api } from "../../api.js";
-import { QueryFeedback } from "../../components/async-state.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { ReadinessPanel } from "../../components/readiness-panel.js";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "../../components/settings-field.js";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
 import { Badge } from "../../components/ui/badge.js";
 import { Button } from "../../components/ui/button.js";
@@ -33,7 +42,6 @@ import {
   CardHeader,
   CardTitle,
 } from "../../components/ui/card.js";
-import { Checkbox } from "../../components/ui/checkbox.js";
 import {
   Collapsible,
   CollapsibleContent,
@@ -47,15 +55,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../../components/ui/dialog.js";
-import {
-  Field,
-  FieldContent,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "../../components/ui/field.js";
 import { Input } from "../../components/ui/input.js";
 import {
   InputGroup,
@@ -72,6 +71,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "../../components/ui/item.js";
+import { Switch } from "../../components/ui/switch.js";
 import { Textarea } from "../../components/ui/textarea.js";
 import { ToggleGroup, ToggleGroupItem } from "../../components/ui/toggle-group.js";
 import { WorkspaceIcon } from "../../components/workspace-identity.js";
@@ -366,7 +366,9 @@ function AgentAccessSettings({
             </CardDescription>
             <CardAction>
               <Button asChild size="sm" variant="outline">
-                <Link to="/settings?section=agent-connections">Connected agents</Link>
+                <Link to="/settings?page=connections&subpage=agent-connections">
+                  Connected agents
+                </Link>
               </Button>
             </CardAction>
           </CardHeader>
@@ -461,13 +463,25 @@ function AgentAccessSettings({
         <div className="settings-stack">
           {selectedDomain === "mail" ? (
             <>
-              <QueryFeedback query={mailSetup} title="Couldn’t load Mail accounts." />
-              <QueryFeedback query={rules} title="Couldn’t load Mail rules." />
+              <DataViewRecovery
+                query={mailSetup}
+                title="Couldn’t load Mail accounts."
+                unavailableLabel="Mail accounts unavailable"
+              />
+              <DataViewRecovery
+                query={rules}
+                title="Couldn’t load Mail rules."
+                unavailableLabel="Mail rules unavailable"
+              />
               {mailSetup.isPending || rules.isPending ? <p>Loading Mail settings…</p> : null}
               {mailSetup.data || rules.data ? (
                 <MailConfiguration
-                  {...(mailSetup.data ? { accounts: mailSources } : {})}
-                  {...(rules.data ? { rules: rules.data } : {})}
+                  {...(mailSetup.data && (mailSetup.isSuccess || mailSources.length > 0)
+                    ? { accounts: mailSources }
+                    : {})}
+                  {...(rules.data && (rules.isSuccess || rules.data.length > 0)
+                    ? { rules: rules.data }
+                    : {})}
                 />
               ) : null}
             </>
@@ -559,23 +573,25 @@ function AgentAccessSettings({
         <>
           <Card className="settings-section" size="sm">
             <CardHeader>
-              <CardAction>
-                <Badge
-                  variant={
-                    !connectionCountLoading &&
-                    !connectionCountUnavailable &&
-                    connectedAgentCount > 0
-                      ? "default"
-                      : "secondary"
-                  }
-                >
-                  {connectionCountLoading
-                    ? "Checking connections"
-                    : connectionCountUnavailable
-                      ? "Connections unavailable"
-                      : `${connectedAgentCount} connected`}
-                </Badge>
-              </CardAction>
+              {connectionCountLoading || connectionCountUnavailable || connectedAgentCount > 0 ? (
+                <CardAction>
+                  <Badge
+                    variant={
+                      !connectionCountLoading &&
+                      !connectionCountUnavailable &&
+                      connectedAgentCount > 0
+                        ? "default"
+                        : "secondary"
+                    }
+                  >
+                    {connectionCountLoading
+                      ? "Checking connections"
+                      : connectionCountUnavailable
+                        ? "Connections unavailable"
+                        : `${connectedAgentCount} connected`}
+                  </Badge>
+                </CardAction>
+              ) : null}
               <CardTitle>
                 <h3>Connect an agent host</h3>
               </CardTitle>
@@ -597,6 +613,25 @@ function AgentAccessSettings({
             className="agent-access__access"
             id="access-management"
           >
+            <DataViewRecovery
+              query={oauthClients}
+              title="Couldn’t load connected hosts."
+              unavailableLabel="Connected hosts unavailable"
+            />
+            <DataViewRecovery
+              query={tokens}
+              title="Couldn’t load access tokens."
+              unavailableLabel="Access tokens unavailable"
+            />
+            {oauthClients.isSuccess &&
+            tokens.isSuccess &&
+            oauthClients.data.length === 0 &&
+            tokens.data.length === 0 ? (
+              <DataViewEmpty
+                title="No agent connections"
+                description="Connect a compatible host using the MCP URL above."
+              />
+            ) : null}
             {(oauthClients.data?.length ?? 0) > 0 ? (
               <Card className="settings-section" size="sm">
                 <CardHeader>
@@ -650,6 +685,7 @@ function AgentAccessSettings({
                 (token) => !activeTokens.some((active) => active.id === token.id),
               )}
               loading={tokens.isPending}
+              unavailable={tokens.isError}
             />
           </section>
           <RevokeAccessDialog
@@ -741,9 +777,9 @@ function WorkspaceSettingsStatus({
         : (step?.userAction ?? plan?.nextAction ?? `${label} setup has not started.`);
   const action =
     !error && !loading && step?.id === "connect_agent"
-      ? { label: "Connect agent", to: "/settings?section=agent-connections" }
+      ? { label: "Connect agent", to: "/settings?page=connections&subpage=agent-connections" }
       : !error && !loading && step?.id === "review_guidance" && plan?.domain === "finances"
-        ? { label: "Review guidance", to: "/settings?section=finances#guidance" }
+        ? { label: "Review guidance", to: "/settings?page=finances#guidance" }
         : null;
   return (
     <Alert role="status" variant={error ? "destructive" : "info"}>
@@ -975,11 +1011,13 @@ function TokenAccess({
   currentTime,
   inactiveTokens,
   loading,
+  unavailable = false,
 }: {
   activeTokens: Awaited<ReturnType<typeof api.listAccessTokens>>;
   currentTime: number;
   inactiveTokens: Awaited<ReturnType<typeof api.listAccessTokens>>;
   loading: boolean;
+  unavailable?: boolean;
 }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -1032,7 +1070,9 @@ function TokenAccess({
           connection.
         </CardDescription>
         <CardAction>
-          <Badge variant="secondary">{activeTokens.length} active</Badge>
+          {!loading && !unavailable && activeTokens.length > 0 ? (
+            <Badge variant="secondary">{activeTokens.length} active</Badge>
+          ) : null}
         </CardAction>
       </CardHeader>
       <CardContent>
@@ -1109,7 +1149,7 @@ function TokenAccess({
                       <FieldGroup className="token-permissions">
                         {selectableScopes.map((scope) => (
                           <Field key={scope} orientation="horizontal">
-                            <Checkbox
+                            <Switch
                               checked={scopes.includes(scope)}
                               id={`scope-${scope}`}
                               onCheckedChange={(checked) =>

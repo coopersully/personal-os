@@ -10,6 +10,7 @@ import {
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { FilterChip, FilterTrigger } from "@/components/data-view-controls";
 import {
   ChevronRightIcon,
   EyeIcon,
@@ -17,7 +18,6 @@ import {
   MoreHorizontalIcon,
   SearchIcon,
   TrashIcon,
-  XIcon,
 } from "@/components/icons";
 import {
   ResponsiveDialog,
@@ -769,33 +769,26 @@ function TaskFilterChips({
       {active.map((key) => {
         const label = `${taskTimingFilterLabel(key)} ${formatMaterialDateTime(searchParams.get(key) as string, timeZone)}`;
         return (
-          <Button
+          <FilterChip
             key={key}
+            label={label}
             aria-label={`Remove ${label}`}
-            onClick={() => remove(key)}
-            size="xs"
-            variant="secondary"
-            className="max-w-full"
-          >
-            <span className="truncate">{label}</span>
-            <XIcon aria-hidden="true" data-icon="inline-end" />
-          </Button>
+            onRemove={() => remove(key)}
+          />
         );
       })}
       {lifecycle ? (
-        <Button
+        <FilterChip
+          label={
+            lifecycle === "completed"
+              ? "Completed"
+              : lifecycle === "cancelled"
+                ? "Cancelled"
+                : "Open"
+          }
           aria-label={`Remove ${lifecycle} filter`}
-          onClick={() => remove("lifecycle")}
-          size="xs"
-          variant="secondary"
-        >
-          {lifecycle === "completed"
-            ? "Completed"
-            : lifecycle === "cancelled"
-              ? "Cancelled"
-              : "Open"}
-          <XIcon aria-hidden="true" data-icon="inline-end" />
-        </Button>
+          onRemove={() => remove("lifecycle")}
+        />
       ) : null}
     </fieldset>
   );
@@ -849,9 +842,12 @@ function TaskFilters({
       }}
     >
       <ResponsiveDialogTrigger asChild>
-        <Button size="sm" variant="outline">
-          Filters{activeCount > 0 ? ` (${activeCount})` : ""}
-        </Button>
+        <FilterTrigger
+          label="Filters"
+          active={activeCount > 0}
+          count={activeCount}
+          aria-label={activeCount ? `Filters (${activeCount})` : "Filters"}
+        />
       </ResponsiveDialogTrigger>
       <ResponsiveDialogContent aria-describedby={undefined}>
         <ResponsiveDialogHeader>

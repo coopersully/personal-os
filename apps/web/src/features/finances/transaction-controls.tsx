@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
+import { FilterTrigger, SortOptionIcon, SortTrigger } from "@/components/data-view-controls";
 import { DateInput } from "@/components/date-input";
 import {
   ChevronDownIcon,
@@ -16,8 +17,6 @@ import {
   LayersIcon,
   PlusIcon,
   ReceiptIcon,
-  SliderHorizontalIcon,
-  SortIcon,
   TagsIcon,
   UploadIcon,
 } from "@/components/icons";
@@ -30,6 +29,7 @@ import {
   ResponsiveDialogTitle,
   ResponsiveDialogTrigger,
 } from "@/components/responsive-dialog";
+import { Field, FieldGroup, FieldLabel } from "@/components/settings-field";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -40,7 +40,6 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
@@ -142,15 +141,13 @@ export function FinanceTransactionControls({
       <WorkspaceHeaderControls label="Transaction controls">
         <ResponsiveDialog open={filtersOpen} onOpenChange={setFiltersOpen}>
           <ResponsiveDialogTrigger asChild>
-            <Button
-              size="icon"
-              variant="ghost"
+            <FilterTrigger
+              compact
+              label="Filters"
+              active={activeFilters > 0}
+              count={activeFilters}
               aria-label={activeFilters ? `Filters (${activeFilters} active)` : "Filters"}
-              badgeCount={activeFilters}
-            >
-              <SliderHorizontalIcon />
-              {activeFilters ? <span className="sr-only">{activeFilters} active</span> : null}
-            </Button>
+            />
           </ResponsiveDialogTrigger>
           <ResponsiveDialogContent>
             <ResponsiveDialogHeader>
@@ -303,9 +300,7 @@ export function FinanceTransactionControls({
         {onSort ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button size="icon" variant="ghost" aria-label="Sort transactions">
-                <SortIcon />
-              </Button>
+              <SortTrigger compact label="Sort transactions" aria-label="Sort transactions" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuRadioGroup value={sort ?? "date:desc"} onValueChange={onSort}>
@@ -320,6 +315,7 @@ export function FinanceTransactionControls({
                   ] as const
                 ).map(([value, label]) => (
                   <DropdownMenuRadioItem key={value} value={value}>
+                    <SortOptionIcon value={value} />
                     {label}
                   </DropdownMenuRadioItem>
                 ))}

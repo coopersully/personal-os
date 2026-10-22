@@ -21,6 +21,55 @@
   run. The narrowed integration acceptance does not complete the broader Finance MVP SMS and host
   acceptance requirements.
 
+## 2026-10-20 — Real browser ritual presentation
+
+- Enabled rituals now present the shared checklist over the signed-in browser app with a blurred
+  backdrop, preserving the current page and restoring focus on dismissal through ritual actions.
+  Sign-in, standalone setup, and native desktop presentation keep their existing ownership.
+- Browser answers, completion, optional reminders, snoozes, and skips use the real owner-scoped
+  API and revisions. Polling and focus/reconnection refresh cross-client settlements; monotonic
+  elapsed time anchored to the server handles snooze/expiry independently of device clock skew.
+- Mutations cancel stale polls before adopting accepted state. Owner-scoped ephemeral query caches
+  and existing session-denial handling prevent late responses from restoring private state after
+  an account change. Read failures use deduplicated Sonner feedback and retry.
+- Browser delivery applies only to an open nohmi tab; writes require connectivity and API
+  acceptance. This is a source checkpoint, not deployment or a verified native macOS smoke test.
+
+## 2026-10-20 — Ritual streaks, weekly progress, and deliberate skipping
+
+- Main rituals show separate morning/evening streaks from retained completion history, including
+  history older than seven days. Optional steps and unscheduled days do not break continuity.
+- Added a dated seven-day completion strip alongside the streak, scoped to the current ritual.
+  Completed days stay visible across misses or skips; pending, unscheduled, and absent-record days
+  remain distinct. Queued completion/skip updates the local strip and discloses synchronization.
+  Preview excludes personal progress; native offline advancement clears the previous strip.
+
+- Skip confirmation shows applied skips in the last 72 hours and the streak at risk. A visible
+  30-second countdown and progress fill require an uninterrupted pointer or keyboard hold before
+  the shared checklist submits a skip. Release, blur, visibility changes, and cancellation reset it.
+- Offline cached streaks are labeled and cleared at the next occurrence; unavailable skip history
+  is disclosed. The existing durable native action queue still owns skip synchronization.
+- Source checkpoint only; no deployment or installed-desktop verification is implied.
+
+## 2026-10-17 — Configurable ritual steps and optional follow-ups
+
+- Added optional step participation and everyday, weekday, weekend, or custom weekday inclusion.
+  Daily checklists resolve in the ritual time zone and retain their original snapshots. Empty
+  days settle without opening; only required steps gate explicit completion on other days.
+- Added separate morning/evening reminder defaults and an unchecked follow-up checkbox with an
+  editable time during the ritual. The interface labels next-day times explicitly. Completion
+  creates native Reminders only for unfinished optional steps when requested, atomically with
+  the ritual and its retry receipt. History records optional not done or follow-up scheduling.
+- Desktop offline completion preserves follow-up intent in its existing encrypted queue. Pending
+  intent is not a confirmed reminder; conflicts retain existing recovery. Valid delayed requests
+  become due at least one minute after acceptance. Preview never writes reminders.
+- Focused domain, PostgreSQL integration, UI, and Rust checks cover scheduling, required/optional
+  completion, retry deduplication, invalid-request rollback, delayed acceptance, snapshots, and
+  offline follow-ups. Desktop/mobile browser coverage exercises settings and preview.
+- This is a source implementation checkpoint, not a deployed release or a verified OS notification.
+  Existing notification preferences and OS permissions still govern delivery; the native changes
+  require a rebuilt desktop app.
+
 ## 2026-10-12 — Finance text results and desktop pet refinements merged
 
 - [PR #242 — Fix Finance MCP text responses](https://github.com/coopersully/personal-os/pull/242)
@@ -1063,3 +1112,25 @@ and are not offered as silent recovery targets. Source links preserve the exact 
 The consolidated Finance completion branch also gates pending question reply admission with the default-off Finance SMS switch. Verified disabled-rollout app composition leaves contextual and canonical replies pending without receipts, answers or continuations. Terminal admission results preserve policy/authority/delivery reasons, and ordered reconciliation reports fixed stage identifiers and validated failure counts without provider text. Focused regression evidence covers these behaviors; the pull request records the exact-main full verifier.
 
 Final host binding validates the Claude API trigger identity before activation. Successive replyable Finance notifications preserve the existing live reply namespace and direct additional work to app review, preventing duplicate item numbers without retargeting delayed replies. Focused regression verification covers both repairs; integrated full verification is recorded in the pull request.
+
+### Ritual history filtering and outcomes
+
+History now offers inactive dashed filter triggers, active chips first, and distinct
+filter/sort icons. Entry summaries separate required/optional completion, show applied
+snoozes and written answers, and put interaction telemetry behind disclosure.
+`GET /v1/rituals/history` accepts optional `status`, `search` (literal, up to 200
+characters), and `sort=newest|oldest`, returning `total` alongside stable cursor pages.
+Ownership/scopes are unchanged; search and sort occur before pagination, including
+for All Time. No new persistence schema or external service is involved.
+
+### Configurable history data view and shared filter treatment
+
+Ritual History now composes a shared TanStack/shadcn table with optional answer,
+outcome, scheduling, and timezone columns; required/optional counts and confirmed
+snoozes remain independently readable. Users can configure visibility, order, width,
+density, and wrapping on this device, inspect details, select the current page, and
+export the page or selected rows as CSV. Mobile renders labelled records. Server
+search/filter/sort remains ahead of bounded cursor pagination with selectable page
+sizes. Shared filter/sort triggers now cover Tasks, Finances, Reviews, Today, workspace
+search, and Calendar/Mail account sources, retaining their domain query behavior.
+These are source implementation claims, not a production deployment claim.

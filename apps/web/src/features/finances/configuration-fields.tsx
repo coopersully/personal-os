@@ -1,8 +1,8 @@
 import type { FinanceProfileVersion, UpdateFinancialProfileInput } from "@personal-os/domain";
 import { CurrencyInput } from "@/components/currency-input";
 import { DateInput } from "@/components/date-input";
+import { Field, FieldDescription, FieldLabel } from "@/components/settings-field";
 import { Button } from "@/components/ui/button";
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { financeCurrencyNumber } from "./configuration-values.js";
@@ -56,11 +56,11 @@ export function FinanceConfigurationField({
           ))}
         </NativeSelect>
       ) : kind === "currency" ? (
-        <CurrencyInput {...common} onValueChange={field.setValue} />
+        <CurrencyInput {...common} placeholder="Not set" onValueChange={field.setValue} />
       ) : kind === "date" ? (
         <DateInput {...common} onValueChange={field.setValue} onValueCommit={field.commit} />
       ) : (
-        <Input {...common} type={kind} onChange={(event) => field.setValue(event.target.value)} />
+        <Input {...common} placeholder="Not set" type={kind} onChange={(event) => field.setValue(event.target.value)} />
       )}
       {description ? <FieldDescription>{description}</FieldDescription> : null}
       {field.save.isError ? (

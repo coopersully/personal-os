@@ -10,6 +10,7 @@ import {
 } from "@personal-os/domain";
 import { useRef, useState } from "react";
 import { CurrencyInput } from "@/components/currency-input";
+import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/settings-field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,7 +21,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Field, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";

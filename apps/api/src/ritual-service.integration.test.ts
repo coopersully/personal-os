@@ -4,6 +4,7 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   migrateDatabase,
+  reminders,
   ritualOccurrences,
   ritualRequests,
   users,
@@ -40,7 +41,12 @@ describe.sequential("ritual account lifecycle", () => {
     await migrateDatabase(database.db, resolve("packages/database/migrations"));
     const [user] = await database.db
       .insert(users)
-      .values({ displayName: "Ritual", email: "ritual@example.com", passwordHash: "unused" })
+      .values({
+        planningTimezone: "America/New_York",
+        displayName: "Ritual",
+        email: "ritual@example.com",
+        passwordHash: "unused",
+      })
       .returning();
     userId = user!.id;
     service = createRitualService({ db: database.db, now: () => clock });
@@ -261,6 +267,47 @@ describe.sequential("ritual account lifecycle", () => {
         (o) => o.definition.kind === "morning" && o.scheduledLocalDate <= "2026-10-03",
       ),
     ).toBe(true);
+  });
+  it("searches and filters the whole history before stable bidirectional pagination", async () => {
+    const all = await service.history(context(), { limit: 100 });
+    expect(all.total).toBe(all.items.length);
+    const oldest = await service.history(context(), { limit: 100, sort: "oldest" });
+    expect(oldest.items.map((item) => item.id)).toEqual(all.items.map((item) => item.id).reverse());
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await service.history(context(), { limit: 1, sort: "oldest", cursor });
+      seen.push(...page.items.map((item) => item.id));
+      expect(page.total).toBe(all.total);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+    expect(seen).toEqual(oldest.items.map((item) => item.id));
+    const label = all.items[0]!.definition.steps[0]!.label;
+    const searched = await service.history(context(), { limit: 100, search: label });
+    expect(searched.total).toBeGreaterThan(0);
+    expect(
+      searched.items.every((item) =>
+        item.definition.steps.some((step) => step.label.includes(label)),
+      ),
+    ).toBe(true);
+    expect(
+      (await service.history(context(), { limit: 10, search: "%unlikely_literal%" })).total,
+    ).toBe(0);
+    const status = all.items[0]!.status;
+    const filtered = await service.history(context(), { limit: 100, status });
+    expect(filtered.items.every((item) => item.status === status)).toBe(true);
+    const [other] = await database.db
+      .insert(users)
+      .values({ displayName: "Other", email: "history-other@example.com", passwordHash: "unused" })
+      .returning();
+    const ctx = context();
+    ctx.principal.userId = other!.id;
+    ctx.principal.actorId = other!.id;
+    expect(await service.history(ctx, { limit: 10, search: label })).toEqual({
+      items: [],
+      total: 0,
+      nextCursor: null,
+    });
   });
   it("keeps today's open occurrence when its edited time is also already past", async () => {
     const current = (await service.current(context())).current!;
@@ -974,59 +1021,295 @@ describe.sequential("ritual account lifecycle", () => {
     const definitions = await service.list(context());
     const morning = definitions.find((d) => d.kind === "morning")!;
     const evening = definitions.find((d) => d.kind === "night")!;
-    const input = { ...morning, ...mutation(morning.revision), timeZone: "Europe/London" };
-    await service.saveDefinition("morning", input, context());
+    await database.db
+      .update(users)
+      .set({ planningTimezone: "Europe/London" })
+      .where(eq(users.id, userId));
     const updated = await service.list(context());
     expect(updated.map((d) => d.timeZone)).toEqual(["Europe/London", "Europe/London"]);
     expect(updated.find((d) => d.kind === "night")?.revision).toBe(evening.revision + 1);
+    expect(updated.find((d) => d.kind === "morning")?.revision).toBe(morning.revision + 1);
     const preserved = (await service.current(context())).current!;
     expect(preserved.id).toBe(open.id);
     expect(preserved.timeZone).toBe("America/New_York");
     expect(preserved.definition.timeZone).toBe("America/New_York");
     expect(preserved.expiresAt).toBe("2026-11-05T21:00:00.000Z");
-    const audit = await database.db
-      .select()
-      .from(auditEvents)
-      .where(eq(auditEvents.userId, userId));
-    const cascade = audit.filter((entry) => entry.after?.requestId === input.requestId);
-    expect(cascade).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          action: "ritual.definition_zone_changed",
-          entityId: evening.id,
-          before: {
-            revision: evening.revision,
-            timeZone: evening.timeZone,
-            enabledAt: evening.enabledAt,
-          },
-          after: expect.objectContaining({
-            revision: evening.revision + 1,
-            timeZone: "Europe/London",
-          }),
-        }),
-        expect.objectContaining({
-          action: "ritual.occurrence_expiry_changed",
-          entityId: open.id,
-          before: { revision: open.revision, expiresAt: open.expiresAt },
-          after: expect.objectContaining({
-            revision: preserved.revision,
-            expiresAt: preserved.expiresAt,
-          }),
-        }),
-      ]),
-    );
-    expect(JSON.stringify(cascade)).not.toContain('"steps"');
-    expect(JSON.stringify(cascade)).not.toContain('"responses"');
-    await service.saveDefinition("morning", input, context());
     expect(await service.list(context())).toEqual(updated);
     await expect(
       service.saveDefinition(
-        "night",
-        { ...evening, ...mutation(evening.revision), title: "Stale edit" },
+        "morning",
+        {
+          ...updated.find((d) => d.kind === "morning")!,
+          ...mutation(morning.revision + 1),
+          timeZone: "America/New_York",
+        },
         context(),
       ),
-    ).rejects.toThrow(/changed/);
+    ).rejects.toThrow(/profile time zone/);
     clock = new Date("2026-11-05T21:00:00Z");
     expect((await service.current(context())).current?.timeZone).toBe("Europe/London");
+    await database.db
+      .update(users)
+      .set({ planningTimezone: "America/New_York" })
+      .where(eq(users.id, userId));
+  });
+  it("snapshots weekday steps and atomically creates only opted-in optional reminders once", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        planningTimezone: "America/New_York",
+        displayName: "Optional",
+        email: "optional@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    const ctx = {
+      ...context(),
+      principal: { ...context().principal, userId: owner!.id, actorId: owner!.id },
+    };
+    clock = new Date("2026-10-16T12:00:00Z"); // Friday, 08:00 New York
+    await service.saveDefinition(
+      "morning",
+      {
+        ...mutation(0),
+        kind: "morning",
+        title: "Morning",
+        enabled: true,
+        time: "06:00",
+        timeZone: "America/New_York",
+        reminderTime: "13:00",
+        steps: [
+          { id: "required", label: "Required", kind: "checkbox" },
+          {
+            id: "optional",
+            label: "Optional journal",
+            kind: "short_text",
+            optional: true,
+            days: [1, 2, 3, 4, 5],
+          },
+          { id: "weekend", label: "Weekend", kind: "checkbox", days: [0, 6] },
+          { id: "done", label: "Done optional", kind: "checkbox", optional: true },
+        ],
+      },
+      ctx,
+    );
+    let state = await service.current(ctx);
+    expect(state.current!.definition.steps.map((s) => s.id)).toEqual([
+      "required",
+      "optional",
+      "done",
+    ]);
+    expect(state.upcoming![0]!.definition.steps.map((s) => s.id)).toEqual([
+      "required",
+      "weekend",
+      "done",
+    ]);
+    const id = state.current!.id;
+    expect(
+      (await service.act(id, { ...mutation(state.current!.revision), kind: "complete" }, ctx))
+        .outcome,
+    ).toBe("conflict");
+    state = await service.current(ctx);
+    for (const step of ["required", "done"])
+      state = await service.saveResponse(
+        id,
+        step,
+        { ...mutation(state.current!.revision), value: true, submitted: true },
+        ctx,
+      );
+    const action = {
+      ...mutation(state.current!.revision),
+      kind: "complete" as const,
+      optionalReminderAt: "2026-10-16T17:00:00Z",
+    };
+    const result = await service.act(id, action, ctx);
+    expect(result.outcome).toBe("applied");
+    expect(result.state.current!.optionalFollowUp).toMatchObject({
+      stepIds: ["optional"],
+      dueAt: "2026-10-16T17:00:00.000Z",
+    });
+    await service.act(id, action, ctx);
+    const rows = await database.db.select().from(reminders).where(eq(reminders.userId, owner!.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      title: "Optional journal",
+      timezone: "America/New_York",
+      dueAt: new Date(action.optionalReminderAt),
+    });
+    clock = new Date("2026-10-17T12:00:00Z");
+    state = await service.current(ctx);
+    for (const step of ["required", "weekend"])
+      state = await service.saveResponse(
+        state.current!.id,
+        step,
+        { ...mutation(state.current!.revision), value: true, submitted: true },
+        ctx,
+      );
+    const skippedOptional = await service.act(
+      state.current!.id,
+      { ...mutation(state.current!.revision), kind: "complete" },
+      ctx,
+    );
+    expect(skippedOptional.outcome).toBe("applied");
+    expect(skippedOptional.state.current!.optionalFollowUp).toBeUndefined();
+    expect(
+      await database.db.select().from(reminders).where(eq(reminders.userId, owner!.id)),
+    ).toHaveLength(1);
+  });
+  it("keeps invalid reminder completion atomic, recovers a late sync, and settles empty days", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        planningTimezone: "America/New_York",
+        displayName: "Later",
+        email: "later@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    const ctx = {
+      ...context(),
+      principal: { ...context().principal, userId: owner!.id, actorId: owner!.id },
+    };
+    clock = new Date("2026-10-16T12:00:00Z");
+    const definition = await service.saveDefinition(
+      "morning",
+      {
+        ...mutation(0),
+        kind: "morning",
+        title: "Morning",
+        enabled: true,
+        time: "06:00",
+        timeZone: "America/New_York",
+        steps: [{ id: "journal", label: "Journal", kind: "short_text", optional: true, days: [5] }],
+      },
+      ctx,
+    );
+    const current = (await service.current(ctx)).current!;
+    for (const optionalReminderAt of ["bad", "2026-10-16T11:00:00Z", "2026-10-18T12:00:00Z"]) {
+      await expect(
+        service.act(
+          current.id,
+          { ...mutation(current.revision), kind: "complete", optionalReminderAt },
+          ctx,
+        ),
+      ).rejects.toThrow("Choose a reminder time");
+      expect((await service.current(ctx)).current!.status).toBe("pending");
+      expect(
+        await database.db.select().from(reminders).where(eq(reminders.userId, owner!.id)),
+      ).toHaveLength(0);
+    }
+    // Changes apply to future occurrences, preserving today's original step schedule.
+    await service.saveDefinition(
+      "morning",
+      {
+        ...definition,
+        ...mutation(definition.revision),
+        steps: [{ ...definition.steps[0]!, days: [6] }],
+      },
+      ctx,
+    );
+    expect((await service.current(ctx)).current!.definition.steps[0]!.days).toEqual([5]);
+    const input = {
+      ...mutation(current.revision),
+      kind: "complete" as const,
+      optionalReminderAt: "2026-10-16T13:00:00Z",
+    };
+    clock = new Date("2026-10-16T14:00:00Z");
+    const completed = await service.act(current.id, input, ctx);
+    expect(completed.state.current!.optionalFollowUp!.dueAt).toBe("2026-10-16T14:01:00.000Z");
+    clock = new Date("2026-10-18T12:00:00Z");
+    const empty = (await service.current(ctx)).current!;
+    expect(empty.definition.steps).toEqual([]);
+    expect(empty.status).toBe("completed");
+    expect(empty.settledAt).toBe(empty.dueAt);
+  });
+  it("counts separate streaks from retained history and recent applied skips", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({ displayName: "Streak", email: "streak@example.com", passwordHash: "unused" })
+      .returning();
+    const ctx = {
+      ...context(),
+      principal: { ...context().principal, userId: owner!.id, actorId: owner!.id },
+    };
+    clock = new Date("2026-11-01T05:00:00Z");
+    await service.saveDefinition(
+      "morning",
+      {
+        ...mutation(0),
+        kind: "morning",
+        title: "Morning",
+        enabled: true,
+        time: "06:00",
+        timeZone: "UTC",
+        steps: [{ id: "optional", label: "Optional", kind: "checkbox", optional: true }],
+      },
+      ctx,
+    );
+    for (let day = 1; day <= 10; day++) {
+      clock = new Date(`2026-11-${String(day).padStart(2, "0")}T12:00:00Z`);
+      const state = await service.current(ctx);
+      expect(state.streakCount).toBe(day - 1);
+      expect(state.completionWeek).toHaveLength(7);
+      expect(state.completionWeek?.at(-1)?.status).toBe("pending");
+      const completed = await service.act(
+        state.current!.id,
+        { ...mutation(state.current!.revision), kind: "complete" },
+        ctx,
+      );
+      expect(completed.state.streakCount).toBe(day);
+      expect(completed.state.completionWeek?.at(-1)?.status).toBe("completed");
+    }
+    clock = new Date("2026-11-11T12:00:00Z");
+    let state = await service.current(ctx);
+    expect(state.streakCount).toBe(10);
+    const skipped = await service.act(
+      state.current!.id,
+      { ...mutation(state.current!.revision), kind: "skip" },
+      ctx,
+    );
+    expect(skipped.state.skipCount).toBe(1);
+    expect(skipped.state.streakCount).toBe(0);
+    expect(skipped.state.completionWeek?.filter((day) => day.status === "completed")).toHaveLength(
+      6,
+    );
+    expect(skipped.state.completionWeek?.at(-1)?.status).toBe("skipped");
+    clock = new Date("2026-11-12T12:00:00Z");
+    state = await service.current(ctx);
+    expect(state.streakCount).toBe(0);
+    expect(state.skipCount).toBe(1);
+    clock = new Date("2026-11-15T12:00:00Z");
+    expect((await service.current(ctx)).skipCount).toBe(0);
+    expect((await service.current(context())).skipCount).toBe(0);
+    await service.saveDefinition(
+      "night",
+      {
+        ...mutation(0),
+        kind: "night",
+        title: "Evening",
+        enabled: true,
+        time: "18:00",
+        timeZone: "UTC",
+        steps: [{ id: "rest", label: "Rest", kind: "checkbox", optional: true }],
+      },
+      ctx,
+    );
+    clock = new Date("2026-11-15T19:00:00Z");
+    state = await service.current(ctx);
+    expect(state.current!.definition.kind).toBe("night");
+    expect(state.streakCount).toBe(0);
+    expect(state.skipCount).toBe(0);
+    const night = await service.act(
+      state.current!.id,
+      { ...mutation(state.current!.revision), kind: "complete" },
+      ctx,
+    );
+    expect(night.state.streakCount).toBe(1);
+    expect(night.state.completionWeek?.filter((day) => day.status === "completed")).toHaveLength(1);
+    expect(night.state.completionWeek?.at(-1)?.status).toBe("completed");
+    clock = new Date("2026-11-16T12:00:00Z");
+    state = await service.current(ctx);
+    expect(state.current!.definition.kind).toBe("morning");
+    expect(state.streakCount).toBe(0);
   });
 });

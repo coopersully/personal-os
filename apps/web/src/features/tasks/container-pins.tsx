@@ -51,7 +51,7 @@ export function TaskContainerPin({
       </Button>
       {pinRecovery ? (
         <Button asChild variant="secondary">
-          <Link to="/settings?section=tasks">Review unsaved pin preferences</Link>
+          <Link to="/settings?page=tasks">Review unsaved pin preferences</Link>
         </Button>
       ) : null}
     </>

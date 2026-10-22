@@ -1,8 +1,12 @@
 import * as React from "react"
 
+import { SettingsControlsContext } from "../settings-controls-context"
+import { SettingsTimeInput } from "../settings-time-input"
 import { cn } from "@/lib/utils"
 
 function Input({ className, type, ...props }: React.ComponentProps<"input">) {
+  const settings = React.useContext(SettingsControlsContext)
+  if (settings && type === "time") return <SettingsTimeInput {...props} type={type} className={className} />
   return (
     <input
       type={type}

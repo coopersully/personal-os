@@ -11,8 +11,11 @@ import {
   financeAlerts,
   financeBalanceInclusions,
   financeBudgetAllocations,
+  financeBudgetBucketCategories,
+  financeBudgetBuckets,
   financeBudgetPlans,
   financeBudgets,
+  financeBudgetTaxonomies,
   financeBudgetVersions,
   financeCashBalanceBases,
   financeCategories,
@@ -50,6 +53,8 @@ import {
 } from "@personal-os/database";
 import { addLocalDays, localDateAt, localDateTimeToUtc, localDateToIso } from "@personal-os/domain";
 import { and, eq, inArray, or } from "drizzle-orm";
+import { createFinanceBudgetBaselineQualificationService } from "./finance/baseline-qualification-service.js";
+import { loadFinanceAuthorization } from "./finance/context.js";
 import { assessMail, type MailAssessmentSnapshot } from "./mail-assessment.js";
 import { MAIL_PLAYBOOK } from "./mail-playbook.js";
 import { financePlanningFixture } from "./qa-finance-planning.js";
@@ -195,6 +200,9 @@ type FixtureData = {
   financeRecurringScheduleVersions: Array<typeof financeRecurringScheduleVersions.$inferInsert>;
   financeCashBalanceBases: Array<typeof financeCashBalanceBases.$inferInsert>;
   financeBalanceInclusions: Array<typeof financeBalanceInclusions.$inferInsert>;
+  financeBudgetTaxonomies: Array<typeof financeBudgetTaxonomies.$inferInsert>;
+  financeBudgetBuckets: Array<typeof financeBudgetBuckets.$inferInsert>;
+  financeBudgetBucketCategories: Array<typeof financeBudgetBucketCategories.$inferInsert>;
   financeAccounts: Array<typeof financeAccounts.$inferInsert>;
   financeAlerts: Array<typeof financeAlerts.$inferInsert>;
   financeBudgets: Array<typeof financeBudgets.$inferInsert>;
@@ -245,6 +253,9 @@ function emptyFixtureData(): FixtureData {
     financeRecurringScheduleVersions: [],
     financeCashBalanceBases: [],
     financeBalanceInclusions: [],
+    financeBudgetTaxonomies: [],
+    financeBudgetBuckets: [],
+    financeBudgetBucketCategories: [],
     financeAccounts: [],
     financeAlerts: [],
     financeBudgets: [],
@@ -1980,10 +1991,54 @@ export async function loadQaFixtures(
       data.financeRecurringScheduleVersions.push(...planning.schedules);
       data.financePlanningEvidence.push(...planning.evidence);
       data.financeOnboardingStates.push(planning.onboarding);
+      if (account.key === "demo-full") {
+        data.financeBudgetTaxonomies.push({
+          id: fixtureId(account, 800),
+          userId: account.id,
+          name: "Everyday budget",
+          isActive: true,
+          createdAt: now,
+          updatedAt: now,
+        });
+        data.financeBudgetBuckets.push(
+          {
+            id: fixtureId(account, 801),
+            taxonomyId: fixtureId(account, 800),
+            userId: account.id,
+            name: "Essentials",
+            position: 0,
+            createdAt: now,
+            updatedAt: now,
+          },
+          {
+            id: fixtureId(account, 802),
+            taxonomyId: fixtureId(account, 800),
+            userId: account.id,
+            name: "Lifestyle",
+            position: 1,
+            createdAt: now,
+            updatedAt: now,
+          },
+        );
+        for (const [index, category] of [422, 421, 420, 424, 776].entries()) {
+          data.financeBudgetBucketCategories.push({
+            id: fixtureId(account, 810 + index),
+            userId: account.id,
+            taxonomyId: fixtureId(account, 800),
+            bucketId: fixtureId(account, index < 2 ? 801 : 802),
+            categoryId: fixtureId(account, category),
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+      }
       // Complete canonical references before snapshotting balances: startup learning
       // must not enrich these transactions and invalidate their reflection revisions.
       const movements = data.financeTransactions.filter((row) => row.userId === account.id);
       for (const [index, movement] of movements.entries()) {
+        if (movement.direction === "transfer")
+          movement.providerDirection =
+            movement.accountId === fixtureId(account, 400) ? "expense" : "income";
         if (!movement.merchantId) {
           movement.merchantId = fixtureId(account, 750 + index);
           data.financeMerchants.push({
@@ -2149,6 +2204,14 @@ export async function loadQaFixtures(
       await transaction.insert(financeCategoryRules).values(data.financeCategoryRules);
     if (data.financeBudgets.length)
       await transaction.insert(financeBudgets).values(data.financeBudgets);
+    if (data.financeBudgetTaxonomies.length)
+      await transaction.insert(financeBudgetTaxonomies).values(data.financeBudgetTaxonomies);
+    if (data.financeBudgetBuckets.length)
+      await transaction.insert(financeBudgetBuckets).values(data.financeBudgetBuckets);
+    if (data.financeBudgetBucketCategories.length)
+      await transaction
+        .insert(financeBudgetBucketCategories)
+        .values(data.financeBudgetBucketCategories);
     if (data.financeProfiles.length)
       await transaction.insert(financeProfiles).values(data.financeProfiles);
     if (data.financeIncomeStreams.length)
@@ -2184,5 +2247,41 @@ export async function loadQaFixtures(
       await transaction.insert(pinterestConnections).values(data.pinterestConnections);
     if (data.auditEvents.length) await transaction.insert(auditEvents).values(data.auditEvents);
   });
+  // The golden persona includes the same exact month/account/currency confirmation
+  // as a manual setup, through the canonical prepare/confirm writers.
+  for (const account of accounts.filter(
+    (row) => row.key === "demo-full" && row.scenario === "complete",
+  )) {
+    const context = await loadFinanceAuthorization({
+      db,
+      principal: {
+        actorId: account.id,
+        actorType: "user",
+        userId: account.id,
+        scopes: new Set(["finances:write"]),
+      },
+      requestId: "qa-budget-scope",
+    });
+    const qualification = createFinanceBudgetBaselineQualificationService({ db, now: () => now });
+    const review = await qualification.prepare(
+      {
+        month: localDateToIso(localDateAt(now, "America/New_York")).slice(0, 7),
+        budgetVersionId: fixtureId(account, 651),
+        accountIds: [400, 401, 403].map((record) => fixtureId(account, record)),
+        currency: "USD",
+        timezone: "America/New_York",
+        idempotencyKey: "qa-budget-scope-prepare",
+      },
+      context,
+    );
+    await qualification.confirm(
+      {
+        reviewId: review.id,
+        expectedFingerprint: review.fingerprint,
+        idempotencyKey: "qa-budget-scope-confirm",
+      },
+      context,
+    );
+  }
   return { accountCount: accounts.length, emails };
 }

@@ -99,7 +99,7 @@ Use fictional people/providers and relative dates; do not equate more records wi
 
 `demo+full@nohmi.test` has a reviewed manual Finance setup, individual account ownership,
 a canonical financial profile, and an approved, balanced $8,250 monthly budget. It covers
-housing, groceries, dining, subscriptions, card repayment, emergency savings, a hiking trip,
+housing, groceries, dining, subscriptions, travel, card repayment, emergency savings, a hiking trip,
 long-term investing, and a $500 buffer. Wealth includes active, paused, and completed goals,
 with explicit progress evidence. Cash flow includes confirmed payroll and bill schedules,
 cash-balance statements with protected floors, and explicit transaction reflection evidence.
@@ -112,3 +112,9 @@ Reloading fixtures restores these states and refreshes dates in America/New_York
 
 Spending offers Bubbles, List, Trends and Rhythm through its View control. These views use
 ledger transactions; planning fixtures do not manufacture posted spending or historical balances.
+
+The full demo also has Essentials and Lifestyle budget buckets and a confirmed current-month
+USD baseline scoped to checking, savings and the credit card. Spending can compare observed
+monthly usage against approved category allocations. Transfer legs retain their incoming/outgoing
+evidence. The loaded QA persona intentionally lacks this confirmation. Manual-source historical
+coverage remains uncertified; that qualification is separate from the available budget comparison.

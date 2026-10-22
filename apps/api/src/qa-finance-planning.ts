@@ -253,8 +253,15 @@ export function financePlanningFixture(userId: string, now: Date, completeBudget
     {
       allocationKey: "investing",
       kind: "savings" as const,
-      amount: 140_000,
+      amount: 120_000,
       description: "Long-term investing",
+    },
+    {
+      allocationKey: "travel",
+      kind: "spending" as const,
+      amount: 20_000,
+      categoryId: id(776),
+      legacyCategory: "Travel",
     },
     { allocationKey: "buffer", kind: "buffer" as const, amount: completeBudget ? 50_000 : 0 },
   ];

@@ -7,7 +7,9 @@ import {
   localDateToIso,
 } from "@personal-os/domain";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
+import { createFinanceBudgetBaselineQualificationService } from "./finance/baseline-qualification-service.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
+import { createFinanceSpendingService } from "./finance/spending-service.js";
 import { createFinanceService } from "./finance-service.js";
 import { loadQaFixtures, qaFixtureAccounts } from "./qa-fixtures.js";
 
@@ -36,7 +38,7 @@ it("reloads canonical planning fixtures without completing empty, recovery or on
           expect(profile.data).toMatchObject({ householdSize: 1, expectedMonthlyTakeHome: 8250 });
           const parsed = financeBudgetVersionSchema.parse(budget.data);
           expect(parsed.resources[0]?.amount).toBe(8250);
-          expect(parsed.allocations).toHaveLength(9);
+          expect(parsed.allocations).toHaveLength(10);
           expect(parsed.balanceDelta).toBe(account.key === "demo-full" ? 0 : 500);
           expect(parsed.status).toBe(account.key === "demo-full" ? "active" : "incomplete");
           expect(setup?.completedAt).toEqual(now);
@@ -65,6 +67,39 @@ it("reloads canonical planning fixtures without completing empty, recovery or on
             accountIds: [id(400), id(401)],
           });
           expect(cashflow.projection.status).not.toBe("unavailable");
+          const baseline = createFinanceBudgetBaselineQualificationService({
+            db: database.db,
+            now: () => now,
+          });
+          const spending = await createFinanceSpendingService({
+            db: database.db,
+            now: () => now,
+            readBudgetQualification: baseline.getQualification,
+          }).readSpending(account.id, {
+            scope: {
+              from: "2026-12-01",
+              through: "2026-12-31",
+              timezone: "America/New_York",
+              accountIds: null,
+              categoryIds: null,
+              basis: "personal_cost",
+              includePending: true,
+              subtractRefunds: true,
+            },
+            grouping: "auto",
+            includeUncategorized: true,
+          });
+          if (account.key === "demo-full") {
+            expect(spending.monthlyBudget).toMatchObject({ state: "qualified" });
+            if (spending.monthlyBudget?.state === "qualified") {
+              expect(
+                spending.monthlyBudget.groups.find((group) => group.budgetCents === 380_000),
+              ).toMatchObject({ usedCents: 293_742 });
+              expect(
+                spending.monthlyBudget.groups.find((group) => group.budgetCents === 95_000),
+              ).toMatchObject({ usedCents: 17_249 });
+            }
+          } else expect(spending.monthlyBudget?.state).toBe("unavailable");
         } else {
           expect(profile.data).toBeNull();
           expect(budget.data).toBeNull();

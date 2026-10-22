@@ -1,5 +1,27 @@
 # nohmi — Implementation Log
 
+## 2026-10-22 — Active reminders implemented on a development branch
+
+The `cooper/active-reminders` branch adds a resolved active-reminder flag to tasks and reminders,
+a revision-bound account default for new items, and a device pause switch. Historical items remain
+off. The separate owner-bound desktop feed pages beyond the daily brief and pet limits. macOS
+routes eligible due items to one persistent, draggable card stack while preserving ordinary system
+delivery when away; an incomplete item can appear after return. Completion waits for the existing
+API's revision-bound acknowledgement.
+
+Native delivery prepares a delayed OS fallback before presentation and cancels it only after the
+card appears and its receipt is persisted. Removed feed items receive authoritative source reads
+before retirement or handoff to ordinary delivery. Account/server generations fence refreshes and
+actions. Settings explain the away/return behavior and that cards can appear during macOS Focus.
+
+Focused persistence, API, browser and native tests cover the implementation. Development-host
+smoke established background presentation, lock-state detection, process-death fallback, actual
+full-screen visibility and saved dragging with disposable synthetic items. See the
+[native evidence and remaining certification limits](../superpowers/specs/2026-10-22-active-reminders-native-evidence.md).
+Physical display sleep, the release-signed app, minimum-supported macOS and a real installed-client
+API journey still need release certification. This records branch-local implementation, not a
+merged or deployed release.
+
 ## 2026-10-19 — Integrated Finance experience merged
 
 - [PR #270 — Complete the Finance workspace and guarded agent workflows](https://github.com/coopersully/personal-os/pull/270)

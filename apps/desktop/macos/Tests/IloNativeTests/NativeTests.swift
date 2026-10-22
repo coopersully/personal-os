@@ -469,6 +469,19 @@ extension NativeTests {
     XCTAssertNil(
       PendingNotificationPolicy.refreshed(request, snapshot: s, preferences: p, now: now))
   }
+  func testStaleReconciliationCannotRewriteManagedFallback() {
+    var s = snapshot(); s.stale = true
+    s.tasks = [item("t", "2026-09-08T17:00:00Z")]
+    var p = NotificationPreferences(); p.enabled = true
+    let content = UNMutableNotificationContent()
+    content.userInfo = ["serverUrl": s.serverUrl, "accountId": s.accountId,
+      "kind": "task", "id": "t", "occurrence": "2026-09-08T17:00:00Z"]
+    let request = UNNotificationRequest(identifier: "fallback", content: content,
+      trigger: UNTimeIntervalNotificationTrigger(timeInterval: 7, repeats: false))
+    XCTAssertNil(PendingNotificationPolicy.refreshed(request, snapshot: s, preferences: p,
+      now: now, managedIDs: ["fallback"]))
+    XCTAssertEqual((request.trigger as? UNTimeIntervalNotificationTrigger)?.timeInterval, 7)
+  }
   func testStaleMeetingPendingIsRemovedWhenQuietHoursOutlastMeeting() {
     var s = snapshot()
     s.stale = true

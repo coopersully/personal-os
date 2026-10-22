@@ -19,6 +19,12 @@ Implementation and verification progress are recorded in the execution ledger; t
 record distinguishes development-host observations from remaining release certification limits.
 The approved design remains the feature contract.
 
+Execution checkpoint: Tasks 2–6 are implemented; Task 1 development-host evidence is recorded;
+Task 7 has browser acceptance and independent review with regression repairs. The full verifier is
+the final branch gate. Release hardware/signing and physical display-sleep checks remain explicitly
+unverified. Detailed original checkboxes below remain the acceptance checklist, not a claim that
+every manual release scenario ran on this host.
+
 ## Global Constraints
 
 - Product spelling is `nohmi`; macOS 14+ is the native first-release target.

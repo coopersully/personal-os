@@ -115,7 +115,7 @@ private struct ActiveReminderCard: View {
   }
 }
 final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting, NSWindowDelegate {
-  private let panel = ActiveReminderWindow(
+  let panel: NSPanel = ActiveReminderWindow(
     contentRect: CGRect(x: 0, y: 0, width: 390, height: 300),
     styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
   var complete: ((ActiveReminderCandidate) -> Void)?
@@ -126,9 +126,11 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting, N
   private var signature = ""
   private var arranging = false
   private var settle: DispatchWorkItem?
+  private let mouseButtons: () -> Int
   var lastError: String?
   var isVisible: Bool { panel.isVisible && panel.isOnActiveSpace }
-  override init() {
+  init(mouseButtons: @escaping () -> Int = { NSEvent.pressedMouseButtons }) {
+    self.mouseButtons = mouseButtons
     super.init()
     panel.level = .floating
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -148,7 +150,9 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting, N
     error: String?, stale: Bool
   ) throws {
     guard !items.isEmpty,
-      let screen = NSScreen.screens.first(where: { id($0) == displayID })
+      let screen = (displayID == nil ? nil : NSScreen.screens.first(where: {
+        $0.frame.contains(CGPoint(x: panel.frame.midX, y: panel.frame.midY))
+      })) ?? NSScreen.screens.first(where: { id($0) == displayID })
         ?? NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) })
         ?? NSScreen.main
     else {
@@ -175,23 +179,26 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting, N
         NSSize(width: 390, height: max(160, min(480, hosting.fittingSize.height))))
       signature = nextSignature
     }
-    arranging = true
-    let screenID = id(screen)
-    if displayID != screenID {
-      displayID = screenID
-      let area = screen.visibleFrame
-      let point = store?.placement(display: screenID) ?? ActiveReminderPoint(x: 0.5, y: 0.5)
-      let frame = CGRect(
-        x: area.minX + max(0, area.width - panel.frame.width) * point.x,
-        y: area.minY + max(0, area.height - panel.frame.height) * point.y,
-        width: panel.frame.width, height: panel.frame.height)
-      panel.setFrame(ActiveReminderPlacement.fit(frame, in: area, snap: false), display: true)
-    } else {
-      panel.setFrame(
-        ActiveReminderPlacement.fit(panel.frame, in: screen.visibleFrame, snap: false),
-        display: true)
+    if displayID == nil || mouseButtons() & 1 == 0 {
+      arranging = true
+      let screenID = id(screen)
+      if displayID == nil {
+        displayID = screenID
+        let area = screen.visibleFrame
+        let point = store?.placement(display: screenID) ?? ActiveReminderPoint(x: 0.5, y: 0.5)
+        let frame = CGRect(
+          x: area.minX + max(0, area.width - panel.frame.width) * point.x,
+          y: area.minY + max(0, area.height - panel.frame.height) * point.y,
+          width: panel.frame.width, height: panel.frame.height)
+        panel.setFrame(ActiveReminderPlacement.fit(frame, in: area, snap: false), display: true)
+      } else {
+        displayID = screenID
+        panel.setFrame(
+          ActiveReminderPlacement.fit(panel.frame, in: screen.visibleFrame, snap: false),
+          display: true)
+      }
+      arranging = false
     }
-    arranging = false
     if !panel.isVisible { panel.orderFrontRegardless() }
     guard panel.isVisible && panel.isOnActiveSpace else {
       throw NativeError.message("The active reminder card could not appear.")
@@ -213,7 +220,7 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting, N
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
   }
   private func savePosition() {
-    if NSEvent.pressedMouseButtons & 1 != 0 {
+    if mouseButtons() & 1 != 0 {
       windowDidMove(Notification(name: NSWindow.didMoveNotification))
       return
     }

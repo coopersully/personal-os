@@ -28,6 +28,23 @@ describe("desktop API transport", () => {
       },
     });
   });
+  it("preserves the expected owner without forwarding arbitrary credentials", async () => {
+    invoke
+      .mockResolvedValueOnce({ settings: { serverUrl: "https://custom.test" } })
+      .mockResolvedValueOnce({ status: 200, body: "{}" });
+    await desktopFetch("https://api.test/v1/active-reminders/preferences", {
+      headers: { "X-Nohmi-Account": "account-a", authorization: "Session never-forward" },
+    });
+    expect(invoke).toHaveBeenLastCalledWith("desktop_request", {
+      request: {
+        serverUrl: "https://custom.test",
+        path: "/v1/active-reminders/preferences",
+        method: "GET",
+        body: null,
+        expectedAccountId: "account-a",
+      },
+    });
+  });
   it("reloads origin after settings change and supports empty responses", async () => {
     invoke
       .mockResolvedValueOnce({ settings: { serverUrl: "https://first.test" } })

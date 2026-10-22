@@ -8,8 +8,9 @@ struct ActiveReminderCandidate: Codable, Equatable, Identifiable {
   var activeReminder: Bool
   var revision: Int?
   var updatedAt: String?
-  var valid: Bool {
-    UUID(uuidString: id) != nil && parseDate(dueAt) != nil && activeReminder
+  var valid: Bool { activeReminder && validSource }
+  var validSource: Bool {
+    UUID(uuidString: id) != nil && parseDate(dueAt) != nil
       && ((kind == "task" && (revision ?? 0) > 0)
         || (kind == "reminder" && parseDate(updatedAt) != nil))
   }
@@ -22,6 +23,7 @@ struct ActiveReminderInventory: Codable {
   var generation: UInt64
   var generatedAt: String
   var items: [ActiveReminderCandidate]
+  var ordinaryItems: [ActiveReminderCandidate]? = nil
   var identity: String { "\(serverUrl)|\(accountId)" }
   func isFresh(at now: Date) -> Bool {
     guard let generated = parseDate(generatedAt) else { return false }

@@ -126,6 +126,9 @@ export const desktopFetch: typeof fetch = async (input, init) => {
         path: `${url.pathname}${url.search}`,
         method: request.method,
         body: requestBody,
+        ...(request.headers.has("X-Nohmi-Account")
+          ? { expectedAccountId: request.headers.get("X-Nohmi-Account") }
+          : {}),
       },
     }),
     request.signal,

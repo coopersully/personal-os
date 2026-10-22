@@ -57,6 +57,83 @@ where
         }
     }
 }
+// Absence from the active feed is not proof of completion: opt-out and due-time edits
+// must hand current source material back to ordinary delivery. Resolve at most eight
+// owner-bound reads concurrently; one failed read retains the previous native inventory.
+async fn resolve_removed<F, R>(
+    previous: &Value,
+    next: &Value,
+    mut fetch: F,
+) -> Result<Vec<Value>, String>
+where
+    F: FnMut(String) -> R,
+    R: Future<Output = Result<(u16, Value), String>> + Send + 'static,
+{
+    let present: HashSet<String> = next["items"]
+        .as_array()
+        .ok_or("Invalid inventory")?
+        .iter()
+        .map(|item| format!("{}:{}", item["kind"], item["id"]))
+        .collect();
+    let removed: Vec<Value> = previous["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|item| !present.contains(&format!("{}:{}", item["kind"], item["id"])))
+        .cloned()
+        .collect();
+    let mut ordinary = Vec::new();
+    for batch in removed.chunks(8) {
+        let mut reads = tokio::task::JoinSet::new();
+        for item in batch {
+            let kind = item["kind"]
+                .as_str()
+                .ok_or("Invalid source kind")?
+                .to_string();
+            let id = item["id"].as_str().ok_or("Invalid source ID")?.to_string();
+            // Reuse action identity validation before ever constructing a source path.
+            completion_request(item)?;
+            let read = fetch(format!("/v1/{kind}s/{id}"));
+            reads.spawn(async move { (kind, id, read.await) });
+        }
+        while let Some(read) = reads.join_next().await {
+            let (kind, id, response) = read.map_err(|_| "Source refresh interrupted")?;
+            let (status, payload) = response?;
+            if status == 404 {
+                continue;
+            }
+            if status != 200 {
+                return Err("Source refresh failed".into());
+            }
+            let record = &payload[&kind];
+            if record["id"] != id {
+                return Err("Source identity changed".into());
+            }
+            if record["completedAt"].is_string()
+                || record["deletedAt"].is_string()
+                || (kind == "task" && record["lifecycle"] != "open")
+            {
+                continue;
+            }
+            if record["dueAt"].is_null() {
+                continue;
+            }
+            let mut candidate = json!({"kind":kind, "id":id, "title":record["title"],
+                "dueAt":record["dueAt"], "activeReminder":record["activeReminder"]});
+            if kind == "task" {
+                candidate["revision"] = record["revision"].clone();
+            } else {
+                candidate["updatedAt"] = record["updatedAt"].clone();
+            }
+            completion_request(&candidate)?;
+            if !candidate["title"].is_string() || !candidate["activeReminder"].is_boolean() {
+                return Err("Invalid source refresh".into());
+            }
+            ordinary.push(candidate);
+        }
+    }
+    Ok(ordinary)
+}
 pub async fn run(app: tauri::AppHandle) {
     use crate::{
         desktop::DesktopState,
@@ -67,12 +144,18 @@ pub async fn run(app: tauri::AppHandle) {
     let state = app.state::<DesktopState>();
     let runtime = app.state::<ActiveReminderRuntime>();
     let mut changed = state.changed.subscribe();
+    let mut previous = Value::Null;
+    let mut previous_identity = None;
     loop {
         let settings = state.settings.lock().await.clone();
         let generation = state.generation.load(Ordering::SeqCst);
         let account = state.account_id.lock().await.clone();
         if settings.notifications.enabled {
             if let Some(account) = account {
+                let identity = (settings.server_url.clone(), account.clone(), generation);
+                if previous_identity.as_ref() != Some(&identity) {
+                    previous = Value::Null;
+                }
                 let result = collect_candidates(|path| {
                     let app = &app;
                     let server = settings.server_url.clone();
@@ -100,6 +183,44 @@ pub async fn run(app: tauri::AppHandle) {
                     }
                 })
                 .await;
+                let result = match result {
+                    Ok(mut inventory) => {
+                        let app_for_read = app.clone();
+                        let server_for_read = settings.server_url.clone();
+                        let account_for_read = account.clone();
+                        resolve_removed(&previous, &inventory, move |path| {
+                            let app = app_for_read.clone();
+                            let server = server_for_read.clone();
+                            let account = account_for_read.clone();
+                            async move {
+                                let response = send(
+                                    &app,
+                                    ApiRequest {
+                                        path,
+                                        method: "GET".into(),
+                                        body: None,
+                                        server_url: server,
+                                        expected_account_id: Some(account),
+                                    },
+                                )
+                                .await?;
+                                let payload = if response.status == 200 {
+                                    serde_json::from_str(&response.body)
+                                        .map_err(|_| "Invalid source response")?
+                                } else {
+                                    Value::Null
+                                };
+                                Ok((response.status, payload))
+                            }
+                        })
+                        .await
+                        .map(|ordinary| {
+                            inventory["ordinaryItems"] = json!(ordinary);
+                            inventory
+                        })
+                    }
+                    Err(error) => Err(error),
+                };
                 let current = state.settings.lock().await;
                 if current.server_url == settings.server_url
                     && state.generation.load(Ordering::SeqCst) == generation
@@ -110,11 +231,16 @@ pub async fn run(app: tauri::AppHandle) {
                             inventory["serverUrl"] = json!(settings.server_url);
                             inventory["accountId"] = json!(account);
                             inventory["generation"] = json!(generation);
-                            let _ = crate::native::call(
+                            if crate::native::call(
                                 &app,
                                 json!({"op":"active_reminders_snapshot","inventory":inventory}),
                             )
-                            .await;
+                            .await
+                            .is_ok()
+                            {
+                                previous = inventory;
+                                previous_identity = Some(identity);
+                            }
                         }
                         Err(_) => {
                             let _=crate::native::call(&app,json!({"op":"active_reminders_error","message":"Active reminders could not refresh. Check your connection."})).await;
@@ -157,6 +283,42 @@ mod tests {
         })
         .await;
         assert!(result.is_err());
+    }
+    #[tokio::test]
+    async fn removed_sources_are_resolved_before_retirement() {
+        let old = json!({"items":[{"kind":"task","id":"11111111-1111-4111-8111-111111111111","dueAt":"2026-10-22T12:00:00Z","revision":1},
+            {"kind":"reminder","id":"22222222-2222-4222-8222-222222222222","dueAt":"2026-10-22T12:00:00Z","updatedAt":"2026-10-22T11:00:00Z"}]});
+        let next = json!({"items":[]});
+        let ordinary = resolve_removed(&old, &next, |path| {
+            std::future::ready(Ok(if path.contains("/tasks/") {
+                (
+                    200,
+                    json!({"task":{
+                        "id":"11111111-1111-4111-8111-111111111111", "title":"Current title",
+                        "dueAt":"2026-10-22T12:00:00Z", "activeReminder":false,
+                        "lifecycle":"open", "deletedAt":null, "completedAt":null, "revision":2
+                    }}),
+                )
+            } else {
+                (404, Value::Null)
+            }))
+        })
+        .await
+        .unwrap();
+        assert_eq!(ordinary.len(), 1);
+        assert_eq!(ordinary[0]["activeReminder"], false);
+        assert_eq!(ordinary[0]["revision"], 2);
+        assert_eq!(ordinary[0]["title"], "Current title");
+        assert!(
+            resolve_removed(&old, &next, |_| std::future::ready(Err("offline".into())))
+                .await
+                .is_err()
+        );
+        let completed = resolve_removed(&old, &next, |_| std::future::ready(Ok((200,
+            json!({"task":{"id":"11111111-1111-4111-8111-111111111111","completedAt":"2026-10-22T12:00:00Z"},
+                   "reminder":{"id":"22222222-2222-4222-8222-222222222222","completedAt":"2026-10-22T12:00:00Z"}})
+        )))).await.unwrap();
+        assert!(completed.is_empty());
     }
     #[tokio::test]
     async fn active_reminders_repeated_cursor_fails_closed() {

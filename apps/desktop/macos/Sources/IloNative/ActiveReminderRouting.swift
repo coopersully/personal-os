@@ -18,6 +18,8 @@ protocol ActiveReminderNotificationSink: AnyObject {
   func ensureActiveOrdinary(
     _ alert: PlannedAlert, item: ActiveReminderCandidate, inventory: ActiveReminderInventory,
     preferences: NotificationPreferences)
+  func handoffActiveOrdinary(_ alert: PlannedAlert, item: ActiveReminderCandidate,
+    inventory: ActiveReminderInventory, preferences: NotificationPreferences)
   func takeActiveOwnership(_ id: String)
   func prepareActiveFallback(
     _ alert: PlannedAlert, item: ActiveReminderCandidate, inventory: ActiveReminderInventory,
@@ -114,6 +116,7 @@ final class ActiveReminderRouter {
   }
   func ingest(_ next: ActiveReminderInventory) throws {
     guard next.items.allSatisfy(\.valid),
+      (next.ordinaryItems ?? []).allSatisfy(\.validSource),
       Set(next.items.map { "\($0.kind):\($0.id)" }).count == next.items.count,
       parseDate(next.generatedAt) != nil
     else { throw NativeError.message("Invalid active reminder inventory.") }
@@ -131,6 +134,7 @@ final class ActiveReminderRouter {
       (presenter as? ActiveReminderPanelController)?.store = store
     }
     let validIDs = Set(next.items.map { $0.occurrenceID(identity: next.identity) })
+    let ordinaryIDs = Set((next.ordinaryItems ?? []).map { $0.occurrenceID(identity: next.identity) })
     if let previous = inventory {
       for item in previous.items {
         let id = item.occurrenceID(identity: previous.identity)
@@ -147,7 +151,7 @@ final class ActiveReminderRouter {
           }
         }
         if !validIDs.contains(id) {
-          notifications.retireActiveOccurrence(id)
+          if !ordinaryIDs.contains(id) { notifications.retireActiveOccurrence(id) }
           claimed.remove(id)
           preparing.remove(id)
           shown.remove(id)
@@ -155,6 +159,14 @@ final class ActiveReminderRouter {
         }
       }
       if previous.generation != next.generation { pending = [:] }
+    }
+    for item in next.ordinaryItems ?? [] {
+      if preferences.enabled && sourceEnabled(item) {
+        notifications.handoffActiveOrdinary(alert(item, inventory: next, at: now()),
+          item: item, inventory: next, preferences: preferences)
+      } else {
+        notifications.retireActiveOccurrence(item.occurrenceID(identity: next.identity))
+      }
     }
     inventory = next
     lastError = nil

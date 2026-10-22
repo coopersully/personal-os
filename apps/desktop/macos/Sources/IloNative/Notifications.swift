@@ -182,8 +182,9 @@ final class MailDeliveryOutbox {
 enum PendingNotificationPolicy {
   static func refreshed(
     _ request: UNNotificationRequest, snapshot s: NativeSnapshot,
-    preferences p: NotificationPreferences, now: Date
+    preferences p: NotificationPreferences, now: Date, managedIDs: Set<String> = []
   ) -> UNNotificationRequest? {
+    guard !managedIDs.contains(request.identifier) else { return nil }
     let info = request.content.userInfo
     guard NotificationEligibility.isCurrent(info, snapshot: s, preferences: p, now: now),
       let c = request.content.mutableCopy() as? UNMutableNotificationContent
@@ -241,6 +242,7 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate, 
   private var activeSources: [String: String] = [:]
   private var activeSignatures: [String: String] = [:]
   private var activeEpoch = 0
+  private var ordinaryHandoffs: [String: UUID] = [:]
   var onActiveComplete: (([AnyHashable: Any]) -> Void)?
   private let center = UNUserNotificationCenter.current()
   private var revision = 0
@@ -352,6 +354,7 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate, 
   }
   func clear(preservingColdResponses: Bool = false, preservingTest: Bool = false) {
     activeEpoch += 1
+    ordinaryHandoffs = [:]
     activeManagedIDs = []; activeOwnershipIDs = []; activeShownIDs = []; activeSources = [:]; activeSignatures = [:]
     revision += 1
     deliveryQueue.invalidate()
@@ -429,7 +432,7 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate, 
                 s.stale || request.content.userInfo["snoozed"] as? Bool == true
                   || request.content.categoryIdentifier == "ilo.mail",
                 let refreshed = PendingNotificationPolicy.refreshed(
-                  request, snapshot: s, preferences: p, now: Date())
+                  request, snapshot: s, preferences: p, now: Date(), managedIDs: self.activeManagedIDs)
               else { return nil }
               return (request.identifier, refreshed)
             })
@@ -613,7 +616,11 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate, 
       guard preferences.enabled, let server = info["serverUrl"] as? String, let account = info["accountId"] as? String,
         let kind = info["kind"] as? String, let id = info["id"] as? String, let due = info["occurrence"] as? String else { return false }
       let key = stableID("\(server)|\(account)", kind, id, due)
-      return activeManagedIDs.contains(key) && activeSources[key] == info["activeSourceRevision"] as? String
+      if !activeManagedIDs.contains(key) {
+        guard let snapshot else { return false }
+        return NotificationEligibility.isCurrent(info, snapshot: snapshot, preferences: preferences, now: Date())
+      }
+      return activeSources[key] == info["activeSourceRevision"] as? String
         && (kind == "task" ? preferences.tasks : preferences.reminders)
     }
     guard let snapshot else { return false }
@@ -643,7 +650,8 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate, 
       }
       let kind = info["kind"] as? String ?? ""
       let id = info["id"] as? String ?? ""
-      if info["activeReminder"] as? Bool == true && response.actionIdentifier == "complete" {
+      if info["activeReminder"] as? Bool == true && response.actionIdentifier == "complete"
+        && self.activeManagedIDs.contains(response.notification.request.identifier) {
         self.onActiveComplete?(info)
         return
       }
@@ -700,6 +708,7 @@ extension NotificationController {
   }
   func ensureActiveOrdinary(_ alert: PlannedAlert, item: ActiveReminderCandidate, inventory: ActiveReminderInventory, preferences p: NotificationPreferences) {
     let id = alert.identifier
+    ordinaryHandoffs[id] = nil
     activeManagedIDs.insert(id); activeSources[id] = item.sourceRevision
     guard !activeOwnershipIDs.contains(id), alert.fireAt > Date() else { return }
     let signature = "\(item.sourceRevision)|\(alert.title)|\(p.sound)|\(p.preview)|\(alert.fireAt.timeIntervalSince1970)"
@@ -729,12 +738,45 @@ extension NotificationController {
     if let snapshot { reconcile(snapshot, preferences: preferences) }
   }
   func retireActiveOccurrence(_ id: String) {
+    ordinaryHandoffs[id] = nil
     guard activeManagedIDs.contains(id) || activeOwnershipIDs.contains(id) else { return }
     activeManagedIDs.remove(id); activeOwnershipIDs.remove(id); activeShownIDs.remove(id)
     activeSources[id] = nil; activeSignatures[id] = nil
     deliveryQueue.invalidate()
     center.removePendingNotificationRequests(withIdentifiers: [id])
     center.removeDeliveredNotifications(withIdentifiers: [id])
+  }
+  func handoffActiveOrdinary(_ alert: PlannedAlert, item: ActiveReminderCandidate,
+    inventory: ActiveReminderInventory, preferences p: NotificationPreferences) {
+    let id = alert.identifier
+    let wasShown = activeShownIDs.contains(id)
+    let token = UUID(); let epoch = activeEpoch
+    ordinaryHandoffs[id] = token
+    activeManagedIDs.remove(id); activeOwnershipIDs.remove(id); activeShownIDs.remove(id)
+    activeSources[id] = nil; activeSignatures[id] = nil
+    // Drain revoked active submissions first: their stale completion is allowed to remove
+    // its old request, and must finish before ordinary delivery replaces that identifier.
+    Task { @MainActor in
+      await deliveryQueue.drain()
+      center.getDeliveredNotifications { delivered in
+        DispatchQueue.main.async {
+          guard self.activeEpoch == epoch, self.ordinaryHandoffs[id] == token else { return }
+          // A past occurrence already shown as a card or delivered by the OS needs no
+          // second banner. Otherwise restore immediately, even if its old ledger says due.
+          guard alert.fireAt > Date() || (!wasShown && !delivered.contains { $0.request.identifier == id }) else { return }
+          let request = self.activeRequest(alert, item: item, inventory: inventory, preferences: p, fire: max(Date(), alert.fireAt))
+          guard let content = request.content.mutableCopy() as? UNMutableNotificationContent else { return }
+          content.categoryIdentifier = "ilo.\(item.kind)"
+          content.userInfo.removeValue(forKey: "activeReminder")
+          content.userInfo.removeValue(forKey: "activeSourceRevision")
+          self.deliveryQueue.enqueue(UNNotificationRequest(identifier: id, content: content, trigger: request.trigger),
+            currency: { [weak self] in self?.activeEpoch == epoch && self?.ordinaryHandoffs[id] == token }) { result in
+              if case .success = result { self.ledger[id] = alert.fireAt.timeIntervalSince1970; self.persist() }
+              else { self.lastError = "Ordinary reminder delivery could not be restored." }
+            }
+        }
+      }
+    }
   }
   func restoreActiveOrdinary(_ alert: PlannedAlert, item: ActiveReminderCandidate, inventory: ActiveReminderInventory, preferences p: NotificationPreferences) {
     activeOwnershipIDs.remove(alert.identifier); activeSignatures[alert.identifier] = nil

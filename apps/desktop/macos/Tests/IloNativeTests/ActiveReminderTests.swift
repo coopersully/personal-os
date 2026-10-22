@@ -40,6 +40,23 @@ final class ActiveReminderTests: XCTestCase {
         frontmost: "app.fixture"
       ).isActive)
   }
+  @MainActor
+  func testPeriodicRenderDoesNotClampAnInProgressCrossDisplayDrag() throws {
+    var pressed = 0
+    let presenter = ActiveReminderPanelController(mouseButtons: { pressed })
+    defer { presenter.hide() }
+    let item = ActiveReminderCandidate(id: "11111111-1111-4111-8111-111111111111",
+      kind: "task", title: "Fixture", dueAt: "2026-10-22T12:00:00Z", activeReminder: true, revision: 1)
+    try presenter.show([item], selected: nil, preview: true, pending: [], error: nil, stale: false)
+    pressed = 1
+    let draggedOrigin = CGPoint(x: 10000, y: 10000)
+    presenter.panel.setFrameOrigin(draggedOrigin)
+    try presenter.show([item], selected: nil, preview: true, pending: [], error: nil, stale: false)
+    XCTAssertEqual(presenter.panel.frame.origin, draggedOrigin)
+    pressed = 0
+    try presenter.show([item], selected: nil, preview: true, pending: [], error: nil, stale: false)
+    XCTAssertNotEqual(presenter.panel.frame.origin, draggedOrigin)
+  }
   func testOccurrenceChangesWhenDueTimeChanges() throws {
     let a = try JSONDecoder().decode(
       ActiveReminderCandidate.self,
@@ -121,12 +138,15 @@ private final class ActiveTestSink: ActiveReminderNotificationSink {
   var retired: [String] = []
   var prepared: [String] = []
   var restores = 0
+  var handedOff: [ActiveReminderCandidate] = []
   var holdPreparation = false
   var preparation: ((Result<Void, Error>) -> Void)?
   func ensureActiveOrdinary(
     _ alert: PlannedAlert, item: ActiveReminderCandidate, inventory: ActiveReminderInventory,
     preferences: NotificationPreferences
   ) {}
+  func handoffActiveOrdinary(_ alert: PlannedAlert, item: ActiveReminderCandidate,
+    inventory: ActiveReminderInventory, preferences: NotificationPreferences) { handedOff.append(item) }
   func takeActiveOwnership(_ id: String) {}
   func prepareActiveFallback(
     _ alert: PlannedAlert, item: ActiveReminderCandidate, inventory: ActiveReminderInventory,
@@ -161,6 +181,33 @@ private final class ActiveTestPresenter: ActiveReminderPresenting {
   func hide() { isVisible = false }
 }
 final class ActiveReminderLifecycleTests: XCTestCase {
+  @MainActor
+  func testFlagOffHandsCurrentSourceToOrdinaryWithoutCancellingItsPendingRequest() throws {
+    let time = Date(timeIntervalSince1970: 1_792_670_400)
+    let sink = ActiveTestSink(); let panel = ActiveTestPresenter()
+    let router = ActiveReminderRouter(notifications: sink, presenter: panel,
+      activity: { MacActivityState.evaluate(inputAge: 200, onConsole: true, loginDone: true, locked: false, displayAwake: true, frontmost: "fixture") },
+      now: { time }, makeStore: { try ActiveReminderStore(url:
+        FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString), identity: $0) },
+      startTimer: false)
+    var item = ActiveReminderCandidate(id: "11111111-1111-4111-8111-111111111111", kind: "task",
+      title: "Old title", dueAt: ISO8601DateFormatter().string(from: time.addingTimeInterval(2)),
+      activeReminder: true, revision: 1)
+    var inventory = ActiveReminderInventory(serverUrl: "https://app.test", accountId: "a",
+      generation: 1, generatedAt: ISO8601DateFormatter().string(from: time), items: [item])
+    var preferences = NotificationPreferences(); preferences.enabled = true
+    router.configure(preferences: preferences, calendar: .current, enabled: true)
+    try router.ingest(inventory)
+    item.activeReminder = false; item.revision = 2; item.title = "Current title"
+    inventory.items = []; inventory.ordinaryItems = [item]
+    try router.ingest(inventory)
+    XCTAssertEqual(sink.handedOff, [item])
+    XCTAssertTrue(sink.retired.isEmpty)
+    XCTAssertFalse(panel.isVisible)
+    inventory.ordinaryItems = nil
+    try router.ingest(inventory)
+    XCTAssertTrue(sink.retired.isEmpty)
+  }
   @MainActor
   func testLockAndStaleReturnCannotRevealUntilFreshRefresh() throws {
     var clock = Date(timeIntervalSince1970: 1_792_670_400)

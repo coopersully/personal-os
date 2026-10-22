@@ -15,7 +15,7 @@ release-signature equivalence or coverage of every supported macOS version.
   usernoted recorded its banner at the expected fallback time after process exit.
 - Notification authorization initially returned denied. Cooper reported seeing no prompt. The OS
   recorded a permission request and denial; System Settings showed the probe disabled. Only the
-  disposable probe's notification toggle was enabled for testing; restore it after the final smoke.
+  disposable probe's notification toggle was enabled for testing and restored Off after the smoke.
 - Cooper manually locked and unlocked the Mac. During lock, recent input, on-console and login-done
   remained true. NSWorkspace session/sleep observers did not report this lock. The foreground app
   changed to `com.apple.loginwindow`, the session dictionary acquired lock-state metadata, and both
@@ -64,3 +64,14 @@ hardware remain release smoke limits; they are not claimed verified on this deve
 The disposable probe’s notification setting was restored to Off in System Settings and its process
 was stopped after the smoke. The installed nohmi application and its notification setting were not
 used as the test fixture.
+
+## Independent review repairs
+
+The branch review found three delivery/isolation defects: generic stale reconciliation could rewrite
+an accepted fallback, feed opt-out could cancel ordinary delivery, and the desktop transport dropped
+its expected owner binding. Regression tests exercise managed-request exclusion, authoritative
+removed-source resolution (including completion/not-found and offline failure), ordinary handoff,
+and the explicit native expected-account parameter. Removed-source reads run in batches of at most
+eight; a failed batch keeps the previous inventory. The presenter also skips frame fitting while a
+drag is held, avoiding periodic renders clamping a move between displays. These repairs have source
+tests; the release certification limits above still apply.

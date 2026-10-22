@@ -88,6 +88,12 @@ unchanged/duplicate saves, support Enter/blur commit and Escape cancellation, an
 focus and normal Tab behavior intact. Update the page contract and frontend skill together when
 this pattern changes; do not duplicate a new competing design specification.
 
+Rejected autocomplete drafts must survive popup close, blur, and refocus with their field
+error associated to the visible editor. Search reveal paths open existing editors without
+creating records; conditional destinations fall back to a visible controlling setting.
+Compound choices respond to their actual column width, preserving every option rather than
+quietly clipping it. Layout checks cover both control bounds and internal option overflow.
+
 ## Feedback
 
 All settings errors and discrete action results use Sonner, including query errors and

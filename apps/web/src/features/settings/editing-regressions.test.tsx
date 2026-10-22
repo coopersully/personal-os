@@ -76,3 +76,21 @@ it.each([
   await browser.keyboard("{Escape}");
   await waitFor(() => expect(opener).toHaveFocus());
 });
+
+it("exposes time validation on the visible editor", () => {
+  render(
+    <>
+      <SettingsTimeInput
+        aria-label="Day end"
+        type="time"
+        defaultValue="08:00"
+        aria-invalid="true"
+        aria-describedby="day-end-error"
+      />
+      <p id="day-end-error">Day end must be after day start.</p>
+    </>,
+  );
+  const editor = screen.getByRole("combobox", { name: "Day end" });
+  expect(editor).toHaveAttribute("aria-invalid", "true");
+  expect(editor).toHaveAccessibleDescription("Day end must be after day start.");
+});

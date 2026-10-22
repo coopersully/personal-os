@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { selectSetting, setSettingTime } from "./settings-controls.js";
 
 test("settings support field search, ritual history, and resumable setup replay", async ({
   page,
@@ -8,7 +9,7 @@ test("settings support field search, ritual history, and resumable setup replay"
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
-  await page.goto("/settings?section=rituals");
+  await page.goto("/settings?page=rituals");
   await expect(page.getByRole("heading", { name: "Rituals", level: 1 })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Top navigation" })).toHaveCount(
     test.info().project.use.isMobile ? 1 : 0,
@@ -88,32 +89,48 @@ test("settings support field search, ritual history, and resumable setup replay"
 
   await results.getByRole("link", { name: /^Time zone Profile/ }).click();
   await expect(page.locator("#profile-timezone")).toBeFocused();
-  await expect(page.getByRole("heading", { name: "Daily defaults" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Daily Defaults" })).toBeVisible();
   await page.getByRole("button", { name: "Search settings", exact: true }).click();
   await page.getByRole("searchbox", { name: "Search all settings" }).fill("rituals");
   await page
     .getByRole("navigation", { name: "Settings search results" })
     .getByRole("link", { name: /^Rituals Shape/ })
     .click();
-  await expect(page.getByRole("radio", { name: "Morning", exact: true })).toBeVisible();
-  await expect(page.getByLabel("Available from").first()).toHaveValue("06:00");
-  await page.getByRole("radio", { name: "Evening", exact: true }).click();
-  await expect(page.getByLabel("Available from").nth(1)).toHaveValue("21:00");
-  await page.getByRole("radio", { name: "Morning", exact: true }).click();
-  await page.getByLabel("Prompt", { exact: true }).first().fill("Morning water");
-  await page.getByLabel("Requirement", { exact: true }).first().selectOption("optional");
-  await page.getByLabel("Requirement", { exact: true }).nth(1).selectOption("optional");
-  await page.getByLabel("Include on", { exact: true }).nth(1).selectOption("weekdays");
-  await page.getByLabel("Morning reminder time").fill("13:30");
+  const morning = page.getByRole("region", { name: "Morning Ritual", exact: true });
+  const evening = page.getByRole("region", { name: "Evening Ritual", exact: true });
+  await expect(morning.getByRole("combobox", { name: "Available from" })).toHaveValue("6:00 AM");
+  await expect(evening.getByRole("combobox", { name: "Available from" })).toHaveValue("9:00 PM");
+  await morning.getByRole("link", { name: "Steps" }).click();
+  await page.getByRole("button", { name: "Edit step 1" }).click();
+  await page.getByLabel("Prompt", { exact: true }).fill("Morning water");
+  await page.getByRole("switch", { name: "Required", exact: true }).uncheck();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await page.getByRole("button", { name: "Edit step 2" }).click();
+  await page.getByRole("switch", { name: "Required", exact: true }).uncheck();
+  await selectSetting(page, "Include on", "Weekdays");
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await expect
+    .poll(
+      async () =>
+        (await (await page.request.get("/v1/rituals")).json()).rituals.find(
+          (r: { kind: string }) => r.kind === "morning",
+        )?.steps,
+    )
+    .toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "Morning water", optional: true }),
+        expect.objectContaining({ optional: true, days: [1, 2, 3, 4, 5] }),
+      ]),
+    );
+  await page.goto("/settings?page=rituals");
   const saved = page.waitForResponse(
     (r) =>
       r.url().endsWith("/v1/rituals/morning") &&
       r.request().method() === "PUT" &&
       r.request().postDataJSON().enabled === true,
   );
-  await page.getByRole("checkbox", { name: "Enable morning ritual" }).check();
-  expect((await saved).status()).toBe(200);
-  await page.reload();
+  await morning.getByRole("switch", { name: "Enable morning ritual" }).check();
+  expect((await saved).ok()).toBe(true);
   const liveState = await (await page.request.get("/v1/rituals/current")).json();
   if (
     liveState.current?.status === "pending" &&
@@ -121,35 +138,64 @@ test("settings support field search, ritual history, and resumable setup replay"
   ) {
     const live = page.getByRole("dialog", { name: "Morning ritual", exact: true });
     await expect(live).toBeVisible({ timeout: 15000 });
-    await live.getByRole("button", { name: "Done" }).click();
-    await live.getByRole("button", { name: "Done" }).click();
+    await live.getByRole("button", { name: "Done", exact: true }).click();
+    await live.getByRole("button", { name: "Done", exact: true }).click();
     await expect(live).toHaveCount(0);
   }
-  await expect(page.getByLabel("Prompt", { exact: true }).first()).toHaveValue("Morning water");
-  await expect(page.getByRole("checkbox", { name: "Enable morning ritual" })).toBeChecked();
-  await expect(page.getByLabel("Morning reminder time")).toHaveValue("13:30");
-  await expect(page.getByLabel("Requirement", { exact: true }).first()).toHaveValue("optional");
-  await expect(page.getByLabel("Include on", { exact: true }).nth(1)).toHaveValue("weekdays");
-  await page.getByRole("button", { name: "Show morning ritual" }).click();
+  await setSettingTime(page, "Morning reminder time", "1:30 PM");
+  await expect
+    .poll(
+      async () =>
+        (await (await page.request.get("/v1/rituals")).json()).rituals.find(
+          (ritual: { kind: string }) => ritual.kind === "morning",
+        ).reminderTime,
+    )
+    .toBe("13:30");
+  await page.reload();
+  const definitions = await (await page.request.get("/v1/rituals")).json();
+  expect(definitions.rituals.find((r: { kind: string }) => r.kind === "morning").steps).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ label: "Morning water", optional: true }),
+      expect.objectContaining({ optional: true, days: [1, 2, 3, 4, 5] }),
+    ]),
+  );
+  await expect(morning.getByRole("switch", { name: "Enable morning ritual" })).toBeChecked();
+  await expect(page.getByRole("combobox", { name: "Morning reminder time" })).toHaveValue(
+    "1:30 PM",
+  );
+  await page.getByRole("button", { name: "Preview Morning Ritual" }).click();
   const preview = page.getByRole("dialog", { name: "Ritual preview" });
-  expect(
-    await preview.evaluate((element) => ({
-      image: getComputedStyle(element).backgroundImage,
-      color: getComputedStyle(element).backgroundColor,
-    })),
-  ).toEqual({ image: "none", color: "rgb(135, 206, 250)" });
-  await expect(preview.getByRole("button", { name: "Done" })).toBeEnabled();
-  await preview.getByRole("button", { name: "Done" }).click();
-  await preview.getByRole("checkbox", { name: "Remind me about these later" }).check();
-  await expect(preview.getByLabel("Reminder time")).toHaveValue("13:30");
-  await preview.getByLabel("Reminder time").fill("14:00");
-  expect(await preview.evaluate((e) => e.scrollWidth <= e.clientWidth + 1)).toBe(true);
-  await preview.getByRole("button", { name: "Done" }).click();
+  await expect(preview.getByRole("button", { name: "Close Preview" })).toBeEnabled();
+  await expect(preview.getByRole("button", { name: "Done", exact: true })).toHaveCount(0);
+  const questions = preview.getByRole("region", { name: "Ritual questions" });
+  await expect(questions).toBeVisible();
+  await expect
+    .poll(() =>
+      questions.evaluate(
+        (element) =>
+          getComputedStyle(element).opacity === "1" &&
+          element
+            .getAnimations()
+            .every((animation) => !animation.pending && animation.playState !== "running"),
+      ),
+    )
+    .toBe(true);
+  await expect.poll(() => preview.evaluate((e) => e.scrollWidth <= e.clientWidth + 1)).toBe(true);
+  for (const control of [questions, preview.getByRole("button", { name: "Close Preview" })]) {
+    const bounds = await control.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width + 1);
+    expect(bounds!.y).toBeGreaterThanOrEqual(0);
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(page.viewportSize()!.height + 1);
+  }
+  await preview.getByRole("button", { name: "Close Preview" }).click();
   await expect(preview).toHaveCount(0);
-  await page.getByRole("radio", { name: "History and data", exact: true }).click();
+  await page.getByRole("link", { name: "Ritual History", exact: true }).click();
   await expect(page.getByRole("region", { name: "Ritual history" })).toBeVisible();
   expect(await page.locator("html").evaluate((e) => e.scrollWidth <= innerWidth + 1)).toBe(true);
-  await page.getByRole("button", { name: "Delete morning data" }).click();
+  await page.goto("/settings?page=rituals");
+  await page.getByRole("button", { name: "Delete Data", exact: true }).first().click();
   const deleted = page.waitForResponse(
     (response) =>
       response.url().endsWith("/v1/rituals/morning/data") &&
@@ -158,13 +204,13 @@ test("settings support field search, ritual history, and resumable setup replay"
   await page.getByRole("button", { name: "Delete permanently" }).click();
   expect((await deleted).ok()).toBe(true);
   await page.reload();
-  await expect(page.getByRole("checkbox", { name: "Enable morning ritual" })).not.toBeChecked();
-  await page.goto("/settings?section=setup");
+  await expect(morning.getByRole("switch", { name: "Enable morning ritual" })).not.toBeChecked();
+  await page.goto("/settings?page=profile&subpage=setup");
   await expect(page.getByRole("heading", { name: "Setup", level: 1 })).toBeVisible();
   const setupSaved = page.waitForResponse(
     (response) => response.url().endsWith("/v1/setup") && response.request().method() === "PATCH",
   );
-  await page.getByRole("button", { name: "Save setup preferences" }).click();
+  await page.getByRole("switch", { name: "Tasks", exact: true }).click();
   expect((await setupSaved).ok()).toBe(true);
   await page.getByRole("link", { name: "View setup experience" }).click();
   await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeVisible();
@@ -278,7 +324,7 @@ test("browser rituals preserve the current page and save real answers and option
   await page.request.delete("/v1/rituals/night/data");
   await page.reload();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
-  await page.goto("/settings?section=rituals");
+  await page.goto("/settings?page=rituals");
   await page.getByRole("button", { name: "Search settings", exact: true }).click();
   const search = page.getByRole("searchbox", { name: "Search all settings" });
   await search.fill("calendar");
@@ -293,7 +339,7 @@ test("browser rituals preserve the current page and save real answers and option
         title: "Browser morning",
         enabled: true,
         time: "00:00",
-        timeZone: "UTC",
+        timeZone: (await (await page.request.get("/v1/me")).json()).user.planningTimezone,
         steps: [
           { id: "water", label: "Drink browser water", kind: "checkbox" },
           { id: "stretch", label: "Browser optional stretch", kind: "checkbox", optional: true },
@@ -381,7 +427,7 @@ test("browser snooze survives reload and another client can settle the same ritu
         title: "Browser evening",
         enabled: true,
         time: "00:01",
-        timeZone: "UTC",
+        timeZone: (await (await page.request.get("/v1/me")).json()).user.planningTimezone,
         steps: [{ id: "reflect", label: "Evening reflection", kind: "checkbox", optional: true }],
       },
     });

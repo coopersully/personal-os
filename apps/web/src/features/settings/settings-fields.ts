@@ -10,7 +10,7 @@ export type SettingsField = {
   aliases?: string;
   reveal?: string[];
   desktopOnly?: boolean;
-  fallbackTarget?: string;
+  fallbackTarget?: string | string[];
 };
 const fields = (
   section: string,
@@ -181,40 +181,29 @@ export const settingsFields: SettingsField[] = [
     ["Guided setup experience", "View setup experience", "onboarding welcome tour"],
   ]),
   ...fields("appearance", [["Color mode", "Color mode", "theme light dark system appearance"]]),
-  ...["morning", "night"].flatMap((kind) =>
-    fields(
-      kind === "morning" ? "ritual-morning" : "ritual-evening",
-      [
+  ...["morning", "night"].flatMap((kind) => {
+    const title = kind === "morning" ? "Morning" : "Evening";
+    return [
+      ...fields("rituals", [
+        [`${title} ritual enabled`, `${kind}-enabled`, "enable routine"],
+        [`${title} available from`, `${kind}-time`, "schedule start time"],
+        [`${title} reminder time`, `${kind}-reminder-time`, "optional steps follow up"],
+      ]),
+      ...fields(
+        kind === "morning" ? "ritual-morning" : "ritual-evening",
         [
-          `${kind === "morning" ? "Morning" : "Evening"} ritual enabled`,
-          `${kind}-enabled`,
-          "enable routine",
+          [`${title} step prompt`, "Prompt", "steps routine question checklist"],
+          [
+            `${title} response type`,
+            "Response type",
+            "checkbox short entry date number multiple choice",
+          ],
+          [`${title} answer choices`, "Choices", "multiple choice options"],
         ],
-        [
-          `${kind === "morning" ? "Morning" : "Evening"} available from`,
-          `${kind}-time`,
-          "schedule start time",
-        ],
-        [`${kind === "morning" ? "Morning" : "Evening"} time zone`, `${kind}-zone`, "timezone"],
-        [
-          `${kind === "morning" ? "Morning" : "Evening"} checklist prompt`,
-          "Prompt",
-          "steps routine question",
-        ],
-        [
-          `${kind === "morning" ? "Morning" : "Evening"} response type`,
-          "Response type",
-          "checkbox short entry date number multiple choice",
-        ],
-        [
-          `${kind === "morning" ? "Morning" : "Evening"} answer choices`,
-          "Choices",
-          "multiple choice options",
-        ],
-      ],
-      { reveal: [kind === "morning" ? "Morning" : "Evening"], fallbackTarget: "Response type" },
-    ),
-  ),
+        { reveal: ["Edit step 1"], fallbackTarget: ["Response type", "Steps"] },
+      ),
+    ];
+  }),
   ...fields(
     "wallpaper",
     [

@@ -19,6 +19,12 @@ or chat surface.
 
 ## Diagnose refinement before editing
 
+For settings refinements, check rejected autocomplete drafts through blur/refocus and keep
+validation on the visible input. Search must reveal existing editors without creating data.
+Check compound choices against their actual column width, including internal overflow;
+page containment alone can miss clipped options. Decorative ritual canvases stay within
+their viewport; independently verify card/footer bounds after entrance animations settle.
+
 - Record the visible symptom, conditions, and user or system cost without
   embedding the requested fix.
 - Walk the governance diagnosis ladder: user outcome → information hierarchy →

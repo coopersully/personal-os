@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { setSettingTime } from "./settings-controls.js";
 
 async function selectCalendarView(page: Page, view: string) {
   const picker = page.getByRole("button", { name: /^Calendar view:/ });
@@ -303,7 +304,9 @@ test("desktop navigation fills the viewport while long content scrolls independe
       .getByRole("navigation", { name: "Workspace navigation" })
       .getByRole("link", { name: "Settings" })
       .click();
-    await expect(page.getByRole("heading", { name: "Profile", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Profile", exact: true, level: 2 }),
+    ).toBeVisible();
     for (const selector of [".workspace-rail", ".sidebar"]) {
       const bounds = await page.locator(selector).boundingBox();
       expect(bounds?.y).toBe(0);
@@ -343,7 +346,7 @@ test("Reviews and agent controls separate decisions from configuration", async (
     (response) =>
       response.url().endsWith("/v1/mail/rules") && response.request().method() === "GET",
   );
-  await page.goto("/settings?section=mail");
+  await page.goto("/settings?page=mail");
   await expect(page.getByRole("heading", { name: "Mail", exact: true, level: 1 })).toBeVisible();
   const { rules } = (await (await rulesResponse).json()) as {
     rules: { id: string; name: string }[];
@@ -355,18 +358,18 @@ test("Reviews and agent controls separate decisions from configuration", async (
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Later", exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
-  await page.goto(`/settings?section=mail&review=${encodeURIComponent(`mail-rule:${rule.id}`)}`);
+  await page.goto(`/settings?page=mail&review=${encodeURIComponent(`mail-rule:${rule.id}`)}`);
   const activate = dialog.getByRole("button", { name: "Activate reviewed rule" });
   await expect(activate).toBeEnabled();
   await expect(dialog.getByText(/Rule scope:/)).toBeVisible();
   await expect(dialog.getByText("Future actions", { exact: true })).toBeVisible();
-  await expect(page).toHaveURL(/settings\?section=mail&review=mail-rule/);
+  await expect(page).toHaveURL(/settings\?page=mail&review=mail-rule/);
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
-  await expect(page).toHaveURL(/settings\?section=mail$/);
+  await expect(page).toHaveURL(/settings\?page=mail$/);
   await expect(page.getByRole("heading", { name: "Mail", exact: true, level: 1 })).toBeVisible();
 
-  await page.goto("/settings?section=workspace-access&workspace=mail");
-  await expect(page.getByRole("heading", { name: "Workspace access", level: 1 })).toBeVisible();
+  await page.goto("/settings?page=security&subpage=workspace-access&workspace=mail");
+  await expect(page.getByRole("heading", { name: "Workspace Access", level: 1 })).toBeVisible();
   await expect(page.getByText("Allowed", { exact: true })).toBeVisible();
   await expect(page.getByText("Needs your approval", { exact: true })).toBeVisible();
   await expect(page.getByText("Not allowed", { exact: true })).toBeVisible();
@@ -754,10 +757,10 @@ test("a person and an agent share one reminder and calendar surface", async ({
   });
   const openSettingsSection = async (name: string | RegExp) => {
     const parent =
-      name === "Connected agents"
+      name === "Connected Agents"
         ? "Connections"
-        : name === "Workspace access"
-          ? "Security & access"
+        : name === "Workspace Access"
+          ? "Security & Access"
           : name;
     if (mobile) {
       await page.getByRole("button", { name: "Workspace actions" }).click();
@@ -771,7 +774,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
     if (parent !== name) {
       await page
         .locator("main")
-        .getByRole("link", { name: new RegExp(`^Open ${name}$`) })
+        .getByRole("link", { name: new RegExp(`^Open ${name}$`, "i") })
         .click();
     }
   };
@@ -792,11 +795,11 @@ test("a person and an agent share one reminder and calendar surface", async ({
     (response) =>
       response.url().endsWith("/v1/me") && response.request().method() === "PATCH" && response.ok(),
   );
-  await page.getByLabel("Day start").fill("10:00");
-  await page.getByLabel("Day end").fill("18:00");
+  await setSettingTime(page, "Day start", "10:00 AM");
+  await setSettingTime(page, "Day end", "6:00 PM");
   await page.getByLabel("Day end").blur();
-  await expect(page.getByLabel("Day start")).toHaveValue("10:00");
-  await expect(page.getByLabel("Day end")).toHaveValue("18:00");
+  await expect(page.getByLabel("Day start")).toHaveValue("10:00 AM");
+  await expect(page.getByLabel("Day end")).toHaveValue("6:00 PM");
   await profileSaved;
   await openSettingsSection("Activity");
   await expect(page.getByText("Reminder · created").first()).toBeVisible();
@@ -812,12 +815,12 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await page.reload();
   await expect(page.getByRole("heading", { name: "Appearance", level: 1 })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Dark" })).toBeChecked();
-  await openSettingsSection("Connected agents");
+  await openSettingsSection("Connected Agents");
   await expect(
-    page.getByRole("heading", { name: "Connected agents", exact: true, level: 1 }),
+    page.getByRole("heading", { name: "Connected Agents", exact: true, level: 1 }),
   ).toBeVisible();
   await expect(page.getByRole("textbox", { name: "nohmi MCP URL" })).toHaveValue(/\/mcp$/);
-  await openSettingsSection("Workspace access");
+  await openSettingsSection("Workspace Access");
   await expect(page.getByText("Allowed", { exact: true })).toBeVisible();
   await expect(page.getByText("Mail readiness")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Setup protocol details" })).toHaveCount(0);
@@ -834,7 +837,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await page.getByRole("button", { name: "Setup details", exact: true }).click();
   await page.getByRole("button", { name: "Setup protocol details" }).click();
   await expect(page.getByRole("link", { name: "View skill source" })).toBeVisible();
-  await openSettingsSection("Connected agents");
+  await openSettingsSection("Connected Agents");
   await page.getByRole("button", { name: "Set up a local token" }).click();
   await expect(
     page.getByRole("radio", {
@@ -878,10 +881,10 @@ test("feedback keeps corrections in context and action failures in toasts", asyn
   await expect(page).toHaveURL(/\/setup$/);
   await page.getByRole("button", { name: "Exit setup" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
-  await page.goto("/settings?section=profile");
+  await page.goto("/settings?page=profile");
   const end = page.getByLabel("Day end");
-  await page.getByLabel("Day start").fill("09:00");
-  await end.fill("08:00");
+  await setSettingTime(page, "Day start", "9:00 AM");
+  await setSettingTime(page, "Day end", "8:00 AM");
   await page.getByLabel("Day end").blur();
   await expect(end).toHaveAttribute("aria-invalid", "true");
   await expect(page.getByText("Day end must be after day start.")).toBeVisible();
@@ -897,14 +900,14 @@ test("feedback keeps corrections in context and action failures in toasts", asyn
     (response) =>
       response.url().endsWith("/v1/me") && response.request().method() === "PATCH" && response.ok(),
   );
-  await end.fill("17:00");
+  await setSettingTime(page, "Day end", "6:00 PM");
   await expect(end).not.toHaveAttribute("aria-invalid", "true");
   await page.getByLabel("Day end").blur();
   await profileSaved;
   await expect(validation).toHaveCount(0);
   await expect(page.getByText("All changes saved", { exact: true })).toHaveCount(0);
 
-  await page.goto("/settings?section=appearance");
+  await page.goto("/settings?page=appearance");
   await page.route("**/v1/me", async (route) => {
     if (route.request().method() !== "PATCH") return route.continue();
     await route.fulfill({

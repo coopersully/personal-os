@@ -123,6 +123,7 @@ export function SettingsTimeInput({ ref: forwardedRef, ...props }: ComponentProp
         <ComboboxInput
           id={props.id}
           aria-label={props["aria-label"]}
+          aria-invalid={props["aria-invalid"]}
           aria-describedby={props["aria-describedby"]}
           className="settings-value-input"
           showClear={false}

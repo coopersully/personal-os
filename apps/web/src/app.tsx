@@ -7392,8 +7392,13 @@ function PinterestWallpaperDesktopSettingsPanel() {
   const adjustments = (
     <>
       <SettingsSection layout="rows" title="Layout">
-        <ShadcnField>
-          <ShadcnFieldLabel>Layout</ShadcnFieldLabel>
+        <ShadcnField className="wallpaper-choice-row">
+          <ShadcnFieldContent>
+            <ShadcnFieldLabel>Layout</ShadcnFieldLabel>
+            <ShadcnFieldDescription>
+              Grid tiles the frame. Stack overlaps repeated photos across the frame.
+            </ShadcnFieldDescription>
+          </ShadcnFieldContent>
           <SegmentedControl
             aria-label="Wallpaper layout"
             onValueChange={(next) => {
@@ -7408,15 +7413,18 @@ function PinterestWallpaperDesktopSettingsPanel() {
               <LayersIcon data-icon="inline-start" className="size-[15px]" /> Stack
             </SegmentedControlItem>
           </SegmentedControl>
-          <ShadcnFieldDescription>
-            Grid tiles the frame. Stack overlaps repeated photos across the frame.
-          </ShadcnFieldDescription>
         </ShadcnField>
       </SettingsSection>
       <SettingsSection layout="rows" title="Appearance">
         <ShadcnFieldGroup className="pinterest-wallpaper__controls">
-          <ShadcnField>
-            <ShadcnFieldLabel>Mosaic fit</ShadcnFieldLabel>
+          <ShadcnField className="wallpaper-choice-row">
+            <ShadcnFieldContent>
+              <ShadcnFieldLabel>Mosaic fit</ShadcnFieldLabel>
+              <ShadcnFieldDescription>
+                Preserve keeps image proportions, trimming photos at the frame edges. Fill crops
+                each photo into an even grid. Both repeat your Pins to fill the available space.
+              </ShadcnFieldDescription>
+            </ShadcnFieldContent>
             <SegmentedControl
               aria-label="Mosaic fit"
               onValueChange={(next) => {
@@ -7431,13 +7439,14 @@ function PinterestWallpaperDesktopSettingsPanel() {
                 Fill frame
               </SegmentedControlItem>
             </SegmentedControl>
-            <ShadcnFieldDescription>
-              Preserve keeps image proportions, trimming photos at the frame edges. Fill crops each
-              photo into an even grid. Both repeat your Pins to fill the available space.
-            </ShadcnFieldDescription>
           </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel>Backdrop</ShadcnFieldLabel>
+          <ShadcnField className="wallpaper-choice-row">
+            <ShadcnFieldContent>
+              <ShadcnFieldLabel>Backdrop</ShadcnFieldLabel>
+              <ShadcnFieldDescription>
+                Matched samples your images. Daily uses one color from a fixed palette each day.
+              </ShadcnFieldDescription>
+            </ShadcnFieldContent>
             <SegmentedControl
               aria-label="Wallpaper backdrop"
               onValueChange={(next) => {
@@ -7475,9 +7484,6 @@ function PinterestWallpaperDesktopSettingsPanel() {
                 value={backgroundColor}
               />
             ) : null}
-            <ShadcnFieldDescription>
-              Matched samples your images. Daily uses one color from a fixed palette each day.
-            </ShadcnFieldDescription>
           </ShadcnField>
           <ShadcnField>
             <ShadcnFieldLabel htmlFor="pinterest-tile-size">

@@ -237,7 +237,7 @@ it("recovers from an unavailable server and retains definition revisions", async
   );
   expect(screen.queryByText("Couldn’t load ritual settings")).not.toBeInTheDocument();
   mocks.list.mockResolvedValue({ rituals: [definition] });
-  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
   expect(await screen.findByDisplayValue("05:45")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Edit step 1" }));
   expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();

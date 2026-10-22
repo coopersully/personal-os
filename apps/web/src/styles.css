@@ -7039,10 +7039,10 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 /* A shared decorative layer: no motion, screen capture, or input handling. */
 .ritual-clouds {
   position: fixed;
-  inset: -12%;
+  inset: 0;
   z-index: -1;
-  width: 124%;
-  height: 124%;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
   image-rendering: auto;
 }
@@ -7082,6 +7082,7 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   --ritual-sky: var(--ritual-morning-sky);
   background: var(--ritual-sky);
   align-content: center;
+  overflow: clip;
 }
 .ritual-browser-preview[data-ritual-kind="night"] {
   background: var(--ritual-sky);
@@ -7623,17 +7624,24 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   min-width: 0;
 }
 .wallpaper-editor > * { min-width: 0; }
+.wallpaper-editor__settings { container: wallpaper-controls / inline-size; }
+.wallpaper-choice-row[data-settings-row] > input[type="color"] { grid-row: 2; }
 .wallpaper-editor__preview {
   position: static;
 }
 .wallpaper-editor__preview .pinterest-wallpaper-preview__canvas {
   width: 100%;
 }
-@container settings (min-width: 56rem) {
+@container settings (min-width: 40rem) {
   .wallpaper-editor { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
   .wallpaper-editor__preview { position: sticky; top: 1rem; grid-column: 2; grid-row: 1; }
   .wallpaper-editor__settings { grid-column: 1; grid-row: 1; }
 
+}
+@container wallpaper-controls (max-width: 28rem) {
+  .settings-panel .wallpaper-choice-row[data-settings-row] { grid-template-columns: minmax(0, 1fr); }
+  .wallpaper-choice-row[data-settings-row] > .segmented-control { grid-column: 1; grid-row: 2; }
+  .wallpaper-choice-row[data-settings-row] > input[type="color"] { grid-column: 1; grid-row: 3; }
 }
 .appearance-picker .choice-card__content {
   grid-template-columns: auto minmax(0, 1fr);

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { ClockIcon } from "@/components/icons";
-import { Field, FieldLabel } from "@/components/settings-field";
+import { Field, FieldContent, FieldError, FieldLabel } from "@/components/settings-field";
 import {
   Combobox,
   ComboboxContent,
@@ -52,6 +52,8 @@ export function ProfileChoice({
   const format = (item: string) => (kind === "time" ? timeLabel(item) : item.replaceAll("_", " "));
   const [query, setQuery] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [validationError, setValidationError] = useState<string>();
+  const errorId = `${id}-error`;
   const update = useFeedbackMutation({
     feedback: { action: `save your ${label.toLowerCase()}`, form: true },
     mutationFn: save,
@@ -72,7 +74,10 @@ export function ProfileChoice({
   ).slice(0, 6);
   return (
     <Field orientation="horizontal" className="profile-setting-row justify-between">
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <FieldContent>
+        <FieldLabel htmlFor={id}>{label}</FieldLabel>
+        {validationError ? <FieldError id={errorId}>{validationError}</FieldError> : null}
+      </FieldContent>
       <Combobox
         autoHighlight
         items={items}
@@ -83,22 +88,37 @@ export function ProfileChoice({
         open={open}
         onOpenChange={(next) => {
           setOpen(next);
-          if (!next && !update.isError) setQuery(null);
+          if (!next && !update.isError && !validationError) setQuery(null);
         }}
         onInputValueChange={(next, details) => {
-          if (details.reason !== "item-press") setQuery(next);
+          // Closing the popup synchronizes its input to the saved selection. Keep
+          // a rejected draft until the user actually edits it.
+          if (validationError && details.reason === "none") {
+            details.cancel();
+            return;
+          }
+          if (details.reason !== "item-press") {
+            setQuery(next);
+            setValidationError(undefined);
+          }
         }}
-        onValueChange={(next) => {
-          if (!next || next === value) {
+        onValueChange={(next, details) => {
+          if (!next) return;
+          if (next === value) {
+            setValidationError(undefined);
             setOpen(false);
             setQuery(null);
             return;
           }
           const error = validate?.(next);
           if (error) {
-            toast.error(error);
+            details.cancel();
+            setQuery(format(next));
+            setValidationError(error);
+            toast.error("Check the highlighted settings fields.");
             return;
           }
+          setValidationError(undefined);
           setQuery(format(next));
           setOpen(false);
           update.mutate(next);
@@ -107,6 +127,8 @@ export function ProfileChoice({
         <ComboboxInput
           id={id}
           aria-label={label}
+          aria-invalid={validationError ? true : undefined}
+          aria-describedby={validationError ? errorId : undefined}
           disabled={update.isPending}
           className="settings-value-input"
           showTrigger={false}

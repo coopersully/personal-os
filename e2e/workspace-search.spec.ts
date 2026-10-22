@@ -3,6 +3,7 @@ import type {
   WorkspacePreferences,
   WorkspaceSettings,
 } from "../packages/domain/src/workspace-settings.js";
+import { selectSetting } from "./settings-controls.js";
 
 async function preserveWorkspacePreferences(
   page: Page,
@@ -83,7 +84,7 @@ test("each workspace discovers records and Calendar settings without changing li
   await page.getByRole("button", { name: "Search Calendar", exact: true }).click();
   await page.getByRole("combobox", { name: "Search Calendar", exact: true }).fill("weekends");
   await page.getByRole("option", { name: "Show weekends Calendar settings Settings" }).click();
-  await expect(page).toHaveURL(/section=calendar.*field=calendar%3Ashow-weekends/);
+  await expect(page).toHaveURL(/page=calendar.*field=calendar%3Ashow-weekends/);
   await expect(page.getByRole("switch", { name: "Show weekends" })).toBeFocused();
 });
 
@@ -114,12 +115,12 @@ test("Calendar remembers its view and opening and snap preferences", async ({ pa
     expect((await saved).ok()).toBeTruthy();
     await page.goto("/calendar");
     await expect(page.getByRole("button", { name: "Calendar view: month" })).toBeVisible();
-    await page.goto("/settings?section=calendar");
-    await expect(page.getByLabel("Preferred view", { exact: true })).toHaveValue("month");
-    await page.getByLabel("Preferred view", { exact: true }).selectOption("day");
+    await page.goto("/settings?page=calendar");
+    await expect(page.getByLabel("Preferred view", { exact: true })).toHaveText("Month");
+    await selectSetting(page, "Preferred view", "Day");
     const weekStart = page.getByLabel("Week starts on", { exact: true });
     await expect(weekStart).toBeEnabled();
-    await weekStart.selectOption("monday");
+    await selectSetting(page, "Week starts on", "Monday");
     const duration = page.getByLabel("Default event duration (minutes)", { exact: true });
     await expect(duration).toBeEnabled();
     await duration.fill("90");
@@ -136,7 +137,7 @@ test("Calendar remembers its view and opening and snap preferences", async ({ pa
     await expect(autoFollow).not.toBeChecked();
     const snap = page.getByRole("switch", { name: "Snap back to Follow" });
     await expect(snap).toBeEnabled();
-    await page.getByLabel("Follow snap sensitivity", { exact: true }).selectOption("generous");
+    await selectSetting(page, "Follow snap sensitivity", "Generous — anywhere nearby");
     await expect(snap).toBeEnabled();
     await snap.click();
     await expect(snap).not.toBeChecked();
@@ -147,13 +148,13 @@ test("Calendar remembers its view and opening and snap preferences", async ({ pa
     await expect
       .poll(() => page.locator(".calendar-timeline-scroll").evaluate((el) => el.scrollTop))
       .toBe(0);
-    await page.goto("/settings?section=calendar");
+    await page.goto("/settings?page=calendar");
     await expect(autoFollow).not.toBeChecked();
-    await expect(weekStart).toHaveValue("monday");
+    await expect(weekStart).toHaveText("Monday");
     await expect(duration).toHaveValue("90");
     await expect(snap).not.toBeChecked();
-    await expect(page.getByLabel("Follow snap sensitivity", { exact: true })).toHaveValue(
-      "generous",
+    await expect(page.getByLabel("Follow snap sensitivity", { exact: true })).toHaveText(
+      "Generous — anywhere nearby",
     );
   } finally {
     await restore();
@@ -480,23 +481,23 @@ test("workspace settings edit Tasks display and Mail layout preferences", async 
           r.request().method() === "PATCH" &&
           r.ok(),
       );
-    await page.goto("/settings?section=tasks");
+    await page.goto("/settings?page=tasks");
     await expect(page.getByLabel("Sort by", { exact: true })).toBeEnabled();
     let writing = saved("tasks");
-    await page.getByLabel("Sort by", { exact: true }).selectOption("title");
+    await selectSetting(page, "Sort by", "Title A–Z");
     await writing;
     await expect(page.getByLabel("Group by", { exact: true })).toBeEnabled();
     writing = saved("tasks");
-    await page.getByLabel("Group by", { exact: true }).selectOption("project");
+    await selectSetting(page, "Group by", "Project");
     await writing;
     await expect(page.getByLabel("List and project sorting", { exact: true })).toBeVisible();
     await expect(page.getByLabel("Notes", { exact: true })).toBeVisible();
     await page.goto("/tasks");
     await expect(page.getByRole("button", { name: "Sort: Title A–Z", exact: true })).toBeVisible();
-    await page.goto("/settings?section=mail");
+    await page.goto("/settings?page=mail");
     await expect(page.getByLabel("Conversation density", { exact: true })).toBeEnabled();
     writing = saved("mail");
-    await page.getByLabel("Conversation density", { exact: true }).selectOption("compact");
+    await selectSetting(page, "Conversation density", "Compact");
     await writing;
     await expect(page.getByLabel("Conversation list width (%)", { exact: true })).toBeEnabled();
     writing = saved("mail");
@@ -536,8 +537,8 @@ test("workspace settings edit Tasks display and Mail layout preferences", async 
     writing = saved("mail");
     await page.getByRole("menuitemradio", { name: "Expanded", exact: true }).click();
     await writing;
-    await page.goto("/settings?section=mail");
-    await expect(page.getByLabel("Conversation density", { exact: true })).toHaveValue("expanded");
+    await page.goto("/settings?page=mail");
+    await expect(page.getByLabel("Conversation density", { exact: true })).toHaveText("Expanded");
     await expect(page.getByLabel("Conversation list width (%)", { exact: true })).toHaveValue("42");
   } finally {
     try {
@@ -985,10 +986,10 @@ test("Financial profile opens shared fields and preserves edits across sections 
     await page.screenshot({
       path: `/tmp/finance-configuration-${isMobile ? "mobile" : "desktop"}.png`,
     });
-    await page.goto("/settings?section=finances&field=finances:household-size");
+    await page.goto("/settings?page=finances&field=finances:household-size");
     await expect(page.getByLabel("Household size")).toHaveValue("3");
   } finally {
-    await page.goto("/settings?section=finances&field=finances:household-size");
+    await page.goto("/settings?page=finances&field=finances:household-size");
     const household = page.getByLabel("Household size");
     await expect(household).toBeEnabled();
     if ((await household.inputValue()) !== original) {

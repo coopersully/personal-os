@@ -543,7 +543,7 @@ it.each([
   await user.type(within(row).getByLabelText(/^(Expected|Monthly) amount$/), "125");
   const day = within(row).queryByLabelText("Due day of month");
   if (day) await user.type(day, "15");
-  if (kind === "priorities") await user.click(within(row).getByRole("checkbox"));
+  if (kind === "priorities") await user.click(within(row).getByRole("switch"));
   await user.click(screen.getByLabelText("Planning notes"));
   await waitFor(() =>
     expect(api.updateFinancialProfile).toHaveBeenLastCalledWith(

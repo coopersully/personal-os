@@ -1155,3 +1155,14 @@ search/filter/sort remains ahead of bounded cursor pagination with selectable pa
 sizes. Shared filter/sort triggers now cover Tasks, Finances, Reviews, Today, workspace
 search, and Calendar/Mail account sources, retaining their domain query behavior.
 These are source implementation claims, not a production deployment claim.
+
+### Settings acceptance repairs
+
+Inline planning-time validation now associates errors with the visible editor and retains a
+rejected choice through popup closure, blur, and refocus. Ritual settings search opens an
+existing step editor and falls back to its visible controlling setting without creating steps.
+Wallpaper compound choices adapt to their actual column width beside the sticky preview;
+ritual cloud canvases remain viewport-sized while scrolling their repeated texture internally.
+Acceptance scenarios use the visible shadcn controls and verify persisted optional/day rules,
+recovery, internal option containment, and card/footer bounds after the entrance animation.
+These are source changes; production acceptance remains part of delivery verification.

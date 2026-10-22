@@ -19,6 +19,12 @@ Use the shared [feedback rubric](../feedback.md) for every operation.
   verification and unavailable platform capabilities remain contextual Alerts.
 - Keep unsaved drafts and one-time invitation/token values visible through failed
   refreshes. Never replace cached settings with an empty-success state.
+- Rejected autocomplete choices retain their attempted value and associated field error
+  through popup closure, blur, and refocus. Announce the error with Sonner; correction
+  happens in the visible input, not a hidden native control.
+- Settings search opens existing editors without creating records or steps. When a
+  conditional field is unavailable, focus the nearest visible controlling setting;
+  never focus a hidden control behind a dialog.
 - Desktop wallpaper is a primary sidebar page. Keep its live preview sticky beside scrolling
   controls at desktop widths, including a 1100px app window. On phone-sized surfaces only,
   place the preview above them. Board, Layout, Appearance, and Framing are separate cards.

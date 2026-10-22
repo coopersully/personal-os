@@ -22,6 +22,9 @@ it("reloads canonical planning fixtures without completing empty, recovery or on
     const service = createProfileBudgetService({ db: database.db, now: () => now });
     for (let pass = 0; pass < 2; pass++) {
       await loadQaFixtures(database.db, { accounts, now });
+      const runtime = createFinanceService({ db: database.db, now: () => now });
+      await runtime.backfillLearning();
+      await runtime.backfillLedgerIntegrity();
       for (const account of accounts) {
         const populated = account.key === "demo-full" || account.key === "qa-loaded";
         const profile = await service.getFinancialProfile(account.id);

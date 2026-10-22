@@ -1980,6 +1980,44 @@ export async function loadQaFixtures(
       data.financeRecurringScheduleVersions.push(...planning.schedules);
       data.financePlanningEvidence.push(...planning.evidence);
       data.financeOnboardingStates.push(planning.onboarding);
+      // Complete canonical references before snapshotting balances: startup learning
+      // must not enrich these transactions and invalidate their reflection revisions.
+      const movements = data.financeTransactions.filter((row) => row.userId === account.id);
+      for (const [index, movement] of movements.entries()) {
+        if (!movement.merchantId) {
+          movement.merchantId = fixtureId(account, 750 + index);
+          data.financeMerchants.push({
+            id: movement.merchantId,
+            userId: account.id,
+            displayName: movement.merchant,
+            normalizedName: movement.merchant.toLowerCase(),
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+        if (movement.category && !movement.categoryId) {
+          const existing = data.financeCategories.find(
+            (category) => category.userId === account.id && category.name === movement.category,
+          );
+          if (existing?.id) movement.categoryId = existing.id;
+          else {
+            movement.categoryId = fixtureId(account, 770 + index);
+            data.financeCategories.push({
+              id: movement.categoryId,
+              userId: account.id,
+              name: movement.category,
+              slug: movement.category.toLowerCase(),
+              group: movement.direction === "transfer" ? "Financial" : "Spending",
+              color: "#64748B",
+              isSystem: true,
+              createdAt: now,
+              updatedAt: now,
+            });
+          }
+        }
+        if (movement.categorySource === "user" || movement.categorySource === "agent")
+          movement.categoryDecidedAt = now;
+      }
       for (const financeAccount of data.financeAccounts.filter(
         (row) => row.userId === account.id,
       )) {

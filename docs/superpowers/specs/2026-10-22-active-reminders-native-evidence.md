@@ -75,3 +75,30 @@ and the explicit native expected-account parameter. Removed-source reads run in 
 eight; a failed batch keeps the previous inventory. The presenter also skips frame fitting while a
 drag is held, avoiding periodic renders clamping a move between displays. These repairs have source
 tests; the release certification limits above still apply.
+
+## Branch verification status
+
+Implementation is local on `cooper/active-reminders`; it has not been merged, deployed or installed
+over the existing application. Independent review repaired the reminder delivery and ownership
+findings, including same-owner settings-generation history and policy fencing of deferred handoffs.
+
+Passed checks:
+
+- Full native suite: 76 Rust and 115 Swift tests.
+- Repository lint/contracts and all TypeScript checks; production builds.
+- Focused persistence, migration, API/default/owner/paging and UI tests. Generated MCP discovery
+  documentation and migration journal assertions include the new field/migration.
+- Active-reminder browser acceptance on desktop and mobile. The full browser run completed with
+  151 passed, two intentionally skipped, and one failure in the existing Finance registered-host
+  chat-history scenario (`e2e/finance-setup-modes.spec.ts:169`), which returned an empty history.
+
+`pnpm verify` is **not green**. An initial complete run exposed stale Finance grant test expiry
+(reproduced on the base branch), plus the migration assertion and generated dictionary changes;
+these were repaired. Both UI timing failures passed under the repository's existing CI timeout.
+A complete CI run then had a workspace-search socket hang-up and a lost Provider Item database
+connection; those suites passed isolated retries and the next full run. That next run instead
+failed the existing Finance post-lock expiry assertion in
+`apps/api/src/finance/maintenance-execution.integration.test.ts` (the preceding two runs passed it).
+The retry was stopped at that failure. No Finance production timing or authority rule was changed.
+A green full-suite/coverage receipt remains required before release, alongside the native
+certification checks above. Failed-run logs and browser traces remain in the ignored local worktree.

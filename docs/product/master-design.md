@@ -475,6 +475,14 @@ ship general routing, maintenance dispatch, global bypass, or SMS-bound reviews.
 
 ### 6.10 Desktop overlay, widgets, notifications, and mobile
 
+Active reminders are an approved target interaction, not yet an implemented capability. A task or
+reminder can opt into a persistent, draggable nohmi card, with a configurable creation default.
+When the person is actively using their Mac, the card replaces ordinary system presentation and
+stays until completion. While away, ordinary system notification delivery continues; returning
+reveals a card only if the item is still incomplete. Completing the source item on another client
+also retires its card. Concrete defaults, native delivery safeguards, and first-release scope are
+proposed in [the active-reminders design](../superpowers/specs/2026-10-22-active-reminders-design.md).
+
 Closing the main desktop window keeps enabled pet, routine presentation, and notification
 refresh active in the menu-bar process. Explicit **Quit nohmi** stops that process until the next
 launch; it does not create a separate companion that survives Quit. Already scheduled operating

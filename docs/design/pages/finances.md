@@ -53,11 +53,25 @@ caveats. Its Cash flow link retains that exact agenda range. Expected movements 
 money or a safe-to-spend total. Existing position, ownership, complete-plan review and manual
 correction controls remain available; no second queue or financial source is created.
 
+Overview leads with its balance metrics. The decision summary and next expected movements form
+an open daily sequence (adjacent at wide widths), with amounts aligned at the end of each upcoming
+row. Historical maintenance and reviews follow the position and planning material.
+
 ### Spending dashboard
 
 Spending is a new sidebar destination; retain Overview and existing destinations in this scope.
 Automations and Activity each have their own sidebar page. Reassess redundancy after the redesign
 is visible rather than replacing Overview now.
+
+The display toolbar groups the single selected view, period navigation, and grouping selector.
+Use shared checked menus for period/grouping and the shared single-select toggle for views.
+Spending options open a bounded dialog with the shared Settings row context: labels at the start,
+controls at the end, active-filter count on its trigger, and immediate revisioned preference saves.
+Keep the selected-period amount, basis, pending inclusion and coverage caveat visible. Detailed
+scope, monthly-budget confirmation, source qualifications and technical references live in
+**About these totals**. Bubble layout controls belong in a contextual **Layout** menu (Arrange
+and Reset), leaving the visualization and the circle-size/monthly-fill legend intact. These
+presentation changes must preserve exact contributions, recovery links and accounting queries.
 
 The spending bubble view defaults to configured budget buckets, or categories when no buckets are
 configured, and remembers the user's explicit grouping choice. Buckets support category drill-down.

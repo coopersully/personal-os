@@ -1,35 +1,76 @@
+import { formatDateOnly } from "@personal-os/domain";
+import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { SpendingPeriod } from "./spending-period";
+
 export function SpendingChoice({
   label,
   value,
   options,
   onChange,
   disabled = false,
+  showLabel = true,
+  displayValue,
 }: {
   label: string;
   value: string;
   options: ReadonlyArray<readonly [string, string]>;
   onChange: (value: string) => void;
   disabled?: boolean;
+  showLabel?: boolean;
+  displayValue?: string;
 }) {
+  if (label === "View")
+    return (
+      <ToggleGroup
+        type="single"
+        aria-label={label}
+        value={value}
+        onValueChange={(next) => next && onChange(next)}
+        disabled={disabled}
+        size="sm"
+        spacing={0}
+      >
+        {options.map(([id, name]) => (
+          <ToggleGroupItem key={id} value={id}>
+            {name}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
+    );
   return (
-    <fieldset className="flex min-w-0 flex-wrap items-center gap-1" disabled={disabled}>
-      <legend className="text-xs text-muted-foreground">{label}</legend>
-      {options.map(([id, name]) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
         <Button
-          key={id}
-          type="button"
+          variant="ghost"
           size="sm"
-          variant={value === id ? "secondary" : "ghost"}
-          aria-pressed={value === id}
-          onClick={() => onChange(id)}
+          disabled={disabled}
+          aria-label={`${label}: ${displayValue ?? options.find(([id]) => id === value)?.[1] ?? "Selected categories"}`}
         >
-          {name}
+          {showLabel ? <span className="text-muted-foreground">{label}</span> : null}
+          {displayValue ?? options.find(([id]) => id === value)?.[1] ?? "Selected categories"}
+          <ChevronDownIcon />
         </Button>
-      ))}
-    </fieldset>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuRadioGroup value={value} onValueChange={onChange} aria-label={label}>
+          {options.map(([id, name]) => (
+            <DropdownMenuRadioItem key={id} value={id}>
+              {name}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 export function SpendingPeriodControls({
@@ -48,9 +89,23 @@ export function SpendingPeriodControls({
   onMove: (direction: number) => void;
 }) {
   return (
-    <div className="flex flex-wrap items-end gap-2">
+    <div className="flex min-w-0 flex-wrap items-center gap-1">
+      {period !== "custom" ? (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Previous period"
+          onClick={() => onMove(-1)}
+        >
+          <ChevronLeftIcon />
+        </Button>
+      ) : null}
       <SpendingChoice
         label="Period"
+        {...(period === "month"
+          ? { displayValue: formatDateOnly(from, { month: "long", year: "numeric" }) }
+          : {})}
+        showLabel={false}
         value={period}
         options={[
           ["today", "Today"],
@@ -60,9 +115,16 @@ export function SpendingPeriodControls({
         ]}
         onChange={onPeriod}
       />
-      {period === "custom" ? (
-        <>
-          <label className="text-xs" htmlFor="spending-from">
+      {period !== "custom" ? (
+        <Button variant="ghost" size="icon-sm" aria-label="Next period" onClick={() => onMove(1)}>
+          <ChevronRightIcon />
+        </Button>
+      ) : (
+        <div className="flex min-w-0 flex-wrap gap-2">
+          <label
+            className="flex items-center gap-2 text-xs text-muted-foreground"
+            htmlFor="spending-from"
+          >
             From
             <Input
               type="date"
@@ -72,7 +134,10 @@ export function SpendingPeriodControls({
               onChange={(event) => event.target.value && onDates(event.target.value, through)}
             />
           </label>
-          <label className="text-xs" htmlFor="spending-through">
+          <label
+            className="flex items-center gap-2 text-xs text-muted-foreground"
+            htmlFor="spending-through"
+          >
             Through
             <Input
               type="date"
@@ -82,16 +147,7 @@ export function SpendingPeriodControls({
               onChange={(event) => event.target.value && onDates(from, event.target.value)}
             />
           </label>
-        </>
-      ) : (
-        <>
-          <Button variant="ghost" aria-label="Previous period" onClick={() => onMove(-1)}>
-            Previous
-          </Button>
-          <Button variant="ghost" aria-label="Next period" onClick={() => onMove(1)}>
-            Next
-          </Button>
-        </>
+        </div>
       )}
     </div>
   );

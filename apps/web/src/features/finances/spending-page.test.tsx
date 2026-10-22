@@ -172,13 +172,13 @@ it("restores saved defaults and honors explicit URL overrides without autosaving
       }),
     }),
   );
-  expect(screen.getByRole("button", { name: "Bubbles" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("radio", { name: "Bubbles" })).toHaveAttribute("aria-checked", "true");
   expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
 });
 it("restores saved List and persists only explicit account and view changes", async () => {
   mount();
   await screen.findByRole("button", { name: "Groceries" });
-  expect(screen.getByRole("button", { name: "List" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("radio", { name: "List" })).toHaveAttribute("aria-checked", "true");
   expect(api.getFinanceSpending).toHaveBeenLastCalledWith(
     expect.objectContaining({ scope: expect.objectContaining({ accountIds: null }) }),
   );
@@ -200,8 +200,9 @@ it("restores saved List and persists only explicit account and view changes", as
       expect.objectContaining({ preferences: { spendAccountIds: null } }),
     ),
   );
-  await waitFor(() => expect(screen.getByRole("button", { name: "Bubbles" })).toBeEnabled());
-  fireEvent.click(screen.getByRole("button", { name: "Bubbles" }));
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  await waitFor(() => expect(screen.getByRole("radio", { name: "Bubbles" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("radio", { name: "Bubbles" }));
   await waitFor(() =>
     expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
       "finances",
@@ -219,7 +220,7 @@ it("opens exact contribution detail and explains qualifications without exposing
   expect(dialog).toHaveTextContent("$2.00");
   expect(screen.queryByText("ownership_unknown")).not.toBeInTheDocument();
   fireEvent.keyDown(dialog, { key: "Escape" });
-  fireEvent.click(screen.getByText("Why these totals are qualified"));
+  fireEvent.click(screen.getByText("About these totals"));
   expect(screen.getByText(/Some account ownership is unknown/)).toBeVisible();
   expect(screen.getByText("ownership_unknown · private-source-id")).not.toBeVisible();
 });
@@ -314,6 +315,7 @@ it("offers scope confirmation only for an unavailable single-month comparison", 
     },
   }));
   mount("?period=custom&from=2026-09-01&through=2026-09-30");
+  fireEvent.click(await screen.findByRole("button", { name: "About these totals" }));
   await screen.findByText("Confirm this month's budget scope");
   cleanup();
   mount("?period=custom&from=2026-08-01&through=2026-09-30");
@@ -342,9 +344,13 @@ it("uses qualified whole-month usage alongside selected-day amounts without chan
   mount("?view=list&period=today&from=2026-09-08");
   await screen.findByText("Observed monthly $25.00 of $100.00 · 25.0%");
   expect(screen.getByText(/2026-09-08 – 2026-09-08/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "About these totals" }));
   expect(screen.getByText(/America\/Chicago/)).toBeVisible();
   expect(screen.getByText(/Confirmed later/)).toBeVisible();
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
   expect(screen.queryByText("Confirm this month's budget scope")).not.toBeInTheDocument();
+  if (screen.queryByRole("dialog", { name: "About these totals" }))
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
   fireEvent.click(screen.getByRole("button", { name: "Groceries" }));
   const detail = await screen.findByRole("dialog");
   expect(detail).toHaveTextContent("Monthly usage: $25.00 of $100.00");
@@ -395,7 +401,9 @@ it("recovers the original full query and changed timezone, then opens a freshly 
   expect(dialog).toHaveTextContent("2026-09-08 – 2026-09-09");
   expect(dialog).toHaveTextContent("Market");
   expect(dialog).toHaveTextContent("$9.00");
-  expect(screen.getByText("Effective time zone: America/Chicago")).toBeInTheDocument();
+  expect(api.getFinanceSpending).toHaveBeenLastCalledWith(
+    expect.objectContaining({ scope: expect.objectContaining({ timezone: "America/Chicago" }) }),
+  );
   expect(screen.getByText(/Recovered selection · current Spending data/)).toBeInTheDocument();
   expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
   fireEvent.keyDown(dialog, { key: "Escape" });
@@ -444,7 +452,8 @@ it("never replaces a missing recovered group with a broader selection", async ()
   await screen.findByText(/recovered group is no longer available/);
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Categories" }));
+  fireEvent.keyDown(screen.getByRole("button", { name: /^Group by:/ }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "Categories" }));
   await waitFor(() =>
     expect(screen.getByTestId("location")).not.toHaveTextContent("recoverSpending"),
   );
@@ -471,6 +480,7 @@ it("explains empty selected data and unsupported source money without showing un
   });
   mount("?accounts=&categories=&pending=0");
   await screen.findByText("No spending in this selection");
+  fireEvent.click(screen.getByRole("button", { name: "About these totals" }));
   expect(screen.getByText(/Buckets unavailable; showing categories/)).toBeVisible();
   expect(screen.getByText("Excluded uncategorized: $1.25")).toBeVisible();
   expect(screen.getByText("Negative adjustments: $0.75")).toBeVisible();
@@ -479,7 +489,6 @@ it("explains empty selected data and unsupported source money without showing un
     screen.getByText(/EUR \(1 transactions\).*Unspecified currency \(1 transactions\)/),
   ).toBeVisible();
   expect(screen.queryByText("Market")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByText("Why these totals are qualified"));
   expect(screen.getByText(/Some spending evidence needs review/)).toBeVisible();
   expect(api.getFinanceSpending).toHaveBeenLastCalledWith(
     expect.objectContaining({
@@ -519,8 +528,8 @@ it("changes account membership and accounting options with explicit revisioned p
       expect.objectContaining({ preferences: { spendAccountIds: [accountId] } }),
     ),
   );
-  await waitFor(() => expect(screen.getByRole("button", { name: "Full outflow" })).toBeEnabled());
-  fireEvent.click(screen.getByRole("button", { name: "Full outflow" }));
+  fireEvent.keyDown(screen.getByRole("button", { name: /^Basis:/ }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "Full outflow" }));
   await waitFor(() =>
     expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
       "finances",
@@ -541,17 +550,15 @@ it("changes account membership and accounting options with explicit revisioned p
 it("focuses Trends on a group then restores all categories without saving a category preference", async () => {
   mount("?view=trends&period=custom&from=2026-09-01&through=2026-09-30");
   await screen.findByRole("region", { name: "Spending trends" });
-  fireEvent.click(screen.getByText("Focus on a group"));
-  fireEvent.click(screen.getByRole("button", { name: "Groceries" }));
+  fireEvent.keyDown(await screen.findByRole("button", { name: /^Focus:/ }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "Groceries" }));
   await waitFor(() =>
     expect(api.getFinanceSpending).toHaveBeenCalledWith(
       expect.objectContaining({ scope: expect.objectContaining({ categoryIds: ["food"] }) }),
     ),
   );
-  await screen.findByText("Focus on a group");
-  const focus = screen.getByText("Focus on a group").closest("details");
-  if (!focus?.open) fireEvent.click(screen.getByText("Focus on a group"));
-  fireEvent.click(await screen.findByRole("button", { name: "All categories" }));
+  fireEvent.keyDown(await screen.findByRole("button", { name: /^Focus:/ }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "All categories" }));
   await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("categories="));
   expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
 });
@@ -569,7 +576,8 @@ it("clears missing recovery explicitly while retaining its full accounting filte
 it("saves explicit grouping and period choices, navigates periods, and retains edited custom dates", async () => {
   mount("?period=month&from=2026-09-01");
   await screen.findByRole("button", { name: "Groceries" });
-  fireEvent.click(screen.getByRole("button", { name: "Buckets" }));
+  fireEvent.keyDown(screen.getByRole("button", { name: /^Group by:/ }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "Buckets" }));
   await waitFor(() =>
     expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
       "finances",
@@ -581,7 +589,8 @@ it("saves explicit grouping and period choices, navigates periods, and retains e
   );
   fireEvent.click(screen.getByRole("button", { name: "Previous period" }));
   await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("from=2026-08-01"));
-  fireEvent.click(screen.getByRole("button", { name: "Custom" }));
+  fireEvent.keyDown(screen.getByRole("button", { name: /^Period:/ }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "Custom" }));
   await waitFor(() =>
     expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
       "finances",

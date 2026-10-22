@@ -73,150 +73,86 @@ export function FinanceOverviewPage() {
   const nextPriority =
     playbook.data?.assessment.blockers[0] ?? playbook.data?.assessment.nextActions[0];
   return (
-    <div className="flex flex-col gap-6">
-      <OverviewSection title="Needs you">
-        {!accessDenied(me.error) ? (
-          <FinanceSourceState label="Decisions" query={me.data ? reviews : me} />
-        ) : null}
-        {reviewDenied ? (
-          <p>Review access unavailable.</p>
-        ) : reviewUnavailable ? (
-          <p>Some Finance decisions could not be checked. Open Reviews to check status.</p>
-        ) : null}
-        {reviewsKnown ? (
-          <ItemGroup>
-            <Item>
-              <ItemContent>
-                <ItemTitle>
-                  {reviewCount
-                    ? `${reviewCount} ${reviewCount === 1 ? "item needs" : "items need"} review`
-                    : "No items need review"}
-                </ItemTitle>
-                <ItemDescription>Questions and exact approvals stay in Reviews.</ItemDescription>
-              </ItemContent>
-            </Item>
-          </ItemGroup>
-        ) : null}
-        <div className="flex flex-wrap gap-2">
-          <Button asChild size="sm" variant="outline">
-            <Link to="/finances?review=open">Open Reviews</Link>
-          </Button>
-          <Button asChild size="sm" variant="ghost">
-            <Link to="/finances/chat">Discuss in Chat</Link>
-          </Button>
-          <Button asChild size="sm" variant="ghost">
-            <Link to="/finances/transactions?financeTask=correct">Correct a transaction</Link>
-          </Button>
-        </div>
-      </OverviewSection>
-      <OverviewSection title="What changed">
-        <p className="text-muted-foreground text-sm">
-          Recorded reviews and maintenance describe work already performed. Activity holds the
-          change history and evidence.
-        </p>
-        <Button asChild size="sm" variant="ghost">
-          <Link to="/finances/activity">Open Activity</Link>
-        </Button>
-        <FinanceSourceState label="Review history" query={status} />
-        <FinanceSourceState label="Maintenance history" query={maintenance} />
-        {latestReview ? (
-          <ItemGroup>
-            <Item>
-              <ItemContent>
-                <ItemTitle>Latest period review</ItemTitle>
-                <ItemDescription>
-                  {financeObservedAt(latestReview.completedAt)} ·{" "}
-                  {latestReview.status.replaceAll("_", " ")}
-                </ItemDescription>
-              </ItemContent>
-              <ItemActions>
-                <Button asChild size="sm" variant="outline">
-                  <Link to={`/finances/reviews/${latestReview.id}`}>Open review</Link>
-                </Button>
-              </ItemActions>
-            </Item>
-          </ItemGroup>
-        ) : status.isSuccess ? (
-          <p className="text-muted-foreground text-sm">No completed period review.</p>
-        ) : null}
-        {maintenance.data?.items.length ? (
-          <Collapsible>
-            <CollapsibleTrigger asChild>
-              <Button variant="ghost" size="sm">
-                Recent maintenance ({maintenance.data.items.length})
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <ItemGroup>
-                {maintenance.data.items.map((run) => (
-                  <Item key={run.run?.id ?? run.recovery?.legacyRunId}>
-                    <ItemContent>
-                      <ItemTitle>
-                        {run.run ? maintenanceLabels[run.run.status] : "Maintenance recovery"}
-                      </ItemTitle>
-                      <ItemDescription>
-                        {run.recovery?.reason ??
-                          run.nextAction?.reason ??
-                          (run.run?.status === "completed"
-                            ? "The recorded maintenance run completed."
-                            : "Inspect the recorded run and its evidence.")}
-                      </ItemDescription>
-                    </ItemContent>
-                    <ItemActions>
-                      <Button asChild size="sm" variant="ghost">
-                        <Link to="/finances/accounts">Review accounts</Link>
-                      </Button>
-                    </ItemActions>
-                  </Item>
-                ))}
-              </ItemGroup>
-            </CollapsibleContent>
-          </Collapsible>
-        ) : maintenance.isSuccess ? (
-          <p className="text-muted-foreground text-sm">No recorded maintenance runs.</p>
-        ) : null}
-      </OverviewSection>
-      <OverviewUpcomingMoney />
+    <div className="flex min-w-0 flex-col gap-8">
       <FinanceSourceState label="Financial position" query={snapshot} />
       {snapshot.data ? (
-        <>
-          <KeyMetrics label="Finance key metrics">
-            <KeyMetric
-              label="Cash"
-              value={
-                snapshot.data.data.cash === null
-                  ? "Unavailable"
-                  : formatCompactMoney(snapshot.data.data.cash)
-              }
-              exactValue={financeAmount(snapshot.data.data.cash)}
-              icon={BankIcon}
-              description="Current balance"
-            />
-            <KeyMetric
-              label="Spent this month"
-              value={
-                snapshot.data.data.budget.spent === null
-                  ? "Unavailable"
-                  : formatCompactMoney(snapshot.data.data.budget.spent)
-              }
-              exactValue={financeAmount(snapshot.data.data.budget.spent)}
-              icon={ReceiptIcon}
-            />
-            <KeyMetric
-              label="Net worth"
-              value={
-                snapshot.data.data.netWorth === null
-                  ? "Unavailable"
-                  : formatCompactMoney(snapshot.data.data.netWorth)
-              }
-              exactValue={financeAmount(snapshot.data.data.netWorth)}
-              icon={WalletIcon}
-              description="Current balance"
-            />
-          </KeyMetrics>
-          <FinancePositionMaterial result={snapshot.data} hideMetrics />
-        </>
+        <KeyMetrics label="Finance key metrics">
+          <KeyMetric
+            label="Cash"
+            value={
+              snapshot.data.data.cash === null
+                ? "Unavailable"
+                : formatCompactMoney(snapshot.data.data.cash)
+            }
+            exactValue={financeAmount(snapshot.data.data.cash)}
+            icon={BankIcon}
+            description="Current balance"
+          />
+          <KeyMetric
+            label="Spent this month"
+            value={
+              snapshot.data.data.budget.spent === null
+                ? "Unavailable"
+                : formatCompactMoney(snapshot.data.data.budget.spent)
+            }
+            exactValue={financeAmount(snapshot.data.data.budget.spent)}
+            icon={ReceiptIcon}
+          />
+          <KeyMetric
+            label="Net worth"
+            value={
+              snapshot.data.data.netWorth === null
+                ? "Unavailable"
+                : formatCompactMoney(snapshot.data.data.netWorth)
+            }
+            exactValue={financeAmount(snapshot.data.data.netWorth)}
+            icon={WalletIcon}
+            description="Current balance"
+          />
+        </KeyMetrics>
       ) : null}
+
+      <div className="grid min-w-0 gap-8 lg:grid-cols-2">
+        <OverviewSection title="Needs you">
+          {!accessDenied(me.error) ? (
+            <FinanceSourceState label="Decisions" query={me.data ? reviews : me} />
+          ) : null}
+          {reviewDenied ? (
+            <p>Review access unavailable.</p>
+          ) : reviewUnavailable ? (
+            <p>Some Finance decisions could not be checked. Open Reviews to check status.</p>
+          ) : null}
+          {reviewsKnown ? (
+            <ItemGroup>
+              <Item>
+                <ItemContent>
+                  <ItemTitle>
+                    {reviewCount
+                      ? `${reviewCount} ${reviewCount === 1 ? "item needs" : "items need"} review`
+                      : "No items need review"}
+                  </ItemTitle>
+                  <ItemDescription>
+                    Review questions and approvals that need your decision.
+                  </ItemDescription>
+                </ItemContent>
+              </Item>
+            </ItemGroup>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            <Button asChild size="sm" variant="outline">
+              <Link to="/finances?review=open">Open Reviews</Link>
+            </Button>
+            <Button asChild size="sm" variant="ghost" className="self-start">
+              <Link to="/finances/chat">Discuss in Chat</Link>
+            </Button>
+            <Button asChild size="sm" variant="ghost" className="self-start">
+              <Link to="/finances/transactions?financeTask=correct">Correct a transaction</Link>
+            </Button>
+          </div>
+        </OverviewSection>
+        <OverviewUpcomingMoney />
+      </div>
+      {snapshot.data ? <FinancePositionMaterial result={snapshot.data} hideMetrics /> : null}
       <div className="grid gap-6 lg:grid-cols-2">
         {reviewsKnown && reviewCount === 0 ? (
           <OverviewSection title="Next step">
@@ -324,7 +260,7 @@ export function FinanceOverviewPage() {
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
-                  <Button asChild size="sm" variant="ghost">
+                  <Button asChild size="sm" variant="ghost" className="self-start">
                     <Link to="/finances/cashflow">Inspect forecast</Link>
                   </Button>
                 </ItemActions>
@@ -338,7 +274,7 @@ export function FinanceOverviewPage() {
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
-                  <Button asChild size="sm" variant="ghost">
+                  <Button asChild size="sm" variant="ghost" className="self-start">
                     <Link to="/finances/cashflow?view=reimbursements">Inspect reimbursements</Link>
                   </Button>
                 </ItemActions>
@@ -359,7 +295,7 @@ export function FinanceOverviewPage() {
                   </ItemDescription>
                 </ItemContent>
                 <ItemActions>
-                  <Button asChild size="sm" variant="ghost">
+                  <Button asChild size="sm" variant="ghost" className="self-start">
                     <Link to="/finances/wealth">Inspect wealth and goals</Link>
                   </Button>
                 </ItemActions>
@@ -372,6 +308,69 @@ export function FinanceOverviewPage() {
         <Link to="/finances/spending">Explore Spending</Link>
       </Button>
       <FinanceSourceState label="Account settings" query={me} />
+      <OverviewSection title="What changed">
+        <Button asChild size="sm" variant="ghost" className="self-start">
+          <Link to="/finances/activity">Open Activity</Link>
+        </Button>
+        <FinanceSourceState label="Review history" query={status} />
+        <FinanceSourceState label="Maintenance history" query={maintenance} />
+        {latestReview ? (
+          <ItemGroup>
+            <Item>
+              <ItemContent>
+                <ItemTitle>Latest period review</ItemTitle>
+                <ItemDescription>
+                  {financeObservedAt(latestReview.completedAt)} ·{" "}
+                  {latestReview.status.replaceAll("_", " ")}
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                <Button asChild size="sm" variant="outline">
+                  <Link to={`/finances/reviews/${latestReview.id}`}>Open review</Link>
+                </Button>
+              </ItemActions>
+            </Item>
+          </ItemGroup>
+        ) : status.isSuccess ? (
+          <p className="text-muted-foreground text-sm">No completed period review.</p>
+        ) : null}
+        {maintenance.data?.items.length ? (
+          <Collapsible>
+            <CollapsibleTrigger asChild>
+              <Button variant="ghost" size="sm">
+                Recent maintenance ({maintenance.data.items.length})
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <ItemGroup>
+                {maintenance.data.items.map((run) => (
+                  <Item key={run.run?.id ?? run.recovery?.legacyRunId}>
+                    <ItemContent>
+                      <ItemTitle>
+                        {run.run ? maintenanceLabels[run.run.status] : "Maintenance recovery"}
+                      </ItemTitle>
+                      <ItemDescription>
+                        {run.recovery?.reason ??
+                          run.nextAction?.reason ??
+                          (run.run?.status === "completed"
+                            ? "The recorded maintenance run completed."
+                            : "Inspect the recorded run and its evidence.")}
+                      </ItemDescription>
+                    </ItemContent>
+                    <ItemActions>
+                      <Button asChild size="sm" variant="ghost" className="self-start">
+                        <Link to="/finances/accounts">Review accounts</Link>
+                      </Button>
+                    </ItemActions>
+                  </Item>
+                ))}
+              </ItemGroup>
+            </CollapsibleContent>
+          </Collapsible>
+        ) : maintenance.isSuccess ? (
+          <p className="text-muted-foreground text-sm">No recorded maintenance runs.</p>
+        ) : null}
+      </OverviewSection>
       {me.data && !accessDenied(me.error) ? <FinanceOverviewSettings key="view-settings" /> : null}
     </div>
   );
@@ -380,8 +379,8 @@ export function FinanceOverviewPage() {
 // Overview is an open daily sequence; supporting material must not become a grid of raised cards.
 function OverviewSection({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section aria-label={title} className="flex min-w-0 flex-col gap-3">
-      <h2 className="font-medium">{title}</h2>
+    <section aria-label={title} className="flex min-w-0 flex-col gap-3 px-1">
+      <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
       {children}
     </section>
   );
@@ -433,7 +432,7 @@ function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: 
   return (
     <>
       <p className="text-muted-foreground text-sm">
-        Next 30 days · {timezone} · Expected money, not posted transactions or a spendable balance.
+        Next 30 days · {timezone} · Expected money, not a spendable balance.
       </p>
       <FinanceSourceState label="Upcoming money" query={upcoming} />
       {denied ? (
@@ -453,7 +452,9 @@ function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: 
                         ? " · Remaining after partial match"
                         : ""}
                     </ItemDescription>
-                    <p className="text-sm tabular-nums">
+                  </ItemContent>
+                  <ItemActions className="ml-auto text-right">
+                    <p className="text-sm font-medium tabular-nums">
                       {row.remainingExpectedCents === null
                         ? "Amount varies"
                         : new Intl.NumberFormat(undefined, {
@@ -462,7 +463,7 @@ function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: 
                           }).format(row.remainingExpectedCents / 100)}
                       {` · ${row.currencyCode}`}
                     </p>
-                  </ItemContent>
+                  </ItemActions>
                 </Item>
               ))}
             </ItemGroup>
@@ -486,7 +487,7 @@ function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: 
           ) : null}
         </>
       ) : null}
-      <Button asChild size="sm" variant="outline">
+      <Button asChild size="sm" variant="ghost" className="self-start">
         <Link to={href}>Open upcoming money</Link>
       </Button>
     </>

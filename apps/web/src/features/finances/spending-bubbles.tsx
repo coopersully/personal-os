@@ -5,7 +5,17 @@ import type {
 } from "@personal-os/domain";
 import { type HTMLMotionProps, motion, useDragControls, useReducedMotion } from "motion/react";
 import { useEffect, useId, useRef, useState } from "react";
+import { ChevronDownIcon, SettingsIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { formatMoney } from "./format";
 import { spendingGroupVisual } from "./spending-visual";
 
@@ -143,23 +153,32 @@ export function SpendingBubbles({
     return () => observer.disconnect();
   }, []);
   return (
-    <section aria-label="Spending bubbles">
-      <div className="flex gap-2">
-        <Button
-          variant="ghost"
-          aria-pressed={arranging}
-          disabled={!!reduced}
-          onClick={() => setArrange(!arranging)}
-        >
-          Arrange
-        </Button>
-        <Button variant="ghost" onClick={() => reset(false)}>
-          Reset layout
-        </Button>
+    <section aria-label="Spending bubbles" className="flex min-w-0 flex-col gap-2">
+      <div className="flex items-center justify-between gap-3 px-1">
+        <p className="text-sm font-medium">Spending breakdown</p>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm">
+              <SettingsIcon />
+              Layout
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuCheckboxItem
+              checked={arranging}
+              disabled={!!reduced}
+              onCheckedChange={(checked) => setArrange(checked)}
+            >
+              Arrange bubbles
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => reset(false)}>Reset layout</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       <div
         ref={container}
-        className="relative mx-auto aspect-square w-full max-w-xl overflow-hidden"
+        className="relative mx-auto aspect-square w-full max-w-lg overflow-hidden"
       >
         {visible.map((group, index) => {
           const node = nodes[index];
@@ -279,57 +298,61 @@ export function SpendingBubbles({
         Circle size: selected-period spending. Fill: monthly budget used, when available. Negative
         adjustments and zero-spend groups remain in List.
       </p>
-      <details>
-        <summary className="min-h-11 cursor-pointer py-3 text-sm">
-          All spending groups ({visible.length})
-        </summary>
-        <ul aria-label="Spending groups" className="grid gap-1 sm:grid-cols-2">
-          {visible.map((group, index) => {
-            const visual = spendingGroupVisual(group);
-            const VisualIcon = visual.Icon;
-            const budget =
-              monthlyBudget?.state === "qualified"
-                ? monthlyBudget.groups.find((item) => item.groupId === group.id)
-                : undefined;
-            const overage =
-              budget?.budgetCents !== null && budget?.budgetCents !== undefined
-                ? Math.max(0, budget.usedCents - budget.budgetCents)
-                : 0;
-            return (
-              <li key={group.id} className="min-w-0">
-                <Button
-                  variant="ghost"
-                  className="h-auto min-h-11 w-full justify-start whitespace-normal text-left"
-                  aria-label={`Open ${group.label} details`}
-                  aria-describedby={`${descriptionId}-${index}`}
-                  onClick={() => onSelect(group)}
-                >
-                  <span
-                    aria-hidden="true"
-                    className="flex size-7 shrink-0 items-center justify-center rounded-full"
-                    style={{ backgroundColor: visual.backgroundColor }}
+      <Collapsible>
+        <CollapsibleTrigger asChild>
+          <Button variant="ghost" className="min-h-11 w-full justify-between">
+            All spending groups ({visible.length})<ChevronDownIcon />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <ul aria-label="Spending groups" className="grid gap-1 sm:grid-cols-2">
+            {visible.map((group, index) => {
+              const visual = spendingGroupVisual(group);
+              const VisualIcon = visual.Icon;
+              const budget =
+                monthlyBudget?.state === "qualified"
+                  ? monthlyBudget.groups.find((item) => item.groupId === group.id)
+                  : undefined;
+              const overage =
+                budget?.budgetCents !== null && budget?.budgetCents !== undefined
+                  ? Math.max(0, budget.usedCents - budget.budgetCents)
+                  : 0;
+              return (
+                <li key={group.id} className="min-w-0">
+                  <Button
+                    variant="ghost"
+                    className="h-auto min-h-11 w-full justify-start whitespace-normal text-left"
+                    aria-label={`Open ${group.label} details`}
+                    aria-describedby={`${descriptionId}-${index}`}
+                    onClick={() => onSelect(group)}
                   >
-                    <VisualIcon className="size-4" />
+                    <span
+                      aria-hidden="true"
+                      className="flex size-7 shrink-0 items-center justify-center rounded-full"
+                      style={{ backgroundColor: visual.backgroundColor }}
+                    >
+                      <VisualIcon className="size-4" />
+                    </span>
+                    <span className="min-w-0 flex-1 break-words">{group.label}</span>
+                    <span className="shrink-0 text-right tabular-nums">
+                      {formatMoney(group.netCents / 100)}
+                      {overage > 0 ? (
+                        <span className="block text-xs text-muted-foreground">
+                          Over budget {formatMoney(overage / 100)}
+                        </span>
+                      ) : null}
+                    </span>
+                  </Button>
+                  <span id={`${descriptionId}-${index}`} className="sr-only">
+                    Selected-period spending {formatMoney(group.netCents / 100)}.{" "}
+                    {monthlyBudgetLabel(budget, monthlyBudget)}.
                   </span>
-                  <span className="min-w-0 flex-1 break-words">{group.label}</span>
-                  <span className="shrink-0 text-right tabular-nums">
-                    {formatMoney(group.netCents / 100)}
-                    {overage > 0 ? (
-                      <span className="block text-xs text-muted-foreground">
-                        Over budget {formatMoney(overage / 100)}
-                      </span>
-                    ) : null}
-                  </span>
-                </Button>
-                <span id={`${descriptionId}-${index}`} className="sr-only">
-                  Selected-period spending {formatMoney(group.netCents / 100)}.{" "}
-                  {monthlyBudgetLabel(budget, monthlyBudget)}.
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      </details>
+                </li>
+              );
+            })}
+          </ul>
+        </CollapsibleContent>
+      </Collapsible>
     </section>
   );
 }

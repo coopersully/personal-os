@@ -426,7 +426,7 @@ it("keeps tiny and long-named groups readable and selectable without inflating t
   expect(smallCircle).toHaveAttribute("tabindex", "-1");
   expect(screen.getByText(/Circle size: selected-period spending/)).toBeVisible();
 });
-it("restores touch scrolling when reduced motion disables an active arrangement", () => {
+it("restores touch scrolling when reduced motion disables an active arrangement", async () => {
   const groups = [
     {
       id: "food",
@@ -439,11 +439,21 @@ it("restores touch scrolling when reduced motion disables an active arrangement"
   ] as unknown as FinanceSpendingDashboard["groups"];
   const props = { groups, onSelect: vi.fn() };
   const { rerender } = render(createElement(SpendingBubbles, props));
-  fireEvent.click(screen.getByRole("button", { name: "Arrange" }));
+  fireEvent.keyDown(screen.getByRole("button", { name: "Layout" }), { key: "ArrowDown" });
+  fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Arrange bubbles" }));
+  await userEvent.keyboard("{Escape}");
   expect(screen.getByRole("button", { name: /Food:/ }).style.touchAction).toBe("none");
   fillAnimation.reduced = true;
   rerender(createElement(SpendingBubbles, props));
-  expect(screen.getByRole("button", { name: "Arrange" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "Arrange" })).toHaveAttribute("aria-pressed", "false");
+  fireEvent.keyDown(screen.getByRole("button", { name: "Layout" }), { key: "ArrowDown" });
+  expect(screen.getByRole("menuitemcheckbox", { name: "Arrange bubbles" })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
+  expect(screen.getByRole("menuitemcheckbox", { name: "Arrange bubbles" })).toHaveAttribute(
+    "aria-checked",
+    "false",
+  );
+  await userEvent.keyboard("{Escape}");
   expect(screen.getByRole("button", { name: /Food:/ }).style.touchAction).toBe("pan-y");
 });

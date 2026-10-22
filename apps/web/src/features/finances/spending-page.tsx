@@ -10,8 +10,21 @@ import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "@/api";
 import { QueryFeedback } from "@/components/async-state";
+import { CircleHelpIcon, FilterIcon } from "@/components/icons";
+import { SettingsControlsContext } from "@/components/settings-controls-context";
+import { Field, FieldGroup, FieldLabel } from "@/components/settings-field";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -129,6 +142,12 @@ export function FinanceSpendingPage() {
       ? null
       : (params.get("accounts")?.split(",").filter(Boolean) ?? [])
     : defaults.spendAccountIds;
+  const activeFilterCount =
+    Number(accountIds !== null) +
+    Number(choice("basis", defaults.financeSpendingBasis) !== "personal_cost") +
+    Number(!bool("pending", defaults.financeSpendingIncludePending)) +
+    Number(!bool("refunds", defaults.financeSpendingSubtractRefunds)) +
+    Number(!bool("uncategorized", defaults.financeSpendingIncludeUncategorized));
   const parsed = financeSpendingQuerySchema.safeParse(
     recovery.state === "valid"
       ? recovery.filter.query
@@ -284,7 +303,7 @@ export function FinanceSpendingPage() {
   }
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex min-w-0 flex-col gap-6">
       {recovery.state === "invalid" ? (
         <p>
           The recovered Spending reference is invalid or too large. No spending query has been run.
@@ -320,145 +339,178 @@ export function FinanceSpendingPage() {
           </Button>
         </p>
       ) : null}
-      {timezone ? (
-        <p className="text-sm text-muted-foreground">Effective time zone: {timezone}</p>
-      ) : null}
-      <div className="flex flex-wrap gap-4">
-        <SpendingChoice
-          label="View"
-          value={view}
-          options={[
-            ["bubbles", "Bubbles"],
-            ["list", "List"],
-            ["trends", "Trends"],
-            ["rhythm", "Rhythm"],
-          ]}
-          disabled={disabled}
-          onChange={(value) => update("view", value, "financeSpendingView")}
-        />
-        <SpendingChoice
-          label="Group by"
-          value={choice("grouping", defaults.financeSpendingGrouping)}
-          options={[
-            ["auto", "Auto"],
-            ["buckets", "Buckets"],
-            ["categories", "Categories"],
-          ]}
-          disabled={disabled}
-          onChange={(value) => update("grouping", value, "financeSpendingGrouping")}
-        />
-      </div>
-      <fieldset disabled={disabled}>
-        <SpendingPeriodControls
-          period={rhythmDefault ? "custom" : period}
-          {...range}
-          onPeriod={(value) => {
-            const next = new URLSearchParams(params);
-            next.set("period", value);
-            next.delete("from");
-            next.delete("through");
-            changeParams(next);
-            save.mutate({ financeSpendingPeriod: value as SpendingPeriod });
-            setSelected(null);
-            setSelectedDrillDown(null);
-          }}
-          onDates={(from, through) => {
-            const next = new URLSearchParams(params);
-            next.set("period", "custom");
-            next.set("from", from);
-            next.set("through", through);
-            changeParams(next);
-            save.mutate({ financeSpendingPeriod: "custom" });
-            setSelected(null);
-            setSelectedDrillDown(null);
-          }}
-          onMove={(direction) => update("from", moveSpendingPeriod(period, range.from, direction))}
-        />
-      </fieldset>
-      {rhythmDefault ? (
-        <p className="text-sm text-muted-foreground">
-          Last three calendar months · Recorded evidence only
-        </p>
-      ) : null}
-      <details>
-        <summary className="cursor-pointer text-sm">Spending options</summary>
-        <div className="flex flex-wrap gap-4 py-3">
+      <Card size="sm" aria-label="Spending controls">
+        <CardContent className="flex flex-wrap items-center justify-between gap-3">
           <SpendingChoice
-            label="Basis"
-            value={choice("basis", defaults.financeSpendingBasis)}
+            label="View"
+            value={view}
             options={[
-              ["personal_cost", "Personal cost"],
-              ["full_outflow", "Full outflow"],
+              ["bubbles", "Bubbles"],
+              ["list", "List"],
+              ["trends", "Trends"],
+              ["rhythm", "Rhythm"],
             ]}
             disabled={disabled}
-            onChange={(value) => update("basis", value, "financeSpendingBasis")}
+            onChange={(value) => update("view", value, "financeSpendingView")}
           />
-          {(
-            [
-              ["pending", "Include pending", "financeSpendingIncludePending"],
-              ["refunds", "Subtract matched refunds", "financeSpendingSubtractRefunds"],
-              ["uncategorized", "Include uncategorized", "financeSpendingIncludeUncategorized"],
-            ] as const
-          ).map(([key, label, pref]) => (
-            <label
-              key={key}
-              htmlFor={`spending-${key}`}
-              className="flex items-center gap-2 text-sm"
-            >
-              <Checkbox
-                id={`spending-${key}`}
-                disabled={disabled}
-                checked={bool(key, defaults[pref])}
-                onCheckedChange={(checked) =>
-                  update(key, checked === true ? "1" : "0", pref, checked === true)
+          <div className="flex flex-wrap items-center gap-2">
+            <fieldset disabled={disabled}>
+              <SpendingPeriodControls
+                period={rhythmDefault ? "custom" : period}
+                {...range}
+                onPeriod={(value) => {
+                  const next = new URLSearchParams(params);
+                  next.set("period", value);
+                  next.delete("from");
+                  next.delete("through");
+                  changeParams(next);
+                  save.mutate({ financeSpendingPeriod: value as SpendingPeriod });
+                  setSelected(null);
+                  setSelectedDrillDown(null);
+                }}
+                onDates={(from, through) => {
+                  const next = new URLSearchParams(params);
+                  next.set("period", "custom");
+                  next.set("from", from);
+                  next.set("through", through);
+                  changeParams(next);
+                  save.mutate({ financeSpendingPeriod: "custom" });
+                  setSelected(null);
+                  setSelectedDrillDown(null);
+                }}
+                onMove={(direction) =>
+                  update("from", moveSpendingPeriod(period, range.from, direction))
                 }
               />
-              {label}
-            </label>
-          ))}
-        </div>
-        {result ? (
-          <fieldset className="flex flex-wrap gap-3">
-            <legend>Accounts</legend>
-            <Button
-              variant="ghost"
+            </fieldset>
+            {rhythmDefault ? (
+              <p className="text-sm text-muted-foreground">
+                Last three calendar months · Recorded evidence only
+              </p>
+            ) : null}
+            <SpendingChoice
+              label="Group by"
+              value={choice("grouping", defaults.financeSpendingGrouping)}
+              options={[
+                ["auto", "Auto"],
+                ["buckets", "Buckets"],
+                ["categories", "Categories"],
+              ]}
               disabled={disabled}
-              onClick={() => update("accounts", "all", "spendAccountIds", null)}
-            >
-              Use all eligible accounts
-            </Button>
-            <Button
-              variant="ghost"
-              disabled={disabled}
-              onClick={() => update("accounts", "", "spendAccountIds", [])}
-            >
-              Select none
-            </Button>
-            {result.accounts.map((account) => (
-              <label
-                key={account.id}
-                htmlFor={`spending-account-${account.id}`}
-                className="flex items-center gap-2 text-sm"
-              >
-                <Checkbox
-                  id={`spending-account-${account.id}`}
-                  disabled={disabled}
-                  checked={accountIds === null || accountIds.includes(account.id)}
-                  onCheckedChange={(checked) => {
-                    const ids = accountIds ?? result.accounts.map((item) => item.id);
-                    const next =
-                      checked === true
-                        ? [...ids, account.id]
-                        : ids.filter((id) => id !== account.id);
-                    update("accounts", next.join(","), "spendAccountIds", next);
-                  }}
-                />
-                {account.label}
-              </label>
-            ))}
-          </fieldset>
-        ) : null}
-      </details>
+              onChange={(value) => update("grouping", value, "financeSpendingGrouping")}
+            />
+
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="ghost" size="sm" aria-label="Spending options">
+                  <FilterIcon />
+                  Spending options
+                  {activeFilterCount ? (
+                    <Badge variant="secondary">{activeFilterCount}</Badge>
+                  ) : null}
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="settings-panel max-h-[85dvh] overflow-y-auto sm:max-w-lg">
+                <SettingsControlsContext.Provider value={true}>
+                  <DialogHeader>
+                    <DialogTitle>Spending options</DialogTitle>
+                    <DialogDescription>
+                      Choose what contributes to this view. Changes are saved as your defaults.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <FieldGroup>
+                    <Field>
+                      <FieldLabel>Accounting basis</FieldLabel>
+                      <SpendingChoice
+                        label="Basis"
+                        showLabel={false}
+                        value={choice("basis", defaults.financeSpendingBasis)}
+                        options={[
+                          ["personal_cost", "Personal cost"],
+                          ["full_outflow", "Full outflow"],
+                        ]}
+                        disabled={disabled}
+                        onChange={(value) => update("basis", value, "financeSpendingBasis")}
+                      />
+                    </Field>
+                    {(
+                      [
+                        ["pending", "Include pending", "financeSpendingIncludePending"],
+                        ["refunds", "Subtract matched refunds", "financeSpendingSubtractRefunds"],
+                        [
+                          "uncategorized",
+                          "Include uncategorized",
+                          "financeSpendingIncludeUncategorized",
+                        ],
+                      ] as const
+                    ).map(([key, label, pref]) => (
+                      <Field key={key}>
+                        <FieldLabel htmlFor={`spending-${key}`}>{label}</FieldLabel>
+                        <Checkbox
+                          id={`spending-${key}`}
+                          disabled={disabled}
+                          checked={bool(key, defaults[pref])}
+                          onCheckedChange={(checked) =>
+                            update(key, checked === true ? "1" : "0", pref, checked === true)
+                          }
+                        />
+                      </Field>
+                    ))}
+                  </FieldGroup>
+                  {result ? (
+                    <fieldset className="flex flex-col gap-2">
+                      <legend className="mb-2 text-xs font-medium text-muted-foreground">
+                        Accounts
+                      </legend>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="ghost"
+                          disabled={disabled}
+                          onClick={() => update("accounts", "all", "spendAccountIds", null)}
+                        >
+                          Use all eligible accounts
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          disabled={disabled}
+                          onClick={() => update("accounts", "", "spendAccountIds", [])}
+                        >
+                          Select none
+                        </Button>
+                      </div>
+                      <FieldGroup>
+                        {result.accounts.map((account) => (
+                          <Field key={account.id}>
+                            <FieldLabel htmlFor={`spending-account-${account.id}`}>
+                              {account.label}
+                            </FieldLabel>
+                            <Checkbox
+                              id={`spending-account-${account.id}`}
+                              disabled={disabled}
+                              checked={accountIds === null || accountIds.includes(account.id)}
+                              onCheckedChange={(checked) => {
+                                const ids = accountIds ?? result.accounts.map((item) => item.id);
+                                const next =
+                                  checked === true
+                                    ? [...ids, account.id]
+                                    : ids.filter((id) => id !== account.id);
+                                update("accounts", next.join(","), "spendAccountIds", next);
+                              }}
+                            />
+                          </Field>
+                        ))}
+                      </FieldGroup>
+                    </fieldset>
+                  ) : null}
+                  {timezone ? (
+                    <p className="text-xs text-muted-foreground">Dates use {timezone}.</p>
+                  ) : null}
+                </SettingsControlsContext.Provider>
+              </DialogContent>
+            </Dialog>
+          </div>
+        </CardContent>
+      </Card>
       <WorkspacePreferenceRecovery workspace="finances" />
       <QueryFeedback query={preferences} title="Couldn’t load Spending preferences." />
       <QueryFeedback query={calendar} title="Couldn’t load calendar preferences." />
@@ -485,87 +537,125 @@ export function FinanceSpendingPage() {
       {data.isLoading ? <Skeleton className="h-72 w-full" /> : null}
       {result ? (
         <>
-          <div>
-            <p className="text-3xl font-semibold tabular-nums">
-              {formatMoney(result.snapshot.netCents / 100)}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              {result.snapshot.scope.from} – {result.snapshot.scope.through} · USD ·{" "}
-              {parsed.success && parsed.data.scope.includePending
-                ? "Includes pending"
-                : "Posted only"}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Coverage: {result.snapshot.coverage} · Source: {result.source.freshness}
-              {result.source.lastSyncedAt
-                ? ` · Last synced ${result.source.lastSyncedAt}`
-                : " · Last sync unknown"}
-            </p>
+          <div className="flex flex-wrap items-end justify-between gap-4 px-1">
+            <div className="flex flex-col gap-1">
+              <p className="text-sm text-muted-foreground">
+                {result.snapshot.scope.basis === "personal_cost"
+                  ? "Personal spending"
+                  : "Full outflow"}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-4xl font-semibold tracking-tight tabular-nums">
+                  {formatMoney(result.snapshot.netCents / 100)}
+                </p>
+                {result.snapshot.coverage !== "complete" ? (
+                  <Badge variant="secondary">
+                    {result.snapshot.coverage === "partial"
+                      ? "Partial coverage"
+                      : "Unverified coverage"}
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {result.snapshot.scope.from} – {result.snapshot.scope.through} · USD ·{" "}
+                {result.snapshot.scope.includePending ? "Includes pending" : "Posted only"}
+              </p>
+            </div>
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="ghost" size="sm">
+                  <CircleHelpIcon />
+                  About these totals
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-h-[85dvh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>About these totals</DialogTitle>
+                  <DialogDescription>
+                    Coverage, accounting scope, and the evidence behind this view.
+                  </DialogDescription>
+                </DialogHeader>
+                <p className="text-sm text-muted-foreground">
+                  Coverage: {result.snapshot.coverage} · Source: {result.source.freshness}
+                  {result.source.lastSyncedAt
+                    ? ` · Last synced ${result.source.lastSyncedAt}`
+                    : " · Last sync unknown"}
+                </p>
+                <SpendingMonthlyBudgetContext budget={result.monthlyBudget} />
+                {result.monthlyBudget?.state === "unavailable" &&
+                result.monthlyBudget.qualificationRequired &&
+                result.snapshot.scope.from.slice(0, 7) ===
+                  result.snapshot.scope.through.slice(0, 7) &&
+                timezone &&
+                user.data ? (
+                  <SpendingBudgetQualification
+                    key={`${user.data.id}:${result.snapshot.scope.from.slice(0, 7)}:${timezone}:${result.referenceRevision ?? result.snapshot.asOf}`}
+                    ownerId={user.data.id}
+                    month={result.snapshot.scope.from.slice(0, 7)}
+                    timezone={timezone}
+                    sourceRevision={result.referenceRevision ?? result.snapshot.asOf}
+                  />
+                ) : null}
+                {result.groupingFallback ? (
+                  <p>
+                    Buckets unavailable; showing categories. Your grouping preference is retained.
+                  </p>
+                ) : null}
+                {result.excludedUncategorizedCents !== 0 ? (
+                  <p>
+                    Excluded uncategorized: {formatMoney(result.excludedUncategorizedCents / 100)}
+                  </p>
+                ) : null}
+                {result.negativeAdjustmentCents > 0 ? (
+                  <p>Negative adjustments: {formatMoney(result.negativeAdjustmentCents / 100)}</p>
+                ) : null}
+                {result.currency.unsupported.length ? (
+                  <p>
+                    Unsupported currencies in source history:{" "}
+                    {result.currency.unsupported
+                      .map(
+                        (item) =>
+                          `${item.code ?? "Unspecified currency"} (${item.transactionIds.length} transactions)`,
+                      )
+                      .join(", ")}
+                    . No exchange rates applied.
+                  </p>
+                ) : null}
+                {result.source.reasons.length || result.snapshot.qualifications.length ? (
+                  <section aria-label="Evidence and limitations">
+                    <h3 className="text-sm font-medium">Evidence and limitations</h3>
+                    <ul className="flex flex-col gap-2 py-2">
+                      {[
+                        ...result.source.reasons.map((code) => ({
+                          code,
+                          sourceIds: [] as string[],
+                        })),
+                        ...result.snapshot.qualifications,
+                      ].map((item) => (
+                        <li key={`${item.code}:${item.sourceIds.join(",")}`}>
+                          <p>
+                            {qualificationCopy[item.code] ??
+                              "Some spending evidence needs review before these totals can be treated as complete."}
+                          </p>
+                          {item.sourceIds.length || !qualificationCopy[item.code] ? (
+                            <details>
+                              <summary className="cursor-pointer text-xs text-muted-foreground">
+                                Technical evidence references
+                              </summary>
+                              <p className="break-all text-xs text-muted-foreground">
+                                {item.code}
+                                {item.sourceIds.length ? ` · ${item.sourceIds.join(", ")}` : ""}
+                              </p>
+                            </details>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ) : null}
+              </DialogContent>
+            </Dialog>
           </div>
-          <SpendingMonthlyBudgetContext budget={result.monthlyBudget} />
-          {result.monthlyBudget?.state === "unavailable" &&
-          result.monthlyBudget.qualificationRequired &&
-          result.snapshot.scope.from.slice(0, 7) === result.snapshot.scope.through.slice(0, 7) &&
-          timezone &&
-          user.data ? (
-            <SpendingBudgetQualification
-              key={`${user.data.id}:${result.snapshot.scope.from.slice(0, 7)}:${timezone}:${result.referenceRevision ?? result.snapshot.asOf}`}
-              ownerId={user.data.id}
-              month={result.snapshot.scope.from.slice(0, 7)}
-              timezone={timezone}
-              sourceRevision={result.referenceRevision ?? result.snapshot.asOf}
-            />
-          ) : null}
-          {result.groupingFallback ? (
-            <p>Buckets unavailable; showing categories. Your grouping preference is retained.</p>
-          ) : null}
-          {result.excludedUncategorizedCents !== 0 ? (
-            <p>Excluded uncategorized: {formatMoney(result.excludedUncategorizedCents / 100)}</p>
-          ) : null}
-          {result.negativeAdjustmentCents > 0 ? (
-            <p>Negative adjustments: {formatMoney(result.negativeAdjustmentCents / 100)}</p>
-          ) : null}
-          {result.currency.unsupported.length ? (
-            <p>
-              Unsupported currencies in source history:{" "}
-              {result.currency.unsupported
-                .map(
-                  (item) =>
-                    `${item.code ?? "Unspecified currency"} (${item.transactionIds.length} transactions)`,
-                )
-                .join(", ")}
-              . No exchange rates applied.
-            </p>
-          ) : null}
-          {result.source.reasons.length || result.snapshot.qualifications.length ? (
-            <details>
-              <summary className="cursor-pointer text-sm">Why these totals are qualified</summary>
-              <ul className="flex flex-col gap-2 py-2">
-                {[
-                  ...result.source.reasons.map((code) => ({ code, sourceIds: [] as string[] })),
-                  ...result.snapshot.qualifications,
-                ].map((item) => (
-                  <li key={`${item.code}:${item.sourceIds.join(",")}`}>
-                    <p>
-                      {qualificationCopy[item.code] ??
-                        "Some spending evidence needs review before these totals can be treated as complete."}
-                    </p>
-                    {item.sourceIds.length || !qualificationCopy[item.code] ? (
-                      <details>
-                        <summary className="cursor-pointer text-xs text-muted-foreground">
-                          Technical evidence references
-                        </summary>
-                        <p className="break-all text-xs text-muted-foreground">
-                          {item.code}
-                          {item.sourceIds.length ? ` · ${item.sourceIds.join(", ")}` : ""}
-                        </p>
-                      </details>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          ) : null}
           {result.groups.length || view === "trends" || view === "rhythm" ? (
             <>
               <div hidden={view !== "bubbles"}>
@@ -578,37 +668,28 @@ export function FinanceSpendingPage() {
               </div>
               {view === "trends" ? (
                 <>
-                  <details>
-                    <summary className="cursor-pointer text-sm">Focus on a group</summary>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        variant="ghost"
-                        onClick={() => {
-                          const next = new URLSearchParams(params);
-                          next.delete("categories");
-                          changeParams(next);
-                          setSelected(null);
-                          setSelectedDrillDown(null);
-                        }}
-                      >
-                        All categories
-                      </Button>
-                      {result.groups.map((group) => (
-                        <Button
-                          key={group.id}
-                          variant="ghost"
-                          onClick={() =>
-                            update(
-                              "categories",
-                              group.categoryIds.map((id) => id ?? "uncategorized").join(","),
-                            )
-                          }
-                        >
-                          {group.label}
-                        </Button>
-                      ))}
-                    </div>
-                  </details>
+                  <SpendingChoice
+                    label="Focus"
+                    value={params.get("categories") ?? "all"}
+                    options={[
+                      ["all", "All categories"],
+                      ...result.groups.map(
+                        (group) =>
+                          [
+                            group.categoryIds.map((id) => id ?? "uncategorized").join(","),
+                            group.label,
+                          ] as const,
+                      ),
+                    ]}
+                    onChange={(value) => {
+                      if (value !== "all") return update("categories", value);
+                      const next = new URLSearchParams(params);
+                      next.delete("categories");
+                      changeParams(next);
+                      setSelected(null);
+                      setSelectedDrillDown(null);
+                    }}
+                  />
                   <p className="text-sm text-muted-foreground">{comparisonScopes?.label}</p>
                   <FinanceSpendingTrends
                     dashboard={result}

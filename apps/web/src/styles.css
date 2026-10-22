@@ -6569,9 +6569,10 @@ p {
 }
 
 .auth-brand-panel {
-  --card: var(--surface-subtle);
+  --card: var(--public-blue);
+  --card-foreground: var(--public-blue-ink);
   display: none;
-  text-align: center;
+  border: 0;
 }
 
 .brand-symbol {

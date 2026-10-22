@@ -1775,26 +1775,27 @@ afterEach(() => {
 describe("ilo web app", () => {
   it("renders the product landing page without requesting a session", async () => {
     setup("/");
-    expect(
-      await screen.findByRole("heading", { name: "Mail, tasks, calendar, and money." }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "a personal harness." })).toBeInTheDocument();
     expect(mocks.getMe).not.toHaveBeenCalled();
     expect(
-      within(screen.getByRole("navigation", { name: "Product navigation" })).getByRole("link", {
-        name: "Login",
+      within(screen.getByRole("navigation", { name: "product navigation" })).getByRole("link", {
+        name: "sign in",
       }),
     ).toHaveAttribute("href", "/login");
-    expect(screen.getAllByRole("link", { name: "Sign up" })[0]).toHaveAttribute("href", "/signup");
+    expect(screen.getAllByRole("link", { name: "get started" })[0]).toHaveAttribute(
+      "href",
+      "/signup",
+    );
   });
 
   it("opens sign-up directly and keeps auth mode in the URL", async () => {
     mocks.getMe.mockRejectedValue(new Error("unauthorized"));
     const browser = userEvent.setup();
     const view = setup("/signup");
-    expect(await screen.findByLabelText("Confirm password")).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Already have an account? Sign in" }));
+    expect(await screen.findByLabelText("confirm password")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "already have an account? sign in" }));
     await waitFor(() => expect(view.location.value).toBe("/login"));
-    expect(await screen.findByRole("heading", { name: "Login" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "sign in" })).toBeInTheDocument();
   });
 
   it("returns to a protected destination after routed login", async () => {
@@ -1802,11 +1803,11 @@ describe("ilo web app", () => {
     mocks.login.mockResolvedValue(user);
     const browser = userEvent.setup();
     const view = setup("/settings?section=security");
-    await screen.findByRole("heading", { name: "Login" });
+    await screen.findByRole("heading", { name: "sign in" });
     expect(view.location.value).toBe("/login?next=%2Fsettings%3Fsection%3Dsecurity");
-    await browser.type(screen.getByLabelText("Email"), "test@example.com");
-    await browser.type(screen.getByLabelText("Password", { exact: true }), "LocalTestOnly123!");
-    await browser.click(screen.getByRole("button", { name: "Log in" }));
+    await browser.type(screen.getByLabelText("email"), "test@example.com");
+    await browser.type(screen.getByLabelText("password", { exact: true }), "LocalTestOnly123!");
+    await browser.click(screen.getByRole("button", { name: "sign in" }));
     await waitFor(() => expect(view.location.value).toBe("/settings?section=security"));
   });
   it("shows link-opening failures on the standalone downloads route", async () => {
@@ -2174,18 +2175,18 @@ describe("ilo web app", () => {
     mocks.register.mockResolvedValue(user);
     setup();
     const browser = userEvent.setup();
-    expect(await screen.findByRole("heading", { name: "Login" })).toBeInTheDocument();
-    await browser.type(screen.getByLabelText("Email"), "test@example.com");
-    await browser.type(screen.getByLabelText("Password"), "wrong-password");
-    await browser.click(screen.getByRole("button", { name: "Log in" }));
+    expect(await screen.findByRole("heading", { name: "sign in" })).toBeInTheDocument();
+    await browser.type(screen.getByLabelText("email"), "test@example.com");
+    await browser.type(screen.getByLabelText("password"), "wrong-password");
+    await browser.click(screen.getByRole("button", { name: "sign in" }));
     expect(
       await screen.findByText(/Couldn’t confirm whether we could sign in/),
     ).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Have an invite? Create an account" }));
-    await browser.click(screen.getByRole("button", { name: "Already have an account? Sign in" }));
-    await browser.click(screen.getByRole("button", { name: "Have an invite? Create an account" }));
-    const inviteCode = screen.getByLabelText("Invite code");
-    const displayName = screen.getByLabelText("Name");
+    await browser.click(screen.getByRole("button", { name: "have an invite? create an account" }));
+    await browser.click(screen.getByRole("button", { name: "already have an account? sign in" }));
+    await browser.click(screen.getByRole("button", { name: "have an invite? create an account" }));
+    const inviteCode = screen.getByLabelText("invite code");
+    const displayName = screen.getByLabelText("name");
     expect(inviteCode).toBeRequired();
     expect(inviteCode.compareDocumentPosition(displayName) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
@@ -2193,11 +2194,11 @@ describe("ilo web app", () => {
     await browser.type(inviteCode, "ABCD2345");
     expect(mocks.validateInvitation).not.toHaveBeenCalled();
     await browser.type(displayName, "Test User");
-    expect(await screen.findByText("Invitation accepted.")).toBeInTheDocument();
-    await browser.clear(screen.getByLabelText("Password"));
-    await browser.type(screen.getByLabelText("Password"), "LocalTestOnly123!");
-    await browser.type(screen.getByLabelText("Confirm password"), "LocalTestOnly123!");
-    await browser.click(screen.getByRole("button", { name: "Create account" }));
+    expect(await screen.findByText("invitation accepted.")).toBeInTheDocument();
+    await browser.clear(screen.getByLabelText("password"));
+    await browser.type(screen.getByLabelText("password"), "LocalTestOnly123!");
+    await browser.type(screen.getByLabelText("confirm password"), "LocalTestOnly123!");
+    await browser.click(screen.getByRole("button", { name: "create account" }));
     expect(await screen.findByRole("heading", { name: "To take care of" })).toBeInTheDocument();
     expect(mocks.register).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2230,15 +2231,15 @@ describe("ilo web app", () => {
     setup();
     const browser = userEvent.setup();
     await browser.click(
-      await screen.findByRole("button", { name: "Have an invite? Create an account" }),
+      await screen.findByRole("button", { name: "have an invite? create an account" }),
     );
-    await browser.type(screen.getByLabelText("Invite code"), "ABCD2345");
-    await browser.type(screen.getByLabelText("Name"), "Test User");
-    expect(await screen.findByText("Invitation accepted.")).toBeInTheDocument();
-    await browser.type(screen.getByLabelText("Email"), "new@example.com");
-    await browser.type(screen.getByLabelText("Password"), "LocalTestOnly123!");
-    await browser.type(screen.getByLabelText("Confirm password"), "LocalTestOnly123!");
-    await browser.click(screen.getByRole("button", { name: "Create account" }));
+    await browser.type(screen.getByLabelText("invite code"), "ABCD2345");
+    await browser.type(screen.getByLabelText("name"), "Test User");
+    expect(await screen.findByText("invitation accepted.")).toBeInTheDocument();
+    await browser.type(screen.getByLabelText("email"), "new@example.com");
+    await browser.type(screen.getByLabelText("password"), "LocalTestOnly123!");
+    await browser.type(screen.getByLabelText("confirm password"), "LocalTestOnly123!");
+    await browser.click(screen.getByRole("button", { name: "create account" }));
     expect(await screen.findByRole("heading", { name: "Hi, Test." })).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Exit Setup" }));
     await waitFor(() =>
@@ -2261,19 +2262,19 @@ describe("ilo web app", () => {
     setup();
     const browser = userEvent.setup();
     await browser.click(
-      await screen.findByRole("button", { name: "Have an invite? Create an account" }),
+      await screen.findByRole("button", { name: "have an invite? create an account" }),
     );
-    const inviteCode = screen.getByLabelText("Invite code");
+    const inviteCode = screen.getByLabelText("invite code");
     await browser.type(inviteCode, "ABCD2345");
-    await browser.click(screen.getByLabelText("Name"));
-    expect(await screen.findByText("Checking invitation…")).toBeInTheDocument();
+    await browser.click(screen.getByLabelText("name"));
+    expect(await screen.findByText("checking invitation…")).toBeInTheDocument();
     expect(inviteCode).not.toHaveAttribute("aria-invalid", "true");
-    await browser.click(screen.getByRole("button", { name: "Create account" }));
+    await browser.click(screen.getByRole("button", { name: "create account" }));
     expect(inviteCode).not.toHaveAttribute("aria-invalid", "true");
     expect(mocks.register).not.toHaveBeenCalled();
     finish?.(false);
-    expect(await screen.findByText("This invitation is invalid or expired.")).toBeInTheDocument();
-    expect(screen.getAllByText("This invitation is invalid or expired.")).toHaveLength(1);
+    expect(await screen.findByText("this invitation is invalid or expired.")).toBeInTheDocument();
+    expect(screen.getAllByText("this invitation is invalid or expired.")).toHaveLength(1);
     expect(inviteCode).toHaveAttribute("aria-invalid", "true");
   });
 
@@ -2284,18 +2285,18 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
 
     await browser.click(
-      await screen.findByRole("button", { name: "Have an invite? Create an account" }),
+      await screen.findByRole("button", { name: "have an invite? create an account" }),
     );
-    const inviteCode = screen.getByLabelText("Invite code");
+    const inviteCode = screen.getByLabelText("invite code");
     await browser.type(inviteCode, "BAD12345");
     expect(mocks.validateInvitation).not.toHaveBeenCalled();
-    await browser.click(screen.getByLabelText("Name"));
+    await browser.click(screen.getByLabelText("name"));
 
-    expect(await screen.findByText("This invitation is invalid or expired.")).toBeInTheDocument();
-    expect(screen.getAllByText("This invitation is invalid or expired.")).toHaveLength(1);
+    expect(await screen.findByText("this invitation is invalid or expired.")).toBeInTheDocument();
+    expect(screen.getAllByText("this invitation is invalid or expired.")).toHaveLength(1);
     expect(mocks.validateInvitation).toHaveBeenCalledWith({ inviteCode: "BAD12345" });
-    await browser.click(screen.getByRole("button", { name: "Create account" }));
-    expect(screen.getByLabelText("Invite code")).toHaveAttribute("aria-invalid", "true");
+    await browser.click(screen.getByRole("button", { name: "create account" }));
+    expect(screen.getByLabelText("invite code")).toHaveAttribute("aria-invalid", "true");
     expect(mocks.register).not.toHaveBeenCalled();
   });
 
@@ -2811,20 +2812,20 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     mocks.getMe.mockRejectedValueOnce(new Error("unauthorized"));
     const recovery = setup();
-    await browser.click(await screen.findByRole("button", { name: "Forgot?" }));
-    await browser.type(screen.getByLabelText("Email"), "test@example.com");
-    await browser.click(screen.getByRole("button", { name: "Send reset link" }));
+    await browser.click(await screen.findByRole("button", { name: "forgot?" }));
+    await browser.type(screen.getByLabelText("email"), "test@example.com");
+    await browser.click(screen.getByRole("button", { name: "send reset link" }));
     expect(await screen.findByRole("status")).toHaveTextContent(
       "password-reset link is on its way",
     );
     expect(mocks.requestPasswordReset).toHaveBeenCalledWith({ email: "test@example.com" });
-    await browser.click(screen.getByRole("button", { name: "Back to sign in" }));
+    await browser.click(screen.getByRole("button", { name: "back to sign in" }));
     recovery.unmount();
 
     window.history.replaceState({}, "", "/?verifyEmail=verification-token");
     mocks.getMe.mockRejectedValueOnce(new Error("unauthorized"));
     const verification = setup("/?verifyEmail=verification-token");
-    await browser.click(await screen.findByRole("button", { name: "Confirm email" }));
+    await browser.click(await screen.findByRole("button", { name: "confirm email" }));
     await waitFor(() =>
       expect(mocks.confirmEmailVerification).toHaveBeenCalledWith({
         token: "verification-token",
@@ -2836,10 +2837,10 @@ describe("ilo web app", () => {
     window.history.replaceState({}, "", "/?resetPassword=reset-token");
     mocks.getMe.mockRejectedValueOnce(new Error("unauthorized"));
     const passwordReset = setup("/?resetPassword=reset-token");
-    await browser.type(await screen.findByLabelText("New password"), "LocalTestOnly123!");
-    await browser.type(screen.getByLabelText("Confirm password"), "LocalTestOnly123!");
-    await browser.click(screen.getByRole("button", { name: "Reset password" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Your password has been reset");
+    await browser.type(await screen.findByLabelText("new password"), "LocalTestOnly123!");
+    await browser.type(screen.getByLabelText("confirm password"), "LocalTestOnly123!");
+    await browser.click(screen.getByRole("button", { name: "reset password" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("your password has been reset");
     expect(mocks.resetPassword).toHaveBeenCalledWith({
       password: "LocalTestOnly123!",
       token: "reset-token",
@@ -2850,9 +2851,7 @@ describe("ilo web app", () => {
 
   it.each(["verifyEmail", "resetPassword"])("ignores an empty %s token", async (parameter) => {
     const landing = setup(`/?${parameter}=`);
-    expect(
-      await screen.findByRole("heading", { name: "Mail, tasks, calendar, and money." }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "a personal harness." })).toBeInTheDocument();
     landing.unmount();
     const login = setup(`/login?${parameter}=`);
     expect(await screen.findByRole("heading", { name: "To take care of" })).toBeInTheDocument();
@@ -2862,13 +2861,13 @@ describe("ilo web app", () => {
   it("returns to sign in after resetting a password with a cached signed-in session", async () => {
     const browser = userEvent.setup();
     const view = setup("/?resetPassword=reset-token");
-    await browser.type(await screen.findByLabelText("New password"), "LocalTestOnly123!");
-    await browser.type(screen.getByLabelText("Confirm password"), "LocalTestOnly123!");
+    await browser.type(await screen.findByLabelText("new password"), "LocalTestOnly123!");
+    await browser.type(screen.getByLabelText("confirm password"), "LocalTestOnly123!");
     await waitFor(() => expect(view.queryClient.getQueryData(["me"])).toEqual(user));
     mocks.getMe.mockRejectedValue(new Error("unauthorized"));
-    await browser.click(screen.getByRole("button", { name: "Reset password" }));
-    await browser.click(await screen.findByRole("link", { name: "Return to sign in." }));
-    expect(await screen.findByRole("heading", { name: "Login" })).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "reset password" }));
+    await browser.click(await screen.findByRole("link", { name: "return to sign in." }));
+    expect(await screen.findByRole("heading", { name: "sign in" })).toBeInTheDocument();
     expect(view.location.value).toBe("/login");
   });
 
@@ -2879,19 +2878,19 @@ describe("ilo web app", () => {
     mocks.validateInvitation.mockRejectedValueOnce(new Error("Invitation lookup failed"));
     const registration = setup();
     await browser.click(
-      await screen.findByRole("button", { name: "Have an invite? Create an account" }),
+      await screen.findByRole("button", { name: "have an invite? create an account" }),
     );
-    const inviteCode = screen.getByLabelText("Invite code");
+    const inviteCode = screen.getByLabelText("invite code");
     await browser.type(inviteCode, "SHORT");
     fireEvent.blur(inviteCode);
     expect(
-      await screen.findByText("Enter all eight characters from your invitation."),
+      await screen.findByText("enter all eight characters from your invitation."),
     ).toBeInTheDocument();
     await browser.clear(inviteCode);
     await browser.type(inviteCode, "ABCD2345");
     fireEvent.blur(inviteCode);
     expect(
-      await screen.findByText("Couldn’t check this invitation. Try again."),
+      await screen.findByText("couldn’t check this invitation. try again."),
     ).toBeInTheDocument();
     const registrationForm = inviteCode.closest("form");
     if (!registrationForm) throw new Error("Registration form was not rendered.");
@@ -2909,8 +2908,8 @@ describe("ilo web app", () => {
         }),
     );
     const verification = setup("/?verifyEmail=authenticated-token");
-    await browser.click(await screen.findByRole("button", { name: "Confirm email" }));
-    expect(screen.getByText("Confirming email")).toBeInTheDocument();
+    await browser.click(await screen.findByRole("button", { name: "confirm email" }));
+    expect(screen.getByText("confirming email")).toBeInTheDocument();
     rejectVerification?.(new Error("Verification expired"));
     expect(
       await screen.findByText(
@@ -2929,10 +2928,10 @@ describe("ilo web app", () => {
         }),
     );
     const passwordReset = setup("/?resetPassword=reset-token");
-    await browser.type(await screen.findByLabelText("New password"), "LocalTestOnly123!");
-    await browser.type(screen.getByLabelText("Confirm password"), "LocalTestOnly123!");
-    await browser.click(screen.getByRole("button", { name: "Reset password" }));
-    expect(screen.getByText("Resetting password")).toBeInTheDocument();
+    await browser.type(await screen.findByLabelText("new password"), "LocalTestOnly123!");
+    await browser.type(screen.getByLabelText("confirm password"), "LocalTestOnly123!");
+    await browser.click(screen.getByRole("button", { name: "reset password" }));
+    expect(screen.getByText("resetting password")).toBeInTheDocument();
     rejectReset?.(new Error("Reset expired"));
     expect(
       await screen.findByText(
@@ -6374,7 +6373,7 @@ describe("ilo web app", () => {
   it("keeps the notification host available before signing in", async () => {
     mocks.getMe.mockRejectedValueOnce(new Error("unauthorized"));
     setup();
-    await screen.findByRole("heading", { name: "Login" });
+    await screen.findByRole("heading", { name: "sign in" });
     expect(screen.getByRole("region", { name: /notifications/i })).toBeInTheDocument();
   });
 
@@ -9149,10 +9148,10 @@ describe("ilo web app", () => {
     );
     const authView = setup();
     const browser = userEvent.setup();
-    await browser.type(await screen.findByLabelText("Email"), "test@example.com");
-    await browser.type(screen.getByLabelText("Password"), "LocalTestOnly123!");
-    await browser.click(screen.getByRole("button", { name: "Log in" }));
-    expect(await screen.findByText("Signing in")).toBeInTheDocument();
+    await browser.type(await screen.findByLabelText("email"), "test@example.com");
+    await browser.type(screen.getByLabelText("password"), "LocalTestOnly123!");
+    await browser.click(screen.getByRole("button", { name: "sign in" }));
+    expect(await screen.findByText("signing in")).toBeInTheDocument();
     rejectLogin(new Error("Later failure"));
     expect(
       await screen.findByText(/Couldn’t confirm whether we could sign in/),
@@ -9436,7 +9435,7 @@ describe("ilo web app", () => {
       mocks.getMe.mockRejectedValue(new Error("unauthorized"));
     });
     await browser.click(screen.getByRole("button", { name: "Log out" }));
-    expect(await screen.findByRole("heading", { name: "Login" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "sign in" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Log out" })).not.toBeInTheDocument();
   });
 
@@ -10392,7 +10391,7 @@ describe("ilo web app", () => {
     expect(resetQueries).not.toHaveBeenCalled();
     expect(view.queryClient.getQueryData(["me"])).toEqual(session);
     expect(view.location.value).toBe("/settings?section=security");
-    expect(screen.queryByRole("heading", { name: "Login" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "sign in" })).not.toBeInTheDocument();
     expect(screen.queryByText("private logout failure")).not.toBeInTheDocument();
 
     mocks.logout.mockImplementationOnce(async () => {
@@ -10400,7 +10399,7 @@ describe("ilo web app", () => {
     });
     await browser.click(screen.getByRole("button", { name: "Log out" }));
 
-    expect(await screen.findByRole("heading", { name: "Login" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "sign in" })).toBeInTheDocument();
     expect(mocks.logout).toHaveBeenCalledTimes(2);
     expect(resetQueries).toHaveBeenCalledOnce();
     expect(screen.queryByRole("navigation", { name: "Workspace dock" })).not.toBeInTheDocument();
@@ -10412,23 +10411,23 @@ describe("ilo web app", () => {
     mocks.getMe.mockRejectedValueOnce(new Error("unauthorized"));
     const browser = userEvent.setup();
     setup();
-    await screen.findByRole("heading", { name: "Login" });
+    await screen.findByRole("heading", { name: "sign in" });
     if (mode === "recovery") {
-      await browser.click(screen.getByRole("button", { name: "Forgot?" }));
+      await browser.click(screen.getByRole("button", { name: "forgot?" }));
       mocks.requestPasswordReset.mockRejectedValueOnce(new Error("private recovery error"));
     } else {
-      await browser.type(screen.getByLabelText("Password"), "LocalTestOnly123!");
+      await browser.type(screen.getByLabelText("password"), "LocalTestOnly123!");
     }
-    const email = screen.getByLabelText("Email");
+    const email = screen.getByLabelText("email");
     await browser.type(email, "sam@localhost");
     expect((email as HTMLInputElement).validity.valid).toBe(true);
     const submit = screen.getByRole("button", {
-      name: mode === "login" ? "Log in" : "Send reset link",
+      name: mode === "login" ? "sign in" : "send reset link",
     });
     await browser.click(submit);
     expect(email).toHaveAttribute("aria-invalid", "true");
     expect(email).toHaveAccessibleDescription(
-      "Enter an email address in the format name@example.com.",
+      "enter an email address in the format name@example.com.",
     );
     expect(email).toHaveFocus();
     expect(mocks.login).not.toHaveBeenCalled();
@@ -10465,25 +10464,25 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     setup();
     await browser.click(
-      await screen.findByRole("button", { name: "Have an invite? Create an account" }),
+      await screen.findByRole("button", { name: "have an invite? create an account" }),
     );
-    await browser.type(screen.getByLabelText("Invite code"), "ABCD2345");
-    const name = screen.getByLabelText("Name");
+    await browser.type(screen.getByLabelText("invite code"), "ABCD2345");
+    const name = screen.getByLabelText("name");
     await browser.type(name, "   ");
-    await screen.findByText("Invitation accepted.");
-    await browser.type(screen.getByLabelText("Email"), "sam@example.com");
-    const password = screen.getByLabelText("Password");
-    const confirmation = screen.getByLabelText("Confirm password");
+    await screen.findByText("invitation accepted.");
+    await browser.type(screen.getByLabelText("email"), "sam@example.com");
+    const password = screen.getByLabelText("password");
+    const confirmation = screen.getByLabelText("confirm password");
     await browser.type(password, "weak");
     await browser.type(confirmation, "DifferentStrong123!");
-    await browser.click(screen.getByRole("button", { name: "Create account" }));
+    await browser.click(screen.getByRole("button", { name: "create account" }));
 
     expect(name).toHaveAttribute("aria-invalid", "true");
-    expect(name).toHaveAccessibleDescription("Enter your name.");
+    expect(name).toHaveAccessibleDescription("enter your name.");
     expect(password).toHaveAttribute("aria-invalid", "true");
-    expect(password).toHaveAccessibleDescription("Meet each password requirement shown below.");
+    expect(password).toHaveAccessibleDescription("meet each password requirement shown below.");
     expect(confirmation).toHaveAttribute("aria-invalid", "true");
-    expect(confirmation).toHaveAccessibleDescription("Passwords must match.");
+    expect(confirmation).toHaveAccessibleDescription("passwords must match.");
     expect(mocks.register).not.toHaveBeenCalled();
 
     await browser.clear(name);
@@ -10495,14 +10494,14 @@ describe("ilo web app", () => {
     expect(name).not.toHaveAttribute("aria-invalid", "true");
     expect(password).not.toHaveAttribute("aria-invalid", "true");
     expect(confirmation).not.toHaveAttribute("aria-invalid", "true");
-    await browser.click(screen.getByRole("button", { name: "Create account" }));
+    await browser.click(screen.getByRole("button", { name: "create account" }));
     expect(
       await screen.findByText(/Couldn’t confirm whether we could create your account/),
     ).toBeInTheDocument();
     expect(name).toHaveValue("Sam Rivera");
     expect(password).toHaveValue("LocalTestOnly123!");
     expect(screen.queryByText("private registration error")).not.toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Create account" }));
+    await browser.click(screen.getByRole("button", { name: "create account" }));
     expect(await screen.findByRole("heading", { name: "To take care of" })).toBeInTheDocument();
     expect(mocks.register).toHaveBeenCalledTimes(2);
   });
@@ -10512,13 +10511,13 @@ describe("ilo web app", () => {
     mocks.getMe.mockRejectedValueOnce(new Error("unauthorized"));
     const browser = userEvent.setup();
     setup("/?resetPassword=reset-token");
-    const password = await screen.findByLabelText("New password");
-    const confirmation = screen.getByLabelText("Confirm password");
+    const password = await screen.findByLabelText("new password");
+    const confirmation = screen.getByLabelText("confirm password");
     await browser.type(password, "weak");
     await browser.type(confirmation, "DifferentStrong123!");
-    await browser.click(screen.getByRole("button", { name: "Reset password" }));
-    expect(password).toHaveAccessibleDescription("Meet each password requirement shown below.");
-    expect(confirmation).toHaveAccessibleDescription("Passwords must match.");
+    await browser.click(screen.getByRole("button", { name: "reset password" }));
+    expect(password).toHaveAccessibleDescription("meet each password requirement shown below.");
+    expect(confirmation).toHaveAccessibleDescription("passwords must match.");
     expect(mocks.resetPassword).not.toHaveBeenCalled();
 
     await browser.clear(password);
@@ -10527,8 +10526,8 @@ describe("ilo web app", () => {
     await browser.type(confirmation, "LocalTestOnly123!");
     expect(password).not.toHaveAttribute("aria-invalid", "true");
     expect(confirmation).not.toHaveAttribute("aria-invalid", "true");
-    await browser.click(screen.getByRole("button", { name: "Reset password" }));
-    expect(await screen.findByText(/Your password has been reset/)).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "reset password" }));
+    expect(await screen.findByText(/your password has been reset/)).toBeInTheDocument();
     expect(mocks.resetPassword).toHaveBeenCalledOnce();
     window.history.replaceState({}, "", "/");
   });

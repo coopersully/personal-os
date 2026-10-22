@@ -20,8 +20,8 @@ test("two editors retain attempted workspace values and explicitly recover repea
   test.setTimeout(90_000);
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   const path = "/v1/workspaces/calendar/settings";
   const origin = new URL(page.url()).origin;
@@ -125,8 +125,8 @@ for (const workspace of ["calendar", "mail"] as const) {
     const mobile = !!info.project.use.isMobile;
     await page.goto("/login");
     await page.getByLabel("Email").fill("demo+full@nohmi.test");
-    await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-    await page.getByRole("button", { name: "Log in" }).click();
+    await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+    await page.getByRole("button", { name: "sign in" }).click();
     await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
     const path = `/v1/workspaces/${workspace}/settings`;
     const origin = new URL(page.url()).origin;
@@ -231,8 +231,8 @@ test("Finance account selection recovery stays readable after reopening and navi
 }, info) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   const path = "/v1/workspaces/finances/settings";
   const origin = new URL(page.url()).origin;
@@ -330,8 +330,8 @@ test("Tasks failed project pin reaches Settings and reapplies only its reviewed 
 }, info) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   const path = "/v1/workspaces/tasks/settings";
   const origin = new URL(page.url()).origin;

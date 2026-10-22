@@ -6,7 +6,7 @@ for (const width of [390, 1100]) {
   }) => {
     await page.setViewportSize({ width, height: 588 });
     await page.goto("/login");
-    await expect(page.getByRole("heading", { name: "Login", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "sign in", exact: true })).toBeVisible();
     const formBox = await page.locator(".auth-form").boundingBox();
     if (!formBox) throw new Error("Missing auth form");
     const panel = page.locator(".auth-brand-panel");
@@ -124,7 +124,7 @@ for (const theme of ["light", "dark"]) {
       .evaluate((element) => getComputedStyle(element).color);
     expect(placeholderColor).not.toBe(labelColor);
     await email.fill("sam@example.com");
-    const password = page.getByLabel("Password", { exact: true });
+    const password = page.getByLabel("password", { exact: true });
     const group = page.locator('[data-slot="input-group"]').filter({ has: password });
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("DOM.enable");

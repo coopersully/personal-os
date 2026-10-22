@@ -22,8 +22,8 @@ async function selectCalendarView(page: Page, view: string) {
 test("the repository QA fixture login exposes representative workspace data", async ({ page }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
 
   await page.goto(`/calendar?follow=0&view=${test.info().project.use.isMobile ? "day" : "week"}`);
@@ -118,8 +118,8 @@ test("desktop navigation fills the viewport while long content scrolls independe
   await page.setViewportSize({ width: 1280, height: 480 });
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   const settingsPath = "/v1/workspaces/calendar/settings";
   const originalResponse = await page.request.get(settingsPath);
@@ -336,8 +336,8 @@ test("desktop navigation fills the viewport while long content scrolls independe
 test("Reviews and agent controls separate decisions from configuration", async ({ page }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   const rulesResponse = page.waitForResponse(
     (response) =>
@@ -445,13 +445,13 @@ test("a person and an agent share one reminder and calendar surface", async ({
   };
 
   await page.goto("/login");
-  await expect(page.getByRole("heading", { name: "Login" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "sign in" })).toBeVisible();
   await page.getByRole("button", { name: "Have an invite? Create an account" }).click();
   await page.getByLabel("Invite code").fill("E2E12345");
   await page.getByLabel("Name").fill("E2E Person");
   await expect(page.getByText("Invitation accepted.")).toBeVisible();
   await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password", { exact: true }).fill("LocalTestOnly123!");
+  await page.getByLabel("password", { exact: true }).fill("LocalTestOnly123!");
   await page.getByLabel("Confirm password").fill("LocalTestOnly123!");
   await page.getByRole("button", { name: "Create account" }).click();
   await expect(page).toHaveURL(/\/setup$/);
@@ -871,7 +871,7 @@ test("feedback keeps corrections in context and action failures in toasts", asyn
   await page.getByLabel("Name").fill("Feedback Person");
   await page.getByLabel("Invite code").fill("E2E12345");
   await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password", { exact: true }).fill("LocalTestOnly123!");
+  await page.getByLabel("password", { exact: true }).fill("LocalTestOnly123!");
   await page.getByLabel("Confirm password").fill("LocalTestOnly123!");
   await expect(page.getByText("Invitation accepted.")).toBeVisible();
   await page.getByRole("button", { name: "Create account" }).click();
@@ -942,8 +942,8 @@ test("Mail sync recovery remains reachable in constrained headers", async ({ pag
   }
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   const failedId = "22222222-2222-4222-8222-222222222222";
   await page.route("**/v1/connectors", async (route) => {

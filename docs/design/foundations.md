@@ -32,13 +32,14 @@ it does not claim the application-wide migration has shipped.
 
 ## Brand idea
 
-**Calm agency.** nohmi is an autonomous exoskeleton that makes a person's real
-commitments, communication, time, money, and priorities tangible while keeping
-the person in clear control of work they perform or delegate.
+**a personal harness.** nohmi connects a person's context, tools, and controls.
+Agents use harnesses to work with context and act through tools; nohmi builds that
+structure around a person. They work directly in familiar workspaces and choose
+what to delegate. Their permissions and judgment remain central.
 
-This is a working articulation of the existing product promise, not a claim
-validated by brand research. Keep it only while it continues to explain the
-product better than the alternatives.
+Use this category in public positioning and the planning lens in
+[`master design`](../product/master-design.md#personal-harness-as-a-planning-lens).
+This is the product direction; shipped capabilities still require implementation evidence.
 
 ## Product promise
 

@@ -5,8 +5,8 @@ test("settings support field search, ritual history, and resumable setup replay"
 }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   await page.goto("/settings?section=rituals");
   await expect(page.getByRole("heading", { name: "Rituals", level: 1 })).toBeVisible();

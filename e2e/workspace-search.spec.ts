@@ -44,8 +44,8 @@ test("each workspace discovers records and Calendar settings without changing li
   test.setTimeout(90_000);
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
 
   for (const [workspace, query, title] of [
@@ -91,8 +91,8 @@ test("Calendar remembers its view and opening and snap preferences", async ({ pa
   test.setTimeout(90_000);
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   const restore = await preserveWorkspacePreferences(page, "calendar", {
     calendarView: "auto",
@@ -163,8 +163,8 @@ test("Calendar remembers its view and opening and snap preferences", async ({ pa
 test("Tasks keeps view switching and utilities in one responsive header", async ({ page }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   const restore = await preserveWorkspacePreferences(page, "tasks", {
     taskSort: "default",
@@ -267,8 +267,8 @@ test("Tasks plus guides creation into the existing responsive editors", async ({
 }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   await page.goto("/tasks");
   await page.getByRole("button", { name: "Create in Tasks" }).click();
@@ -319,8 +319,8 @@ test("Tasks collections support browsing, searching, and sorting lists and proje
 }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   const restore = await preserveWorkspacePreferences(page, "tasks", {
     pinnedListIds: [],
@@ -395,8 +395,8 @@ test("Tasks collections support browsing, searching, and sorting lists and proje
 test("Tasks restores saved display preferences on a fresh workspace entry", async ({ page }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   const restore = await preserveWorkspacePreferences(page, "tasks", {
     taskSort: "default",
@@ -461,8 +461,8 @@ test("workspace settings edit Tasks display and Mail layout preferences", async 
   test.setTimeout(90_000);
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   const restoreTasks = await preserveWorkspacePreferences(page, "tasks", {
     taskSort: "default",
@@ -553,8 +553,8 @@ test("Mail opens at its latest message and retains scrollable conversation histo
 }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   await page.goto("/mail");
   await page.locator(".mail-thread-row").filter({ hasText: "Board packet for Friday" }).click();
@@ -598,8 +598,8 @@ test("Mail single-message reader keeps the title at the top and uses the full ca
 }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   await page.goto("/mail");
   await page
@@ -635,8 +635,8 @@ test("Mail saves full-width conversation layout and supports returning to the li
 }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   const restore = await preserveWorkspacePreferences(page, "mail", {
     mailConversationLayout: "split",
@@ -708,8 +708,8 @@ test("Collapsed workspace sidebar keeps reviews centered and exposes the count i
   test.skip(isMobile, "Mobile uses the header review control.");
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   await page.goto("/mail");
   const review = page.locator('[data-sidebar="menu-button"].review-navigation');
@@ -735,8 +735,8 @@ test("Collapsed workspace sidebar keeps reviews centered and exposes the count i
 test("Mail attachments download, retry failures, and preview safely", async ({ page }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   await page.route("**/v1/mail/threads/*/messages", async (route) => {
     const response = await route.fetch();
@@ -794,8 +794,8 @@ test("Finance consolidates contextual controls and preserves responsive creation
   test.setTimeout(90_000);
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   const header = page.getByRole("navigation", { name: "Top navigation", exact: true });
   for (const [path, group, action] of [
@@ -954,8 +954,8 @@ test("Financial profile opens shared fields and preserves edits across sections 
   });
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
-  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   await page.goto("/finances/setup");
   const steps = page.getByRole("navigation", { name: "Financial profile sections" });

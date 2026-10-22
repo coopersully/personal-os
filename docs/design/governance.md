@@ -162,6 +162,10 @@ registry name states the meaning rather than repeating reicon's vendor name.
 
 **Identity and component checks — October 21 target**
 
+For product planning, identify the context, tool, or control strengthened by the
+change; use the personal harness lens in `docs/product/master-design.md`. Public
+pages explain that category with concrete capabilities and honest availability.
+
 Apply the accepted direction in `foundations.md` and control contracts in
 `system.md` to new and revised surfaces:
 

@@ -52,23 +52,32 @@ keyboard skip navigation, public contact/policy links, and sign-in navigation. C
 layout and preserve legible light/dark contrast. Static assets must also be present in the production
 build. A production deployment and Twilio approval require separate evidence.
 
-The public header is transparent at the top and uses a scroll-driven CSS animation over the first
-96px to narrow into a translucent sticky pill. The header contains Guide and Login; sign-up stays
-in the landing hero. Reduced-motion and older-browser fallbacks retain a stable sticky pill.
-The footer stays in the current theme using the subtle surface, includes only the current-year
-Cooper Sullivan copyright, and places a decorative, low-opacity nohmi wordmark behind the content.
-Operator identity and contact information remain in the relevant document bodies.
+## Exterior brand and composition
 
-Footer links are grouped under Product, Account, and Legal subheaders. Account includes Login and
-Create an Account. The copyright sits flush against the bottom-left edge outside the padded menu
-container, without a divider. The decorative wordmark offsets the font’s sidebearing and baseline
-space so its visible lettering reaches the footer’s left and bottom edges, with no visual inset. It uses 2.5% opacity
-so it remains behind the readable content.
+The brand category and line are **“a personal harness.”** Explain it through the person's
+context, tools, and controls. The hero introduces that category alongside a square light-blue
+instrument panel; four equally weighted workspace cards describe familiar work. A control section
+explains access, review, and revocation. Signup remains an invitation-based alpha.
 
-The landing workspace section describes the master-plan vision in two-column cards, including
-unified Mail, capacity-aware Tasks, coordinated Calendar availability, and contextual Finances.
-Source-linked handoffs and recurring agent routines explain how they work together. The section
-is framed as the product vision; it is not evidence that each target capability has shipped.
+Use lowercase authored copy, including accessible names. Preserve user content, external names,
+quoted consent, and policy commitments. The about page explains the category; the guide supports
+getting started. Legal documents remain complete, readable, and linked from every public surface.
+
+External light blue is scoped to `.public-site` and `.auth-shell` brand tokens. Hero, footer,
+and the desktop authentication panel use the blue/ink pair, including in dark mode. No brand token
+changes signed-in product chrome. Other surfaces use the shared neutral theme tokens.
+
+Use 16px gaps between equal workspace cards, 32px square icon slots with 14–16px glyphs, one layer
+of card padding, and 16px outer radii. Desktop hero and control sections use two columns;
+narrow screens stack them and workspace cards reduce from four to two to one column. The square
+brand panel scales with its column, growing beyond square when narrow text requires it. Preserve
+text at zoom rather than clipping to a fixed height.
+
+The desktop public header uses the existing scroll-driven docking treatment, with reduced-motion
+and older-browser fallbacks. Narrow screens keep a stable flat header. The light-blue footer groups
+links under product, account, and legal, with the current-year operator copyright and a quiet
+background wordmark. Authentication keeps its functional form and policy links; the decorative
+pattern is replaced by a static, readable brand panel on wide screens.
 
 Public copy is direct and restrained. Name the capability, action, or consequence; remove slogans,
 repeated assurances, and unsupported comparisons. Keep the master-plan vision distinguishable

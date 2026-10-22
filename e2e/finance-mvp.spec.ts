@@ -15,12 +15,12 @@ test("saved manual context survives reload without changing the ledger and stays
 }, testInfo) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill(owner.email);
-  await page.getByLabel("Password", { exact: true }).fill(owner.password);
+  await page.getByLabel("password", { exact: true }).fill(owner.password);
   const login = page.waitForResponse(
     (response) =>
       response.url().endsWith("/v1/auth/login") && response.request().method() === "POST",
   );
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByRole("button", { name: "sign in" }).click();
   const { sessionToken } = await (await login).json();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   const headers = { authorization: `Session ${sessionToken}` };

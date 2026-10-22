@@ -97,7 +97,6 @@ import {
   TextField,
 } from "@/components/auth-fields";
 import { BrandMark, brandTitle, hasBrandMark, NohmiBrandMark } from "@/components/brand-marks";
-import { BrandPattern } from "@/components/brand-pattern";
 import { ChoiceCardGroup } from "@/components/choice-card-group";
 import { ConnectionCard } from "@/components/connection-card";
 import { DateInput } from "@/components/date-input";
@@ -313,6 +312,7 @@ import { WorkspaceLayout } from "@/components/workspace-layout";
 import { ConnectionAuthorizationOutcome } from "@/features/connections/authorization-outcome";
 import { TaskCreationProgress } from "@/features/tasks/creation-progress";
 import { api, isUnauthorized } from "./api.js";
+import { BRAND_PROMISE } from "./brand.js";
 import { scrollTimelineToMinute } from "./calendar-timeline.js";
 import { InlineError, PageLoading, QueryFeedback } from "./components/async-state.js";
 import { useConfirmAction } from "./components/confirm-action.js";
@@ -759,13 +759,13 @@ function CredentialsScreen() {
   const invitationError = !inviteBlurred
     ? undefined
     : credentials.inviteCode.length !== 8
-      ? "Enter all eight characters from your invitation."
+      ? "enter all eight characters from your invitation."
       : invitationResultIsCurrent && invitationValidation.isError
-        ? "Couldn’t check this invitation. Try again."
+        ? "couldn’t check this invitation. try again."
         : invitationResultIsCurrent &&
             invitationValidation.isSuccess &&
             invitationValidation.data === false
-          ? "This invitation is invalid or expired."
+          ? "this invitation is invalid or expired."
           : undefined;
   const invitationStatus =
     invitationResultIsCurrent && invitationValidation.isPending
@@ -822,14 +822,14 @@ function CredentialsScreen() {
         onSubmit={submit}
         validate={() => {
           const errors: Record<string, string> = {};
-          if (!emailValid) errors.email = "Enter an email address in the format name@example.com.";
+          if (!emailValid) errors.email = "enter an email address in the format name@example.com.";
           if (mode === "register") {
-            if (!credentials.displayName.trim()) errors.displayName = "Enter your name.";
+            if (!credentials.displayName.trim()) errors.displayName = "enter your name.";
             if (!invitationValid && invitationStatus !== "checking")
               errors.inviteCode =
-                invitationError ?? "Enter a valid invitation and wait for it to be checked.";
-            if (!passwordValid) errors.password = "Meet each password requirement shown below.";
-            if (!passwordsMatch) errors.confirmPassword = "Passwords must match.";
+                invitationError ?? "enter a valid invitation and wait for it to be checked.";
+            if (!passwordValid) errors.password = "meet each password requirement shown below.";
+            if (!passwordsMatch) errors.confirmPassword = "passwords must match.";
           }
           return errors;
         }}
@@ -837,16 +837,16 @@ function CredentialsScreen() {
         <div className="auth-form__heading">
           <h2>
             {mode === "login"
-              ? "Login"
+              ? "sign in"
               : mode === "recovery"
-                ? "Reset your password"
-                : "Redeem Invite Code"}
+                ? "reset your password"
+                : "create account"}
           </h2>
           {mode !== "login" ? (
             <p>
               {mode === "recovery"
-                ? "We’ll send a reset link if this address has an account."
-                : "Welcome to the closed alpha. Thanks for trying nohmi—it’s early, experimental, and a little buggy."}
+                ? "we’ll send a reset link if this address has an account."
+                : "you’ll need an invitation. nohmi is in alpha; expect rough edges."}
             </p>
           ) : null}
         </div>
@@ -872,7 +872,7 @@ function CredentialsScreen() {
             />
             <TextField
               autoComplete="name"
-              label="Name"
+              label="name"
               name="displayName"
               onChange={(event) =>
                 setCredentials((current) => ({ ...current, displayName: event.target.value }))
@@ -903,7 +903,7 @@ function CredentialsScreen() {
                   onClick={() => selectMode("recovery")}
                   type="button"
                 >
-                  Forgot?
+                  forgot?
                 </button>
               ) : undefined
             }
@@ -918,32 +918,32 @@ function CredentialsScreen() {
 
         {mutation.isSuccess && mode === "recovery" ? (
           <p className="form-success" role="status">
-            If an account exists for that email, a password-reset link is on its way.
+            if an account exists for that email, a password-reset link is on its way.
           </p>
         ) : null}
         <ShadcnButton className="button--wide" disabled={mutation.isPending} type="submit">
           {mutation.isPending ? (
-            <Spinner label="Signing in" />
+            <Spinner label="signing in" />
           ) : mode === "login" ? (
-            "Log in"
+            "sign in"
           ) : mode === "recovery" ? (
-            "Send reset link"
+            "send reset link"
           ) : (
-            "Create account"
+            "create account"
           )}
         </ShadcnButton>
         {mode === "login" ? (
           <button
-            aria-label="Have an invite? Create an account"
+            aria-label="have an invite? create an account"
             className="text-button"
             type="button"
             onClick={() => selectMode("register")}
           >
-            Have an invite? Create an account
+            have an invite? create an account
           </button>
         ) : (
           <button className="text-button" type="button" onClick={() => selectMode("login")}>
-            {mode === "register" ? "Already have an account? Sign in" : "Back to sign in"}
+            {mode === "register" ? "already have an account? sign in" : "back to sign in"}
           </button>
         )}
       </FeedbackForm>
@@ -965,12 +965,12 @@ function EmailVerificationScreen({ token }: { token: string }) {
   });
   return (
     <AuthActionShell
-      description="Confirm the email address for this nohmi account."
-      title="Confirm your email"
+      description="confirm the email address for this nohmi account."
+      title="confirm your email"
     >
       {verification.isSuccess ? (
         <p className="form-success" role="status">
-          Your email is confirmed. You can close this page or continue using nohmi.
+          your email is confirmed. you can close this page or continue using nohmi.
         </p>
       ) : (
         <Button
@@ -978,7 +978,7 @@ function EmailVerificationScreen({ token }: { token: string }) {
           onClick={() => verification.mutate()}
           tone="accent"
         >
-          {verification.isPending ? <Spinner label="Confirming email" /> : "Confirm email"}
+          {verification.isPending ? <Spinner label="confirming email" /> : "confirm email"}
         </Button>
       )}
       <MutationFeedback feedback={verification.feedback} />
@@ -1002,10 +1002,10 @@ function PasswordResetScreen({ token }: { token: string }) {
   });
   const passwordsMatch = confirmPassword.length > 0 && password === confirmPassword;
   return (
-    <AuthActionShell title="Choose a new password">
+    <AuthActionShell title="choose a new password">
       {complete ? (
         <p className="form-success" role="status">
-          Your password has been reset. <Link to="/login">Return to sign in.</Link>
+          your password has been reset. <Link to="/login">return to sign in.</Link>
         </p>
       ) : (
         <FeedbackForm
@@ -1013,8 +1013,8 @@ function PasswordResetScreen({ token }: { token: string }) {
           validate={() => {
             const errors: Record<string, string> = {};
             if (!isValidPassword(password))
-              errors.password = "Meet each password requirement shown below.";
-            if (!passwordsMatch) errors.confirmPassword = "Passwords must match.";
+              errors.password = "meet each password requirement shown below.";
+            if (!passwordsMatch) errors.confirmPassword = "passwords must match.";
             return errors;
           }}
           className="auth-form"
@@ -1026,7 +1026,7 @@ function PasswordResetScreen({ token }: { token: string }) {
           <PasswordFields
             autoComplete="new-password"
             confirmValue={confirmPassword}
-            label="New password"
+            label="new password"
             onConfirmValueChange={setConfirmPassword}
             onValueChange={setPassword}
             showRequirements
@@ -1034,7 +1034,7 @@ function PasswordResetScreen({ token }: { token: string }) {
           />
 
           <Button disabled={reset.isPending} tone="accent" type="submit">
-            {reset.isPending ? <Spinner label="Resetting password" /> : "Reset password"}
+            {reset.isPending ? <Spinner label="resetting password" /> : "reset password"}
           </Button>
         </FeedbackForm>
       )}
@@ -1056,21 +1056,23 @@ function AuthLayout({ children }: { children: ReactNode }) {
         </header>
         <section className="auth-form-wrap">{children}</section>
         <nav
-          aria-label="About nohmi and policies"
+          aria-label="about nohmi and policies"
           className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted-foreground"
         >
-          <a href="/about/">About nohmi</a>
-          <a href="/docs/">Guide</a>
-          <a href="/privacy/">Privacy policy</a>
-          <a href="/terms/">Terms of use</a>
-          <a href="/data-use/">Data use</a>
-          <a href="/sms/">SMS</a>
-          <a href="/support/">Support</a>
+          <a href="/about/">about nohmi</a>
+          <a href="/docs/">guide</a>
+          <a href="/privacy/">privacy</a>
+          <a href="/terms/">terms</a>
+          <a href="/data-use/">data use</a>
+          <a href="/sms/">texting terms</a>
+          <a href="/support/">support</a>
         </nav>
       </div>
-      <ShadcnCard aria-hidden="true" className="auth-brand-panel">
-        <ShadcnCardContent>
-          <BrandPattern />
+      <ShadcnCard className="auth-brand-panel">
+        <ShadcnCardContent className="auth-brand-panel__copy">
+          <span>nohmi / built around you</span>
+          <h2>{BRAND_PROMISE}</h2>
+          <p>your context, tools, and controls. connected for you and the agents you choose.</p>
         </ShadcnCardContent>
       </ShadcnCard>
     </main>

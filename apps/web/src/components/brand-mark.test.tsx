@@ -30,7 +30,7 @@ describe("BrandMark", () => {
     expect(orbitCopy).toHaveAttribute("href", "#auth-brand-graphic-orbit-circle");
     expect(orbitCopy).toHaveAttribute("lengthAdjust", "spacing");
     expect(orbitCopy).toHaveAttribute("textLength", "282.743");
-    expect(orbitCopy?.textContent?.match(/know what matters/g)).toHaveLength(2);
+    expect(orbitCopy?.textContent?.match(/a personal harness/g)).toHaveLength(2);
     expect(orbitCopy?.textContent?.match(/✦/g)).toHaveLength(2);
     expect(mark.querySelector(".auth-brand-graphic__frame")).toBeInTheDocument();
   });

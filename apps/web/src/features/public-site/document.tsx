@@ -22,11 +22,11 @@ export function PublicDocument({
         <aside>
           <Card>
             <CardHeader>
-              <p className="font-medium">Explore nohmi</p>
+              <p className="font-medium">explore nohmi</p>
             </CardHeader>
             <CardContent>
               <nav
-                aria-label="Document navigation"
+                aria-label="document navigation"
                 className="grid grid-cols-2 gap-1 lg:flex lg:flex-col"
               >
                 {publicDocuments.map(({ slug: path, label }) => (

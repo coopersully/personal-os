@@ -1,5 +1,19 @@
 # nohmi — Implementation Log
 
+## 2026-10-21 — Personal harness exterior (branch implementation)
+
+- The design branch positions nohmi as **a personal harness**: context, tools, and controls
+  built around a person. Canonical planning and design guidance use that lens. This is product
+  direction, not a claim that the entire target is available.
+- The public landing page, about page, getting-started guide, and authentication brand panel
+  adopt lowercase copy, restrained proportions, and external light blue. The shared public
+  navigation/footer and authentication labels follow the same voice. Product theme tokens and
+  policy/consent bodies retain their existing behavior and commitments.
+- Public documents and the landing page still use the existing static rendering path and work
+  without JavaScript or a session. The public-site page contract records layout and color scope.
+- This entry records local branch implementation only; no merge or production publication is
+  asserted. The application-wide neutral-theme migration remains a separate implementation task.
+
 ## 2026-10-19 — Integrated Finance experience merged
 
 - [PR #270 — Complete the Finance workspace and guarded agent workflows](https://github.com/coopersully/personal-os/pull/270)

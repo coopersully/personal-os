@@ -42,6 +42,11 @@ its policy links remain readable without JavaScript. The generated fragment is i
 React component rather than maintaining a second copy of the landing text. Browser acceptance
 covers the root and all seven documents with JavaScript disabled on desktop and mobile.
 
+The external category is **“a personal harness.”** The landing page, about page, guide, and
+authentication brand panel explain context, tools, and controls in lowercase source copy.
+External light blue stays scoped to public/unauthenticated brand surfaces; product chrome stays
+neutral. Quoted consent, legal commitments, and external identities retain their required form.
+
 The product mission follows `docs/product/master-design.md`; public copy must distinguish intent
 from deployed capability. Do not promise universal autonomous execution, immediate erasure, a fixed
 retention deadline, certifications, or every external AI provider's training practices without

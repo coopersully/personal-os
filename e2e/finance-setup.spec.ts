@@ -10,8 +10,8 @@ test("an incomplete first plan survives reload and leaves bookkeeping available"
 }, testInfo) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill(demoAccount.email);
-  await page.getByLabel("Password", { exact: true }).fill(demoAccount.password);
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByLabel("password", { exact: true }).fill(demoAccount.password);
+  await page.getByRole("button", { name: "sign in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
   const configurationResponse = page.waitForResponse(
     (response) =>

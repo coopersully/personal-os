@@ -34,6 +34,13 @@ workspace-stewardship skills live alongside it. `CLAUDE.md` imports the shared r
 client skill directories share one source. Add nested `AGENTS.md` only for a real subtree-specific
 rule that is absent from the existing owner and skill contracts.
 
+## Product direction
+
+nohmi is **a personal harness**: context, tools, and controls built around a person.
+Use the [master design planning lens](../product/master-design.md#personal-harness-as-a-planning-lens)
+when prioritizing work. Preserve familiar workspaces, direct action, and bounded agent authority.
+Public copy uses this category; it must distinguish the target from current capability.
+
 ## Make routine decisions autonomously
 
 Choose the smallest change that satisfies the issue's observable outcome and the canonical product

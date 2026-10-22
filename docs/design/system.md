@@ -16,7 +16,7 @@ unrelated cards, or an AI chat surface.
 - **Name:** `nohmi`, always lowercase in product and prose.
 - **Pronunciation:** “know me.” This is meaning, not a visual gimmick; never split,
   capitalize, or decorate the name to explain the wordplay.
-- **Promise:** “know what matters.” Use it sparingly at brand entry points, not as
+- **Promise:** “a personal harness.” Use it sparingly at brand entry points, not as
   a repeated page subtitle.
 - **Posture:** neutral, capable, soft, and direct. nohmi is unafraid of color but
   unopinionated in its use: the product has no signature hue.

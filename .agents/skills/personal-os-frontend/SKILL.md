@@ -5,6 +5,14 @@ description: Build and refine accessible, domain-owned nohmi React PWA experienc
 
 # nohmi frontend
 
+## Product purpose
+
+nohmi is a personal harness: the person's context, tools, and controls. Use the
+planning lens in `docs/product/master-design.md`. Keep direct workspace operation
+and authorized agent work on the same records. Public pages explain this category
+with concrete capabilities and honest availability; they do not imply that the
+whole target has shipped.
+
 ## Brand and product boundary
 
 Apply the October 21 direction in `docs/design/foundations.md` and the control

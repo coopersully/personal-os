@@ -27,8 +27,8 @@ test.describe("durable Finance manual setup", () => {
     async function login(account: { email: string; password: string }) {
       await page.goto("/login");
       await page.getByLabel("Email", { exact: true }).fill(account.email);
-      await page.getByLabel("Password", { exact: true }).fill(account.password);
-      await page.getByRole("button", { name: "Log in", exact: true }).click();
+      await page.getByLabel("password", { exact: true }).fill(account.password);
+      await page.getByRole("button", { name: "sign in", exact: true }).click();
       await expect(page).not.toHaveURL(/\/login(?:[/?#]|$)/);
       return browserFinanceHuman(page, runtimeURL);
     }

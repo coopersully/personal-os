@@ -98,7 +98,7 @@ export default defineConfig(({ mode }) => {
         includeAssets: ["apple-touch-icon.png", "favicon-32.png", "icon.svg"],
         manifest: {
           background_color: "#18181b",
-          description: "A shared daily surface for people and their agents.",
+          description: "a personal harness for your mail, tasks, calendar, and money.",
           display: "standalone",
           icons: [
             { sizes: "any", src: "/icon.svg", type: "image/svg+xml" },

@@ -20,6 +20,11 @@ unrelated cards, or an AI chat surface.
   a repeated page subtitle.
 - **Posture:** neutral, capable, soft, and direct. nohmi is unafraid of color but
   unopinionated in its use: the product has no signature hue.
+- **Company brand:** independent, assured, and quietly renegade, with light blue
+  reserved for company communications and external brand expression. The
+  signed-in product does not favor the brand hue. Preserve meaningful content,
+  provider, workspace, chart, and semantic-state colors without using any as
+  the default for chrome, focus, selection, or primary actions.
 - **Wordmark:** the lowercase text wordmark is primary. The compact `n` mark is
   for constrained app-icon and navigation contexts. Neither uses a gradient,
   glow, outline, or decorative symbol.
@@ -31,6 +36,8 @@ unrelated cards, or an AI chat surface.
   contained decorative-opacity exception, not a general product motion pattern.
 - **Voice:** use plain verbs, short clauses, and concrete nouns. Sound calm and
   useful, never cute, breathless, mystical, or artificially intimate.
+  Use lowercase for nohmi-authored copy. Preserve user content and external
+  identities verbatim. See the October 21 direction in `foundations.md`.
 - **Full-page errors:** use the default canvas with a centered short,
   large title, description, and recovery actions, without a foreground logo. The shared fading tile
   pattern may fill the background at subdued opacity; omit navigation branding
@@ -261,7 +268,7 @@ colors, raw color utilities, or a second spacing scale.
 | Spacing | Use the shared 4 px rhythm. Block gaps are 24–32 px; row gaps are 8–12 px; dense metadata gaps are 4–8 px. |
 | Shape | Shared `--radius` owns component roundness. Use cards and controls from `src/components/ui`; do not invent parallel primitives. |
 | Color | Primary actions, selection, and current context use the monochrome ink scale. Warning, destructive, info, and success use semantic status tokens only. |
-| Effects | No decorative gradients, borders, elevation shadows, blur, glass, or translucent product surfaces. Hierarchy comes from spacing, type, and opaque tonal fields. A surface-colored edge fade with bounded backdrop blur is allowed only when it separates fixed navigation from scrolling content, as in Setup and Calendar. |
+| Effects | Ordinary product surfaces remain flat and opaque. A surface-colored edge fade with bounded backdrop blur may separate fixed navigation from scrolling content, as in Setup and Calendar. Rare neutral glass is allowed only under the contextual-glass contract below. |
 | Icons | Icons clarify an existing label or stand in only when the action has a familiar, accessible name. Icon-only actions require an accessible label and tooltip. |
 | Navigation | Active navigation keeps the same geometry as inactive navigation and uses the solid form of its icon; inactive items use the outline form. |
 | Motion | Motion confirms a spatial change and stays brief. It never conveys the only signal of urgency, completion, or error. Respect reduced motion. |
@@ -290,9 +297,54 @@ fallbacks use nested neutral tones so the identity boundary remains legible on
 canvas, selected, and highlighted surfaces without a decorative border or
 shadow.
 
+### Control proportions and padding
+
+Repeated controls share geometry. Use a 32px square slot for compact icon actions
+and a 44px effective target on coarse pointers. A normal glyph is 14–16px; a select
+chevron is 12px. Increasing the hit area must not scale the glyph. Keep icon slots
+square and nonshrinking.
+
+Text controls keep 12px horizontal padding, with a separate trailing chevron
+slot and at least 8px between text and glyph. Center the chevron in its slot,
+not against the outer edge. It must never overlap text or inherit container-sized
+SVG dimensions. Preserve normal control padding in menus and popover triggers.
+
+A row collection owns one 16px horizontal inset and full-width dividers; its
+parent must not add a second copy of that inset. Comfortable settings rows are
+48px minimum height; long text grows naturally. Compact collection density is
+a separate shared variant, not a reason to shrink interaction targets.
+
+Inspect narrow, long-label, focused, open, and touch states. Verify actual glyph
+bounds as well as container bounds. Apply this target through shared owners;
+these rules are not a claim that every existing page already conforms.
+
+### Contextual glass
+
+Glass is an exceptional neutral material for a transient floating action group,
+such as a selection toolbar. Keep it rare and localized. Ordinary navigation,
+rows, form fields, menus, data cards, and inspectors stay flat and opaque.
+Content remains reachable when the toolbar is dismissed.
+
+Use the reviewed React Bits GlassSurface source. Keep tint neutral, chromatic
+offsets at zero, and edge lighting restrained. The filter acts on the backdrop;
+labels and icons stay sharp. Use an opaque equivalent for increased contrast or
+reduced transparency, and a legible frosted fallback where DOM refraction is
+unsupported. Inspect the material over text and rules, on narrow/touch layouts,
+and with its fallback renderer before admitting a new glass use.
+
+This is a narrow exception to flat-surface and shadow rules. Its SVG filter is
+optical infrastructure, not an icon-pack exception; production admission must
+scope automated SVG checks to retain the icon-registry contract.
+
 ### Interface copy
 
 Copy earns its space by changing a decision. Apply these rules mechanically:
+
+- Use lowercase for nohmi-authored headings, navigation, actions, options,
+  placeholders, tooltips, accessible names, and supporting copy. This target
+  supersedes prior sentence-case and title-case styling rules. Write lowercase
+  source strings; do not transform user data, external identities, identifiers,
+  or whole documents with CSS. Locale and data-format correctness remain intact.
 
 - A page title names the area; it does not need a subtitle unless the subtitle
   establishes scope, live state, or a consequence the title cannot carry.
@@ -309,10 +361,11 @@ Copy earns its space by changing a decision. Apply these rules mechanically:
   that owns the immediate task carries the strongest page-level emphasis.
 - Workspace-switcher triggers show the workspace glyph without its frame,
   including the compact mobile header trigger. Picker items use unframed outline glyphs; the
-  current workspace uses a filled glyph and its colored selected surface.
+  current workspace uses a filled glyph on a neutral selected surface.
   in the desktop rail, inactive destinations use neutral outline glyphs and only
-  the selected destination uses a filled glyph on its colored control surface, without an icon frame. Preserve the same glyph
-  across states; color is reserved for the selected rail destination.
+  the selected destination uses a filled glyph on a neutral control surface, without an icon frame. Preserve the same glyph
+  across states; meaningful workspace identity color belongs to the glyph, not
+  the shared control's selection, hover, or focus treatment.
 - Desktop account-management actions live in Settings, reached from the bottom of the workspace rail. A
   workspace may use compact account avatars in its app bar only as a source-visibility filter; that
   filter must surface health and link to Settings for repair rather than duplicating management.

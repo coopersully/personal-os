@@ -10,6 +10,11 @@ permission/configuration state and field correction/retry controls may remain in
 replace a Sonner error. Tests must assert Sonner and no inline action-result message.
 See [the canonical feedback rule](../feedback.md).
 
+New and revised nohmi-authored labels follow the lowercase contract in
+[`../foundations.md`](../foundations.md). It supersedes earlier sentence-case or
+title-case conventions; preserve user data and external identities. Shared
+control padding, glyph sizes, and chevron slots follow `../system.md`.
+
 The immediate job is to inspect or change a preference, account, or connection.
 Use the shared [feedback rubric](../feedback.md) for every operation.
 

@@ -160,6 +160,24 @@ registry name states the meaning rather than repeating reicon's vendor name.
 
 ## Design review evidence
 
+**Identity and component checks — October 21 target**
+
+Apply the accepted direction in `foundations.md` and control contracts in
+`system.md` to new and revised surfaces:
+
+- Company/external light blue has not leaked into signed-in chrome, selection,
+  focus, or action defaults. Meaningful content and semantic colors remain intact.
+- Authored copy and accessible names are lowercase; user content and external
+  identities retain their supplied spelling. There is no blanket CSS transform.
+- Text, icon, chevron, and hit-area bounds are checked separately. Glyphs stay
+  14–16px, chevrons 12px, with real text clearance and stable control padding.
+- Row collections have one padding owner. Repeated parts share proportions;
+  long labels and touch targets fit without clipping or stretching glyphs.
+- Any glass surface has a documented transient purpose, neutral tint, readable
+  labels, and inspected fallback. Ordinary material remains flat and opaque.
+
+These are target review criteria, not evidence of completed app-wide migration.
+
 Review the actual product, not only a clean screenshot. For a bounded change,
 collect evidence proportional to risk:
 

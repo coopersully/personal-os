@@ -5,6 +5,23 @@ description: Build and refine accessible, domain-owned nohmi React PWA experienc
 
 # nohmi frontend
 
+## Brand and product boundary
+
+Apply the October 21 direction in `docs/design/foundations.md` and the control
+anatomy in `docs/design/system.md`. Company/external brand expression may use
+light blue; signed-in chrome has no favored hue. Keep primary actions, focus,
+selection, checkboxes, switches, and contextual glass neutral. Color remains
+available for actual content, identities, user choices, and semantic states.
+Write nohmi-authored UI copy in lowercase at its source, including accessible
+names and tooltips; preserve user data and external identities. This supersedes
+earlier sentence/title-case conventions.
+
+Before accepting a refinement, inspect actual control and glyph bounds:
+14–16px normal icons and 12px chevrons in nonshrinking square slots, with larger
+touch targets retaining the same glyph size. Keep one layer of row padding and
+reserve a separate trailing chevron slot. Follow the bounded neutral-glass
+exception instead of spreading translucency through ordinary surfaces.
+
 Follow `docs/design/foundations.md`, `docs/design/governance.md`,
 `docs/design/system.md`, the relevant page specification in
 `docs/design/pages`, `apps/web/src/features/README.md`, and
@@ -84,9 +101,11 @@ or chat surface.
   expected shape with obviously fictional reserved material such as
   `sam@example.com`; never use personal data, production identifiers, or
   plausible credentials.
-- Keep interaction treatment flat. Shared controls use semantic background and
+- Keep ordinary interaction treatment flat. Shared controls use semantic background and
   border changes for hover, focus, and selection; do not add rings, outlines,
   or box shadows as interaction indicators.
+  The system's rare contextual-glass exception is a material treatment, not a
+  general hover, focus, or control style.
 - Separate ordinary surfaces and controls with opaque semantic tone rather than
   a visible resting border. Shared primitives may reserve transparent border
   geometry for focus, invalid, increased-contrast, or functional data states;

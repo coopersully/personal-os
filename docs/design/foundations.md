@@ -2,7 +2,33 @@
 
 - Status: Working foundation
 - Audience: Product, design, engineering, and agents contributing to nohmi
-- Scope: The product experience and its expression; not company or campaign branding
+- Scope: Brand expression and the product experience, with distinct color roles
+
+## Accepted direction — October 21, 2026
+
+Cooper's direction is a hyper-minimal, independent technology brand with the
+confidence and renegade character of rabbit r1. Product structure takes its
+precision from a considered instrument: repeated component proportions, useful
+density, soft geometry, and deliberate spacing. This establishes the target;
+it does not claim the application-wide migration has shipped.
+
+- **Company and external brand:** light blue is the brand color. Use it in
+  company communications, marketing, and external brand assets.
+- **Signed-in product:** neutral chrome with no favored hue. Actions, focus,
+  navigation, selection, checked controls, and glass use the neutral ink scale.
+  Do not import light blue into these roles because it is the brand color.
+- **Meaningful color:** preserve colors belonging to real content, provider
+  identities, workspace identities, user choices, charts, and semantic states.
+  Their meaning owns their color; no hue becomes the general UI default.
+- **Copy:** nohmi-authored labels, headings, navigation, actions, help, and brand
+  copy are lowercase and use the fewest words that retain meaning. Preserve
+  user-authored content, external identities, code, identifiers, and quoted
+  source material as supplied. Do not apply a global CSS text transform.
+- **Personality:** confident, independent, direct, and quietly unconventional.
+  Let the product's utility and precision carry its character.
+- **Material:** flat opaque surfaces by default; rare, neutral liquid glass
+  may identify transient contextual controls. Glass must not become the default
+  material for data or forms; follow the system's bounded exception.
 
 ## Brand idea
 
@@ -81,7 +107,8 @@ person, hide uncertainty, or narrate ordinary interface mechanics.
 
 ### Voice rules
 
-- Use sentence case, direct verbs, concrete nouns, and short clauses.
+- Use lowercase for nohmi-authored copy, direct verbs, concrete nouns, and short
+  clauses. This supersedes older sentence-case and title-case guidance.
 - Address the person as “you” only when it makes the consequence clearer. Avoid
   repeated second-person phrasing in labels and navigation.
 - Name the object and outcome: **Save budget**, **Reconnect calendar**, **Move 3
@@ -134,6 +161,9 @@ unrelated tools.
 - Use the monochrome ink scale for hierarchy, selection, and primary action.
   Status color is reserved for danger, warning, success, and information with a
   stable semantic meaning.
+- Keep company light blue outside signed-in chrome. It is not a primary-action,
+  selection, focus, switch, or checkbox color. Meaningful content and status
+  colors remain available without a favored hue.
 - Light and dark themes carry the same roles and reading hierarchy. A feature
   consumes semantic roles and never chooses a raw color for one theme.
 - Calendar, Tasks, Mail, and Finances are first-class workspaces with clear,
@@ -166,10 +196,8 @@ unrelated tools.
 
 ### Typography
 
-- Plus Jakarta Sans is the interface voice. Its approachable geometry should
-  remain readable and quiet at application density.
-- DM Mono is functional notation for compact time, date, count, identifier, or
-  source metadata. It is not a decorative display face.
+- Geist is the existing product typeface, including compact metadata. Keep it
+  readable at application density; precision does not require a decorative face.
 - Hierarchy comes from role, size, weight, line height, and space together. Do
   not compensate for weak information structure with oversized headings.
 - Use tabular numerals when values must compare vertically or update in place.

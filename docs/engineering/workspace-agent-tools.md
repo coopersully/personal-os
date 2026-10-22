@@ -4081,6 +4081,10 @@ Create one reminder immediately. dueAt is a due or attention time; it does not s
 {
   "type": "object",
   "properties": {
+    "activeReminder": {
+      "description": "Show a persistent Mac card when due. Omission inherits the account creation default.",
+      "type": "boolean"
+    },
     "dueAt": {
       "default": null,
       "anyOf": [
@@ -4240,6 +4244,9 @@ Create one executable Task, optionally organized in a List and Project with due 
 {
   "type": "object",
   "properties": {
+    "activeReminder": {
+      "type": "boolean"
+    },
     "dueAt": {
       "default": null,
       "anyOf": [
@@ -16737,6 +16744,9 @@ Change one reminder after reading it. Pass expectedUpdatedAt from get_reminder s
 {
   "type": "object",
   "properties": {
+    "activeReminder": {
+      "type": "boolean"
+    },
     "dueAt": {
       "anyOf": [
         {
@@ -16821,6 +16831,9 @@ Update one loaded Task's executable content or timing. Lifecycle changes use com
 {
   "type": "object",
   "properties": {
+    "activeReminder": {
+      "type": "boolean"
+    },
     "dueAt": {
       "anyOf": [
         {

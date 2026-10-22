@@ -670,3 +670,19 @@ at 1,200 periods and paginated. Achieved goals, nonpositive contributions, missi
 beyond-horizon estimates stay explicit. Exploring changes never saves a budget or actual progress.
 Confirmation writes retain their exact request/key on uncertain results, refresh canonical reads,
 and use Sonner for loading and outcomes; field correction guidance stays beside the relevant input.
+
+### Consistent planning controls
+
+Budget uses a compact category-group toolbar and the shared Card header/content structure for
+its monthly totals, resources and allocations. Assumptions and rationale use the shared Finance
+disclosure; revising and approving a version keep their existing explicit authority and recovery.
+Cash flow uses the same single-view toggle and toolbar language as Spending. Timeline options
+open a bounded settings-row dialog for dates and account scope; account menus retain checked
+multi-selection and an explicit empty selection. Reset clears only timeline parameters. Schedule,
+date-scope and payday evidence use consistent labelled disclosures, and the payday income selector
+uses the shared checked/searchable Settings control. Selection never certifies a schedule or balance.
+Wealth leads with the shared metrics and goal rows before supporting position evidence. Show goal
+progress only when current applicable confirmation evidence and a positive target support it.
+Keep progress confirmation and exploration direct; place pause/resume, completion and removal in
+the goal's contextual menu. Completion/removal retain their confirmation dialogs. Goal editing uses
+shared Settings rows and checked priority choices without changing save, version or error behavior.

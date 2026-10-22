@@ -266,7 +266,7 @@ it("uses the same dated occurrence in the calendar and preserves unrelated URL s
   const user = userEvent.setup();
   mount();
   await screen.findByRole("link", { name: "Private salary" });
-  await user.selectOptions(screen.getByLabelText("Timeline view"), "calendar");
+  await user.click(screen.getByRole("radio", { name: "Calendar" }));
   await user.click(
     screen.getByRole("button", { name: /October 20, 2026, 1 scheduled occurrence/ }),
   );
@@ -376,6 +376,7 @@ it("rejects an invalid date window without reading a fabricated range and resets
   mount("/finances/cashflow?cashflowFrom=2026-10-31&cashflowTo=2026-10-01&sentinel=keep");
   expect(await screen.findByText(/Choose a valid date range/)).toBeVisible();
   expect(mock.api.listFinanceCashflowSources).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Timeline options" }));
   await user.click(screen.getByRole("button", { name: "Reset timeline filters" }));
   await screen.findByRole("link", { name: "Private salary" });
   expect(screen.getByLabelText("Location")).toHaveTextContent("sentinel=keep");

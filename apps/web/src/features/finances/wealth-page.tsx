@@ -9,9 +9,19 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { ActionButton as Button } from "@/components/action-button";
 import { CurrencyInput } from "@/components/currency-input";
-import { BankIcon, DollarIcon, PlusIcon, TargetIcon, WalletIcon } from "@/components/icons";
+import {
+  BankIcon,
+  DollarIcon,
+  EditIcon,
+  MoreHorizontalIcon,
+  PlusIcon,
+  TargetIcon,
+  WalletIcon,
+} from "@/components/icons";
 import { KeyMetric, KeyMetrics } from "@/components/key-metrics";
+import { SettingsControlsContext } from "@/components/settings-controls-context";
 import { Field, FieldGroup, FieldLabel, FieldSet } from "@/components/settings-field";
+import { SettingsSelect } from "@/components/settings-select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,6 +33,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import {
@@ -33,7 +50,8 @@ import {
   ItemGroup,
   ItemTitle,
 } from "@/components/ui/item";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { NativeSelectOption } from "@/components/ui/native-select";
+import { Progress } from "@/components/ui/progress";
 import { api } from "../../api.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
@@ -124,26 +142,23 @@ export function FinanceWealthPage() {
     <div className="flex flex-col gap-6">
       <FinanceSourceState label="Wealth snapshot" query={snapshot} />
       {snapshot.data ? (
-        <>
-          <KeyMetrics label="Wealth key metrics">
-            {[
-              { label: "Net worth", value: snapshot.data.data.netWorth, icon: WalletIcon },
-              { label: "Cash", value: snapshot.data.data.cash, icon: BankIcon },
-              { label: "Investments", value: snapshot.data.data.investments, icon: TargetIcon },
-              { label: "Debt", value: snapshot.data.data.debt, icon: DollarIcon },
-            ].map(({ label, value, icon }) => (
-              <KeyMetric
-                key={label}
-                label={label}
-                value={value === null ? "Unavailable" : formatCompactMoney(value)}
-                exactValue={financeAmount(value)}
-                icon={icon}
-                description="Current balance"
-              />
-            ))}
-          </KeyMetrics>
-          <FinancePositionMaterial result={snapshot.data} wealth hideMetrics />
-        </>
+        <KeyMetrics label="Wealth key metrics">
+          {[
+            { label: "Net worth", value: snapshot.data.data.netWorth, icon: WalletIcon },
+            { label: "Cash", value: snapshot.data.data.cash, icon: BankIcon },
+            { label: "Investments", value: snapshot.data.data.investments, icon: TargetIcon },
+            { label: "Debt", value: snapshot.data.data.debt, icon: DollarIcon },
+          ].map(({ label, value, icon }) => (
+            <KeyMetric
+              key={label}
+              label={label}
+              value={value === null ? "Unavailable" : formatCompactMoney(value)}
+              exactValue={financeAmount(value)}
+              icon={icon}
+              description="Current balance"
+            />
+          ))}
+        </KeyMetrics>
       ) : null}
       <Card aria-label="Financial goals">
         <CardHeader>
@@ -169,7 +184,7 @@ export function FinanceWealthPage() {
             </Alert>
           ) : null}
           {visibleGoals?.length ? (
-            <ItemGroup className="finance-bento finance-goal-grid">
+            <ItemGroup className="gap-3">
               {visibleGoals.map((goal) => {
                 const progress =
                   me.data && todayLocalDate
@@ -180,8 +195,12 @@ export function FinanceWealthPage() {
                     ? progress.evidence
                     : null;
                 return (
-                  <Item key={goal.id} id={`goal-${goal.id}`}>
-                    <ItemContent className="min-w-0">
+                  <Item
+                    key={goal.id}
+                    id={`goal-${goal.id}`}
+                    className="flex-col items-stretch sm:flex-row sm:items-center"
+                  >
+                    <ItemContent className="min-w-0 w-full sm:w-auto">
                       <ItemTitle>
                         {goal.name}
                         <Badge variant="secondary">
@@ -204,13 +223,25 @@ export function FinanceWealthPage() {
                             : "Low"}{" "}
                         priority{goal.deadline ? ` · Due ${goal.deadline}` : " · No deadline"}
                       </ItemDescription>
+                      {evidence && goal.targetAmount > 0 ? (
+                        <Progress
+                          aria-label={`Confirmed progress for ${goal.name}`}
+                          value={Math.max(
+                            0,
+                            Math.min(
+                              100,
+                              (evidence.progressAmountCents / 100 / goal.targetAmount) * 100,
+                            ),
+                          )}
+                        />
+                      ) : null}
                       <p className="text-muted-foreground text-xs">
                         {evidence
                           ? `Your statement as of ${evidence.asOf} · Version ${goal.version}`
                           : `Recorded amount ${goal.currentAmount} is not confirmed progress · Version ${goal.version}`}
                       </p>
                     </ItemContent>
-                    <ItemActions className="flex-wrap">
+                    <ItemActions className="flex-wrap gap-1 self-end sm:self-center">
                       <Button
                         size="sm"
                         variant="secondary"
@@ -218,7 +249,7 @@ export function FinanceWealthPage() {
                         aria-label={`${evidence ? "Reconfirm" : "Confirm"} progress for ${goal.name}`}
                         onClick={() => setProgressGoal(goal)}
                       >
-                        {evidence ? "Reconfirm progress" : "Confirm progress"}
+                        {evidence ? "Reconfirm" : "Confirm progress"}
                       </Button>
                       <Button
                         size="sm"
@@ -233,47 +264,56 @@ export function FinanceWealthPage() {
                         aria-label={`Edit ${goal.name}`}
                         disabled={changeGoal.isPending}
                         onClick={() => setEditor(goal)}
-                        size="sm"
-                        variant="outline"
-                      >
-                        Edit
-                      </Button>
-                      {goal.status === "active" || goal.status === "paused" ? (
-                        <Button
-                          aria-label={`${goal.status === "paused" ? "Resume" : "Pause"} ${goal.name}`}
-                          disabled={changeGoal.isPending}
-                          onClick={() =>
-                            changeGoal.mutate({
-                              goal,
-                              operation: goal.status === "paused" ? "resume" : "pause",
-                            })
-                          }
-                          size="sm"
-                          variant="ghost"
-                        >
-                          {goal.status === "paused" ? "Resume" : "Pause"}
-                        </Button>
-                      ) : null}
-                      {goal.status !== "completed" ? (
-                        <Button
-                          aria-label={`Complete ${goal.name}`}
-                          disabled={changeGoal.isPending}
-                          onClick={() => setConfirm({ goal, operation: "complete" })}
-                          size="sm"
-                          variant="ghost"
-                        >
-                          Complete
-                        </Button>
-                      ) : null}
-                      <Button
-                        aria-label={`Remove ${goal.name}`}
-                        disabled={changeGoal.isPending}
-                        onClick={() => setConfirm({ goal, operation: "remove" })}
-                        size="sm"
+                        size="icon-sm"
                         variant="ghost"
                       >
-                        Remove
+                        <EditIcon />
                       </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            size="icon-sm"
+                            variant="ghost"
+                            aria-label={`Actions for ${goal.name}`}
+                          >
+                            <MoreHorizontalIcon />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {goal.status === "active" || goal.status === "paused" ? (
+                            <DropdownMenuItem
+                              disabled={changeGoal.isPending}
+                              aria-label={`${goal.status === "paused" ? "Resume" : "Pause"} ${goal.name}`}
+                              onSelect={() =>
+                                changeGoal.mutate({
+                                  goal,
+                                  operation: goal.status === "paused" ? "resume" : "pause",
+                                })
+                              }
+                            >
+                              {goal.status === "paused" ? "Resume" : "Pause"}
+                            </DropdownMenuItem>
+                          ) : null}
+                          {goal.status !== "completed" ? (
+                            <DropdownMenuItem
+                              disabled={changeGoal.isPending}
+                              aria-label={`Complete ${goal.name}`}
+                              onSelect={() => setConfirm({ goal, operation: "complete" })}
+                            >
+                              Mark complete
+                            </DropdownMenuItem>
+                          ) : null}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            variant="destructive"
+                            disabled={changeGoal.isPending}
+                            aria-label={`Remove ${goal.name}`}
+                            onSelect={() => setConfirm({ goal, operation: "remove" })}
+                          >
+                            Remove goal
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </ItemActions>
                   </Item>
                 );
@@ -294,6 +334,7 @@ export function FinanceWealthPage() {
           ) : null}
         </CardContent>
       </Card>
+      {snapshot.data ? <FinancePositionMaterial result={snapshot.data} wealth hideMetrics /> : null}
       {exploredGoal && me.data && todayLocalDate ? (
         <>
           <Button variant="ghost" onClick={() => setExploreGoalId(null)}>
@@ -424,90 +465,92 @@ function GoalEditor({ goal, onClose }: { goal: FinanceGoal | null; onClose: () =
         if (!open && !save.isPending) onClose();
       }}
     >
-      <DialogContent className="max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{goal ? "Edit financial goal" : "Create financial goal"}</DialogTitle>
-          <DialogDescription>
-            {goal
-              ? `Revise the target for ${goal.name}.`
-              : "Set a target and priority for your financial plan."}
-          </DialogDescription>
-        </DialogHeader>
-        <FeedbackForm
-          feedback={save.feedback}
-          fieldNames={{
-            targetAmount: "target",
-            "changes.targetAmount": "target",
-            "changes.name": "name",
-            "changes.deadline": "deadline",
-            "changes.priority": "priority",
-          }}
-          className="flex flex-col gap-5"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (validTarget) save.mutate();
-          }}
-        >
-          <FieldSet disabled={save.isPending}>
-            <FieldGroup>
-              <Field>
-                <FieldLabel htmlFor="goal-name">Goal name</FieldLabel>
-                <Input
-                  name="name"
-                  id="goal-name"
-                  maxLength={240}
-                  required
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="goal-target">Target amount</FieldLabel>
-                <CurrencyInput
-                  name="target"
-                  id="goal-target"
-                  min={0}
-                  max={100000000}
-                  required
-                  value={target}
-                  onValueChange={setTarget}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="goal-deadline">Deadline</FieldLabel>
-                <Input
-                  name="deadline"
-                  id="goal-deadline"
-                  type="date"
-                  value={deadline}
-                  onChange={(event) => setDeadline(event.target.value)}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor="goal-priority">Priority</FieldLabel>
-                <NativeSelect
-                  name="priority"
-                  id="goal-priority"
-                  value={priority}
-                  onChange={(event) => setPriority(event.target.value as FinanceGoal["priority"])}
-                >
-                  <NativeSelectOption value="high">High</NativeSelectOption>
-                  <NativeSelectOption value="medium">Medium</NativeSelectOption>
-                  <NativeSelectOption value="low">Low</NativeSelectOption>
-                </NativeSelect>
-              </Field>
-            </FieldGroup>
-          </FieldSet>
+      <DialogContent className="settings-panel max-h-[85dvh] overflow-y-auto sm:max-w-lg">
+        <SettingsControlsContext.Provider value={true}>
+          <DialogHeader>
+            <DialogTitle>{goal ? "Edit financial goal" : "Create financial goal"}</DialogTitle>
+            <DialogDescription>
+              {goal
+                ? `Revise the target for ${goal.name}.`
+                : "Set a target and priority for your financial plan."}
+            </DialogDescription>
+          </DialogHeader>
+          <FeedbackForm
+            feedback={save.feedback}
+            fieldNames={{
+              targetAmount: "target",
+              "changes.targetAmount": "target",
+              "changes.name": "name",
+              "changes.deadline": "deadline",
+              "changes.priority": "priority",
+            }}
+            className="flex flex-col gap-5"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (validTarget) save.mutate();
+            }}
+          >
+            <FieldSet disabled={save.isPending}>
+              <FieldGroup>
+                <Field>
+                  <FieldLabel htmlFor="goal-name">Goal name</FieldLabel>
+                  <Input
+                    name="name"
+                    id="goal-name"
+                    maxLength={240}
+                    required
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="goal-target">Target amount</FieldLabel>
+                  <CurrencyInput
+                    name="target"
+                    id="goal-target"
+                    min={0}
+                    max={100000000}
+                    required
+                    value={target}
+                    onValueChange={setTarget}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="goal-deadline">Deadline</FieldLabel>
+                  <Input
+                    name="deadline"
+                    id="goal-deadline"
+                    type="date"
+                    value={deadline}
+                    onChange={(event) => setDeadline(event.target.value)}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="goal-priority">Priority</FieldLabel>
+                  <SettingsSelect
+                    name="priority"
+                    id="goal-priority"
+                    value={priority}
+                    onChange={(event) => setPriority(event.target.value as FinanceGoal["priority"])}
+                  >
+                    <NativeSelectOption value="high">High</NativeSelectOption>
+                    <NativeSelectOption value="medium">Medium</NativeSelectOption>
+                    <NativeSelectOption value="low">Low</NativeSelectOption>
+                  </SettingsSelect>
+                </Field>
+              </FieldGroup>
+            </FieldSet>
 
-          <DialogFooter>
-            <Button disabled={save.isPending} onClick={onClose} type="button" variant="outline">
-              Cancel
-            </Button>
-            <Button disabled={save.isPending} type="submit">
-              {save.isPending ? "Saving goal…" : goal ? "Save goal" : "Create goal"}
-            </Button>
-          </DialogFooter>
-        </FeedbackForm>
+            <DialogFooter>
+              <Button disabled={save.isPending} onClick={onClose} type="button" variant="outline">
+                Cancel
+              </Button>
+              <Button disabled={save.isPending} type="submit">
+                {save.isPending ? "Saving goal…" : goal ? "Save goal" : "Create goal"}
+              </Button>
+            </DialogFooter>
+          </FeedbackForm>
+        </SettingsControlsContext.Provider>
       </DialogContent>
     </Dialog>
   );

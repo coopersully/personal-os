@@ -12,17 +12,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
-import { EditIcon, PlusIcon } from "@/components/icons";
+import { EditIcon, SettingsIcon } from "@/components/icons";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Dialog,
@@ -46,6 +39,7 @@ import { api } from "../../api.js";
 import { InlineError, PageLoading } from "../../components/async-state.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { FinanceBudgetBucketManager } from "./bucket-manager.js";
+import { FinanceDisclosure } from "./disclosure";
 import { formatMoney } from "./format.js";
 import { isConfirmedFinanceMutationFailure } from "./mutation-retry.js";
 import { FinancePlanEditor } from "./plan-editor.js";
@@ -113,129 +107,124 @@ function AllocationRelation({
 function PlanDetails({ plan, relations }: { plan: FinanceBudgetVersion; relations: Relations }) {
   return (
     <div className="grid min-w-0 gap-7">
-      <Card aria-label="Plan resources" className="grid min-w-0 gap-3 p-5">
-        <h2 className="text-base font-medium">Resources</h2>
-        {plan.resources.length ? (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Resource</TableHead>
-                <TableHead>Source</TableHead>
-                <TableHead className="text-right">Planned amount</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {plan.resources.map((resource) => (
-                <TableRow key={resource.key}>
-                  <TableCell className="min-w-40 whitespace-normal">
-                    <span className="font-medium">{resource.key}</span>
-                    <span className="block text-xs text-muted-foreground">
-                      {resourceLabels[resource.kind]}
-                    </span>
-                    {resource.description ? (
-                      <span className="block text-sm text-muted-foreground">
-                        {resource.description}
-                      </span>
-                    ) : null}
-                  </TableCell>
-                  <TableCell className="max-w-64 whitespace-normal">
-                    {resource.sourceId ? (
-                      <span>
-                        {relations.accounts.find((account) => account.id === resource.sourceId)
-                          ?.name ?? "Saved source"}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">No linked source</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {formatMoney(resource.amount)}
-                  </TableCell>
+      <Card aria-label="Plan resources">
+        <CardHeader>
+          <CardTitle>Resources</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {plan.resources.length ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Resource</TableHead>
+                  <TableHead>Source</TableHead>
+                  <TableHead className="text-right">Planned amount</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            No resources recorded. Add income or other available funds in your financial profile.
-          </p>
-        )}
-      </Card>
-      <Card aria-label="Plan allocations" className="grid min-w-0 gap-3 p-5">
-        <h2 className="text-base font-medium">Allocations</h2>
-        {plan.allocations.length ? (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Allocation</TableHead>
-                <TableHead>Linked record</TableHead>
-                <TableHead className="text-right">Planned amount</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {plan.allocations.map((allocation) => (
-                <TableRow key={allocation.key}>
-                  <TableCell className="min-w-40 whitespace-normal">
-                    <span className="font-medium">{allocation.key}</span>
-                    <span className="block text-xs text-muted-foreground">
-                      {allocationLabels[allocation.kind]}
-                    </span>
-                    {allocation.description ? (
-                      <span className="block text-sm text-muted-foreground">
-                        {allocation.description}
+              </TableHeader>
+              <TableBody>
+                {plan.resources.map((resource) => (
+                  <TableRow key={resource.key}>
+                    <TableCell className="min-w-40 whitespace-normal">
+                      <span className="font-medium">{resource.key}</span>
+                      <span className="block text-xs text-muted-foreground">
+                        {resourceLabels[resource.kind]}
                       </span>
-                    ) : null}
-                  </TableCell>
-                  <TableCell className="max-w-64 whitespace-normal">
-                    <AllocationRelation allocation={allocation} relations={relations} />
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {formatMoney(allocation.amount)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            Nothing allocated yet. Add expenses and priorities in your financial profile, then
-            revise this budget.
-          </p>
-        )}
-      </Card>
-      <Card aria-label="Plan reasoning" className="grid gap-3 p-5">
-        <h2 className="text-base font-medium">What this budget depends on</h2>
-        <Collapsible>
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost">{plan.assumptions.length} assumptions · Show details</Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="pt-3">
-            {plan.assumptions.length ? (
-              <ul className="grid gap-2 text-sm">
-                {plan.assumptions.map((assumption) => (
-                  <li className="rounded-lg bg-secondary p-3 whitespace-pre-wrap" key={assumption}>
-                    {assumption}
-                  </li>
+                      {resource.description ? (
+                        <span className="block text-sm text-muted-foreground">
+                          {resource.description}
+                        </span>
+                      ) : null}
+                    </TableCell>
+                    <TableCell className="max-w-64 whitespace-normal">
+                      {resource.sourceId ? (
+                        <span>
+                          {relations.accounts.find((account) => account.id === resource.sourceId)
+                            ?.name ?? "Saved source"}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">No linked source</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatMoney(resource.amount)}
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </ul>
-            ) : (
-              <p className="text-sm text-muted-foreground">No assumptions recorded.</p>
-            )}
-          </CollapsibleContent>
-        </Collapsible>
-        <Collapsible>
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost">Why this budget?</Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="pt-3">
-            <p className="whitespace-pre-wrap text-sm">{plan.rationale}</p>
-          </CollapsibleContent>
-        </Collapsible>
-        <p className="text-xs text-muted-foreground">
-          Created {new Date(plan.createdAt).toLocaleString()}
-          {plan.approvedAt ? ` · Approved ${new Date(plan.approvedAt).toLocaleString()}` : ""}
-        </p>
+              </TableBody>
+            </Table>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No resources recorded. Add income or other available funds in your financial profile.
+            </p>
+          )}
+        </CardContent>
       </Card>
+      <Card aria-label="Plan allocations">
+        <CardHeader>
+          <CardTitle>Allocations</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {plan.allocations.length ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Allocation</TableHead>
+                  <TableHead>Linked record</TableHead>
+                  <TableHead className="text-right">Planned amount</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {plan.allocations.map((allocation) => (
+                  <TableRow key={allocation.key}>
+                    <TableCell className="min-w-40 whitespace-normal">
+                      <span className="font-medium">{allocation.key}</span>
+                      <span className="block text-xs text-muted-foreground">
+                        {allocationLabels[allocation.kind]}
+                      </span>
+                      {allocation.description ? (
+                        <span className="block text-sm text-muted-foreground">
+                          {allocation.description}
+                        </span>
+                      ) : null}
+                    </TableCell>
+                    <TableCell className="max-w-64 whitespace-normal">
+                      <AllocationRelation allocation={allocation} relations={relations} />
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatMoney(allocation.amount)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Nothing allocated yet. Add expenses and priorities in your financial profile, then
+              revise this budget.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+      <section aria-label="Plan reasoning" className="flex flex-col gap-2">
+        <FinanceDisclosure title={`${plan.assumptions.length} assumptions · Show details`}>
+          {plan.assumptions.length ? (
+            <ul className="flex flex-col gap-2">
+              {plan.assumptions.map((assumption) => (
+                <li key={assumption}>{assumption}</li>
+              ))}
+            </ul>
+          ) : (
+            <p>No assumptions recorded.</p>
+          )}
+        </FinanceDisclosure>
+        <FinanceDisclosure title="Why this budget?">
+          <p className="whitespace-pre-wrap">{plan.rationale}</p>
+          <p className="text-xs text-muted-foreground">
+            Created {new Date(plan.createdAt).toLocaleString()}
+            {plan.approvedAt ? ` · Approved ${new Date(plan.approvedAt).toLocaleString()}` : ""}
+          </p>
+        </FinanceDisclosure>
+      </section>
     </div>
   );
 }
@@ -356,7 +345,7 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
         {!approvalTask && plan && loaded ? (
           <Button
             size="icon-sm"
-            variant="outline"
+            variant="ghost"
             disabled={approve.isPending}
             onClick={openEditor}
             aria-label="Revise plan"
@@ -368,20 +357,27 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
       </WorkspaceHeaderControls>
       <div className="grid min-w-0 gap-7">
         {!approvalTask ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>Budget buckets</CardTitle>
-              <CardDescription>Group categories for your monthly plan.</CardDescription>
-              <CardAction>
+          <Card size="sm" aria-label="Budget controls">
+            <CardContent className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm text-muted-foreground">Category groups</span>
+                {relations.buckets.map((bucket) => (
+                  <Badge key={bucket.id} variant="secondary">
+                    {bucket.name}
+                  </Badge>
+                ))}
+              </div>
+              <div>
                 <Dialog>
                   <DialogTrigger asChild>
                     <Button
-                      size="icon-sm"
+                      size="sm"
                       variant="ghost"
                       aria-label="Budget buckets"
                       title="Budget buckets"
                     >
-                      <PlusIcon />
+                      <SettingsIcon />
+                      Budget buckets
                     </Button>
                   </DialogTrigger>
                   <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-3xl">
@@ -402,9 +398,7 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
                     )}
                   </DialogContent>
                 </Dialog>
-              </CardAction>
-            </CardHeader>
-            <CardContent>
+              </div>
               {bucketQuery.isError ? (
                 <InlineError
                   error={bucketQuery.error}
@@ -417,13 +411,6 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
               ) : !relations.buckets.length ? (
                 <p className="text-sm text-muted-foreground">No budget buckets yet.</p>
               ) : null}
-              <div className="flex flex-wrap gap-2">
-                {relations.buckets.map((bucket) => (
-                  <Badge key={bucket.id} variant="secondary">
-                    {bucket.name}
-                  </Badge>
-                ))}
-              </div>
             </CardContent>
           </Card>
         ) : null}
@@ -455,7 +442,8 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
             <Card>
               <CardHeader>
                 <div className="flex flex-wrap items-center gap-2">
-                  <CardTitle>Version {plan.version}</CardTitle>
+                  <CardTitle>Monthly budget</CardTitle>
+                  <span className="text-xs text-muted-foreground">Version {plan.version}</span>
                   <Badge variant={plan.status === "active" ? "default" : "secondary"}>
                     {plan.status === "proposed"
                       ? "Proposed"

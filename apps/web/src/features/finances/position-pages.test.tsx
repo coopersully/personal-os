@@ -20,6 +20,13 @@ import {
 } from "./position-material.js";
 import { FinanceWealthPage } from "./wealth-page.js";
 
+async function selectGoalAction(operation: string, name: string) {
+  fireEvent.keyDown(await screen.findByRole("button", { name: `Actions for ${name}` }), {
+    key: "ArrowDown",
+  });
+  fireEvent.click(await screen.findByRole("menuitem", { name: `${operation} ${name}` }));
+}
+
 vi.spyOn(toast, "loading");
 vi.spyOn(toast, "success");
 vi.spyOn(toast, "error");
@@ -310,9 +317,9 @@ describe("Finance position pages", () => {
       api.manageFinanceGoal.mockResolvedValueOnce({ ...envelope(goal), outcome: "failed" });
     else api.manageFinanceGoal.mockRejectedValueOnce(new Error("Network response lost"));
     mount(<FinanceWealthPage />);
-    fireEvent.click(await screen.findByRole("button", { name: "Pause Emergency reserve" }));
+    await selectGoalAction("Pause", "Emergency reserve");
     await screen.findByText("Goal was not changed");
-    fireEvent.click(screen.getByRole("button", { name: "Pause Emergency reserve" }));
+    await selectGoalAction("Pause", "Emergency reserve");
     await waitFor(() => expect(api.manageFinanceGoal).toHaveBeenCalledTimes(2));
     const first = api.manageFinanceGoal.mock.calls[0]?.[0];
     const second = api.manageFinanceGoal.mock.calls[1]?.[0];
@@ -867,7 +874,7 @@ describe("Finance position pages", () => {
     const position = await screen.findByRole("region", { name: "Wealth key metrics" });
     expect(within(position).getAllByText("Unavailable")).toHaveLength(3);
     expect(within(position).queryByText("$1,000.00")).not.toBeInTheDocument();
-    fireEvent.click(await screen.findByRole("button", { name: "Pause Emergency reserve" }));
+    await selectGoalAction("Pause", "Emergency reserve");
     await waitFor(() =>
       expect(api.manageFinanceGoal).toHaveBeenCalledWith({
         operation: "pause",
@@ -998,16 +1005,16 @@ describe("Finance position pages", () => {
     expect(screen.getByText(/Low priority · No deadline/)).toBeVisible();
     expect(screen.queryByText("Removed goal")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Manage accounts" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Resume Paused goal" }));
+    await selectGoalAction("Resume", "Paused goal");
     await waitFor(() =>
       expect(api.manageFinanceGoal).toHaveBeenCalledWith(
         expect.objectContaining({ operation: "resume" }),
       ),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Remove Done goal" }));
+    await selectGoalAction("Remove", "Done goal");
     expect(screen.getByRole("dialog", { name: "Remove goal" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    fireEvent.click(screen.getByRole("button", { name: "Complete Paused goal" }));
+    await selectGoalAction("Complete", "Paused goal");
     expect(screen.getByRole("dialog", { name: "Complete goal" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Confirm completion" }));
     await waitFor(() =>

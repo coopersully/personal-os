@@ -68,7 +68,7 @@ function estimate(): FinanceCashflowProjectionView {
     },
   };
 }
-it("requires explicit income selection and exposes real recovery actions for incomplete evidence", () => {
+it("requires explicit income selection and exposes real recovery actions for incomplete evidence", async () => {
   const callbacks = actions();
   render(
     <PaydayView
@@ -78,10 +78,13 @@ it("requires explicit income selection and exposes real recovery actions for inc
       {...callbacks}
     />,
   );
-  expect(screen.getByLabelText("Income stream defining this cycle")).toHaveValue("");
-  fireEvent.change(screen.getByLabelText("Income stream defining this cycle"), {
-    target: { value: "job-b" },
+  expect(
+    screen.getByRole("button", { name: "Income stream defining this cycle" }),
+  ).toHaveTextContent("Choose an income stream");
+  fireEvent.keyDown(screen.getByRole("button", { name: "Income stream defining this cycle" }), {
+    key: "ArrowDown",
   });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "Other job" }));
   expect(callbacks.onIncomeStreamChange).toHaveBeenCalledWith("job-b");
   fireEvent.click(screen.getByRole("button", { name: "Confirm recurring schedule" }));
   fireEvent.click(screen.getByRole("button", { name: "Review actual matches" }));
@@ -151,7 +154,7 @@ it("withholds stale-source results and explains unavailable canonical review rat
   expect(screen.queryByRole("table")).not.toBeInTheDocument();
 });
 
-it("shows an explicit zero protected floor and returns to the first movement page when selection clears", () => {
+it("shows an explicit zero protected floor and returns to the first movement page when selection clears", async () => {
   const view = estimate();
   if (view.projection.status !== "estimated") throw new Error("Expected estimate fixture");
   view.projection.protectedFloor = {
@@ -182,9 +185,10 @@ it("shows an explicit zero protected floor and returns to the first movement pag
   fireEvent.click(screen.getByRole("button", { name: "Previous cycle movements" }));
   expect(screen.getByText("Cycle movement page 1 of 2")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Next cycle movements" }));
-  fireEvent.change(screen.getByLabelText("Income stream defining this cycle"), {
-    target: { value: "" },
+  fireEvent.keyDown(screen.getByRole("button", { name: "Income stream defining this cycle" }), {
+    key: "ArrowDown",
   });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "Choose an income stream" }));
   expect(callbacks.onIncomeStreamChange).toHaveBeenCalledWith(null);
   expect(screen.getByText("Cycle movement page 1 of 2")).toBeVisible();
 });

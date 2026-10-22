@@ -1,3 +1,4 @@
+import { ReorderHandle } from "@/components/reorder-handle";
 import {
   defaultRitualReminderTime,
   type RitualDefinition,
@@ -11,8 +12,8 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api } from "../../api.js";
 import { useConfirmAction } from "../../components/confirm-action.js";
-import { QueryFeedback } from "../../components/async-state.js";
-import { ChevronRightIcon, MenuIcon, PlusIcon, ActivityIcon } from "../../components/icons.js";
+import { DataViewLoading, DataViewRecovery } from "@/components/data-view-state";
+import { ChevronRightIcon, PlusIcon, ActivityIcon } from "../../components/icons.js";
 import {
   Field,
   FieldDescription,
@@ -67,19 +68,14 @@ const responseTypes: { value: RitualStep["kind"]; label: string }[] = [
 ];
 export function RitualSettings({ timeZone, view = "morning", content = "all" }: { timeZone: string; content?: "all" | "checklist"; view?: "overview" | "morning" | "night" | "history" }) {
   const query = useQuery({ queryKey: ["rituals"], queryFn: api.listRituals });
-  if (query.isPending) return <p>Loading rituals…</p>;
-  if (query.isError && !query.data)
-    return (
-      <Card>
-        <CardContent>
-          <QueryFeedback query={query} title="Couldn’t load ritual settings." />
-          <Button onClick={() => void query.refetch()}>Retry</Button>
-        </CardContent>
-      </Card>
-    );
+  // History owns its own collection query; a definitions failure must not block it.
+  if (view === "history") return <RitualHistory />;
+  if (query.isPending) return <DataViewLoading label="Loading ritual settings" />;
+  if (!query.data)
+    return <DataViewRecovery query={query} title="Couldn’t load ritual settings." unavailableLabel="Ritual settings unavailable" />;
   return (
     <div className="settings-stack">
-      <QueryFeedback query={query} title="Couldn’t refresh ritual settings." staleOnly />
+      <DataViewRecovery query={query} title="Couldn’t refresh ritual settings." unavailableLabel="Ritual settings unavailable" />
       {view === "overview" ? (
         <>
           {(["morning", "night"] as const).map((kind) => <RitualForm key={kind} kind={kind} content="schedule" definition={query.data.rituals.find((d) => d.kind === kind)} timeZone={timeZone} />)}
@@ -88,7 +84,7 @@ export function RitualSettings({ timeZone, view = "morning", content = "all" }: 
         </>
       ) : view === "morning" || view === "night" ? (
         <RitualForm key={view} kind={view} content={content} definition={query.data.rituals.find((d) => d.kind === view)} timeZone={timeZone} />
-      ) : <RitualHistory />}
+      ) : null}
 
     </div>
   );
@@ -527,23 +523,8 @@ function SortableStep({
       className="ritual-step-row settings-inline-row relative flex min-h-12 items-center gap-2 px-4 py-2"
     >
       <Dialog open={open} onOpenChange={setOpen}>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className="cursor-grab touch-none active:cursor-grabbing"
-                aria-label={`Reorder step ${index + 1}`}
-                aria-description="Drag to reorder or use the up and down arrow keys"
-                onPointerDown={(event) => controls.start(event)}
-                onKeyDown={(event) => {
-                  const offset = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : 0;
-                  if (offset) {
-                    event.preventDefault();
-                    if (index + offset >= 0 && index + offset < count) move(offset);
-                  }
-                }}
-              >
-                <MenuIcon />
-              </Button>
+              <ReorderHandle controls={controls} label={`Reorder step ${index + 1}`}
+                onMove={move} canMoveUp={index > 0} canMoveDown={index < count - 1} />
           <DialogTrigger asChild>
             <Button variant="ghost" aria-label={`Edit step ${index + 1}`}
               className="ritual-step-trigger h-auto min-h-12 min-w-0 flex-1 justify-between gap-8 rounded-none px-0 py-2 text-left">

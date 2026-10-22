@@ -21,9 +21,8 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { ActionButton as ShadcnButton } from "@/components/action-button";
 import { CurrencyInput } from "@/components/currency-input";
+import { SortTrigger } from "@/components/data-view-controls";
 import {
-  ArrowDownIcon,
-  ArrowUpIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   CircleCheckIcon,
@@ -32,7 +31,6 @@ import {
   DownloadIcon,
   MerchantIcon,
   ReceiptIcon,
-  SortIcon,
 } from "@/components/icons";
 import {
   ResponsiveDialogBody as ImportBody,
@@ -2964,18 +2962,14 @@ function TransactionSortButton({
   sortBy: FinanceTransactionQuery["sortBy"];
 }) {
   const isActive = sort.sortBy === sortBy;
-  const Icon = !isActive ? SortIcon : sort.sortDirection === "asc" ? ArrowUpIcon : ArrowDownIcon;
   return (
-    <ShadcnButton
+    <SortTrigger
       aria-label={`Sort by ${label.toLowerCase()}`}
       className={align === "right" ? "ml-auto" : "-ml-2"}
       onClick={() => onSort(sortBy)}
-      size="sm"
-      variant="ghost"
-    >
-      {label}
-      <Icon aria-hidden="true" data-icon="inline-end" />
-    </ShadcnButton>
+      label={label}
+      direction={isActive ? sort.sortDirection : undefined}
+    />
   );
 }
 

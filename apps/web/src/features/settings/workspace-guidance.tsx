@@ -5,11 +5,12 @@ import {
 } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { QueryFeedback } from "@/components/async-state";
+import { DataViewLoading, DataViewRecovery } from "@/components/data-view-state";
 import { FeedbackForm } from "@/components/feedback-form";
 import { MutationFeedback } from "@/components/mutation-feedback";
 import { Field, FieldDescription, FieldLabel } from "@/components/settings-field";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useFeedbackMutation } from "@/lib/use-feedback-mutation";
@@ -17,7 +18,6 @@ import { api } from "../../api.js";
 import { CalendarProfilePreferenceFields } from "../calendar/profile-preference-fields";
 import { MailProfilePreferenceFields } from "../mail/profile-preference-fields";
 import { ProfileRow } from "./profile-rows";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { SettingsSection } from "./settings-layout";
 
 export function WorkspaceGuidance({ domain }: { domain: "calendar" | "mail" | "tasks" }) {
@@ -32,9 +32,13 @@ export function WorkspaceGuidance({ domain }: { domain: "calendar" | "mail" | "t
       title="Preferences & guidance"
       description="Describe how this workspace should support you."
     >
-      <QueryFeedback query={query} title="Couldn’t load workspace guidance." />
+      <DataViewRecovery
+        query={query}
+        title="Couldn’t load workspace guidance."
+        unavailableLabel="Workspace guidance unavailable"
+      />
       {query.isPending ? (
-        <p>Loading guidance…</p>
+        <DataViewLoading label="Loading workspace guidance" />
       ) : query.data ? (
         <>
           <ProfileRow label="Guidance" value="Configure" onClick={() => setEditing(true)} />

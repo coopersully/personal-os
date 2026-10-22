@@ -1,3 +1,4 @@
+import { settingsRoute } from "./settings-routes";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -56,7 +57,7 @@ function LocationProbe() {
 
 function SettingsDestination() {
   const location = useLocation();
-  const section = new URLSearchParams(location.search).get("section");
+  const section = settingsRoute(location.search);
   if (section === "agent-connections") return <ConnectedAgentsSettings />;
   if (section === "workspace-access") return <WorkspaceAccessSettings />;
   if (
@@ -606,7 +607,7 @@ describe("agent access settings", () => {
     const browser = userEvent.setup();
     renderSettings("/settings?page=security&subpage=workspace-access&workspace=mail");
 
-    expect(await screen.findByRole("heading", { name: "Workspace Access" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Agent review policy" })).toBeInTheDocument();
     expect(screen.queryByText("Your action queue")).not.toBeInTheDocument();
     expect(screen.queryByText("Access management")).not.toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Mail" })).toBeChecked();
@@ -638,7 +639,7 @@ describe("agent access settings", () => {
     expect(screen.getByLabelText("Current location")).toHaveTextContent(
       "/settings?page=security&subpage=workspace-access&workspace=tasks",
     );
-    await browser.click(screen.getByRole("link", { name: "Connected Agents" }));
+    await browser.click(screen.getByRole("link", { name: /^(Open )?Connected Agents$/i }));
     expect(
       await screen.findByRole("heading", { name: "Connect an agent host" }),
     ).toBeInTheDocument();
@@ -788,7 +789,7 @@ describe("agent access settings", () => {
     ).not.toBeInTheDocument();
 
     await browser.click(screen.getByRole("link", { name: "Open Mail access" }));
-    await browser.click(screen.getByRole("link", { name: "Connected Agents" }));
+    await browser.click(screen.getByRole("link", { name: /^(Open )?Connected Agents$/i }));
     expect(await screen.findByText("2 connected")).toBeInTheDocument();
     expect(screen.getByText(/Legacy inactive permission/)).toBeInTheDocument();
     const claudeHost = (await screen.findByText("Claude")).closest('[data-slot="item"]');

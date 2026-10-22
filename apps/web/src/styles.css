@@ -7624,16 +7624,14 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 }
 .wallpaper-editor > * { min-width: 0; }
 .wallpaper-editor__preview {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+  position: static;
 }
 .wallpaper-editor__preview .pinterest-wallpaper-preview__canvas {
   width: 100%;
 }
-@container settings (min-width: 32rem) {
+@container settings (min-width: 56rem) {
   .wallpaper-editor { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
-  .wallpaper-editor__preview { top: 1rem; grid-column: 2; grid-row: 1; }
+  .wallpaper-editor__preview { position: sticky; top: 1rem; grid-column: 2; grid-row: 1; }
   .wallpaper-editor__settings { grid-column: 1; grid-row: 1; }
 
 }
@@ -7646,7 +7644,7 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 }
 .appearance-picker .appearance-preview { width: 100%; }
 
-.wallpaper-editor__settings [data-slot="field-group"] { padding-inline: 0.5rem; }
+.wallpaper-editor__settings [data-slot="field-group"] { padding-inline: 0; gap: 0; }
 
 html.pet-window,
 html.pet-window body,
@@ -7778,15 +7776,11 @@ html.pet-window #root {
 .settings-panel [data-settings-row] > [data-slot="field-description"] { align-self: start; }
 .settings-panel [data-settings-row] > [data-slot="field-error"] { grid-column: 1 / -1; grid-row: auto; justify-self: stretch; }
 .settings-panel [data-settings-row] > :is(textarea, [data-slot="field-group"], [data-slot="field-set"]) { grid-column: 1 / -1; grid-row: auto; width: 100%; }
-.settings-panel [data-settings-row] > input[type="range"] { width: 12rem; }
+.settings-panel [data-settings-row] > :is(input[type="range"], [data-slot="slider"]) { width: 12rem; }
 .settings-panel [data-settings-row] > [data-slot="settings-value"] { text-align: end; color: var(--muted-foreground); overflow-wrap: anywhere; }
 @container settings (max-width: 30rem) {
   .settings-panel [data-settings-row] { grid-template-columns: minmax(6rem, 1fr) minmax(0, 1fr); }
   .settings-panel [data-settings-row] > :is([data-slot="settings-select"], [data-slot="settings-time"]) { max-width: 100%; }
-}
-@container settings (max-width: 22rem) {
-  .settings-panel [data-settings-row] { grid-template-columns: minmax(0, 1fr); }
-  .settings-panel [data-settings-row] > * { grid-column: 1; grid-row: auto; }
 }
 .settings-page__tools { display: none; justify-content: flex-end; gap: 0.5rem; margin-block-end: 1rem; }
 .settings-page__tools[data-has-actions="true"] { display: flex; }
@@ -7795,7 +7789,7 @@ html.pet-window #root {
 /* One editing geometry for every scalar Settings control. The row reserves room
    for the editor so focusing a short value cannot squeeze its label. */
 .settings-panel { --settings-editor-width: 18rem; }
-.settings-panel [data-settings-row] { grid-template-columns: minmax(0, 1fr) minmax(0, var(--settings-editor-width)); }
+.settings-panel [data-settings-row] { grid-template-columns: minmax(0, 1fr) minmax(0, min(var(--settings-editor-width), 60%)); }
 .settings-panel [data-settings-row] > :is([data-slot="settings-select"], [data-slot="settings-time"]) { width: 100%; min-width: 0; }
 .settings-panel [data-settings-row] > :where(input:not([type="range"]):not([type="color"]), [data-slot="input-group"]),
 .settings-panel .settings-value-input[data-slot="input-group"] {
@@ -7873,6 +7867,7 @@ html.pet-window #root {
   flex-grow: 0;
 }
 .settings-panel :is([data-settings-row], .settings-navigation-row):last-child { box-shadow: none; }
+.settings-panel [data-slot="table-row"] { border-color: var(--settings-divider-color); }
 .settings-panel .settings-inline-row { padding-block: 0; }
 
 .settings-icon-slot {
@@ -7971,7 +7966,9 @@ html.pet-window #root {
 .ritual-step-row { background: var(--card); transition: background-color 120ms ease; }
 .ritual-step-row:hover,
 .ritual-step-row:focus-within { background: var(--control-hover-background); }
-.ritual-step-row[data-dragging="true"] { background: var(--muted); z-index: 1; }
+:is(.ritual-step-row, .reorder-row)[data-dragging="true"] { background: var(--secondary); z-index: 1; }
+.reorder-row { transition: background-color 120ms ease; }
+.reorder-row:hover, .reorder-row:focus-within { background: var(--secondary); }
 .ritual-step-row .ritual-step-trigger { background: transparent; transform: none; }
 .ritual-step-editor.settings-panel { animation: none; }
 .ritual-step-editor.settings-panel [data-settings-row] { box-shadow: none; padding-inline: 0; }
@@ -8023,3 +8020,45 @@ html.pet-window #root {
   .auth-footer__links { display: none; }
   .auth-footer__help { display: block; }
 }
+
+/* Grouped search actions keep count badges within their divided end section. */
+[data-slot="input-group-addon"] .action-count-badge { right: .125rem; bottom: .125rem; }
+
+/* Count badges sit above search dividers, adjacent buttons, and their state surfaces. */
+.action-count-badge { z-index: 2; width: 1rem; min-width: 1rem; height: 1rem; padding: 0; border-radius: 9999px; }
+
+/* Joined search actions retain a fixed divider independent of their state surface. */
+[data-slot="input-group"]:has(.search-data-controls) { isolation: isolate; }
+/* Clip only the joined action surface. Counts live inside each section, above its
+   fill/divider; portalled menus and tooltips remain outside this clipping box. */
+.search-data-controls {
+  border-start-end-radius: inherit;
+  border-end-end-radius: inherit;
+  overflow: hidden;
+  margin-inline-end: 0;
+}
+.search-data-controls .search-data-control {
+  isolation: isolate;
+  overflow: visible;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.search-data-controls .search-data-control::before {
+  content: "";
+  position: absolute;
+  inset-block: 6px;
+  left: 0;
+  width: 1px;
+  background: var(--border);
+  opacity: .65;
+  pointer-events: none;
+}
+.search-data-controls .search-data-control:hover,
+.search-data-controls .search-data-control[data-state="open"] {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+.search-data-controls .search-data-control:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -3px;
+}
+.search-data-controls .action-count-badge { z-index: 3; }

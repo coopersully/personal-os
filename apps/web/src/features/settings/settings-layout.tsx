@@ -4,6 +4,7 @@ import { ArrowLeftIcon } from "@/components/icons";
 import { SettingsControlsContext } from "@/components/settings-controls-context";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader } from "@/components/ui/card";
+import { SettingsDataStateNotice } from "./dev/data-state-preview";
 import { SettingsFieldFocus } from "./settings-field-focus.js";
 
 /** Settings composition: a page introduction, then task-sized groups. No workspace app bar. */
@@ -31,6 +32,7 @@ export function SettingsPageLayout({
   return (
     <div className="settings-page">
       <SettingsFieldFocus />
+      {import.meta.env.DEV ? <SettingsDataStateNotice /> : null}
       {showHeader ? (
         <Card className="settings-page__heading relative" data-settings-section={section}>
           {back ? (
@@ -109,10 +111,10 @@ export function SettingsSection({
   return (
     <section className="settings-subsection" aria-labelledby={headingId}>
       {!hasHeader ? (
-      <div className="settings-subsection__label">
-        <h2 id={headingId}>{title}</h2>
-        {action ? <CardAction>{action}</CardAction> : null}
-      </div>
+        <div className="settings-subsection__label">
+          <h2 id={headingId}>{title}</h2>
+          {action ? <CardAction>{action}</CardAction> : null}
+        </div>
       ) : null}
       <Card
         className={
@@ -123,10 +125,18 @@ export function SettingsSection({
       >
         {hasHeader ? (
           <CardHeader className="settings-subsection__header flex flex-row items-start gap-3 p-4">
-            {icon ? <span className="settings-subsection__icon" aria-hidden="true">{icon}</span> : null}
+            {icon ? (
+              <span className="settings-subsection__icon" aria-hidden="true">
+                {icon}
+              </span>
+            ) : null}
             <div className="min-w-0 flex-1 space-y-1">
-              <h2 id={headingId} className="text-sm font-semibold">{title}</h2>
-              {description ? <p className="text-sm leading-relaxed text-muted-foreground">{description}</p> : null}
+              <h2 id={headingId} className="text-sm font-semibold">
+                {title}
+              </h2>
+              {description ? (
+                <p className="text-sm leading-relaxed text-muted-foreground">{description}</p>
+              ) : null}
               {headerContent}
             </div>
             {headerAside}

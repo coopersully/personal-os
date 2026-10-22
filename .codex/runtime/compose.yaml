@@ -69,6 +69,8 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgres://personal_os:personal_os@postgres:5432/personal_os
+      # Disposable local QA owner; explicit owner configuration always wins.
+      OWNER_EMAILS: ${OWNER_EMAILS:-qa+loaded@nohmi.test}
     healthcheck:
       test: [CMD, node, -e, "fetch('http://127.0.0.1:8787/health/ready').then(r=>{if(!r.ok)process.exit(1)})"]
       interval: 5s
@@ -99,6 +101,9 @@ services:
       mcp:
         condition: service_started
     environment:
+      # Bound the dev server on hosts running several worktree runtimes.
+      NODE_OPTIONS: --max-old-space-size=512
+      RAYON_NUM_THREADS: "1"
       VITE_API_BASE_URL: ""
       VITE_PROXY_API_TARGET: http://api:8787
       VITE_PROXY_MCP_TARGET: http://mcp:8788

@@ -501,3 +501,16 @@ it("locks dependent schedule fields until the ritual is enabled and keeps their 
   expect(time).toBeDisabled();
   expect(time).toHaveValue("06:00");
 });
+
+it("offers recovery when definitions fail without blocking the independent history collection", async () => {
+  mocks.list.mockReset().mockRejectedValue(new Error("Offline"));
+  mocks.history.mockReset().mockResolvedValue({ items: [], total: 0, nextCursor: null });
+  openSubpage("morning");
+  const unavailable = await screen.findByRole("region", { name: "Ritual settings unavailable" });
+  expect(unavailable).toHaveTextContent("Try again");
+  expect(screen.queryByText("Offline")).not.toBeInTheDocument();
+  await waitFor(() => expect(toast.error).toHaveBeenCalled());
+  openSubpage("history");
+  expect(await screen.findByText("No rituals in this period")).toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Ritual settings unavailable" })).not.toBeInTheDocument();
+});

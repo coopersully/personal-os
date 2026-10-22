@@ -3,6 +3,12 @@ import { type FormEvent, useId, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
 import {
+  FilterChip,
+  FilterTrigger,
+  SortOptionIcon,
+  SortTrigger,
+} from "@/components/data-view-controls";
+import {
   CalendarIcon,
   ChevronRightIcon,
   ClockIcon,
@@ -11,10 +17,7 @@ import {
   LayersIcon,
   ListTodoIcon,
   ProjectIcon,
-  SliderHorizontalIcon,
-  SortIcon,
   TagsIcon,
-  XIcon,
 } from "@/components/icons";
 import {
   ResponsiveDialog,
@@ -81,18 +84,16 @@ export function WorkspaceSort({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          size="icon"
-          variant="ghost"
+        <SortTrigger
+          compact
+          label={sortOptions.find(([key]) => key === value)?.[1] ?? "Recommended"}
           aria-label={
             value !== "default"
               ? `Sort: ${sortOptions.find(([key]) => key === value)?.[1] ?? "Recommended"}`
               : "Sort"
           }
           title="Sort tasks"
-        >
-          <SortIcon aria-hidden="true" />
-        </Button>
+        />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuGroup>
@@ -106,6 +107,7 @@ export function WorkspaceSort({
           >
             {sortOptions.map(([key, label]) => (
               <DropdownMenuRadioItem key={key} value={key}>
+                <SortOptionIcon value={key} />
                 {label}
               </DropdownMenuRadioItem>
             ))}
@@ -315,15 +317,13 @@ export function WorkspaceFilters({
       }}
     >
       <ResponsiveDialogTrigger asChild>
-        <Button
-          size="icon"
-          variant={count ? "secondary" : "ghost"}
+        <FilterTrigger
+          compact
+          label="Filters"
+          active={count > 0}
+          count={count}
           aria-label={count ? `Filters (${count})` : "Filters"}
-          title={count ? `Filters (${count})` : "Filters"}
-          badgeCount={count}
-        >
-          <SliderHorizontalIcon aria-hidden="true" />
-        </Button>
+        />
       </ResponsiveDialogTrigger>
       <ResponsiveDialogContent>
         <ResponsiveDialogHeader>
@@ -640,20 +640,16 @@ export function WorkspaceFilterChips({
   return (
     <fieldset aria-label="Active task filters" className="flex flex-wrap gap-1">
       {chips.map((chip) => (
-        <Button
+        <FilterChip
           key={chip.key}
-          size="xs"
-          variant="secondary"
+          label={chip.label}
           aria-label={`Remove ${chip.label}`}
-          onClick={() => {
+          onRemove={() => {
             const next = new URLSearchParams(routeParams);
             for (const key of chip.keys) next.delete(key);
             navigate(workspacePath(next));
           }}
-        >
-          <span className="max-w-64 truncate">{chip.label}</span>
-          <XIcon aria-hidden="true" data-icon="inline-end" />
-        </Button>
+        />
       ))}
     </fieldset>
   );

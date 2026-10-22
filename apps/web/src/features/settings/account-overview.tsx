@@ -2,6 +2,7 @@ import type { User } from "@personal-os/domain";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { BrandMark } from "@/components/brand-marks";
 import { BrandPattern } from "@/components/brand-pattern";
+import { DataViewRecovery } from "@/components/data-view-state";
 import { CloudIcon } from "@/components/icons";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { workspaceIdentities, workspaceIds } from "@/components/workspace-identity";
@@ -97,8 +98,16 @@ export function AccountOverview() {
         })}
       </ProfileSection>
       <ProfileSection title="Connections">
-        <QueryFeedback query={connectors} title="Couldn’t check connected accounts." />
-        <QueryFeedback query={bookmarks} title="Couldn’t check X bookmarks." />
+        <DataViewRecovery
+          query={connectors}
+          title="Couldn’t check connected accounts."
+          unavailableLabel="Connections unavailable"
+        />
+        <DataViewRecovery
+          query={bookmarks}
+          title="Couldn’t check X bookmarks."
+          unavailableLabel="X bookmarks unavailable"
+        />
         {connectors.data?.map((account) => (
           <ProfileRow
             key={account.id}

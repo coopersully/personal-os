@@ -1194,6 +1194,12 @@ export function createOpenApiDocument(apiBaseUrl: string) {
             queryParameter("kind", { type: "string", enum: ["morning", "night"] }),
             queryParameter("dateFrom", { type: "string", format: "date" }),
             queryParameter("dateTo", { type: "string", format: "date" }),
+            queryParameter("status", {
+              type: "string",
+              enum: ["pending", "completed", "skipped", "missed", "cancelled_configuration"],
+            }),
+            queryParameter("search", { type: "string", maxLength: 200 }),
+            queryParameter("sort", { type: "string", enum: ["newest", "oldest"] }),
           ],
           "x-required-scopes": ["tracking:read"],
           responses: { 200: { description: "Paginated ritual history" } },

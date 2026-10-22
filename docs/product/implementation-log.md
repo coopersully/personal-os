@@ -1091,3 +1091,25 @@ and are not offered as silent recovery targets. Source links preserve the exact 
 The consolidated Finance completion branch also gates pending question reply admission with the default-off Finance SMS switch. Verified disabled-rollout app composition leaves contextual and canonical replies pending without receipts, answers or continuations. Terminal admission results preserve policy/authority/delivery reasons, and ordered reconciliation reports fixed stage identifiers and validated failure counts without provider text. Focused regression evidence covers these behaviors; the pull request records the exact-main full verifier.
 
 Final host binding validates the Claude API trigger identity before activation. Successive replyable Finance notifications preserve the existing live reply namespace and direct additional work to app review, preventing duplicate item numbers without retargeting delayed replies. Focused regression verification covers both repairs; integrated full verification is recorded in the pull request.
+
+### Ritual history filtering and outcomes
+
+History now offers inactive dashed filter triggers, active chips first, and distinct
+filter/sort icons. Entry summaries separate required/optional completion, show applied
+snoozes and written answers, and put interaction telemetry behind disclosure.
+`GET /v1/rituals/history` accepts optional `status`, `search` (literal, up to 200
+characters), and `sort=newest|oldest`, returning `total` alongside stable cursor pages.
+Ownership/scopes are unchanged; search and sort occur before pagination, including
+for All Time. No new persistence schema or external service is involved.
+
+### Configurable history data view and shared filter treatment
+
+Ritual History now composes a shared TanStack/shadcn table with optional answer,
+outcome, scheduling, and timezone columns; required/optional counts and confirmed
+snoozes remain independently readable. Users can configure visibility, order, width,
+density, and wrapping on this device, inspect details, select the current page, and
+export the page or selected rows as CSV. Mobile renders labelled records. Server
+search/filter/sort remains ahead of bounded cursor pagination with selectable page
+sizes. Shared filter/sort triggers now cover Tasks, Finances, Reviews, Today, workspace
+search, and Calendar/Mail account sources, retaining their domain query behavior.
+These are source implementation claims, not a production deployment claim.

@@ -52,6 +52,11 @@ export function registerRitualRoutes({
             kind: z.enum(["morning", "night"]).optional(),
             dateFrom: z.iso.date().optional(),
             dateTo: z.iso.date().optional(),
+            status: z
+              .enum(["pending", "completed", "skipped", "missed", "cancelled_configuration"])
+              .optional(),
+            search: z.string().trim().max(200).optional(),
+            sort: z.enum(["newest", "oldest"]).optional(),
           })
           .parse(c.req.query()),
       ),

@@ -35,6 +35,7 @@ import { getCookie, setCookie } from "hono/cookie";
 import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { z } from "zod";
+import { createActiveReminderService } from "./active-reminder-service.js";
 import { createAgentAccessWorkItemService } from "./agent-access-work-items.js";
 import { createAssistantService } from "./assistant-service.js";
 import { createAuditService } from "./audit.js";
@@ -102,6 +103,7 @@ import { readinessPayload } from "./release-revision.js";
 import { createReminderService } from "./reminder-service.js";
 import { readBoundedRequestBody } from "./request-body.js";
 import { createRitualService } from "./ritual-service.js";
+import { registerActiveReminderRoutes } from "./routes/active-reminders.js";
 import { registerAssistantRoutes } from "./routes/assistant.js";
 import { registerAutomationHostRoutes } from "./routes/automation-hosts.js";
 import { registerCalendarRoutes } from "./routes/calendar.js";
@@ -302,6 +304,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       from: dependencies.config.emailFrom,
       resendApiKey: dependencies.config.resendApiKey,
     });
+  const activeReminders = createActiveReminderService({
+    db: dependencies.db,
+    now,
+    cursorSecret: dependencies.config.encryptionKey,
+  });
   const reminders = createReminderService({ db: dependencies.db, now });
   const taskWorkspace = createTaskWorkspaceService({
     db: dependencies.db,
@@ -1236,6 +1243,8 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/x-bookmarks", authenticate);
   app.use("/v1/x-bookmarks/*", authenticate);
   app.use("/v1/desktop/activity", authenticate, requireHuman);
+  app.use("/v1/desktop/active-reminders", authenticate, requireHuman);
+  app.use("/v1/active-reminders/*", authenticate, requireHuman);
   app.get("/v1/desktop/activity", async (context) => {
     const query = desktopActivityQuerySchema.parse(context.req.query());
     return context.json(
@@ -1543,6 +1552,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   });
   registerFinanceActivityRoutes({ app, activity: financeActivity });
 
+  registerActiveReminderRoutes({ app, activeReminders });
   registerReminderRoutes({ app, mutationContext, reminders });
 
   registerTaskListRoutes({ app, mutationContext, taskLists });

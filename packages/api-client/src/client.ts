@@ -35,6 +35,7 @@ import {
   connectedAccountHealthSchema,
   connectorAuthorizationOutcomeSchema,
 } from "@personal-os/domain";
+import { createActiveReminderApiClient } from "./features/active-reminders.js";
 import { createAssistantApiClient } from "./features/assistant.js";
 import { createAutomationHostApi } from "./features/automation-hosts.js";
 import { createCalendarApiClient } from "./features/calendar.js";
@@ -226,6 +227,7 @@ export function createApiClient(options: ClientOptions) {
     ...createDesktopReleaseApiClient(request),
     ...createMailApiClient(request, toQuery),
     ...createMailStewardshipApiClient(request),
+    ...createActiveReminderApiClient(request, toQuery),
     ...createReminderApiClient(request, toQuery),
     ...createTaskApiClient(request, toQuery),
     ...createTaskWorkspaceApiClient(request, toQuery),

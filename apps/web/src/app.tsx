@@ -1,5 +1,3 @@
-import { RecordDateEditor } from "./features/settings/record-date-editor";
-import { GoalProgressEditor } from "./features/settings/goal-progress-editor.js";
 import { settingsPath } from "@/features/settings/settings-routes";
 import {
   DayTimeline,
@@ -10,6 +8,8 @@ import {
   type TodayTimelineDensity,
 } from "./features/calendar/day-timeline.js";
 import { calendarEventColorStyle } from "./features/calendar/event-color.js";
+import { GoalProgressEditor } from "./features/settings/goal-progress-editor.js";
+import { RecordDateEditor } from "./features/settings/record-date-editor";
 import { settingsParents, settingsRoute } from "./features/settings/settings-routes";
 
 export {
@@ -104,6 +104,7 @@ import { BrandMark, brandTitle, hasBrandMark, NohmiBrandMark } from "@/component
 import { BrandPattern } from "@/components/brand-pattern";
 import { ChoiceCardGroup } from "@/components/choice-card-group";
 import { ConnectionCard } from "@/components/connection-card";
+import { DataViewEmpty, DataViewLoading, DataViewRecovery } from "@/components/data-view-state";
 import { DateInput } from "@/components/date-input";
 import { ErrorPage } from "@/components/error-page";
 import {
@@ -118,6 +119,7 @@ import {
 import {
   ActivityIcon,
   AlertTriangleIcon,
+  ArrowRightIcon,
   BankIcon,
   CalendarIcon,
   CalendarPlusIcon,
@@ -128,7 +130,6 @@ import {
   ClockIcon,
   CloudIcon,
   CompassIcon,
-  ArrowRightIcon,
   CopyIcon,
   CopyPlusIcon,
   EditIcon,
@@ -152,8 +153,8 @@ import {
   MoonIcon,
   PaintBrushIcon,
   PauseIcon,
-  PlayIcon,
   PinIcon,
+  PlayIcon,
   PlugIcon,
   PlusIcon,
   PulseIcon,
@@ -238,6 +239,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -312,12 +314,12 @@ import { TaskCreationProgress } from "@/features/tasks/creation-progress";
 import { api, isUnauthorized } from "./api.js";
 import { scrollTimelineToMinute } from "./calendar-timeline.js";
 import { InlineError, PageLoading, QueryFeedback } from "./components/async-state.js";
+import { AuthFooter } from "./components/auth-footer.js";
 import { useConfirmAction } from "./components/confirm-action.js";
+import { DataChoice } from "./components/data-view-controls.js";
 import { FeedbackForm } from "./components/feedback-form.js";
 import { MobileWorkspaceDock } from "./components/mobile-workspace-dock.js";
 import { MutationFeedback } from "./components/mutation-feedback.js";
-import { RecordSummaryTrial } from "./features/settings/record-summary-trial.js";
-import { AuthFooter } from "./components/auth-footer.js";
 import { SettingsRecord, SettingsRecordAction } from "./components/settings-record.js";
 import { WorkspaceAppBar } from "./components/workspace-app-bar.js";
 import { WorkspaceHeaderControlsSlot } from "./components/workspace-header-controls.js";
@@ -380,6 +382,7 @@ import {
 import { ProfileChoice } from "./features/settings/profile-choice.js";
 import { ProfileInlineField } from "./features/settings/profile-inline-field.js";
 import { ProfileRow, ProfileSection } from "./features/settings/profile-rows.js";
+import { RecordSummaryTrial } from "./features/settings/record-summary-trial.js";
 import { RelatedSettings } from "./features/settings/related-settings.js";
 import { SettingsPageLayout, SettingsSection } from "./features/settings/settings-layout.js";
 import { SettingsSearch, settingsDescriptions } from "./features/settings/settings-search.js";
@@ -1806,7 +1809,11 @@ function SidebarNavigationItem({
   return contextMenu ? (
     <ContextMenu>
       <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-      <ContextMenuContent><ContextMenuLabel>{label}</ContextMenuLabel><ContextMenuSeparator />{contextMenu}</ContextMenuContent>
+      <ContextMenuContent>
+        <ContextMenuLabel>{label}</ContextMenuLabel>
+        <ContextMenuSeparator />
+        {contextMenu}
+      </ContextMenuContent>
     </ContextMenu>
   ) : (
     row
@@ -1861,7 +1868,14 @@ function NavigationIcon({
       />
     );
   }
-  return <OutlineIcon aria-hidden="true" className={className} weight={active ? "Filled" : "Outline"} data-navigation-icon-weight={active ? "fill" : "regular"} />;
+  return (
+    <OutlineIcon
+      aria-hidden="true"
+      className={className}
+      weight={active ? "Filled" : "Outline"}
+      data-navigation-icon-weight={active ? "fill" : "regular"}
+    />
+  );
 }
 
 function WorkspaceAppBarForRoute({
@@ -2637,12 +2651,19 @@ function TodayCommitmentList({
 
   return (
     <div className="today-commitments">
-      <SegmentedControl aria-label="Commitment filters" onValueChange={selectFilter} value={filter}>
-        <SegmentedControlItem value="all">All</SegmentedControlItem>
-        <SegmentedControlItem value="overdue">Overdue</SegmentedControlItem>
-        <SegmentedControlItem value="tasks">Tasks</SegmentedControlItem>
-        <SegmentedControlItem value="reminders">Reminders</SegmentedControlItem>
-      </SegmentedControl>
+      <DataChoice
+        label="Commitment filters"
+        ariaLabel="Commitment filters"
+        value={filter}
+        active={filter !== "all"}
+        choices={[
+          ["all", "All"],
+          ["overdue", "Overdue"],
+          ["tasks", "Tasks"],
+          ["reminders", "Reminders"],
+        ]}
+        onChange={selectFilter}
+      />
       {visibleCommitments.length > 0 ? (
         <ShadcnScrollArea aria-label="Commitments" className="today-commitments__scroll">
           <ShadcnItemGroup aria-label="Commitments" className="today-commitments__list">
@@ -5303,77 +5324,116 @@ function GoalsPage({ completedOnly = false }: { completedOnly?: boolean }) {
     mutationFn: (id: string) => api.deleteGoal(id),
     onSuccess: refresh,
   });
-  if (goals.isPending) return <PageLoading />;
+  if (goals.isPending) return <DataViewLoading label="Loading goals" />;
   if (goals.isError && !goals.data)
-    return <InlineError error={goals.error} retry={goals.refetch} />;
+    return (
+      <DataViewRecovery
+        query={goals}
+        title="Couldn’t load goals."
+        unavailableLabel="Goals unavailable"
+      />
+    );
   return (
     <div className="settings-stack">
-      {!completedOnly ? <h2 className="px-1 text-xs font-medium text-muted-foreground">Goals</h2> : null}
-      <QueryFeedback query={goals} title="Couldn’t refresh goals." staleOnly />
+      {!completedOnly ? (
+        <h2 className="px-1 text-xs font-medium text-muted-foreground">Goals</h2>
+      ) : null}
+      <DataViewRecovery
+        query={goals}
+        title="Couldn’t refresh goals."
+        unavailableLabel="Goals unavailable"
+      />
       <Dialog open={creating} onOpenChange={setCreating}>
-        {!completedOnly ? <SettingsSection
-          layout="rows"
-          title="Active Outcomes"
-          icon={<TargetIcon />}
-          description="Outcomes you’re working toward. Share them as context with authorized agents to help connect daily decisions to what matters to you."
-          action={
-            <DialogTrigger asChild>
-              <SettingsRecordAction label="Add goal">
-                <PlusIcon />
-              </SettingsRecordAction>
-            </DialogTrigger>
-          }
-        >
-          {goals.data.filter((goal) => goal.status !== "completed").length === 0 ? (
-            <EmptyState icon={<TargetIcon />} title="Set a direction">
-              Create one outcome you want your daily decisions to support.
-            </EmptyState>
-          ) : (
-            <ShadcnItemGroup className="gap-0 overflow-hidden rounded-[inherit]">
-              {goals.data.filter((goal) => goal.status !== "completed").map((goal) => (
-                <GoalItem
-                  goal={goal}
-                  key={goal.id}
-                  onDelete={() =>
-                    confirm({
-                      title: "Delete goal?",
-                      description: "This permanently deletes the goal.",
-                      actionLabel: "Delete goal",
-                      onConfirm: () => remove.mutate(goal.id),
-                    })
-                  }
-                  onUpdate={(input) => update.mutateAsync({ id: goal.id, input })}
-                  pending={update.isPending || remove.isPending}
-                />
-              ))}
-            </ShadcnItemGroup>
-          )}
-        </SettingsSection> : null}
-        {!completedOnly ? <div className="flex justify-end">
-          <ShadcnButton asChild variant="secondary" size="sm">
-            <Link to={settingsSectionPath("completed-outcomes")}>Completed Outcomes <ArrowRightIcon aria-hidden="true" /></Link>
-          </ShadcnButton>
-        </div> : null}
+        {!completedOnly ? (
+          <SettingsSection
+            layout="rows"
+            title="Active Outcomes"
+            icon={<TargetIcon />}
+            description="Outcomes you’re working toward. Share them as context with authorized agents to help connect daily decisions to what matters to you."
+            action={
+              goals.data.some((goal) => goal.status !== "completed") ? (
+                <DialogTrigger asChild>
+                  <SettingsRecordAction label="Add goal">
+                    <PlusIcon />
+                  </SettingsRecordAction>
+                </DialogTrigger>
+              ) : undefined
+            }
+          >
+            {goals.isError && goals.data.length === 0 ? null : goals.data.filter(
+                (goal) => goal.status !== "completed",
+              ).length === 0 ? (
+              <DataViewEmpty
+                title="No active outcomes"
+                description="Add a goal to give your daily decisions a direction."
+              >
+                <ShadcnButton onClick={() => setCreating(true)}>Add goal</ShadcnButton>
+              </DataViewEmpty>
+            ) : (
+              <ShadcnItemGroup className="gap-0 overflow-hidden rounded-[inherit]">
+                {goals.data
+                  .filter((goal) => goal.status !== "completed")
+                  .map((goal) => (
+                    <GoalItem
+                      goal={goal}
+                      key={goal.id}
+                      onDelete={() =>
+                        confirm({
+                          title: "Delete goal?",
+                          description: "This permanently deletes the goal.",
+                          actionLabel: "Delete goal",
+                          onConfirm: () => remove.mutate(goal.id),
+                        })
+                      }
+                      onUpdate={(input) => update.mutateAsync({ id: goal.id, input })}
+                      pending={update.isPending || remove.isPending}
+                    />
+                  ))}
+              </ShadcnItemGroup>
+            )}
+          </SettingsSection>
+        ) : null}
+        {!completedOnly ? (
+          <div className="flex justify-end">
+            <ShadcnButton asChild variant="secondary" size="sm">
+              <Link to={settingsSectionPath("completed-outcomes")}>
+                Completed Outcomes <ArrowRightIcon aria-hidden="true" />
+              </Link>
+            </ShadcnButton>
+          </div>
+        ) : null}
         {completedOnly ? (
-          <SettingsSection layout="rows" title="Completed Outcomes" icon={<CheckIcon />} description="Outcomes you’ve finished. Keep them as a record of progress and context you can share with agents, separate from your current priorities.">
+          <SettingsSection
+            layout="rows"
+            title="Completed Outcomes"
+            icon={<CheckIcon />}
+            description="Outcomes you’ve finished. Keep them as a record of progress and context you can share with agents, separate from your current priorities."
+          >
             <ShadcnItemGroup className="gap-0 overflow-hidden rounded-[inherit]">
-              {!goals.data.some((goal) => goal.status === "completed") ? <p className="p-4 text-sm text-muted-foreground">No completed outcomes yet.</p> : null}
-              {goals.data.filter((goal) => goal.status === "completed").map((goal) => (
-                <GoalItem
-                  goal={goal}
-                  key={goal.id}
-                  onDelete={() =>
-                    confirm({
-                      title: "Delete goal?",
-                      description: "This permanently deletes the goal.",
-                      actionLabel: "Delete goal",
-                      onConfirm: () => remove.mutate(goal.id),
-                    })
-                  }
-                  onUpdate={(input) => update.mutateAsync({ id: goal.id, input })}
-                  pending={update.isPending || remove.isPending}
+              {!goals.isError && !goals.data.some((goal) => goal.status === "completed") ? (
+                <DataViewEmpty
+                  title="No completed outcomes yet"
+                  description="Goals you finish will appear here."
                 />
-              ))}
+              ) : null}
+              {goals.data
+                .filter((goal) => goal.status === "completed")
+                .map((goal) => (
+                  <GoalItem
+                    goal={goal}
+                    key={goal.id}
+                    onDelete={() =>
+                      confirm({
+                        title: "Delete goal?",
+                        description: "This permanently deletes the goal.",
+                        actionLabel: "Delete goal",
+                        onConfirm: () => remove.mutate(goal.id),
+                      })
+                    }
+                    onUpdate={(input) => update.mutateAsync({ id: goal.id, input })}
+                    pending={update.isPending || remove.isPending}
+                  />
+                ))}
             </ShadcnItemGroup>
           </SettingsSection>
         ) : null}
@@ -5452,41 +5512,83 @@ function GoalItem({
 }) {
   return (
     <RecordSummaryTrial
-      editing={{ pending, description: goal.description ?? "", saveTitle: (title) => onUpdate({ title }), saveDescription: (description) => onUpdate({ description: description || null }) }}
+      editing={{
+        pending,
+        description: goal.description ?? "",
+        saveTitle: (title) => onUpdate({ title }),
+        saveDescription: (description) => onUpdate({ description: description || null }),
+      }}
       kind="Goal"
       title={goal.title}
       progress={goal.progress}
       inactive={goal.status === "paused"}
       completed={goal.status === "completed"}
       value={null}
-      summary={[goal.status === "paused" ? "Paused" : null, goal.targetDate ? `Target ${formatCalendarDate(goal.targetDate)}` : null].filter(Boolean).join(" · ")}
+      summary={[
+        goal.status === "paused" ? "Paused" : null,
+        goal.targetDate ? `Target ${formatCalendarDate(goal.targetDate)}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")}
       details={
         <div className="space-y-5">
           <dl className="space-y-2 text-sm">
             <dt className="settings-detail-heading">Target date</dt>
-            <dd className="text-muted-foreground"><RecordDateEditor value={goal.targetDate ?? ""} pending={pending} onSave={(targetDate) => onUpdate({ targetDate: targetDate || null })} /></dd>
+            <dd className="text-muted-foreground">
+              <RecordDateEditor
+                value={goal.targetDate ?? ""}
+                pending={pending}
+                onSave={(targetDate) => onUpdate({ targetDate: targetDate || null })}
+              />
+            </dd>
           </dl>
-          <GoalProgressEditor value={goal.progress} pending={pending} onSave={(progress) => { void onUpdate({ progress, ...(progress === 100 ? { status: "completed" } : goal.status === "completed" ? { status: "active" } : {}) }).catch(() => {}); }} />
+          <GoalProgressEditor
+            value={goal.progress}
+            pending={pending}
+            onSave={(progress) => {
+              void onUpdate({
+                progress,
+                ...(progress === 100
+                  ? { status: "completed" }
+                  : goal.status === "completed"
+                    ? { status: "active" }
+                    : {}),
+              }).catch(() => {});
+            }}
+          />
         </div>
       }
       description={goal.description ?? "No supporting context yet."}
       actions={
         <>
-          <ShadcnButton variant="destructive" aria-label={`Remove ${goal.title}`} disabled={pending} onClick={onDelete}>
+          <ShadcnButton
+            variant="destructive"
+            aria-label={`Remove ${goal.title}`}
+            disabled={pending}
+            onClick={onDelete}
+          >
             Delete
           </ShadcnButton>
           {goal.status === "active" || goal.status === "paused" ? (
-            <ShadcnButton variant="secondary"
+            <ShadcnButton
+              variant="secondary"
               disabled={pending}
-              onClick={() => { void onUpdate({ status: goal.status === "paused" ? "active" : "paused" }).catch(() => {}); }}
+              onClick={() => {
+                void onUpdate({ status: goal.status === "paused" ? "active" : "paused" }).catch(
+                  () => {},
+                );
+              }}
             >
-              {goal.status === "paused" ? <PlayIcon aria-hidden="true" /> : <PauseIcon aria-hidden="true" />}
+              {goal.status === "paused" ? (
+                <PlayIcon aria-hidden="true" />
+              ) : (
+                <PauseIcon aria-hidden="true" />
+              )}
               {goal.status === "paused" ? "Resume" : "Pause"}
             </ShadcnButton>
           ) : null}
         </>
       }
-
     />
   );
 }
@@ -5520,13 +5622,23 @@ function MotivesPage() {
     mutationFn: (id: string) => api.deleteMotive(id),
     onSuccess: refresh,
   });
-  if (motives.isPending) return <PageLoading />;
+  if (motives.isPending) return <DataViewLoading label="Loading motives" />;
   if (motives.isError && !motives.data)
-    return <InlineError error={motives.error} retry={motives.refetch} />;
+    return (
+      <DataViewRecovery
+        query={motives}
+        title="Couldn’t load motives."
+        unavailableLabel="Motives unavailable"
+      />
+    );
   return (
     <div className="settings-stack">
       <h2 className="px-1 text-xs font-medium text-muted-foreground">Motives</h2>
-      <QueryFeedback query={motives} title="Couldn’t refresh motives." staleOnly />
+      <DataViewRecovery
+        query={motives}
+        title="Couldn’t refresh motives."
+        unavailableLabel="Motives unavailable"
+      />
       <Dialog open={creating} onOpenChange={setCreating}>
         <SettingsSection
           layout="rows"
@@ -5534,22 +5646,33 @@ function MotivesPage() {
           icon={<CompassIcon />}
           description="Values and reasons behind your priorities. Share this context with authorized agents to help them understand what matters to you."
           action={
-            <DialogTrigger asChild>
-              <SettingsRecordAction label="Add motive">
-                <PlusIcon />
-              </SettingsRecordAction>
-            </DialogTrigger>
+            motives.data.length ? (
+              <DialogTrigger asChild>
+                <SettingsRecordAction label="Add motive">
+                  <PlusIcon />
+                </SettingsRecordAction>
+              </DialogTrigger>
+            ) : undefined
           }
         >
-          {motives.data.length === 0 ? (
-            <EmptyState icon={<CompassIcon />} title="Name what matters">
-              Add a value or reason that should inform your priorities.
-            </EmptyState>
+          {motives.isError && motives.data.length === 0 ? null : motives.data.length === 0 ? (
+            <DataViewEmpty
+              title="No motives yet"
+              description="Add a value or reason behind your priorities."
+            >
+              <ShadcnButton onClick={() => setCreating(true)}>Add motive</ShadcnButton>
+            </DataViewEmpty>
           ) : (
             <ShadcnItemGroup className="gap-0 overflow-hidden rounded-[inherit]">
               {motives.data.map((motive) => (
                 <RecordSummaryTrial
-                  editing={{ pending: update.isPending, description: motive.detail ?? "", saveTitle: (title) => update.mutateAsync({ id: motive.id, input: { title } }), saveDescription: (detail) => update.mutateAsync({ id: motive.id, input: { detail: detail || null } }) }}
+                  editing={{
+                    pending: update.isPending,
+                    description: motive.detail ?? "",
+                    saveTitle: (title) => update.mutateAsync({ id: motive.id, input: { title } }),
+                    saveDescription: (detail) =>
+                      update.mutateAsync({ id: motive.id, input: { detail: detail || null } }),
+                  }}
                   inactive={!motive.isActive}
                   kind="Motive"
                   key={motive.id}
@@ -5571,12 +5694,21 @@ function MotivesPage() {
                             onConfirm: () => remove.mutate(motive.id),
                           })
                         }
-                      >Delete</ShadcnButton>
-                      <ShadcnButton variant="secondary"
-                        disabled={update.isPending}
-                        onClick={() => update.mutate({ id: motive.id, input: { isActive: !motive.isActive } })}
                       >
-                        {motive.isActive ? <PauseIcon aria-hidden="true" /> : <PlayIcon aria-hidden="true" />}
+                        Delete
+                      </ShadcnButton>
+                      <ShadcnButton
+                        variant="secondary"
+                        disabled={update.isPending}
+                        onClick={() =>
+                          update.mutate({ id: motive.id, input: { isActive: !motive.isActive } })
+                        }
+                      >
+                        {motive.isActive ? (
+                          <PauseIcon aria-hidden="true" />
+                        ) : (
+                          <PlayIcon aria-hidden="true" />
+                        )}
                         {motive.isActive ? "Pause" : "Resume"}
                       </ShadcnButton>
                     </>
@@ -6363,28 +6495,31 @@ function SettingsPageContent({
       ) : null}
       {section === "agent-connections" ? <ConnectedAgentsSettings /> : null}
       {section === "workspace-access" ? <WorkspaceAccessSettings /> : null}
-      {section === "activity" ? (
-        <SettingsSection
-          title="Activity history"
-          description="Search changes made by you, agents, and connected services."
-        >
-          <div>
-            <ActivityTopbarControls />
-          </div>
-          <ActivityPage />
-        </SettingsSection>
-      ) : null}
+      {section === "activity" ? <ActivityPage /> : null}
       {section === "appearance" ? (
         <div className="settings-stack">
           <ThemeSettings user={user} />
         </div>
       ) : null}
-      {section === "rituals" ? <RitualSettings view="overview" timeZone={user.planningTimezone} /> : null}
-      {section === "ritual-morning" ? <RitualSettings view="morning" content="checklist" timeZone={user.planningTimezone} /> : null}
-      {section === "ritual-evening" ? <RitualSettings view="night" content="checklist" timeZone={user.planningTimezone} /> : null}
-      {section === "ritual-history" ? <RitualSettings view="history" timeZone={user.planningTimezone} /> : null}
+      {section === "rituals" ? (
+        <RitualSettings view="overview" timeZone={user.planningTimezone} />
+      ) : null}
+      {section === "ritual-morning" ? (
+        <RitualSettings view="morning" content="checklist" timeZone={user.planningTimezone} />
+      ) : null}
+      {section === "ritual-evening" ? (
+        <RitualSettings view="night" content="checklist" timeZone={user.planningTimezone} />
+      ) : null}
+      {section === "ritual-history" ? (
+        <RitualSettings view="history" timeZone={user.planningTimezone} />
+      ) : null}
       {section === "completed-outcomes" ? <GoalsPage completedOnly /> : null}
-      {section === "goals" ? <div className="settings-stack"><GoalsPage /><MotivesPage /></div> : null}
+      {section === "goals" ? (
+        <div className="settings-stack">
+          <GoalsPage />
+          <MotivesPage />
+        </div>
+      ) : null}
       {section === "profile" ? <ProfileSettings user={user} /> : null}
       {section === "setup" ? <SetupSettings user={user} /> : null}
       {section === "invitations" ? <InvitationsSettings /> : null}
@@ -6416,9 +6551,15 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
     onSuccess: () => invalidateMaterial(queryClient),
   });
   const calendarGroups = groupCalendarsByAccount(accounts.data ?? [], query.data ?? []);
-  if (query.isPending) return <PageLoading />;
+  if (query.isPending) return <DataViewLoading label="Loading calendar sources" />;
   if (query.isError && !query.data)
-    return <InlineError error={query.error} retry={query.refetch} />;
+    return (
+      <DataViewRecovery
+        query={query}
+        title="Couldn’t load calendars."
+        unavailableLabel="Calendar sources unavailable"
+      />
+    );
   return (
     <SettingsSection
       action={
@@ -6428,85 +6569,60 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
       }
       description="Choose what appears in your unified view."
       title="Calendar sources"
+      layout="rows"
     >
-      <QueryFeedback query={query} title="Couldn’t load calendars." />
-      <QueryFeedback query={accounts} title="Couldn’t load connected accounts." />
+      <DataViewRecovery
+        query={query}
+        title="Couldn’t load calendars."
+        unavailableLabel="Calendar sources unavailable"
+      />
+      <DataViewRecovery
+        query={accounts}
+        title="Couldn’t load connected accounts."
+        unavailableLabel="Connected accounts unavailable"
+      />
       {calendarGroups.length ? (
-        <ShadcnItemGroup className="calendar-settings__groups">
+        <div>
           {calendarGroups.map((group) => (
-            <section className="calendar-settings__group" key={group.accountId}>
-              <ShadcnItem className="calendar-settings__account" size="sm">
-                <ShadcnItemMedia variant="default">
+            <section
+              key={group.accountId}
+              className="border-b border-(--settings-divider-color) last:border-b-0"
+            >
+              <div className="settings-subsection__header flex min-w-0 items-center gap-3 p-4">
+                <span className="settings-icon-slot">
                   <ConnectedAccountIdentity
                     avatarUrl={group.account?.avatarUrl}
                     label={group.label}
                     provider={group.provider}
                     size="default"
                   />
-                </ShadcnItemMedia>
-                <ShadcnItemContent>
-                  <ShadcnItemTitle>{group.label}</ShadcnItemTitle>
-                  <ShadcnItemDescription>
-                    {group.account?.email && group.account.email !== group.label
-                      ? group.account.email
-                      : `${group.calendars.length} calendar${group.calendars.length === 1 ? "" : "s"}`}
-                  </ShadcnItemDescription>
-                </ShadcnItemContent>
-                <ShadcnItemActions>
-                  <span className="calendar-settings__count">
-                    {group.calendars.filter((calendar) => calendar.isSelected).length}/
-                    {group.calendars.length}
-                  </span>
-                </ShadcnItemActions>
-              </ShadcnItem>
-              <ShadcnItemGroup className="calendar-settings__calendars">
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{group.label}</p>
+                  {group.account?.email ? (
+                    <p className="truncate text-xs text-muted-foreground">{group.account.email}</p>
+                  ) : null}
+                </div>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {group.calendars.filter((calendar) => calendar.isSelected).length} /{" "}
+                  {group.calendars.length}
+                </span>
+              </div>
+              <ShadcnFieldGroup>
                 {group.calendars.map((calendar) => (
-                  <ShadcnItem
-                    variant="secondary"
-                    className="calendar-settings__calendar"
-                    key={calendar.id}
-                    size="sm"
-                  >
-                    <ShadcnItemMedia variant="default">
-                      <ShadcnSwitch
-                        aria-label={
-                          calendar.isSelected ? `Hide ${calendar.name}` : `Show ${calendar.name}`
-                        }
-                        checked={calendar.isSelected}
-                        className="calendar-settings__checkbox data-checked:border-(--calendar-color) data-checked:bg-(--calendar-color)"
-                        disabled={selected.isPending}
-                        onCheckedChange={(checked) =>
-                          selected.mutate({ id: calendar.id, value: checked === true })
-                        }
-                        style={
-                          {
-                            "--calendar-color": calendar.color ?? "var(--primary)",
-                          } as CSSProperties
-                        }
-                      />
-                    </ShadcnItemMedia>
-                    <ShadcnItemContent>
-                      <ShadcnItemTitle>
-                        {calendar.name}
-                        {!calendar.isWritable ? (
-                          <ExternalLinkIcon
-                            aria-label="Subscribed calendar"
-                            className="calendar-settings__calendar-external"
-                            role="img"
-                          />
-                        ) : null}
-                      </ShadcnItemTitle>
-                      <ShadcnItemDescription>
-                        {calendar.provider === "local"
-                          ? "nohmi calendar"
-                          : calendar.provider === "icloud"
-                            ? "iCloud Calendar"
-                            : "Google Calendar"}{" "}
-                        · {calendar.isWritable ? "Writable" : "Subscribed"}
-                      </ShadcnItemDescription>
-                    </ShadcnItemContent>
-                    {calendar.provider === "local" ? (
-                      <ShadcnItemActions>
+                  <ShadcnField key={calendar.id} orientation="horizontal">
+                    <ShadcnFieldLabel htmlFor={`calendar-visible-${calendar.id}`}>
+                      {calendar.name}
+                      {!calendar.isWritable ? (
+                        <ExternalLinkIcon
+                          aria-label="Subscribed calendar"
+                          className="size-4 text-muted-foreground"
+                          role="img"
+                        />
+                      ) : null}
+                    </ShadcnFieldLabel>
+                    <div data-settings-row-actions="" className="flex shrink-0 items-center gap-3">
+                      {calendar.provider === "local" ? (
                         <ActionButton
                           aria-label={`Delete ${calendar.name}`}
                           disabled={remove.isPending}
@@ -6525,17 +6641,31 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
                         >
                           <TrashIcon />
                         </ActionButton>
-                      </ShadcnItemActions>
-                    ) : null}
-                  </ShadcnItem>
+                      ) : null}
+                      <ShadcnSwitch
+                        id={`calendar-visible-${calendar.id}`}
+                        aria-label={
+                          calendar.isSelected ? `Hide ${calendar.name}` : `Show ${calendar.name}`
+                        }
+                        checked={calendar.isSelected}
+                        disabled={selected.isPending}
+                        onCheckedChange={(checked) =>
+                          selected.mutate({ id: calendar.id, value: checked === true })
+                        }
+                      />
+                    </div>
+                  </ShadcnField>
                 ))}
-              </ShadcnItemGroup>
+              </ShadcnFieldGroup>
             </section>
           ))}
-        </ShadcnItemGroup>
-      ) : (
-        <p className="settings-empty">No calendars are available.</p>
-      )}
+        </div>
+      ) : !query.isError ? (
+        <DataViewEmpty
+          title="No calendar sources"
+          description="Add a local calendar or connect an account to choose what appears."
+        />
+      ) : null}
 
       <MutationFeedback feedback={selected.feedback} />
       <MutationFeedback feedback={remove.feedback} />
@@ -6652,9 +6782,15 @@ function ConnectorsSettings() {
         invalidateMaterial(queryClient),
       ]),
   });
-  if (query.isPending) return <PageLoading />;
+  if (query.isPending) return <DataViewLoading label="Loading connections" />;
   if (query.isError && !query.data)
-    return <InlineError error={query.error} retry={query.refetch} />;
+    return (
+      <DataViewRecovery
+        query={query}
+        title="Couldn’t load connections."
+        unavailableLabel="Connections unavailable"
+      />
+    );
   return (
     <SettingsSection
       action={
@@ -6712,9 +6848,21 @@ function ConnectorsSettings() {
           else setConnectMenuOpen(true);
         }}
       />
-      <QueryFeedback query={query} title="Couldn’t load connected accounts." />
-      <QueryFeedback query={xAccount} title="Couldn’t load X bookmarks account." />
-      <QueryFeedback query={xFolders} title="Couldn’t load bookmark folders." />
+      <DataViewRecovery
+        query={query}
+        title="Couldn’t load connected accounts."
+        unavailableLabel="Connections unavailable"
+      />
+      <DataViewRecovery
+        query={xAccount}
+        title="Couldn’t load X bookmarks account."
+        unavailableLabel="X bookmarks unavailable"
+      />
+      <DataViewRecovery
+        query={xFolders}
+        title="Couldn’t load bookmark folders."
+        unavailableLabel="Bookmark folders unavailable"
+      />
       <Dialog
         open={showICloud}
         onOpenChange={(open) => {
@@ -6887,11 +7035,12 @@ function ConnectorsSettings() {
             />
           ))}
         </ShadcnItemGroup>
-      ) : (
-        <p className="settings-empty">
-          No external calendars connected. Your local calendar already works.
-        </p>
-      )}
+      ) : !query.isError && xAccount.isSuccess && !xAccount.data ? (
+        <DataViewEmpty
+          title="No connected accounts"
+          description="Your local calendar works without a connection. Use Connect when you want to add an account."
+        />
+      ) : null}
 
       <MutationFeedback feedback={googleConnect.feedback} />
       <MutationFeedback feedback={xConnect.feedback} />
@@ -7583,7 +7732,8 @@ function PinterestWallpaperDesktopSettingsPanel() {
         </SettingsSection>
       </div>
       <div className="wallpaper-editor__settings settings-stack">
-        <SettingsSection layout="rows"
+        <SettingsSection
+          layout="rows"
           description="Paste a public board URL and nohmi will compose a fresh tiled collage from its Pins each day."
           title="Pinterest wallpaper"
         >
@@ -8088,21 +8238,20 @@ function ProfileSecurity({ user }: { user: User }) {
   return (
     <div className="settings-stack">
       <ProfileSection title="Security">
-        <ProfileRow
-          label="Password"
-          value="Change"
-          onClick={() => setAction("password")}
-        />
+        <ProfileRow label="Password" value="Change" onClick={() => setAction("password")} />
         <div className="settings-command-row">
           <ShadcnButton
             variant="destructive"
             disabled={logout.isPending}
-            onClick={() => confirm({
-              title: "Logout?",
-              description: "You’ll be logged out on this device. You can sign in again at any time.",
-              actionLabel: "Logout",
-              onConfirm: () => logout.mutate(),
-            })}
+            onClick={() =>
+              confirm({
+                title: "Logout?",
+                description:
+                  "You’ll be logged out on this device. You can sign in again at any time.",
+                actionLabel: "Logout",
+                onConfirm: () => logout.mutate(),
+              })
+            }
           >
             {logout.isPending ? "Logging out…" : "Logout"}
           </ShadcnButton>
@@ -8313,21 +8462,24 @@ function InvitationsSettings() {
     <SettingsSection
       description="Issue single-use invitation codes for the private beta. The code is shown only once, so copy it before you leave this page."
       title="Invitations"
+      layout="rows"
       action={
-        <ShadcnButton type="button" onClick={() => setCreating(true)}>
+        <ShadcnButton
+          type="button"
+          disabled={invitations.isPending || (invitations.isError && !invitations.data)}
+          onClick={() => setCreating(true)}
+        >
           <PlusIcon />
           New invitation
         </ShadcnButton>
       }
     >
-      <QueryFeedback query={invitations} title="Couldn’t load invitations." staleOnly />
-      {invitations.isError && !invitations.data ? (
-        <InlineError
-          error={invitations.error}
-          retry={invitations.refetch}
-          title="Couldn’t load invitations."
-        />
-      ) : (
+      <DataViewRecovery
+        query={invitations}
+        title="Couldn’t load invitations."
+        unavailableLabel="Invitations unavailable"
+      />
+      {!invitations.isError || invitations.data ? (
         <>
           <Dialog
             open={creating}
@@ -8335,7 +8487,7 @@ function InvitationsSettings() {
               if (!create.isPending) setCreating(open);
             }}
           >
-            <DialogContent>
+            <DialogContent showCloseButton={false}>
               <DialogHeader>
                 <DialogTitle>New invitation</DialogTitle>
                 <DialogDescription>Choose a recipient and expiry.</DialogDescription>
@@ -8360,9 +8512,19 @@ function InvitationsSettings() {
                   </ShadcnField>
                 </ShadcnFieldGroup>
 
-                <ShadcnButton disabled={create.isPending} type="submit">
-                  {create.isPending ? "Creating invitation…" : "Create invitation"}
-                </ShadcnButton>
+                <DialogFooter>
+                  <ShadcnButton
+                    type="button"
+                    variant="secondary"
+                    disabled={create.isPending}
+                    onClick={() => setCreating(false)}
+                  >
+                    Cancel
+                  </ShadcnButton>
+                  <ShadcnButton disabled={create.isPending} type="submit">
+                    {create.isPending ? "Creating invitation…" : "Create invitation"}
+                  </ShadcnButton>
+                </DialogFooter>
               </FeedbackForm>
             </DialogContent>
           </Dialog>
@@ -8380,16 +8542,22 @@ function InvitationsSettings() {
               </ShadcnAlertAction>
             </ShadcnAlert>
           ) : null}
-          {invitations.isLoading ? <Spinner label="Loading invitations" /> : null}
+          {invitations.isLoading ? <DataViewLoading label="Loading invitations" /> : null}
+          {invitations.data?.length === 0 && !invitations.isError ? (
+            <DataViewEmpty
+              title="No invitations yet"
+              description="Create an invitation when you’re ready to invite someone."
+            />
+          ) : null}
           {invitations.data?.length ? (
-            <ShadcnItemGroup>
+            <ShadcnFieldGroup>
               {invitations.data.map((invitation) => (
                 <InvitationRow invitation={invitation} key={invitation.id} />
               ))}
-            </ShadcnItemGroup>
+            </ShadcnFieldGroup>
           ) : null}
         </>
-      )}
+      ) : null}
     </SettingsSection>
   );
 }
@@ -8397,18 +8565,18 @@ function InvitationsSettings() {
 function InvitationRow({ invitation }: { invitation: Invitation }) {
   const expired = new Date(invitation.expiresAt).getTime() <= Date.now();
   return (
-    <ShadcnItem variant="secondary">
-      <ShadcnItemContent>
-        <ShadcnItemTitle>{invitation.email ?? "Unassigned invitation"}</ShadcnItemTitle>
-        <ShadcnItemDescription>
-          {invitation.redeemedAt
-            ? `Redeemed ${formatRelative(invitation.redeemedAt)}`
-            : expired
-              ? "Expired"
-              : `Expires ${formatRelative(invitation.expiresAt)}`}
-        </ShadcnItemDescription>
-      </ShadcnItemContent>
-    </ShadcnItem>
+    <div className="settings-navigation-row flex min-w-0 items-center justify-between gap-6 text-sm">
+      <span className="min-w-0 truncate font-medium">
+        {invitation.email ?? "Unassigned invitation"}
+      </span>
+      <span className="shrink-0 text-xs text-muted-foreground">
+        {invitation.redeemedAt
+          ? `Redeemed ${formatRelative(invitation.redeemedAt)}`
+          : expired
+            ? "Expired"
+            : `Expires ${formatRelative(invitation.expiresAt)}`}
+      </span>
+    </div>
   );
 }
 
@@ -8421,15 +8589,31 @@ function SessionsSettings() {
     mutationFn: api.revokeSession,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["sessions"] }),
   });
-  if (sessions.isPending) return <PageLoading />;
+  if (sessions.isPending) return <DataViewLoading label="Loading devices" />;
   if (sessions.isError && !sessions.data)
-    return <InlineError error={sessions.error} retry={sessions.refetch} />;
+    return (
+      <DataViewRecovery
+        query={sessions}
+        title="Couldn’t load devices."
+        unavailableLabel="Devices unavailable"
+      />
+    );
   return (
     <SettingsSection
       description="Devices with an active sign-in to your nohmi account. Revoke access you no longer recognize."
       title="Sessions"
     >
-      <QueryFeedback query={sessions} title="Couldn’t load sessions." />
+      <DataViewRecovery
+        query={sessions}
+        title="Couldn’t load devices."
+        unavailableLabel="Devices unavailable"
+      />
+      {!sessions.isError && sessions.data?.length === 0 ? (
+        <DataViewEmpty
+          title="No signed-in devices"
+          description="Devices with an active sign-in will appear here."
+        />
+      ) : null}
       <ShadcnItemGroup>
         {sessions.data?.map((session) => (
           <SessionRow

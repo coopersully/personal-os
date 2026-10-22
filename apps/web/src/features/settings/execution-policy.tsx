@@ -10,7 +10,6 @@ import {
   FieldDescription,
   FieldLabel,
 } from "../../components/settings-field.js";
-import { SettingsSection } from "./settings-layout";
 import { Switch } from "../../components/ui/switch.js";
 import { classifyMutationError } from "../../lib/feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
@@ -20,6 +19,7 @@ import {
   usePreferenceSession,
 } from "../workspace-settings/account-save-session";
 import { SettingsSaveRecovery } from "../workspace-settings/save-recovery";
+import { SettingsSection } from "./settings-layout";
 
 const queryKey = ["execution-policy"] as const;
 

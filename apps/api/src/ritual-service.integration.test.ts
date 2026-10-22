@@ -268,6 +268,47 @@ describe.sequential("ritual account lifecycle", () => {
       ),
     ).toBe(true);
   });
+  it("searches and filters the whole history before stable bidirectional pagination", async () => {
+    const all = await service.history(context(), { limit: 100 });
+    expect(all.total).toBe(all.items.length);
+    const oldest = await service.history(context(), { limit: 100, sort: "oldest" });
+    expect(oldest.items.map((item) => item.id)).toEqual(all.items.map((item) => item.id).reverse());
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await service.history(context(), { limit: 1, sort: "oldest", cursor });
+      seen.push(...page.items.map((item) => item.id));
+      expect(page.total).toBe(all.total);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+    expect(seen).toEqual(oldest.items.map((item) => item.id));
+    const label = all.items[0]!.definition.steps[0]!.label;
+    const searched = await service.history(context(), { limit: 100, search: label });
+    expect(searched.total).toBeGreaterThan(0);
+    expect(
+      searched.items.every((item) =>
+        item.definition.steps.some((step) => step.label.includes(label)),
+      ),
+    ).toBe(true);
+    expect(
+      (await service.history(context(), { limit: 10, search: "%unlikely_literal%" })).total,
+    ).toBe(0);
+    const status = all.items[0]!.status;
+    const filtered = await service.history(context(), { limit: 100, status });
+    expect(filtered.items.every((item) => item.status === status)).toBe(true);
+    const [other] = await database.db
+      .insert(users)
+      .values({ displayName: "Other", email: "history-other@example.com", passwordHash: "unused" })
+      .returning();
+    const ctx = context();
+    ctx.principal.userId = other!.id;
+    ctx.principal.actorId = other!.id;
+    expect(await service.history(ctx, { limit: 10, search: label })).toEqual({
+      items: [],
+      total: 0,
+      nextCursor: null,
+    });
+  });
   it("keeps today's open occurrence when its edited time is also already past", async () => {
     const current = (await service.current(context())).current!;
     const def = (await service.list(context()))[0]!;

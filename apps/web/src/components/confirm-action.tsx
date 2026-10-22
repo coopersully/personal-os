@@ -69,7 +69,13 @@ export function useConfirmAction() {
               <DialogDescription>{options.description}</DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              {options.intent === "default" ? <DialogClose asChild><Button ref={cancel} variant="secondary">Cancel</Button></DialogClose> : null}
+              {options.intent === "default" ? (
+                <DialogClose asChild>
+                  <Button ref={cancel} variant="secondary">
+                    Cancel
+                  </Button>
+                </DialogClose>
+              ) : null}
               <Button
                 type="button"
                 variant={options.intent === "default" ? "default" : "destructive"}
@@ -81,9 +87,11 @@ export function useConfirmAction() {
               >
                 {options.actionLabel}
               </Button>
-              {options.intent !== "default" ? <DialogClose asChild>
-                <Button ref={cancel}>Cancel</Button>
-              </DialogClose> : null}
+              {options.intent !== "default" ? (
+                <DialogClose asChild>
+                  <Button ref={cancel}>Cancel</Button>
+                </DialogClose>
+              ) : null}
             </DialogFooter>
           </DialogContent>
         ) : null}

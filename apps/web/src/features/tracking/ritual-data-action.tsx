@@ -4,7 +4,13 @@ import { useConfirmAction } from "../../components/confirm-action.js";
 import { Button } from "../../components/ui/button.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 
-export function RitualDataAction({ kind, disabled = false }: { kind?: "morning" | "night"; disabled?: boolean }) {
+export function RitualDataAction({
+  kind,
+  disabled = false,
+}: {
+  kind?: "morning" | "night";
+  disabled?: boolean;
+}) {
   const cache = useQueryClient();
   const exportData = useFeedbackMutation({
     feedback: { action: "export ritual history", safeToRetry: true, form: false },
@@ -43,15 +49,37 @@ export function RitualDataAction({ kind, disabled = false }: { kind?: "morning" 
       onConfirm: () => remove.mutate(kind),
     });
 
-  return <>
-    {kind ? <Button variant="destructive" size="sm" disabled={disabled || remove.isPending} onClick={() => deleteHistory(kind)}>Delete Data</Button> :
-      <Button variant="secondary" size="sm" disabled={exportData.isPending} onClick={() => confirm({
-        intent: "default",
-        title: "Export Rituals?",
-        description: "Download your ritual definitions, answers, and history as a JSON file on this device.",
-        actionLabel: "Export Rituals",
-        onConfirm: () => exportData.mutate(),
-      })}>Export Rituals</Button>}
-    {confirmation}
-  </>;
+  return (
+    <>
+      {kind ? (
+        <Button
+          variant="destructive"
+          size="sm"
+          disabled={disabled || remove.isPending}
+          onClick={() => deleteHistory(kind)}
+        >
+          Delete Data
+        </Button>
+      ) : (
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={exportData.isPending}
+          onClick={() =>
+            confirm({
+              intent: "default",
+              title: "Export Rituals?",
+              description:
+                "Download your ritual definitions, answers, and history as a JSON file on this device.",
+              actionLabel: "Export Rituals",
+              onConfirm: () => exportData.mutate(),
+            })
+          }
+        >
+          Export Rituals
+        </Button>
+      )}
+      {confirmation}
+    </>
+  );
 }

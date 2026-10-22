@@ -557,12 +557,204 @@ the same padding token, with no additional root gap or vertical padding. Content
 omits top padding when a header exists and bottom padding when a footer exists,
 so adjoining slots provide one spacing interval rather than doubling it.
 
-Ritual History uses an open search/filter/sort toolbar above a flat divided row list,
+Ritual History uses an open search/filter/sort toolbar above a configurable table (stacked records on mobile),
 not a separate card of filter settings or nested record cards. Default to the current
 Monday–Sunday week in the profile time zone; allow week/month selection and adjacent
 period navigation. Each row summarizes ritual, date, completed steps, and status, with
 a chevron opening the answer/activity dialog and a full-width Close footer action.
-Search (including answers) and status filtering operate over the complete selected
-period before sorting and ten-row pagination; never silently search only loaded pages.
-Keep the request bounded by the selected period and resolve its API cursors, reset
-pagination when criteria change, and distinguish an empty period from no matches.
+Search (including answers), status filtering, and sorting run on the API before
+bounded cursor pagination (ten rows by default). Keep one page in flight rather than fetching the entire
+history; All Time is available without a date constraint. Reset pagination when
+criteria change, and distinguish an empty period from no matches.
+
+History filter controls use a leading filter icon. Unfiltered values (Both Rituals,
+All Statuses, All Time) are dashed, quiet triggers with a plus affordance; selected
+constraints become filled chips and move before inactive controls in both visual
+and keyboard order. Sorting uses a separate sort icon and does not masquerade as
+a filter. Default to This Week while allowing the period filter to be cleared.
+
+Ritual history emphasizes outcomes over interaction telemetry: summarize required
+and optional progress separately, count only confirmed/applied snoozes, and preview
+a submitted written answer when available. Detail dialogs show the latest answer
+or Not done for every scheduled step, including unfinished required steps. Preserve
+the complete saved-response/button-press evidence under Interaction Log, closed
+initially, so drafts/cancellations do not read as successful actions.
+
+## Flexible data views and filter controls
+
+Use shared `FilterTrigger`, `FilterChip`, `SortTrigger`, `DataChoice`, and `FilterBar`
+from `components/data-view-controls`. Dataset filters have a leading filter glyph;
+unconstrained defaults are quiet dashed triggers with a plus, applied constraints are
+filled secondary chips. Applied filters precede inactive controls in DOM and keyboard
+order. Sorting has its own glyph and radio menu; it is not an applied filter. Keep
+view switches, grouping, and default-setting editors distinct from dataset filters.
+Existing advanced forms retain draft/apply behavior and domain-specific choices.
+
+Bound toolbars rather than adding an unlimited horizontal strip: show a small set
+(two on mobile, five on desktop), then a searchable More Filters dialog/drawer.
+Retain full accessible names when visible labels truncate. Long option sets need a
+searchable combobox; short mutually exclusive lists use shadcn radio menus. This
+shared treatment applies to Tasks, Finances, Reviews, Today, workspace search, and
+Calendar/Mail account-source filters. Preserve their URL and saved-preference contracts.
+
+Use `components/data-table` for configurable record views. Ritual History is its
+first consumer: desktop has shared shadcn table anatomy and full-width row dividers;
+mobile has labelled stacked records with the same fields and detail actions. Offer
+column visibility/order/width, density, wrapping, and reset through Table Options.
+Persist only layout preferences on the device, scoped by account. Table configuration
+must not mutate underlying records or reduce audit evidence to editable generic CRUD.
+
+Keep search/filter/sort on the server before cursor pagination. Reset cursors when
+criteria or page size changes; request only a bounded page (10/25/50/100 for history).
+Do not imply that sorting the loaded page sorts the full dataset. Selection and CSV
+export explicitly cover the current page or selected rows on that page, use visible
+columns in their chosen order, and escape spreadsheet formula text. Keep history
+answers and interaction evidence accessible through row details, with outcome,
+required/optional completion, and confirmed snoozes available as separate columns.
+Do not promise arbitrary unlimited data in the browser: bounded requests, responsive
+filter overflow, and local table scrolling are the scaling contract. Background layout
+saves are silent; storage/download failures and download initiation use Sonner.
+
+Keep record-table chrome outside the table surface: a quiet contextual caption and
+secondary overflow menu sit above the card; the card begins with column headings.
+Put Export and Table Options in that overflow menu rather than exposing parallel
+buttons. Selection actions appear only after selection; select-all lives in the
+table header (mobile offers Select Page in the menu). Show the result range once
+in a compact pagination footer alongside page size. Avoid repeating row counts or
+creating a second header band inside the table card.
+
+For compact record toolbars, keep the shrinking search input, one Filters trigger
+(with an applied count), and an icon-sized Sort trigger on one row, including mobile.
+Use `FilterBar collapsed` to put all criteria in its searchable responsive dialog.
+Table Options must fit the dialog width; allow vertical scrolling only, shrink
+labels/controls, and never require horizontal scrolling for configuration.
+
+Reorderable lists use the shared `ReorderHandle`: the same leading grip glyph,
+ghost button, grab/grabbing cursor, and handle-only pointer/touch drag. Up/Down
+arrow keys on the focused handle provide the equivalent reorder action with bounds.
+Use Motion Reorder groups/items with quiet shared drag-state treatment, preserve
+input/row-action interactions, and avoid separate up/down action-button pairs.
+This list pattern does not replace spatial event dragging in the calendar.
+
+Mobile table records need a distinguishing title, not just the desktop first-cell
+label. Combine the object name with meaningful identity context such as its date;
+keep that title first even when desktop columns are reordered. Avoid repeating
+title metadata as a separate field. Ritual History uses “Evening Ritual · date”
+above four default details: Status, Required, Optional, Snoozes. Extra configured
+columns remain available. Desktop keeps the ritual name and date in separate columns.
+Use DataColumn `mobileCell` and `mobileHidden` for this domain-owned presentation.
+
+When dataset actions sit beside a search field, append them inside its shadcn
+InputGroup using `SearchDataControls` (inline-end addon and InputGroupButton).
+Use icon-only triggers with full accessible names/tooltips, an applied-filter count,
+and a secondary selected treatment for a non-default sort. Avoid separate floating
+pills, repeated borders, or another toolbar row. Filter dialogs keep readable labels.
+This follows the app’s existing Calendar and Settings input-addon action pattern.
+
+Tables default to Compact density. Desktop cells use small consistent vertical
+padding and grow for actual wrapped content; never stretch rows to fill the page.
+Mobile records keep a distinguishing title above a tight two-column detail grid;
+in Compact density, short labels and values share a baseline rather than consuming
+two lines per field. Omit duplicated metadata, keep long text bounded with details
+accessible, and retain Comfortable spacing and wrapping as explicit user choices.
+Density must preserve readable labels, meaningful identifiers, keyboard focus, and
+usable touch targets; it does not mean shrinking type or removing necessary context.
+
+Column reordering uses rounded shadcn Item anatomy with a quiet secondary surface
+for hover/focus/drag, preserving text color and avoiding bright rectangular inversions.
+Never use a foreground/content token as a dragged-row background. Compact mobile
+status cells may use `CompactStatus` glyphs, retaining a label on tap/focus and an
+accessible name; desktop retains text badges. Counts use `CompletionCount`: the
+completed and total use the same normal text size and color.
+CSV values remain plain ratios and full status labels.
+
+Treat mobile table rows as composed records, not wrapped desktop columns. Build an
+identity block with a prominent name and subordinate distinguishing context (date,
+account, or identifier), then cluster related facts in a deliberate reading order.
+Keep each short label close to its value; avoid distributing unrelated facts across
+a grid solely because they were adjacent columns on desktop. Use `mobileOrder` for
+domain-owned grouping while preserving desktop column ordering and visibility.
+Ritual history groups Required + Optional completion first, Status + Snoozes second.
+Keep the title/date together and omit repeated metadata. In progress ratios, make
+completed and total the same normal text, separated by a spaced slash. Compact
+density minimizes unnecessary spacing without flattening identity and detail into
+one undifferentiated line.
+
+Search action sections and filter forms: keep filter and sort in separate appended
+sections divided from the search input and one another. Use standard action-count
+badges for active filters/non-default sorting; no inline count text or standalone
+floating pills. Filter dialogs use the standard search InputGroup above flat Settings
+Field rows with full-width dividers and plain end-aligned values; avoid filter-chip
+controls inside the form itself. Mobile metadata uses consistent text size/line height
+and a predictable value column per group. Completion ratios are plain “done / total”
+text without different sizes, colors, or weights within the ratio. This replaces
+earlier experiments with subordinate denominators and undivided search actions.
+
+Settings value columns reserve up to the standard editor width, capped at 60%
+of the row on narrow surfaces. Keep editor-width tokens as lengths and constrain
+the row track, so nested controls do not repeatedly shrink a percentage width.
+
+Search action dividers use the surrounding body/background color. Count badges
+are circular and paint above dividers and every button hover/focus/selected surface;
+never clip them at input or action boundaries. Keep hover and keyboard focus visible
+without covering the badge. Every sort option has a direction/field icon; filter
+options get domain icons when meaningful (dates, morning/evening, statuses). Filter
+value triggers retain standard horizontal padding in idle, hover, focus, and open
+states; plain text styling is not zero-padding button styling.
+
+- Joined search actions use stable inset separators independent of hover/open backgrounds, consistent hit areas and inset keyboard focus. Count badges stay above state surfaces. Rows open from their non-interactive area; checkboxes and other embedded controls retain independent actions, with a primary keyboard-accessible opener.
+- Historical detail views separate a compact outcome summary, numbered question/answer pairs, and a single chronological activity log. Retain draft and action-outcome evidence; align timestamps separately from content. Nearby calendar dates use Today, Yesterday, or Tomorrow in the relevant time zone, with explicit dates farther away.
+
+### Data-page states and verification
+
+Follow the full state matrix in `../design/system.md#data-page-state-and-recovery-contract`.
+Compose shared `data-view-state` with domain query state; never infer global absence from
+one filtered/cursor page. Remove meaningless table controls for zero rows, retaining every
+escape from active criteria. Error details belong to Sonner in Settings; persistent neutral
+availability/freshness and retry controls keep recovery discoverable without duplicate error
+copy. Test initial load, filtered/period emptiness, global emptiness, stale data, failure/retry,
+and restoration. Verify no data mutation, lost filters, lost preferences, or keyboard trap.
+
+All Time must retain scope context and a direct return to the default period. Successful
+recovery restores data-dependent controls; no one-way UI hiding flags. Test the complete
+Show All/return round trip on real records. Inventory absence requires every contributing
+read to succeed, and cached zero results after refresh failure do not establish current
+absence. Empty states should offer one clear create path, not duplicate header/body buttons.
+
+Visual QA uses the local development collection-state preview described in
+`qa-fixtures.md`. Audit each owning collection on desktop/mobile and inspect lower regions,
+not only page headers. Keep admin gates unchanged and report permission coverage gaps;
+UI simulations are not evidence that an upstream failure was reproduced in production.
+
+### Populated records and native configuration
+
+The 2026-10-22 audit used the local owner fixture and a current-worktree Tauri QA
+bundle. Shared loading/absence/recovery coverage is not complete layout adoption:
+inspect populated records and actual native controls too.
+
+- General capability guidance belongs in the subsection identity header. Actionable
+  OS permission setup is its first standard row, with current state and a modal
+  chevron. Keep setup instructions, native settings, checks, and tests together in
+  that guided dialog. Refresh on open/return and allow manual recheck; opening the
+  dialog must not request OS permissions. Keep footer actions grouped, with the next
+  setup/test action primary on the right. Test acceptance is not banner delivery.
+  Action outcomes use Sonner; persistent permission state is configuration state.
+- Compact rows retain leading label/trailing control placement on narrow screens;
+  do not move a switch to another line simply because the viewport is small. Let
+  labels wrap within their track; use an explicit stacked composition only for a
+  compound editor that actually needs it.
+- Calendar Sources uses account identity headers followed by flat calendar rows;
+  account and calendar separators share the canonical divider. Keep switches at the
+  end and deletion independently labelled. Mail account summaries navigate to their
+  configuration; rule summaries use compact rows with bounded condition text and
+  independent status/actions. Do not nest record cards inside these row sections.
+- A color setting rests as a swatch and value. Open the shared color picker in a
+  bounded, end-aligned popover; preserve keyboard editing, live preview, coalesced
+  persistence, and focus restoration. Related workspace switches get ordinary rows.
+- Server choices stay visible as flat rows. Switching an API origin is an explicit
+  Connect action because it crosses a session boundary; ordinary preference autosave
+  must not silently switch it. Preserve tested-origin checks, fresh settings identity,
+  and sign-out/reset semantics. Keep Connect on the right of secondary test actions.
+
+Native UI inspection does not certify signed widget installation, OS permission
+delivery, login registration, or production/provider operation.

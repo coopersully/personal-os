@@ -50,7 +50,15 @@ export function ProfileRow({
         <span className="min-w-0">
           <span className="block truncate font-medium">{label}</span>
           {description ? (
-            <span className={truncateDescription ? "block max-w-[52ch] truncate text-xs font-normal text-muted-foreground" : "block text-xs font-normal text-muted-foreground"}>{description}</span>
+            <span
+              className={
+                truncateDescription
+                  ? "block max-w-[52ch] truncate text-xs font-normal text-muted-foreground"
+                  : "block text-xs font-normal text-muted-foreground"
+              }
+            >
+              {description}
+            </span>
           ) : null}
         </span>
       </span>

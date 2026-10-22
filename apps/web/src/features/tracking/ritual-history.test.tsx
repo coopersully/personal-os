@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { RitualOccurrence } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { toast } from "sonner";
 import { SettingsFeedbackContext } from "../../lib/settings-feedback.js";
 import { RitualDataAction } from "./ritual-data-action.js";
@@ -104,13 +104,12 @@ it("filters, paginates and exports complete response and escape history", async 
       <RitualDataAction kind="night" />
     </>,
   );
-  const rows = await screen.findAllByRole("button", { name: /Morning Ritual.*steps done/ });
-  expect(rows).toHaveLength(2);
+  const rows = await screen.findAllByRole("button", { name: /Morning Ritual/ });
+  expect(rows).toHaveLength(1);
   expect(mocks.history).toHaveBeenCalledWith(
     undefined,
     expect.objectContaining({ dateFrom: expect.any(String), dateTo: expect.any(String) }),
   );
-  expect(mocks.history).toHaveBeenCalledWith("2026-09-29T10:00:00Z", expect.anything());
   fireEvent.click(rows[0]!);
   expect(screen.getByText(/^Due /)).toHaveTextContent(
     new Date(occurrence.dueAt).toLocaleString(undefined, {
@@ -118,11 +117,25 @@ it("filters, paginates and exports complete response and escape history", async 
       timeZoneName: "short",
     }),
   );
-  expect(screen.getByText(/Teeth: Done/)).toBeInTheDocument();
-  expect(screen.getByText(/Teeth: Unchecked/)).toBeInTheDocument();
-  expect(screen.getByText(/Private draft/)).toHaveTextContent("(draft)");
-  expect(screen.getByText(/snooze pressed/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Interaction Log" }));
+  expect(
+    screen.getByText(
+      (_, element) => element?.tagName === "P" && element.textContent === "Teeth: Done",
+    ),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      (_, element) => element?.tagName === "P" && element.textContent === "Teeth: Unchecked",
+    ),
+  ).toBeInTheDocument();
+  expect(screen.getAllByText(/Private draft/)[0]).toHaveTextContent("(draft)");
+  expect(screen.getByText(/Snooze opened/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await waitFor(() =>
+    expect(mocks.history).toHaveBeenCalledWith("2026-09-29T10:00:00Z", expect.anything()),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
   fireEvent.keyDown(screen.getByRole("button", { name: /^Ritual:/ }), { key: "ArrowDown" });
   fireEvent.click(screen.getByRole("menuitemradio", { name: /^Morning$/ }));
   await waitFor(() =>
@@ -131,6 +144,8 @@ it("filters, paginates and exports complete response and escape history", async 
       expect.objectContaining({ kind: "morning" }),
     ),
   );
+  if (screen.queryByRole("dialog", { name: "Filters" }))
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
   fireEvent.click(screen.getByRole("button", { name: "Export Rituals" }));
   expect(screen.getByRole("dialog", { name: "Export Rituals?" })).toBeInTheDocument();
   fireEvent.click(screen.getAllByRole("button", { name: "Export Rituals" }).at(-1)!);
@@ -146,7 +161,7 @@ it("requires explicit deletion and keeps failure visible for retry", async () =>
       <RitualDataAction kind="night" />
     </>,
   );
-  await screen.findByRole("button", { name: /Morning Ritual.*steps done/ });
+  await screen.findByRole("button", { name: /Morning Ritual/ });
   fireEvent.click(screen.getAllByRole("button", { name: "Delete Data" })[0]!);
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(mocks.remove).not.toHaveBeenCalled();
@@ -167,6 +182,8 @@ it("requires explicit deletion and keeps failure visible for retry", async () =>
   expect(screen.queryByText(/Couldn’t delete ritual history/)).not.toBeInTheDocument();
   expect(mocks.remove).toHaveBeenLastCalledWith("night");
   mocks.export.mockRejectedValueOnce(new Error("Export unavailable"));
+  if (screen.queryByRole("dialog", { name: "Filters" }))
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
   fireEvent.click(screen.getByRole("button", { name: "Export Rituals" }));
   expect(screen.getByRole("dialog", { name: "Export Rituals?" })).toBeInTheDocument();
   fireEvent.click(screen.getAllByRole("button", { name: "Export Rituals" }).at(-1)!);
@@ -178,6 +195,8 @@ it("requires explicit deletion and keeps failure visible for retry", async () =>
   );
   expect(screen.queryByText(/Couldn’t export ritual history/)).not.toBeInTheDocument();
   mocks.export.mockResolvedValue({ occurrences: [] });
+  if (screen.queryByRole("dialog", { name: "Filters" }))
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
   fireEvent.click(screen.getByRole("button", { name: "Export Rituals" }));
   expect(screen.getByRole("dialog", { name: "Export Rituals?" })).toBeInTheDocument();
   fireEvent.click(screen.getAllByRole("button", { name: "Export Rituals" }).at(-1)!);
@@ -195,7 +214,9 @@ it("reports unavailable account history", async () => {
       <RitualDataAction kind="night" />
     </>,
   );
-  expect(await screen.findByRole("status")).toHaveTextContent("Couldn’t load ritual history");
+  await screen.findByRole("region", { name: "History unavailable" });
+  expect(toast.error).toHaveBeenCalledWith("Couldn’t load ritual history.", expect.any(Object));
+  expect(screen.queryByText("Couldn’t load ritual history.")).not.toBeInTheDocument();
 });
 it("exports pending native evidence and only discards after explicit confirmation", async () => {
   mocks.invoke.mockResolvedValue({
@@ -272,19 +293,18 @@ it("distinguishes optional not done from accepted and queued follow-ups", async 
       <RitualDataAction kind="night" />
     </>,
   );
-  const rows = await screen.findAllByRole("button", { name: /Morning Ritual.*steps done/ });
+  const rows = await screen.findAllByRole("button", { name: /Morning Ritual/ });
   const expected = ["Reminder scheduled", "Not done", "Reminder waiting to sync"];
   const detailTexts: string[] = [];
-  for (const row of rows) {
-    fireEvent.click(row);
+  for (let index = 0; index < rows.length; index++) {
+    fireEvent.click(screen.getAllByRole("button", { name: /Morning Ritual/ })[index]!);
     detailTexts.push(screen.getByRole("dialog").textContent ?? "");
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
   }
-  for (const text of expected)
-    expect(detailTexts.some((value) => value.includes(`Stretch: Optional · ${text}`))).toBe(true);
+  for (const text of expected) expect(detailTexts.some((value) => value.includes(text))).toBe(true);
 });
 
-it("searches and sorts all cursor pages before paginating ten flat rows", async () => {
+it("requests server search and sort and follows page cursors", async () => {
   const items = Array.from({ length: 12 }, (_, index) => ({
     ...occurrence,
     id: `row-${index}`,
@@ -292,33 +312,146 @@ it("searches and sorts all cursor pages before paginating ten flat rows", async 
     scheduledLocalDate: `2026-10-${String(index + 1).padStart(2, "0")}`,
     definition: { ...occurrence.definition, title: index === 0 ? "Rare answer" : "Good morning" },
   }));
-  mocks.history.mockImplementation((cursor) =>
-    Promise.resolve({
-      items: cursor ? items.slice(6) : items.slice(0, 6),
-      nextCursor: cursor ? null : "next",
-    }),
-  );
+  mocks.history.mockImplementation((cursor, filters) => {
+    let result = items.filter(
+      (item) => !filters.search || item.definition.title.includes(filters.search),
+    );
+    result = [...result].sort((a, b) =>
+      filters.sort === "oldest" ? a.dueAt.localeCompare(b.dueAt) : b.dueAt.localeCompare(a.dueAt),
+    );
+    const start = Number(cursor ?? 0);
+    return Promise.resolve({
+      items: result.slice(start, start + 10),
+      total: result.length,
+      nextCursor: start + 10 < result.length ? String(start + 10) : null,
+    });
+  });
   mount(<RitualHistory />);
-  expect(await screen.findAllByRole("button", { name: /Morning Ritual.*steps done/ })).toHaveLength(
-    10,
-  );
+  expect(await screen.findAllByRole("button", { name: /Morning Ritual/ })).toHaveLength(10);
   fireEvent.click(screen.getByRole("button", { name: "Next" }));
-  expect(screen.getAllByRole("button", { name: /Morning Ritual.*steps done/ })).toHaveLength(2);
+  await waitFor(() =>
+    expect(screen.getAllByRole("button", { name: /Morning Ritual/ })).toHaveLength(2),
+  );
   fireEvent.change(screen.getByRole("textbox", { name: "Search history" }), {
     target: { value: "Rare answer" },
   });
-  expect(screen.getAllByRole("button", { name: /Morning Ritual.*steps done/ })).toHaveLength(1);
+  await waitFor(() =>
+    expect(screen.getAllByRole("button", { name: /Morning Ritual/ })).toHaveLength(1),
+  );
   expect(screen.getByText("1–1 of 1 rituals")).toBeInTheDocument();
   fireEvent.change(screen.getByRole("textbox", { name: "Search history" }), {
     target: { value: "" },
   });
   fireEvent.keyDown(screen.getByRole("button", { name: /^Sort:/ }), { key: "ArrowDown" });
   fireEvent.click(screen.getByRole("menuitemradio", { name: "Oldest First" }));
-  expect(
-    screen.getAllByRole("button", { name: /Morning Ritual.*steps done/ })[0],
-  ).toHaveTextContent("Thu, Oct 1");
+  await waitFor(() =>
+    expect(
+      screen.getAllByRole("button", { name: /Morning Ritual/ })[0]!.closest("tr"),
+    ).toHaveTextContent("Thu, Oct 1"),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Previous week" }));
   await waitFor(() =>
     expect(new Set(mocks.history.mock.calls.map((call) => call[1].dateFrom)).size).toBe(2),
   );
+});
+
+it("puts active filter chips first and restores unfiltered dashed triggers", async () => {
+  mount(<RitualHistory />);
+  await screen.findByRole("button", { name: /Morning Ritual/ });
+  expect(screen.queryByRole("button", { name: /^Ritual:/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+  const ritual = screen.getByRole("button", { name: /^Ritual:/ });
+  expect(ritual).toHaveTextContent("Both Rituals");
+  fireEvent.keyDown(ritual, { key: "ArrowDown" });
+  fireEvent.click(screen.getByRole("menuitemradio", { name: /^Morning$/ }));
+  expect(screen.getByRole("button", { name: "Ritual: Morning" })).toHaveTextContent("Morning");
+  fireEvent.keyDown(screen.getByRole("button", { name: /^Period:/ }), { key: "ArrowDown" });
+  fireEvent.click(screen.getByRole("menuitemradio", { name: "All Time" }));
+  await waitFor(() =>
+    expect(mocks.history).toHaveBeenLastCalledWith(undefined, {
+      kind: "morning",
+      sort: "newest",
+      limit: 10,
+    }),
+  );
+  const filters = within(screen.getByRole("dialog", { name: "Filters" })).getAllByRole("button");
+  expect(filters[0]).toHaveAccessibleName("Ritual: Morning");
+  expect(screen.getByRole("button", { name: "Period: All Time" })).toHaveTextContent("All Time");
+});
+
+it("removes meaningless empty-table controls while preserving a non-destructive way out", async () => {
+  mocks.history.mockResolvedValue({ items: [], total: 0, nextCursor: null });
+  mount(<RitualHistory />);
+  await screen.findByText("No rituals in this period");
+  expect(screen.queryByRole("button", { name: /^Sort:/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("combobox", { name: "Rows per page" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Table actions" })).not.toBeInTheDocument();
+  expect(screen.queryByText(/0–0/)).not.toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Search history" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Filters" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "Show all history" }));
+  await screen.findByText("No ritual history yet");
+  expect(mocks.history.mock.lastCall?.[1]).not.toHaveProperty("dateFrom");
+  expect(mocks.remove).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: "Show all history" })).not.toBeInTheDocument();
+});
+
+it("does not confuse failed history with empty history and retries with preserved criteria", async () => {
+  mocks.history.mockRejectedValueOnce(new Error("private query detail"));
+  mount(<RitualHistory />);
+  await screen.findByRole("region", { name: "History unavailable" });
+  expect(toast.error).toHaveBeenCalledWith("Couldn’t load ritual history.", expect.any(Object));
+  expect(screen.queryByText("Couldn’t load ritual history.")).not.toBeInTheDocument();
+  expect(screen.queryByText(/No rituals|No ritual history/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/private query detail/)).not.toBeInTheDocument();
+  mocks.history.mockResolvedValueOnce({ items: [occurrence], nextCursor: null });
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await screen.findByRole("button", { name: /Morning Ritual/ });
+  expect(screen.queryByRole("region", { name: "History unavailable" })).not.toBeInTheDocument();
+  expect(mocks.history.mock.calls[0]?.[1]).toEqual(mocks.history.mock.lastCall?.[1]);
+});
+
+it("retains cached records and pagination after a refresh failure", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <RitualHistory />
+    </QueryClientProvider>,
+  );
+  await screen.findByRole("button", { name: /Morning Ritual/ });
+  mocks.history.mockRejectedValue(new Error("network failure"));
+  await client.invalidateQueries({ queryKey: ["ritual-history"] });
+  await screen.findByText("Last available results");
+  expect(screen.getByRole("button", { name: /Morning Ritual/ })).toBeEnabled();
+  expect(screen.getByRole("combobox", { name: "Rows per page" })).toBeEnabled();
+  expect(screen.queryByText(/No rituals|No ritual history/)).not.toBeInTheDocument();
+  mocks.history.mockResolvedValue({ items: [occurrence], nextCursor: null });
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(screen.queryByText("Last available results")).not.toBeInTheDocument());
+});
+
+it("restores the full toolbar after Show All and keeps a direct path back to the current week", async () => {
+  mocks.history.mockImplementation((_cursor, filters) =>
+    Promise.resolve({
+      items: filters.search ? [] : [occurrence],
+      total: filters.search ? 0 : 1,
+      nextCursor: null,
+    }),
+  );
+  mount(<RitualHistory />);
+  await screen.findByRole("button", { name: /Morning Ritual/ });
+  fireEvent.change(screen.getByRole("textbox", { name: "Search history" }), {
+    target: { value: "no match" },
+  });
+  await screen.findByText("No matching rituals");
+  fireEvent.click(screen.getByRole("button", { name: "Show all history" }));
+  await screen.findByRole("button", { name: /Morning Ritual/ });
+  expect(screen.getByRole("button", { name: /^Sort:/ })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Table actions" })).toBeEnabled();
+  expect(screen.getByRole("combobox", { name: "Rows per page" })).toBeEnabled();
+  expect(screen.getByRole("textbox", { name: "Search history" })).toHaveValue("");
+  expect(screen.getByText("All time")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "This week" }));
+  await screen.findByRole("button", { name: "Previous week" });
+  expect(mocks.history.mock.lastCall?.[1]).toHaveProperty("dateFrom");
 });

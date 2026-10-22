@@ -2,7 +2,6 @@ import type { AccountSetupWorkspace, User } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "../../api.js";
-import { Button } from "../../components/ui/button.js";
 import {
   Field,
   FieldContent,
@@ -10,6 +9,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "../../components/settings-field.js";
+import { Button } from "../../components/ui/button.js";
 import { Switch } from "../../components/ui/switch.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { workspaceOptions } from "../setup/workspace-options.js";

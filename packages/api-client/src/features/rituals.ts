@@ -34,13 +34,17 @@ export function createRitualsApiClient(
         kind?: string | undefined;
         dateFrom?: string | undefined;
         dateTo?: string | undefined;
+        status?: RitualOccurrence["status"] | undefined;
+        search?: string | undefined;
+        sort?: "newest" | "oldest" | undefined;
+        limit?: number | undefined;
       } = {},
     ) => {
       const query = new URLSearchParams();
       for (const [key, value] of Object.entries({ ...filters, cursor })) {
-        if (value !== undefined && value !== "") query.set(key, value);
+        if (value !== undefined && value !== "") query.set(key, String(value));
       }
-      return request<{ items: RitualOccurrence[]; nextCursor: string | null }>(
+      return request<{ items: RitualOccurrence[]; nextCursor: string | null; total?: number }>(
         `/v1/rituals/history${query.size ? `?${query}` : ""}`,
       );
     },

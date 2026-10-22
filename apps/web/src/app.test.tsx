@@ -1784,7 +1784,12 @@ describe("ilo web app", () => {
     expect(screen.getAllByRole("link", { name: "Sign up" })[0]).toHaveAttribute("href", "/signup");
   });
 
-  it.each(["/", "/login", "/signup", "/forgot-password"])("redirects an already authenticated visitor from %s to Today", async (path) => {
+  it.each([
+    "/",
+    "/login",
+    "/signup",
+    "/forgot-password",
+  ])("redirects an already authenticated visitor from %s to Today", async (path) => {
     const view = setup(path);
     expect(await screen.findByRole("heading", { name: "To take care of" })).toBeInTheDocument();
     expect(view.location.value).toBe("/today");
@@ -3106,7 +3111,9 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: "Workspace actions" }));
     expect(screen.getByRole("dialog", { name: "Settings" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create in Tasks" })).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Goals & Motives" }).querySelector("svg")).not.toBeNull();
+    expect(
+      screen.getByRole("link", { name: /^Goals & Motives/ }).querySelector("svg"),
+    ).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Test account" })).not.toBeInTheDocument();
     expect(screen.queryByText("Change password")).not.toBeInTheDocument();
     expect(screen.queryByText("Log out")).not.toBeInTheDocument();
@@ -5174,8 +5181,13 @@ describe("ilo web app", () => {
   it("opens subpages from a Settings context menu", async () => {
     const browser = userEvent.setup();
     const view = setup("/settings?page=profile");
-    const sidebar = await screen.findByRole("complementary", { name: "Account utility navigation" });
-    await browser.pointer({ target: within(sidebar).getByRole("link", { name: "Profile" }), keys: "[MouseRight]" });
+    const sidebar = await screen.findByRole("complementary", {
+      name: "Account utility navigation",
+    });
+    await browser.pointer({
+      target: within(sidebar).getByRole("link", { name: "Profile" }),
+      keys: "[MouseRight]",
+    });
     expect(within(await screen.findByRole("menu")).getByText("Profile")).toBeInTheDocument();
     await browser.click(await screen.findByRole("menuitem", { name: "Setup" }));
     await waitFor(() => expect(view.location.value).toBe("/settings?page=profile&subpage=setup"));
@@ -5201,8 +5213,14 @@ describe("ilo web app", () => {
     setup("/settings?page=security");
     await browser.click(await screen.findByRole("button", { name: "Edit Password" }));
     expect(mocks.requestPasswordReset).not.toHaveBeenCalled();
-    await browser.click(within(screen.getByRole("dialog", { name: "Change password" })).getByRole("button", { name: "Send link" }));
-    await waitFor(() => expect(mocks.requestPasswordReset).toHaveBeenCalledWith({ email: user.email }));
+    await browser.click(
+      within(screen.getByRole("dialog", { name: "Change password" })).getByRole("button", {
+        name: "Send link",
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.requestPasswordReset).toHaveBeenCalledWith({ email: user.email }),
+    );
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
@@ -5210,11 +5228,10 @@ describe("ilo web app", () => {
     setup("/settings?section=account");
     expect(await screen.findByRole("heading", { name: "Profile", level: 1 })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Setup" })).toHaveAttribute(
-      "href", "/settings?page=profile&subpage=setup",
+      "href",
+      "/settings?page=profile&subpage=setup",
     );
-    expect(screen.getByRole("link", { name: "Profile" })).toHaveAttribute(
-      "aria-current", "page",
-    );
+    expect(screen.getByRole("link", { name: "Profile" })).toHaveAttribute("aria-current", "page");
   });
 
   it("does not advertise placeholder automation routines in Settings", async () => {
@@ -5233,10 +5250,17 @@ describe("ilo web app", () => {
     expect(await screen.findByRole("heading", { name: "Setup", level: 1 })).toBeInTheDocument();
     const tasks = screen.getByRole("checkbox", { name: "Tasks" });
     await browser.click(tasks);
-    expect(screen.queryByRole("button", { name: "Save setup preferences" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Save setup preferences" }),
+    ).not.toBeInTheDocument();
     await waitFor(() =>
       expect(mocks.updateAccountSetup).toHaveBeenCalledWith(
-        expect.objectContaining({ action: "preferences", selectedWorkspaces: user.setup.selectedWorkspaces.includes("tasks") ? user.setup.selectedWorkspaces.filter((workspace) => workspace !== "tasks") : [...user.setup.selectedWorkspaces, "tasks"] }),
+        expect.objectContaining({
+          action: "preferences",
+          selectedWorkspaces: user.setup.selectedWorkspaces.includes("tasks")
+            ? user.setup.selectedWorkspaces.filter((workspace) => workspace !== "tasks")
+            : [...user.setup.selectedWorkspaces, "tasks"],
+        }),
       ),
     );
     expect(view.location.value).toBe("/settings?page=profile&subpage=setup");
@@ -6393,9 +6417,7 @@ describe("ilo web app", () => {
       "today-section-heading__description",
     );
     const todayQueue = screen.getByRole("complementary", { name: "To take care of" });
-    expect(
-      within(todayQueue).getByRole("radiogroup", { name: "Commitment filters" }),
-    ).toBeVisible();
+    expect(within(todayQueue).getByRole("button", { name: "Commitment filters" })).toBeVisible();
     expect(within(todayQueue).queryByRole("heading", { level: 3 })).not.toBeInTheDocument();
     const commitmentList = within(todayQueue).getByRole("list", { name: "Commitments" });
     expect(within(commitmentList).getAllByRole("listitem")[0]).toHaveTextContent("Draft brief");
@@ -6410,13 +6432,16 @@ describe("ilo web app", () => {
     expect(within(todayQueue).queryByText("Time reserved")).not.toBeInTheDocument();
     await browser.click(within(todayQueue).getByRole("link", { name: "Go to next page" }));
     expect(within(todayQueue).getByText("7–7 of 7")).toBeVisible();
-    await browser.click(within(todayQueue).getByRole("radio", { name: "Tasks" }));
+    await browser.click(within(todayQueue).getByRole("button", { name: "Commitment filters" }));
+    await browser.click(screen.getByRole("menuitemradio", { name: "Tasks" }));
     expect(within(todayQueue).getByText("1–3 of 3")).toBeVisible();
     expect(within(todayQueue).queryByText("Overdue reminder")).not.toBeInTheDocument();
-    await browser.click(within(todayQueue).getByRole("radio", { name: "Overdue" }));
+    await browser.click(within(todayQueue).getByRole("button", { name: "Commitment filters" }));
+    await browser.click(screen.getByRole("menuitemradio", { name: "Overdue" }));
     expect(within(todayQueue).getByText("1–2 of 2")).toBeVisible();
     expect(within(todayQueue).getByText("Overdue reminder")).toBeVisible();
-    await browser.click(within(todayQueue).getByRole("radio", { name: "All" }));
+    await browser.click(within(todayQueue).getByRole("button", { name: "Commitment filters" }));
+    await browser.click(screen.getByRole("menuitemradio", { name: "All" }));
     await browser.click(
       within(todayQueue).getAllByRole("button", { name: "Open Draft brief" })[0] as HTMLElement,
     );
@@ -8054,14 +8079,14 @@ describe("ilo web app", () => {
       name: "Account utility navigation",
     });
     await browser.click(within(accountSidebar).getByRole("link", { name: "Profile" }));
-    expect(await screen.findByRole("heading", { name: "Profile" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Profile", level: 1 })).toBeInTheDocument();
     const settingsSidebar = screen.getByRole("complementary", {
       name: "Account utility navigation",
     });
     const settingsNavigation = within(settingsSidebar);
     expect(settingsNavigation.queryByRole("link", { name: "Invitations" })).not.toBeInTheDocument();
     await browser.click(settingsNavigation.getByRole("link", { name: "Calendar" }));
-    await browser.click(screen.getByRole("checkbox", { name: "Hide Personal" }));
+    await browser.click(screen.getByRole("switch", { name: "Hide Personal" }));
     await waitFor(() => expect(mocks.setCalendarSelected).toHaveBeenCalledWith(id, false));
     await browser.click(screen.getByRole("button", { name: "Delete Personal" }));
     await browser.click(
@@ -8323,8 +8348,9 @@ describe("ilo web app", () => {
       name: "Account utility navigation",
     });
     await browser.click(within(settingsSidebar).getByRole("link", { name: "Activity Log" }));
+    await browser.click(await screen.findByRole("button", { name: /^Reminder · created ·/ }));
     expect(await screen.findByText(/Agent · 2 changes/)).toBeInTheDocument();
-    expect(screen.getAllByText("Reminder · created")).toHaveLength(3);
+    expect(screen.getByRole("dialog")).toHaveTextContent("Reminder · created");
     view.unmount();
   });
 
@@ -9411,7 +9437,9 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: /^Protect focus/ }));
     await browser.click(screen.getByRole("button", { name: "Remove Protect focus" }));
     await browser.click(
-      within(await screen.findByRole("dialog", { name: "Delete goal?" })).getByRole("button", { name: "Delete goal" }),
+      within(await screen.findByRole("dialog", { name: "Delete goal?" })).getByRole("button", {
+        name: "Delete goal",
+      }),
     );
     await waitFor(() => expect(mocks.deleteGoal).toHaveBeenCalledWith(id));
     goals.unmount();
@@ -9444,10 +9472,31 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: /^Act with care/ }));
     await browser.click(screen.getByRole("button", { name: "Remove Act with care" }));
     await browser.click(
-      within(await screen.findByRole("dialog", { name: "Delete motive?" })).getByRole("button", { name: "Delete motive" }),
+      within(await screen.findByRole("dialog", { name: "Delete motive?" })).getByRole("button", {
+        name: "Delete motive",
+      }),
     );
     await waitFor(() => expect(mocks.deleteMotive).toHaveBeenCalledWith(secondId));
     motives.unmount();
+  });
+
+  it("keeps empty settings collection actions unique and initial errors recoverable", async () => {
+    mocks.listGoals.mockResolvedValue([]);
+    mocks.listMotives.mockResolvedValue([]);
+    const view = setup("/settings?page=goals");
+    await screen.findByText("No active outcomes");
+    expect(screen.getAllByRole("button", { name: "Add goal" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Add motive" })).toHaveLength(1);
+    view.unmount();
+    mocks.listSessions.mockRejectedValue(new Error("private diagnostic"));
+    setup("/settings?page=security&subpage=sessions");
+    await screen.findByRole("region", { name: "Devices unavailable" });
+    expect(
+      (await screen.findByText("Couldn’t load devices.")).closest("[data-sonner-toast]"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Devices unavailable" })).not.toHaveTextContent(
+      "Couldn’t load devices.",
+    );
   });
 
   it("keeps goal and motive edge states explicit", async () => {
@@ -9484,14 +9533,22 @@ describe("ilo web app", () => {
     mocks.createMotive.mockRejectedValueOnce(new Error("Motive rejected"));
     const browser = userEvent.setup();
     const goals = setup("/goals");
-    expect(within(await screen.findByRole("region", { name: "Active Outcomes" })).queryByRole("button", { name: /^Completed goal/ })).not.toBeInTheDocument();
+    expect(
+      within(await screen.findByRole("region", { name: "Active Outcomes" })).queryByRole("button", {
+        name: /^Completed goal/,
+      }),
+    ).not.toBeInTheDocument();
     await browser.click(screen.getByRole("link", { name: "Completed Outcomes" }));
     const completedSections = await screen.findAllByRole("region", { name: "Completed Outcomes" });
     const completedSection = completedSections[completedSections.length - 1]!;
-    expect(within(completedSection).getByRole("button", { name: /^Completed goal/ })).toBeInTheDocument();
+    expect(
+      within(completedSection).getByRole("button", { name: /^Completed goal/ }),
+    ).toBeInTheDocument();
 
     await browser.click(await screen.findByRole("button", { name: /^Completed goal/ }));
-    expect(screen.getByRole("button", { name: "Edit Success looks like" })).toHaveTextContent("Not set");
+    expect(screen.getByRole("button", { name: "Edit Success looks like" })).toHaveTextContent(
+      "Not set",
+    );
     await browser.clear(screen.getByRole("spinbutton", { name: "Progress" }));
     await browser.type(screen.getByRole("spinbutton", { name: "Progress" }), "100");
     await browser.tab();
@@ -9518,10 +9575,10 @@ describe("ilo web app", () => {
     goals.unmount();
     const motives = setup("/motives");
     await browser.click(await screen.findByRole("button", { name: /^Paused motive/ }));
+    expect(await screen.findByRole("button", { name: "Edit Why it matters" })).toBeInTheDocument();
     expect(
-      await screen.findByRole("button", { name: "Edit Why it matters" }),
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Resume" }),
     ).toBeInTheDocument();
-    expect(within(screen.getByRole("dialog")).getByRole("button", { name: "Resume" })).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Resume" }));
     await waitFor(() => expect(mocks.updateMotive).toHaveBeenCalledWith(id, { isActive: true }));
     expect(screen.queryByLabelText("Motive")).not.toBeInTheDocument();
@@ -9535,11 +9592,17 @@ describe("ilo web app", () => {
     motives.unmount();
     mocks.listGoals.mockRejectedValue(new Error("Goals unavailable"));
     const brokenGoals = setup("/goals");
-    expect(await screen.findByText("Couldn’t load this material.")).toBeInTheDocument();
+    await screen.findByRole("region", { name: "Goals unavailable" });
+    expect(
+      (await screen.findByText("Couldn’t load goals.")).closest("[data-sonner-toast]"),
+    ).toBeInTheDocument();
     brokenGoals.unmount();
     mocks.listMotives.mockRejectedValue(new Error("Motives unavailable"));
     setup("/motives");
-    expect(await screen.findByText("Couldn’t load this material.")).toBeInTheDocument();
+    await screen.findByRole("region", { name: "Motives unavailable" });
+    expect(
+      (await screen.findByText("Couldn’t load motives.")).closest("[data-sonner-toast]"),
+    ).toBeInTheDocument();
   });
 
   it("manages private invitations from the admin-only settings surface", async () => {

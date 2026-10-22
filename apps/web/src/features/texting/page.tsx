@@ -24,7 +24,6 @@ import {
   CardHeader,
   CardTitle,
 } from "../../components/ui/card.js";
-import { Switch } from "../../components/ui/switch.js";
 import {
   Dialog,
   DialogContent,
@@ -34,6 +33,7 @@ import {
 } from "../../components/ui/dialog.js";
 import { Input } from "../../components/ui/input.js";
 import { NativeSelect, NativeSelectOption } from "../../components/ui/native-select.js";
+import { Switch } from "../../components/ui/switch.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { SettingsSection } from "../settings/settings-layout";
 

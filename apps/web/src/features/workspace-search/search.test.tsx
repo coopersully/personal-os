@@ -141,7 +141,7 @@ it("shows honest pending and empty states and does not retain results from anoth
 });
 it("shares the settings field catalog and recognizes weekdays with the account time zone", () => {
   expect(
-    workspaceCatalog("calendar", "time zone").some((item) => item.href.includes("section=profile")),
+    workspaceCatalog("calendar", "time zone").some((item) => item.href.includes("page=profile")),
   ).toBe(true);
   expect(workspaceCatalog("finances", "reviews")[0]?.href).toBe("/finances?review=open");
   expect(workspaceCatalog("mail", "unread")[0]?.href).toBe("/mail?unread=1");
@@ -187,7 +187,8 @@ it("filters discovery without changing the page and paginates server results", a
       expect.any(AbortSignal),
     ),
   );
-  await user.selectOptions(screen.getByRole("combobox", { name: "Search result type" }), "reviews");
+  await user.click(screen.getByRole("button", { name: "Search result type" }));
+  await user.click(screen.getByRole("menuitemradio", { name: "Reviews" }));
   await waitFor(() =>
     expect(api.searchWorkspace).toHaveBeenLastCalledWith(
       "mail",

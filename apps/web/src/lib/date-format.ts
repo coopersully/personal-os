@@ -92,3 +92,27 @@ export function formatCalendarDate(value: string): string {
     timeZone: "UTC",
   }).format(date);
 }
+
+/** Relative labels compare calendar days in the user's zone, never elapsed hours. */
+export function formatRelativeCalendarDate(
+  value: string,
+  timeZone: string,
+  { now = new Date() }: { now?: Date } = {},
+): string {
+  const date = new Date(`${value}T00:00:00Z`);
+  if (!Number.isFinite(date.getTime())) return value;
+  const difference = date.getTime() / 86_400_000 - localDayNumber(now, timeZone);
+  if (difference === 0) return "Today";
+  if (difference === -1) return "Yesterday";
+  if (difference === 1) return "Tomorrow";
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+    ...(date.getUTCFullYear() !==
+    new Date(localDayNumber(now, timeZone) * 86_400_000).getUTCFullYear()
+      ? { year: "numeric" as const }
+      : {}),
+  }).format(date);
+}

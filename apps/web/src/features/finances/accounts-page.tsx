@@ -29,7 +29,6 @@ import {
 } from "@/components/settings-field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -42,6 +41,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { ItemGroup } from "@/components/ui/item";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { Switch } from "@/components/ui/switch";
 import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import { api } from "../../api.js";
 import { FeedbackForm } from "../../components/feedback-form.js";

@@ -1,6 +1,6 @@
-import { settingsPath } from "@/features/settings/settings-routes";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
+import { settingsPath } from "@/features/settings/settings-routes";
 import { api } from "../../api.js";
 import { MonitorIcon } from "../../components/icons.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";

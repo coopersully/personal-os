@@ -106,7 +106,11 @@ it("scrubs the sky when dragging the background without intercepting form contro
   fireEvent.pointerUp(surface);
   expect(surface.style.cursor).toBe("");
   const openPreview = vi.fn();
-  view.rerender(<button className="ritual-sky-preview" onClick={openPreview}><RitualClouds kind="morning" /></button>);
+  view.rerender(
+    <button type="button" className="ritual-sky-preview" onClick={openPreview}>
+      <RitualClouds kind="morning" />
+    </button>,
+  );
   const thumbnail = view.container.firstElementChild as HTMLElement;
   thumbnail.setPointerCapture = vi.fn();
   thumbnail.hasPointerCapture = vi.fn(() => false);
@@ -125,20 +129,32 @@ it("yields during large texture setup and cancels unfinished work on unmount", (
   vi.useFakeTimers();
   try {
     vi.stubGlobal("CanvasRenderingContext2D", class {});
-    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
-    vi.stubGlobal("requestAnimationFrame", vi.fn(() => 1));
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn(() => 1),
+    );
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     let clock = 0;
     vi.spyOn(performance, "now").mockImplementation(() => ++clock);
     vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue({
-      width: 1600, height: 1000,
+      width: 1600,
+      height: 1000,
     } as DOMRect);
     const paint = vi.fn();
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
       createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
       putImageData: paint,
       createPattern: vi.fn(() => ({})),
-      setTransform: vi.fn(), fillRect: vi.fn(), clearRect: vi.fn(),
+      setTransform: vi.fn(),
+      fillRect: vi.fn(),
+      clearRect: vi.fn(),
     } as unknown as CanvasRenderingContext2D);
     const view = render(<RitualClouds kind="night" />);
     expect(paint).not.toHaveBeenCalled();

@@ -7,6 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { api } from "@/api";
 import { QueryFeedback } from "@/components/async-state";
+import { DataViewRecovery } from "@/components/data-view-state";
 import { MutationFeedback } from "@/components/mutation-feedback";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/settings-field";
 import { Button } from "@/components/ui/button";
@@ -301,9 +302,17 @@ function TasksPreferences() {
     >
       {(values, save, disabled) => (
         <>
-          <QueryFeedback query={lists} title="Couldn’t load capture lists." />
+          <DataViewRecovery
+            query={lists}
+            title="Couldn’t load capture lists."
+            unavailableLabel="Capture lists unavailable"
+          />
           {recovery?.attempted.pinnedProjectIds ? (
-            <QueryFeedback query={projects} title="Couldn’t load pinned project names." />
+            <DataViewRecovery
+              query={projects}
+              title="Couldn’t load pinned project names."
+              unavailableLabel="Pinned projects unavailable"
+            />
           ) : null}
           <Choice
             id="tasks-default-capture-list"

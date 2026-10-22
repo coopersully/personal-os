@@ -94,3 +94,46 @@ projects, reminders, calendar, mail, financial records, rituals and past respons
 should preview a concrete decision grounded in those records. Include completed and cancelled
 work, quiet days, interruptions, realistic overdue items, and long or missing optional fields.
 Use fictional people/providers and relative dates; do not equate more records with better coverage.
+
+## Settings collection state previews (development only)
+
+For visual state audits without deleting fixture records or stopping services, append
+`dataState=empty` or `dataState=error` to an existing local `/settings?page=…` URL.
+The visible Development preview notice names the simulation and provides Exit preview,
+which reloads the actual route without the parameter. Use a single audit tab and inspect
+1100 × 844 and 390 × 844; scroll lower collections into view before capturing them.
+
+`apps/web/src/features/settings/dev/data-state-preview.tsx` is a loopback-only, development
+read adapter for an explicit list of collection endpoints (history, goals/motives,
+activity, connections, calendars, sessions, invitations, agent credentials, and Mail
+accounts/rules). The API composition root loads it only in browser development, never
+in the desktop transport or production configuration. Authentication, configuration,
+and permission gates remain real; an inaccessible admin route stays inaccessible.
+It returns a successful empty read or a simulated 503, not an access-denial simulation.
+The ritual current-state read retains the authoritative response/auth errors and hides
+only its overlay in this isolated view; no completion, skip, or snooze is written.
+Mail account previews retain other authoritative setup context.
+
+Record mutations on the same origin return 409 while the mode is active, preventing
+an absent-record preview from overwriting actual records. Auth flows remain real, and
+other origins are never intercepted. Exiting preview clears the simulated query cache
+through navigation/reload; re-enter normal mode before testing real mutations. These
+previews prove presentation/recovery composition, not provider or production availability.
+Use regression tests for actual retry/criteria retention, authority, and cached-data paths.
+Preserve curated demo data during presentation-only audits; do not reload the catalog
+solely to generate absence. The QA persona remains available for genuine empty-data tests.
+
+### Local owner and native Settings acceptance
+
+The worktree development Compose API defaults `OWNER_EMAILS` to the existing
+`qa+loaded@nohmi.test` fixture when no explicit owner list is configured. This is
+local QA configuration only; explicit owner configuration wins and production
+configuration is unchanged. Use that fixture to exercise Invitations through its
+real permission gate. Never promote the polished demo or bypass client/API checks.
+
+For native UI acceptance, run the current worktree frontend through the actual
+Tauri bridge in a separately identified QA application pointed at the local
+runtime. An installed release with older assets is not evidence for local changes.
+The app must launch from a valid macOS bundle with its declared sound resources;
+launching the debug executable directly can crash UserNotifications. An unsigned QA
+bundle cannot prove signed widget installation, login registration, or release delivery.

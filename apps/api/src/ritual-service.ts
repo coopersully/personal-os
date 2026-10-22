@@ -33,7 +33,7 @@ import {
   unfinishedOptionalRitualSteps,
   upcomingRitualWindows,
 } from "@personal-os/domain";
-import { and, desc, eq, gte, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, lt, lte, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import type { Principal } from "./types.js";
@@ -837,38 +837,63 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
         kind?: string | undefined;
         dateFrom?: string | undefined;
         dateTo?: string | undefined;
+        status?: RitualOccurrence["status"] | undefined;
+        search?: string | undefined;
+        sort?: "newest" | "oldest" | undefined;
       },
     ) {
       return locked(context, async (tx) => {
         await reconcile(tx, context.principal.userId);
         const [cursorTime, cursorId] = query.cursor?.split("|") ?? [];
+        const oldest = query.sort === "oldest";
+        const compare = oldest ? gt : lt;
+        const order = oldest ? asc : desc;
+        const term = query.search?.trim().replace(/[\\%_]/g, "\\$&");
+        const pattern = `%${term}%`;
+        const scope = and(
+          eq(ritualOccurrences.userId, context.principal.userId),
+          query.kind
+            ? sql`${ritualOccurrences.data}->'definition'->>'kind' = ${query.kind}`
+            : undefined,
+          query.dateFrom ? gte(ritualOccurrences.localDate, query.dateFrom) : undefined,
+          query.dateTo ? lte(ritualOccurrences.localDate, query.dateTo) : undefined,
+          query.status ? sql`${ritualOccurrences.data}->>'status' = ${query.status}` : undefined,
+          term
+            ? or(
+                sql`${ritualOccurrences.data}->'definition'->>'title' ILIKE ${pattern}`,
+                sql`EXISTS (SELECT 1 FROM jsonb_array_elements(${ritualOccurrences.data}->'definition'->'steps') step WHERE step->>'label' ILIKE ${pattern})`,
+                sql`EXISTS (SELECT 1 FROM jsonb_array_elements(${ritualOccurrences.data}->'responses') response WHERE response->>'value' ILIKE ${pattern})`,
+                sql`${ritualOccurrences.localDate} ILIKE ${pattern}`,
+              )
+            : undefined,
+        );
+        const [aggregate] = await tx
+          .select({ total: sql<number>`count(*)::int` })
+          .from(ritualOccurrences)
+          .where(scope);
         const rows = await tx
           .select()
           .from(ritualOccurrences)
           .where(
             and(
-              eq(ritualOccurrences.userId, context.principal.userId),
+              scope,
               cursorTime
                 ? or(
-                    lt(ritualOccurrences.dueAt, new Date(cursorTime)),
+                    compare(ritualOccurrences.dueAt, new Date(cursorTime)),
                     cursorId
                       ? and(
                           eq(ritualOccurrences.dueAt, new Date(cursorTime)),
-                          lt(ritualOccurrences.id, cursorId),
+                          compare(ritualOccurrences.id, cursorId),
                         )
                       : undefined,
                   )
                 : undefined,
-              query.kind
-                ? sql`${ritualOccurrences.data}->'definition'->>'kind' = ${query.kind}`
-                : undefined,
-              query.dateFrom ? gte(ritualOccurrences.localDate, query.dateFrom) : undefined,
-              query.dateTo ? lte(ritualOccurrences.localDate, query.dateTo) : undefined,
             ),
           )
-          .orderBy(desc(ritualOccurrences.dueAt), desc(ritualOccurrences.id))
+          .orderBy(order(ritualOccurrences.dueAt), order(ritualOccurrences.id))
           .limit(query.limit + 1);
         return {
+          total: aggregate?.total ?? 0,
           items: rows.slice(0, query.limit).map((r) => compactResponses(r.data)),
           nextCursor:
             rows.length > query.limit

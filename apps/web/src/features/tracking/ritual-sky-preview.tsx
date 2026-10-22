@@ -2,7 +2,11 @@ import { Button } from "../../components/ui/button.js";
 import { RitualClouds } from "./ritual-clouds.js";
 
 /** The miniature is one preview action; its content and footer are decorative placeholders. */
-export function RitualSkyPreview({ kind, disabled, onPreview }: {
+export function RitualSkyPreview({
+  kind,
+  disabled,
+  onPreview,
+}: {
   kind: "morning" | "night";
   disabled: boolean;
   onPreview: () => void;
@@ -24,7 +28,12 @@ export function RitualSkyPreview({ kind, disabled, onPreview }: {
           <span className="mt-auto h-2 w-full rounded-full bg-primary" />
         </span>
       </span>
-      <span aria-hidden="true" className="ritual-sky-preview__action rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground shadow-sm">Preview</span>
+      <span
+        aria-hidden="true"
+        className="ritual-sky-preview__action rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground shadow-sm"
+      >
+        Preview
+      </span>
     </Button>
   );
 }

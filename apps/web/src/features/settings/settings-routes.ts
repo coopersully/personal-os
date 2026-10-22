@@ -20,7 +20,8 @@ export function settingsPath(section: string): string {
 }
 export function settingsRoute(search: string): string {
   const params = new URLSearchParams(search);
-  if (params.get("subpage") === "ritual-data" || params.get("section") === "ritual-data") return "rituals";
+  if (params.get("subpage") === "ritual-data" || params.get("section") === "ritual-data")
+    return "rituals";
   const page = params.get("page");
   const subpage = params.get("subpage");
   if (page === "motives" || (!page && params.get("section") === "motives")) return "goals";

@@ -134,6 +134,9 @@ where
     }
     Ok(ordinary)
 }
+fn same_history_owner(previous: &(String, String, u64), next: &(String, String, u64)) -> bool {
+    previous.0 == next.0 && previous.1 == next.1
+}
 pub async fn run(app: tauri::AppHandle) {
     use crate::{
         desktop::DesktopState,
@@ -153,7 +156,10 @@ pub async fn run(app: tauri::AppHandle) {
         if settings.notifications.enabled {
             if let Some(account) = account {
                 let identity = (settings.server_url.clone(), account.clone(), generation);
-                if previous_identity.as_ref() != Some(&identity) {
+                if !previous_identity
+                    .as_ref()
+                    .is_some_and(|previous| same_history_owner(previous, &identity))
+                {
                     previous = Value::Null;
                 }
                 let result = collect_candidates(|path| {
@@ -283,6 +289,18 @@ mod tests {
         })
         .await;
         assert!(result.is_err());
+    }
+    #[test]
+    fn settings_generation_changes_preserve_same_owner_removal_history() {
+        let prior = ("https://app.test".to_string(), "owner".to_string(), 1);
+        let mut next = prior.clone();
+        next.2 = 2;
+        assert!(same_history_owner(&prior, &next));
+        next.1 = "other".into();
+        assert!(!same_history_owner(&prior, &next));
+        next.1 = "owner".into();
+        next.0 = "https://other.test".into();
+        assert!(!same_history_owner(&prior, &next));
     }
     #[tokio::test]
     async fn removed_sources_are_resolved_before_retirement() {

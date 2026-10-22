@@ -532,6 +532,24 @@ extension NativeTests {
 
 extension NativeTests {
   @MainActor
+  func testOrdinaryHandoffRevokesAnInFlightPrivateSubmissionAfterPolicyChange() async {
+    let scheduler = ControlledNotificationScheduler()
+    let queue = NotificationDeliveryQueue(submit: scheduler.submit, remove: scheduler.remove)
+    let policy = NotificationHandoffPolicy()
+    var preferences = NotificationPreferences(); preferences.enabled = true; preferences.preview = true
+    policy.update(preferences)
+    let expected = policy.generation
+    let submitted = expectation(description: "Private handoff submitted")
+    scheduler.started = { _ in submitted.fulfill() }
+    queue.enqueue(request("private"), currency: { policy.generation == expected })
+    await fulfillment(of: [submitted], timeout: 2)
+    preferences.preview = false; preferences.tasks = false
+    policy.update(preferences)
+    scheduler.finish("private")
+    await queue.drain()
+    XCTAssertNil(scheduler.pending["same"])
+  }
+  @MainActor
   func testActiveFallbackSurvivesOrdinaryReconcileButNotOwnerRevocation() async {
     let scheduler = ControlledNotificationScheduler()
     let queue = NotificationDeliveryQueue(submit: scheduler.submit, remove: scheduler.remove)

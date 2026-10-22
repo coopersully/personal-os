@@ -65,6 +65,15 @@ final class NotificationDeliveryQueue {
   func drain() async { await tail?.value }
 }
 
+final class NotificationHandoffPolicy {
+  private var preferences = NotificationPreferences()
+  private(set) var generation = 0
+  func update(_ next: NotificationPreferences) {
+    if preferences != next { generation += 1 }
+    preferences = next
+  }
+}
+
 struct DeferredNotificationResponses<Response> {
   private(set) var values: [Response] = []
   private(set) var acceptsColdResponses = true
@@ -243,6 +252,7 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate, 
   private var activeSignatures: [String: String] = [:]
   private var activeEpoch = 0
   private var ordinaryHandoffs: [String: UUID] = [:]
+  private let handoffPolicy = NotificationHandoffPolicy()
   var onActiveComplete: (([AnyHashable: Any]) -> Void)?
   private let center = UNUserNotificationCenter.current()
   private var revision = 0
@@ -393,6 +403,7 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate, 
   }
   func reconcile(_ s: NativeSnapshot, preferences p: NotificationPreferences) {
     let privacyChanged = preferences.preview != p.preview
+    handoffPolicy.update(p)
     snapshot = s
     preferences = p
     let responses = deferredResponses.takeAfterAuthentication()
@@ -750,7 +761,7 @@ extension NotificationController {
     inventory: ActiveReminderInventory, preferences p: NotificationPreferences) {
     let id = alert.identifier
     let wasShown = activeShownIDs.contains(id)
-    let token = UUID(); let epoch = activeEpoch
+    let token = UUID(); let epoch = activeEpoch; let policy = handoffPolicy.generation
     ordinaryHandoffs[id] = token
     activeManagedIDs.remove(id); activeOwnershipIDs.remove(id); activeShownIDs.remove(id)
     activeSources[id] = nil; activeSignatures[id] = nil
@@ -760,7 +771,8 @@ extension NotificationController {
       await deliveryQueue.drain()
       center.getDeliveredNotifications { delivered in
         DispatchQueue.main.async {
-          guard self.activeEpoch == epoch, self.ordinaryHandoffs[id] == token else { return }
+          guard self.activeEpoch == epoch, self.ordinaryHandoffs[id] == token,
+            self.handoffPolicy.generation == policy else { return }
           // A past occurrence already shown as a card or delivered by the OS needs no
           // second banner. Otherwise restore immediately, even if its old ledger says due.
           guard alert.fireAt > Date() || (!wasShown && !delivered.contains { $0.request.identifier == id }) else { return }
@@ -770,7 +782,7 @@ extension NotificationController {
           content.userInfo.removeValue(forKey: "activeReminder")
           content.userInfo.removeValue(forKey: "activeSourceRevision")
           self.deliveryQueue.enqueue(UNNotificationRequest(identifier: id, content: content, trigger: request.trigger),
-            currency: { [weak self] in self?.activeEpoch == epoch && self?.ordinaryHandoffs[id] == token }) { result in
+            currency: { [weak self] in self?.activeEpoch == epoch && self?.ordinaryHandoffs[id] == token && self?.handoffPolicy.generation == policy }) { result in
               if case .success = result { self.ledger[id] = alert.fireAt.timeIntervalSince1970; self.persist() }
               else { self.lastError = "Ordinary reminder delivery could not be restored." }
             }

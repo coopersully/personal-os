@@ -9,15 +9,25 @@ import {
   domainProfiles,
   financeAccounts,
   financeAlerts,
+  financeBalanceInclusions,
+  financeBudgetAllocations,
+  financeBudgetPlans,
   financeBudgets,
+  financeBudgetVersions,
+  financeCashBalanceBases,
   financeCategories,
   financeCategoryRules,
   financeClassificationDecisions,
+  financeGoals,
   financeIncomeStreams,
   financeMerchantAliases,
   financeMerchants,
+  financeOnboardingStates,
+  financePlanningEvidence,
   financeProfiles,
+  financeProfileVersions,
   financeRecurringObligations,
+  financeRecurringScheduleVersions,
   financeReviewCases,
   financeTransactions,
   goals,
@@ -42,6 +52,7 @@ import { addLocalDays, localDateAt, localDateTimeToUtc, localDateToIso } from "@
 import { and, eq, inArray, or } from "drizzle-orm";
 import { assessMail, type MailAssessmentSnapshot } from "./mail-assessment.js";
 import { MAIL_PLAYBOOK } from "./mail-playbook.js";
+import { financePlanningFixture } from "./qa-finance-planning.js";
 import { demoPlanningStory } from "./qa-planning-story.js";
 import { hashPassword } from "./security.js";
 
@@ -174,6 +185,16 @@ type FixtureData = {
   calendarEvents: Array<typeof calendarEvents.$inferInsert>;
   calendars: Array<typeof calendars.$inferInsert>;
   domainProfiles: Array<typeof domainProfiles.$inferInsert>;
+  financeBudgetAllocations: Array<typeof financeBudgetAllocations.$inferInsert>;
+  financeBudgetPlans: Array<typeof financeBudgetPlans.$inferInsert>;
+  financeBudgetVersions: Array<typeof financeBudgetVersions.$inferInsert>;
+  financeGoals: Array<typeof financeGoals.$inferInsert>;
+  financeOnboardingStates: Array<typeof financeOnboardingStates.$inferInsert>;
+  financePlanningEvidence: Array<typeof financePlanningEvidence.$inferInsert>;
+  financeProfileVersions: Array<typeof financeProfileVersions.$inferInsert>;
+  financeRecurringScheduleVersions: Array<typeof financeRecurringScheduleVersions.$inferInsert>;
+  financeCashBalanceBases: Array<typeof financeCashBalanceBases.$inferInsert>;
+  financeBalanceInclusions: Array<typeof financeBalanceInclusions.$inferInsert>;
   financeAccounts: Array<typeof financeAccounts.$inferInsert>;
   financeAlerts: Array<typeof financeAlerts.$inferInsert>;
   financeBudgets: Array<typeof financeBudgets.$inferInsert>;
@@ -214,6 +235,16 @@ function emptyFixtureData(): FixtureData {
     calendarEvents: [],
     calendars: [],
     domainProfiles: [],
+    financeBudgetAllocations: [],
+    financeBudgetPlans: [],
+    financeBudgetVersions: [],
+    financeGoals: [],
+    financeOnboardingStates: [],
+    financePlanningEvidence: [],
+    financeProfileVersions: [],
+    financeRecurringScheduleVersions: [],
+    financeCashBalanceBases: [],
+    financeBalanceInclusions: [],
     financeAccounts: [],
     financeAlerts: [],
     financeBudgets: [],
@@ -1935,6 +1966,73 @@ export async function loadQaFixtures(
     addBaseAccount(data, account, passwordHash, now);
     if (account.scenario === "complete") addLoadedWorkspace(data, account, now, false);
     if (account.scenario === "degraded") addLoadedWorkspace(data, account, now, true);
+    if (
+      account.scenario === "complete" &&
+      (account.key === "demo-full" || account.key === "qa-loaded")
+    ) {
+      const planning = financePlanningFixture(account.id, now, account.key === "demo-full");
+      data.financeProfileVersions.push(planning.profile);
+      data.financeBudgetPlans.push(planning.plan);
+      data.financeBudgetVersions.push(planning.budget);
+      data.financeBudgetAllocations.push(...planning.allocations);
+      data.financeGoals.push(...planning.goals);
+      data.financeRecurringObligations.push(...planning.obligations);
+      data.financeRecurringScheduleVersions.push(...planning.schedules);
+      data.financePlanningEvidence.push(...planning.evidence);
+      data.financeOnboardingStates.push(planning.onboarding);
+      for (const financeAccount of data.financeAccounts.filter(
+        (row) => row.userId === account.id,
+      )) {
+        financeAccount.ownershipType = "individual";
+        financeAccount.ownershipShareBps = 10_000;
+        financeAccount.currencyCode = "USD";
+        financeAccount.syncState = "current";
+        if (
+          financeAccount.kind === "cash" &&
+          financeAccount.balance !== null &&
+          financeAccount.balance !== undefined
+        ) {
+          if (!financeAccount.id) throw new Error("Cash fixture requires a stable account ID.");
+          const basisId = fixtureId(
+            account,
+            financeAccount.id === fixtureId(account, 400) ? 710 : 711,
+          );
+          data.financeCashBalanceBases.push({
+            id: basisId,
+            userId: account.id,
+            actorUserId: account.id,
+            accountId: financeAccount.id,
+            basisRevision: 1,
+            accountContextualRevision: 1n,
+            kind: "current",
+            amountCents: financeAccount.balance,
+            currencyCode: "USD",
+            asOf: now,
+            validUntil: new Date(now.getTime() + 30 * 86_400_000),
+            protectedFloorCents: financeAccount.id === fixtureId(account, 401) ? 1_520_000 : 50_000,
+            recordedAt: now,
+          });
+          for (const movement of data.financeTransactions.filter(
+            (row) => row.accountId === financeAccount.id,
+          )) {
+            if (!movement.id) throw new Error("Cash fixture requires a stable transaction ID.");
+            data.financeBalanceInclusions.push({
+              id: fixtureId(
+                account,
+                720 +
+                  data.financeBalanceInclusions.filter((row) => row.userId === account.id).length,
+              ),
+              userId: account.id,
+              basisId,
+              transactionId: movement.id,
+              transactionContextualRevision: 1n,
+              reflection: movement.pending ? "not_included" : "included",
+              recordedAt: now,
+            });
+          }
+        }
+      }
+    }
     if (account.key === "demo-full" && account.scenario === "complete") {
       const story = demoPlanningStory(account.id, taskInboxPlaceholderId(account), now);
       for (const key of ["goals", "motives", "reminders", "taskProjects"] as const) {
@@ -2020,6 +2118,27 @@ export async function loadQaFixtures(
       await transaction
         .insert(financeRecurringObligations)
         .values(data.financeRecurringObligations);
+    if (data.financeGoals.length) await transaction.insert(financeGoals).values(data.financeGoals);
+    if (data.financeProfileVersions.length)
+      await transaction.insert(financeProfileVersions).values(data.financeProfileVersions);
+    if (data.financeBudgetPlans.length)
+      await transaction.insert(financeBudgetPlans).values(data.financeBudgetPlans);
+    if (data.financeBudgetVersions.length)
+      await transaction.insert(financeBudgetVersions).values(data.financeBudgetVersions);
+    if (data.financeBudgetAllocations.length)
+      await transaction.insert(financeBudgetAllocations).values(data.financeBudgetAllocations);
+    if (data.financeRecurringScheduleVersions.length)
+      await transaction
+        .insert(financeRecurringScheduleVersions)
+        .values(data.financeRecurringScheduleVersions);
+    if (data.financePlanningEvidence.length)
+      await transaction.insert(financePlanningEvidence).values(data.financePlanningEvidence);
+    if (data.financeOnboardingStates.length)
+      await transaction.insert(financeOnboardingStates).values(data.financeOnboardingStates);
+    if (data.financeCashBalanceBases.length)
+      await transaction.insert(financeCashBalanceBases).values(data.financeCashBalanceBases);
+    if (data.financeBalanceInclusions.length)
+      await transaction.insert(financeBalanceInclusions).values(data.financeBalanceInclusions);
     if (data.financeAlerts.length)
       await transaction.insert(financeAlerts).values(data.financeAlerts);
     if (data.pinterestConnections.length)

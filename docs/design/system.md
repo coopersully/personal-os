@@ -51,6 +51,9 @@ unrelated cards, or an AI chat surface.
   use a flat inset repaint to mask the browser's forced color—never elevation
   or a focus shadow. Clip autofill to text only inside a filled InputGroup.
 
+Navigation lock indicators occupy the inline end of the row, after counts or attention markers.
+The shared sidebar metadata slots reserve space so labels, counts, and locks cannot collide.
+
 ## Working principles
 
 1. **Start with the material.** Design against the actual records, states,

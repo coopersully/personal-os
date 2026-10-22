@@ -94,3 +94,21 @@ projects, reminders, calendar, mail, financial records, rituals and past respons
 should preview a concrete decision grounded in those records. Include completed and cancelled
 work, quiet days, interruptions, realistic overdue items, and long or missing optional fields.
 Use fictional people/providers and relative dates; do not equate more records with better coverage.
+
+## Finance planning coverage
+
+`demo+full@nohmi.test` has a reviewed manual Finance setup, individual account ownership,
+a canonical financial profile, and an approved, balanced $8,250 monthly budget. It covers
+housing, groceries, dining, subscriptions, card repayment, emergency savings, a hiking trip,
+long-term investing, and a $500 buffer. Wealth includes active, paused, and completed goals,
+with explicit progress evidence. Cash flow includes confirmed payroll and bill schedules,
+cash-balance statements with protected floors, and explicit transaction reflection evidence.
+
+`qa+loaded@nohmi.test` has the same populated profile, goals and schedules, but an incomplete
+budget with $500 still to allocate. Use it for incomplete-plan and approval recovery checks.
+The empty, onboarding and connector-recovery personas keep their original missing setup,
+unknown ownership and missing planning data. No real provider or automation is connected.
+Reloading fixtures restores these states and refreshes dates in America/New_York.
+
+Spending offers Bubbles, List, Trends and Rhythm through its View control. These views use
+ledger transactions; planning fixtures do not manufacture posted spending or historical balances.

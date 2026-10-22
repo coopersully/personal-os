@@ -7266,6 +7266,10 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 
 /* Shared sidebar metadata stays independent of the destination label. */
 .sidebar-item-with-meta { padding-inline-end: 4.5rem; }
+/* Locks occupy the last metadata slot even when counts or attention are present. */
+[data-sidebar="menu-item"][data-locked="true"] .sidebar-item-meta { inset-inline-end: 2rem; }
+[data-sidebar="menu-item"][data-locked="true"] .sidebar-item-with-meta { padding-inline-end: 6rem; }
+.sidebar-item-lock[data-sidebar="menu-badge"] { inset-inline-end: 0.5rem; }
 .sidebar-item-meta,
 .sidebar-item-meta[data-sidebar="menu-badge"] {
   display: flex;

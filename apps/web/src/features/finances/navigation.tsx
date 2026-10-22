@@ -169,11 +169,17 @@ export function FinanceSidebarNavigation({
                           (budget?.state === "loaded" && budget.value?.status !== "active")
                         : false;
                 const count = id === "accounts" ? accounts?.length : undefined;
+                const locked =
+                  (id === "plan" && budgetNeedsInput) ||
+                  (id === "chat" && readiness.data?.canSend !== true);
                 return (
-                  <SidebarMenuItem key={id}>
+                  <SidebarMenuItem key={id} data-locked={locked || undefined}>
                     <SidebarMenuButton
                       className={
-                        attention || count !== undefined || (id === "chat" && unreadCount > 0n)
+                        locked ||
+                        attention ||
+                        count !== undefined ||
+                        (id === "chat" && unreadCount > 0n)
                           ? "sidebar-item-with-meta"
                           : undefined
                       }
@@ -194,19 +200,18 @@ export function FinanceSidebarNavigation({
                           weight={financeNavigationActive(section, id) ? "Filled" : "Outline"}
                         />
                         <span>{label}</span>
-                        {(id === "plan" && budgetNeedsInput) ||
-                        (id === "chat" && readiness.data?.canSend !== true) ? (
-                          <LockIcon
-                            aria-label={
-                              id === "chat"
-                                ? "Chat verification required"
-                                : "Prerequisites required"
-                            }
-                            className="ml-auto size-3.5 text-muted-foreground"
-                          />
-                        ) : null}
                       </Link>
                     </SidebarMenuButton>
+                    {locked ? (
+                      <SidebarMenuBadge className="sidebar-item-lock">
+                        <LockIcon
+                          aria-label={
+                            id === "chat" ? "Chat verification required" : "Prerequisites required"
+                          }
+                          className="size-3.5 text-muted-foreground"
+                        />
+                      </SidebarMenuBadge>
+                    ) : null}
                     {id === "chat" && unreadCount > 0n ? (
                       <SidebarMenuBadge
                         role="group"

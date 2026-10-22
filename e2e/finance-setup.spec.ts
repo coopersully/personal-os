@@ -2,8 +2,8 @@ import { expect, test } from "@playwright/test";
 import { qaFixtureAccounts } from "../apps/api/src/qa-fixtures.js";
 import type { FinanceConfiguration } from "../packages/domain/src/index.js";
 
-const demoAccount = qaFixtureAccounts.find((account) => account.key === "demo-full");
-if (!demoAccount) throw new Error("The demo-full QA fixture is required.");
+const demoAccount = qaFixtureAccounts.find((account) => account.key === "qa-loaded");
+if (!demoAccount) throw new Error("The qa-loaded QA fixture is required.");
 
 test("an incomplete first plan survives reload and leaves bookkeeping available", async ({
   page,

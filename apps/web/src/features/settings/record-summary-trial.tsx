@@ -46,12 +46,14 @@ export function RecordSummaryTrial({
   metadata?: ReactNode;
   actions?: ReactNode;
 }) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const [open, setOpen] = useState(false);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <li className="settings-inline-row">
         <ProfileRow
+          ref={triggerRef}
           label={title}
           variant={inactive ? "inactive" : "default"}
           icon={
@@ -90,6 +92,10 @@ export function RecordSummaryTrial({
       </li>
       <DialogContent
         aria-label={title}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          triggerRef.current?.focus();
+        }}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
           titleRef.current?.focus();

@@ -169,6 +169,7 @@ export function RitualChecklist({
 }) {
   const [state, setState] = useState(external);
   const [busy, setBusy] = useState(false);
+  const [hasFailedSave, setHasFailedSave] = useState(false);
   const [confirmSkip, setConfirmSkip] = useState(false);
   const [confirmComplete, setConfirmComplete] = useState(false);
   const actionToast = useId();
@@ -239,6 +240,7 @@ export function RitualChecklist({
     try {
       const next = await saveResponse(stepId, { ...attempt, value, submitted });
       delete failedDrafts.current[stepId];
+      setHasFailedSave(false);
       setState(next);
       const accepted = next.current && latestRitualResponses(next.current)[stepId];
       if (accepted?.value === value && accepted.submitted === submitted) {
@@ -251,12 +253,27 @@ export function RitualChecklist({
       }
     } catch (e) {
       failedDrafts.current[stepId] = { value, occurrenceId, revision: attempt.expectedRevision };
-      showError(
+      setHasFailedSave(true);
+      toast.error(
         classifyMutationError(e, {
           action: "save your ritual answers",
           form: true,
           safeToRetry: false,
         }).message,
+        {
+          id: actionToast,
+          action: {
+            label: "Retry",
+            onClick: () => {
+              if (
+                stateRef.current.current?.id === occurrenceId &&
+                failedDrafts.current[stepId]?.value === value
+              ) {
+                void respondRef.current(stepId, value, submitted);
+              }
+            },
+          },
+        },
       );
     } finally {
       setBusy(false);
@@ -413,6 +430,13 @@ export function RitualChecklist({
   const optionalComplete = optionalTotal - optional.length;
   const requirementsMet = ritualIsAnswered(occurrence);
   const dirty = Object.entries(texts).some(([id, value]) => value !== answers[id]?.value);
+  const failedText =
+    hasFailedSave &&
+    Object.entries(texts).find(
+      ([id, value]) =>
+        failedDrafts.current[id]?.value === value &&
+        failedDrafts.current[id]?.occurrenceId === occurrence.id,
+    );
   const ready =
     requirementsMet && !dirty && !busy && (!remindLater || !optional.length || !!reminderAt);
   const mainScreen = !challenge && !confirmSkip && !confirmComplete;
@@ -728,7 +752,7 @@ export function RitualChecklist({
               role="status"
               className="ritual-support-text inline-flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground"
             >
-              {busy || dirty ? (
+              {busy ? (
                 <Spinner aria-hidden="true" className="size-3" />
               ) : state.syncStatus === "conflict" ? (
                 <AlertTriangleIcon aria-hidden="true" className="size-3" />
@@ -737,15 +761,48 @@ export function RitualChecklist({
               ) : (
                 <CheckIcon aria-hidden="true" className="size-3" />
               )}
-              {busy || dirty
+              {busy
                 ? "Saving"
-                : state.syncStatus === "queued"
-                  ? "Saved on this Mac and waiting to sync"
-                  : state.syncStatus === "conflict"
-                    ? "Changes need review in Ritual settings"
-                    : "Saved to your account"}
+                : dirty
+                  ? "Unsaved changes"
+                  : state.syncStatus === "queued"
+                    ? "Saved on this Mac and waiting to sync"
+                    : state.syncStatus === "conflict"
+                      ? "Changes need review in Ritual settings"
+                      : "Saved to your account"}
             </p>
           ) : null}
+          {mainScreen && !preview && failedText && !busy ? (
+            <div className="flex flex-wrap justify-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  failedDrafts.current = {};
+                  setHasFailedSave(false);
+                  setTexts({});
+                  toast.dismiss(actionToast);
+                }}
+              >
+                Discard unsaved changes
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  void respondRef.current(
+                    failedText[0],
+                    failedText[1],
+                    ritualAnswerIsValid(
+                      occurrence.definition.steps.find((step) => step.id === failedText[0])!,
+                      failedText[1],
+                    ),
+                  )
+                }
+              >
+                Retry saving
+              </Button>
+            </div>
+          ) : null}
+
           {!preview && !challenge && !confirmSkip && !confirmComplete ? (
             <div className="ritual-escapes flex shrink-0 justify-center gap-5 text-center">
               <Button

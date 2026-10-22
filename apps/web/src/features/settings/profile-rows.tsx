@@ -1,4 +1,4 @@
-import { type ReactNode, useId } from "react";
+import { type ReactNode, type Ref, useId } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRightIcon, ChevronRightIcon } from "@/components/icons";
 import { SettingsIconSlot } from "@/components/settings-icon-slot";
@@ -20,6 +20,7 @@ export function ProfileSection({ title, children }: { title: string; children: R
 }
 
 export function ProfileRow({
+  ref,
   label,
   icon,
   value,
@@ -31,6 +32,7 @@ export function ProfileRow({
   truncateDescription = false,
   variant = "default",
 }: {
+  ref?: Ref<HTMLButtonElement>;
   label: string;
   ariaLabel?: string;
   icon?: ReactNode;
@@ -70,6 +72,7 @@ export function ProfileRow({
   );
   return (
     <Button
+      ref={ref}
       data-settings-variant={variant}
       asChild={Boolean(to)}
       aria-label={ariaLabel ?? (to ? label : `Edit ${label}`)}

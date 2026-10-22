@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Progress } from "@/components/ui/progress";
 
@@ -9,8 +9,9 @@ export function GoalProgressEditor({
 }: {
   value: number;
   pending: boolean;
-  onSave: (value: number) => void;
+  onSave: (value: number) => Promise<unknown>;
 }) {
+  const submitting = useRef(false);
   const [draft, setDraft] = useState<string | null>(null);
   const invalid =
     draft !== null &&
@@ -37,14 +38,25 @@ export function GoalProgressEditor({
               aria-invalid={invalid}
               aria-describedby={invalid ? "goal-progress-help" : undefined}
               onFocus={(event) => {
-                setDraft(String(value));
+                setDraft((current) => current ?? String(value));
                 event.target.select();
               }}
               onChange={(event) => setDraft(event.target.value)}
-              onBlur={() => {
-                if (invalid) return;
-                if (draft !== null && Number(draft) !== value) onSave(Number(draft));
-                setDraft(null);
+              onBlur={async () => {
+                if (invalid || submitting.current) return;
+                if (draft === null || Number(draft) === value) {
+                  setDraft(null);
+                  return;
+                }
+                submitting.current = true;
+                try {
+                  await onSave(Number(draft));
+                  setDraft(null);
+                } catch {
+                  // The owning mutation reports through Sonner; retain the rejected draft.
+                } finally {
+                  submitting.current = false;
+                }
               }}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {

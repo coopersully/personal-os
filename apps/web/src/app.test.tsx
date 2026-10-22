@@ -6264,6 +6264,52 @@ describe("ilo web app", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("serializes sibling name edits without overwriting a pending first name", async () => {
+    const browser = userEvent.setup();
+    let resolveFirst: (value: typeof user) => void = () => {};
+    mocks.updateUser
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockImplementation(async (input) => ({ ...user, ...input }));
+    setup("/settings?page=profile");
+    await browser.click(await screen.findByRole("button", { name: "Edit First name" }));
+    await browser.clear(screen.getByLabelText("First name"));
+    await browser.type(screen.getByLabelText("First name"), "Taylor{Enter}");
+    await waitFor(() => expect(mocks.updateUser).toHaveBeenCalledTimes(1));
+    await browser.click(screen.getByRole("button", { name: "Edit Last name" }));
+    await browser.clear(screen.getByLabelText("Last name"));
+    await browser.type(screen.getByLabelText("Last name"), "Adams{Enter}");
+    expect(mocks.updateUser).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveFirst({ ...user, displayName: "Taylor User" });
+    });
+    await waitFor(() =>
+      expect(mocks.updateUser).toHaveBeenNthCalledWith(2, { displayName: "Taylor Adams" }),
+    );
+  });
+
+  it("persists an empty Home when its text is cleared and blurred", async () => {
+    mocks.getMe.mockResolvedValue({
+      ...user,
+      homeLocation: {
+        label: "New York",
+        coordinates: { latitude: 40.7, longitude: -74 },
+        timezone: "America/New_York",
+      },
+    });
+    const browser = userEvent.setup();
+    setup("/settings?page=profile");
+    const home = await screen.findByLabelText("Home");
+    await browser.clear(home);
+    expect(mocks.updateUser).not.toHaveBeenCalled();
+    await browser.tab();
+    await waitFor(() => expect(mocks.updateUser).toHaveBeenCalledWith({ homeLocation: null }));
+  });
+
   it("profile phone starts with details before verification", async () => {
     const browser = userEvent.setup();
     setup("/settings?page=profile");

@@ -2,6 +2,10 @@
 
 ## 2026-10-22 — Native settings and populated source rows
 
+- Shipping review added audited profile-zone reconciliation, serialized first/last-name edits,
+  keyboard Home clearing, optional-time unsetting, dialog focus restoration, retained failed goal
+  progress drafts, and explicit retry/discard recovery for unsaved ritual answers. Regression tests
+  include a real second-owner attempt against completion with optional reminder creation.
 - Desktop Notifications keeps general guidance in its shared subsection header. Its first row
   summarizes macOS permissions and opens a guided setup dialog containing permission instructions,
   presentation checks, recheck/native settings actions, and the authorized-only test action.

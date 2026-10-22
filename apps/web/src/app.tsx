@@ -5556,14 +5556,14 @@ function GoalItem({
             value={goal.progress}
             pending={pending}
             onSave={(progress) => {
-              void onUpdate({
+              return onUpdate({
                 progress,
                 ...(progress === 100
                   ? { status: "completed" }
                   : goal.status === "completed"
                     ? { status: "active" }
                     : {}),
-              }).catch(() => {});
+              });
             }}
           />
         </div>
@@ -8083,10 +8083,28 @@ function ConnectorCapabilityBadge({
 function ProfileSettings({ user }: { user: User }) {
   const queryClient = useQueryClient();
   const [firstName, lastName] = splitProfileName(user.displayName);
-  const save = async (input: Parameters<typeof api.updateUser>[0]) => {
-    const nextUser = await api.updateUser(input);
-    queryClient.setQueryData(["me"], nextUser);
+  const saveQueue = useRef(Promise.resolve());
+  const save = (
+    input:
+      | Parameters<typeof api.updateUser>[0]
+      | ((current: User) => Parameters<typeof api.updateUser>[0]),
+  ) => {
+    const saving = saveQueue.current
+      .catch(() => {})
+      .then(async () => {
+        const current = queryClient.getQueryData<User>(["me"]) ?? user;
+        const nextUser = await api.updateUser(typeof input === "function" ? input(current) : input);
+        queryClient.setQueryData(["me"], nextUser);
+      });
+    saveQueue.current = saving;
+    return saving;
   };
+  const saveName = (part: 0 | 1, value: string) =>
+    save((current) => {
+      const names = splitProfileName(current.displayName);
+      names[part] = value;
+      return { displayName: names.filter(Boolean).join(" ") };
+    });
   const update = useFeedbackMutation({
     feedback: { action: "save your profile", form: true },
     mutationFn: (input: Parameters<typeof api.updateUser>[0]) => api.updateUser(input),
@@ -8114,7 +8132,7 @@ function ProfileSettings({ user }: { user: User }) {
           required
           fieldName="displayName"
           validate={(value) => (value ? undefined : "Enter your first name.")}
-          save={(value) => save({ displayName: [value, lastName].filter(Boolean).join(" ") })}
+          save={(value) => saveName(0, value)}
         />
         <ProfileInlineField
           id="profile-last-name"
@@ -8122,7 +8140,7 @@ function ProfileSettings({ user }: { user: User }) {
           value={lastName}
           autoComplete="family-name"
           fieldName="displayName"
-          save={(value) => save({ displayName: [firstName, value].filter(Boolean).join(" ") })}
+          save={(value) => saveName(1, value)}
         />
         <ProfileInlineField
           id="profile-email"
@@ -8401,6 +8419,9 @@ function HomeLocationField({
           autoComplete="off"
           id="profile-home-location"
           placeholder="Search by city, ZIP, or region"
+          onBlur={() => {
+            if (!searchValue.trim() && savedLocation) onCommit(null);
+          }}
           showClear={false}
           showTrigger={false}
         >

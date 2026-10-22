@@ -27,6 +27,7 @@ const revisionSchema = z.number().int().positive();
 const taskSourceSchema = localTaskMaterialSourceSchema("task");
 
 const taskContentFieldsSchema = z.object({
+  activeReminder: z.boolean(),
   dueAt: isoDateTimeSchema.nullable(),
   estimateMinutes: nullableEstimateMinutesSchema,
   notes: nullableTaskTextSchema,
@@ -40,6 +41,7 @@ const taskContentFieldsSchema = z.object({
 
 export const createTaskInputSchema = taskContentFieldsSchema
   .extend({
+    activeReminder: z.boolean().optional(),
     dueAt: isoDateTimeSchema.nullable().default(null),
     estimateMinutes: estimateMinutesSchema,
     idempotencyKey: z.uuid().optional(),
@@ -70,6 +72,7 @@ export const updateTaskInputSchema = taskContentFieldsSchema
 export type UpdateTaskInput = z.infer<typeof updateTaskInputSchema>;
 
 export const taskSchema = taskContentFieldsSchema.extend({
+  activeReminder: z.boolean().default(false),
   cancelledAt: isoDateTimeSchema.nullable(),
   completedAt: isoDateTimeSchema.nullable(),
   createdAt: isoDateTimeSchema,

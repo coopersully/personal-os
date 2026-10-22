@@ -40,6 +40,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { z } from "zod";
+import { readActiveReminderPreferences } from "./active-reminder-preferences.js";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError, isUniqueViolation } from "./errors.js";
@@ -167,6 +168,7 @@ export function createTaskService({ db, movePreviewSecret, now }: TaskServiceOpt
     return createHash("sha256")
       .update(
         JSON.stringify({
+          ...(input.activeReminder === undefined ? {} : { activeReminder: input.activeReminder }),
           dueAt: input.dueAt,
           estimateMinutes: input.estimateMinutes,
           lifecycle: input.lifecycle,
@@ -582,6 +584,10 @@ export function createTaskService({ db, movePreviewSecret, now }: TaskServiceOpt
                 destination.id,
               )
             : null;
+          const activeReminder =
+            input.activeReminder ??
+            (await readActiveReminderPreferences(transaction, context.principal.userId))
+              .defaultActiveReminder;
           const changedAt = now();
           const scheduledAt = input.scheduledAt ? new Date(input.scheduledAt) : null;
           const created = requireDatabaseRecord(
@@ -589,6 +595,7 @@ export function createTaskService({ db, movePreviewSecret, now }: TaskServiceOpt
               await transaction
                 .insert(reminders)
                 .values({
+                  activeReminder,
                   completedAt: input.lifecycle === "completed" ? changedAt : null,
                   dueAt: input.dueAt ? new Date(input.dueAt) : null,
                   estimateMinutes: input.estimateMinutes,
@@ -1229,6 +1236,9 @@ export function createTaskService({ db, movePreviewSecret, now }: TaskServiceOpt
             await transaction
               .update(reminders)
               .set({
+                ...(input.activeReminder === undefined
+                  ? {}
+                  : { activeReminder: input.activeReminder }),
                 ...(input.dueAt === undefined
                   ? {}
                   : { dueAt: input.dueAt ? new Date(input.dueAt) : null }),

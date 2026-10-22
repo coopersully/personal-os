@@ -20,6 +20,7 @@ import {
   type UpsertReminderAttentionItemInput,
 } from "@personal-os/domain";
 import { and, asc, desc, eq, gte, ilike, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { readActiveReminderPreferences } from "./active-reminder-preferences.js";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
@@ -222,11 +223,16 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
 
     async create(input: CreateReminderInput, context: MutationContext): Promise<Reminder> {
       const record = await db.transaction(async (transaction) => {
+        const activeReminder =
+          input.activeReminder ??
+          (await readActiveReminderPreferences(transaction, context.principal.userId))
+            .defaultActiveReminder;
         const created = requireDatabaseRecord(
           (
             await transaction
               .insert(reminders)
               .values({
+                activeReminder,
                 dueAt: input.dueAt ? new Date(input.dueAt) : null,
                 kind: "reminder",
                 notes: input.notes,
@@ -486,6 +492,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
         const [updated] = await transaction
           .update(reminders)
           .set({
+            ...(input.activeReminder === undefined ? {} : { activeReminder: input.activeReminder }),
             ...(input.dueAt === undefined
               ? {}
               : { dueAt: input.dueAt ? new Date(input.dueAt) : null }),

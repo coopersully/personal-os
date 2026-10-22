@@ -5289,6 +5289,7 @@ describe.sequential("ilo API", () => {
 
   it("daily brief uses canonical lifecycle, deletion, and timing", async () => {
     const baseTask: Task = {
+      activeReminder: false,
       cancelledAt: null,
       completedAt: null,
       createdAt: "2026-07-13T08:00:00.000Z",

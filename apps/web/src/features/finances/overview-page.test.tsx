@@ -155,7 +155,7 @@ it("uses the owner's local dates and preserves remaining amounts, currencies and
       { from: "2026-10-19", to: "2026-11-17" },
     ]),
   ).toBeDefined();
-  expect(within(next).getByText("€12.50 · EUR")).toBeVisible();
+  expect(within(next).getByText("−€12.50")).toBeVisible();
   expect(within(next).getByText(/Remaining after partial match/)).toBeVisible();
   expect(
     within(next).queryByText(/Already matched|Invalidated|Historical/),
@@ -179,7 +179,7 @@ it("distinguishes empty schedules, incomplete evidence and variable amounts", as
     unavailableSources: [{ reason: "unconfirmed_schedule" }],
   });
   mount();
-  expect(await screen.findByText("Amount varies · GBP")).toBeVisible();
+  expect(await screen.findByText("Amount varies")).toBeVisible();
   expect(screen.getByText(/1 sources need schedule or amount confirmation/)).toBeVisible();
   expect(
     screen.queryByText("No unmatched scheduled money in this date range."),
@@ -344,4 +344,28 @@ it("shows six upcoming items together and paginates larger schedules with standa
   expect(screen.getByText("11–12 of 12")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Previous page" }));
   expect(within(table).getByText("Item 00")).toBeVisible();
+});
+
+it("links upcoming income and outflows to Cash flow and shows signed amounts without currency codes", async () => {
+  api.listFinanceRecurringOccurrences.mockResolvedValue({
+    occurrences: [
+      occurrence("Salary", { source: { kind: "income", id: "salary / one" } }),
+      occurrence("Rent", { source: { kind: "obligation", id: "rent / one" } }),
+    ],
+    unavailableSources: [],
+  });
+  mount();
+  const table = await screen.findByRole("table", { name: "Upcoming expected money" });
+  expect(await within(table).findByRole("link", { name: "Salary" })).toHaveAttribute(
+    "href",
+    "/finances/cashflow?view=income&record=salary%20%2F%20one",
+  );
+  expect(within(table).getByRole("link", { name: "Rent" })).toHaveAttribute(
+    "href",
+    "/finances/cashflow?view=subscriptions&record=rent%20%2F%20one",
+  );
+  expect(within(table).getByText("+$20.00")).toHaveClass("text-success");
+  expect(within(table).getByText("−$20.00")).toHaveClass("text-destructive");
+  expect(within(table).queryByText("Type")).not.toBeInTheDocument();
+  expect(within(table).queryByText(/USD/)).not.toBeInTheDocument();
 });

@@ -3,7 +3,7 @@ import { cashflowScheduleRange, formatDateOnly } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   BankIcon,
   ChevronLeftIcon,
@@ -401,6 +401,7 @@ function OverviewUpcomingMoney() {
 }
 
 function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: string }) {
+  const navigate = useNavigate();
   const [asOf] = useState(() => new Date().toISOString());
   const [page, setPage] = useState(0);
   const range = cashflowScheduleRange(asOf, timezone);
@@ -435,36 +436,56 @@ function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: 
                   <TableRow>
                     <TableHead>Expected date</TableHead>
                     <TableHead>Item</TableHead>
-                    <TableHead>Type</TableHead>
                     <TableHead className="text-right">Expected amount</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.slice(start, start + pageSize).map((row) => (
-                    <TableRow key={row.key}>
-                      <TableCell>
-                        {formatDateOnly(row.localDate, { dateStyle: "medium" })}
-                      </TableCell>
-                      <TableCell className="min-w-36 whitespace-normal">
-                        {row.displayName}
-                        {row.matchState === "partially_matched" ? (
-                          <p className="text-xs text-muted-foreground">
-                            Remaining after partial match
-                          </p>
-                        ) : null}
-                      </TableCell>
-                      <TableCell>{row.source.kind === "income" ? "Income" : "Outflow"}</TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {row.remainingExpectedCents === null
-                          ? "Amount varies"
-                          : new Intl.NumberFormat(undefined, {
-                              style: "currency",
-                              currency: row.currencyCode,
-                            }).format(row.remainingExpectedCents / 100)}
-                        {` · ${row.currencyCode}`}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {rows.slice(start, start + pageSize).map((row) => {
+                    const destination = `/finances/cashflow?view=${row.source.kind === "income" ? "income" : "subscriptions"}&record=${encodeURIComponent(row.source.id)}`;
+                    return (
+                      <TableRow
+                        key={row.key}
+                        className="cursor-pointer"
+                        onClick={(event) => {
+                          if (
+                            !(event.target as Element).closest("a") &&
+                            !window.getSelection()?.toString()
+                          )
+                            navigate(destination);
+                        }}
+                      >
+                        <TableCell>
+                          {formatDateOnly(row.localDate, { dateStyle: "medium" })}
+                        </TableCell>
+                        <TableCell className="min-w-36 whitespace-normal">
+                          <Link
+                            to={destination}
+                            className="rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground/50"
+                          >
+                            {row.displayName}
+                          </Link>
+                          {row.matchState === "partially_matched" ? (
+                            <p className="text-xs text-muted-foreground">
+                              Remaining after partial match
+                            </p>
+                          ) : null}
+                        </TableCell>
+                        <TableCell
+                          className={`text-right font-medium tabular-nums ${row.remainingExpectedCents === null ? "text-muted-foreground" : row.source.kind === "income" ? "text-success" : "text-destructive"}`}
+                        >
+                          {row.remainingExpectedCents === null
+                            ? "Amount varies"
+                            : `${row.source.kind === "income" ? "+" : "−"}${new Intl.NumberFormat(
+                                undefined,
+                                {
+                                  style: "currency",
+                                  currency: row.currencyCode,
+                                },
+                              ).format(row.remainingExpectedCents / 100)}`}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">

@@ -46,8 +46,9 @@ does not duplicate the decision summary or its action links. Unavailable or deni
 still suppress all-clear next-step advice.
 
 Recorded reviews and maintenance link to Activity evidence rather than implying a new completed
-action. Upcoming money uses the shared table with expected date, item, income/outflow type and
-expected amount. Show ten canonical occurrences per page across 30 owner-local dates, with
+action. Upcoming money uses the shared table with expected date, linked item and signed expected amount. Income uses success color and +;
+outflows use destructive color and −, matching Transactions, without a trailing currency code.
+Rows open the corresponding income/bill source in Cash flow; item links also support keyboard navigation. Show ten canonical occurrences per page across 30 owner-local dates, with
 standard previous/next chevrons, page count and visible range below the table. Six demo items fit
 on one page. Do not repeat the date-range/timezone explanatory line above it. Preserve remaining
 amounts for partial occurrences, explicit currencies and incomplete-source caveats. Its Cash flow

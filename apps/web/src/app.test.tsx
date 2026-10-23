@@ -5669,6 +5669,27 @@ describe("ilo web app", () => {
     view.unmount();
   });
 
+  it("shows each Finance page name at the start of the top navigation", async () => {
+    configureFinanceWorkspace();
+    for (const [path, title] of [
+      ["/finances", "Overview"],
+      ["/finances/spending", "Spending"],
+      ["/finances/plan", "Budget"],
+      ["/finances/accounts", "Accounts"],
+      ["/finances/cashflow", "Cash flow"],
+      ["/finances/wealth", "Wealth"],
+    ] as const) {
+      const view = setup(path);
+      const header = await screen.findByRole("navigation", { name: "Top navigation" });
+      const titleElement = within(header).getByText(title, { exact: true });
+      expect(titleElement).toBeVisible();
+      expect(header.querySelector(".workspace-app-bar__identity")?.firstElementChild).toBe(
+        titleElement,
+      );
+      view.unmount();
+    }
+  });
+
   it("renders Finance destinations and subscriptions through their owning workspace views", async () => {
     configureFinanceWorkspace();
     for (const [path, title] of [

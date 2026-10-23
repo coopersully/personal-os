@@ -1571,7 +1571,10 @@ function AuthenticatedApp({ user }: { user: User }) {
             ) : (
               <WorkspaceAppBarForRoute
                 sidebarOwnsTitle={
-                  !isMobileWorkspaceDock && !!sidebarMode && sidebarMode !== "settings"
+                  !isMobileWorkspaceDock &&
+                  !!sidebarMode &&
+                  sidebarMode !== "settings" &&
+                  sidebarMode !== "finances"
                 }
                 workspaceSwitcher={
                   isMobileWorkspaceDock ? (
@@ -3016,7 +3019,7 @@ function workspaceTitleForLocation(pathname: string, search: string): string | n
   if (pathname === "/mail") return "Mail";
   if (pathname === "/goals") return "Goals";
   if (pathname === "/motives") return "Motives";
-  if (pathname === "/finances") return "Finances";
+  if (pathname === "/finances") return "Overview";
   if (pathname === "/finances/chat") return "Chat";
   if (pathname === "/finances/automations") return "Automations";
   if (pathname === "/finances/activity") return "Activity";

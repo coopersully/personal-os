@@ -40,8 +40,7 @@ design §§4 and 13 retain the accepted direction.
 
 ### Daily summary
 
-Overview leads with compact linked balance metrics, then upcoming expected money and recorded
-position/planning context. Reviews remain available through the shared sidebar entry; Overview
+Overview leads with compact linked balance metrics and an About these totals disclosure, then upcoming expected money and planning context. The disclosure replaces the Financial position card and retains freshness, reconciliation, required evidence gaps and Accounts navigation. Reviews remain available through the shared sidebar entry; Overview
 does not duplicate the decision summary or its action links. Unavailable or denied decision reads
 still suppress all-clear next-step advice.
 
@@ -56,8 +55,7 @@ Pagination sits outside the Card; it does not form an extra table row or padded 
 on one page. Do not repeat the date-range/timezone explanatory line above it. Preserve remaining
 amounts for partial occurrences, explicit currencies and incomplete-source caveats. Its Cash flow
 link sits opposite the Coming next heading and retains the exact agenda range.
-Unavailable recurring records are described as items not included yet, with dates/amounts to
-confirm in Cash flow, rather than an unexplained source count. Expected movements are not booked money or a safe-to-spend
+Unavailable recurring records appear in the Coming next header description as items not included yet, with dates/amounts to confirm in Cash flow. Open upcoming money uses the standard outline button opposite the heading. Expected movements are not booked money or a safe-to-spend
 total. Historical maintenance and reviews follow the position and planning material.
 
 ### Spending dashboard

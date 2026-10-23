@@ -141,8 +141,8 @@ it("uses the owner's local dates and preserves remaining amounts, currencies and
     unavailableSources: [],
   });
   const client = mount();
-  const next = await screen.findByRole("region", { name: "Coming next" });
-  await within(next).findByText("Partial bill");
+  await screen.findByText("Partial bill");
+  const next = screen.getByRole("region", { name: "Coming next" });
   expect(api.listFinanceRecurringOccurrences).toHaveBeenCalledWith({
     from: "2026-10-19",
     to: "2026-11-17",
@@ -313,6 +313,7 @@ it("links compact position metrics to their owning views and explains Spending s
   expect(
     within(metrics).getByText(/Posted personal expenses · no pending or transfers/),
   ).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: /About these totals/ }));
   expect(screen.getByText(/Its total can differ with account or date filters/)).toBeVisible();
 });
 
@@ -373,4 +374,31 @@ it("links upcoming income and outflows to Cash flow and shows signed amounts wit
   expect(within(table).getByText("−$20.00")).toHaveClass("text-destructive");
   expect(within(table).queryByText("Type")).not.toBeInTheDocument();
   expect(within(table).queryByText(/USD/)).not.toBeInTheDocument();
+});
+
+it("keeps financial evidence in a compact disclosure near totals", async () => {
+  api.getFinanceSnapshot.mockResolvedValue({
+    ...envelope({
+      asOf: "2026-10-19T12:00:00Z",
+      cash: 100,
+      netWorth: 100,
+      budget: { spent: 0 },
+      ledger: { trustworthy: false, reconciledThrough: "2026-10-18" },
+    }),
+    communication: { requiredDisclosures: [{ message: "One account needs confirmation." }] },
+  });
+  mount();
+  const disclosure = await screen.findByRole("button", {
+    name: /About these totals · Partial evidence/,
+  });
+  expect(disclosure).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByRole("region", { name: "Financial position" })).not.toBeInTheDocument();
+  expect(screen.queryByText("One account needs confirmation.")).not.toBeInTheDocument();
+  fireEvent.click(disclosure);
+  expect(screen.getByText("One account needs confirmation.")).toBeVisible();
+  expect(screen.getByText(/Reconciled through 2026-10-18/)).toBeVisible();
+  expect(screen.getByRole("link", { name: "Review accounts" })).toHaveAttribute(
+    "href",
+    "/finances/accounts",
+  );
 });

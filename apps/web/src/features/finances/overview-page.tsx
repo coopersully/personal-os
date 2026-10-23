@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   BankIcon,
+  ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   ReceiptIcon,
@@ -39,7 +40,6 @@ import { api } from "../../api.js";
 import { formatCompactMoney } from "./format";
 import { FinanceOverviewSettings } from "./overview-settings";
 import {
-  FinancePositionMaterial,
   FinanceSourceState,
   financeAmount,
   financeObservedAt,
@@ -136,13 +136,41 @@ export function FinanceOverviewPage() {
         </KeyMetrics>
       ) : null}
 
-      <p className="-mt-5 text-xs text-muted-foreground">
-        Balances use recorded amounts and your ownership share. Spending opens this month without
-        pending transactions. Its total can differ with account or date filters, pending
-        transactions, and refund adjustments.
-      </p>
+      {snapshot.data ? (
+        <Collapsible className="-mt-5 flex min-w-0 flex-col gap-3">
+          <CollapsibleTrigger asChild>
+            <Button size="sm" variant="ghost" className="group self-start">
+              About these totals ·{" "}
+              {snapshot.data.data.ledger.trustworthy ? "Current evidence" : "Partial evidence"}
+              <ChevronDownIcon className="size-4 group-data-[state=open]:rotate-180" />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="flex flex-col gap-2 px-2 text-xs text-muted-foreground">
+            <p>
+              As of {financeObservedAt(snapshot.data.data.asOf)} ·{" "}
+              {snapshot.data.data.ledger.reconciledThrough
+                ? `Reconciled through ${snapshot.data.data.ledger.reconciledThrough}`
+                : "Reconciliation date unavailable"}
+            </p>
+            <p>
+              Balances use recorded amounts from planning accounts and your ownership share.
+              Spending opens this month without pending transactions. Its total can differ with
+              account or date filters, pending transactions, and refund adjustments.
+            </p>
+            {snapshot.data.communication.requiredDisclosures.length ? (
+              <ul className="list-disc pl-4">
+                {snapshot.data.communication.requiredDisclosures.map((disclosure) => (
+                  <li key={disclosure.message}>{disclosure.message}</li>
+                ))}
+              </ul>
+            ) : null}
+            <Link to="/finances/accounts" className="self-start underline underline-offset-4">
+              Review accounts
+            </Link>
+          </CollapsibleContent>
+        </Collapsible>
+      ) : null}
       <OverviewUpcomingMoney />
-      {snapshot.data ? <FinancePositionMaterial result={snapshot.data} hideMetrics /> : null}
       <div className="grid gap-6 lg:grid-cols-2">
         {reviewsKnown && reviewCount === 0 ? (
           <OverviewSection title="Next step">
@@ -371,16 +399,21 @@ function OverviewSection({
   title,
   children,
   action,
+  description,
 }: {
   title: string;
   children: ReactNode;
   action?: ReactNode;
+  description?: ReactNode;
 }) {
   return (
     <section aria-label={title} className="flex min-w-0 flex-col gap-3 px-1">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
-        {action}
+      <div className="flex flex-col gap-1">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
+          {action}
+        </div>
+        {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
       </div>
       {children}
     </section>
@@ -397,34 +430,23 @@ function OverviewUpcomingMoney() {
   const range = me.data?.planningTimezone
     ? cashflowScheduleRange(asOf, me.data.planningTimezone)
     : null;
-  const href = range
-    ? `/finances/cashflow?${new URLSearchParams({ cashflowFrom: range.from, cashflowTo: range.to, timeline: "agenda" })}`
-    : null;
+  if (me.data?.planningTimezone && range && !accessDenied(me.error)) {
+    return (
+      <OwnerUpcomingMoney
+        key={me.data.id}
+        ownerId={me.data.id}
+        timezone={me.data.planningTimezone}
+        range={range}
+      />
+    );
+  }
   return (
-    <OverviewSection
-      title="Coming next"
-      action={
-        href && !accessDenied(me.error) ? (
-          <Button asChild size="sm" variant="ghost">
-            <Link to={href}>Open upcoming money</Link>
-          </Button>
-        ) : null
-      }
-    >
+    <OverviewSection title="Coming next">
       <FinanceSourceState label="Planning context" query={me} />
       {accessDenied(me.error) ? (
         <p>Upcoming money access unavailable.</p>
       ) : me.data ? (
-        me.data.planningTimezone && range ? (
-          <OwnerUpcomingMoney
-            key={me.data.id}
-            ownerId={me.data.id}
-            timezone={me.data.planningTimezone}
-            range={range}
-          />
-        ) : (
-          <p>Set your planning timezone in Settings before viewing upcoming dates.</p>
-        )
+        <p>Set your planning timezone in Settings before viewing upcoming dates.</p>
       ) : null}
     </OverviewSection>
   );
@@ -457,150 +479,155 @@ function OwnerUpcomingMoney({
         .sort((a, b) => a.localDate.localeCompare(b.localDate) || a.key.localeCompare(b.key));
   const currentPage = Math.min(page, Math.max(0, Math.ceil(rows.length / pageSize) - 1));
   const start = currentPage * pageSize;
+  const href = `/finances/cashflow?${new URLSearchParams({ cashflowFrom: range.from, cashflowTo: range.to, timeline: "agenda" })}`;
+  const excluded = denied ? 0 : (upcoming.data?.unavailableSources.length ?? 0);
   return (
-    <>
+    <OverviewSection
+      title="Coming next"
+      action={
+        <Button asChild size="sm" variant="outline">
+          <Link to={href}>Open upcoming money</Link>
+        </Button>
+      }
+      description={
+        excluded
+          ? `${excluded} recurring ${excluded === 1 ? "item is" : "items are"} not included yet. Confirm their dates and amounts in Cash flow to complete this list.`
+          : undefined
+      }
+    >
       <FinanceSourceState label="Upcoming money" query={upcoming} />
       {denied ? (
         <p>Upcoming money access unavailable.</p>
       ) : upcoming.data ? (
-        <>
-          {rows.length ? (
-            <div className="flex min-w-0 flex-col gap-3">
-              <Card className="settings-panel min-w-0 gap-0 overflow-hidden py-0">
-                <Table aria-label="Upcoming expected money" className="table-fixed">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-28 px-4 sm:w-36">Expected date</TableHead>
-                      <TableHead className="px-4">Item</TableHead>
-                      <TableHead className="w-32 px-4 text-right whitespace-normal leading-tight sm:w-40">
-                        Expected amount
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rows.slice(start, start + pageSize).map((row) => {
-                      const destination = `/finances/cashflow?view=${row.source.kind === "income" ? "income" : "subscriptions"}&record=${encodeURIComponent(row.source.id)}`;
-                      return (
-                        <TableRow
-                          key={row.key}
-                          className="cursor-pointer"
-                          onClick={(event) => {
-                            if (
-                              !(event.target as Element).closest("a") &&
-                              !window.getSelection()?.toString()
-                            )
-                              navigate(destination);
-                          }}
-                        >
-                          <TableCell className="px-4 py-2 text-muted-foreground">
-                            {formatDateOnly(row.localDate, { dateStyle: "medium" })}
-                          </TableCell>
-                          <TableCell className="px-4 py-2 whitespace-normal break-words">
-                            <Link
-                              to={destination}
-                              className="rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground/50"
-                            >
-                              {row.displayName}
-                            </Link>
-                            {row.matchState === "partially_matched" ? (
-                              <p className="text-xs text-muted-foreground">
-                                Remaining after partial match
-                              </p>
-                            ) : null}
-                          </TableCell>
-                          <TableCell
-                            className={`px-4 py-2 text-right font-medium tabular-nums ${row.remainingExpectedCents === null ? "text-muted-foreground" : row.source.kind === "income" ? "text-success" : "text-destructive"}`}
+        rows.length ? (
+          <div className="flex min-w-0 flex-col gap-3">
+            <Card className="settings-panel min-w-0 gap-0 overflow-hidden py-0">
+              <Table aria-label="Upcoming expected money" className="table-fixed">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-28 px-4 sm:w-36">Expected date</TableHead>
+                    <TableHead className="px-4">Item</TableHead>
+                    <TableHead className="w-32 px-4 text-right whitespace-normal leading-tight sm:w-40">
+                      Expected amount
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.slice(start, start + pageSize).map((row) => {
+                    const destination = `/finances/cashflow?view=${row.source.kind === "income" ? "income" : "subscriptions"}&record=${encodeURIComponent(row.source.id)}`;
+                    return (
+                      <TableRow
+                        key={row.key}
+                        className="cursor-pointer"
+                        onClick={(event) => {
+                          if (
+                            !(event.target as Element).closest("a") &&
+                            !window.getSelection()?.toString()
+                          )
+                            navigate(destination);
+                        }}
+                      >
+                        <TableCell className="px-4 py-2 text-muted-foreground">
+                          {formatDateOnly(row.localDate, { dateStyle: "medium" })}
+                        </TableCell>
+                        <TableCell className="px-4 py-2 whitespace-normal break-words">
+                          <Link
+                            to={destination}
+                            className="rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground/50"
                           >
-                            {row.remainingExpectedCents === null
-                              ? "Amount varies"
-                              : `${row.source.kind === "income" ? "+" : "−"}${new Intl.NumberFormat(
-                                  undefined,
-                                  {
-                                    style: "currency",
-                                    currency: row.currencyCode,
-                                  },
-                                ).format(row.remainingExpectedCents / 100)}`}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </Card>
-              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-1 text-xs text-muted-foreground">
-                <span className="text-xs">
-                  {start + 1}–{Math.min(start + pageSize, rows.length)} of {rows.length}
-                </span>
-                <div className="flex flex-wrap items-center gap-4">
-                  <label htmlFor="upcoming-page-size" className="flex items-center gap-2">
-                    <span className="hidden sm:inline">Rows per page</span>
-                    <NativeSelect
-                      id="upcoming-page-size"
-                      aria-label="Rows per page"
-                      size="sm"
-                      value={pageSize}
-                      onChange={(event) => {
-                        setPageSize(Number(event.target.value));
-                        setPage(0);
-                      }}
-                    >
-                      {[10, 25, 50].map((size) => (
-                        <NativeSelectOption key={size} value={size}>
-                          {size}
-                        </NativeSelectOption>
-                      ))}
-                    </NativeSelect>
-                  </label>
-                  <Pagination aria-label="Upcoming money pagination" className="mx-0 w-auto">
-                    <PaginationContent className="gap-2">
-                      <PaginationItem>
-                        <Button
-                          size="icon-sm"
-                          variant="outline"
-                          aria-label="Previous page"
-                          disabled={currentPage === 0}
-                          onClick={() => setPage(currentPage - 1)}
+                            {row.displayName}
+                          </Link>
+                          {row.matchState === "partially_matched" ? (
+                            <p className="text-xs text-muted-foreground">
+                              Remaining after partial match
+                            </p>
+                          ) : null}
+                        </TableCell>
+                        <TableCell
+                          className={`px-4 py-2 text-right font-medium tabular-nums ${row.remainingExpectedCents === null ? "text-muted-foreground" : row.source.kind === "income" ? "text-success" : "text-destructive"}`}
                         >
-                          <ChevronLeftIcon />
-                        </Button>
-                      </PaginationItem>
-                      <PaginationItem>
-                        <span className="px-1 text-xs">
-                          Page {currentPage + 1} of {Math.ceil(rows.length / pageSize)}
-                        </span>
-                      </PaginationItem>
-                      <PaginationItem>
-                        <Button
-                          size="icon-sm"
-                          variant="outline"
-                          aria-label="Next page"
-                          disabled={start + pageSize >= rows.length}
-                          onClick={() => setPage(currentPage + 1)}
-                        >
-                          <ChevronRightIcon />
-                        </Button>
-                      </PaginationItem>
-                    </PaginationContent>
-                  </Pagination>
-                </div>
+                          {row.remainingExpectedCents === null
+                            ? "Amount varies"
+                            : `${row.source.kind === "income" ? "+" : "−"}${new Intl.NumberFormat(
+                                undefined,
+                                {
+                                  style: "currency",
+                                  currency: row.currencyCode,
+                                },
+                              ).format(row.remainingExpectedCents / 100)}`}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </Card>
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-1 text-xs text-muted-foreground">
+              <span className="text-xs">
+                {start + 1}–{Math.min(start + pageSize, rows.length)} of {rows.length}
+              </span>
+              <div className="flex flex-wrap items-center gap-4">
+                <label htmlFor="upcoming-page-size" className="flex items-center gap-2">
+                  <span className="hidden sm:inline">Rows per page</span>
+                  <NativeSelect
+                    id="upcoming-page-size"
+                    aria-label="Rows per page"
+                    size="sm"
+                    value={pageSize}
+                    onChange={(event) => {
+                      setPageSize(Number(event.target.value));
+                      setPage(0);
+                    }}
+                  >
+                    {[10, 25, 50].map((size) => (
+                      <NativeSelectOption key={size} value={size}>
+                        {size}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </label>
+                <Pagination aria-label="Upcoming money pagination" className="mx-0 w-auto">
+                  <PaginationContent className="gap-2">
+                    <PaginationItem>
+                      <Button
+                        size="icon-sm"
+                        variant="outline"
+                        aria-label="Previous page"
+                        disabled={currentPage === 0}
+                        onClick={() => setPage(currentPage - 1)}
+                      >
+                        <ChevronLeftIcon />
+                      </Button>
+                    </PaginationItem>
+                    <PaginationItem>
+                      <span className="px-1 text-xs">
+                        Page {currentPage + 1} of {Math.ceil(rows.length / pageSize)}
+                      </span>
+                    </PaginationItem>
+                    <PaginationItem>
+                      <Button
+                        size="icon-sm"
+                        variant="outline"
+                        aria-label="Next page"
+                        disabled={start + pageSize >= rows.length}
+                        onClick={() => setPage(currentPage + 1)}
+                      >
+                        <ChevronRightIcon />
+                      </Button>
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
               </div>
             </div>
-          ) : (
-            <p>
-              {upcoming.data.unavailableSources.length
-                ? "Upcoming money cannot be fully determined yet."
-                : "No unmatched scheduled money in this date range."}
-            </p>
-          )}
-          {upcoming.data.unavailableSources.length ? (
-            <p className="text-sm">
-              {upcoming.data.unavailableSources.length} recurring{" "}
-              {upcoming.data.unavailableSources.length === 1 ? "item is" : "items are"} not included
-              yet. Confirm their dates and amounts in Cash flow to complete this list.
-            </p>
-          ) : null}
-        </>
+          </div>
+        ) : (
+          <p>
+            {upcoming.data.unavailableSources.length
+              ? "Upcoming money cannot be fully determined yet."
+              : "No unmatched scheduled money in this date range."}
+          </p>
+        )
       ) : null}
-    </>
+    </OverviewSection>
   );
 }

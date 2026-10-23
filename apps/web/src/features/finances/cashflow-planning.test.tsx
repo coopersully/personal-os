@@ -266,7 +266,8 @@ it("uses the same dated occurrence in the calendar and preserves unrelated URL s
   const user = userEvent.setup();
   mount();
   await screen.findByRole("link", { name: "Private salary" });
-  await user.click(screen.getByRole("radio", { name: "Calendar" }));
+  await user.click(screen.getByRole("button", { name: "View: Agenda" }));
+  await user.click(screen.getByRole("menuitemradio", { name: "Calendar" }));
   await user.click(
     screen.getByRole("button", { name: /October 20, 2026, 1 scheduled occurrence/ }),
   );

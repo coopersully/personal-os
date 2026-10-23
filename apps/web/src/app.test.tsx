@@ -2996,7 +2996,9 @@ describe("ilo web app", () => {
     await act(async () => {
       await view.queryClient.invalidateQueries({ queryKey: ["me"] });
     });
-    expect(screen.getByRole("dialog", { name: "Reconnect to your account" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("dialog", { name: "Reconnect to your account" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Test User")).toBeInTheDocument();
     expect(screen.queryByText("Couldn’t refresh your account.")).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();

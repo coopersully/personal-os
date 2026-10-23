@@ -2970,22 +2970,38 @@ describe("ilo web app", () => {
     window.history.replaceState({}, "", "/");
   });
 
-  it("renders fatal and inline failures", async () => {
+  it.each([
+    "/today",
+    "/today?verifyEmail=",
+    "/today?resetPassword=",
+  ])("recovers account failure without a layout banner at %s", async (path) => {
     mocks.getMe.mockRejectedValueOnce(new TypeError("Load failed"));
-    const offline = setup();
-    expect(await screen.findByRole("heading", { name: "Can’t connect" })).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent("Check your connection");
+    const view = setup(path);
+    expect(
+      await screen.findByRole("dialog", { name: "Reconnect to your account" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await userEvent.setup().keyboard("{Escape}");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }));
-    offline.unmount();
-    mocks.getMe.mockRejectedValueOnce(new Error("database unavailable"));
-    const first = setup();
-    expect(await screen.findByRole("heading", { name: "Server error" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(await screen.findByRole("heading", { name: "To take care of" })).toBeInTheDocument();
+    view.unmount();
+  });
+
+  it("keeps a stale account workspace mounted behind recovery until the authoritative retry succeeds", async () => {
+    const view = setup("/settings?page=profile");
+    await screen.findByRole("heading", { name: "Test User" });
+    mocks.getMe.mockRejectedValueOnce(new Error("private database failure"));
+    await act(async () => {
+      await view.queryClient.invalidateQueries({ queryKey: ["me"] });
+    });
+    expect(screen.getByRole("dialog", { name: "Reconnect to your account" })).toBeInTheDocument();
+    expect(screen.getByText("Test User")).toBeInTheDocument();
+    expect(screen.queryByText("Couldn’t refresh your account.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }));
-    first.unmount();
-    mocks.getMe.mockResolvedValueOnce(user);
-    mocks.getDailyBrief.mockRejectedValue(new Error("calendar unavailable"));
-    setup();
-    expect(await screen.findByText("Couldn’t load this material.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
   it("keeps desktop workspaces directly reachable beside contextual navigation", async () => {

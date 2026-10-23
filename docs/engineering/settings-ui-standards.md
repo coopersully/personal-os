@@ -716,9 +716,12 @@ states; plain text styling is not zero-padding button styling.
 Follow the full state matrix in `../design/system.md#data-page-state-and-recovery-contract`.
 Compose shared `data-view-state` with domain query state; never infer global absence from
 one filtered/cursor page. Remove meaningless table controls for zero rows, retaining every
-escape from active criteria. Error details belong to Sonner in Settings; persistent neutral
-availability/freshness and retry controls keep recovery discoverable without duplicate error
-copy. Test initial load, filtered/period emptiness, global emptiness, stale data, failure/retry,
+escape from active criteria. Error details belong to Sonner in Settings. Initial unavailable
+data retains bounded neutral recovery in its own content area. Cached refresh failures use
+Sonner Retry and existing refresh controls without inserting rows, banners, or alerts into
+workspace chrome, navigation, sidebars, or bento layout. The sole account-wide verification
+exception uses the shared recovery dialog until confirmed query success; auth-denial routing
+and public/authentication flows remain usable. Test initial load, filtered/period emptiness, global emptiness, stale data, failure/retry,
 and restoration. Verify no data mutation, lost filters, lost preferences, or keyboard trap.
 
 All Time must retain scope context and a direct return to the default period. Successful

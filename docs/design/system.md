@@ -989,7 +989,7 @@ not evidence that every existing data page has been migrated.
 | Empty period | Name the date-range scope; earlier records may exist | Keep period navigation and an all-time/broaden action |
 | Confirmed empty collection | Quiet Empty title plus at most one useful sentence | Offer create/connect/setup only when that is the actual next step and permitted; do not invent an action for read-only history |
 | Initial load unavailable | Distinct availability/retry region, never the empty dashed container or a success-zero count | Keep criteria/navigation; safe Retry with pending/disabled feedback; announce the error via Sonner in settings |
-| Refresh failed with cached data | Keep last available rows and label their freshness honestly | Keep inspection and scope controls, with Retry; withhold operations that require confirmed current state |
+| Refresh failed with cached data | Keep last available rows; announce failed refresh in Sonner without inserting layout | Keep inspection and scope controls, with Retry in the toast; withhold operations that require confirmed current state |
 | Access denied / expired session | Follow authoritative permission/session recovery; remove denied cached material | Sign in or request the correct access when supported; do not claim Retry alone repairs permissions |
 | Empty later cursor page | Do not infer a globally empty collection | Retain Previous Page or another bounded recovery path |
 
@@ -1012,10 +1012,11 @@ retain a sensible focus target; primary recovery actions need visible keyboard f
 Query failures are not evidence of absence. Preserve criteria, drafts, column preferences,
 and valid cached records across retry; recovery must restore the populated view without
 requiring a reload. Never show raw server diagnostics. Settings use one deduplicated Sonner
-error owner (including load errors), with no duplicate inline error paragraph/Alert. A neutral
-availability/freshness label plus a persistent recovery control may remain at the dataset
-boundary so dismissing a toast does not remove the way forward; it is actual state, not
-repeated action-result copy. Full-page route errors retain their separate ErrorPage contract.
+error owner (including load errors), with no duplicate inline error paragraph/Alert. An initial unavailable dataset retains neutral recovery inside its content boundary. Cached
+refresh errors use a toast retry action and preserve existing scope/refresh controls; never insert
+new availability rows, alerts, or banners into workspace/navigation/sidebar layout. Account-wide
+verification failures use the non-dismissible recovery dialog defined in [feedback](feedback.md),
+remaining open through retry until confirmed success. Local dataset failures never gate the app. Full-page route errors retain their separate ErrorPage contract.
 Do not claim a refresh succeeded before the authoritative query returns. Keep export and
 selection scope honest during partial, stale, or paginated views.
 

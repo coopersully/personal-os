@@ -1,7 +1,7 @@
 import { ApiClientError } from "@personal-os/api-client";
-import { useSettingsError } from "../lib/settings-feedback.js";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert.js";
+import { useErrorToast, useSettingsError } from "../lib/settings-feedback.js";
 import { Button } from "./ui/button.js";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty.js";
 import { WorkspaceSkeleton, type WorkspaceSkeletonKind } from "./workspace-skeleton.js";
 
 export function PageLoading({ workspace = "generic" }: { workspace?: WorkspaceSkeletonKind }) {
@@ -20,33 +20,34 @@ export function InlineError({
   stale?: boolean;
 }) {
   const settingsFeedback = useSettingsError(error, title, retry);
-  if (settingsFeedback) return null;
+  useErrorToast(error, title, retry, !settingsFeedback);
+  if (settingsFeedback || stale) return null;
   const description =
     error instanceof ApiClientError && error.status === 401
       ? "Your session has expired. Sign in again to continue."
       : error instanceof ApiClientError && error.status === 403
         ? "You don’t have access to this material. Check the account’s permissions."
-        : stale
-          ? "Showing the last available update. Try refreshing before relying on this information."
-          : "Try again. If the problem continues, check your connection.";
+        : "Try again. If the problem continues, check your connection.";
   return (
-    <Alert variant={stale ? "warning" : "destructive"} role="status">
-      <AlertTitle>{title}</AlertTitle>
-      <AlertDescription>{description}</AlertDescription>
+    <Empty role="region" aria-label={title}>
+      <EmptyHeader>
+        <EmptyTitle>{title}</EmptyTitle>
+        <EmptyDescription>{description}</EmptyDescription>
+      </EmptyHeader>
       {retry ? (
-        <AlertAction>
+        <EmptyContent>
           <Button
             onClick={() => {
               void retry();
             }}
-            variant="outline"
+            variant="secondary"
             size="sm"
           >
             Try again
           </Button>
-        </AlertAction>
+        </EmptyContent>
       ) : null}
-    </Alert>
+    </Empty>
   );
 }
 

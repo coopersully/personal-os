@@ -48,6 +48,7 @@ export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
       version: "0.1.0",
     },
     {
+      maxToolInputElements: 10_000,
       instructions:
         "Call get_ilo_context first. Inspect authoritative state before proposing changes, use preview tools before consequential commits, and verify mutations from returned state or activity. nohmi's API remains the authority for access and policy.",
     },

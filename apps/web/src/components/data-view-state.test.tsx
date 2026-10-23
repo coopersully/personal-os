@@ -47,8 +47,8 @@ it("keeps recovery discoverable, announces errors once through Sonner, and prese
       unavailableLabel="Records unavailable"
     />,
   );
-  expect(screen.getByText("Last available results")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Retrying…" })).toBeDisabled();
+  expect(screen.queryByText("Last available results")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button")).not.toBeInTheDocument();
   expect(toast.error).toHaveBeenCalledTimes(1);
   view.rerender(
     <DataViewRecovery

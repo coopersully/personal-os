@@ -1,3 +1,4 @@
+import { type Action, toast } from "sonner";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { FinancePeriodReview } from "@personal-os/domain";
@@ -190,14 +191,18 @@ it("retains a saved review during failed refresh and discloses missing recommend
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  expect(await screen.findByText(/Showing the last available update/)).toBeVisible();
+  await waitFor(() => expect(toast.error).toHaveBeenCalled());
+  expect(screen.queryByText(/Showing the last available update/)).not.toBeInTheDocument();
   expect(screen.getByText("2026-08-01 – 2026-08-31")).toBeVisible();
   expect(screen.getByText("Evidence: No evidence recorded.")).toBeVisible();
   expect(screen.getByText("Assumptions: None recorded.")).toBeVisible();
   expect(screen.getByText("Tradeoffs: None recorded.")).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  const retryAction = vi.mocked(toast.error).mock.calls.at(-1)?.[1]?.action as Action;
+  retryAction.onClick({} as Parameters<Action["onClick"]>[0]);
   await waitFor(() =>
     expect(screen.queryByText(/Showing the last available update/)).not.toBeInTheDocument(),
   );
   expect(api.getFinancePeriodReview).toHaveBeenCalledTimes(2);
 });
+
+vi.spyOn(toast, "error");

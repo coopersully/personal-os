@@ -4,7 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { type Action, toast } from "sonner";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "../../api.js";
 import { FinancesPage } from "./page.js";
 import { financeWorkspaceReadinessKey } from "./use-finance-workspace-readiness";
@@ -257,7 +258,7 @@ describe("Finance query recovery", () => {
     querySetup(route);
     const message = await screen.findByText(title);
     expect(screen.queryByText("private provider details")).not.toBeInTheDocument();
-    const status = message.closest('[role="status"]');
+    const status = message.closest('[role="region"]');
     if (!status) throw new Error("Persistent query feedback is missing");
     await userEvent.click(within(status as HTMLElement).getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(screen.queryByText(title)).not.toBeInTheDocument());
@@ -277,16 +278,14 @@ describe("Finance query recovery", () => {
     request.mockRejectedValueOnce(new Error("private background failure"));
     const data = queryDefaults[method];
     const client = querySetup(route, { key, value: data });
-    const message = await screen.findByText(title);
-    const status = message.closest('[role="status"]');
-    if (!status) throw new Error("Persistent query feedback is missing");
-    expect(
-      within(status as HTMLElement).getByText(/Showing the last available update/),
-    ).toBeInTheDocument();
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(title, expect.any(Object)));
+    expect(screen.queryByText(title)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Showing the last available update/)).not.toBeInTheDocument();
     expect(client.getQueryData(key)).toEqual(data);
-
-    await userEvent.click(within(status as HTMLElement).getByRole("button", { name: "Try again" }));
-    await waitFor(() => expect(screen.queryByText(title)).not.toBeInTheDocument());
+    const notice = vi.mocked(toast.error).mock.calls.findLast(([message]) => message === title);
+    const action = notice?.[1]?.action as Action;
+    await act(async () => action.onClick({} as Parameters<Action["onClick"]>[0]));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
     expect(request).toHaveBeenCalledTimes(2);
   });
 
@@ -306,7 +305,7 @@ describe("Finance query recovery", () => {
       querySetup("overview");
       const message = await screen.findByText("Couldn’t load account spending.");
       await userEvent.click(
-        within(message.closest('[role="status"]') as HTMLElement).getByRole("button", {
+        within(message.closest('[role="region"]') as HTMLElement).getByRole("button", {
           name: "Try again",
         }),
       );
@@ -325,7 +324,7 @@ describe("Finance query recovery", () => {
     const client = querySetup("accounts");
     const initial = await screen.findByText("Couldn’t load your finances.");
     await userEvent.click(
-      within(initial.closest('[role="status"]') as HTMLElement).getByRole("button", {
+      within(initial.closest('[role="region"]') as HTMLElement).getByRole("button", {
         name: "Try again",
       }),
     );
@@ -334,15 +333,23 @@ describe("Finance query recovery", () => {
     await act(async () => {
       await client.invalidateQueries({ queryKey: ["finance-overview"] });
     });
-    const stale = await screen.findByText("Couldn’t refresh your finances.");
-    expect(screen.getByRole("button", { name: "Track account" })).toBeInTheDocument();
-    await userEvent.click(
-      within(stale.closest('[role="status"]') as HTMLElement).getByRole("button", {
-        name: "Try again",
-      }),
-    );
     await waitFor(() =>
-      expect(screen.queryByText("Couldn’t refresh your finances.")).not.toBeInTheDocument(),
+      expect(toast.error).toHaveBeenCalledWith(
+        "Couldn’t refresh your finances.",
+        expect.any(Object),
+      ),
     );
+    expect(screen.getByRole("button", { name: "Track account" })).toBeInTheDocument();
+    expect(screen.queryByText("Couldn’t refresh your finances.")).not.toBeInTheDocument();
+    const notice = vi
+      .mocked(toast.error)
+      .mock.calls.findLast(([message]) => message === "Couldn’t refresh your finances.");
+    const action = notice?.[1]?.action as Action;
+    await act(async () => action.onClick({} as Parameters<Action["onClick"]>[0]));
+    await waitFor(() => expect(api.getFinanceOverview).toHaveBeenCalledTimes(4));
   });
+});
+
+beforeEach(() => {
+  vi.spyOn(toast, "error");
 });

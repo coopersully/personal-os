@@ -564,8 +564,12 @@ For table/data-page states, apply the state matrix in
 successful empty scope from failure and stale data. With no rows, omit irrelevant
 table chrome while keeping editable criteria and a safe way to broaden/return.
 Verify recovery transitions, not just a populated screenshot. Keep settings errors
-in Sonner, with neutral availability/freshness and retry controls at the dataset
-boundary; never duplicate failure prose or turn recovery into a record mutation.
+in Sonner; initial unavailability retains bounded recovery in its own content area. Cached
+refresh errors never insert rows/banners into workspace chrome, sidebars, navigation, or bento
+layout. Use toast retry plus existing refresh controls. Only account-wide non-authentication
+verification failure gates the app with the shared non-dismissible recovery dialog, through
+pending retry until confirmed query success. Keep 401/private-cache and public/auth flows intact.
+Never duplicate failure prose or turn recovery into a record mutation.
 
 Exercise empty → broaden → populated → default-scope round trips for data pages.
 No recovery action may permanently remove scope/navigation or leave an initial-error

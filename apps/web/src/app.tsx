@@ -141,12 +141,10 @@ import {
   HouseIcon,
   type Icon,
   ImageIcon,
-  KeyIcon,
   LayersIcon,
   ListChecksIcon,
   ListTodoIcon,
   LockIcon,
-  LogOutIcon,
   MailIcon,
   MapPinIcon,
   MonitorIcon,
@@ -313,6 +311,7 @@ import { ConnectionAuthorizationOutcome } from "@/features/connections/authoriza
 import { TaskCreationProgress } from "@/features/tasks/creation-progress";
 import { api, isUnauthorized } from "./api.js";
 import { scrollTimelineToMinute } from "./calendar-timeline.js";
+import { AccountRecoveryDialog } from "./components/account-recovery-dialog.js";
 import { InlineError, PageLoading, QueryFeedback } from "./components/async-state.js";
 import { AuthFooter } from "./components/auth-footer.js";
 import { useConfirmAction } from "./components/confirm-action.js";
@@ -561,10 +560,23 @@ export function App() {
 }
 
 function SessionApp() {
+  const location = useLocation();
+  const tokens = new URLSearchParams(location.search);
   const me = useQuery({ queryFn: api.getMe, queryKey: ["me"] });
   return (
     <>
       <AppContent me={me} />
+      <AccountRecoveryDialog
+        query={me}
+        enabled={
+          !isUnauthorized(me.error) &&
+          !tokens.get("verifyEmail") &&
+          !tokens.get("resetPassword") &&
+          (location.pathname !== "/" || isTauri() || Boolean(me.data))
+        }
+      >
+        {isTauri() ? <DesktopSettingsPanel connectionOnly /> : null}
+      </AccountRecoveryDialog>
       <Toaster
         theme={typeof window.matchMedia === "function" ? (me.data?.theme ?? "system") : "light"}
       />
@@ -602,13 +614,13 @@ function AppContent({ me }: { me: UseQueryResult<User> }) {
   if (me.isError && !me.data)
     return (
       <>
-        <FatalState error={me.error} />
-        {isTauri() ? <DesktopSettingsPanel connectionOnly /> : null}
+        <main className="center-screen">
+          <Spinner label="Waiting for account connection" />
+        </main>
       </>
     );
   return (
     <TooltipProvider>
-      <QueryFeedback query={me} title="Couldn’t refresh your account." staleOnly />
       <AuthenticatedExperience user={me.data as User} />
     </TooltipProvider>
   );

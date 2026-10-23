@@ -827,8 +827,10 @@ escape when a later cursor page is empty.
 
 Loading uses bounded shared skeleton rows. Initial failure shows history availability and
 Retry, with the error announced once through Sonner. No duplicate inline error message or
-empty-success message. Failed refresh preserves valid last results, with a freshness label
-and Retry. Recovery keeps the criteria and restores the table; no destructive action is part
+empty-success message. Failed refresh preserves valid last results without inserting a new
+row or banner; use Sonner with Retry and retain existing refresh/scope controls. Account-wide
+non-authentication read failure uses the shared non-dismissible recovery dialog until confirmed
+success, as specified in `../feedback.md`. Recovery keeps the criteria and restores the table; no destructive action is part
 of empty/error recovery. Use `DataViewEmpty`, `DataViewLoading`, and `DataViewRecovery`.
 
 Settings collection states now share `data-view-state` across Ritual History, Goals,

@@ -517,6 +517,7 @@ describe("database schema contracts", () => {
       "0121_oauth_access_token_rotations",
       "0122_finance_reimbursement_relationship_generation",
       "0123_finance_maintenance_execution_binding",
+      "0124_finance_transaction_coverage",
     ]);
   });
 

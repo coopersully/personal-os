@@ -802,14 +802,14 @@ test("Finance consolidates contextual controls and preserves responsive creation
   for (const [path, group, action] of [
     ["/finances/transactions", "Transaction controls", "Add in Transactions"],
     ["/finances/accounts", "Account controls", "Add account"],
-    ["/finances/wealth", null, "Create goal"],
-    ["/finances/plan", null, "Budget buckets"],
+    ["/finances/wealth", "Wealth controls", "Create goal"],
+    ["/finances/plan", "Budget controls", "Budget buckets"],
     ["/finances/cashflow", "Cash flow views", "Cash flow view"],
   ] as const) {
     await page.goto(path);
     await expect(page.getByRole("button", { name: action, exact: true })).toBeVisible();
     if (group) await expect(header.getByRole("group", { name: group, exact: true })).toBeVisible();
-    else if (path === "/finances/plan") {
+    if (path === "/finances/plan") {
       const budgetResponse = await page.request.get("/v1/finances/budget-plans");
       expect(budgetResponse.ok()).toBe(true);
       const budget = await budgetResponse.json();
@@ -820,9 +820,9 @@ test("Finance consolidates contextual controls and preserves responsive creation
           page.getByRole("link", { name: "Set up your budget", exact: true }),
         ).toHaveAttribute("href", "/finances/setup?section=budget&returnTo=%2Ffinances%2Fplan");
         await expect(revise).toHaveCount(0);
-        await expect(header.locator(".workspace-header-controls").locator("button, a")).toHaveCount(
-          0,
-        );
+        await expect(
+          header.getByRole("button", { name: "Budget buckets", exact: true }),
+        ).toBeVisible();
       } else {
         expect(budget.data).toEqual(
           expect.objectContaining({ id: expect.any(String), version: expect.any(Number) }),
@@ -840,7 +840,7 @@ test("Finance consolidates contextual controls and preserves responsive creation
         await revision.getByRole("button", { name: "Close", exact: true }).click();
         await expect(revision).not.toBeVisible();
       }
-    } else await expect(header.getByRole("group")).toHaveCount(0);
+    }
     await expect(page.locator('[data-slot="workspace-secondary-app-bar"]')).toHaveCount(0);
     await expect(page.getByRole("button", { name: "New transaction", exact: true })).toHaveCount(0);
     await expect(
@@ -853,15 +853,17 @@ test("Finance consolidates contextual controls and preserves responsive creation
       await expect(header.getByRole("button", { name: "Export", exact: true })).toBeVisible();
     } else if (path === "/finances/accounts") {
       await expect(header.getByRole("link", { name: "Import records", exact: true })).toBeVisible();
-      await expect(header.getByRole("button", { name: "Add account", exact: true })).toHaveCount(0);
+      await expect(header.getByRole("button", { name: "Add account", exact: true })).toBeVisible();
     } else if (path === "/finances/wealth" || path === "/finances/plan") {
-      await expect(header.getByRole("button", { name: action, exact: true })).toHaveCount(0);
+      await expect(header.getByRole("button", { name: action, exact: true })).toBeVisible();
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(
       true,
     );
     const bounds = await header.boundingBox();
-    expect(bounds?.height).toBeLessThanOrEqual(isMobile ? 112 : 64);
+    // Cash flow now includes timeline controls in the header: identity plus two control rows.
+    const mobileHeaderLimit = path === "/finances/cashflow" ? 144 : 112;
+    expect(bounds?.height).toBeLessThanOrEqual(isMobile ? mobileHeaderLimit : 64);
     for (const control of await header
       .locator(".workspace-header-controls")
       .locator("button, a")

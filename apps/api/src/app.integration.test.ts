@@ -5181,7 +5181,8 @@ describe.sequential("ilo API", () => {
     ]);
     expect(events).toHaveLength(12);
     expect(messages).toHaveLength(5);
-    expect(transactions).toHaveLength(9);
+    // Nine current records plus 159 transactions across the four completed history months.
+    expect(transactions).toHaveLength(168);
     expect(profiles).toContainEqual(expect.objectContaining({ domain: "mail", status: "active" }));
     expect(emptyTasks).toEqual([]);
     expect(degradedAccounts).toContainEqual(

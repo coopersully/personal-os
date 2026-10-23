@@ -103,7 +103,7 @@ test("the repository QA fixture login exposes representative workspace data", as
   await expect(page.getByText("Board packet for Friday", { exact: true })).toBeVisible();
   await page.goto("/finances/transactions?view=table");
   const unknownTransaction = page.getByRole("row", {
-    name: "Open Sq Unknown Popup transaction",
+    name: "Open SQ *UNKNOWN POPUP 8821 transaction",
     exact: true,
   });
   await expect(unknownTransaction).toBeVisible();

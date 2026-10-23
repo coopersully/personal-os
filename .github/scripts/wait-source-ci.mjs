@@ -54,7 +54,7 @@ async function main() {
     !/^[0-9a-f]{40}$/.test(base ?? "")
   )
     throw new Error("Missing candidate identity");
-  const deadline = Date.now() + 40 * 60 * 1000;
+  const deadline = Date.now() + 55 * 60 * 1000;
   while (Date.now() < deadline) {
     const runs = await readRuns(() =>
       execFileSync(

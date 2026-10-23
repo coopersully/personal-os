@@ -555,7 +555,7 @@ from missing planning facts, proposed budgets awaiting approval, and disconnecte
 not successfully refreshed for more than 24 hours. Accounts displays the total account count, including manual accounts. Missing balances, unresolved ownership, and possible duplicate accounts also set sidebar attention.
 Account warnings name the affected account and provide sync, reconnect, or edit actions.
 
-Accounts use full-width records with type icons, source/status badges beside the title, and tooltip-equipped edit/transaction actions at the top end. Wealth presents current metrics in responsive shared KPI cards and links to Accounts rather than repeating its records. Historical charts are deferred until reliable balance history is available.
+Accounts use compact full-width records with type icons, institution/type below the title, end-aligned balances, and a shared Popover for source details and edit/transaction actions. Debt uses destructive text and an Amount owed label. Wealth presents current metrics in responsive shared KPI cards and links to Accounts rather than repeating its records. Historical charts are deferred until reliable balance history is available.
 
 Accounts, Budget buckets, and Financial goals expose their management actions in the shared workspace header. The transaction-only Add menu lives at the end of the header; other Finance pages have no
 workspace-wide Add menu. Cash flow view selection occupies the shared leading header slot; search
@@ -687,4 +687,4 @@ Keep progress confirmation and exploration direct; place pause/resume, completio
 the goal's contextual menu. Completion/removal retain their confirmation dialogs. Goal editing uses
 shared Settings rows and checked priority choices without changing save, version or error behavior.
 
-Account rows align institution and account identity at the start, with type and recorded current balance at the end. Ownership and source observation details remain inspectable through Account details; attention and recovery actions stay visible. Cash flow occurrences use distinct shared card surfaces, end-aligned expected amounts, and explicit money-in/money-out labels.
+Account rows align institution and account identity at the start, with type and recorded current balance at the end. Institution and type sit below the name. A shared Popover behind the account options button contains ownership, source observation details and edit/transaction actions. Debt uses destructive text and an Amount owed label; attention and recovery actions stay visible. Cash flow occurrences use distinct shared card surfaces, end-aligned expected amounts, and explicit money-in/money-out labels.

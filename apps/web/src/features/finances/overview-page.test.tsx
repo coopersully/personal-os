@@ -356,3 +356,24 @@ it("reports no unmatched scheduled money only after all source schedules are ava
 });
 
 vi.spyOn(toast, "error");
+
+it("links compact position metrics to their owning views and explains Spending scope", async () => {
+  mount();
+  const metrics = await screen.findByRole("region", { name: "Finance key metrics" });
+  expect(within(metrics).getByRole("link", { name: /^Cash/ })).toHaveAttribute(
+    "href",
+    "/finances/accounts",
+  );
+  expect(within(metrics).getByRole("link", { name: /^Spent this month/ })).toHaveAttribute(
+    "href",
+    "/finances/spending?period=month&pending=0",
+  );
+  expect(within(metrics).getByRole("link", { name: /^Net worth/ })).toHaveAttribute(
+    "href",
+    "/finances/wealth",
+  );
+  expect(
+    within(metrics).getByText(/Posted personal expenses · no pending or transfers/),
+  ).toBeVisible();
+  expect(screen.getByText(/Its total can differ with account or date filters/)).toBeVisible();
+});

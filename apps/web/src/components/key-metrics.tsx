@@ -1,4 +1,5 @@
 import { Children, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import type { Icon } from "@/components/icons";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -8,31 +9,51 @@ export function KeyMetric({
   description,
   exactValue,
   icon: Icon,
+  to,
+  compact = false,
 }: {
   label: string;
   value: ReactNode;
   description?: string;
   exactValue?: string;
   icon?: Icon;
+  to?: string;
+  compact?: boolean;
 }) {
-  return (
-    <Card className="min-w-0 h-full">
-      <CardHeader>
+  const card = (
+    <Card size={compact ? "sm" : "default"} className="min-w-0 h-full">
+      <CardHeader className={compact ? "pb-1" : undefined}>
         <CardTitle className="flex items-center gap-2">
-          {Icon ? <Icon aria-hidden="true" /> : null}
+          {Icon ? <Icon aria-hidden="true" className={compact ? "size-4" : undefined} /> : null}
           {label}
         </CardTitle>
-        {description ? <CardDescription>{description}</CardDescription> : null}
+        {description && !compact ? <CardDescription>{description}</CardDescription> : null}
       </CardHeader>
       <CardContent className="mt-auto">
-        <p title={exactValue} className="break-words text-3xl font-semibold tabular-nums">
+        <p
+          title={exactValue}
+          className={`break-words font-semibold tabular-nums ${compact ? "text-2xl" : "text-3xl"}`}
+        >
           <span aria-hidden={exactValue && exactValue !== value ? true : undefined}>{value}</span>
           {exactValue && exactValue !== value ? (
             <span className="sr-only">{exactValue}</span>
           ) : null}
         </p>
+        {description && compact ? (
+          <CardDescription className="mt-1 text-xs">{description}</CardDescription>
+        ) : null}
       </CardContent>
     </Card>
+  );
+  return to ? (
+    <Link
+      to={to}
+      className="block min-w-0 h-full rounded-xl outline-none transition-colors hover:bg-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground/50 [&:hover>[data-slot=card]]:bg-secondary"
+    >
+      {card}
+    </Link>
+  ) : (
+    card
   );
 }
 

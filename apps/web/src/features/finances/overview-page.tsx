@@ -78,6 +78,8 @@ export function FinanceOverviewPage() {
       {snapshot.data ? (
         <KeyMetrics label="Finance key metrics">
           <KeyMetric
+            compact
+            to="/finances/accounts"
             label="Cash"
             value={
               snapshot.data.data.cash === null
@@ -86,9 +88,11 @@ export function FinanceOverviewPage() {
             }
             exactValue={financeAmount(snapshot.data.data.cash)}
             icon={BankIcon}
-            description="Current balance"
+            description="Recorded planning cash · your share"
           />
           <KeyMetric
+            compact
+            to="/finances/spending?period=month&pending=0"
             label="Spent this month"
             value={
               snapshot.data.data.budget.spent === null
@@ -97,8 +101,11 @@ export function FinanceOverviewPage() {
             }
             exactValue={financeAmount(snapshot.data.data.budget.spent)}
             icon={ReceiptIcon}
+            description="Posted personal expenses · no pending or transfers"
           />
           <KeyMetric
+            compact
+            to="/finances/wealth"
             label="Net worth"
             value={
               snapshot.data.data.netWorth === null
@@ -107,11 +114,16 @@ export function FinanceOverviewPage() {
             }
             exactValue={financeAmount(snapshot.data.data.netWorth)}
             icon={WalletIcon}
-            description="Current balance"
+            description="Planning assets minus debt · your share"
           />
         </KeyMetrics>
       ) : null}
 
+      <p className="-mt-5 text-xs text-muted-foreground">
+        Balances use recorded amounts and your ownership share. Spending opens this month without
+        pending transactions. Its total can differ with account or date filters, pending
+        transactions, and refund adjustments.
+      </p>
       <div className="grid min-w-0 gap-8 lg:grid-cols-2">
         <OverviewSection title="Needs you">
           {!accessDenied(me.error) ? (

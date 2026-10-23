@@ -1166,3 +1166,9 @@ ritual cloud canvases remain viewport-sized while scrolling their repeated textu
 Acceptance scenarios use the visible shadcn controls and verify persisted optional/day rules,
 recovery, internal option containment, and card/footer bounds after the entrance animation.
 These are source changes; production acceptance remains part of delivery verification.
+
+Ritual progress-load failures now use Sonner with an explicit retry and show an unavailable
+value rather than a false zero. A recovered ritual-settings conflict dispatches autosave
+with the latest authoritative revision, including when refreshed fields are unchanged;
+server compare-and-swap and local draft rebasing remain in force. Added regression cases
+cover failed refresh recovery, reduced-motion clouds, data-view controls and form editors.

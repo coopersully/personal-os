@@ -516,3 +516,62 @@ it("offers recovery when definitions fail without blocking the independent histo
     screen.queryByRole("region", { name: "Ritual settings unavailable" }),
   ).not.toBeInTheDocument();
 });
+
+it("preserves a ritual draft through a conflict and unavailable refresh until explicit recovery", async () => {
+  const definition = {
+    id: "morning",
+    kind: "morning",
+    title: "Morning",
+    enabled: true,
+    time: "06:00",
+    timeZone: "UTC",
+    revision: 2,
+    steps: [{ id: "water", label: "Water", kind: "checkbox" }],
+  };
+  mocks.list
+    .mockReset()
+    .mockResolvedValueOnce({ rituals: [definition] })
+    .mockRejectedValueOnce(new Error("Private refresh failure"))
+    .mockRejectedValueOnce(new Error("Still unavailable"))
+    .mockResolvedValue({ rituals: [{ ...definition, revision: 4 }] });
+  mocks.save
+    .mockReset()
+    .mockRejectedValueOnce(Object.assign(new Error("Revision conflict"), { status: 409 }))
+    .mockImplementation(async (input) => ({ ...input, id: "morning", revision: 5 }));
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <RitualSettings timeZone="UTC" />
+    </QueryClientProvider>,
+  );
+  await screen.findByDisplayValue("06:00");
+  fireEvent.change(screen.getAllByLabelText("Available from")[0]!, { target: { value: "07:15" } });
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining("Unable to refresh changed settings"),
+      expect.anything(),
+    ),
+  );
+  expect(screen.getByDisplayValue("07:15")).toBeInTheDocument();
+  expect(screen.queryByText("Private refresh failure")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Unable to refresh changed settings/)).not.toBeInTheDocument();
+  expect(mocks.save).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("button", { name: "Retry saving" }));
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining("Couldn’t refresh ritual settings"),
+      expect.anything(),
+    ),
+  );
+  expect(screen.getByDisplayValue("07:15")).toBeInTheDocument();
+  expect(mocks.save).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(screen.getByRole("button", { name: "Retry saving" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Retry saving" }));
+  await waitFor(() =>
+    expect(mocks.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({ expectedRevision: 4, time: "07:15" }),
+    ),
+  );
+  expect(mocks.save).toHaveBeenCalledTimes(2);
+});

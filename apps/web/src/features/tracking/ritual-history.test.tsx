@@ -455,3 +455,72 @@ it("restores the full toolbar after Show All and keeps a direct path back to the
   await screen.findByRole("button", { name: "Previous week" });
   expect(mocks.history.mock.lastCall?.[1]).toHaveProperty("dateFrom");
 });
+
+it("exposes advanced columns and exports submitted answers without leaking draft answer text", async () => {
+  const user = (await import("@testing-library/user-event")).default.setup();
+  localStorage.removeItem("nohmi:data-view:ritual-history");
+  mocks.history.mockResolvedValue({
+    items: [
+      {
+        ...occurrence,
+        definition: {
+          ...occurrence.definition,
+          kind: "night",
+          steps: [
+            { id: "journal", label: "Reflection", kind: "short_text" },
+            { id: "draft", label: "Private note", kind: "short_text", optional: true },
+          ],
+        },
+        responses: [
+          {
+            id: "one",
+            stepId: "journal",
+            value: "A useful reflection",
+            submitted: true,
+            recordedAt: occurrence.dueAt,
+          },
+          {
+            id: "two",
+            stepId: "draft",
+            value: "Unsubmitted private draft",
+            submitted: false,
+            recordedAt: occurrence.dueAt,
+          },
+        ],
+        actions: [
+          {
+            id: "snooze",
+            kind: "snooze_confirmed",
+            outcome: "applied",
+            recordedAt: occurrence.dueAt,
+          },
+        ],
+      },
+    ],
+    nextCursor: null,
+  });
+  mount(<RitualHistory />);
+  await screen.findByRole("button", { name: /Evening Ritual/ });
+  await user.click(screen.getByRole("button", { name: "Table actions" }));
+  await user.click(screen.getByRole("menuitem", { name: "Table Options" }));
+  for (const label of ["Written Answer", "Outcome", "Scheduled Time", "Time Zone"]) {
+    await user.click(screen.getByRole("checkbox", { name: label }));
+  }
+  await user.click(screen.getByRole("button", { name: "Done" }));
+  expect(screen.getByText("Reflection: A useful reflection")).toBeInTheDocument();
+  expect(screen.getByText("America/New_York")).toBeInTheDocument();
+  expect(screen.getByText(/Snoozed 1 time/)).toBeInTheDocument();
+  expect(screen.queryByText("Unsubmitted private draft")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Table actions" }));
+  await user.click(screen.getByRole("menuitem", { name: "Export Page" }));
+  const blob = vi.mocked(URL.createObjectURL).mock.calls[0]![0] as Blob;
+  const csv = await new Promise<string>((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsText(blob);
+  });
+  expect(csv).toContain('"Written Answer"');
+  expect(csv).toContain('"Time Zone"');
+  expect(csv).toContain("A useful reflection");
+  expect(csv).not.toContain("Unsubmitted private draft");
+});

@@ -16,6 +16,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "../../components/ui/tooltip.js";
+import { useSettingsError } from "../../lib/settings-feedback.js";
 
 export function RitualSettingsProgress({ definition }: { definition: RitualDefinition }) {
   const date = localDateToIso(localDateAt(new Date(), definition.timeZone));
@@ -32,10 +33,18 @@ export function RitualSettingsProgress({ definition }: { definition: RitualDefin
       return items;
     },
   });
+  useSettingsError(history.error, "Couldn’t load ritual progress.", () => history.refetch());
   if (!history.data)
     return (
       <span className="text-xs text-muted-foreground">
-        {history.isError ? "Progress unavailable" : "Loading progress…"}
+        {history.isError ? (
+          <>
+            <span aria-hidden="true">—</span>
+            <span className="sr-only">Ritual progress unavailable</span>
+          </>
+        ) : (
+          "Loading progress…"
+        )}
       </span>
     );
   const entries = history.data

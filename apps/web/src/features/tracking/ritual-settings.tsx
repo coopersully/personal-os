@@ -240,7 +240,9 @@ function RitualForm({
     const timer = setTimeout(() => {
       setBusy(true);
       void api
-        .saveRitual(value.data)
+        // A successful retry can refresh only the revision, leaving serialized
+        // fields unchanged. Read its current value when the debounce dispatches.
+        .saveRitual({ ...value.data, expectedRevision: revision.current })
         .then((result) => {
           revision.current = result.revision;
           saved.current = serialized;

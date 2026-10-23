@@ -180,7 +180,7 @@ it("distinguishes empty schedules, incomplete evidence and variable amounts", as
   });
   mount();
   expect(await screen.findByText("Amount varies")).toBeVisible();
-  expect(screen.getByText(/1 sources need schedule or amount confirmation/)).toBeVisible();
+  expect(screen.getByText(/1 recurring item is not included yet/)).toBeVisible();
   expect(
     screen.queryByText("No unmatched scheduled money in this date range."),
   ).not.toBeInTheDocument();
@@ -280,14 +280,14 @@ it.each([
   expect(
     screen.queryByText("No unmatched scheduled money in this date range."),
   ).not.toBeInTheDocument();
-  expect(screen.getByText(/This list is incomplete/)).toBeVisible();
+  expect(screen.getByText(/not included yet/)).toBeVisible();
   expect(screen.getByRole("link", { name: "Open upcoming money" })).toBeVisible();
 });
 
 it("reports no unmatched scheduled money only after all source schedules are available", async () => {
   mount();
   expect(await screen.findByText("No unmatched scheduled money in this date range.")).toBeVisible();
-  expect(screen.queryByText(/This list is incomplete/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/not included yet/)).not.toBeInTheDocument();
   expect(
     screen.queryByText("Upcoming money cannot be fully determined yet."),
   ).not.toBeInTheDocument();

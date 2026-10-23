@@ -55,7 +55,9 @@ with aligned 16px horizontal cell padding, compact 8px vertical padding and wrap
 Pagination sits outside the Card; it does not form an extra table row or padded panel. Six demo items fit
 on one page. Do not repeat the date-range/timezone explanatory line above it. Preserve remaining
 amounts for partial occurrences, explicit currencies and incomplete-source caveats. Its Cash flow
-link retains the exact agenda range. Expected movements are not booked money or a safe-to-spend
+link sits opposite the Coming next heading and retains the exact agenda range.
+Unavailable recurring records are described as items not included yet, with dates/amounts to
+confirm in Cash flow, rather than an unexplained source count. Expected movements are not booked money or a safe-to-spend
 total. Historical maintenance and reviews follow the position and planning material.
 
 ### Spending dashboard

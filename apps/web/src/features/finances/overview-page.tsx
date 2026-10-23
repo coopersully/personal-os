@@ -367,10 +367,21 @@ export function FinanceOverviewPage() {
 }
 
 // Overview is an open daily sequence; supporting material must not become a grid of raised cards.
-function OverviewSection({ title, children }: { title: string; children: ReactNode }) {
+function OverviewSection({
+  title,
+  children,
+  action,
+}: {
+  title: string;
+  children: ReactNode;
+  action?: ReactNode;
+}) {
   return (
     <section aria-label={title} className="flex min-w-0 flex-col gap-3 px-1">
-      <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
+        {action}
+      </div>
       {children}
     </section>
   );
@@ -382,17 +393,34 @@ function accessDenied(error: unknown) {
 
 function OverviewUpcomingMoney() {
   const me = useQuery({ queryKey: ["me"], queryFn: api.getMe });
+  const [asOf] = useState(() => new Date().toISOString());
+  const range = me.data?.planningTimezone
+    ? cashflowScheduleRange(asOf, me.data.planningTimezone)
+    : null;
+  const href = range
+    ? `/finances/cashflow?${new URLSearchParams({ cashflowFrom: range.from, cashflowTo: range.to, timeline: "agenda" })}`
+    : null;
   return (
-    <OverviewSection title="Coming next">
+    <OverviewSection
+      title="Coming next"
+      action={
+        href && !accessDenied(me.error) ? (
+          <Button asChild size="sm" variant="ghost">
+            <Link to={href}>Open upcoming money</Link>
+          </Button>
+        ) : null
+      }
+    >
       <FinanceSourceState label="Planning context" query={me} />
       {accessDenied(me.error) ? (
         <p>Upcoming money access unavailable.</p>
       ) : me.data ? (
-        me.data.planningTimezone ? (
+        me.data.planningTimezone && range ? (
           <OwnerUpcomingMoney
             key={me.data.id}
             ownerId={me.data.id}
             timezone={me.data.planningTimezone}
+            range={range}
           />
         ) : (
           <p>Set your planning timezone in Settings before viewing upcoming dates.</p>
@@ -402,12 +430,18 @@ function OverviewUpcomingMoney() {
   );
 }
 
-function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: string }) {
+function OwnerUpcomingMoney({
+  ownerId,
+  timezone,
+  range,
+}: {
+  ownerId: string;
+  timezone: string;
+  range: ReturnType<typeof cashflowScheduleRange>;
+}) {
   const navigate = useNavigate();
-  const [asOf] = useState(() => new Date().toISOString());
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(10);
-  const range = cashflowScheduleRange(asOf, timezone);
   const upcoming = useQuery({
     queryKey: ["finance-recurring-occurrences", ownerId, timezone, range],
     queryFn: () => api.listFinanceRecurringOccurrences(range),
@@ -423,7 +457,6 @@ function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: 
         .sort((a, b) => a.localDate.localeCompare(b.localDate) || a.key.localeCompare(b.key));
   const currentPage = Math.min(page, Math.max(0, Math.ceil(rows.length / pageSize) - 1));
   const start = currentPage * pageSize;
-  const href = `/finances/cashflow?${new URLSearchParams({ cashflowFrom: range.from, cashflowTo: range.to, timeline: "agenda" })}`;
   return (
     <>
       <FinanceSourceState label="Upcoming money" query={upcoming} />
@@ -561,15 +594,13 @@ function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: 
           )}
           {upcoming.data.unavailableSources.length ? (
             <p className="text-sm">
-              {upcoming.data.unavailableSources.length} sources need schedule or amount confirmation
-              in Cash flow. This list is incomplete.
+              {upcoming.data.unavailableSources.length} recurring{" "}
+              {upcoming.data.unavailableSources.length === 1 ? "item is" : "items are"} not included
+              yet. Confirm their dates and amounts in Cash flow to complete this list.
             </p>
           ) : null}
         </>
       ) : null}
-      <Button asChild size="sm" variant="ghost" className="self-start">
-        <Link to={href}>Open upcoming money</Link>
-      </Button>
     </>
   );
 }

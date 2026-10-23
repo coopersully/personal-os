@@ -33,7 +33,7 @@ test("production has isolated storage, no published ports and explicit resource 
     assert.ok(!JSON.stringify(service).includes("docker.sock"));
   }
   assert.equal(model.networks.database.internal, true);
-  assert.deepEqual(model.services.tunnel.networks, ["edge"]);
+  assert.deepEqual(Object.keys(model.services.tunnel.networks), ["edge"]);
   assert.deepEqual(model.services.web.networks, ["origin"]);
   assert.equal(model.services.api.stop_grace_period, "120s");
   assert.deepEqual(model.services.postgres.volumes, ["postgres-data:/var/lib/postgresql/data"]);
@@ -204,4 +204,14 @@ test("operation lock excludes concurrent work and releases after failure", async
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("edge services have distinct fixed addresses regardless of restart order", () => {
+  const { services } = composeModel(fixture());
+  assert.equal(services.gateway.networks.edge.ipv4_address, "172.30.253.2");
+  assert.equal(services.tunnel.networks.edge.ipv4_address, "172.30.253.3");
+  assert.notEqual(
+    services.gateway.networks.edge.ipv4_address,
+    services.tunnel.networks.edge.ipv4_address,
+  );
 });

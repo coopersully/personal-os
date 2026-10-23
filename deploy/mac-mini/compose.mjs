@@ -123,7 +123,8 @@ export function composeModel(input) {
       tunnel: {
         ...app("tunnel", "128m", 0.25),
         user: "0:0",
-        networks: ["edge"],
+        // Docker restart policies do not honor Compose dependency ordering.
+        networks: { edge: { ipv4_address: "172.30.253.3" } },
         command: ["tunnel", "--no-autoupdate", "run", "--token-file", "/run/secrets/tunnel-token"],
         volumes: [`${c.root}/tunnel-token:/run/secrets/tunnel-token:ro`],
         depends_on: { gateway: { condition: "service_started" } },

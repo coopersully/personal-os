@@ -4,7 +4,13 @@ import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { BankIcon, ReceiptIcon, WalletIcon } from "@/components/icons";
+import {
+  BankIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ReceiptIcon,
+  WalletIcon,
+} from "@/components/icons";
 import { KeyMetric, KeyMetrics } from "@/components/key-metrics";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +24,15 @@ import {
   ItemGroup,
   ItemTitle,
 } from "@/components/ui/item";
+import { Pagination, PaginationContent, PaginationItem } from "@/components/ui/pagination";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { api } from "../../api.js";
 import { formatCompactMoney } from "./format";
 import { FinanceOverviewSettings } from "./overview-settings";
@@ -124,46 +139,7 @@ export function FinanceOverviewPage() {
         pending transactions. Its total can differ with account or date filters, pending
         transactions, and refund adjustments.
       </p>
-      <div className="grid min-w-0 gap-8 lg:grid-cols-2">
-        <OverviewSection title="Needs you">
-          {!accessDenied(me.error) ? (
-            <FinanceSourceState label="Decisions" query={me.data ? reviews : me} />
-          ) : null}
-          {reviewDenied ? (
-            <p>Review access unavailable.</p>
-          ) : reviewUnavailable ? (
-            <p>Some Finance decisions could not be checked. Open Reviews to check status.</p>
-          ) : null}
-          {reviewsKnown ? (
-            <ItemGroup>
-              <Item variant="outline">
-                <ItemContent>
-                  <ItemTitle>
-                    {reviewCount
-                      ? `${reviewCount} ${reviewCount === 1 ? "item needs" : "items need"} review`
-                      : "No items need review"}
-                  </ItemTitle>
-                  <ItemDescription>
-                    Review questions and approvals that need your decision.
-                  </ItemDescription>
-                </ItemContent>
-              </Item>
-            </ItemGroup>
-          ) : null}
-          <div className="flex flex-wrap gap-2">
-            <Button asChild size="sm" variant="outline">
-              <Link to="/finances?review=open">Open Reviews</Link>
-            </Button>
-            <Button asChild size="sm" variant="ghost" className="self-start">
-              <Link to="/finances/chat">Discuss in Chat</Link>
-            </Button>
-            <Button asChild size="sm" variant="ghost" className="self-start">
-              <Link to="/finances/transactions?financeTask=correct">Correct a transaction</Link>
-            </Button>
-          </div>
-        </OverviewSection>
-        <OverviewUpcomingMoney />
-      </div>
+      <OverviewUpcomingMoney />
       {snapshot.data ? <FinancePositionMaterial result={snapshot.data} hideMetrics /> : null}
       <div className="grid gap-6 lg:grid-cols-2">
         {reviewsKnown && reviewCount === 0 ? (
@@ -426,6 +402,7 @@ function OverviewUpcomingMoney() {
 
 function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: string }) {
   const [asOf] = useState(() => new Date().toISOString());
+  const [page, setPage] = useState(0);
   const range = cashflowScheduleRange(asOf, timezone);
   const upcoming = useQuery({
     queryKey: ["finance-recurring-occurrences", ownerId, timezone, range],
@@ -440,45 +417,95 @@ function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: 
             row.inCurrentSchedule && ["expected", "partially_matched"].includes(row.matchState),
         )
         .sort((a, b) => a.localDate.localeCompare(b.localDate) || a.key.localeCompare(b.key));
+  const pageSize = 10;
+  const currentPage = Math.min(page, Math.max(0, Math.ceil(rows.length / pageSize) - 1));
+  const start = currentPage * pageSize;
   const href = `/finances/cashflow?${new URLSearchParams({ cashflowFrom: range.from, cashflowTo: range.to, timeline: "agenda" })}`;
   return (
     <>
-      <p className="text-muted-foreground text-sm">
-        Next 30 days · {timezone} · Expected money, not a spendable balance.
-      </p>
       <FinanceSourceState label="Upcoming money" query={upcoming} />
       {denied ? (
         <p>Upcoming money access unavailable.</p>
       ) : upcoming.data ? (
         <>
           {rows.length ? (
-            <ItemGroup>
-              {rows.slice(0, 3).map((row) => (
-                <Item key={row.key} variant="outline">
-                  <ItemContent>
-                    <ItemTitle>{row.displayName}</ItemTitle>
-                    <ItemDescription>
-                      {formatDateOnly(row.localDate, { dateStyle: "medium" })} ·{" "}
-                      {row.source.kind === "income" ? "Expected income" : "Expected outflow"}
-                      {row.matchState === "partially_matched"
-                        ? " · Remaining after partial match"
-                        : ""}
-                    </ItemDescription>
-                  </ItemContent>
-                  <ItemActions className="ml-auto text-right">
-                    <p className="text-sm font-medium tabular-nums">
-                      {row.remainingExpectedCents === null
-                        ? "Amount varies"
-                        : new Intl.NumberFormat(undefined, {
-                            style: "currency",
-                            currency: row.currencyCode,
-                          }).format(row.remainingExpectedCents / 100)}
-                      {` · ${row.currencyCode}`}
-                    </p>
-                  </ItemActions>
-                </Item>
-              ))}
-            </ItemGroup>
+            <div className="min-w-0 rounded-xl bg-card p-3">
+              <Table aria-label="Upcoming expected money">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Expected date</TableHead>
+                    <TableHead>Item</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead className="text-right">Expected amount</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.slice(start, start + pageSize).map((row) => (
+                    <TableRow key={row.key}>
+                      <TableCell>
+                        {formatDateOnly(row.localDate, { dateStyle: "medium" })}
+                      </TableCell>
+                      <TableCell className="min-w-36 whitespace-normal">
+                        {row.displayName}
+                        {row.matchState === "partially_matched" ? (
+                          <p className="text-xs text-muted-foreground">
+                            Remaining after partial match
+                          </p>
+                        ) : null}
+                      </TableCell>
+                      <TableCell>{row.source.kind === "income" ? "Income" : "Outflow"}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {row.remainingExpectedCents === null
+                          ? "Amount varies"
+                          : new Intl.NumberFormat(undefined, {
+                              style: "currency",
+                              currency: row.currencyCode,
+                            }).format(row.remainingExpectedCents / 100)}
+                        {` · ${row.currencyCode}`}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+                <span>
+                  {start + 1}–{Math.min(start + pageSize, rows.length)} of {rows.length}
+                </span>
+                <Pagination aria-label="Upcoming money pagination" className="mx-0 w-auto">
+                  <PaginationContent>
+                    <PaginationItem>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        aria-label="Previous page"
+                        disabled={currentPage === 0}
+                        onClick={() => setPage(currentPage - 1)}
+                      >
+                        <ChevronLeftIcon />
+                        Previous
+                      </Button>
+                    </PaginationItem>
+                    <PaginationItem>
+                      <span className="px-2">
+                        Page {currentPage + 1} of {Math.ceil(rows.length / pageSize)}
+                      </span>
+                    </PaginationItem>
+                    <PaginationItem>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        aria-label="Next page"
+                        disabled={start + pageSize >= rows.length}
+                        onClick={() => setPage(currentPage + 1)}
+                      >
+                        Next
+                        <ChevronRightIcon />
+                      </Button>
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
+              </div>
+            </div>
           ) : (
             <p>
               {upcoming.data.unavailableSources.length
@@ -486,11 +513,6 @@ function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: 
                 : "No unmatched scheduled money in this date range."}
             </p>
           )}
-          {rows.length > 3 ? (
-            <p className="text-muted-foreground text-sm">
-              Showing the next 3 of {rows.length} expected items.
-            </p>
-          ) : null}
           {upcoming.data.unavailableSources.length ? (
             <p className="text-sm">
               {upcoming.data.unavailableSources.length} sources need schedule or amount confirmation

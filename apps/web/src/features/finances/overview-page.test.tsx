@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import "@testing-library/jest-dom/vitest";
 import { ApiClientError } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -98,7 +98,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-it("summarizes decisions without copying the first review question or authorizing it", async () => {
+it("omits the duplicate decision summary while keeping supporting navigation", async () => {
   api.getFinanceInbox.mockResolvedValue(envelope([]));
   api.listAgentAccessWorkItems.mockResolvedValue({
     summary: { byDomain: { finances: 3 } },
@@ -107,17 +107,12 @@ it("summarizes decisions without copying the first review question or authorizin
     nextCursor: null,
   });
   mount();
-  expect(await screen.findByText("3 items need review")).toBeVisible();
+  await screen.findByRole("region", { name: "Coming next" });
+  expect(screen.queryByRole("region", { name: "Needs you" })).not.toBeInTheDocument();
   expect(screen.queryByText("Private first review question")).not.toBeInTheDocument();
   expect(api.getFinanceInbox).not.toHaveBeenCalled();
-  expect(api.listAgentAccessWorkItems).toHaveBeenCalledWith({ domain: "finances", limit: 10 });
-  expect(screen.getByRole("link", { name: "Open Reviews" })).toHaveAttribute(
-    "href",
-    "/finances?review=open",
-  );
-  expect(screen.getByRole("link", { name: "Discuss in Chat" })).toHaveAttribute(
-    "href",
-    "/finances/chat",
+  await waitFor(() =>
+    expect(api.listAgentAccessWorkItems).toHaveBeenCalledWith({ domain: "finances", limit: 10 }),
   );
   expect(screen.getByRole("link", { name: "Open Activity" })).toHaveAttribute(
     "href",
@@ -196,7 +191,7 @@ it("does not claim an empty schedule or all-clear decisions on failed reads", as
   api.listFinanceRecurringOccurrences.mockRejectedValue(new Error("offline"));
   mount();
   expect(await screen.findByText("Upcoming money unavailable")).toBeVisible();
-  expect(screen.getByText("Decisions unavailable")).toBeVisible();
+  expect(screen.queryByRole("region", { name: "Next step" })).not.toBeInTheDocument();
   expect(screen.queryByText("No items need review")).not.toBeInTheDocument();
   expect(
     screen.queryByText("No unmatched scheduled money in this date range."),
@@ -267,66 +262,9 @@ it("withholds an all-clear and next-step advice when canonical review coverage i
     nextCursor: null,
   });
   mount();
-  expect(await screen.findByText(/Some Finance decisions could not be checked/)).toBeVisible();
+  await waitFor(() => expect(api.listAgentAccessWorkItems).toHaveBeenCalled());
   expect(screen.queryByText("No items need review")).not.toBeInTheDocument();
   expect(screen.queryByRole("region", { name: "Next step" })).not.toBeInTheDocument();
-});
-
-it("hides a cached decision count after denied access", async () => {
-  api.listAgentAccessWorkItems.mockResolvedValue({
-    summary: { byDomain: { finances: 3 } },
-    unavailableDomains: [],
-    items: [],
-    nextCursor: null,
-  });
-  const client = mount();
-  await screen.findByText("3 items need review");
-  api.listAgentAccessWorkItems.mockRejectedValue(
-    new ApiClientError({ status: 403, code: "forbidden", message: "Forbidden" }),
-  );
-  await client.invalidateQueries({ queryKey: ["agent-access-work-items"] });
-  expect(await screen.findByText("Review access unavailable.")).toBeVisible();
-  expect(screen.queryByText("3 items need review")).not.toBeInTheDocument();
-});
-
-it("does not reuse a previous owner's cached or late review count", async () => {
-  let finishOld: ((value: unknown) => void) | undefined;
-  api.listAgentAccessWorkItems.mockResolvedValueOnce({
-    summary: { byDomain: { finances: 3 } },
-    unavailableDomains: [],
-    items: [],
-    nextCursor: null,
-  });
-  const client = mount();
-  await screen.findByText("3 items need review");
-  api.listAgentAccessWorkItems.mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        finishOld = resolve;
-      }),
-  );
-  const oldRefresh = client.invalidateQueries({ queryKey: ["agent-access-work-items"] });
-  await waitFor(() => expect(api.listAgentAccessWorkItems).toHaveBeenCalledTimes(2));
-  api.listAgentAccessWorkItems.mockResolvedValue({
-    summary: { byDomain: { finances: 1 } },
-    unavailableDomains: [],
-    items: [],
-    nextCursor: null,
-  });
-  act(() => client.setQueryData(["me"], { id: "owner-b", planningTimezone: "America/New_York" }));
-  await screen.findByText("1 item needs review");
-  await act(async () => {
-    finishOld?.({
-      summary: { byDomain: { finances: 4 } },
-      unavailableDomains: [],
-      items: [],
-      nextCursor: null,
-    });
-    await oldRefresh;
-  });
-  expect(screen.queryByText("3 items need review")).not.toBeInTheDocument();
-  expect(screen.queryByText("4 items need review")).not.toBeInTheDocument();
-  expect(screen.getByText("1 item needs review")).toBeVisible();
 });
 
 it.each([
@@ -376,4 +314,34 @@ it("links compact position metrics to their owning views and explains Spending s
     within(metrics).getByText(/Posted personal expenses · no pending or transfers/),
   ).toBeVisible();
   expect(screen.getByText(/Its total can differ with account or date filters/)).toBeVisible();
+});
+
+it("shows six upcoming items together and paginates larger schedules with standard controls", async () => {
+  api.listFinanceRecurringOccurrences.mockResolvedValue({
+    occurrences: Array.from({ length: 6 }, (_, i) =>
+      occurrence(`Item ${String(i).padStart(2, "0")}`),
+    ),
+    unavailableSources: [],
+  });
+  const client = mount();
+  const table = await screen.findByRole("table", { name: "Upcoming expected money" });
+  await within(table).findByText("Item 05");
+  expect(within(table).getAllByRole("row")).toHaveLength(7);
+  expect(screen.queryByText(/Next 30 days/)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
+  api.listFinanceRecurringOccurrences.mockResolvedValue({
+    occurrences: Array.from({ length: 12 }, (_, i) =>
+      occurrence(`Item ${String(i).padStart(2, "0")}`),
+    ),
+    unavailableSources: [],
+  });
+  await client.invalidateQueries({ queryKey: ["finance-recurring-occurrences"] });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Next page" })).toBeEnabled());
+  expect(within(table).getAllByRole("row")).toHaveLength(11);
+  fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+  expect(within(table).getByText("Item 11")).toBeVisible();
+  expect(within(table).queryByText("Item 00")).not.toBeInTheDocument();
+  expect(screen.getByText("11–12 of 12")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Previous page" }));
+  expect(within(table).getByText("Item 00")).toBeVisible();
 });

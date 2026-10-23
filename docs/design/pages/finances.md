@@ -40,22 +40,19 @@ design §§4 and 13 retain the accepted direction.
 
 ### Daily summary
 
-Overview leads with what needs the person, recorded changes, and upcoming money before secondary
-account-view settings. Its review count comes from the shared Finance decision summary, including
-questions, approvals and cases shown by the global Reviews dialog; it is not a transaction-only
-Inbox count. A review link opens that canonical destination without copying its first question or
-placing an approval action on Overview. Unavailable or denied decision reads suppress an all-clear.
+Overview leads with compact linked balance metrics, then upcoming expected money and recorded
+position/planning context. Reviews remain available through the shared sidebar entry; Overview
+does not duplicate the decision summary or its action links. Unavailable or denied decision reads
+still suppress all-clear next-step advice.
 
 Recorded reviews and maintenance link to Activity evidence rather than implying a new completed
-action. Upcoming money shows at most three canonical expected occurrences across 30 owner-local
-dates, with remaining amounts for partial occurrences, explicit currencies and incomplete-source
-caveats. Its Cash flow link retains that exact agenda range. Expected movements are not booked
-money or a safe-to-spend total. Existing position, ownership, complete-plan review and manual
-correction controls remain available; no second queue or financial source is created.
-
-Overview leads with its balance metrics. The decision summary and next expected movements form
-an open daily sequence (adjacent at wide widths), with amounts aligned at the end of each upcoming
-row. Historical maintenance and reviews follow the position and planning material.
+action. Upcoming money uses the shared table with expected date, item, income/outflow type and
+expected amount. Show ten canonical occurrences per page across 30 owner-local dates, with
+standard previous/next chevrons, page count and visible range below the table. Six demo items fit
+on one page. Do not repeat the date-range/timezone explanatory line above it. Preserve remaining
+amounts for partial occurrences, explicit currencies and incomplete-source caveats. Its Cash flow
+link retains the exact agenda range. Expected movements are not booked money or a safe-to-spend
+total. Historical maintenance and reviews follow the position and planning material.
 
 ### Spending dashboard
 

@@ -6,7 +6,7 @@ import { ApiClientError } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { toast } from "sonner";
+import { type Action, toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FinanceAccountsPage } from "./accounts-page.js";
 import { FinanceOverviewPage } from "./overview-page.js";
@@ -1106,7 +1106,7 @@ describe("Finance position pages", () => {
         />
       </>,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Retry accounts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(refetch).toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Edit Cash manual" }));
     expect(onEdit).toHaveBeenCalled();
@@ -1179,9 +1179,11 @@ it("keeps account evidence visible when its refresh fails and allows source-spec
       </TooltipProvider>
     </QueryClientProvider>,
   );
-  expect(await screen.findByText(/Showing the last available update/)).toBeVisible();
+  await waitFor(() => expect(toast.error).toHaveBeenCalled());
+  expect(screen.queryByText(/Showing the last available update/)).not.toBeInTheDocument();
   expect(screen.getByRole("region", { name: "Financial position" })).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "Retry financial position" }));
+  const retryAction = vi.mocked(toast.error).mock.calls.at(-1)?.[1]?.action as Action;
+  retryAction.onClick({} as Parameters<Action["onClick"]>[0]);
   await waitFor(() =>
     expect(screen.queryByText(/Showing the last available update/)).not.toBeInTheDocument(),
   );
@@ -1238,7 +1240,7 @@ it.each([
   expect(screen.getByText(/Saved account display selections do not change/)).toBeVisible();
   expect(screen.getByRole("link", { name: "Open Finance settings" })).toHaveAttribute(
     "href",
-    "/settings?section=finances",
+    "/settings?page=finances",
   );
   if (state === "failed") {
     expect(await screen.findByText("Financial position unavailable")).toBeVisible();

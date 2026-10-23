@@ -22,9 +22,8 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { toast } from "sonner";
 import { ActionButton as ShadcnButton } from "@/components/action-button";
 import { CurrencyInput } from "@/components/currency-input";
+import { SortTrigger } from "@/components/data-view-controls";
 import {
-  ArrowDownIcon,
-  ArrowUpIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   CircleCheckIcon,
@@ -33,7 +32,6 @@ import {
   DownloadIcon,
   MerchantIcon,
   ReceiptIcon,
-  SortIcon,
 } from "@/components/icons";
 import {
   ResponsiveDialogBody as ImportBody,
@@ -47,6 +45,12 @@ import {
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
 } from "@/components/responsive-dialog";
+import {
+  Field as ShadcnField,
+  FieldDescription as ShadcnFieldDescription,
+  FieldGroup as ShadcnFieldGroup,
+  FieldLabel as ShadcnFieldLabel,
+} from "@/components/settings-field";
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
 import {
   Card as ShadcnCard,
@@ -77,12 +81,6 @@ import {
   DropdownMenuSeparator as ShadcnDropdownMenuSeparator,
   DropdownMenuTrigger as ShadcnDropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Field as ShadcnField,
-  FieldDescription as ShadcnFieldDescription,
-  FieldGroup as ShadcnFieldGroup,
-  FieldLabel as ShadcnFieldLabel,
-} from "@/components/ui/field";
 import { Input as ShadcnInput } from "@/components/ui/input";
 import {
   Item as ShadcnItem,
@@ -3214,18 +3212,14 @@ function TransactionSortButton({
 }) {
   if (!onSort) return <span>{label}</span>;
   const isActive = sort.sortBy === sortBy;
-  const Icon = !isActive ? SortIcon : sort.sortDirection === "asc" ? ArrowUpIcon : ArrowDownIcon;
   return (
-    <ShadcnButton
+    <SortTrigger
       aria-label={`Sort by ${label.toLowerCase()}`}
       className={align === "right" ? "ml-auto" : "-ml-2"}
       onClick={() => onSort(sortBy)}
-      size="sm"
-      variant="ghost"
-    >
-      {label}
-      <Icon aria-hidden="true" data-icon="inline-end" />
-    </ShadcnButton>
+      label={label}
+      direction={isActive ? sort.sortDirection : undefined}
+    />
   );
 }
 

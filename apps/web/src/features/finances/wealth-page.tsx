@@ -11,6 +11,7 @@ import { ActionButton as Button } from "@/components/action-button";
 import { CurrencyInput } from "@/components/currency-input";
 import { BankIcon, DollarIcon, PlusIcon, TargetIcon, WalletIcon } from "@/components/icons";
 import { KeyMetric, KeyMetrics } from "@/components/key-metrics";
+import { Field, FieldGroup, FieldLabel, FieldSet } from "@/components/settings-field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,7 +24,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { Field, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   Item,

@@ -5,13 +5,11 @@ import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "../../components/ui/card.js";
-import { Field, FieldContent, FieldDescription, FieldLabel } from "../../components/ui/field.js";
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+} from "../../components/settings-field.js";
 import { Switch } from "../../components/ui/switch.js";
 import { classifyMutationError } from "../../lib/feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
@@ -21,6 +19,7 @@ import {
   usePreferenceSession,
 } from "../workspace-settings/account-save-session";
 import { SettingsSaveRecovery } from "../workspace-settings/save-recovery";
+import { SettingsSection } from "./settings-layout";
 
 const queryKey = ["execution-policy"] as const;
 
@@ -107,87 +106,74 @@ function SessionExecutionPolicySettingsCard({ session }: { session: PreferenceSe
   const unavailable =
     !current() || settings.isPending || update.isPending || !settings.data || !!recovery;
   return (
-    <Card className="settings-section">
-      <CardHeader>
-        <CardTitle>Agent review policy</CardTitle>
-        <CardDescription>
-          One account setting controls eligible agent work across every workspace and channel.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="settings-section__body">
-        <QueryFeedback query={settings} title="Couldn’t load agent review policy." />
-        {!recovery ? <MutationFeedback feedback={update.feedback} /> : null}
-        {recovery ? (
-          <SettingsSaveRecovery
-            outcome={recovery.outcome}
-            title="Agent review policy change has not been confirmed."
-            pending={settings.isFetching || update.isPending}
-            reviewed={!!recovery.reviewed}
-            rows={[
-              {
-                label: "Apply eligible work without waiting in Review",
-                attempted: recovery.attempted ? "Enabled" : "Disabled",
-                current: recovery.reviewed?.reviewBypassEnabled ? "Enabled" : "Disabled",
-              },
-            ]}
-            onRefresh={async () => {
-              if (!current()) return;
-              const sequence = ++refreshSequence.current;
-              setRecovery({ attempted: recovery.attempted, outcome: recovery.outcome });
-              const latest = await settings.refetch();
-              if (
-                sequence === refreshSequence.current &&
-                current() &&
-                !latest.isError &&
-                latest.data
-              )
-                setRecovery({
-                  attempted: recovery.attempted,
-                  outcome: recovery.outcome,
-                  reviewed: latest.data,
-                });
-            }}
-            onAccept={() => {
-              if (!current()) return;
-              setRecovery(undefined);
-              update.reset();
-            }}
-            onReapply={() => {
-              if (current() && recovery.reviewed)
-                update.mutate({
-                  reviewBypassEnabled: recovery.attempted,
-                  expectedVersion: recovery.reviewed.version,
-                  session,
-                });
-            }}
-          />
-        ) : null}
-        <Field data-disabled={unavailable} orientation="horizontal">
-          <FieldContent>
-            <FieldLabel htmlFor="global-review-bypass">
-              Apply eligible work without waiting in Review
-            </FieldLabel>
-            <FieldDescription>
-              The account default is off: eligible work waits in Review. Currently this applies to
-              reversible, policy-authorized Finance changes. Permissions, questions, and explicit
-              approval requirements still apply.
-            </FieldDescription>
-          </FieldContent>
-          <Switch
-            checked={settings.data?.reviewBypassEnabled ?? false}
-            disabled={unavailable}
-            id="global-review-bypass"
-            onCheckedChange={(enabled) => {
-              if (current() && settings.data)
-                update.mutate({
-                  reviewBypassEnabled: enabled,
-                  expectedVersion: settings.data.version,
-                  session,
-                });
-            }}
-          />
-        </Field>
-      </CardContent>
-    </Card>
+    <SettingsSection layout="rows" title="Agent review policy">
+      <QueryFeedback query={settings} title="Couldn’t load agent review policy." />
+      {!recovery ? <MutationFeedback feedback={update.feedback} /> : null}
+      {recovery ? (
+        <SettingsSaveRecovery
+          outcome={recovery.outcome}
+          title="Agent review policy change has not been confirmed."
+          pending={settings.isFetching || update.isPending}
+          reviewed={!!recovery.reviewed}
+          rows={[
+            {
+              label: "Apply eligible work without waiting in Review",
+              attempted: recovery.attempted ? "Enabled" : "Disabled",
+              current: recovery.reviewed?.reviewBypassEnabled ? "Enabled" : "Disabled",
+            },
+          ]}
+          onRefresh={async () => {
+            if (!current()) return;
+            const sequence = ++refreshSequence.current;
+            setRecovery({ attempted: recovery.attempted, outcome: recovery.outcome });
+            const latest = await settings.refetch();
+            if (sequence === refreshSequence.current && current() && !latest.isError && latest.data)
+              setRecovery({
+                attempted: recovery.attempted,
+                outcome: recovery.outcome,
+                reviewed: latest.data,
+              });
+          }}
+          onAccept={() => {
+            if (!current()) return;
+            setRecovery(undefined);
+            update.reset();
+          }}
+          onReapply={() => {
+            if (current() && recovery.reviewed)
+              update.mutate({
+                reviewBypassEnabled: recovery.attempted,
+                expectedVersion: recovery.reviewed.version,
+                session,
+              });
+          }}
+        />
+      ) : null}
+      <Field data-disabled={unavailable} orientation="horizontal">
+        <FieldContent>
+          <FieldLabel htmlFor="global-review-bypass">
+            Apply eligible work without waiting in Review
+          </FieldLabel>
+          <FieldDescription>
+            The account default is off: eligible work waits in Review. Currently this applies to
+            reversible, policy-authorized Finance changes. Permissions, questions, and explicit
+            approval requirements still apply.
+          </FieldDescription>
+        </FieldContent>
+        <Switch
+          checked={settings.data?.reviewBypassEnabled ?? false}
+          disabled={unavailable}
+          id="global-review-bypass"
+          onCheckedChange={(enabled) => {
+            if (current() && settings.data)
+              update.mutate({
+                reviewBypassEnabled: enabled,
+                expectedVersion: settings.data.version,
+                session,
+              });
+          }}
+        />
+      </Field>
+    </SettingsSection>
   );
 }

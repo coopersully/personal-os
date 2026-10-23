@@ -2,7 +2,7 @@ import type { CalendarProfilePreferences, DomainProfile } from "@personal-os/dom
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api";
 import { QueryFeedback } from "@/components/async-state";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/settings-field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 
@@ -51,7 +51,7 @@ export function CalendarProfilePreferenceFields({
         </NativeSelect>
         <FieldDescription>
           Only calendars configured in this profile are available.{" "}
-          <a href="/settings?section=calendar#calendar-setup" className="underline">
+          <a href="/settings?page=calendar#calendar-setup" className="underline">
             Open Calendar setup to add a source.
           </a>
         </FieldDescription>

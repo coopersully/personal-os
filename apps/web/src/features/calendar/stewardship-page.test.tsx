@@ -266,7 +266,7 @@ describe("Calendar schedule health", () => {
     expect(screen.getByText("Google access needs to be renewed.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open Connections" })).toHaveAttribute(
       "href",
-      "/settings?section=connections",
+      "/settings?page=connections",
     );
     expect(screen.queryByText(/No findings/)).not.toBeInTheDocument();
     expect(screen.getByText("Unknown until source evidence is current")).toBeInTheDocument();

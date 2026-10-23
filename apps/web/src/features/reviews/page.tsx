@@ -7,6 +7,7 @@ import type {
 import { useQuery } from "@tanstack/react-query";
 import { useDeferredValue, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { DataChoice, FilterBar } from "@/components/data-view-controls";
 import {
   AlertTriangleIcon,
   ChevronLeftIcon,
@@ -14,7 +15,6 @@ import {
   CircleCheckIcon,
   RefreshIcon,
 } from "@/components/icons";
-import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
 import { SettingsRecordAction, SettingsRecordContent } from "@/components/settings-record";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -27,7 +27,6 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Item, ItemGroup } from "@/components/ui/item";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Pagination, PaginationContent, PaginationItem } from "@/components/ui/pagination";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WorkspaceIcon, workspaceIdentities } from "@/components/workspace-identity";
@@ -243,50 +242,65 @@ export function ReviewsPage({ workspace }: { workspace?: AgentAccessDomain }) {
 
       <section aria-label="Review filters" className="reviews-page__filters">
         <WorkspaceSearch label="Search reviews" />
-        <label htmlFor="review-sort" className="reviews-page__workspace-filter">
-          Sort
-          <NativeSelect
-            id="review-sort"
-            value={sort}
-            onChange={(event) => selectFilter("sort", event.target.value)}
-          >
-            <NativeSelectOption value="priority">Priority</NativeSelectOption>
-            <NativeSelectOption value="oldest">Oldest updated</NativeSelectOption>
-            <NativeSelectOption value="newest">Recently updated</NativeSelectOption>
-          </NativeSelect>
-        </label>
-        <SegmentedControl
-          aria-label="Filter by work type"
-          onValueChange={(value) => selectFilter("kind", value)}
-          value={kind}
+        <FilterBar
+          filters={[
+            {
+              id: "kind",
+              label: "Work Type",
+              active: kind !== "all",
+              control: (
+                <DataChoice
+                  label="Filter by work type"
+                  ariaLabel="Filter by work type"
+                  value={kind}
+                  active={kind !== "all"}
+                  choices={[
+                    ["all", "All work"],
+                    ...kinds.map((value) => [value, kindLabels[value]] as const),
+                  ]}
+                  onChange={(value) => selectFilter("kind", value)}
+                />
+              ),
+            },
+            ...(!workspace
+              ? [
+                  {
+                    id: "workspace",
+                    label: "Workspace",
+                    active: domain !== "all",
+                    control: (
+                      <DataChoice
+                        label="Filter by workspace"
+                        ariaLabel="Filter by workspace"
+                        value={domain}
+                        active={domain !== "all"}
+                        choices={[
+                          ["all", "All workspaces"],
+                          ...domains.map(
+                            (value) => [value, workspaceIdentities[value].label] as const,
+                          ),
+                        ]}
+                        onChange={(value) => selectFilter("workspace", value)}
+                      />
+                    ),
+                  },
+                ]
+              : []),
+          ]}
         >
-          <SegmentedControlItem value="all">All work</SegmentedControlItem>
-          {kinds.map((value) => (
-            <SegmentedControlItem key={value} value={value}>
-              {kindLabels[value]}
-            </SegmentedControlItem>
-          ))}
-        </SegmentedControl>
-        {!workspace ? (
-          <label className="reviews-page__workspace-filter" htmlFor="review-workspace">
-            <span>Workspace</span>
-            <NativeSelect
-              id="review-workspace"
-              aria-label="Filter by workspace"
-              autoComplete="off"
-              name="review-workspace"
-              onChange={(event) => selectFilter("workspace", event.target.value)}
-              value={domain}
-            >
-              <NativeSelectOption value="all">All workspaces</NativeSelectOption>
-              {domains.map((value) => (
-                <NativeSelectOption key={value} value={value}>
-                  {workspaceIdentities[value].label}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </label>
-        ) : null}
+          <DataChoice
+            label="Sort"
+            ariaLabel="Sort reviews"
+            sorting
+            value={sort}
+            choices={[
+              ["priority", "Priority"],
+              ["oldest", "Oldest updated"],
+              ["newest", "Recently updated"],
+            ]}
+            onChange={(value) => selectFilter("sort", value)}
+          />
+        </FilterBar>
       </section>
       <div className="flex min-w-0 flex-col gap-4">
         {query.isPending ? <QueueSkeleton /> : null}

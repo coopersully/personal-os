@@ -3,7 +3,7 @@ import {
   type MailProfilePreferences,
   mailProfilePreferencesSchema,
 } from "@personal-os/domain";
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/settings-field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 

@@ -56,15 +56,11 @@ const stylesheetForDecorativeChecks = stylesheet
     /(\.setup-navigation__fade\s*\{\s*)background: linear-gradient\(to bottom, transparent, var\(--canvas\) 62%\);/g,
     "$1",
   );
-// Ritual previews mirror the explicitly approved native sunrise/moonlight backdrop.
-// Keep this exception restricted to those two selectors and their exact colors.
+// The approved shared ritual glow is bounded to its decorative sky layer.
 const stylesheetForRitualChecks = stylesheetForDecorativeChecks
+  .replace(/(\.browser-ritual\s*\{\s*)backdrop-filter: blur\(24px\);/g, "$1")
   .replace(
-    /(\.ritual-browser-preview\s*\{\s*)background: radial-gradient\(ellipse at 50% 100%, rgb\(255 210 64 \/ 65%\), transparent 65%\), rgb\(38 79 133\);/g,
-    "$1",
-  )
-  .replace(
-    /(\.ritual-browser-preview\[data-ritual-kind="night"\]\s*\{\s*)background: radial-gradient\(ellipse at 50% 0%, rgb\(240 248 255 \/ 65%\), transparent 65%\), rgb\(9 18 48\);/g,
+    /(\.ritual-glow\s*\{[^}]*?)background: radial-gradient\(ellipse at 50% 50%, var\(--ritual-glow-color\) 0%, transparent 65%\);/g,
     "$1",
   );
 const stylesheetPatterns = [

@@ -117,7 +117,7 @@ it("shows the ledger challenge reason and connected-agent route", async () => {
   ).toBeVisible();
   expect(screen.getByRole("link", { name: "Connected agents" })).toHaveAttribute(
     "href",
-    "/settings?section=agent-connections",
+    "/settings?page=connections&subpage=agent-connections",
   );
   expect(screen.queryByRole("link", { name: "Answer in Review" })).not.toBeInTheDocument();
 });

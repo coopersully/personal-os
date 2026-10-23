@@ -26,6 +26,8 @@
   --border-strong: #8d8d8d;
   --content-primary: #202020;
   --ritual-morning-content: #202020;
+  --ritual-morning-sky: #87cefa;
+  --ritual-evening-sky: #101622;
   --ritual-evening-content: #f9f9f9;
   --content-secondary: #5b5b5b;
   --content-tertiary: #646464;
@@ -4415,6 +4417,11 @@ p {
 }
 .segmented-control [data-slot="toggle-group-item"] {
   flex: 0 0 auto;
+  color: var(--muted-foreground);
+}
+.segmented-control [data-slot="toggle-group-item"][data-state="on"] {
+  background: var(--primary);
+  color: var(--primary-foreground);
 }
 .activity-list {
   border-top: 1px solid var(--line);
@@ -6075,7 +6082,7 @@ p {
   --popover-foreground: var(--ink);
   --primary: var(--content-primary);
   --primary-foreground: var(--canvas);
-  --secondary: var(--paper);
+  --secondary: var(--surface-strong);
   --secondary-foreground: var(--ink);
   --ui-muted: var(--surface-muted);
   --muted-foreground: var(--muted);
@@ -6985,33 +6992,42 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 }
 .ritual-surface {
   --ritual-chrome: var(--ritual-morning-content);
+  --ritual-sky: var(--ritual-morning-sky);
   height: 100dvh;
   display: grid;
   place-items: center;
-  padding: 64px;
-  background: transparent;
+  padding: 88px 24px 72px;
+  background: var(--ritual-sky);
   color: var(--card-foreground);
   text-align: center;
 }
 .ritual-presentation {
+  position: relative;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 18px;
+  gap: 16px;
   width: 100%;
-  max-height: 100%;
+  max-width: 36rem;
+  max-height: calc(100dvh - 164px);
   min-height: 0;
-  --ritual-card-delay: 1100ms;
-  --ritual-card-duration: 2000ms;
-  --ritual-chrome-delay: calc(var(--ritual-card-delay) + var(--ritual-card-duration));
+  --ritual-chrome-muted: color-mix(in srgb, var(--ritual-chrome) 45%, var(--ritual-sky));
+  --ritual-card-delay: 140ms;
+  --ritual-card-duration: 640ms;
+  --ritual-chrome-delay: 40ms;
 }
 .ritual-logo {
+  position: fixed;
+  top: max(20px, env(safe-area-inset-top));
+  left: 50%;
+  translate: -50% 0;
   flex-shrink: 0;
-  animation: ritual-chrome-enter 1600ms ease-in-out var(--ritual-chrome-delay) backwards;
+  animation: ritual-chrome-enter 420ms ease-out var(--ritual-chrome-delay) backwards;
 }
 .ritual-logo .brand-symbol { width: 40px; height: 40px; }
 .ritual-support {
-  animation: ritual-chrome-enter 1600ms ease-in-out var(--ritual-chrome-delay) backwards;
+  animation: ritual-chrome-enter 420ms ease-out 480ms backwards;
 }
 .ritual-support-text { font-size: 0.75rem; font-weight: 400; }
 .ritual-card {
@@ -7020,24 +7036,56 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   --card-spacing: 1.75rem;
   animation: ritual-element-enter var(--ritual-card-duration) cubic-bezier(0.22, 1, 0.36, 1) var(--ritual-card-delay) backwards;
 }
+/* A shared decorative layer: no motion, screen capture, or input handling. */
+.ritual-clouds {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  image-rendering: auto;
+}
+.ritual-progress { color: var(--ritual-chrome-muted); animation: ritual-question-enter 460ms ease-out 80ms backwards; }
+.ritual-progress .text-muted-foreground { color: inherit; }
+
+.ritual-actions { color: var(--ritual-chrome); }
+.ritual-card .ritual-actions { color: var(--card-foreground); }
+.ritual-scroll li { animation: ritual-question-enter 420ms ease-out backwards; }
+.ritual-clouds { animation: ritual-chrome-enter 1000ms ease-out both; will-change: transform; }
+.ritual-actions .text-muted-foreground { color: inherit; }
+.ritual-actions > div { padding-inline: 0.25rem; }
 .ritual-scroll { overscroll-behavior: contain; scrollbar-gutter: stable; }
+@media (max-height: 640px) {
+  .ritual-surface { padding: 72px 16px 60px; }
+  .ritual-presentation { max-height: calc(100dvh - 132px); }
+  .ritual-card { min-height: 0; }
+}
+/* Approved ritual-only backdrop isolates the current page without capturing the screen. */
+.browser-ritual { backdrop-filter: blur(24px); }
+
+
+
 @keyframes ritual-element-enter {
-  from { opacity: 0; filter: blur(8px); transform: translateY(12px); }
-  to { opacity: 1; filter: none; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(14px) scale(0.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ritual-logo, .ritual-card, .ritual-support { animation: none; }
+  .ritual-logo, .ritual-card, .ritual-support, .ritual-progress, .ritual-clouds, .ritual-scroll li { animation: none; }
 }
 @media (max-width: 440px) {
   .ritual-card { --card-spacing: 1.25rem; }
 }
 
 .ritual-browser-preview {
-  background: radial-gradient(ellipse at 50% 100%, rgb(255 210 64 / 65%), transparent 65%), rgb(38 79 133);
+  --ritual-chrome: var(--ritual-morning-content);
+  --ritual-sky: var(--ritual-morning-sky);
+  background: var(--ritual-sky);
   align-content: center;
+  overflow: clip;
 }
 .ritual-browser-preview[data-ritual-kind="night"] {
-  background: radial-gradient(ellipse at 50% 0%, rgb(240 248 255 / 65%), transparent 65%), rgb(9 18 48);
+  background: var(--ritual-sky);
 }
 
 .ritual-surface[data-ready="false"] { visibility: hidden; }
@@ -7046,15 +7094,15 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 .ritual-surface[data-ready="false"] .ritual-support { animation: none; }
 
 .ritual-surface[data-ritual-kind="night"],
-.ritual-browser-preview[data-ritual-kind="night"] { --ritual-chrome: var(--ritual-evening-content); }
+.ritual-browser-preview[data-ritual-kind="night"] { --ritual-chrome: var(--ritual-evening-content); --ritual-sky: var(--ritual-evening-sky); }
 .ritual-logo .brand-symbol,
 .ritual-support-text {
-  color: var(--ritual-chrome, var(--ritual-morning-content));
+  color: var(--ritual-chrome-muted);
   fill: currentColor;
-  opacity: 0.25;
+  opacity: 1;
 }
 @media (max-width: 440px) {
-  .ritual-surface { padding: 40px; }
+  .ritual-surface { padding: 80px 20px 64px; }
 }
 
 @keyframes ritual-chrome-enter {
@@ -7197,12 +7245,26 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   padding: clamp(1rem, 3vw, 2.5rem);
 }
 .settings-page__heading {
-  align-items: flex-start;
-  display: flex;
-  gap: 1rem;
-  justify-content: space-between;
-  margin-block-end: 1.5rem;
+  --settings-heading-accent: var(--status-info);
+  margin-block-end: 1rem;
+  width: 100%;
 }
+.settings-page__heading[data-settings-section="calendar"] { --settings-heading-accent: var(--workspace-calendar-accent); }
+.settings-page__heading:is([data-settings-section="tasks"], [data-settings-section="rituals"], [data-settings-section="goals"], [data-settings-section="motives"]) { --settings-heading-accent: var(--workspace-tasks-accent); }
+.settings-page__heading:is([data-settings-section="mail"], [data-settings-section="appearance"]) { --settings-heading-accent: var(--workspace-mail-accent); }
+.settings-page__heading[data-settings-section="finances"] { --settings-heading-accent: var(--workspace-finances-accent); }
+.settings-page__icon {
+  align-items: center;
+  background: color-mix(in srgb, var(--settings-heading-accent) 14%, var(--card));
+  border-radius: var(--radius-lg);
+  color: var(--settings-heading-accent);
+  display: flex;
+  flex: 0 0 auto;
+  height: 3rem;
+  justify-content: center;
+  width: 3rem;
+}
+.settings-page__icon svg { width: 1.5rem; height: 1.5rem; }
 .settings-page__heading h1 {
   font-size: 1.5rem;
   font-weight: 600;
@@ -7562,19 +7624,24 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   min-width: 0;
 }
 .wallpaper-editor > * { min-width: 0; }
+.wallpaper-editor__settings { container: wallpaper-controls / inline-size; }
+.wallpaper-choice-row[data-settings-row] > input[type="color"] { grid-row: 2; }
 .wallpaper-editor__preview {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+  position: static;
 }
 .wallpaper-editor__preview .pinterest-wallpaper-preview__canvas {
   width: 100%;
 }
-@container settings (min-width: 32rem) {
+@container settings (min-width: 40rem) {
   .wallpaper-editor { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
-  .wallpaper-editor__preview { top: 1rem; grid-column: 2; grid-row: 1; }
+  .wallpaper-editor__preview { position: sticky; top: 1rem; grid-column: 2; grid-row: 1; }
   .wallpaper-editor__settings { grid-column: 1; grid-row: 1; }
 
+}
+@container wallpaper-controls (max-width: 28rem) {
+  .settings-panel .wallpaper-choice-row[data-settings-row] { grid-template-columns: minmax(0, 1fr); }
+  .wallpaper-choice-row[data-settings-row] > .segmented-control { grid-column: 1; grid-row: 2; }
+  .wallpaper-choice-row[data-settings-row] > input[type="color"] { grid-column: 1; grid-row: 3; }
 }
 .appearance-picker .choice-card__content {
   grid-template-columns: auto minmax(0, 1fr);
@@ -7585,7 +7652,7 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 }
 .appearance-picker .appearance-preview { width: 100%; }
 
-.wallpaper-editor__settings [data-slot="field-group"] { padding-inline: 0.5rem; }
+.wallpaper-editor__settings [data-slot="field-group"] { padding-inline: 0; gap: 0; }
 
 html.pet-window,
 html.pet-window body,
@@ -7619,3 +7686,421 @@ html.pet-window #root {
 .pet-section-scroll [data-slot="scroll-area-scrollbar"][data-orientation="vertical"] {
   right: 6px !important;
 }
+
+/* Ritual progress is quiet chrome; questions retain the main surface. */
+.ritual-day-dot {
+  width: 12px;
+  height: 12px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  opacity: 1;
+}
+.ritual-day-dot-complete { background: currentColor; opacity: 1; }
+.ritual-button-progress {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  background: currentColor;
+  opacity: 0.18;
+  transition: width 220ms ease-out;
+  pointer-events: none;
+}
+.ritual-escapes {
+  position: fixed;
+  inset-inline: 0;
+  bottom: max(12px, env(safe-area-inset-bottom));
+}
+.ritual-follow-up { color: var(--ritual-chrome); }
+@media (prefers-reduced-motion: reduce) {
+  .ritual-button-progress { transition: none; }
+}
+
+@keyframes ritual-question-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.ritual-support > button { position: fixed; inset-inline-start: 50%; translate: -50% 0; bottom: max(12px, env(safe-area-inset-bottom)); }
+
+/* A quick, shared sunrise/moonlight reveal behind the ritual form. */
+.ritual-glow {
+  --ritual-glow-color: rgb(255 231 170 / 18%);
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 50%, var(--ritual-glow-color) 0%, transparent 65%);
+  animation: ritual-glow-reveal 1200ms ease-out both;
+}
+.ritual-glow[data-ritual-kind="night"] { --ritual-glow-color: rgb(205 218 255 / 18%); }
+@keyframes ritual-glow-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ritual-glow { animation: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ritual-clouds { animation: none; will-change: auto; }
+}
+
+.ritual-surface, .ritual-browser-preview { touch-action: pan-y; }
+
+/* Profile records use the same setting controls as other pages. */
+.profile-setting-row { min-height: 3rem; padding: 0.5rem 1rem; border-bottom: 1px solid var(--settings-divider-color); }
+.profile-setting-row:last-child { border-bottom: 0; }
+.account-profile-identity { border-bottom: 1px solid var(--settings-divider-color); border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.profile-destination-icon { display: flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; border-radius: var(--radius); background: var(--secondary); color: var(--muted-foreground); }
+.profile-workspace-icon { border: 0; }
+
+/* Settings-wide composition: compact labels, continuous cards, direct trailing controls. */
+.settings-subsection { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
+.settings-subsection__label { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding-inline: 0.25rem; }
+.settings-subsection__label h2 { font-size: 0.75rem; font-weight: 500; color: var(--muted-foreground); }
+/* Settings titles use title case; field help and prose retain sentence case. */
+.settings-page h1,
+.settings-page h2 { text-transform: capitalize; }
+/* Explicit Settings rows share geometry; domain fields keep their save contracts. */
+.settings-panel [data-slot="field-group"] { gap: 0; }
+.settings-panel [data-settings-row] {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1fr) minmax(0, auto);
+  align-items: center;
+  gap: 0.125rem 1rem;
+  min-height: 3rem;
+  padding-block: 0.5rem;
+  border-bottom: 1px solid var(--settings-divider-color);
+}
+.settings-panel [data-settings-row]:last-child { border-bottom: 0; }
+.settings-panel [data-settings-row] > * { grid-column: 2; grid-row: 1; width: auto; justify-self: end; min-width: 0; max-width: 100%; }
+.settings-panel [data-settings-row] > :is([data-slot="field-label"], [data-slot="field-content"]) { grid-column: 1; justify-self: start; color: var(--foreground); }
+.settings-panel [data-settings-row] > [data-slot="field-description"] { grid-column: 1; grid-row: 2; justify-self: start; max-width: 48ch; font-size: 0.75rem; }
+/* Described rows center their control across both text lines. */
+.settings-panel [data-settings-row] [data-slot="field-description"] { margin-block: 0; font-size: 0.75rem; line-height: 1.4; }
+.settings-panel [data-settings-row] > [data-slot="field-content"] { gap: 0.125rem; }
+.settings-panel [data-settings-row] > :is([role="checkbox"], [role="switch"], [role="radio"]) { margin-block: 0; align-self: center; }
+.settings-panel [data-settings-row]:has(> [data-slot="field-description"]) > :not([data-slot="field-label"]):not([data-slot="field-description"]):not([data-slot="field-error"]):not(textarea):not([data-slot="field-group"]):not([data-slot="field-set"]) { grid-row: 1 / 3; align-self: center; }
+.settings-panel [data-settings-row]:has(> [data-slot="field-description"]) > [data-slot="field-label"] { align-self: end; }
+.settings-panel [data-settings-row] > [data-slot="field-description"] { align-self: start; }
+.settings-panel [data-settings-row] > [data-slot="field-error"] { grid-column: 1 / -1; grid-row: auto; justify-self: stretch; }
+.settings-panel [data-settings-row] > :is(textarea, [data-slot="field-group"], [data-slot="field-set"]) { grid-column: 1 / -1; grid-row: auto; width: 100%; }
+.settings-panel [data-settings-row] > :is(input[type="range"], [data-slot="slider"]) { width: 12rem; }
+.settings-panel [data-settings-row] > [data-slot="settings-value"] { text-align: end; color: var(--muted-foreground); overflow-wrap: anywhere; }
+@container settings (max-width: 30rem) {
+  .settings-panel [data-settings-row] { grid-template-columns: minmax(6rem, 1fr) minmax(0, 1fr); }
+  .settings-panel [data-settings-row] > :is([data-slot="settings-select"], [data-slot="settings-time"]) { max-width: 100%; }
+}
+/* Compound editors may stack on narrow screens, but a switch or compact action
+   group still fits beside its label. Keep those rows flat instead of adding height. */
+@container settings (max-width: 22rem) {
+  .settings-panel [data-settings-row] > * { grid-column: 1; grid-row: auto; }
+  .settings-panel [data-settings-row]:not(:has(> :is([role="switch"], [data-settings-row-actions]))) { grid-template-columns: minmax(0, 1fr); }
+  .settings-panel [data-settings-row]:not(:has(> :is([role="switch"], [data-settings-row-actions]))):has(> [data-slot="field-description"]) > [data-slot="field-label"] { grid-row: 1; }
+  .settings-panel [data-settings-row]:not(:has(> :is([role="switch"], [data-settings-row-actions]))):has(> [data-slot="field-description"]) > :not([data-slot="field-label"]):not([data-slot="field-description"]):not([data-slot="field-error"]) { grid-row: 3; }
+  .settings-panel [data-settings-row]:has(> :is([role="switch"], [data-settings-row-actions])) {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .settings-panel [data-settings-row] > :is([role="switch"], [data-settings-row-actions]) { grid-column: 2; grid-row: 1; }
+}
+.settings-page__tools { display: none; justify-content: flex-end; gap: 0.5rem; margin-block-end: 1rem; }
+.settings-page__tools[data-has-actions="true"] { display: flex; }
+@media (max-width: 900px) { .settings-page__tools { display: flex; } }
+
+/* One editing geometry for every scalar Settings control. The row reserves room
+   for the editor so focusing a short value cannot squeeze its label. */
+.settings-panel { --settings-editor-width: 18rem; }
+.settings-panel [data-settings-row] { grid-template-columns: minmax(0, 1fr) minmax(0, min(var(--settings-editor-width), 60%)); }
+.settings-panel [data-settings-row] > :is([data-slot="settings-select"], [data-slot="settings-time"]) { width: 100%; min-width: 0; }
+.settings-panel [data-settings-row] > :where(input:not([type="range"]):not([type="color"]), [data-slot="input-group"]),
+.settings-panel .settings-value-input[data-slot="input-group"] {
+  width: max-content;
+  max-width: 100%;
+  min-width: 0;
+  margin-inline-start: auto;
+  background: transparent;
+  color: var(--muted-foreground);
+  text-align: right;
+  field-sizing: content;
+  font-size: 0.875rem;
+}
+.settings-panel .settings-value-input[data-slot="input-group"]:not(:focus-within),
+.settings-panel [data-settings-row] > [data-slot="input-group"]:not(:focus-within) { gap: 0.375rem; }
+.settings-panel .settings-value-input input,
+.settings-panel [data-settings-row] > [data-slot="input-group"] input {
+  field-sizing: content;
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+  text-align: right;
+}
+.settings-panel .settings-value-input:not(:focus-within) [data-slot="input-group-addon"],
+.settings-panel [data-settings-row] > [data-slot="input-group"]:not(:focus-within) [data-slot="input-group-addon"] {
+  flex-shrink: 0;
+  padding-inline: 0;
+  font-size: inherit;
+}
+.settings-panel .settings-value-input [data-slot="input-group-addon"]:empty { display: none; }
+.settings-panel .settings-value-input [data-slot="input-group-addon"] svg { width: 1em; height: 1em; }
+.settings-panel [data-settings-row] > input:not([type="range"]):not([type="color"]):focus,
+.settings-panel [data-settings-row] > [data-slot="input-group"]:focus-within,
+.settings-panel .settings-value-input[data-slot="input-group"]:focus-within {
+  width: var(--settings-editor-width);
+  max-width: 100%;
+  field-sizing: fixed;
+  background: var(--input-surface);
+  color: var(--foreground);
+  text-align: start;
+}
+.settings-panel .settings-value-input:focus-within input,
+.settings-panel [data-settings-row] > [data-slot="input-group"]:focus-within input {
+  field-sizing: fixed;
+  flex: 1 1 0%;
+  width: 0;
+  text-align: start;
+}
+@container settings (max-width: 34rem) {
+  .settings-panel [data-settings-row] { grid-template-columns: minmax(0, 1fr) minmax(0, 60%); }
+}
+@container settings (max-width: 22rem) {
+  .settings-panel [data-settings-row] { grid-template-columns: minmax(0, 1fr); }
+}
+
+.settings-panel .settings-value-input:not(:focus-within) input,
+.settings-panel [data-settings-row] > [data-slot="input-group"]:not(:focus-within) input { padding-inline: 0; }
+
+@container settings (max-width: 22rem) {
+  .settings-panel [data-settings-row]:has(> [data-slot="field-description"]) > * { grid-column: 1; grid-row: auto; }
+}
+
+/* Wrappers must not add padding or border height to the shared 48px field. */
+.settings-inline-row { position: relative; }
+.settings-inline-row:last-child::after { display: none; }
+
+/* A divider is paint, not another pixel of row height. */
+.settings-panel { --settings-row-height: 3rem; --settings-row-padding: 0.5rem; }
+.settings-panel :is([data-settings-row], .settings-navigation-row) {
+  min-height: var(--settings-row-height);
+  padding-block: var(--settings-row-padding);
+  border-block-width: 0;
+  position: relative;
+  flex-grow: 0;
+}
+.settings-panel :is([data-settings-row], .settings-navigation-row):last-child::after { display: none; }
+.settings-panel [data-slot="table-row"] { border-color: var(--settings-divider-color); }
+.settings-panel .settings-inline-row { padding-block: 0; }
+
+.settings-icon-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 2rem;
+  background: transparent;
+  border: 0;
+}
+.settings-icon-slot > :is(svg, img, [data-brand-monogram]) {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+.settings-page__icon { position: relative; }
+.settings-page__subpage-icon { position: absolute; right: -0.375rem; bottom: -0.375rem; display: flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; border-radius: var(--radius-sm); background: var(--secondary);  }
+.settings-page__subpage-icon svg { width: 0.875rem; height: 0.875rem; }
+
+/* Row cards own no inset: individual rows own spacing and edge-to-edge dividers. */
+.settings-section.settings-section--rows { padding: 0; gap: 0; }
+.settings-section__body.settings-section__body--rows { padding: 0; gap: 0; }
+.settings-section__body--rows [data-settings-row] { padding-inline: 1rem; }
+.settings-panel .settings-navigation-row { padding-inline: 1rem; }
+
+.settings-section__body--rows [data-slot="field-group"] > [data-slot="field-description"] {
+  padding: 0.5rem 1rem;
+}
+
+/* Intrinsic glyph dimensions must survive the row grid's generic width reset. */
+.settings-panel [data-settings-row] > [role="checkbox"],
+.settings-panel [data-settings-row] > [role="radio"] { width: 1rem; height: 1rem; }
+.settings-panel [data-settings-row] > [role="switch"] { width: 2rem; }
+.settings-panel [data-settings-row] > [role="switch"][data-size="sm"] { width: 1.5rem; }
+.settings-section__body--rows .settings-inline-row > [data-settings-row] { padding-inline: 0; }
+
+/* Labels nested in FieldContent carry the same emphasis as direct row labels. */
+.settings-panel [data-settings-row] > [data-slot="field-content"] > [data-slot="field-label"] {
+  color: var(--foreground);
+}
+.settings-command-row { display: flex; align-items: center; min-height: 3rem; padding: 0.5rem 1rem; }
+
+/* Inactive settings remain operable so their state can be inspected or resumed. */
+
+
+/* Settings variants change emphasis without changing row geometry or dividers. */
+[data-settings-variant="inactive"] > * { opacity: 0.45; }
+[data-settings-variant="inactive"]:is(:hover, :focus-visible) > * { opacity: 0.7; }
+[data-settings-variant="danger"] {
+  color: var(--destructive);
+  background: var(--status-danger-surface);
+}
+[data-settings-variant="danger"] .text-muted-foreground { color: inherit; }
+.settings-subsection__header {
+  position: relative;
+}
+.settings-subsection__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 3rem;
+  height: 3rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--settings-divider-color);
+  background: color-mix(in srgb, var(--border) 8%, transparent);
+  color: var(--foreground);
+}
+.settings-subsection__icon svg { width: 1.5rem; height: 1.5rem; }
+
+/* Consistent labels for sections inside settings detail dialogs. */
+.settings-detail-heading {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+/* Record prose starts at the heading edge; focused controls retain standard sizing. */
+.record-inline-editor.settings-panel .settings-value-input {
+  margin-inline-start: 0;
+}
+.record-inline-editor.settings-panel .settings-value-input:has(textarea) {
+  width: var(--settings-editor-width);
+}
+
+.record-inline-editor.settings-panel { animation: none; }
+
+.settings-icon-slot > .settings-subsection__icon { width: 2rem; height: 2rem; }
+.settings-icon-slot > .settings-subsection__icon svg { width: 1rem; height: 1rem; }
+
+/* One hover surface for a sortable row; no pill highlight inside its label. */
+.ritual-step-row { background: var(--card); transition: background-color 120ms ease; }
+.ritual-step-row:hover,
+.ritual-step-row:focus-within { background: var(--control-hover-background); }
+:is(.ritual-step-row, .reorder-row)[data-dragging="true"] { background: var(--secondary); z-index: 1; }
+.reorder-row { transition: background-color 120ms ease; }
+.reorder-row:hover, .reorder-row:focus-within { background: var(--secondary); }
+.ritual-step-row .ritual-step-trigger { background: transparent; transform: none; }
+.ritual-step-editor.settings-panel { animation: none; }
+.ritual-step-editor.settings-panel [data-settings-row] { padding-inline: 0; }
+.ritual-step-editor.settings-panel [data-settings-row]::after { display: none; }
+.ritual-step-editor.settings-panel [data-settings-row] > fieldset { grid-column: 1 / -1; grid-row: auto; justify-self: start; }
+.ritual-step-editor.settings-panel fieldset [data-settings-row] { display: flex; gap: 0.375rem; min-height: 2rem; padding: 0; }
+
+/* Header thumbnails share the real ritual sky and open the full preview. */
+.ritual-sky-preview {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  align-self: flex-start;
+  flex: 0 0 clamp(6rem, 15vw, 12rem);
+  aspect-ratio: 16 / 9;
+  height: auto;
+  padding: 0;
+  border-radius: var(--radius);
+}
+.ritual-sky-preview__scene {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--ritual-morning-sky);
+  transition: filter 180ms ease;
+}
+.ritual-sky-preview__scene[data-ritual-kind="night"] { background: var(--ritual-evening-sky); }
+.ritual-sky-preview .ritual-clouds,
+.ritual-sky-preview .ritual-glow { position: absolute; z-index: 0; }
+.ritual-sky-preview__card { z-index: 1; }
+.ritual-sky-preview__action { position: relative; z-index: 2; opacity: 0; transition: opacity 180ms ease; }
+.ritual-sky-preview:is(:hover, :focus-visible):not(:disabled) .ritual-sky-preview__scene { filter: blur(3px); }
+.ritual-sky-preview:is(:hover, :focus-visible):not(:disabled) .ritual-sky-preview__action { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .ritual-sky-preview__scene, .ritual-sky-preview__action { transition: none; }
+}
+
+
+:root { --settings-divider-color: color-mix(in srgb, var(--border) 40%, transparent); }
+/* Separators are flat paint, preserving identical row/header geometry. */
+.settings-panel :is([data-settings-row], .settings-navigation-row)::after,
+.settings-inline-row::after,
+.settings-subsection__header::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--settings-divider-color);
+  pointer-events: none;
+}
+.settings-divider-before { position: relative; }
+.settings-divider-before::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 1px;
+  background: var(--settings-divider-color);
+  pointer-events: none;
+}
+.settings-panel .settings-dependent [data-settings-row] { padding-inline-start: 2rem; }
+.settings-dependent[data-disabled] [data-settings-row] > :is([data-slot="field-label"], [data-slot="field-description"]) { opacity: 0.45; }
+
+/* Auth utility navigation adapts to its pane, keeping one readable row. */
+.auth-footer { container: auth-footer / inline-size; }
+.auth-footer__help { display: none; }
+@container auth-footer (width < 22rem) {
+  .auth-footer__links { display: none; }
+  .auth-footer__help { display: block; }
+}
+
+/* Grouped search actions keep count badges within their divided end section. */
+[data-slot="input-group-addon"] .action-count-badge { right: .125rem; bottom: .125rem; }
+
+/* Count badges sit above search dividers, adjacent buttons, and their state surfaces. */
+.action-count-badge { z-index: 2; width: 1rem; min-width: 1rem; height: 1rem; padding: 0; border-radius: var(--radius-xl); }
+
+/* Joined search actions retain a fixed divider independent of their state surface. */
+[data-slot="input-group"]:has(.search-data-controls) { isolation: isolate; }
+/* Clip only the joined action surface. Counts live inside each section, above its
+   fill/divider; portalled menus and tooltips remain outside this clipping box. */
+.search-data-controls {
+  border-start-end-radius: inherit;
+  border-end-end-radius: inherit;
+  overflow: hidden;
+  margin-inline-end: 0;
+}
+.search-data-controls .search-data-control {
+  isolation: isolate;
+  overflow: visible;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.search-data-controls .search-data-control::before {
+  content: "";
+  position: absolute;
+  inset-block: 6px;
+  left: 0;
+  width: 1px;
+  background: var(--border);
+  opacity: .65;
+  pointer-events: none;
+}
+.search-data-controls .search-data-control:hover,
+.search-data-controls .search-data-control[data-state="open"] {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+.search-data-controls .search-data-control:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -3px;
+}
+.search-data-controls .action-count-badge { z-index: 3; }

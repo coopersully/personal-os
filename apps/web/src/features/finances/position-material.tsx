@@ -3,6 +3,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
+import { QueryFeedback } from "@/components/async-state";
 import {
   BankIcon,
   CircleAlertIcon,
@@ -11,7 +12,6 @@ import {
   TargetIcon,
   WalletIcon,
 } from "@/components/icons";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -67,22 +67,7 @@ export function FinanceSourceState({
         <span className="sr-only">Loading {label}</span>
       </div>
     );
-  if (!query.isError) return null;
-  return (
-    <Alert variant="destructive">
-      <AlertTitle>{label} unavailable</AlertTitle>
-      <AlertDescription>
-        <p>
-          {query.data !== undefined
-            ? "Showing the last available update. Refresh before relying on this information."
-            : "Couldn’t load this information. Try again."}
-        </p>
-        <Button onClick={() => void query.refetch()} size="sm" variant="outline">
-          Retry {label.toLowerCase()}
-        </Button>
-      </AlertDescription>
-    </Alert>
-  );
+  return <QueryFeedback query={query} title={`${label} unavailable`} />;
 }
 
 export function FinancePositionMaterial({

@@ -22,6 +22,8 @@ export function connectedAgentCount(
 }
 
 export function useSettingsSidebarCounts(enabled: boolean) {
+  const goals = useQuery({ enabled, queryKey: ["goals"], queryFn: api.listGoals });
+  const motives = useQuery({ enabled, queryKey: ["motives"], queryFn: api.listMotives });
   const connectors = useQuery({ enabled, queryKey: ["connectors"], queryFn: api.listConnectors });
   const bookmarks = useQuery({
     enabled,
@@ -31,6 +33,11 @@ export function useSettingsSidebarCounts(enabled: boolean) {
   const tokens = useQuery({ enabled, queryKey: ["tokens"], queryFn: api.listAccessTokens });
   const clients = useQuery({ enabled, queryKey: ["oauth-clients"], queryFn: api.listOAuthClients });
   return {
+    goals:
+      enabled && goals.isSuccess && motives.isSuccess
+        ? goals.data.length + motives.data.length
+        : undefined,
+    motives: enabled && motives.isSuccess ? motives.data.length : undefined,
     connections:
       enabled && connectors.isSuccess && bookmarks.isSuccess
         ? connectors.data.length + (bookmarks.data ? 1 : 0)

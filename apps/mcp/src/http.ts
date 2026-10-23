@@ -70,7 +70,7 @@ const nodeHandler = toNodeHandler(handler, {
 
 const app = express();
 app.disable("x-powered-by");
-app.use(express.json());
+app.use(express.json({ limit: "100kb" }));
 
 app.get("/health/live", (_request, response) => response.json({ status: "ok" }));
 app.use(hostHeaderValidation([new URL(publicUrl).hostname]));

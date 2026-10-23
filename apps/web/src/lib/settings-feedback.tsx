@@ -6,6 +6,17 @@ export const SettingsFeedbackContext = createContext(false);
 
 export function useSettingsError(error: unknown, message: string, retry?: () => unknown) {
   const enabled = useContext(SettingsFeedbackContext);
+  useErrorToast(error, message, retry, enabled);
+  return enabled;
+}
+
+/** Read failures use a stable toast rather than changing the surrounding layout. */
+export function useErrorToast(
+  error: unknown,
+  message: string,
+  retry?: () => unknown,
+  enabled = true,
+) {
   const id = useId();
   const retryRef = useRef(retry);
   retryRef.current = retry;
@@ -44,5 +55,4 @@ export function useSettingsError(error: unknown, message: string, retry?: () => 
     if (!key && previous.current) toast.dismiss(id);
     previous.current = key;
   }, [enabled, error, id, message]);
-  return enabled;
 }

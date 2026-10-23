@@ -922,6 +922,53 @@ function mockApi() {
 }
 
 describe("ilo MCP server", () => {
+  it("rejects excessive tool input elements before validation or API work", async () => {
+    const api = mockApi();
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      timeZone: "UTC",
+    });
+    const client = new Client({ name: "input-limit-test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+      const rejected = await client.callTool({
+        name: "get_task_list",
+        arguments: { id: accountId, extra: Array(10_001).fill(0) },
+      });
+      expect(rejected.isError).toBe(true);
+      expect(JSON.stringify(rejected.content)).toMatch(/maximum of 10000 elements/);
+      expect(api.getTaskList).not.toHaveBeenCalled();
+      const result = await client.callTool({ name: "get_task_list", arguments: { id: accountId } });
+      expect(result.isError).not.toBe(true);
+      expect(api.getTaskList).toHaveBeenCalledOnce();
+      // Largest declared collection sizes remain comfortably below the protocol guard.
+      const budget = {
+        allocations: Array.from({ length: 500 }, (_, index) => ({
+          key: `bucket-${index}`,
+          kind: "buffer",
+          amount: 1,
+        })),
+        resources: Array.from({ length: 100 }, (_, index) => ({
+          key: `resource-${index}`,
+          kind: "income",
+          amount: 5,
+        })),
+        assumptions: Array(100).fill("Fixture assumption"),
+        effectiveFrom: "2026-10",
+        idempotencyKey: "bounded-budget-fixture",
+        rationale: "Fixture maximum collection sizes",
+        name: "Fixture plan",
+      };
+      const accepted = await client.callTool({ name: "create_finance_budget", arguments: budget });
+      expect(accepted.isError).not.toBe(true);
+      expect(api.createFinanceBudget).toHaveBeenCalledWith(budget);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
   it("introduces nohmi to connected hosts while preserving existing tool names", async () => {
     const server = createPersonalOsMcpServer({
       api: mockApi() as unknown as PersonalOsApiClient,

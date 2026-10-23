@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { ApiClientError } from "@personal-os/api-client";
@@ -211,7 +212,8 @@ it("hides cached occurrences after an access denial and keeps transient failures
   await screen.findByText("Private salary");
   api.listFinanceRecurringOccurrences.mockRejectedValue(new Error("offline"));
   await client.invalidateQueries({ queryKey: ["finance-recurring-occurrences"] });
-  expect(await screen.findByText(/Showing the last available update/)).toBeVisible();
+  await waitFor(() => expect(toast.error).toHaveBeenCalled());
+  expect(screen.queryByText(/Showing the last available update/)).not.toBeInTheDocument();
   expect(screen.getByText("Private salary")).toBeVisible();
   api.listFinanceRecurringOccurrences.mockRejectedValue(
     new ApiClientError({ status: 403, message: "Forbidden", code: "denied" }),
@@ -352,3 +354,5 @@ it("reports no unmatched scheduled money only after all source schedules are ava
     screen.queryByText("Upcoming money cannot be fully determined yet."),
   ).not.toBeInTheDocument();
 });
+
+vi.spyOn(toast, "error");

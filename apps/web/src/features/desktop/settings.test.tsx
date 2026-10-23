@@ -63,6 +63,10 @@ async function openPetColor() {
   }
   return screen.findByLabelText("Pet color");
 }
+async function openNotificationPermissions() {
+  await userEvent.click(await screen.findByRole("button", { name: /^macOS permissions/ }));
+  return screen.findByRole("dialog", { name: "Set up notifications" });
+}
 async function save() {
   const connect = screen.queryByRole("button", { name: "Connect to server" });
   if (connect && !connect.hasAttribute("disabled")) await userEvent.click(connect);
@@ -409,20 +413,42 @@ describe("desktop preferences", () => {
     expect(status.settings.petColor).toBe(settings.petColor);
   });
 
-  it("groups native notification guidance and actions in the subsection header", async () => {
+  it("opens permission setup from the first row and restores focus on close", async () => {
     status.native.notificationPermission = "notDetermined";
     mount({ section: "notifications" });
-    const allow = await screen.findByRole("button", { name: "Allow notifications" });
-    const header = allow.closest(".settings-subsection__header");
-    expect(header).toContainElement(screen.getByText("macOS permission: Not requested"));
-    expect(header).toContainElement(screen.getByRole("button", { name: "Test notification" }));
-    expect(header).toContainElement(
-      screen.getByRole("button", { name: "macOS notification settings" }),
+    const trigger = await screen.findByRole("button", { name: /^macOS permissions/ });
+    const section = screen
+      .getByRole("heading", { name: "Desktop notifications" })
+      .closest("section");
+    expect(section?.querySelector("button")).toBe(trigger);
+    expect(screen.queryByRole("button", { name: "Allow notifications" })).not.toBeInTheDocument();
+    const dialog = await openNotificationPermissions();
+    expect(dialog).toContainElement(screen.getByText("macOS permission: Not requested"));
+    expect(dialog).not.toContainElement(
+      screen.getByRole("switch", { name: "Enable notifications", hidden: true }),
     );
-    expect(header).toHaveTextContent("Notifications work with the window closed");
-    expect(header).not.toContainElement(
-      screen.getByRole("switch", { name: "Enable notifications" }),
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("rechecks permissions and refreshes setup when returning from macOS", async () => {
+    status.native.notificationPermission = "notDetermined";
+    mount({ section: "notifications" });
+    await openNotificationPermissions();
+    status = { ...status, native: { ...status.native, notificationPermission: "authorized" } };
+    await userEvent.click(screen.getByRole("button", { name: "Check again" }));
+    expect(await screen.findByText("macOS permission: Allowed")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Test notification" })).toBeEnabled();
+    expect(toast.success).toHaveBeenCalledWith(
+      "macOS permission status checked",
+      expect.anything(),
     );
+    expect(screen.queryByText("macOS permission status checked")).not.toBeInTheDocument();
+    status = { ...status, native: { ...status.native, notificationPermission: "denied" } };
+    fireEvent.focus(window);
+    expect(await screen.findByText("macOS permission: Blocked")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Test notification" })).not.toBeInTheDocument();
   });
 
   it("keeps draft notification choices when requesting permission refreshes native status", async () => {
@@ -430,10 +456,13 @@ describe("desktop preferences", () => {
     mount({ section: "notifications" });
     await screen.findByRole("switch", { name: "Enable notifications" });
     await userEvent.click(screen.getByRole("switch", { name: "Enable notifications" }));
+    await openNotificationPermissions();
     status = { ...status, native: { ...status.native, notificationPermission: "authorized" } };
     await userEvent.click(screen.getByRole("button", { name: "Allow notifications" }));
-    expect(await screen.findByText("macOS permission: authorized")).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "Enable notifications" })).toBeChecked();
+    expect(await screen.findByText("macOS permission: Allowed")).toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", { name: "Enable notifications", hidden: true }),
+    ).toBeChecked();
     expect(mocks.invoke).toHaveBeenCalledWith("desktop_native_action", {
       action: "request_notification_permission",
     });
@@ -449,6 +478,7 @@ describe("desktop preferences", () => {
   it("reports notification tests through Sonner without adding inline result text", async () => {
     status.native.notificationPermission = "authorized";
     mount({ section: "notifications" });
+    await openNotificationPermissions();
     const button = await screen.findByRole("button", { name: "Test notification" });
     expect(toast.success).not.toHaveBeenCalled(); // Cached status is not a new action.
     await userEvent.click(button);
@@ -470,6 +500,7 @@ describe("desktop preferences", () => {
     status.native.notificationPermission = "authorized";
     status.native.testNotificationStatus = "failed";
     const { cache } = mount({ section: "notifications" });
+    await openNotificationPermissions();
     await userEvent.click(await screen.findByRole("button", { name: "Test notification" }));
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(vi.mocked(toast.error).mock.calls.at(-1)?.[1]?.id).toBe(
@@ -487,19 +518,21 @@ describe("desktop preferences", () => {
 
   it("opens macOS settings after denial and prevents tests until authorized", async () => {
     mount({ section: "notifications" });
+    await openNotificationPermissions();
     await userEvent.click(await screen.findByRole("button", { name: "Allow in macOS settings" }));
     expect(mocks.invoke).toHaveBeenCalledWith("desktop_native_action", {
       action: "open_notification_settings",
     });
-    expect(screen.getByRole("button", { name: "Test notification" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Test notification" })).not.toBeInTheDocument();
   });
 
   it("keeps permission requests pending until the native result arrives", async () => {
     status.native.notificationPermission = "notDetermined";
     status.native.notificationPermissionPending = true;
     mount({ section: "notifications" });
+    await openNotificationPermissions();
     expect(await screen.findByRole("button", { name: "Waiting for macOS…" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Test notification" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Test notification" })).not.toBeInTheDocument();
   });
 
   it("autosaves workspace choices independently and keeps global controls separate", async () => {
@@ -1160,17 +1193,19 @@ it("distinguishes disabled macOS alerts and sounds from granted permission", asy
   status.native.notificationAlertsAvailable = false;
   status.native.notificationSoundsAvailable = false;
   mount({ section: "notifications" });
-  expect(await screen.findByText(/macOS alerts are off. Enable banners/)).toBeInTheDocument();
+  await openNotificationPermissions();
+  expect(await screen.findByText(/macOS alerts are off. Choose banners/)).toBeInTheDocument();
   expect(screen.getByText(/Sounds are disabled in macOS/)).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Notifications allowed" })).toBeDisabled();
+  expect(screen.getByText("macOS permission: Allowed")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "macOS notification settings" })).toBeEnabled();
 });
 
 it("offers permission setup when native permission is unavailable", async () => {
   delete status.native.notificationPermission;
   mount({ section: "notifications" });
-  expect(await screen.findByText("macOS permission: unavailable")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Test notification" })).toBeDisabled();
+  await openNotificationPermissions();
+  expect(await screen.findByText("macOS permission: Unavailable")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Test notification" })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Allow notifications" })).toBeEnabled();
 });
 

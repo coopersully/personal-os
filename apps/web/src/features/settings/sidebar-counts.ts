@@ -33,7 +33,10 @@ export function useSettingsSidebarCounts(enabled: boolean) {
   const tokens = useQuery({ enabled, queryKey: ["tokens"], queryFn: api.listAccessTokens });
   const clients = useQuery({ enabled, queryKey: ["oauth-clients"], queryFn: api.listOAuthClients });
   return {
-    goals: enabled && goals.isSuccess && motives.isSuccess ? goals.data.length + motives.data.length : undefined,
+    goals:
+      enabled && goals.isSuccess && motives.isSuccess
+        ? goals.data.length + motives.data.length
+        : undefined,
     motives: enabled && motives.isSuccess ? motives.data.length : undefined,
     connections:
       enabled && connectors.isSuccess && bookmarks.isSuccess

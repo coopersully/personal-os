@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { settingsDataPreviewFetch, settingsPreviewMode } from "./data-state-preview";
+
 const realFetch = vi.fn();
 beforeEach(() => {
   vi.stubGlobal("fetch", realFetch);
@@ -38,8 +39,14 @@ it("simulates only allowlisted reads and never forwards a mutation during previe
 });
 it("hides only the ritual overlay in preview and preserves authoritative auth failures", async () => {
   history.replaceState(null, "", "/settings?dataState=error");
-  realFetch.mockResolvedValueOnce(Response.json({ current: { id: "real" }, syncStatus: "saved", serverNow: "now" }));
-  expect(await (await settingsDataPreviewFetch(`${location.origin}/v1/rituals/current`)).json()).toEqual({ current: null, upcoming: [], syncStatus: "saved", serverNow: "now" });
+  realFetch.mockResolvedValueOnce(
+    Response.json({ current: { id: "real" }, syncStatus: "saved", serverNow: "now" }),
+  );
+  expect(
+    await (await settingsDataPreviewFetch(`${location.origin}/v1/rituals/current`)).json(),
+  ).toEqual({ current: null, upcoming: [], syncStatus: "saved", serverNow: "now" });
   realFetch.mockResolvedValueOnce(new Response(null, { status: 401 }));
-  expect((await settingsDataPreviewFetch(`${location.origin}/v1/rituals/current`)).status).toBe(401);
+  expect((await settingsDataPreviewFetch(`${location.origin}/v1/rituals/current`)).status).toBe(
+    401,
+  );
 });

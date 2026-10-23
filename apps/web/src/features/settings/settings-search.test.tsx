@@ -46,7 +46,7 @@ describe("Settings search", () => {
     ).not.toBeInTheDocument();
     await user.click(within(results).getByRole("link", { name: /^Account Your/ }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Location")).toHaveTextContent("?section=profile");
+    expect(screen.getByLabelText("Location")).toHaveTextContent("?page=profile");
     await user.click(screen.getByRole("button", { name: "Search settings" }));
     expect(screen.getByRole("searchbox")).toHaveValue("");
   });

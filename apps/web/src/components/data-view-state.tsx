@@ -60,21 +60,17 @@ export function DataViewRecovery({
       <SettingsFeedbackContext.Provider value={true}>
         <QueryFeedback query={query} title={title} />
       </SettingsFeedbackContext.Provider>
-      {query.isError ? (
+      {query.isError && !retained ? (
         <section
           aria-label={unavailableLabel}
-          className={
-            retained
-              ? "flex flex-wrap items-center justify-between gap-3"
-              : "flex flex-col items-center gap-4 py-8 text-center"
-          }
+          className="flex flex-col items-center gap-4 py-8 text-center"
         >
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <CircleAlertIcon className="size-4 shrink-0" aria-hidden="true" />
-            <span>{retained ? "Last available results" : unavailableLabel}</span>
+            <span>{unavailableLabel}</span>
           </div>
           <Button
-            variant={retained ? "secondary" : "default"}
+            variant="default"
             disabled={query.isFetching}
             onClick={() => {
               void query.refetch();

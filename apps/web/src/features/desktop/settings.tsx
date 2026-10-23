@@ -2,7 +2,7 @@ import { useIsMutating, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DataViewLoading, DataViewRecovery } from "@/components/data-view-state";
-import { PulseIcon } from "@/components/icons";
+import { CheckIcon, ChevronRightIcon, PulseIcon } from "@/components/icons";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { settingsPath } from "@/features/settings/settings-routes";
 import { api } from "../../api.js";
@@ -26,8 +26,10 @@ import {
 } from "../../components/ui/color-picker.js";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -145,6 +147,26 @@ function DesktopSettingsContent({
     return () => window.removeEventListener("focus", refresh);
   }, [cache]);
   const [draft, setDraft] = useState<DesktopSettings | null>(null);
+  const permission = query.data?.native.notificationPermission;
+  const permissionPending = query.data?.native.notificationPermissionPending;
+  const permissionLabel = permissionPending
+    ? "Waiting for macOS"
+    : permission === "authorized"
+      ? "Allowed"
+      : permission === "denied"
+        ? "Blocked"
+        : permission === "notDetermined"
+          ? "Not requested"
+          : "Unavailable";
+  const permissionCheck = useFeedbackMutation({
+    feedback: {
+      action: "check notification permissions",
+      pending: "Checking macOS permissions…",
+      success: "macOS permission status checked",
+    },
+    mutationFn: getDesktopSettings,
+    onSuccess: (current) => cache.setQueryData(["desktop-settings"], current),
+  });
 
   const settingsIdentity = query.data ? desktopSettingsIdentity(query.data) : null;
   const save = useFeedbackMutation({
@@ -822,82 +844,163 @@ function DesktopSettingsContent({
             title="Desktop notifications"
             icon={<PulseIcon />}
             description="Notifications work with the window closed and the pet disabled. macOS Focus and notification settings control presentation."
-            headerContent={
-              <div className="flex flex-col gap-2 pt-2">
-                <p role="status">
-                  macOS permission:{" "}
-                  {query.data?.native.notificationPermission === "notDetermined"
-                    ? "Not requested"
-                    : (query.data?.native.notificationPermission ?? "unavailable")}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {query.data?.native.notificationPermission === "denied"
-                    ? "Notifications are blocked. Open macOS notification settings and allow nohmi, then return here."
-                    : query.data?.native.notificationPermission === "authorized" &&
-                        query.data?.native.notificationAlertsAvailable === false
-                      ? "macOS alerts are off. Enable banners or alerts in notification settings."
-                      : query.data?.native.notificationPermission === "authorized"
-                        ? "Notifications are allowed. macOS Focus and screen-sharing settings may silence tests."
-                        : "Allow notifications to receive alerts from nohmi, then send a test."}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={
-                      action.isPending ||
-                      query.data?.native.notificationPermissionPending ||
-                      query.data?.native.notificationPermission === "authorized"
-                    }
-                    onClick={() =>
-                      action.mutate(
-                        query.data?.native.notificationPermission === "denied"
-                          ? "open_notification_settings"
-                          : "request_notification_permission",
-                      )
-                    }
-                  >
-                    {query.data?.native.notificationPermissionPending
-                      ? "Waiting for macOS…"
-                      : query.data?.native.notificationPermission === "authorized"
-                        ? "Notifications allowed"
-                        : query.data?.native.notificationPermission === "denied"
-                          ? "Allow in macOS settings"
-                          : "Allow notifications"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => action.mutate("open_notification_settings")}
-                  >
-                    macOS notification settings
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={
-                      action.isPending ||
-                      testNotification.isPending ||
-                      query.data?.native.notificationPermission !== "authorized" ||
-                      query.data?.native.notificationPermissionPending
-                    }
-                    onClick={() => testNotification.mutate()}
-                  >
-                    Test notification
-                  </Button>
-                </div>
-                {draft.notifications.sound &&
-                query.data?.native.notificationSoundsAvailable === false &&
-                query.data?.native.notificationPermission === "authorized" ? (
-                  <p className="text-xs text-muted-foreground">
-                    Sounds are disabled in macOS. Enable “Play sound for notification” in macOS
-                    notification settings to hear the soft click.
-                  </p>
-                ) : null}
-              </div>
-            }
           >
             <FieldGroup>
+              <Dialog
+                onOpenChange={(open) => {
+                  if (open) void query.refetch();
+                }}
+              >
+                <DialogTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="settings-navigation-row h-auto min-h-12 w-full justify-between gap-8 rounded-none px-4 py-2"
+                  >
+                    <span className="font-medium">macOS permissions</span>
+                    <span className="flex items-center gap-3 font-normal text-muted-foreground">
+                      {permissionLabel}
+                      <ChevronRightIcon className="size-4" />
+                    </span>
+                  </Button>
+                </DialogTrigger>
+                <DialogContent
+                  showCloseButton={false}
+                  className="max-h-[calc(100dvh-2rem)] overflow-y-auto"
+                >
+                  <DialogHeader>
+                    <span className="settings-subsection__icon" aria-hidden="true">
+                      <PulseIcon />
+                    </span>
+                    <DialogTitle>Set up notifications</DialogTitle>
+                    <DialogDescription>
+                      Allow nohmi in macOS, check how alerts appear, then send a test. Permission
+                      checks update automatically while this is open and when you return.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <ol className="space-y-5 text-sm">
+                    <li className="flex gap-3">
+                      <span
+                        className="flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground"
+                        aria-hidden="true"
+                      >
+                        {permission === "authorized" ? <CheckIcon className="size-4" /> : "1"}
+                      </span>
+                      <div className="min-w-0 space-y-1">
+                        <h3 className="font-medium">Allow notifications</h3>
+                        <p className="text-muted-foreground" role="status">
+                          macOS permission: {permissionLabel}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {permission === "denied"
+                            ? "Open macOS notification settings, select nohmi, and turn on Allow Notifications. Return here to check it."
+                            : permission === "authorized"
+                              ? "nohmi is allowed to send notifications."
+                              : permissionPending
+                                ? "Respond to the macOS permission prompt to continue."
+                                : permission === "notDetermined"
+                                  ? "Choose Allow notifications below, then approve the macOS prompt."
+                                  : "macOS permission status is unavailable. Check again or open macOS notification settings."}
+                        </p>
+                      </div>
+                    </li>
+                    <li className="flex gap-3">
+                      <span
+                        className="flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground"
+                        aria-hidden="true"
+                      >
+                        2
+                      </span>
+                      <div className="min-w-0 space-y-1">
+                        <h3 className="font-medium">Choose how alerts appear</h3>
+                        <p className="text-xs text-muted-foreground">
+                          {permission === "authorized" &&
+                          query.data?.native.notificationAlertsAvailable === false
+                            ? "macOS alerts are off. Choose banners or alerts in macOS notification settings."
+                            : "In macOS notification settings, choose banners or alerts. Focus and screen sharing can silence them."}
+                        </p>
+                        {draft.notifications.sound &&
+                        permission === "authorized" &&
+                        query.data?.native.notificationSoundsAvailable === false ? (
+                          <p className="text-xs text-muted-foreground">
+                            Sounds are disabled in macOS. Enable “Play sound for notification” there
+                            to hear alerts.
+                          </p>
+                        ) : null}
+                      </div>
+                    </li>
+                    <li className="flex gap-3">
+                      <span
+                        className="flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground"
+                        aria-hidden="true"
+                      >
+                        3
+                      </span>
+                      <div className="min-w-0 space-y-1">
+                        <h3 className="font-medium">Send a test</h3>
+                        <p className="text-xs text-muted-foreground">
+                          Once permission is allowed, send a test and look for it in Notification
+                          Center. macOS accepting it doesn’t confirm a banner appeared.
+                        </p>
+                      </div>
+                    </li>
+                  </ol>
+                  <DialogFooter className="grid-flow-row grid-cols-2">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={action.isPending}
+                      aria-label="macOS notification settings"
+                      onClick={() => action.mutate("open_notification_settings")}
+                    >
+                      macOS settings
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={permissionCheck.isPending}
+                      onClick={() => permissionCheck.mutate()}
+                    >
+                      Check again
+                    </Button>
+                    <DialogClose asChild>
+                      <Button type="button" variant="secondary">
+                        Close
+                      </Button>
+                    </DialogClose>
+                    {permission === "authorized" ? (
+                      <Button
+                        type="button"
+                        disabled={
+                          action.isPending || testNotification.isPending || permissionPending
+                        }
+                        onClick={() => testNotification.mutate()}
+                      >
+                        Test notification
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        aria-label={permission === "denied" ? "Allow in macOS settings" : undefined}
+                        disabled={action.isPending || permissionPending}
+                        onClick={() =>
+                          action.mutate(
+                            permission === "denied"
+                              ? "open_notification_settings"
+                              : "request_notification_permission",
+                          )
+                        }
+                      >
+                        {permissionPending
+                          ? "Waiting for macOS…"
+                          : permission === "denied"
+                            ? "Open settings"
+                            : "Allow notifications"}
+                      </Button>
+                    )}
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
               <Toggle
                 label="Enable notifications"
                 value={draft.notifications.enabled}

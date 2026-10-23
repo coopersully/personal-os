@@ -96,7 +96,10 @@ export function MailConfiguration({
                       .join("; ")}
                   </FieldDescription>
                 </FieldContent>
-                <div className="flex shrink-0 items-center justify-end gap-2">
+                <div
+                  data-settings-row-actions=""
+                  className="flex shrink-0 items-center justify-end gap-2"
+                >
                   <Badge variant="secondary">{rule.enabled ? "Active" : "Needs review"}</Badge>
                   {rule.enabled ? (
                     <SettingsRecordAction

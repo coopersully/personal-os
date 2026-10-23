@@ -165,8 +165,12 @@ test.describe("durable Finance manual setup", () => {
       await expect(chat.getByRole("button", { name: "Send message", exact: true })).toBeEnabled();
       await chat.getByRole("button", { name: "Send message", exact: true }).click();
       await expect(chat.getByText(message, { exact: true })).toBeVisible();
+      await expect
+        .poll(async () =>
+          (await human.getFinanceConversationHistory()).messages.map((item) => item.text),
+        )
+        .toContain(message);
       const history = await human.getFinanceConversationHistory();
-      expect(history.messages.map((item) => item.text)).toContain(message);
       await page.reload();
       await expect(chat.getByText(message, { exact: true })).toBeVisible();
       await host.revokeOriginalToken();

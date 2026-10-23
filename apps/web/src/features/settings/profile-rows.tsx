@@ -1,4 +1,4 @@
-import { type ReactNode, useId } from "react";
+import { type ReactNode, type Ref, useId } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRightIcon, ChevronRightIcon } from "@/components/icons";
 import { SettingsIconSlot } from "@/components/settings-icon-slot";
@@ -20,6 +20,7 @@ export function ProfileSection({ title, children }: { title: string; children: R
 }
 
 export function ProfileRow({
+  ref,
   label,
   icon,
   value,
@@ -31,6 +32,7 @@ export function ProfileRow({
   truncateDescription = false,
   variant = "default",
 }: {
+  ref?: Ref<HTMLButtonElement>;
   label: string;
   ariaLabel?: string;
   icon?: ReactNode;
@@ -50,7 +52,15 @@ export function ProfileRow({
         <span className="min-w-0">
           <span className="block truncate font-medium">{label}</span>
           {description ? (
-            <span className={truncateDescription ? "block max-w-[52ch] truncate text-xs font-normal text-muted-foreground" : "block text-xs font-normal text-muted-foreground"}>{description}</span>
+            <span
+              className={
+                truncateDescription
+                  ? "block max-w-[52ch] truncate text-xs font-normal text-muted-foreground"
+                  : "block text-xs font-normal text-muted-foreground"
+              }
+            >
+              {description}
+            </span>
           ) : null}
         </span>
       </span>
@@ -62,6 +72,7 @@ export function ProfileRow({
   );
   return (
     <Button
+      ref={ref}
       data-settings-variant={variant}
       asChild={Boolean(to)}
       aria-label={ariaLabel ?? (to ? label : `Edit ${label}`)}

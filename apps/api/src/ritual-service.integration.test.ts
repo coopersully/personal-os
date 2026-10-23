@@ -1025,7 +1025,32 @@ describe.sequential("ritual account lifecycle", () => {
       .update(users)
       .set({ planningTimezone: "Europe/London" })
       .where(eq(users.id, userId));
-    const updated = await service.list(context());
+    const zoneContext = context();
+    const updated = await service.list(zoneContext);
+    const zoneAudit = await database.db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.requestId, zoneContext.requestId));
+    expect(
+      zoneAudit.filter((event) => event.action === "ritual.definition_zone_changed"),
+    ).toHaveLength(2);
+    expect(
+      zoneAudit.find((event) => event.action === "ritual.occurrence_expiry_changed"),
+    ).toMatchObject({
+      actorId: userId,
+      userId,
+      entityId: open.id,
+      before: { expiresAt: open.expiresAt },
+      after: { expiresAt: "2026-11-05T21:00:00.000Z", source: "profile" },
+    });
+    const auditedCount = zoneAudit.length;
+    await service.list(zoneContext);
+    expect(
+      await database.db
+        .select()
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, zoneContext.requestId)),
+    ).toHaveLength(auditedCount);
     expect(updated.map((d) => d.timeZone)).toEqual(["Europe/London", "Europe/London"]);
     expect(updated.find((d) => d.kind === "night")?.revision).toBe(evening.revision + 1);
     expect(updated.find((d) => d.kind === "morning")?.revision).toBe(morning.revision + 1);
@@ -1122,6 +1147,12 @@ describe.sequential("ritual account lifecycle", () => {
       kind: "complete" as const,
       optionalReminderAt: "2026-10-16T17:00:00Z",
     };
+    const remindersBefore = await database.db.select().from(reminders);
+    await expect(
+      service.act(id, { ...action, requestId: crypto.randomUUID() }, context()),
+    ).rejects.toThrow(/not found/i);
+    expect(await database.db.select().from(reminders)).toEqual(remindersBefore);
+    expect((await service.current(ctx)).current?.status).toBe("pending");
     const result = await service.act(id, action, ctx);
     expect(result.outcome).toBe("applied");
     expect(result.state.current!.optionalFollowUp).toMatchObject({

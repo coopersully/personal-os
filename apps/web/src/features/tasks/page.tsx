@@ -505,7 +505,12 @@ function DependencyFailure({
 }) {
   return (
     <div className="flex flex-col items-start gap-2 px-2">
-      <InlineError error={error} title={`Couldn’t load ${name.toLowerCase()}.`} />
+      <InlineError
+        error={error}
+        title={`Couldn’t load ${name.toLowerCase()}.`}
+        retry={retry}
+        toastOnly
+      />
       <Button onClick={retry} size="sm" variant="ghost">
         Retry {name}
       </Button>

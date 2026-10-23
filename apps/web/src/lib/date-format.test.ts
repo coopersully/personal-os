@@ -3,8 +3,8 @@ import {
   formatCalendarDate,
   formatMaterialDateTime,
   formatOrdinalDate,
-  formatRelativeMaterialDateTime,
   formatRelativeCalendarDate,
+  formatRelativeMaterialDateTime,
   ordinalSuffix,
 } from "./date-format.js";
 

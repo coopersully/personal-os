@@ -77,7 +77,8 @@ export function FinanceIncomeEditor() {
   const profile = query.data.income.value;
   const accounts = query.data.accounts;
   return (
-    <SettingsSection layout="rows"
+    <SettingsSection
+      layout="rows"
       title="Payroll details"
       description="Paycheck amounts and timing. Monthly estimates and reliable budget income are separate."
     >

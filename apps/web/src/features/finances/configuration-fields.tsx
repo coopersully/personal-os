@@ -60,7 +60,12 @@ export function FinanceConfigurationField({
       ) : kind === "date" ? (
         <DateInput {...common} onValueChange={field.setValue} onValueCommit={field.commit} />
       ) : (
-        <Input {...common} placeholder="Not set" type={kind} onChange={(event) => field.setValue(event.target.value)} />
+        <Input
+          {...common}
+          placeholder="Not set"
+          type={kind}
+          onChange={(event) => field.setValue(event.target.value)}
+        />
       )}
       {description ? <FieldDescription>{description}</FieldDescription> : null}
       {field.save.isError ? (

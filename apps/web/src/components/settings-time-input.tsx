@@ -52,6 +52,7 @@ export function SettingsTimeInput({ ref: forwardedRef, ...props }: ComponentProp
   const typed = parse(query);
   const choices = Array.from(
     new Set([
+      ...(!query && !props.required ? [""] : []),
       ...(typed ? [typed] : []),
       ...(!query && value ? [value] : []),
       ...options.filter(
@@ -66,7 +67,8 @@ export function SettingsTimeInput({ ref: forwardedRef, ...props }: ComponentProp
   )
     .filter(
       (item) =>
-        (!props.min || item >= String(props.min)) && (!props.max || item <= String(props.max)),
+        (item === "" && !props.required) ||
+        ((!props.min || item >= String(props.min)) && (!props.max || item <= String(props.max))),
     )
     .slice(0, 6);
   return (
@@ -92,7 +94,7 @@ export function SettingsTimeInput({ ref: forwardedRef, ...props }: ComponentProp
         autoHighlight
         value={value}
         inputValue={search ?? label(value)}
-        itemToStringLabel={label}
+        itemToStringLabel={(item) => (item ? label(item) : "No time")}
         disabled={props.disabled || props.readOnly}
         onOpenChange={(open) => {
           if (!open) setSearch(null);
@@ -101,7 +103,7 @@ export function SettingsTimeInput({ ref: forwardedRef, ...props }: ComponentProp
           if (details.reason !== "item-press") setSearch(next);
         }}
         onValueChange={(next) => {
-          if (!next) return;
+          if (next === null || (!next && props.required)) return;
           setSearch(null);
           setLocal(next);
           const control = input.current;
@@ -121,6 +123,7 @@ export function SettingsTimeInput({ ref: forwardedRef, ...props }: ComponentProp
         <ComboboxInput
           id={props.id}
           aria-label={props["aria-label"]}
+          aria-invalid={props["aria-invalid"]}
           aria-describedby={props["aria-describedby"]}
           className="settings-value-input"
           showClear={false}
@@ -137,7 +140,7 @@ export function SettingsTimeInput({ ref: forwardedRef, ...props }: ComponentProp
           <ComboboxList>
             {(item: string) => (
               <ComboboxItem key={item} value={item}>
-                {label(item)}
+                {item ? label(item) : "No time"}
               </ComboboxItem>
             )}
           </ComboboxList>

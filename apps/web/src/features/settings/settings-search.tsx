@@ -186,7 +186,7 @@ export function SettingsSearch({ groups }: { groups: SettingsSearchGroup[] }) {
                     <span className="block text-sm font-medium">{field.label}</span>
                     <span className="block text-xs text-muted-foreground">
                       {section.label}
-                      {field.reveal ? " · Opens the relevant form" : ""}
+                      {field.reveal?.length ? " · Opens the relevant form" : ""}
                     </span>
                   </span>
                 </Link>

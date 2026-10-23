@@ -37,7 +37,9 @@ export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
     let lastPaint = -Infinity;
     let velocity = 1;
     let drag: { id: number; x: number; time: number } | undefined;
-    const surface = element.closest<HTMLElement>(".ritual-surface, .ritual-browser-preview, .ritual-sky-preview");
+    const surface = element.closest<HTMLElement>(
+      ".ritual-surface, .ritual-browser-preview, .ritual-sky-preview",
+    );
     const thumbnail = surface?.classList.contains("ritual-sky-preview") ?? false;
     let suppressClick = false;
     let dragStartX = 0;
@@ -97,7 +99,13 @@ export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
       const ratio = Math.min(window.devicePixelRatio || 1, 2);
       const displayWidth = Math.ceil(bounds.width * ratio);
       const displayHeight = Math.ceil(bounds.height * ratio);
-      if (width === nextWidth && height === nextHeight && element.width === displayWidth && element.height === displayHeight) return;
+      if (
+        width === nextWidth &&
+        height === nextHeight &&
+        element.width === displayWidth &&
+        element.height === displayHeight
+      )
+        return;
       width = nextWidth;
       height = nextHeight;
       pixelsPerScreenPixel = width / bounds.width;
@@ -124,24 +132,24 @@ export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
           }
           const y = row;
           for (let x = 0; x < width; x++) {
-          const index = (y * width + x) * 4;
-          image.data[index] = kind === "night" ? 170 : 255;
-          image.data[index + 1] = kind === "night" ? 185 : 255;
-          image.data[index + 2] = kind === "night" ? 210 : 255;
-          const nx = (x / width) * 5;
-          const ny = (y / height) * 4;
-          const periodic = (scale: number, vertical: number, offset = 0) => {
-            const mix = x / width;
-            return (
-              noise(nx * scale + offset, vertical) * (1 - mix) +
-              noise((nx - 5) * scale + offset, vertical) * mix
-            );
-          };
-          field[y * width + x] =
-            periodic(1, ny * 1.5) * 0.55 + periodic(2, ny * 3) * 0.3 + periodic(6, ny * 5) * 0.15;
-          variation[y * width + x] = periodic(1, ny + 13, 9) - 0.5;
+            const index = (y * width + x) * 4;
+            image.data[index] = kind === "night" ? 170 : 255;
+            image.data[index + 1] = kind === "night" ? 185 : 255;
+            image.data[index + 2] = kind === "night" ? 210 : 255;
+            const nx = (x / width) * 5;
+            const ny = (y / height) * 4;
+            const periodic = (scale: number, vertical: number, offset = 0) => {
+              const mix = x / width;
+              return (
+                noise(nx * scale + offset, vertical) * (1 - mix) +
+                noise((nx - 5) * scale + offset, vertical) * mix
+              );
+            };
+            field[y * width + x] =
+              periodic(1, ny * 1.5) * 0.55 + periodic(2, ny * 3) * 0.3 + periodic(6, ny * 5) * 0.15;
+            variation[y * width + x] = periodic(1, ny + 13, 9) - 0.5;
+          }
         }
-      }
         ready = true;
         paint();
         draw();
@@ -169,9 +177,11 @@ export function RitualClouds({ kind }: { kind: "morning" | "night" }) {
       if (
         event.button !== 0 ||
         !(event.target instanceof Element) ||
-        (!thumbnail && event.target.closest(
-          "button,a,input,textarea,select,label,.ritual-card,[data-slot=card],[role=tooltip]",
-        )) || surface?.matches(":disabled")
+        (!thumbnail &&
+          event.target.closest(
+            "button,a,input,textarea,select,label,.ritual-card,[data-slot=card],[role=tooltip]",
+          )) ||
+        surface?.matches(":disabled")
       )
         return;
       suppressClick = false;

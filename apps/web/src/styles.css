@@ -7039,10 +7039,10 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 /* A shared decorative layer: no motion, screen capture, or input handling. */
 .ritual-clouds {
   position: fixed;
-  inset: -12%;
+  inset: 0;
   z-index: -1;
-  width: 124%;
-  height: 124%;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
   image-rendering: auto;
 }
@@ -7082,6 +7082,7 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   --ritual-sky: var(--ritual-morning-sky);
   background: var(--ritual-sky);
   align-content: center;
+  overflow: clip;
 }
 .ritual-browser-preview[data-ritual-kind="night"] {
   background: var(--ritual-sky);
@@ -7627,17 +7628,24 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   min-width: 0;
 }
 .wallpaper-editor > * { min-width: 0; }
+.wallpaper-editor__settings { container: wallpaper-controls / inline-size; }
+.wallpaper-choice-row[data-settings-row] > input[type="color"] { grid-row: 2; }
 .wallpaper-editor__preview {
   position: static;
 }
 .wallpaper-editor__preview .pinterest-wallpaper-preview__canvas {
   width: 100%;
 }
-@container settings (min-width: 56rem) {
+@container settings (min-width: 40rem) {
   .wallpaper-editor { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
   .wallpaper-editor__preview { position: sticky; top: 1rem; grid-column: 2; grid-row: 1; }
   .wallpaper-editor__settings { grid-column: 1; grid-row: 1; }
 
+}
+@container wallpaper-controls (max-width: 28rem) {
+  .settings-panel .wallpaper-choice-row[data-settings-row] { grid-template-columns: minmax(0, 1fr); }
+  .wallpaper-choice-row[data-settings-row] > .segmented-control { grid-column: 1; grid-row: 2; }
+  .wallpaper-choice-row[data-settings-row] > input[type="color"] { grid-column: 1; grid-row: 3; }
 }
 .appearance-picker .choice-card__content {
   grid-template-columns: auto minmax(0, 1fr);
@@ -7786,6 +7794,18 @@ html.pet-window #root {
   .settings-panel [data-settings-row] { grid-template-columns: minmax(6rem, 1fr) minmax(0, 1fr); }
   .settings-panel [data-settings-row] > :is([data-slot="settings-select"], [data-slot="settings-time"]) { max-width: 100%; }
 }
+/* Compound editors may stack on narrow screens, but a switch or compact action
+   group still fits beside its label. Keep those rows flat instead of adding height. */
+@container settings (max-width: 22rem) {
+  .settings-panel [data-settings-row] > * { grid-column: 1; grid-row: auto; }
+  .settings-panel [data-settings-row]:not(:has(> :is([role="switch"], [data-settings-row-actions]))) { grid-template-columns: minmax(0, 1fr); }
+  .settings-panel [data-settings-row]:not(:has(> :is([role="switch"], [data-settings-row-actions]))):has(> [data-slot="field-description"]) > [data-slot="field-label"] { grid-row: 1; }
+  .settings-panel [data-settings-row]:not(:has(> :is([role="switch"], [data-settings-row-actions]))):has(> [data-slot="field-description"]) > :not([data-slot="field-label"]):not([data-slot="field-description"]):not([data-slot="field-error"]) { grid-row: 3; }
+  .settings-panel [data-settings-row]:has(> :is([role="switch"], [data-settings-row-actions])) {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .settings-panel [data-settings-row] > :is([role="switch"], [data-settings-row-actions]) { grid-column: 2; grid-row: 1; }
+}
 .settings-page__tools { display: none; justify-content: flex-end; gap: 0.5rem; margin-block-end: 1rem; }
 .settings-page__tools[data-has-actions="true"] { display: flex; }
 @media (max-width: 900px) { .settings-page__tools { display: flex; } }
@@ -7858,8 +7878,8 @@ html.pet-window #root {
 }
 
 /* Wrappers must not add padding or border height to the shared 48px field. */
-.settings-inline-row { box-shadow: inset 0 -1px var(--settings-divider-color); }
-.settings-inline-row:last-child { box-shadow: none; }
+.settings-inline-row { position: relative; }
+.settings-inline-row:last-child::after { display: none; }
 
 /* A divider is paint, not another pixel of row height. */
 .settings-panel { --settings-row-height: 3rem; --settings-row-padding: 0.5rem; }
@@ -7867,10 +7887,10 @@ html.pet-window #root {
   min-height: var(--settings-row-height);
   padding-block: var(--settings-row-padding);
   border-block-width: 0;
-  box-shadow: inset 0 -1px var(--settings-divider-color);
+  position: relative;
   flex-grow: 0;
 }
-.settings-panel :is([data-settings-row], .settings-navigation-row):last-child { box-shadow: none; }
+.settings-panel :is([data-settings-row], .settings-navigation-row):last-child::after { display: none; }
 .settings-panel [data-slot="table-row"] { border-color: var(--settings-divider-color); }
 .settings-panel .settings-inline-row { padding-block: 0; }
 
@@ -7891,7 +7911,7 @@ html.pet-window #root {
 }
 
 .settings-page__icon { position: relative; }
-.settings-page__subpage-icon { position: absolute; right: -0.375rem; bottom: -0.375rem; display: flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; border-radius: var(--radius-lg); background: var(--secondary); box-shadow: 0 0 0 3px var(--card); }
+.settings-page__subpage-icon { position: absolute; right: -0.375rem; bottom: -0.375rem; display: flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; border-radius: var(--radius-sm); background: var(--secondary);  }
 .settings-page__subpage-icon svg { width: 0.875rem; height: 0.875rem; }
 
 /* Row cards own no inset: individual rows own spacing and edge-to-edge dividers. */
@@ -7929,7 +7949,7 @@ html.pet-window #root {
 }
 [data-settings-variant="danger"] .text-muted-foreground { color: inherit; }
 .settings-subsection__header {
-  box-shadow: inset 0 -1px var(--settings-divider-color);
+  position: relative;
 }
 .settings-subsection__icon {
   display: flex;
@@ -7975,7 +7995,8 @@ html.pet-window #root {
 .reorder-row:hover, .reorder-row:focus-within { background: var(--secondary); }
 .ritual-step-row .ritual-step-trigger { background: transparent; transform: none; }
 .ritual-step-editor.settings-panel { animation: none; }
-.ritual-step-editor.settings-panel [data-settings-row] { box-shadow: none; padding-inline: 0; }
+.ritual-step-editor.settings-panel [data-settings-row] { padding-inline: 0; }
+.ritual-step-editor.settings-panel [data-settings-row]::after { display: none; }
 .ritual-step-editor.settings-panel [data-settings-row] > fieldset { grid-column: 1 / -1; grid-row: auto; justify-self: start; }
 .ritual-step-editor.settings-panel fieldset [data-settings-row] { display: flex; gap: 0.375rem; min-height: 2rem; padding: 0; }
 
@@ -8013,7 +8034,28 @@ html.pet-window #root {
 
 
 :root { --settings-divider-color: color-mix(in srgb, var(--border) 40%, transparent); }
-.settings-divider-before { box-shadow: inset 0 1px var(--settings-divider-color); }
+/* Separators are flat paint, preserving identical row/header geometry. */
+.settings-panel :is([data-settings-row], .settings-navigation-row)::after,
+.settings-inline-row::after,
+.settings-subsection__header::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--settings-divider-color);
+  pointer-events: none;
+}
+.settings-divider-before { position: relative; }
+.settings-divider-before::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 1px;
+  background: var(--settings-divider-color);
+  pointer-events: none;
+}
 .settings-panel .settings-dependent [data-settings-row] { padding-inline-start: 2rem; }
 .settings-dependent[data-disabled] [data-settings-row] > :is([data-slot="field-label"], [data-slot="field-description"]) { opacity: 0.45; }
 
@@ -8029,7 +8071,7 @@ html.pet-window #root {
 [data-slot="input-group-addon"] .action-count-badge { right: .125rem; bottom: .125rem; }
 
 /* Count badges sit above search dividers, adjacent buttons, and their state surfaces. */
-.action-count-badge { z-index: 2; width: 1rem; min-width: 1rem; height: 1rem; padding: 0; border-radius: 999px; }
+.action-count-badge { z-index: 2; width: 1rem; min-width: 1rem; height: 1rem; padding: 0; border-radius: var(--radius-xl); }
 
 /* Joined search actions retain a fixed divider independent of their state surface. */
 [data-slot="input-group"]:has(.search-data-controls) { isolation: isolate; }

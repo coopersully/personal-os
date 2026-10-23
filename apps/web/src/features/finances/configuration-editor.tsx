@@ -34,7 +34,11 @@ export function FinanceConfigurationEditor() {
   const profile = query.data.profile.value;
   return (
     <div className="settings-stack">
-      <SettingsSection layout="rows" title="Household" description="Your financial household and location.">
+      <SettingsSection
+        layout="rows"
+        title="Household"
+        description="Your financial household and location."
+      >
         <div className="flex flex-col">
           <Setting
             id="jurisdiction"

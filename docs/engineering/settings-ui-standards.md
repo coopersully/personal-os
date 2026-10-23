@@ -88,6 +88,12 @@ unchanged/duplicate saves, support Enter/blur commit and Escape cancellation, an
 focus and normal Tab behavior intact. Update the page contract and frontend skill together when
 this pattern changes; do not duplicate a new competing design specification.
 
+Rejected autocomplete drafts must survive popup close, blur, and refocus with their field
+error associated to the visible editor. Search reveal paths open existing editors without
+creating records; conditional destinations fall back to a visible controlling setting.
+Compound choices respond to their actual column width, preserving every option rather than
+quietly clipping it. Layout checks cover both control bounds and internal option overflow.
+
 ## Feedback
 
 All settings errors and discrete action results use Sonner, including query errors and
@@ -710,9 +716,12 @@ states; plain text styling is not zero-padding button styling.
 Follow the full state matrix in `../design/system.md#data-page-state-and-recovery-contract`.
 Compose shared `data-view-state` with domain query state; never infer global absence from
 one filtered/cursor page. Remove meaningless table controls for zero rows, retaining every
-escape from active criteria. Error details belong to Sonner in Settings; persistent neutral
-availability/freshness and retry controls keep recovery discoverable without duplicate error
-copy. Test initial load, filtered/period emptiness, global emptiness, stale data, failure/retry,
+escape from active criteria. Error details belong to Sonner in Settings. Initial unavailable
+data retains bounded neutral recovery in its own content area. Cached refresh failures use
+Sonner Retry and existing refresh controls without inserting rows, banners, or alerts into
+workspace chrome, navigation, sidebars, or bento layout. The sole account-wide verification
+exception uses the shared recovery dialog until confirmed query success; auth-denial routing
+and public/authentication flows remain usable. Test initial load, filtered/period emptiness, global emptiness, stale data, failure/retry,
 and restoration. Verify no data mutation, lost filters, lost preferences, or keyboard trap.
 
 All Time must retain scope context and a direct return to the default period. Successful
@@ -732,10 +741,13 @@ The 2026-10-22 audit used the local owner fixture and a current-worktree Tauri Q
 bundle. Shared loading/absence/recovery coverage is not complete layout adoption:
 inspect populated records and actual native controls too.
 
-- A subsection's permission state, capability guidance, and related test/settings
-  actions belong in its identity header, separated from editable rows by the same
-  full-width divider. Notification action outcomes still use Sonner; the persistent
-  macOS permission is configuration state, not action feedback.
+- General capability guidance belongs in the subsection identity header. Actionable
+  OS permission setup is its first standard row, with current state and a modal
+  chevron. Keep setup instructions, native settings, checks, and tests together in
+  that guided dialog. Refresh on open/return and allow manual recheck; opening the
+  dialog must not request OS permissions. Keep footer actions grouped, with the next
+  setup/test action primary on the right. Test acceptance is not banner delivery.
+  Action outcomes use Sonner; persistent permission state is configuration state.
 - Compact rows retain leading label/trailing control placement on narrow screens;
   do not move a switch to another line simply because the viewport is small. Let
   labels wrap within their track; use an explicit stacked composition only for a

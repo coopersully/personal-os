@@ -85,7 +85,6 @@ for (const width of [390, 1100, 1440]) {
       await page.getByRole("button", { name: "Server settings" }).click();
       const server = page.getByRole("dialog", { name: "Server connection" });
       await expect(server).toBeVisible();
-      await server.getByRole("button", { name: "Advanced server settings" }).click();
       await expect(server.getByLabel("Custom API server")).toBeVisible();
       await expectContained(page);
       await page.screenshot({ path: `/tmp/nohmi-server-${width}.png` });
@@ -97,11 +96,11 @@ for (const width of [390, 1100, 1440]) {
     test("desktop, pet, and ritual sections are discoverable and contained", async ({ page }) => {
       await logIn(page);
       for (const section of ["desktop", "pet", "rituals"]) {
-        await page.goto(`/settings?section=${section}`);
+        await page.goto(`/settings?page=${section}`);
         await expect(
           page.getByRole("heading", {
             name:
-              section === "desktop" ? "Desktop app" : section === "pet" ? "Desktop pet" : "Rituals",
+              section === "desktop" ? "Desktop App" : section === "pet" ? "Desktop Pet" : "Rituals",
             level: 1,
           }),
         ).toBeVisible();
@@ -111,8 +110,13 @@ for (const width of [390, 1100, 1440]) {
         if (section === "pet")
           await expect(page.getByRole("switch", { name: "Show desktop pet" })).toBeVisible();
         if (section === "rituals") {
-          await expect(page.getByRole("link", { name: "Background settings" })).toBeVisible();
-          await page.getByRole("link", { name: "Background settings" }).scrollIntoViewIfNeeded();
+          await expect(
+            page.getByRole("link", { name: "Background settings" }).first(),
+          ).toBeVisible();
+          await page
+            .getByRole("link", { name: "Background settings" })
+            .first()
+            .scrollIntoViewIfNeeded();
         } else {
           await expect(page.getByText("Checking", { exact: true })).toHaveCount(0);
         }
@@ -120,7 +124,7 @@ for (const width of [390, 1100, 1440]) {
           await expect(
             page
               .locator('[data-slot="sidebar"]')
-              .getByRole("link", { name: "Desktop pet", exact: true }),
+              .getByRole("link", { name: "Desktop Pet", exact: true }),
           ).toBeVisible();
         }
         await expectContained(page);
@@ -129,21 +133,17 @@ for (const width of [390, 1100, 1440]) {
     });
     test("appearance and wallpaper controls remain contained", async ({ page }) => {
       await logIn(page);
-      await page.goto("/settings?section=appearance");
+      await page.goto("/settings?page=appearance");
       const themeCards = page.locator(".appearance-picker .choice-card");
       for (const card of await themeCards.all()) {
         const label = await card.locator(".choice-card__label").boundingBox();
         const preview = await card.locator(".choice-card__preview").boundingBox();
         expect(label!.y + label!.height).toBeLessThanOrEqual(preview!.y);
       }
-      await page.goto("/settings?section=wallpaper");
+      await page.goto("/settings?page=wallpaper");
       await expect(page.getByRole("heading", { name: "Wallpaper", exact: true })).toBeVisible();
       for (const title of ["Layout", "Appearance", "Framing"]) {
-        await expect(
-          page
-            .locator('[data-slot="card"]')
-            .filter({ has: page.getByRole("heading", { name: title, exact: true }) }),
-        ).toHaveCount(1);
+        await expect(page.getByRole("region", { name: title, exact: true })).toHaveCount(1);
       }
       if (width >= 1100) {
         const settingsBounds = await page.locator(".wallpaper-editor__settings").boundingBox();
@@ -161,7 +161,13 @@ for (const width of [390, 1100, 1440]) {
         await slider.press("Home");
         await expectContained(page);
       }
+      for (const group of await page.locator(".wallpaper-editor .segmented-control").all()) {
+        expect(
+          await group.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+        ).toBe(true);
+      }
       await page.getByText(/^Link edge padding/).scrollIntoViewIfNeeded();
+      if (width < 1100) await preview.scrollIntoViewIfNeeded();
       const bounds = await preview.boundingBox();
       expect(bounds!.y).toBeGreaterThanOrEqual(0);
       expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(844);
@@ -183,16 +189,18 @@ for (const width of [390, 1100, 1440]) {
     });
     test("notification preferences autosave and link to workspace settings", async ({ page }) => {
       await logIn(page);
-      await page.goto("/settings?section=notifications");
+      await page.goto("/settings?page=notifications");
       await expect(page.getByRole("switch", { name: "Enable notifications" })).toBeVisible();
-      const fromBounds = await page.getByLabel("From", { exact: true }).boundingBox();
-      const untilBounds = await page.getByLabel("Until", { exact: true }).boundingBox();
-      if (width >= 640) {
-        expect(Math.abs(fromBounds!.y - untilBounds!.y)).toBeLessThan(2);
-        expect(untilBounds!.x).toBeGreaterThan(fromBounds!.x + fromBounds!.width);
-      } else {
-        expect(untilBounds!.y).toBeGreaterThan(fromBounds!.y + fromBounds!.height);
-      }
+      const fromBounds = await page
+        .getByRole("combobox", { name: "Quiet hours start" })
+        .boundingBox();
+      const untilBounds = await page
+        .getByRole("combobox", { name: "Quiet hours end" })
+        .boundingBox();
+      expect(untilBounds!.y).toBeGreaterThan(fromBounds!.y + fromBounds!.height);
+      expect(
+        Math.abs(untilBounds!.x + untilBounds!.width - fromBounds!.x - fromBounds!.width),
+      ).toBeLessThan(2);
       await expect(page.getByRole("switch", { name: "Tasks due" })).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Save preferences" })).toHaveCount(0);
       await page.getByRole("switch", { name: "Enable notifications" }).click();
@@ -206,10 +214,13 @@ for (const width of [390, 1100, 1440]) {
         )
         .toBe(true);
       for (const workspace of ["Calendar", "Tasks", "Mail", "Finances"]) {
-        await page.goto("/settings?section=notifications");
+        await page.goto("/settings?page=notifications");
         await expect(page.getByRole("switch", { name: "Enable notifications" })).toBeChecked();
-        await page.getByRole("link", { name: `${workspace} Notification settings` }).click();
-        await expect(page).toHaveURL(new RegExp(`section=${workspace.toLowerCase()}&field=`));
+        await page
+          .getByRole("region", { name: /Workspace notifications/i })
+          .getByRole("link", { name: workspace, exact: true })
+          .click();
+        await expect(page).toHaveURL(new RegExp(`page=${workspace.toLowerCase()}&field=`));
         const heading = page.getByRole("heading", { name: "Notifications", exact: true });
         await expect(heading).toBeFocused();
         const box = await heading.boundingBox();
@@ -234,7 +245,12 @@ async function expectContained(page: Page) {
     const clipped = [...document.querySelectorAll("button,input,a[role=button]")]
       .filter((element) => {
         const bounds = element.getBoundingClientRect();
-        if (!bounds.width || !bounds.height || getComputedStyle(element).opacity === "0")
+        if (
+          !bounds.width ||
+          !bounds.height ||
+          getComputedStyle(element).opacity === "0" ||
+          element.closest('[aria-hidden="true"]')
+        )
           return false;
         const owner = element.closest('[data-slot="card"], [role="dialog"]');
         if (!owner) return false;

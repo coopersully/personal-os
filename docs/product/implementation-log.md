@@ -1,25 +1,25 @@
 # nohmi — Implementation Log
 
-## 2026-10-19 — Integrated Finance experience merged
+## 2026-10-22 — Native settings and populated source rows
 
-- [PR #270 — Complete the Finance workspace and guarded agent workflows](https://github.com/coopersully/personal-os/pull/270)
-  merged at `498f08d4` with resumable setup, Spending, Chat, Automations and Activity, and manual
-  workflow surfaces. Setup receipts preserve existing access and separate completion from messaging
-  readiness; the conversation and activity trail connect decisions to their supporting records.
-- Spending defaults to personal cost while retaining full-outflow inspection, exact transaction
-  drill-down, and applicable monthly budget evidence. These distinctions keep expected reimbursements
-  and unsupported budget percentages from appearing as confirmed money. See the
-  [Finance specification](../design/pages/finances.md) and its owning contracts.
-- Every active budget activation or revision requires exact authenticated human approval. Agent
-  execution scopes, bypass, prior context and conversation replies do not substitute for that approval;
-  historical approval provenance remains evidence, not present authority. See [MCP policy](../mcp.md).
-- [PR #274 — Document confirmed Finance costs and goal progress](https://github.com/coopersully/personal-os/pull/274)
-  records the current cost and goal-progress distinctions, including current evidence versus expected
-  recovery. It does not add a second runtime delivery claim.
-- These are merged-source checkpoints. Production revision/controller proof, production-specific
-  shutdown evidence, and external-host/provider certification remain unobserved in this maintenance
-  run. The narrowed integration acceptance does not complete the broader Finance MVP SMS and host
-  acceptance requirements.
+- Shipping review added audited profile-zone reconciliation, serialized first/last-name edits,
+  keyboard Home clearing, optional-time unsetting, dialog focus restoration, retained failed goal
+  progress drafts, and explicit retry/discard recovery for unsaved ritual answers. Regression tests
+  include a real second-owner attempt against completion with optional reminder creation.
+- Desktop Notifications keeps general guidance in its shared subsection header. Its first row
+  summarizes macOS permissions and opens a guided setup dialog containing permission instructions,
+  presentation checks, recheck/native settings actions, and the authorized-only test action.
+  Checks refresh on opening and return; editable preferences remain flat divided rows.
+- Calendar Sources groups flat switch rows under account identities. Mail account and rule summaries
+  use compact rows instead of nested record cards, preserving navigation, health, and rule actions.
+- Native server configuration exposes flat hosted/custom choices with the existing explicit tested
+  Connect flow. Pet color rests as a swatch/value and opens a shared picker popover; pet workspace
+  switches use their own standard row section. Narrow settings no longer force simple controls below
+  their labels solely at a viewport breakpoint.
+- Checked populated Calendar/Mail in desktop and mobile browser views, and Notifications, server
+  chooser, and color popover in the current-source isolated macOS QA app. Focused native/settings
+  and Calendar tests plus web type checking pass. This does not certify OS notification delivery,
+  signed widget installation, or production server connectivity.
 
 ## 2026-10-20 — Real browser ritual presentation
 
@@ -69,6 +69,27 @@
 - This is a source implementation checkpoint, not a deployed release or a verified OS notification.
   Existing notification preferences and OS permissions still govern delivery; the native changes
   require a rebuilt desktop app.
+
+## 2026-10-19 — Integrated Finance experience merged
+
+- [PR #270 — Complete the Finance workspace and guarded agent workflows](https://github.com/coopersully/personal-os/pull/270)
+  merged at `498f08d4` with resumable setup, Spending, Chat, Automations and Activity, and manual
+  workflow surfaces. Setup receipts preserve existing access and separate completion from messaging
+  readiness; the conversation and activity trail connect decisions to their supporting records.
+- Spending defaults to personal cost while retaining full-outflow inspection, exact transaction
+  drill-down, and applicable monthly budget evidence. These distinctions keep expected reimbursements
+  and unsupported budget percentages from appearing as confirmed money. See the
+  [Finance specification](../design/pages/finances.md) and its owning contracts.
+- Every active budget activation or revision requires exact authenticated human approval. Agent
+  execution scopes, bypass, prior context and conversation replies do not substitute for that approval;
+  historical approval provenance remains evidence, not present authority. See [MCP policy](../mcp.md).
+- [PR #274 — Document confirmed Finance costs and goal progress](https://github.com/coopersully/personal-os/pull/274)
+  records the current cost and goal-progress distinctions, including current evidence versus expected
+  recovery. It does not add a second runtime delivery claim.
+- These are merged-source checkpoints. Production revision/controller proof, production-specific
+  shutdown evidence, and external-host/provider certification remain unobserved in this maintenance
+  run. The narrowed integration acceptance does not complete the broader Finance MVP SMS and host
+  acceptance requirements.
 
 ## 2026-10-12 — Finance text results and desktop pet refinements merged
 
@@ -1134,3 +1155,20 @@ search/filter/sort remains ahead of bounded cursor pagination with selectable pa
 sizes. Shared filter/sort triggers now cover Tasks, Finances, Reviews, Today, workspace
 search, and Calendar/Mail account sources, retaining their domain query behavior.
 These are source implementation claims, not a production deployment claim.
+
+### Settings acceptance repairs
+
+Inline planning-time validation now associates errors with the visible editor and retains a
+rejected choice through popup closure, blur, and refocus. Ritual settings search opens an
+existing step editor and falls back to its visible controlling setting without creating steps.
+Wallpaper compound choices adapt to their actual column width beside the sticky preview;
+ritual cloud canvases remain viewport-sized while scrolling their repeated texture internally.
+Acceptance scenarios use the visible shadcn controls and verify persisted optional/day rules,
+recovery, internal option containment, and card/footer bounds after the entrance animation.
+These are source changes; production acceptance remains part of delivery verification.
+
+Ritual progress-load failures now use Sonner with an explicit retry and show an unavailable
+value rather than a false zero. A recovered ritual-settings conflict dispatches autosave
+with the latest authoritative revision, including when refreshed fields are unchanged;
+server compare-and-swap and local draft rebasing remain in force. Added regression cases
+cover failed refresh recovery, reduced-motion clouds, data-view controls and form editors.

@@ -59,7 +59,8 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
       return run(tx);
     });
   }
-  async function definitions(tx: Tx, userId: string) {
+  async function definitions(tx: Tx, context: Context) {
+    const userId = context.principal.userId;
     const [owner] = await tx
       .select({ timeZone: users.planningTimezone })
       .from(users)
@@ -90,6 +91,26 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
       await tx
         .insert(ritualDefinitionRevisions)
         .values({ userId, ritualId: record.id, revision: updated.revision, data: updated });
+      await tx.insert(auditEvents).values(
+        auditValues({
+          ...context,
+          action: "ritual.definition_zone_changed",
+          entityType: "ritual",
+          entityId: updated.id,
+          before: {
+            revision: before.revision,
+            timeZone: before.timeZone,
+            enabledAt: before.enabledAt,
+          },
+          after: {
+            revision: updated.revision,
+            timeZone: updated.timeZone,
+            enabledAt: updated.enabledAt,
+            source: "profile",
+            requestId: context.requestId,
+          },
+        }),
+      );
       result.push(updated);
     }
     if (result.some((definition, index) => definition.revision !== records[index]?.data.revision)) {
@@ -115,6 +136,21 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
             { ...open, expiresAt: next.dueAt, revision: open.revision + 1 },
             userId,
           );
+          await tx.insert(auditEvents).values(
+            auditValues({
+              ...context,
+              action: "ritual.occurrence_expiry_changed",
+              entityType: "ritual_occurrence",
+              entityId: open.id,
+              before: { revision: open.revision, expiresAt: open.expiresAt },
+              after: {
+                revision: open.revision + 1,
+                expiresAt: next.dueAt,
+                source: "profile",
+                requestId: context.requestId,
+              },
+            }),
+          );
         }
       }
     }
@@ -128,9 +164,10 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
   }
   async function reconcile(
     tx: Tx,
-    userId: string,
+    context: Context,
   ): Promise<{ state: RitualState; occurrences: RitualOccurrence[] }> {
-    const defs = await definitions(tx, userId);
+    const userId = context.principal.userId;
+    const defs = await definitions(tx, context);
     const instant = now().toISOString();
     let window = currentRitualWindow(defs, instant);
     const occurrences = (
@@ -341,7 +378,7 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
       if (!version) throw new AppError("conflict", "This ritual version is no longer available.");
       return version.data as T;
     }
-    const { state } = await reconcile(tx, context.principal.userId);
+    const { state } = await reconcile(tx, context);
     return (receipt.kind === "state" ? state : { ...receipt.result, state }) as T;
   }
   function hash(input: unknown) {
@@ -399,10 +436,10 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
   }
   return {
     async current(context: Context) {
-      return locked(context, async (tx) => (await reconcile(tx, context.principal.userId)).state);
+      return locked(context, async (tx) => (await reconcile(tx, context)).state);
     },
     async list(context: Context) {
-      return locked(context, (tx) => definitions(tx, context.principal.userId));
+      return locked(context, (tx) => definitions(tx, context));
     },
     async saveDefinition(
       kind: string,
@@ -414,7 +451,7 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
           throw new AppError("invalid_request", "Ritual kind must match its address.");
         const replay = await previous<RitualDefinition>(tx, context, input.requestId, input);
         if (replay) return replay;
-        const defs = await definitions(tx, context.principal.userId),
+        const defs = await definitions(tx, context),
           before = defs.find((d) => d.kind === kind);
         const [owner] = await tx
           .select({ timeZone: users.planningTimezone })
@@ -450,9 +487,7 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
             before.enabled !== input.enabled);
         // Reconcile the old schedule first so changing a time cannot rewrite the
         // occurrence already open, even when no client loaded it yet today.
-        const open = defs.length
-          ? (await reconcile(tx, context.principal.userId)).state.current
-          : null;
+        const open = defs.length ? (await reconcile(tx, context)).state.current : null;
         if (before && !before.enabled && input.enabled) enabledAt = now().toISOString();
         if (before && (before.time !== input.time || before.timeZone !== input.timeZone))
           enabledAt = new Date(now().getTime() + 1).toISOString();
@@ -553,7 +588,7 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
             );
           }
         }
-        await reconcile(tx, context.principal.userId);
+        await reconcile(tx, context);
         await remember(
           tx,
           context,
@@ -576,7 +611,7 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
         const payload = { id, stepId, ...input };
         const replay = await previous<RitualState>(tx, context, input.requestId, payload);
         if (replay) return replay;
-        const { state, occurrences } = await reconcile(tx, context.principal.userId);
+        const { state, occurrences } = await reconcile(tx, context);
         const occurrence = findOccurrence(occurrences, id);
         fresh(occurrence, input.expectedRevision);
         const step = occurrence.definition.steps.find((s) => s.id === stepId);
@@ -629,7 +664,7 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
         const payload = { id, ...input };
         const replay = await previous<RitualActionResult>(tx, context, input.requestId, payload);
         if (replay) return replay;
-        const { state, occurrences } = await reconcile(tx, context.principal.userId);
+        const { state, occurrences } = await reconcile(tx, context);
         const occurrence = findOccurrence(occurrences, id);
         const instant = now().toISOString();
         const count = countActions(
@@ -843,7 +878,7 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
       },
     ) {
       return locked(context, async (tx) => {
-        await reconcile(tx, context.principal.userId);
+        await reconcile(tx, context);
         const [cursorTime, cursorId] = query.cursor?.split("|") ?? [];
         const oldest = query.sort === "oldest";
         const compare = oldest ? gt : lt;
@@ -904,7 +939,7 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
     },
     async export(context: Context) {
       return locked(context, async (tx) => {
-        await reconcile(tx, context.principal.userId);
+        await reconcile(tx, context);
         const ledger = await tx
           .select()
           .from(ritualResponses)
@@ -921,7 +956,7 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
           responses.set(row.occurrenceId, entries);
         }
         return {
-          definitions: await definitions(tx, context.principal.userId),
+          definitions: await definitions(tx, context),
           occurrences: (
             await tx
               .select()
@@ -946,10 +981,10 @@ export function createRitualService({ db, now }: { db: Database; now: () => Date
     },
     async deleteData(kind: string, context: Context) {
       await locked(context, async (tx) => {
-        const defs = await definitions(tx, context.principal.userId);
+        const defs = await definitions(tx, context);
         const def = defs.find((d) => d.id === kind || d.kind === kind);
         if (!def) throw new AppError("not_found", "Ritual was not found.");
-        const { occurrences } = await reconcile(tx, context.principal.userId);
+        const { occurrences } = await reconcile(tx, context);
         const latest = occurrences.toSorted((a, b) => Date.parse(b.dueAt) - Date.parse(a.dueAt))[0];
         if (latest?.ritualId === def.id) {
           // Deletion removes its history too. Retain only a schedule cutoff on

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
-import { toast } from "sonner";
 import { MemoryRouter } from "react-router-dom";
+import { toast } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AccountOverview } from "./account-overview";
 
@@ -72,7 +72,10 @@ it("surfaces setup actions and unavailable domains without claiming all clear", 
   expect(screen.getByRole("link", { name: "Mail" })).toHaveTextContent("Setup needed");
   expect(await screen.findByText("Unavailable")).toBeInTheDocument();
   await screen.findByRole("region", { name: "Connections unavailable" });
-  expect(toast.error).toHaveBeenCalledWith("Couldn’t check connected accounts.", expect.any(Object));
+  expect(toast.error).toHaveBeenCalledWith(
+    "Couldn’t check connected accounts.",
+    expect.any(Object),
+  );
   expect(screen.queryByText("Couldn’t check connected accounts.")).not.toBeInTheDocument();
   expect(screen.queryByText("No accounts connected yet.")).not.toBeInTheDocument();
 });

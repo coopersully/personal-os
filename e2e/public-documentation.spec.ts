@@ -85,7 +85,8 @@ test("sign-in exposes public policies without granting messaging consent", async
   const links = page.getByRole("navigation", { name: "About nohmi and policies" });
   await expect(links).toBeVisible();
   await page.screenshot({ path: test.info().outputPath("sign-in.png"), fullPage: true });
-  await links.getByRole("link", { name: "SMS", exact: true }).click();
+  await links.getByRole("button", { name: "Legal", exact: true }).click();
+  await page.getByRole("menuitem", { name: "SMS Policy", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
     "nohmi SMS terms and enrollment",
   );
@@ -144,21 +145,18 @@ test("sign-up is directly addressable and browser history restores the auth page
 test("login restores a protected destination and does not replace the product root", async ({
   page,
 }) => {
-  await page.goto("/settings?section=security");
+  await page.goto("/settings?page=security");
   await expect(page).toHaveURL(/\/login\?next=/);
   await page.getByLabel("Email", { exact: true }).fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await expect(page).toHaveURL(/\/settings\?section=security$/);
-  await page.goto("/");
-  await expect(
-    page.getByRole("heading", { level: 1, name: "Mail, tasks, calendar, and money." }),
-  ).toBeVisible();
-  await page
-    .getByRole("navigation", { name: "Product navigation" })
-    .getByRole("link", { name: "Login", exact: true })
-    .click();
-  await expect(page).toHaveURL(/\/today$/);
+  await expect(page).toHaveURL(/\/settings\?page=security$/);
+  for (const destination of ["/", "/login", "/signup"]) {
+    await page.goto(destination);
+    await expect(page).toHaveURL(/\/today$/);
+  }
+  await page.goto("/privacy/");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Privacy policy");
 });
 
 for (const path of ["/", "/privacy/"]) {

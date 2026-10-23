@@ -1,3 +1,4 @@
+import { type Action, toast } from "sonner";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -157,12 +158,14 @@ it("retains a pending source and its original merchant through a failed backgrou
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  expect(await screen.findByText(/Showing the last available update/)).toBeVisible();
+  await waitFor(() => expect(toast.error).toHaveBeenCalled());
+  expect(screen.queryByText(/Showing the last available update/)).not.toBeInTheDocument();
   expect(screen.getByText("Pending")).toBeVisible();
   expect(screen.getByText(/MARKET 123 POS/)).toBeVisible();
   await userEvent.click(screen.getByRole("button", { name: "Categorize" }));
   expect(onCategorize).toHaveBeenCalledWith(record);
-  await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+  const retryAction = vi.mocked(toast.error).mock.calls.at(-1)?.[1]?.action as Action;
+  retryAction.onClick({} as Parameters<Action["onClick"]>[0]);
   await waitFor(() =>
     expect(screen.queryByText(/Showing the last available update/)).not.toBeInTheDocument(),
   );
@@ -325,3 +328,5 @@ it("keeps a linked source with loading taxonomy distinct from uncategorized", as
   expect(await screen.findByText("Loading category…")).toBeVisible();
   expect(screen.queryByText("Uncategorized")).not.toBeInTheDocument();
 });
+
+vi.spyOn(toast, "error");

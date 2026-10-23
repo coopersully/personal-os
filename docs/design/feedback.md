@@ -19,17 +19,34 @@ or waiting for an asynchronous OS callback does not make inline action feedback 
 Use one toast per action: loading → confirmed result. Native submission is only acceptance,
 not proof of visible delivery or audible sound. Keep diagnostic next steps in the toast's
 `description` or action. Do not replay a success toast from cached status when opening a page.
-Errors always reach Sonner, including validation, load, autosave, and native failures; deduplicate
+Errors reach Sonner, including validation, local load, autosave, and native failures; deduplicate
 unchanged polling failures. Background autosave success stays silent.
 
 Field correction/retry controls and actual configuration/permission state may remain inline.
-They supplement required Sonner error announcements; they are not an alternative. For dataset
-loads, a neutral availability/freshness label and persistent Retry control may remain at the data
-boundary; keep the failure explanation in Sonner, never duplicate it in a paragraph or Alert.
+They supplement Sonner announcements, not replace them. Initial dataset failures use a bounded,
+neutral availability/retry region inside the owning content area. Cached refresh failures preserve
+existing content and use one deduplicated Sonner error with a retry action; never insert a new
+freshness/error row, banner, or Alert into workspace chrome, navigation, sidebars, or bento layout.
+Do not shift or cover neighboring content to announce a failed read. Useful domain warnings and
+always-present source timestamps remain content, not action feedback.
+Navigation/sidebar reads use shared `toastOnly` feedback even for initial failures; bounded
+initial recovery regions belong inside data content, never in workspace chrome. Preserve a
+compact existing menu retry when useful. If several reads fail, target the query whose missing
+data blocks the action, not a different failed read that still has retained data.
+
+Account verification is the deliberate blocking exception: when the account read fails for a
+non-authentication reason, show the shared recovery dialog above the existing layout. It has no
+close control, outside dismissal, or Escape dismissal; keep it open throughout retry until the
+account query confirms success. A failed manual retry updates one loading Sonner toast to an error.
+Never duplicate the initial dialog explanation in a toast. Preserve native server configuration
+inside this recovery path. Authoritative 401 handling still clears private state and routes to
+sign-in; password-reset/email-verification flows and the anonymous public landing remain usable.
+A locally failed dataset must never lock the whole app behind this dialog.
+
 Successful absence uses Empty; failed reads never masquerade as an empty collection. Follow the
 [data-page state matrix](system.md#data-page-state-and-recovery-contract).
-These settings rules override the generic surface defaults below. Tests must verify the Sonner call and verify
-that the same action-result message is absent from the page content.
+Tests verify Sonner delivery, no layout-shifting error insertion, retained data, and confirmed
+recovery. These rules override generic surface defaults below.
 
 ## Definitions and selection
 

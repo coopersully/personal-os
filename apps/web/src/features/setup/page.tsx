@@ -288,7 +288,9 @@ export function SetupPage({ user }: { user: User }) {
         {currentStep === "ready" ? (
           <ReadyStep
             complete={() => completeSetup()}
-            connectAgent={() => completeSetup("/settings?page=connections&subpage=agent-connections")}
+            connectAgent={() =>
+              completeSetup("/settings?page=connections&subpage=agent-connections")
+            }
             connectedAccounts={connectors.data?.length ?? 0}
             financeAccounts={finances.data?.accounts.length ?? 0}
             pending={save.isPending}

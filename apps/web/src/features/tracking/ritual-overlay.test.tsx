@@ -543,3 +543,20 @@ it("fills required progress independently of completed optional steps", () => {
   expect(screen.getByText("1 required left")).toBeInTheDocument();
   expect(screen.queryByLabelText("Reminder time")).not.toBeInTheDocument();
 });
+
+it("keeps failed answers retryable and permits discarding only local drafts to regain escape actions", async () => {
+  const response = vi.fn().mockRejectedValue(new Error("Network unavailable"));
+  render(<RitualChecklist state={state} saveResponse={response} act={vi.fn()} />);
+  fireEvent.change(screen.getByRole("textbox", { name: "Journal" }), {
+    target: { value: "Keep this answer" },
+  });
+  await screen.findByRole("button", { name: "Retry saving" });
+  expect(screen.getByRole("textbox", { name: "Journal" })).toHaveValue("Keep this answer");
+  expect(screen.queryByText("Saving")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Snooze" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Retry saving" }));
+  await waitFor(() => expect(response).toHaveBeenCalledTimes(2));
+  fireEvent.click(await screen.findByRole("button", { name: "Discard unsaved changes" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Snooze" })).toBeEnabled());
+  expect(screen.getByRole("textbox", { name: "Journal" })).toHaveValue("");
+});

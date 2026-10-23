@@ -12,6 +12,7 @@ import type {
   TaskProject,
   WorkspaceSettings,
 } from "../packages/domain/src/index.js";
+import { selectSetting } from "./settings-controls.js";
 
 test("two editors retain attempted workspace values and explicitly recover repeated conflicts", async ({
   page,
@@ -53,16 +54,16 @@ test("two editors retain attempted workspace values and explicitly recover repea
     second.on("request", (request) => {
       if (request.method() === "PATCH" && request.url().endsWith(path)) secondWrites++;
     });
-    await page.goto("/settings?section=calendar");
-    await second.goto("/settings?section=calendar");
+    await page.goto("/settings?page=calendar");
+    await second.goto("/settings?page=calendar");
     await expect(page.getByLabel("Preferred view")).toBeEnabled();
     await expect(second.getByLabel("Preferred view")).toBeEnabled();
     const firstSave = page.waitForResponse(
       (response) => response.request().method() === "PATCH" && response.url().endsWith(path),
     );
-    await page.getByLabel("Preferred view").selectOption("month");
+    await selectSetting(page, "Preferred view", "Month");
     expect((await firstSave).ok()).toBeTruthy();
-    await second.getByLabel("Preferred view").selectOption("day");
+    await selectSetting(second, "Preferred view", "Day");
     await expect(second.getByText("Your change: day")).toBeVisible();
     await expect(
       second.getByText(
@@ -91,7 +92,7 @@ test("two editors retain attempted workspace values and explicitly recover repea
     const firstAgain = page.waitForResponse(
       (response) => response.request().method() === "PATCH" && response.url().endsWith(path),
     );
-    await page.getByLabel("Week starts on").selectOption("monday");
+    await selectSetting(page, "Week starts on", "Monday");
     expect((await firstAgain).ok()).toBeTruthy();
     await second.getByRole("button", { name: "Reapply reviewed change" }).click();
     await expect(second.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
@@ -100,7 +101,7 @@ test("two editors retain attempted workspace values and explicitly recover repea
     await second.getByRole("button", { name: "Refresh latest settings" }).click();
     await expect(second.getByRole("button", { name: "Reapply reviewed change" })).toBeEnabled();
     await second.getByRole("button", { name: "Reapply reviewed change" }).click();
-    await expect(second.getByLabel("Preferred view")).toHaveValue("day");
+    await expect(second.getByLabel("Preferred view")).toHaveText("Day");
     await expect(second.getByLabel("Preferred view")).toBeEnabled();
     expect(secondWrites).toBe(3);
     const current = await (await page.request.get(path)).json();
@@ -208,9 +209,9 @@ async function openSettingsSection(page: Page, mobile: boolean, label: string) {
     await page.getByRole("button", { name: "Workspace actions" }).click();
     const link = page
       .getByRole("dialog", { name: "Settings" })
-      .locator(`a[href="/settings?section=${label.toLowerCase()}"]`);
+      .locator(`a[href="/settings?page=${label.toLowerCase()}"]`);
     await expect(link).toHaveAccessibleName(new RegExp(`^${label}(?:: Action required)?$`));
-    await expect(link).toHaveAttribute("href", `/settings?section=${label.toLowerCase()}`);
+    await expect(link).toHaveAttribute("href", `/settings?page=${label.toLowerCase()}`);
     await link.click();
   } else {
     await page
@@ -219,9 +220,9 @@ async function openSettingsSection(page: Page, mobile: boolean, label: string) {
       .click();
     const link = page
       .getByRole("complementary", { name: "Account utility navigation" })
-      .locator(`a[href="/settings?section=${label.toLowerCase()}"]`);
+      .locator(`a[href="/settings?page=${label.toLowerCase()}"]`);
     await expect(link).toHaveAccessibleName(new RegExp(`^${label}(?:: Action required)?$`));
-    await expect(link).toHaveAttribute("href", `/settings?section=${label.toLowerCase()}`);
+    await expect(link).toHaveAttribute("href", `/settings?page=${label.toLowerCase()}`);
     await link.click();
   }
 }
@@ -303,9 +304,7 @@ test("Finance account selection recovery stays readable after reopening and navi
     await expect(dialog.getByText("Latest: Everyday checking", { exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
     await openSettingsSection(page, !!info.project.use.isMobile, "Finances");
-    const preferences = page.locator(".settings-section").filter({
-      has: page.getByRole("heading", { name: "Workspace preferences", exact: true }),
-    });
+    const preferences = page.getByRole("region", { name: /^Workspace preferences$/i });
     await expect(preferences.getByText("Your change: None selected")).toBeVisible();
     await expect(preferences.getByText("Latest: Everyday checking", { exact: true })).toBeVisible();
     await preferences.getByRole("button", { name: "Refresh latest settings" }).click();
@@ -390,7 +389,7 @@ test("Tasks failed project pin reaches Settings and reapplies only its reviewed 
       .getByRole("link", { name: "Review unsaved pin preferences", exact: true })
       .first()
       .click();
-    await expect(page).toHaveURL(/settings\?section=tasks/);
+    await expect(page).toHaveURL(/settings\?page=tasks/);
     await expect(
       page.getByText("Your change: Autumn program opening", { exact: true }),
     ).toBeVisible();

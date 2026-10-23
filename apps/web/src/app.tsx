@@ -92,7 +92,6 @@ import {
   reconnectAccountsLabel,
 } from "@/components/account-selection-trigger";
 import { ActionButton } from "@/components/action-button";
-import { DataViewEmpty, DataViewLoading, DataViewRecovery } from "@/components/data-view-state";
 import {
   EmailField,
   InviteCodeField,
@@ -105,6 +104,7 @@ import { BrandMark, brandTitle, hasBrandMark, NohmiBrandMark } from "@/component
 import { BrandPattern } from "@/components/brand-pattern";
 import { ChoiceCardGroup } from "@/components/choice-card-group";
 import { ConnectionCard } from "@/components/connection-card";
+import { DataViewEmpty, DataViewLoading, DataViewRecovery } from "@/components/data-view-state";
 import { DateInput } from "@/components/date-input";
 import { ErrorPage } from "@/components/error-page";
 import {
@@ -141,12 +141,10 @@ import {
   HouseIcon,
   type Icon,
   ImageIcon,
-  KeyIcon,
   LayersIcon,
   ListChecksIcon,
   ListTodoIcon,
   LockIcon,
-  LogOutIcon,
   MailIcon,
   MapPinIcon,
   MonitorIcon,
@@ -238,8 +236,8 @@ import {
 import {
   Dialog,
   DialogContent,
-  DialogFooter,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -313,6 +311,7 @@ import { ConnectionAuthorizationOutcome } from "@/features/connections/authoriza
 import { TaskCreationProgress } from "@/features/tasks/creation-progress";
 import { api, isUnauthorized } from "./api.js";
 import { scrollTimelineToMinute } from "./calendar-timeline.js";
+import { AccountRecoveryDialog } from "./components/account-recovery-dialog.js";
 import { InlineError, PageLoading, QueryFeedback } from "./components/async-state.js";
 import { AuthFooter } from "./components/auth-footer.js";
 import { useConfirmAction } from "./components/confirm-action.js";
@@ -561,10 +560,23 @@ export function App() {
 }
 
 function SessionApp() {
+  const location = useLocation();
+  const tokens = new URLSearchParams(location.search);
   const me = useQuery({ queryFn: api.getMe, queryKey: ["me"] });
   return (
     <>
       <AppContent me={me} />
+      <AccountRecoveryDialog
+        query={me}
+        enabled={
+          !isUnauthorized(me.error) &&
+          !tokens.get("verifyEmail") &&
+          !tokens.get("resetPassword") &&
+          (location.pathname !== "/" || isTauri() || Boolean(me.data))
+        }
+      >
+        {isTauri() ? <DesktopSettingsPanel connectionOnly /> : null}
+      </AccountRecoveryDialog>
       <Toaster
         theme={typeof window.matchMedia === "function" ? (me.data?.theme ?? "system") : "light"}
       />
@@ -602,13 +614,13 @@ function AppContent({ me }: { me: UseQueryResult<User> }) {
   if (me.isError && !me.data)
     return (
       <>
-        <FatalState error={me.error} />
-        {isTauri() ? <DesktopSettingsPanel connectionOnly /> : null}
+        <main className="center-screen">
+          <Spinner label="Waiting for account connection" />
+        </main>
       </>
     );
   return (
     <TooltipProvider>
-      <QueryFeedback query={me} title="Couldn’t refresh your account." staleOnly />
       <AuthenticatedExperience user={me.data as User} />
     </TooltipProvider>
   );
@@ -5556,14 +5568,14 @@ function GoalItem({
             value={goal.progress}
             pending={pending}
             onSave={(progress) => {
-              void onUpdate({
+              return onUpdate({
                 progress,
                 ...(progress === 100
                   ? { status: "completed" }
                   : goal.status === "completed"
                     ? { status: "active" }
                     : {}),
-              }).catch(() => {});
+              });
             }}
           />
         </div>
@@ -6594,27 +6606,89 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
       />
       {calendarGroups.length ? (
         <div>
-          {calendarGroups.map(group => <section key={group.accountId} className="border-b border-(--settings-divider-color) last:border-b-0">
-            <div className="settings-subsection__header flex min-w-0 items-center gap-3 p-4">
-              <span className="settings-icon-slot"><ConnectedAccountIdentity avatarUrl={group.account?.avatarUrl} label={group.label} provider={group.provider} size="default" /></span>
-              <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{group.label}</p>{group.account?.email ? <p className="truncate text-xs text-muted-foreground">{group.account.email}</p> : null}</div>
-              <span className="shrink-0 text-xs text-muted-foreground">{group.calendars.filter(calendar=>calendar.isSelected).length} / {group.calendars.length}</span>
-            </div>
-            <ShadcnFieldGroup>
-              {group.calendars.map(calendar => <ShadcnField key={calendar.id} orientation="horizontal">
-                <ShadcnFieldLabel htmlFor={`calendar-visible-${calendar.id}`}>
-                  {calendar.name}
-                  {!calendar.isWritable ? <ExternalLinkIcon aria-label="Subscribed calendar" className="size-4 text-muted-foreground" role="img" /> : null}
-                </ShadcnFieldLabel>
-                <div className="flex shrink-0 items-center gap-3">
-                  {calendar.provider === "local" ? <ActionButton aria-label={`Delete ${calendar.name}`} disabled={remove.isPending} onClick={() => confirm({title:"Delete calendar?",description:"This permanently deletes this local calendar and its events.",actionLabel:"Delete calendar",onConfirm:()=>remove.mutate(calendar.id)})} size="icon" type="button" variant="ghost"><TrashIcon /></ActionButton> : null}
-                  <ShadcnSwitch id={`calendar-visible-${calendar.id}`} aria-label={calendar.isSelected ? `Hide ${calendar.name}` : `Show ${calendar.name}`} checked={calendar.isSelected} disabled={selected.isPending} onCheckedChange={checked=>selected.mutate({id:calendar.id,value:checked === true})} />
+          {calendarGroups.map((group) => (
+            <section
+              key={group.accountId}
+              className="border-b border-(--settings-divider-color) last:border-b-0"
+            >
+              <div className="settings-subsection__header flex min-w-0 items-center gap-3 p-4">
+                <span className="settings-icon-slot">
+                  <ConnectedAccountIdentity
+                    avatarUrl={group.account?.avatarUrl}
+                    label={group.label}
+                    provider={group.provider}
+                    size="default"
+                  />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{group.label}</p>
+                  {group.account?.email ? (
+                    <p className="truncate text-xs text-muted-foreground">{group.account.email}</p>
+                  ) : null}
                 </div>
-              </ShadcnField>)}
-            </ShadcnFieldGroup>
-          </section>)}
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {group.calendars.filter((calendar) => calendar.isSelected).length} /{" "}
+                  {group.calendars.length}
+                </span>
+              </div>
+              <ShadcnFieldGroup>
+                {group.calendars.map((calendar) => (
+                  <ShadcnField key={calendar.id} orientation="horizontal">
+                    <ShadcnFieldLabel htmlFor={`calendar-visible-${calendar.id}`}>
+                      {calendar.name}
+                      {!calendar.isWritable ? (
+                        <ExternalLinkIcon
+                          aria-label="Subscribed calendar"
+                          className="size-4 text-muted-foreground"
+                          role="img"
+                        />
+                      ) : null}
+                    </ShadcnFieldLabel>
+                    <div data-settings-row-actions="" className="flex shrink-0 items-center gap-3">
+                      {calendar.provider === "local" ? (
+                        <ActionButton
+                          aria-label={`Delete ${calendar.name}`}
+                          disabled={remove.isPending}
+                          onClick={() =>
+                            confirm({
+                              title: "Delete calendar?",
+                              description:
+                                "This permanently deletes this local calendar and its events.",
+                              actionLabel: "Delete calendar",
+                              onConfirm: () => remove.mutate(calendar.id),
+                            })
+                          }
+                          size="icon"
+                          type="button"
+                          variant="ghost"
+                        >
+                          <TrashIcon />
+                        </ActionButton>
+                      ) : null}
+                      <ShadcnSwitch
+                        id={`calendar-visible-${calendar.id}`}
+                        aria-label={
+                          calendar.isSelected ? `Hide ${calendar.name}` : `Show ${calendar.name}`
+                        }
+                        checked={calendar.isSelected}
+                        disabled={selected.isPending}
+                        onCheckedChange={(checked) =>
+                          selected.mutate({ id: calendar.id, value: checked === true })
+                        }
+                      />
+                    </div>
+                  </ShadcnField>
+                ))}
+              </ShadcnFieldGroup>
+            </section>
+          ))}
         </div>
-      ) : !query.isError ? <DataViewEmpty title="No calendar sources" description="Add a local calendar or connect an account to choose what appears." /> : null}
+      ) : !query.isError ? (
+        <DataViewEmpty
+          title="No calendar sources"
+          description="Add a local calendar or connect an account to choose what appears."
+        />
+      ) : null}
 
       <MutationFeedback feedback={selected.feedback} />
       <MutationFeedback feedback={remove.feedback} />
@@ -7330,8 +7404,13 @@ function PinterestWallpaperDesktopSettingsPanel() {
   const adjustments = (
     <>
       <SettingsSection layout="rows" title="Layout">
-        <ShadcnField>
-          <ShadcnFieldLabel>Layout</ShadcnFieldLabel>
+        <ShadcnField className="wallpaper-choice-row">
+          <ShadcnFieldContent>
+            <ShadcnFieldLabel>Layout</ShadcnFieldLabel>
+            <ShadcnFieldDescription>
+              Grid tiles the frame. Stack overlaps repeated photos across the frame.
+            </ShadcnFieldDescription>
+          </ShadcnFieldContent>
           <SegmentedControl
             aria-label="Wallpaper layout"
             onValueChange={(next) => {
@@ -7346,15 +7425,18 @@ function PinterestWallpaperDesktopSettingsPanel() {
               <LayersIcon data-icon="inline-start" className="size-[15px]" /> Stack
             </SegmentedControlItem>
           </SegmentedControl>
-          <ShadcnFieldDescription>
-            Grid tiles the frame. Stack overlaps repeated photos across the frame.
-          </ShadcnFieldDescription>
         </ShadcnField>
       </SettingsSection>
       <SettingsSection layout="rows" title="Appearance">
         <ShadcnFieldGroup className="pinterest-wallpaper__controls">
-          <ShadcnField>
-            <ShadcnFieldLabel>Mosaic fit</ShadcnFieldLabel>
+          <ShadcnField className="wallpaper-choice-row">
+            <ShadcnFieldContent>
+              <ShadcnFieldLabel>Mosaic fit</ShadcnFieldLabel>
+              <ShadcnFieldDescription>
+                Preserve keeps image proportions, trimming photos at the frame edges. Fill crops
+                each photo into an even grid. Both repeat your Pins to fill the available space.
+              </ShadcnFieldDescription>
+            </ShadcnFieldContent>
             <SegmentedControl
               aria-label="Mosaic fit"
               onValueChange={(next) => {
@@ -7369,13 +7451,14 @@ function PinterestWallpaperDesktopSettingsPanel() {
                 Fill frame
               </SegmentedControlItem>
             </SegmentedControl>
-            <ShadcnFieldDescription>
-              Preserve keeps image proportions, trimming photos at the frame edges. Fill crops each
-              photo into an even grid. Both repeat your Pins to fill the available space.
-            </ShadcnFieldDescription>
           </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel>Backdrop</ShadcnFieldLabel>
+          <ShadcnField className="wallpaper-choice-row">
+            <ShadcnFieldContent>
+              <ShadcnFieldLabel>Backdrop</ShadcnFieldLabel>
+              <ShadcnFieldDescription>
+                Matched samples your images. Daily uses one color from a fixed palette each day.
+              </ShadcnFieldDescription>
+            </ShadcnFieldContent>
             <SegmentedControl
               aria-label="Wallpaper backdrop"
               onValueChange={(next) => {
@@ -7413,9 +7496,6 @@ function PinterestWallpaperDesktopSettingsPanel() {
                 value={backgroundColor}
               />
             ) : null}
-            <ShadcnFieldDescription>
-              Matched samples your images. Daily uses one color from a fixed palette each day.
-            </ShadcnFieldDescription>
           </ShadcnField>
           <ShadcnField>
             <ShadcnFieldLabel htmlFor="pinterest-tile-size">
@@ -8021,13 +8101,32 @@ function ConnectorCapabilityBadge({
 function ProfileSettings({ user }: { user: User }) {
   const queryClient = useQueryClient();
   const [firstName, lastName] = splitProfileName(user.displayName);
-  const save = async (input: Parameters<typeof api.updateUser>[0]) => {
-    const nextUser = await api.updateUser(input);
-    queryClient.setQueryData(["me"], nextUser);
+  const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const save = (
+    input:
+      | Parameters<typeof api.updateUser>[0]
+      | ((current: User) => Parameters<typeof api.updateUser>[0]),
+  ) => {
+    const saving = saveQueue.current
+      .catch(() => {})
+      .then(async () => {
+        const current = queryClient.getQueryData<User>(["me"]) ?? user;
+        const nextUser = await api.updateUser(typeof input === "function" ? input(current) : input);
+        queryClient.setQueryData(["me"], nextUser);
+        return nextUser;
+      });
+    saveQueue.current = saving;
+    return saving;
   };
+  const saveName = (part: 0 | 1, value: string) =>
+    save((current) => {
+      const names = splitProfileName(current.displayName);
+      names[part] = value;
+      return { displayName: names.filter(Boolean).join(" ") };
+    });
   const update = useFeedbackMutation({
     feedback: { action: "save your profile", form: true },
-    mutationFn: (input: Parameters<typeof api.updateUser>[0]) => api.updateUser(input),
+    mutationFn: (input: Parameters<typeof api.updateUser>[0]) => save(input),
     onSuccess: (nextUser) => {
       queryClient.setQueryData(["me"], nextUser);
     },
@@ -8052,7 +8151,7 @@ function ProfileSettings({ user }: { user: User }) {
           required
           fieldName="displayName"
           validate={(value) => (value ? undefined : "Enter your first name.")}
-          save={(value) => save({ displayName: [value, lastName].filter(Boolean).join(" ") })}
+          save={(value) => saveName(0, value)}
         />
         <ProfileInlineField
           id="profile-last-name"
@@ -8060,7 +8159,7 @@ function ProfileSettings({ user }: { user: User }) {
           value={lastName}
           autoComplete="family-name"
           fieldName="displayName"
-          save={(value) => save({ displayName: [firstName, value].filter(Boolean).join(" ") })}
+          save={(value) => saveName(1, value)}
         />
         <ProfileInlineField
           id="profile-email"
@@ -8339,6 +8438,9 @@ function HomeLocationField({
           autoComplete="off"
           id="profile-home-location"
           placeholder="Search by city, ZIP, or region"
+          onBlur={() => {
+            if (!searchValue.trim() && savedLocation) onCommit(null);
+          }}
           showClear={false}
           showTrigger={false}
         >
@@ -8462,7 +8564,14 @@ function InvitationsSettings() {
                 </ShadcnFieldGroup>
 
                 <DialogFooter>
-                  <ShadcnButton type="button" variant="secondary" disabled={create.isPending} onClick={() => setCreating(false)}>Cancel</ShadcnButton>
+                  <ShadcnButton
+                    type="button"
+                    variant="secondary"
+                    disabled={create.isPending}
+                    onClick={() => setCreating(false)}
+                  >
+                    Cancel
+                  </ShadcnButton>
                   <ShadcnButton disabled={create.isPending} type="submit">
                     {create.isPending ? "Creating invitation…" : "Create invitation"}
                   </ShadcnButton>
@@ -8508,11 +8617,15 @@ function InvitationRow({ invitation }: { invitation: Invitation }) {
   const expired = new Date(invitation.expiresAt).getTime() <= Date.now();
   return (
     <div className="settings-navigation-row flex min-w-0 items-center justify-between gap-6 text-sm">
-      <span className="min-w-0 truncate font-medium">{invitation.email ?? "Unassigned invitation"}</span>
+      <span className="min-w-0 truncate font-medium">
+        {invitation.email ?? "Unassigned invitation"}
+      </span>
       <span className="shrink-0 text-xs text-muted-foreground">
         {invitation.redeemedAt
           ? `Redeemed ${formatRelative(invitation.redeemedAt)}`
-          : expired ? "Expired" : `Expires ${formatRelative(invitation.expiresAt)}`}
+          : expired
+            ? "Expired"
+            : `Expires ${formatRelative(invitation.expiresAt)}`}
       </span>
     </div>
   );

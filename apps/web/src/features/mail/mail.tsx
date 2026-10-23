@@ -243,8 +243,9 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
             <p className="context-sidebar__empty">Loading mailboxes…</p>
           ) : (accounts.isError && !accounts.data) || (mailboxes.isError && !mailboxes.data) ? (
             <QueryFeedback
-              query={accounts.isError ? accounts : mailboxes}
+              query={accounts.isError && !accounts.data ? accounts : mailboxes}
               title="Couldn’t load mailboxes."
+              toastOnly
             />
           ) : enabled.length === 0 ? (
             <p className="context-sidebar__empty">Connect a mailbox in Settings to see it here.</p>

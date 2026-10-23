@@ -19,6 +19,12 @@ Use the shared [feedback rubric](../feedback.md) for every operation.
   verification and unavailable platform capabilities remain contextual Alerts.
 - Keep unsaved drafts and one-time invitation/token values visible through failed
   refreshes. Never replace cached settings with an empty-success state.
+- Rejected autocomplete choices retain their attempted value and associated field error
+  through popup closure, blur, and refocus. Announce the error with Sonner; correction
+  happens in the visible input, not a hidden native control.
+- Settings search opens existing editors without creating records or steps. When a
+  conditional field is unavailable, focus the nearest visible controlling setting;
+  never focus a hidden control behind a dialog.
 - Desktop wallpaper is a primary sidebar page. Keep its live preview sticky beside scrolling
   controls at desktop widths, including a 1100px app window. On phone-sized surfaces only,
   place the preview above them. Board, Layout, Appearance, and Framing are separate cards.
@@ -821,8 +827,10 @@ escape when a later cursor page is empty.
 
 Loading uses bounded shared skeleton rows. Initial failure shows history availability and
 Retry, with the error announced once through Sonner. No duplicate inline error message or
-empty-success message. Failed refresh preserves valid last results, with a freshness label
-and Retry. Recovery keeps the criteria and restores the table; no destructive action is part
+empty-success message. Failed refresh preserves valid last results without inserting a new
+row or banner; use Sonner with Retry and retain existing refresh/scope controls. Account-wide
+non-authentication read failure uses the shared non-dismissible recovery dialog until confirmed
+success, as specified in `../feedback.md`. Recovery keeps the criteria and restores the table; no destructive action is part
 of empty/error recovery. Use `DataViewEmpty`, `DataViewLoading`, and `DataViewRecovery`.
 
 Settings collection states now share `data-view-state` across Ritual History, Goals,
@@ -835,10 +843,14 @@ and This week action. Profile account summaries retain independent query recover
 
 ### Native subsection information and compound values
 
-Keep permission state, how-it-works guidance, and related native test/settings actions
-in the actual subsection identity header, with a standard neutral framed icon and
-one canonical full-width divider before editable rows. Use readable permission labels;
-action results remain Sonner feedback. A header is not a replacement for a setting row.
+Keep general how-it-works guidance in the subsection identity header, with a standard
+neutral framed icon and the canonical full-width divider. Actionable OS permission setup
+is the first setting row: a concise label, readable current state, and a modal chevron.
+Its guided dialog groups permission instructions, presentation checks, native settings,
+and test actions. Refresh on opening and returning from macOS, and offer an explicit
+recheck. Do not request OS permission just by opening the guide. Tests become available
+only after permission is granted; OS acceptance does not prove a banner appeared.
+Action results remain Sonner feedback; persistent permission state stays in the row/dialog.
 
 Grouped source records use account identity headers and flat rows, never cards nested
 inside a row card. Keep provider identity aligned in the shared icon slot, descriptions

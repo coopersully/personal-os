@@ -19,6 +19,12 @@ or chat surface.
 
 ## Diagnose refinement before editing
 
+For settings refinements, check rejected autocomplete drafts through blur/refocus and keep
+validation on the visible input. Search must reveal existing editors without creating data.
+Check compound choices against their actual column width, including internal overflow;
+page containment alone can miss clipped options. Decorative ritual canvases stay within
+their viewport; independently verify card/footer bounds after entrance animations settle.
+
 - Record the visible symptom, conditions, and user or system cost without
   embedding the requested fix.
 - Walk the governance diagnosis ladder: user outcome → information hierarchy →
@@ -558,8 +564,14 @@ For table/data-page states, apply the state matrix in
 successful empty scope from failure and stale data. With no rows, omit irrelevant
 table chrome while keeping editable criteria and a safe way to broaden/return.
 Verify recovery transitions, not just a populated screenshot. Keep settings errors
-in Sonner, with neutral availability/freshness and retry controls at the dataset
-boundary; never duplicate failure prose or turn recovery into a record mutation.
+in Sonner; initial unavailability retains bounded recovery in its own content area. Cached
+refresh errors never insert rows/banners into workspace chrome, sidebars, navigation, or bento
+layout. Initial navigation/sidebar failures also use `toastOnly`; an initial Empty recovery
+region belongs to data content. Retry the missing blocking read when other sources have stale
+retained data. Use toast retry plus existing refresh controls. Only account-wide non-authentication
+verification failure gates the app with the shared non-dismissible recovery dialog, through
+pending retry until confirmed query success. Keep 401/private-cache and public/auth flows intact.
+Never duplicate failure prose or turn recovery into a record mutation.
 
 Exercise empty → broaden → populated → default-scope round trips for data pages.
 No recovery action may permanently remove scope/navigation or leave an initial-error
@@ -573,8 +585,10 @@ identity and the actual desktop bridge. In compact mobile metadata pairs, constr
 the value track (`minmax(0, 1fr)`) and truncate long text; an unconstrained `auto`
 value track can overlap the adjacent pair despite no document-level overflow.
 
-- In native settings audits, place subsection-level permission/capability guidance and
-  related tests in the real identity header. Inspect populated account/record groups,
+- In native settings audits, keep general capability guidance in the identity header;
+  actionable OS permissions use a leading state-summary row and a guided modal that
+  groups instructions, checks, native settings, and tests. Refresh checks on open/return;
+  never request OS permission merely by opening the guide. Inspect populated account/record groups,
   not only recovery states. Flat presentation must preserve authority boundaries:
   server changes require the existing tested Connect flow; color edits retain live
   preview/coalesced saves inside a bounded popover.

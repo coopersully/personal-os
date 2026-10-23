@@ -31,6 +31,10 @@ Record its actual scope once. Do not ask again when it is already clear. Separat
 recurrence and production-effect authority still follows epic/handoff contracts. Plan mode can
 produce an issue proposal without creating it. Existing work enters at its next missing evidence,
 not at a fixed first step. Coordinators delegate implementation; choosing a mode never changes role.
+Carry the agreed intent, rationale, non-goals, unfinished obligations and grants through the handoff.
+Use repository oversight’s local lifecycle and monitoring references; do not require a personal skill
+install, add a supervisor layer or reconfirm settled decisions. Planning, dispatch, acknowledgement,
+implementation, review and acceptance each require their own evidence, separate from waiting/blocked.
 
 ## Step contracts
 

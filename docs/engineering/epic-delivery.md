@@ -1,7 +1,7 @@
 # Epic planning and launch
 
 This is the nohmi procedure for repository `oversight` and the personal head/orchestrator skills.
-Generic SWE oversight supplies reusable coordination behavior; the
+The self-contained repository oversight skill supplies lifecycle and monitoring runbooks; the
 [autonomous development contract](autonomous-development.md) governs roles and merge authority.
 This documents a workflow, not a running coordinator or automated admission validator.
 
@@ -50,6 +50,9 @@ Keep feature behavior and tests together. Do not split by file or create foundat
 named consumer and observable acceptance. Every parent criterion has a child or explicit integration
 owner; every child serves the parent outcome. Open product decisions block only affected slices.
 Admission is per ready slice; future implementation details need not all be settled upfront.
+For a single-owner outcome, that worker owns integration on its existing branch. Name a separate
+composition worker and rolling integration branch only for genuine cross-owner integration needs;
+never add either as launch ceremony. Preserve one owner for shared paths and consumer verification.
 
 ## Launch the admitted scope
 
@@ -75,11 +78,15 @@ Admission is per ready slice; future implementation details need not all be sett
    results. Subagents do not get sidebar rows. UI failure is an organization gap, not a reason to
    duplicate owners or stop independent execution.
 5. Require executor acknowledgement of scope, checkout/base, tools and runtime before marking it
-   active. Release dependent writes only when the exact prerequisite is merged and present in its
-   base. Budget slots for workers and reviewers; reserve scarce verification resources separately.
+   active. Release dependent writes when the exact prerequisite milestone is evidenced on the
+   integration base: stable reviewed source may suffice for source inclusion; an explicitly required
+   merged prerequisite must be merged and present. Preserve migration/publication constraints. Budget
+   slots for workers and reviewers; reserve scarce verification resources separately.
 6. Establish the real next trigger: bounded waits while active, a saved scoped heartbeat for
-   authorized recurring work. Reuse matching monitors and remain quiet on unchanged/non-actionable
-   runs. A checkpoint is not a scheduler. Without a wakeup, report waiting and the responsible owner
+   authorized recurring work. Reuse matching monitors and preserve cadence/timezone. Apply the
+   oversight skill’s scheduled-report preference (short visible report even unchanged), unless the
+   user explicitly requests quiet/muted reporting. A checkpoint is not a scheduler. Without a wakeup,
+   report waiting and the responsible owner
    rather than claim unattended execution is running.
 
 Report planned, admitted, dispatched, acknowledged/running and waiting separately with actual owner

@@ -8,6 +8,36 @@ Successful background autosaves are silent. Never render a persistent “All cha
 saved” message or idle success checkmark. Temporary saving feedback may disappear
 when complete; validation failures and retry remain visible until resolved.
 
+## Stable workspace geometry
+
+Action outcomes never introduce in-flow Alerts, status paragraphs, rows, or cards into a
+workspace, record, navigation bar, sidebar, or bento grid. The mutation hook delivers errors
+through Sonner across the app, including uncertain writes; legacy/custom mutation callers use
+`MutationFeedback` as an out-of-flow announcement adapter. Never replay a mutation from a
+generic error message. Keep field corrections, drafts, idempotency identities and domain retry
+controls in their existing owners. Background autosave success remains silent.
+
+Read errors use the signed-in read recovery queue, including finance coverage and secondary
+reads. Partial domain availability that still has usable records uses a Sonner notice with an explicit
+retry action; keep the available records, pagination and filters usable. Feature code must use `QueryFeedback` instead of a custom load-error Alert so the shared
+owner can suppress duplicates. Domain recovery that needs explicit review (partial batch results,
+conflicting settings, uncertain approval) registers a `RecoveryRequest`. Its shared queue presents
+one desktop dialog/mobile drawer at a time and waits behind account/read/connection recovery.
+Source content remains mounted. A decision surface clears only its own initial action toast
+by attempt ID, so duplicate feedback cannot cover its values or actions on a small screen. Never
+clear unrelated toasts. Include companion lookup/configuration retries in that surface; do not leave the only repair
+control behind its inert underlay. Domain controls decide whether to refresh, accept the latest
+state, or reapply an explicitly reviewed change; generic recovery never decides to write.
+
+Dynamic navigation attention affordances reserve their geometry before a failure. Details stay
+in a popover or recovery surface. Persisted record facts, readiness constraints and field correction
+are still content; do not erase them as though they were transient action feedback. Test both the
+Sonner/recovery delivery and absence of in-flow feedback, and visually compare workspace geometry
+before/during/after failures on mobile and desktop, including an unsaved draft and a failed retry.
+Component tests of these paths use the test-only `renderWithFeedback` outlet; full-app tests
+already have a Toaster and must not mount a duplicate. Assert action messages in Sonner rather
+than searching inside the editor or workspace container.
+
 ## Mandatory settings feedback contract
 
 **Sonner is required, not a preference, for every settings error and discrete action message.**

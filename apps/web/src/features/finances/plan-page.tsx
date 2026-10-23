@@ -11,8 +11,11 @@ import { financeConfigurationCapabilities } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import { ActionButton as Button } from "@/components/action-button";
+import { QueryFeedback } from "@/components/async-state";
 import { EditIcon, PlusIcon } from "@/components/icons";
+import { RecoveryRequest } from "@/components/recovery-request";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -299,6 +302,7 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
       return requireFinancePlanResult(result);
     },
     onSuccess: async (result) => {
+      toast.success(`Version ${result.data.version} saved.`);
       queryClient.setQueryData(["finance-plan", requestedPlanId], result);
       setEditing(null);
       await refresh();
@@ -328,6 +332,7 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
         approvalKeys.current.delete(`${displayed.id}:${displayed.version}`);
     },
     onSuccess: async (result) => {
+      toast.success(`Version ${result.data.version} approved.`);
       queryClient.setQueryData(["finance-plan", requestedPlanId], result);
       queryClient.setQueryData(["finance-canonical-budget-status"], result);
       await refresh();
@@ -428,17 +433,7 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
           </Card>
         ) : null}
         {planQuery.isPending ? <PageLoading workspace="finances" /> : null}
-        {planQuery.isError ? (
-          <Alert variant="destructive">
-            <AlertTitle>{plan ? "Saved plan may be out of date" : "Plan unavailable"}</AlertTitle>
-            <AlertDescription>
-              {"Couldn’t refresh this information. Try again."}
-              <Button variant="outline" onClick={reload}>
-                Try again
-              </Button>
-            </AlertDescription>
-          </Alert>
-        ) : null}
+        <QueryFeedback query={planQuery} title="Couldn’t load the plan." />
         {loaded && !plan && approvalTask ? (
           <p>No budget proposal is available to approve.</p>
         ) : null}
@@ -538,53 +533,35 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
                     </p>
                   </div>
                 ) : null}
-                {approve.error ? (
-                  <Alert variant="destructive">
-                    <AlertTitle>
-                      {isFinancePlanConflict(approve.error)
-                        ? "The plan changed before approval"
-                        : "Approval did not complete"}
-                    </AlertTitle>
-                    <AlertDescription>
-                      {approve.feedback?.message}
-                      {isFinancePlanConflict(approve.error) ? (
-                        <Button variant="outline" onClick={reload}>
-                          Reload latest plan
-                        </Button>
-                      ) : null}
-                    </AlertDescription>
-                  </Alert>
-                ) : null}
-                {approve.isSuccess ? (
-                  <p role="status" className="text-sm">
-                    Version {approve.data.data.version} approved.
-                  </p>
-                ) : null}
+                <RecoveryRequest
+                  toastId={approve.feedback?.toastId}
+                  open={approve.isError}
+                  title="Approval needs review"
+                  description={
+                    approve.feedback?.message ?? "Check the latest plan before trying again."
+                  }
+                  actions={
+                    <>
+                      <Button variant="secondary" onClick={() => approve.reset()}>
+                        Return to plan
+                      </Button>
+                      <Button onClick={reload}>Reload latest plan</Button>
+                    </>
+                  }
+                />
               </CardContent>
             </Card>
             {statusQuery.isPending ? (
               <p className="text-sm text-muted-foreground">Checking active plan…</p>
             ) : statusQuery.isError ? (
-              <Alert variant="destructive">
-                <AlertTitle>Active plan status unavailable</AlertTitle>
-                <AlertDescription>
-                  {"Couldn’t refresh this information. Try again."}
-                </AlertDescription>
-              </Alert>
+              <QueryFeedback query={statusQuery} title="Couldn’t load active plan status." />
             ) : !active ? (
               <p className="text-sm text-muted-foreground">No approved plan is active yet.</p>
             ) : null}
-            {[categoryQuery, accountQuery, goalQuery, bucketQuery].some(
-              (query) => query.isError,
-            ) ? (
-              <Alert>
-                <AlertTitle>Some linked records are unavailable</AlertTitle>
-                <AlertDescription>
-                  Saved identities and amounts remain visible. Refresh to reload category, account,
-                  goal, or bucket names.
-                </AlertDescription>
-              </Alert>
-            ) : null}
+            <QueryFeedback query={categoryQuery} title="Couldn’t load categories." />
+            <QueryFeedback query={accountQuery} title="Couldn’t load accounts." />
+            <QueryFeedback query={goalQuery} title="Couldn’t load goals." />
+            <QueryFeedback query={bucketQuery} title="Couldn’t load buckets." />
             <PlanDetails plan={plan} relations={relations} />
           </>
         ) : null}

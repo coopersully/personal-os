@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { Toaster } from "sonner";
 import { FinanceCashflowPage } from "./cashflow-page";
 
 const api = vi.hoisted(() => ({
@@ -29,6 +30,7 @@ function renderPage(
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[path]}>
+        <Toaster />
         <FinanceCashflowPage />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -119,7 +121,7 @@ it.each([
 ])("does not claim recurring activity is empty when its source fails in %s", async (view) => {
   api.listFinanceRecurringItems.mockRejectedValue(new Error("Recurring source is offline"));
   renderPage(`/finances/cashflow?view=${view}`);
-  expect(await screen.findByText("Recurring activity unavailable")).toBeVisible();
+  expect(await screen.findByText("Couldn’t load recurring activity.")).toBeVisible();
   expect(screen.queryByText("No confirmed upcoming activity")).not.toBeInTheDocument();
   expect(screen.queryByText("No income patterns yet")).not.toBeInTheDocument();
   expect(screen.queryByText("No bills or subscriptions yet")).not.toBeInTheDocument();

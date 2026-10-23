@@ -6041,29 +6041,32 @@ function MailSyncButton({
 
   return (
     <div className="mail-sync-control">
-      {hasSyncDetails ? (
-        <ShadcnPopover open={detailsOpen} onOpenChange={setDetailsOpen}>
-          <ShadcnPopoverTrigger asChild>
-            <ActionButton aria-label="Mail sync details" size="icon-sm" variant="ghost">
-              <AlertTriangleIcon aria-hidden="true" />
-            </ActionButton>
-          </ShadcnPopoverTrigger>
-          <ShadcnPopoverContent className="space-y-3" align="end">
-            <ShadcnPopoverHeader>
-              <ShadcnPopoverTitle>Mail sync needs attention</ShadcnPopoverTitle>
-            </ShadcnPopoverHeader>
-            <QueryFeedback query={accounts} title="Couldn’t load mail accounts." />
-            <MutationFeedback feedback={sync.feedback} />
-            {partialOutcome ? (
-              <p className="text-sm text-muted-foreground" role="status">
-                {partialOutcome.completed} of {partialOutcome.total} mail accounts synced.{" "}
-                {failedAccountIds.length}{" "}
-                {failedAccountIds.length === 1 ? "account needs" : "accounts need"} another attempt.
-              </p>
-            ) : null}
-          </ShadcnPopoverContent>
-        </ShadcnPopover>
-      ) : null}
+      <span className="inline-flex size-7 shrink-0">
+        {hasSyncDetails ? (
+          <ShadcnPopover open={detailsOpen} onOpenChange={setDetailsOpen}>
+            <ShadcnPopoverTrigger asChild>
+              <ActionButton aria-label="Mail sync details" size="icon-sm" variant="ghost">
+                <AlertTriangleIcon aria-hidden="true" />
+              </ActionButton>
+            </ShadcnPopoverTrigger>
+            <ShadcnPopoverContent className="space-y-3" align="end">
+              <ShadcnPopoverHeader>
+                <ShadcnPopoverTitle>Mail sync needs attention</ShadcnPopoverTitle>
+              </ShadcnPopoverHeader>
+              <QueryFeedback query={accounts} title="Couldn’t load mail accounts." />
+              <MutationFeedback feedback={sync.feedback} />
+              {partialOutcome ? (
+                <p className="text-sm text-muted-foreground" role="status">
+                  {partialOutcome.completed} of {partialOutcome.total} mail accounts synced.{" "}
+                  {failedAccountIds.length}{" "}
+                  {failedAccountIds.length === 1 ? "account needs" : "accounts need"} another
+                  attempt.
+                </p>
+              ) : null}
+            </ShadcnPopoverContent>
+          </ShadcnPopover>
+        ) : null}
+      </span>
       <Tooltip>
         <TooltipTrigger asChild>
           <ShadcnButton

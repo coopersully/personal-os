@@ -111,6 +111,7 @@ function SessionExecutionPolicySettingsCard({ session }: { session: PreferenceSe
       {!recovery ? <MutationFeedback feedback={update.feedback} /> : null}
       {recovery ? (
         <SettingsSaveRecovery
+          toastId={update.feedback?.toastId}
           outcome={recovery.outcome}
           title="Agent review policy change has not been confirmed."
           pending={settings.isFetching || update.isPending}

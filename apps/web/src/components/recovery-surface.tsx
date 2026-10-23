@@ -50,23 +50,29 @@ export function RecoverySurface({
   };
   const content = mobile ? (
     <Drawer open={open} dismissible={false} shouldScaleBackground={false} autoFocus>
-      <DrawerContent {...focus}>
-        <DrawerHeader>
+      <DrawerContent className="overflow-hidden" {...focus}>
+        <DrawerHeader className="shrink-0">
           <DrawerTitle>{title}</DrawerTitle>
           <DrawerDescription>{description}</DrawerDescription>
         </DrawerHeader>
         {children ? <div className="min-h-0 overflow-y-auto px-4">{children}</div> : null}
-        <DrawerFooter className="grid grid-cols-1 sm:grid-cols-2">{actions}</DrawerFooter>
+        <DrawerFooter className="grid shrink-0 grid-cols-1 sm:grid-cols-2">{actions}</DrawerFooter>
       </DrawerContent>
     </Drawer>
   ) : (
     <Dialog open={open}>
-      <DialogContent showCloseButton={false} {...focus}>
+      <DialogContent
+        className={
+          children ? "max-h-[85svh] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden" : ""
+        }
+        showCloseButton={false}
+        {...focus}
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        {children}
+        {children ? <div className="min-h-0 overflow-y-auto">{children}</div> : null}
         <DialogFooter>{actions}</DialogFooter>
       </DialogContent>
     </Dialog>

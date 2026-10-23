@@ -12,7 +12,6 @@ import { CurrencyInput } from "@/components/currency-input";
 import { BankIcon, DollarIcon, PlusIcon, TargetIcon, WalletIcon } from "@/components/icons";
 import { KeyMetric, KeyMetrics } from "@/components/key-metrics";
 import { Field, FieldGroup, FieldLabel, FieldSet } from "@/components/settings-field";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -162,12 +161,7 @@ export function FinanceWealthPage() {
         <CardContent className="flex flex-col gap-3">
           <FinanceSourceState label="Financial goals" query={goals} />
           <FinanceSourceState label="Goal confirmation context" query={me} />
-          {changeGoal.isError && !confirm ? (
-            <Alert variant="destructive">
-              <AlertTitle>Goal was not changed</AlertTitle>
-              <AlertDescription>{changeGoal.feedback?.message}</AlertDescription>
-            </Alert>
-          ) : null}
+
           {visibleGoals?.length ? (
             <ItemGroup className="finance-bento finance-goal-grid">
               {visibleGoals.map((goal) => {
@@ -340,12 +334,7 @@ export function FinanceWealthPage() {
                   : `Remove ${confirm.goal.name} from your active goals. Existing plan allocations remain part of their recorded budget versions.`}
               </DialogDescription>
             </DialogHeader>
-            {changeGoal.isError ? (
-              <Alert variant="destructive">
-                <AlertTitle>Goal was not changed</AlertTitle>
-                <AlertDescription>{changeGoal.feedback?.message}</AlertDescription>
-              </Alert>
-            ) : null}
+
             <DialogFooter>
               <Button
                 disabled={changeGoal.isPending}

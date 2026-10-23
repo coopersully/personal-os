@@ -46,6 +46,12 @@ in navigation, sidebars, or bento layouts. Retry safe reads only, never uncertai
 authoritative connector health, not renderer-invented staleness. Connection reminders can only be
 reviewed or temporarily snoozed, with owner-scoped session expiry and recurrence after 15 minutes.
 Test persistence, expiry, identity isolation, automatic recovery, focus, and mobile drawer behavior.
+Action feedback uses Sonner everywhere, including non-settings records and toolbars. Use
+`RecoveryRequest` for domain-owned conflict/batch recovery; preserve drafts and reviewed retry
+controls without inserting banners. Include companion lookup/configuration retries in the recovery
+surface so they are usable while the page is blocked. Secondary reads use `QueryFeedback` so the read gate owns
+them. Reserve geometry for conditional navigation attention controls and visually compare the
+layout before, during, and after failures on desktop/mobile.
 Use the shared modal-priority contract: defer late-opening page dialogs during recovery, preserve
 already-open editors and drafts, and allow nested repair dialogs inside the recovery surface.
 

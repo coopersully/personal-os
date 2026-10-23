@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { Toaster } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FinancePlanPage } from "./plan-page.js";
 
@@ -83,6 +84,7 @@ function mount(route = "/finances/plan", approvalTask = false) {
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[route]}>
+        <Toaster />
         <FinancePlanPage approvalTask={approvalTask} />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -123,9 +125,9 @@ describe("complete finance plan", () => {
     else api.approveFinanceBudget.mockResolvedValueOnce({ ...result(plan), outcome: "failed" });
     mount();
     fireEvent.click(await screen.findByRole("button", { name: "Approve version 3" }));
-    await screen.findByText("Approval did not complete");
-    expect(screen.getByRole("button", { name: "Approve version 3" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "Approve version 3" }));
+    await screen.findByText("Approval needs review");
+    await userEvent.click(screen.getByRole("button", { name: "Return to plan" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Approve version 3" }));
     await waitFor(() => expect(api.approveFinanceBudget).toHaveBeenCalledTimes(2));
     const first = api.approveFinanceBudget.mock.calls[0]?.[0];
     const second = api.approveFinanceBudget.mock.calls[1]?.[0];
@@ -186,7 +188,7 @@ describe("complete finance plan", () => {
         idempotencyKey: expect.any(String),
       }),
     );
-    expect(await screen.findByRole("status")).toHaveTextContent("Version 3 approved.");
+    expect(await screen.findByText("Version 3 approved.")).toBeInTheDocument();
     expect(invalidate).toHaveBeenCalled();
   });
 
@@ -194,8 +196,9 @@ describe("complete finance plan", () => {
     api.approveFinanceBudget.mockRejectedValueOnce(new Error("Connection interrupted"));
     mount();
     await userEvent.click(await screen.findByRole("button", { name: "Approve version 3" }));
-    expect(await screen.findByText("Approval did not complete")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Approve version 3" }));
+    expect(await screen.findByText("Approval needs review")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Return to plan" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Approve version 3" }));
     await waitFor(() => expect(api.approveFinanceBudget).toHaveBeenCalledTimes(2));
     expect(api.approveFinanceBudget.mock.calls[1]?.[0]).toEqual(
       api.approveFinanceBudget.mock.calls[0]?.[0],
@@ -214,8 +217,8 @@ describe("complete finance plan", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Approve version 3" }));
     expect(screen.getByRole("button", { name: "Approving…" })).toBeDisabled();
     await act(async () => reject(Object.assign(new Error("Version changed"), { status: 409 })));
-    expect(await screen.findByText("The plan changed before approval")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Approve version 3" })).toBeDisabled();
+    expect(await screen.findByText("Approval needs review")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve version 3", hidden: true })).toBeDisabled();
     api.getFinanceBudget.mockResolvedValue(result({ ...plan, version: 4 }));
     await userEvent.click(screen.getByRole("button", { name: "Reload latest plan" }));
     expect(await screen.findByRole("button", { name: "Approve version 4" })).toBeEnabled();
@@ -328,8 +331,8 @@ describe("complete finance plan", () => {
     api.listFinanceAccounts.mockRejectedValue(new Error("Accounts unavailable"));
     api.getCanonicalFinanceBudgetStatus.mockRejectedValue(new Error("Status unavailable"));
     mount();
-    expect(await screen.findByText("Some linked records are unavailable")).toBeInTheDocument();
-    expect(screen.getByText("Active plan status unavailable")).toBeInTheDocument();
+    expect(await screen.findByText("Couldn’t load accounts.")).toBeInTheDocument();
+    expect(screen.getAllByText("Couldn’t load active plan status.").length).toBeGreaterThan(0);
     expect(screen.getByText("Account unavailable")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve version 3" })).toBeEnabled();
     await userEvent.click(screen.getByRole("button", { name: "Revise plan" }));
@@ -347,7 +350,7 @@ describe("complete finance plan", () => {
       },
     });
     mount();
-    expect(await screen.findByText("Plan unavailable")).toBeInTheDocument();
+    expect(await screen.findByText("Couldn’t load the plan.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create plan" })).not.toBeInTheDocument();
   });
 

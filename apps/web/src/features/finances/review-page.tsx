@@ -10,6 +10,7 @@ import { EmptyState, Spinner } from "@personal-os/ui";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import { CircleCheckIcon } from "@/components/icons";
 import { SearchableSelect } from "@/components/searchable-select";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/settings-field";
@@ -518,6 +519,7 @@ export function ReviewQuestion({
     },
     onSuccess: (response) => {
       if (response.outcome === "failed") {
+        toast.error(response.communication.headline);
         requestKey.current = { signature: "", key: "" };
         return;
       }
@@ -590,7 +592,7 @@ export function ReviewQuestion({
         ) : null}
         {clarification ? (
           <Alert>
-            <AlertTitle>Note saved · awaiting maintenance</AlertTitle>
+            <AlertTitle>Note awaiting maintenance</AlertTitle>
             <AlertDescription>{clarification}</AlertDescription>
           </Alert>
         ) : null}
@@ -775,12 +777,6 @@ export function ReviewQuestion({
             </Field>
           </FieldGroup>
 
-          {mutation.data?.outcome === "failed" ? (
-            <Alert variant="destructive">
-              <AlertTitle>Answer not saved</AlertTitle>
-              <AlertDescription>{mutation.data.communication.headline}</AlertDescription>
-            </Alert>
-          ) : null}
           <Button
             className="justify-self-start"
             disabled={mutation.isPending || invalidAnswer || missingSelection}

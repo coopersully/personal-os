@@ -65,7 +65,12 @@ export function TaskListDialog({
     onSuccess: () => finish(list ? "List updated." : "List created."),
   });
   const archive = useFeedbackMutation({
-    feedback: { action: "archive this list", safeToRetry: false, form: false },
+    feedback: {
+      action: "archive this list",
+      safeToRetry: false,
+      form: false,
+      ownsError: (error) => Boolean(taskListConflict(error)),
+    },
     mutationFn: async (
       resolution?: "archive_contents_together" | "cancel" | "move_active_contents",
     ) => {

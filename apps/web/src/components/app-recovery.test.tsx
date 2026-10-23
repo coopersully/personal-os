@@ -37,7 +37,10 @@ vi.mock("../api", () => ({
   api: { listConnectors: mocks.connectors, listFinanceAccounts: mocks.finance },
 }));
 vi.mock("../hooks/use-mobile", () => ({ useIsMobile: () => mocks.mobile }));
-vi.mock("sonner", () => ({ toast: { loading: vi.fn(), dismiss: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({
+  useSonner: () => ({ toasts: [] }),
+  toast: { loading: vi.fn(), dismiss: vi.fn(), error: vi.fn() },
+}));
 const clients: QueryClient[] = [];
 const ready = { state: "ready", message: null, nextSyncAt: null, recovery: null } as const;
 function account(

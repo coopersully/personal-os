@@ -14,6 +14,7 @@ import {
 import { canRetryRead, ReadRecoveryContext, useReadRecovery } from "../lib/read-recovery";
 import { ArrowRightIcon } from "./icons";
 import { ModalRecoveryPriority } from "./modal-recovery-priority";
+import { RecoveryQueue } from "./recovery-request";
 import { RecoverySurface } from "./recovery-surface";
 import { Button } from "./ui/button";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemTitle } from "./ui/item";
@@ -46,7 +47,7 @@ export function AppRecovery({
       {children}
     </SessionRecovery>
   ) : (
-    children
+    <RecoveryQueue>{children}</RecoveryQueue>
   );
 }
 
@@ -269,8 +270,10 @@ function SessionRecovery({
   return (
     <ReadRecoveryContext.Provider value={handlesError}>
       <ModalRecoveryPriority.Provider value={accountBlocked || reads.length > 0 || due.length > 0}>
-        {children}
-        {surface}
+        <RecoveryQueue>
+          {children}
+          {surface}
+        </RecoveryQueue>
       </ModalRecoveryPriority.Provider>
     </ReadRecoveryContext.Provider>
   );

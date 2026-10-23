@@ -3856,7 +3856,7 @@ describe("ilo web app", () => {
     await browser.type(screen.getByLabelText("Name"), "Work");
     await browser.click(screen.getByRole("button", { name: "Create List" }));
     expect(
-      await screen.findByText(/confirm whether we could save this (list|project)/),
+      (await screen.findAllByText(/confirm whether we could save this (list|project)/)).at(-1),
     ).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Cancel" }));
 
@@ -3924,7 +3924,7 @@ describe("ilo web app", () => {
     await browser.type(screen.getByLabelText("Name"), "Launch");
     await browser.click(screen.getByRole("button", { name: "Create Project" }));
     expect(
-      await screen.findByText(/confirm whether we could save this (list|project)/),
+      (await screen.findAllByText(/confirm whether we could save this (list|project)/)).at(-1),
     ).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Cancel" }));
 
@@ -4341,7 +4341,7 @@ describe("ilo web app", () => {
     await browser.click(await screen.findByRole("button", { name: "Move and detach Project" }));
     const moveDialog = screen.getByRole("dialog");
     expect(
-      await within(moveDialog).findByText(/confirm whether we could move and save this task/),
+      await screen.findByText(/confirm whether we could move and save this task/),
     ).toBeInTheDocument();
     expect(moveDialog).toHaveTextContent("Move Task without its Project?");
     await browser.click(screen.getByRole("button", { name: "Move and detach Project" }));
@@ -5204,6 +5204,7 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: "Move to Trash" }));
     expect(await screen.findByText(/Test reminder: Couldn’t confirm/)).toBeInTheDocument();
     expect(mocks.trashReminder).toHaveBeenCalledWith(reminder.id, reminder.updatedAt);
+    await browser.click(screen.getByRole("button", { name: "Return to tasks" }));
     expect(screen.getByRole("button", { name: "Test reminder options" })).toBeEnabled();
     deletionView.unmount();
   });
@@ -8000,7 +8001,7 @@ describe("ilo web app", () => {
     const pasteFailure = await screen.findByText(
       /Couldn’t confirm whether we could paste this event/,
     );
-    expect(pasteFailure.closest("[data-calendar-feedback]")).not.toBeNull();
+    expect(pasteFailure.closest("[data-sonner-toast]")).not.toBeNull();
     expect(timeline).not.toContainElement(pasteFailure);
     mocks.createEvent.mockRejectedValueOnce(new Error("Network lost"));
     const item = screen.getByRole("button", { name: /^1:00 PM Focus block/ });
@@ -8009,7 +8010,7 @@ describe("ilo web app", () => {
     const duplicateFailure = await screen.findByText(
       /Couldn’t confirm whether we could duplicate this event/,
     );
-    expect(duplicateFailure.closest("[data-calendar-feedback]")).not.toBeNull();
+    expect(duplicateFailure.closest("[data-sonner-toast]")).not.toBeNull();
     expect(timeline).not.toContainElement(duplicateFailure);
     await waitFor(() =>
       expect(mocks.createEvent).toHaveBeenCalledWith(

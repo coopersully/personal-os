@@ -7,7 +7,6 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 export function FinanceChoice({
   label,
@@ -26,24 +25,6 @@ export function FinanceChoice({
   showLabel?: boolean;
   displayValue?: string;
 }) {
-  if (label === "View")
-    return (
-      <ToggleGroup
-        type="single"
-        aria-label={label}
-        value={value}
-        onValueChange={(next) => next && onChange(next)}
-        disabled={disabled}
-        size="sm"
-        spacing={0}
-      >
-        {options.map(([id, name]) => (
-          <ToggleGroupItem key={id} value={id}>
-            {name}
-          </ToggleGroupItem>
-        ))}
-      </ToggleGroup>
-    );
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>

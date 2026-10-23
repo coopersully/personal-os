@@ -357,16 +357,8 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
       </WorkspaceHeaderControls>
       <div className="grid min-w-0 gap-7">
         {!approvalTask ? (
-          <Card size="sm" aria-label="Budget controls">
-            <CardContent className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm text-muted-foreground">Category groups</span>
-                {relations.buckets.map((bucket) => (
-                  <Badge key={bucket.id} variant="secondary">
-                    {bucket.name}
-                  </Badge>
-                ))}
-              </div>
+          <WorkspaceHeaderControls label="Budget controls">
+            <div className="flex flex-wrap items-center gap-2">
               <div>
                 <Dialog>
                   <DialogTrigger asChild>
@@ -411,8 +403,8 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
               ) : !relations.buckets.length ? (
                 <p className="text-sm text-muted-foreground">No budget buckets yet.</p>
               ) : null}
-            </CardContent>
-          </Card>
+            </div>
+          </WorkspaceHeaderControls>
         ) : null}
         {planQuery.isPending ? <PageLoading workspace="finances" /> : null}
         {planQuery.isError ? (

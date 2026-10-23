@@ -172,13 +172,13 @@ it("restores saved defaults and honors explicit URL overrides without autosaving
       }),
     }),
   );
-  expect(screen.getByRole("radio", { name: "Bubbles" })).toHaveAttribute("aria-checked", "true");
+  expect(screen.getByRole("button", { name: "View: Bubbles" })).toBeVisible();
   expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
 });
 it("restores saved List and persists only explicit account and view changes", async () => {
   mount();
   await screen.findByRole("button", { name: "Groceries" });
-  expect(screen.getByRole("radio", { name: "List" })).toHaveAttribute("aria-checked", "true");
+  expect(screen.getByRole("button", { name: "View: List" })).toBeVisible();
   expect(api.getFinanceSpending).toHaveBeenLastCalledWith(
     expect.objectContaining({ scope: expect.objectContaining({ accountIds: null }) }),
   );
@@ -201,8 +201,9 @@ it("restores saved List and persists only explicit account and view changes", as
     ),
   );
   fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
-  await waitFor(() => expect(screen.getByRole("radio", { name: "Bubbles" })).toBeEnabled());
-  fireEvent.click(screen.getByRole("radio", { name: "Bubbles" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "View: List" })).toBeEnabled());
+  fireEvent.keyDown(screen.getByRole("button", { name: "View: List" }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "Bubbles" }));
   await waitFor(() =>
     expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
       "finances",

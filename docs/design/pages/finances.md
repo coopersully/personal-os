@@ -557,7 +557,7 @@ Account warnings name the affected account and provide sync, reconnect, or edit 
 
 Accounts use full-width records with type icons, source/status badges beside the title, and tooltip-equipped edit/transaction actions at the top end. Wealth presents current metrics in responsive shared KPI cards and links to Accounts rather than repeating its records. Historical charts are deferred until reliable balance history is available.
 
-Accounts, Budget buckets, and Financial goals each expose a tooltip-equipped Add action at their card header end. The transaction-only Add menu lives at the end of the header; other Finance pages have no
+Accounts, Budget buckets, and Financial goals expose their management actions in the shared workspace header. The transaction-only Add menu lives at the end of the header; other Finance pages have no
 workspace-wide Add menu. Cash flow view selection occupies the shared leading header slot; search
 and other utilities remain at the end. Account records are secondary Items within the Accounts
 card, with inline attention, source, kind, balance, and recovery actions rather than separate warning
@@ -673,10 +673,10 @@ and use Sonner for loading and outcomes; field correction guidance stays beside 
 
 ### Consistent planning controls
 
-Budget uses a compact category-group toolbar and the shared Card header/content structure for
+Budget places category management in the shared workspace header and uses shared Cards for
 its monthly totals, resources and allocations. Assumptions and rationale use the shared Finance
 disclosure; revising and approving a version keep their existing explicit authority and recovery.
-Cash flow uses the same single-view toggle and toolbar language as Spending. Timeline options
+Cash flow and Spending place view, period and scope controls in the shared workspace header. Timeline options
 open a bounded settings-row dialog for dates and account scope; account menus retain checked
 multi-selection and an explicit empty selection. Reset clears only timeline parameters. Schedule,
 date-scope and payday evidence use consistent labelled disclosures, and the payday income selector
@@ -686,3 +686,5 @@ progress only when current applicable confirmation evidence and a positive targe
 Keep progress confirmation and exploration direct; place pause/resume, completion and removal in
 the goal's contextual menu. Completion/removal retain their confirmation dialogs. Goal editing uses
 shared Settings rows and checked priority choices without changing save, version or error behavior.
+
+Account rows align institution and account identity at the start, with type and recorded current balance at the end. Ownership and source observation details remain inspectable through Account details; attention and recovery actions stay visible. Cash flow occurrences use distinct shared card surfaces, end-aligned expected amounts, and explicit money-in/money-out labels.

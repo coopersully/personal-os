@@ -24,7 +24,7 @@ import { Field, FieldGroup, FieldLabel, FieldSet } from "@/components/settings-f
 import { SettingsSelect } from "@/components/settings-select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -52,6 +52,7 @@ import {
 } from "@/components/ui/item";
 import { NativeSelectOption } from "@/components/ui/native-select";
 import { Progress } from "@/components/ui/progress";
+import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import { api } from "../../api.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
@@ -163,7 +164,7 @@ export function FinanceWealthPage() {
       <Card aria-label="Financial goals">
         <CardHeader>
           <CardTitle>Financial goals</CardTitle>
-          <CardAction>
+          <WorkspaceHeaderControls label="Wealth controls">
             <Button
               size="icon-sm"
               variant="ghost"
@@ -172,7 +173,7 @@ export function FinanceWealthPage() {
             >
               <PlusIcon />
             </Button>
-          </CardAction>
+          </WorkspaceHeaderControls>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <FinanceSourceState label="Financial goals" query={goals} />

@@ -15,7 +15,6 @@ import { SettingsControlsContext } from "@/components/settings-controls-context"
 import { Field, FieldGroup, FieldLabel } from "@/components/settings-field";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -27,6 +26,7 @@ import {
 } from "@/components/ui/dialog";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
+import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import {
   useSaveWorkspacePreferences,
   useWorkspacePreferences,
@@ -339,8 +339,8 @@ export function FinanceSpendingPage() {
           </Button>
         </p>
       ) : null}
-      <Card size="sm" aria-label="Spending controls">
-        <CardContent className="flex flex-wrap items-center justify-between gap-3">
+      <WorkspaceHeaderControls label="Spending controls" placement="leading">
+        <div className="flex flex-wrap items-center gap-2">
           <SpendingChoice
             label="View"
             value={view}
@@ -400,117 +400,119 @@ export function FinanceSpendingPage() {
               onChange={(value) => update("grouping", value, "financeSpendingGrouping")}
             />
 
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button variant="ghost" size="sm" aria-label="Spending options">
-                  <FilterIcon />
-                  Spending options
-                  {activeFilterCount ? (
-                    <Badge variant="secondary">{activeFilterCount}</Badge>
-                  ) : null}
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="settings-panel max-h-[85dvh] overflow-y-auto sm:max-w-lg">
-                <SettingsControlsContext.Provider value={true}>
-                  <DialogHeader>
-                    <DialogTitle>Spending options</DialogTitle>
-                    <DialogDescription>
-                      Choose what contributes to this view. Changes are saved as your defaults.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <FieldGroup>
-                    <Field>
-                      <FieldLabel>Accounting basis</FieldLabel>
-                      <SpendingChoice
-                        label="Basis"
-                        showLabel={false}
-                        value={choice("basis", defaults.financeSpendingBasis)}
-                        options={[
-                          ["personal_cost", "Personal cost"],
-                          ["full_outflow", "Full outflow"],
-                        ]}
-                        disabled={disabled}
-                        onChange={(value) => update("basis", value, "financeSpendingBasis")}
-                      />
-                    </Field>
-                    {(
-                      [
-                        ["pending", "Include pending", "financeSpendingIncludePending"],
-                        ["refunds", "Subtract matched refunds", "financeSpendingSubtractRefunds"],
-                        [
-                          "uncategorized",
-                          "Include uncategorized",
-                          "financeSpendingIncludeUncategorized",
-                        ],
-                      ] as const
-                    ).map(([key, label, pref]) => (
-                      <Field key={key}>
-                        <FieldLabel htmlFor={`spending-${key}`}>{label}</FieldLabel>
-                        <Checkbox
-                          id={`spending-${key}`}
+            <WorkspaceHeaderControls label="Spending filters">
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button variant="ghost" size="icon-sm" aria-label="Spending options">
+                    <FilterIcon />
+                    <span className="sr-only">Spending options</span>
+                    {activeFilterCount ? (
+                      <Badge variant="secondary">{activeFilterCount}</Badge>
+                    ) : null}
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="settings-panel max-h-[85dvh] overflow-y-auto sm:max-w-lg">
+                  <SettingsControlsContext.Provider value={true}>
+                    <DialogHeader>
+                      <DialogTitle>Spending options</DialogTitle>
+                      <DialogDescription>
+                        Choose what contributes to this view. Changes are saved as your defaults.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <FieldGroup>
+                      <Field>
+                        <FieldLabel>Accounting basis</FieldLabel>
+                        <SpendingChoice
+                          label="Basis"
+                          showLabel={false}
+                          value={choice("basis", defaults.financeSpendingBasis)}
+                          options={[
+                            ["personal_cost", "Personal cost"],
+                            ["full_outflow", "Full outflow"],
+                          ]}
                           disabled={disabled}
-                          checked={bool(key, defaults[pref])}
-                          onCheckedChange={(checked) =>
-                            update(key, checked === true ? "1" : "0", pref, checked === true)
-                          }
+                          onChange={(value) => update("basis", value, "financeSpendingBasis")}
                         />
                       </Field>
-                    ))}
-                  </FieldGroup>
-                  {result ? (
-                    <fieldset className="flex flex-col gap-2">
-                      <legend className="mb-2 text-xs font-medium text-muted-foreground">
-                        Accounts
-                      </legend>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="ghost"
-                          disabled={disabled}
-                          onClick={() => update("accounts", "all", "spendAccountIds", null)}
-                        >
-                          Use all eligible accounts
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          disabled={disabled}
-                          onClick={() => update("accounts", "", "spendAccountIds", [])}
-                        >
-                          Select none
-                        </Button>
-                      </div>
-                      <FieldGroup>
-                        {result.accounts.map((account) => (
-                          <Field key={account.id}>
-                            <FieldLabel htmlFor={`spending-account-${account.id}`}>
-                              {account.label}
-                            </FieldLabel>
-                            <Checkbox
-                              id={`spending-account-${account.id}`}
-                              disabled={disabled}
-                              checked={accountIds === null || accountIds.includes(account.id)}
-                              onCheckedChange={(checked) => {
-                                const ids = accountIds ?? result.accounts.map((item) => item.id);
-                                const next =
-                                  checked === true
-                                    ? [...ids, account.id]
-                                    : ids.filter((id) => id !== account.id);
-                                update("accounts", next.join(","), "spendAccountIds", next);
-                              }}
-                            />
-                          </Field>
-                        ))}
-                      </FieldGroup>
-                    </fieldset>
-                  ) : null}
-                  {timezone ? (
-                    <p className="text-xs text-muted-foreground">Dates use {timezone}.</p>
-                  ) : null}
-                </SettingsControlsContext.Provider>
-              </DialogContent>
-            </Dialog>
+                      {(
+                        [
+                          ["pending", "Include pending", "financeSpendingIncludePending"],
+                          ["refunds", "Subtract matched refunds", "financeSpendingSubtractRefunds"],
+                          [
+                            "uncategorized",
+                            "Include uncategorized",
+                            "financeSpendingIncludeUncategorized",
+                          ],
+                        ] as const
+                      ).map(([key, label, pref]) => (
+                        <Field key={key}>
+                          <FieldLabel htmlFor={`spending-${key}`}>{label}</FieldLabel>
+                          <Checkbox
+                            id={`spending-${key}`}
+                            disabled={disabled}
+                            checked={bool(key, defaults[pref])}
+                            onCheckedChange={(checked) =>
+                              update(key, checked === true ? "1" : "0", pref, checked === true)
+                            }
+                          />
+                        </Field>
+                      ))}
+                    </FieldGroup>
+                    {result ? (
+                      <fieldset className="flex flex-col gap-2">
+                        <legend className="mb-2 text-xs font-medium text-muted-foreground">
+                          Accounts
+                        </legend>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="ghost"
+                            disabled={disabled}
+                            onClick={() => update("accounts", "all", "spendAccountIds", null)}
+                          >
+                            Use all eligible accounts
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            disabled={disabled}
+                            onClick={() => update("accounts", "", "spendAccountIds", [])}
+                          >
+                            Select none
+                          </Button>
+                        </div>
+                        <FieldGroup>
+                          {result.accounts.map((account) => (
+                            <Field key={account.id}>
+                              <FieldLabel htmlFor={`spending-account-${account.id}`}>
+                                {account.label}
+                              </FieldLabel>
+                              <Checkbox
+                                id={`spending-account-${account.id}`}
+                                disabled={disabled}
+                                checked={accountIds === null || accountIds.includes(account.id)}
+                                onCheckedChange={(checked) => {
+                                  const ids = accountIds ?? result.accounts.map((item) => item.id);
+                                  const next =
+                                    checked === true
+                                      ? [...ids, account.id]
+                                      : ids.filter((id) => id !== account.id);
+                                  update("accounts", next.join(","), "spendAccountIds", next);
+                                }}
+                              />
+                            </Field>
+                          ))}
+                        </FieldGroup>
+                      </fieldset>
+                    ) : null}
+                    {timezone ? (
+                      <p className="text-xs text-muted-foreground">Dates use {timezone}.</p>
+                    ) : null}
+                  </SettingsControlsContext.Provider>
+                </DialogContent>
+              </Dialog>
+            </WorkspaceHeaderControls>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </WorkspaceHeaderControls>
       <WorkspacePreferenceRecovery workspace="finances" />
       <QueryFeedback query={preferences} title="Couldn’t load Spending preferences." />
       <QueryFeedback query={calendar} title="Couldn’t load calendar preferences." />

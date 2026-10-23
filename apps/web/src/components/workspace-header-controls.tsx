@@ -33,8 +33,8 @@ export function WorkspaceHeaderControlsSlot({
     <div
       className={
         placement === "leading"
-          ? "workspace-header-controls-slot workspace-header-controls-slot--leading"
-          : "workspace-header-controls-slot"
+          ? "workspace-header-controls-slot workspace-header-controls-slot--leading flex flex-wrap items-center gap-1.5"
+          : "workspace-header-controls-slot flex flex-wrap items-center gap-1.5"
       }
       data-slot="workspace-header-controls"
       ref={placement === "leading" ? slot?.setLeadingTarget : slot?.setTarget}

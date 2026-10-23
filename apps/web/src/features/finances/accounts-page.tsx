@@ -28,8 +28,7 @@ import {
   FieldSet,
 } from "@/components/settings-field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Switch } from "@/components/ui/switch";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -42,6 +41,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { ItemGroup } from "@/components/ui/item";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { Switch } from "@/components/ui/switch";
 import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import { api } from "../../api.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
@@ -87,8 +87,9 @@ export function FinanceAccountsPage() {
   const [editing, setEditing] = useState<FinanceAccount | null>(null);
   return (
     <div className="flex flex-col gap-5">
-      {canImport ? (
-        <WorkspaceHeaderControls label="Account controls">
+      <WorkspaceHeaderControls label="Account controls">
+        <FinanceCreateButton kind="account" />
+        {canImport ? (
           <Button
             asChild
             size="icon"
@@ -100,14 +101,11 @@ export function FinanceAccountsPage() {
               <HistoryIcon />
             </Link>
           </Button>
-        </WorkspaceHeaderControls>
-      ) : null}
+        ) : null}
+      </WorkspaceHeaderControls>
       <Card>
         <CardHeader>
           <CardTitle>Accounts</CardTitle>
-          <CardAction>
-            <FinanceCreateButton kind="account" />
-          </CardAction>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <FinanceSourceState label="Accounts" query={accounts} />

@@ -7609,7 +7609,7 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 }
 
 .action-count-badge { position: absolute; right: -0.2rem; bottom: -0.2rem; min-width: 1rem; height: 1rem; padding: 0 .2rem; font-size: .625rem; line-height: 1; pointer-events: none; }
-.finance-account-grid .finance-account-record { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; }
+.finance-account-grid .finance-account-record { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 1rem; }
 .finance-account-record [data-slot="item-actions"] { align-self: start; }
 .finance-account-record [data-slot="item-description"] { -webkit-line-clamp: unset; }
 
@@ -8066,3 +8066,10 @@ html.pet-window #root {
   outline-offset: -3px;
 }
 .search-data-controls .action-count-badge { z-index: 3; }
+
+.finance-account-record .finance-account-balance { display: flex; flex-direction: column; align-items: flex-end; gap: .375rem; }
+.finance-account-record > [data-slot="item-actions"] { grid-column: 3; grid-row: 1; }
+@media (max-width: 639px) {
+  .finance-account-grid .finance-account-record { grid-template-columns: minmax(0, 1fr) auto; }
+  .finance-account-record > [data-slot="item-actions"] { grid-column: 1 / -1; grid-row: auto; justify-content: flex-end; }
+}

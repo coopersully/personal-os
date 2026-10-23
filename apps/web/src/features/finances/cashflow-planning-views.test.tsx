@@ -109,7 +109,8 @@ it("changes dates and presentation through named controls and provides filter re
   fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-10-02" } });
   fireEvent.change(screen.getByLabelText("Through"), { target: { value: "2026-10-30" } });
   await userEvent.click(screen.getByRole("button", { name: "Close" }));
-  await userEvent.click(screen.getByRole("radio", { name: "Calendar" }));
+  await userEvent.click(screen.getByRole("button", { name: "View: Agenda" }));
+  await userEvent.click(screen.getByRole("menuitemradio", { name: "Calendar" }));
   await userEvent.click(screen.getByRole("button", { name: "Timeline options" }));
   fireEvent.click(screen.getByRole("button", { name: "Reset timeline filters" }));
   expect(callbacks.onParamChange.mock.calls).toEqual([

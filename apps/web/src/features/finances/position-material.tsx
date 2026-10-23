@@ -25,6 +25,7 @@ import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/co
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { financeAccountNeedsAttention } from "./attention";
+import { FinanceDisclosure } from "./disclosure";
 import { formatMoney } from "./format.js";
 
 export function refreshFinancePosition(client: QueryClient) {
@@ -245,35 +246,18 @@ export function FinanceAccountRecord({
           </Badge>
         </div>
         <ItemDescription>{account.institution}</ItemDescription>
-        <div className="flex flex-wrap items-center gap-3">
-          <Badge variant="outline">
-            {account.kind === "investment"
-              ? "Investments"
-              : account.kind === "cash"
-                ? "Cash"
-                : account.kind === "debt"
-                  ? "Debt"
-                  : "Other assets"}
-          </Badge>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="text-xl font-semibold tabular-nums">{balance}</span>
-            </TooltipTrigger>
-            <TooltipContent>
-              {account.currencyCode ?? "The source has not provided a currency code."}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-        <p className="text-muted-foreground text-sm">
-          {accountOwnership(account)} ·{" "}
-          {account.includeInPlanning ? "Included in planning" : "Excluded from planning"}
-        </p>
-        <p className="text-muted-foreground text-xs">
-          {account.provider === "manual" ? "Manually tracked" : "Connected source"} ·{" "}
-          {account.lastSyncedAt
-            ? `Last synced ${financeObservedAt(account.lastSyncedAt)}`
-            : "No recorded sync"}
-        </p>
+        <FinanceDisclosure title="Account details">
+          <p className="text-muted-foreground text-sm">
+            {accountOwnership(account)} ·{" "}
+            {account.includeInPlanning ? "Included in planning" : "Excluded from planning"}
+          </p>
+          <p className="text-muted-foreground text-xs">
+            {account.provider === "manual" ? "Manually tracked" : "Connected source"} ·{" "}
+            {account.lastSyncedAt
+              ? `Last synced ${financeObservedAt(account.lastSyncedAt)}`
+              : "No recorded sync"}
+          </p>
+        </FinanceDisclosure>
         {account.synchronization.message ? (
           <p className="text-sm">{account.synchronization.message}</p>
         ) : null}
@@ -290,6 +274,26 @@ export function FinanceAccountRecord({
         ) : null}
         {attentionAction}
       </ItemContent>
+      <div className="finance-account-balance">
+        <Badge variant="outline">
+          {account.kind === "investment"
+            ? "Investments"
+            : account.kind === "cash"
+              ? "Cash"
+              : account.kind === "debt"
+                ? "Debt"
+                : "Other assets"}
+        </Badge>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="text-xl font-semibold tabular-nums">{balance}</span>
+          </TooltipTrigger>
+          <TooltipContent>
+            {account.currencyCode ?? "The source has not provided a currency code."}
+          </TooltipContent>
+        </Tooltip>
+        <span className="text-xs text-muted-foreground">Current balance</span>
+      </div>
       <ItemActions className="flex-wrap">
         {onEdit ? (
           <Button aria-label={`Edit ${account.name}`} onClick={onEdit} size="icon" variant="ghost">

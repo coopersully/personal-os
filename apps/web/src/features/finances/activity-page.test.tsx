@@ -587,3 +587,18 @@ it("pages with server cursors, goes back, and resets to the first page when size
   expect(read.mock.calls[3]?.[0]).toMatchObject({ limit: 10, cursor: undefined });
   expect(screen.getByText("Page 1")).toBeVisible();
 });
+
+it("keeps cursor navigation available when a subsequent page has no projected entries", async () => {
+  const read = vi
+    .fn()
+    .mockResolvedValueOnce(page([entry], "empty-page"))
+    .mockResolvedValueOnce(page([]))
+    .mockResolvedValueOnce(page([entry], "empty-page"));
+  render(view(read));
+  await screen.findByText(entry.action);
+  fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+  await screen.findByText(/No recorded activity matches/);
+  fireEvent.click(screen.getByRole("button", { name: "Previous page" }));
+  expect(await screen.findByText(entry.action)).toBeVisible();
+  expect(screen.getByText("Page 1")).toBeVisible();
+});

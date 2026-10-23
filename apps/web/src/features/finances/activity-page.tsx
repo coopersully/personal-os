@@ -292,12 +292,11 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
           </form>
         </ResponsiveDialogContent>
       </ResponsiveDialog>
-      {!page?.entries.length ? coverage : null}
       {passiveLoading && !page ? <p>Loading activity…</p> : null}
       {page?.entries.length === 0 ? (
         <p>No recorded activity matches these filters. Coverage is partial.</p>
       ) : null}
-      {page?.entries.length ? (
+      {page ? (
         <>
           <DataTable
             rows={groupFinanceActivity(page.entries)}

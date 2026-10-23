@@ -1,9 +1,10 @@
 import { ApiClientError } from "@personal-os/api-client";
-import { cashflowScheduleRange, formatDateOnly } from "@personal-os/domain";
+import { cashflowScheduleRange } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { DateDisplay } from "@/components/date-display";
 import {
   ArrowRightIcon,
   BankIcon,
@@ -385,14 +386,14 @@ function OwnerUpcomingMoney({
                         className="cursor-pointer"
                         onClick={(event) => {
                           if (
-                            !(event.target as Element).closest("a") &&
+                            !(event.target as Element).closest("a, button") &&
                             !window.getSelection()?.toString()
                           )
                             navigate(destination);
                         }}
                       >
                         <TableCell className="px-4 py-2 text-muted-foreground">
-                          {formatDateOnly(row.localDate, { dateStyle: "medium" })}
+                          <DateDisplay value={row.localDate} timeZone={timezone} />
                         </TableCell>
                         <TableCell className="px-4 py-2 whitespace-normal break-words">
                           <Link

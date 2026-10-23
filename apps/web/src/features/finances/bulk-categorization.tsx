@@ -56,6 +56,10 @@ export function useFinanceBulkSelection(transactions: FinanceTransaction[], disa
     reloadRequired,
     setReloadRequired,
     clear,
+    selectAll: () => {
+      if (!locked && transactions.length <= limit)
+        setSnapshot({ version, ids: transactions.map((item) => item.id) });
+    },
     selectPage: (
       <Checkbox
         id={pageCheckboxId}
@@ -99,8 +103,10 @@ export function FinanceBulkCategorization({
   selection,
   categories,
   reloadQueryKey = ["finance-transactions"],
+  contextual = false,
 }: {
   selection: Selection;
+  contextual?: boolean;
   categories: FinanceCategory[];
   reloadQueryKey?: QueryKey | undefined;
 }) {
@@ -222,18 +228,26 @@ export function FinanceBulkCategorization({
       <fieldset
         ref={toolbar}
         tabIndex={-1}
-        className="flex flex-wrap items-center gap-3"
+        className={
+          contextual && !selection.selected.length && !selection.reloadRequired
+            ? "hidden"
+            : "flex flex-wrap items-center gap-3"
+        }
         aria-label="Bulk transaction categorization"
       >
-        <label
-          htmlFor={selection.pageCheckboxId}
-          className="flex min-h-11 items-center gap-3 text-sm"
-        >
-          {selection.selectPage}Select this page
-        </label>
-        <span className="text-sm text-muted-foreground">
-          {selection.selected.length} selected · this page only
-        </span>
+        {!contextual ? (
+          <label
+            htmlFor={selection.pageCheckboxId}
+            className="flex min-h-11 items-center gap-3 text-sm"
+          >
+            {selection.selectPage}Select this page
+          </label>
+        ) : null}
+        {!contextual ? (
+          <span className="text-sm text-muted-foreground">
+            {selection.selected.length} selected · this page only
+          </span>
+        ) : null}
         <Button
           variant="secondary"
           disabled={selection.locked || selection.selected.length === 0 || categories.length === 0}
@@ -242,7 +256,7 @@ export function FinanceBulkCategorization({
         >
           Categorize selected
         </Button>
-        {selection.selected.length > 0 ? (
+        {!contextual && selection.selected.length > 0 ? (
           <Button variant="ghost" disabled={mutation.isPending} onClick={selection.clear}>
             Clear selection
           </Button>

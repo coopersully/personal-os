@@ -7,6 +7,7 @@ import type {
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
+import { DateDisplay } from "@/components/date-display";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Item, ItemContent } from "@/components/ui/item";
@@ -95,8 +96,7 @@ export function FinanceActivityEntry({
         </div>
         <p className="text-sm text-muted-foreground">
           {entry.actor.type}
-          {entry.actor.id ? ` · ${entry.actor.id}` : ""} ·{" "}
-          <time dateTime={entry.occurredAt}>{new Date(entry.occurredAt).toLocaleString()}</time>
+          {entry.actor.id ? ` · ${entry.actor.id}` : ""} · <DateDisplay value={entry.occurredAt} />
         </p>
         <p className="whitespace-pre-wrap break-words">{entry.explanation}</p>
         {entry.kind === "human_answer_decision" && entry.status === "accepted" ? (

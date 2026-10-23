@@ -182,7 +182,11 @@ it("supports mobile-specific cells and page selection without losing record acti
       rows={rows}
       caption="Current page"
       columns={[
-        { ...columns[0]!, mobileCell: (row) => `Mobile ${row.name}` },
+        {
+          ...columns[0]!,
+          header: <button type="button">Sort name</button>,
+          mobileCell: (row) => `Mobile ${row.name}`,
+        },
         { ...columns[1]!, defaultHidden: false, mobileOrder: 1 },
         { id: "extra", label: "Extra", value: () => "Desktop-only content", mobileHidden: true },
       ]}
@@ -302,4 +306,29 @@ it("resizes a column with a pointer and persists the accepted width", () => {
   fireEvent.mouseUp(document, { clientX: 140 });
   expect(resizer).toHaveAttribute("aria-valuenow", "200");
   expect(JSON.parse(localStorage.getItem("nohmi:data-view:table-test")!).sizing.name).toBe(200);
+});
+
+it("uses domain-owned selection for actions and clears it without opening the row", () => {
+  const clear = vi.fn();
+  const controls = {
+    header: <span>Domain selection</span>,
+    cell: (row: (typeof rows)[number]) => (
+      <input type="checkbox" aria-label={`Domain ${row.name}`} readOnly checked={row.id === "a"} />
+    ),
+    selected: [rows[0]!],
+    clear,
+    selectPage: vi.fn(),
+    locked: false,
+    actions: <button type="button">Categorize selected</button>,
+  };
+  render(<DataTable {...props} rows={rows} selectionControls={controls} />);
+  expect(screen.getByText("1 selected on this page")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Categorize selected" })).toBeEnabled();
+  expect(screen.getByRole("row", { name: "Open First record" })).toHaveAttribute(
+    "data-state",
+    "selected",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Clear selection" }));
+  expect(clear).toHaveBeenCalledOnce();
+  expect(props.onOpen).not.toHaveBeenCalled();
 });

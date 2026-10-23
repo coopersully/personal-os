@@ -917,6 +917,13 @@ and a secondary selected treatment for a non-default sort. Avoid separate floati
 pills, repeated borders, or another toolbar row. Filter dialogs keep readable labels.
 This follows the app’s existing Calendar and Settings input-addon action pattern.
 
+Read-only calendar dates use the shared `DateDisplay` and `dateDisplayLabels` helpers.
+Use `Oct 25, 2026` for the calendar form. Default to Today, Yesterday, or Tomorrow
+within one calendar day in the relevant time zone; farther dates default to the calendar
+form. Clicking or keyboard-activating a date toggles to its relative day count and back.
+Date-only values preserve their written day, and toggles never open their containing record.
+Keep editable dates in the shared date input instead.
+
 Tables default to Compact density. Desktop cells use small consistent vertical
 padding and grow for actual wrapped content; never stretch rows to fill the page.
 Mobile records keep a distinguishing title above a tight two-column detail grid;

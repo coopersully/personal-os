@@ -10,6 +10,7 @@ import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "@/api";
 import { QueryFeedback } from "@/components/async-state";
+import { DateDisplay } from "@/components/date-display";
 import { CircleHelpIcon, FilterIcon } from "@/components/icons";
 import { SettingsControlsContext } from "@/components/settings-controls-context";
 import { Field, FieldGroup, FieldLabel } from "@/components/settings-field";
@@ -558,10 +559,16 @@ export function FinanceSpendingPage() {
                   </Badge>
                 ) : null}
               </div>
-              <p className="text-sm text-muted-foreground">
-                {result.snapshot.scope.from} – {result.snapshot.scope.through} · USD ·{" "}
-                {result.snapshot.scope.includePending ? "Includes pending" : "Posted only"}
-              </p>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+                <span className="inline-flex flex-wrap items-center gap-1">
+                  <DateDisplay value={result.snapshot.scope.from} timeZone={timezone ?? "UTC"} />
+                  <span aria-hidden="true">–</span>
+                  <DateDisplay value={result.snapshot.scope.through} timeZone={timezone ?? "UTC"} />
+                </span>
+                <span>
+                  {result.snapshot.scope.includePending ? "Includes pending" : "Posted only"}
+                </span>
+              </div>
             </div>
             <Dialog>
               <DialogTrigger asChild>

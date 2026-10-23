@@ -344,7 +344,7 @@ it("uses qualified whole-month usage alongside selected-day amounts without chan
   }));
   mount("?view=list&period=today&from=2026-09-08");
   await screen.findByText("Observed monthly $25.00 of $100.00 · 25.0%");
-  expect(screen.getByText(/2026-09-08 – 2026-09-08/)).toBeVisible();
+  expect(screen.getAllByRole("button", { name: /^Sep 8, 2026; show/ })).toHaveLength(2);
   fireEvent.click(screen.getByRole("button", { name: "About these totals" }));
   expect(screen.getByText(/America\/Chicago/)).toBeVisible();
   expect(screen.getByText(/Confirmed later/)).toBeVisible();

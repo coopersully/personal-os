@@ -15,14 +15,15 @@ import type {
 import { addMonths, formatDateOnly, formatMonth } from "@personal-os/domain";
 import { EmptyState, Spinner } from "@personal-os/ui";
 import { type QueryKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { toast } from "sonner";
 import { ActionButton as ShadcnButton } from "@/components/action-button";
 import { CurrencyInput } from "@/components/currency-input";
+import { type DataColumn, DataTable } from "@/components/data-table";
 import { SortTrigger } from "@/components/data-view-controls";
+import { DateDisplay } from "@/components/date-display";
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -51,6 +52,7 @@ import {
   FieldGroup as ShadcnFieldGroup,
   FieldLabel as ShadcnFieldLabel,
 } from "@/components/settings-field";
+import { TablePagination } from "@/components/table-pagination";
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
 import {
   Card as ShadcnCard,
@@ -112,6 +114,7 @@ import { MutationFeedback } from "../../components/mutation-feedback.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { classifyMutationError } from "../../lib/feedback.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
+import { usePreferenceSession } from "../workspace-settings/account-save-session";
 import {
   useSaveWorkspacePreferences,
   useWorkspacePreferences,
@@ -325,13 +328,15 @@ export function FinancesPage() {
     transaction: FinanceTransaction;
   } | null>(null);
   const [breakdownTransaction, setBreakdownTransaction] = useState<FinanceTransaction | null>(null);
+  const [transactionPageSize, setTransactionPageSize] = useState(50);
   const [transactionCursor, setTransactionCursor] = useState<string | null>(null);
   const [transactionCursorHistory, setTransactionCursorHistory] = useState<Array<string | null>>(
     [],
   );
-  const transactionFilterKey = JSON.stringify(
+  const transactionFilterKey = JSON.stringify([
     exactSpending ? spendingReference : transactionFilters,
-  );
+    transactionPageSize,
+  ]);
   const [cursorFilterKey, setCursorFilterKey] = useState(transactionFilterKey);
   const currentTransactionCursor =
     cursorFilterKey === transactionFilterKey ? transactionCursor : null;
@@ -357,7 +362,7 @@ export function FinancesPage() {
       api.listFinanceTransactions({
         ...transactionFilters,
         cursor: currentTransactionCursor ?? undefined,
-        limit: 50,
+        limit: transactionPageSize,
         sortBy: transactionSort.sortBy,
         sortDirection: transactionSort.sortDirection,
       }),
@@ -366,11 +371,13 @@ export function FinancesPage() {
       currentTransactionCursor,
       transactionSort,
       transactionFilters,
+      transactionPageSize,
     ],
   });
   const spendingTransactionQueryKey = [
     "finance-spending-transactions",
     spendingReference,
+    transactionPageSize,
     currentTransactionCursor,
   ];
   const spendingTransactionList = useQuery({
@@ -381,7 +388,7 @@ export function FinancesPage() {
       return api.listFinanceSpendingTransactions(
         spendingReference.filter,
         currentTransactionCursor ?? undefined,
-        50,
+        transactionPageSize,
       );
     },
     retry: false,
@@ -881,7 +888,6 @@ export function FinancesPage() {
             if (canImport) setImportOpen(true);
           }}
           onAddCategory={() => setCategoryOpen(true)}
-          exportAction={<FinanceExportMenu />}
           accounts={finance.accounts}
           sort={`${transactionSort.sortBy}:${transactionSort.sortDirection}`}
           onSort={(value) => {
@@ -1107,6 +1113,9 @@ export function FinancesPage() {
                   selectionDisabled={
                     transactionList.isFetching || transactionList.isError || categories.isError
                   }
+                  pageIndex={transactionCursorHistory.length}
+                  pageSize={transactionPageSize}
+                  onPageSizeChange={setTransactionPageSize}
                   hasPreviousPage={transactionCursorHistory.length > 0}
                   isCategorizing={categorize.isPending}
                   isLoading={transactionList.isPending}
@@ -2092,6 +2101,49 @@ function FinanceMonthNavigator({
   );
 }
 
+function FinanceExportItems() {
+  return (
+    <>
+      <ShadcnDropdownMenuLabel>Raw finance data (CSV)</ShadcnDropdownMenuLabel>
+      <ShadcnDropdownMenuSeparator />
+      <ShadcnDropdownMenuItem
+        onSelect={() =>
+          void api
+            .exportFinanceData()
+            .then((value) => downloadFinanceCsv("transactions", value.transactions))
+        }
+      >
+        Transactions
+      </ShadcnDropdownMenuItem>
+      <ShadcnDropdownMenuItem
+        onSelect={() =>
+          void api
+            .exportFinanceData()
+            .then((value) => downloadFinanceCsv("accounts", value.accounts))
+        }
+      >
+        Accounts
+      </ShadcnDropdownMenuItem>
+      <ShadcnDropdownMenuItem
+        onSelect={() =>
+          void api.exportFinanceData().then((value) => downloadFinanceCsv("budgets", value.budgets))
+        }
+      >
+        Budget plan
+      </ShadcnDropdownMenuItem>
+      <ShadcnDropdownMenuItem
+        onSelect={() =>
+          void api
+            .exportFinanceData()
+            .then((value) => downloadFinanceCsv("categories", value.categories))
+        }
+      >
+        Categories
+      </ShadcnDropdownMenuItem>
+    </>
+  );
+}
+
 function FinanceExportMenu() {
   return (
     <ShadcnDropdownMenu>
@@ -2102,44 +2154,7 @@ function FinanceExportMenu() {
         </ShadcnButton>
       </ShadcnDropdownMenuTrigger>
       <ShadcnDropdownMenuContent align="end">
-        <ShadcnDropdownMenuLabel>Raw finance data (CSV)</ShadcnDropdownMenuLabel>
-        <ShadcnDropdownMenuSeparator />
-        <ShadcnDropdownMenuItem
-          onSelect={() =>
-            void api
-              .exportFinanceData()
-              .then((value) => downloadFinanceCsv("transactions", value.transactions))
-          }
-        >
-          Transactions
-        </ShadcnDropdownMenuItem>
-        <ShadcnDropdownMenuItem
-          onSelect={() =>
-            void api
-              .exportFinanceData()
-              .then((value) => downloadFinanceCsv("accounts", value.accounts))
-          }
-        >
-          Accounts
-        </ShadcnDropdownMenuItem>
-        <ShadcnDropdownMenuItem
-          onSelect={() =>
-            void api
-              .exportFinanceData()
-              .then((value) => downloadFinanceCsv("budgets", value.budgets))
-          }
-        >
-          Budget plan
-        </ShadcnDropdownMenuItem>
-        <ShadcnDropdownMenuItem
-          onSelect={() =>
-            void api
-              .exportFinanceData()
-              .then((value) => downloadFinanceCsv("categories", value.categories))
-          }
-        >
-          Categories
-        </ShadcnDropdownMenuItem>
+        <FinanceExportItems />{" "}
       </ShadcnDropdownMenuContent>
     </ShadcnDropdownMenu>
   );
@@ -2798,6 +2813,9 @@ function FinanceLedgerHealthCard({ health }: { health: FinanceLedgerHealth }) {
 }
 
 function FinanceTransactionsTable({
+  pageIndex,
+  pageSize,
+  onPageSizeChange,
   categories,
   categoryReadState,
   selectionDisabled = false,
@@ -2814,6 +2832,9 @@ function FinanceTransactionsTable({
   sort,
   transactions,
 }: {
+  pageIndex: number;
+  pageSize: number;
+  onPageSizeChange: (size: number) => void;
   categories: FinanceCategory[];
   categoryReadState: FinanceCategoryReadState;
   selectionDisabled?: boolean;
@@ -2833,6 +2854,7 @@ function FinanceTransactionsTable({
   };
   transactions: FinanceTransaction[];
 }) {
+  const session = usePreferenceSession(useQueryClient());
   const selection = useFinanceBulkSelection(transactions, selectionDisabled || isCategorizing);
   const presentation = useFinancePresentationParams();
   const view = presentation.get("view") === "cards" ? "cards" : "table";
@@ -2855,19 +2877,23 @@ function FinanceTransactionsTable({
   );
   const [selectedTransaction, setSelectedTransaction] = useState<FinanceTransaction | null>(null);
   const [contextTransaction, setContextTransaction] = useState<FinanceTransaction | null>(null);
-  const columns = useMemo<Array<ColumnDef<FinanceTransaction>>>(
+  const columns = useMemo<Array<DataColumn<FinanceTransaction>>>(
     () => [
       {
-        accessorKey: "date",
-        cell: ({ getValue }) => formatTransactionDate(getValue<string>()),
-        header: () => (
-          <TransactionSortButton label="Date" onSort={onSort} sort={sort} sortBy="date" />
-        ),
+        id: "date",
+        label: "Date",
+        width: 140,
+        value: (item) => item.date,
+        cell: (item) => <DateDisplay value={item.date} />,
+        header: <TransactionSortButton label="Date" onSort={onSort} sort={sort} sortBy="date" />,
       },
       {
-        accessorKey: "merchant",
-        cell: ({ row }) => {
-          const item = row.original;
+        id: "merchant",
+        label: "Merchant",
+        primary: true,
+        width: 280,
+        value: (item) => item.merchant,
+        cell: (item) => {
           const isKnownMerchant = item.merchantId !== null && item.merchantId !== undefined;
           return (
             <div className="flex min-w-0 items-center gap-2">
@@ -2907,30 +2933,37 @@ function FinanceTransactionsTable({
             </div>
           );
         },
-        header: () => (
+        header: (
           <TransactionSortButton label="Merchant" onSort={onSort} sort={sort} sortBy="merchant" />
         ),
       },
       {
-        accessorFn: (item) => financeTransactionCategoryLabel(item, categories, categoryReadState),
         id: "category",
-        cell: ({ getValue }) => (
-          <ShadcnBadge className="max-w-full truncate" title={getValue<string>()} variant="outline">
-            {getValue<string>()}
+        label: "Category",
+        width: 140,
+        value: (item) => financeTransactionCategoryLabel(item, categories, categoryReadState),
+        cell: (item) => (
+          <ShadcnBadge
+            className="max-w-full truncate"
+            title={financeTransactionCategoryLabel(item, categories, categoryReadState)}
+            variant="outline"
+          >
+            {financeTransactionCategoryLabel(item, categories, categoryReadState)}
           </ShadcnBadge>
         ),
-        header: "Category",
       },
       {
-        accessorKey: "amount",
-        cell: ({ row }) => (
-          <span
-            className={`font-medium tabular-nums ${transactionAmountTone(row.original.direction)}`}
-          >
-            {formatTransactionAmount(row.original.amount, row.original.direction)}
+        id: "amount",
+        label: "Amount",
+        width: 130,
+        align: "right",
+        value: (item) => formatTransactionAmount(item.amount, item.direction),
+        cell: (item) => (
+          <span className={`font-medium tabular-nums ${transactionAmountTone(item.direction)}`}>
+            {formatTransactionAmount(item.amount, item.direction)}
           </span>
         ),
-        header: () => (
+        header: (
           <TransactionSortButton
             align="right"
             label="Amount"
@@ -2942,35 +2975,28 @@ function FinanceTransactionsTable({
       },
       {
         id: "status",
-        header: "Status",
-        enableSorting: false,
-        cell: ({ row }) => (
+        label: "Status",
+        width: 80,
+        align: "center",
+        value: (item) => (item.pending ? "Pending" : "Posted"),
+        cell: (item) => (
           <UiTooltip>
             <TooltipTrigger asChild>
-              <button type="button" aria-label={row.original.pending ? "Pending" : "Posted"}>
-                {row.original.pending ? (
-                  <ClockIcon aria-hidden="true" />
+              <button type="button" aria-label={item.pending ? "Pending" : "Posted"}>
+                {item.pending ? (
+                  <ClockIcon aria-hidden="true" className="size-4" />
                 ) : (
-                  <CircleCheckIcon aria-hidden="true" />
+                  <CircleCheckIcon aria-hidden="true" className="size-4" />
                 )}
               </button>
             </TooltipTrigger>
-            <TooltipContent>
-              {row.original.pending ? "Pending — not yet posted" : "Posted"}
-            </TooltipContent>
+            <TooltipContent>{item.pending ? "Pending — not yet posted" : "Posted"}</TooltipContent>
           </UiTooltip>
         ),
       },
     ],
     [onSort, sort, categories, categoryReadState],
   );
-  const table = useReactTable({
-    columns,
-    data: groupedTransactions,
-    getCoreRowModel: getCoreRowModel(),
-    getRowId: (row) => row.id,
-    manualSorting: true,
-  });
 
   if (isLoading)
     return (
@@ -2988,11 +3014,13 @@ function FinanceTransactionsTable({
 
   return (
     <div className="flex flex-col gap-3">
-      <FinanceBulkCategorization
-        selection={selection}
-        categories={categories}
-        reloadQueryKey={reloadQueryKey}
-      />
+      {view === "cards" ? (
+        <FinanceBulkCategorization
+          selection={selection}
+          categories={categories}
+          reloadQueryKey={reloadQueryKey}
+        />
+      ) : null}
       {groupHeadings.size > 0 && (hasPreviousPage || nextCursor) ? (
         <p className="text-xs text-muted-foreground">Grouped within this page</p>
       ) : null}
@@ -3039,64 +3067,44 @@ function FinanceTransactionsTable({
           ))}
         </ShadcnItemGroup>
       ) : (
-        <ShadcnTable aria-label="Transactions" className="min-w-[33rem] table-fixed">
-          <ShadcnTableHeader>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <ShadcnTableRow key={headerGroup.id}>
-                <ShadcnTableHead className="w-12">Select</ShadcnTableHead>
-                {headerGroup.headers.map((header) => (
-                  <ShadcnTableHead
-                    className={transactionTableColumnClass(header.column.id)}
-                    key={header.id}
-                  >
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(header.column.columnDef.header, header.getContext())}
-                  </ShadcnTableHead>
-                ))}
-              </ShadcnTableRow>
-            ))}
-          </ShadcnTableHeader>
-          <ShadcnTableBody>
-            {table.getRowModel().rows.map((row) => (
-              <TransactionContextMenu
-                key={row.id}
-                transaction={row.original}
-                onSplit={() => onBreakdown(row.original)}
-                onContext={() => setContextTransaction(row.original)}
-                onCategorize={() => onCategorize(row.original)}
-              >
-                <ShadcnTableRow
-                  tabIndex={0}
-                  aria-label={`Open ${row.original.merchant} transaction`}
-                  className="cursor-pointer focus-visible:bg-selection"
-                  onClick={() => setSelectedTransaction(row.original)}
-                  onKeyDown={(event) => {
-                    if (
-                      event.target === event.currentTarget &&
-                      (event.key === "Enter" || event.key === " ")
-                    ) {
-                      event.preventDefault();
-                      setSelectedTransaction(row.original);
-                    }
-                  }}
-                >
-                  <ShadcnTableCell className="w-12">
-                    {selection.control(row.original)}
-                  </ShadcnTableCell>
-                  {row.getVisibleCells().map((cell) => (
-                    <ShadcnTableCell
-                      className={transactionTableColumnClass(cell.column.id)}
-                      key={cell.id}
-                    >
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </ShadcnTableCell>
-                  ))}
-                </ShadcnTableRow>
-              </TransactionContextMenu>
-            ))}
-          </ShadcnTableBody>
-        </ShadcnTable>
+        <DataTable
+          rows={groupedTransactions}
+          columns={columns}
+          rowId={(transaction) => transaction.id}
+          rowLabel={(transaction) => `Open ${transaction.merchant} transaction`}
+          onOpen={setSelectedTransaction}
+          storageKey={`${session.owner ?? "anonymous"}:finance-transactions`}
+          menuItems={<FinanceExportItems />}
+          label="Transactions"
+          fileName="transactions.csv"
+          selectionControls={{
+            header: selection.selectPage,
+            cell: selection.control,
+            selected: selection.selected,
+            clear: selection.clear,
+            selectPage: selection.selectAll,
+            locked: selection.locked,
+            actions: (
+              <FinanceBulkCategorization
+                contextual
+                selection={selection}
+                categories={categories}
+                reloadQueryKey={reloadQueryKey}
+              />
+            ),
+          }}
+          renderRow={(transaction, children) => (
+            <TransactionContextMenu
+              key={transaction.id}
+              transaction={transaction}
+              onSplit={() => onBreakdown(transaction)}
+              onContext={() => setContextTransaction(transaction)}
+              onCategorize={() => onCategorize(transaction)}
+            >
+              {children}
+            </TransactionContextMenu>
+          )}
+        />
       )}
       {selectedTransaction ? (
         <ResponsiveDialog open onOpenChange={(open) => !open && setSelectedTransaction(null)}>
@@ -3111,7 +3119,7 @@ function FinanceTransactionsTable({
                 {formatTransactionAmount(selectedTransaction.amount, selectedTransaction.direction)}
               </p>
               <p className="text-sm text-muted-foreground">
-                {formatTransactionDate(selectedTransaction.date)} ·{" "}
+                <DateDisplay value={selectedTransaction.date} /> ·{" "}
                 {financeTransactionCategoryLabel(
                   selectedTransaction,
                   categories,
@@ -3167,29 +3175,16 @@ function FinanceTransactionsTable({
           onClose={() => setContextTransaction(null)}
         />
       ) : null}
-      <div className="flex items-center justify-between gap-3 border-t pt-3">
-        <p className="font-mono text-xs text-muted-foreground">
-          {transactions.length} {transactions.length === 1 ? "transaction" : "transactions"}
-        </p>
-        <div className="flex items-center gap-2">
-          <ShadcnButton
-            disabled={!hasPreviousPage}
-            onClick={onPreviousPage}
-            size="sm"
-            variant="outline"
-          >
-            Previous
-          </ShadcnButton>
-          <ShadcnButton
-            disabled={nextCursor === null}
-            onClick={onNextPage}
-            size="sm"
-            variant="outline"
-          >
-            Next
-          </ShadcnButton>
-        </div>
-      </div>
+      <TablePagination
+        pageIndex={pageIndex}
+        pageSize={pageSize}
+        count={transactions.length}
+        hasNext={nextCursor !== null}
+        pending={selectionDisabled}
+        onPrevious={onPreviousPage}
+        onNext={onNextPage}
+        onPageSizeChange={onPageSizeChange}
+      />
     </div>
   );
 }
@@ -3221,16 +3216,6 @@ function TransactionSortButton({
       direction={isActive ? sort.sortDirection : undefined}
     />
   );
-}
-
-function transactionTableColumnClass(columnId: string) {
-  return {
-    amount: "w-24 text-right",
-    category: "w-24",
-    date: "w-20",
-    status: "w-16 text-center",
-    merchant: "w-44",
-  }[columnId];
 }
 
 export function TransactionDetails({

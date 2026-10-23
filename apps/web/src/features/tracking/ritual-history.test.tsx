@@ -422,13 +422,26 @@ it("retains cached records and pagination after a refresh failure", async () => 
   await screen.findByRole("button", { name: /Morning Ritual/ });
   mocks.history.mockRejectedValue(new Error("network failure"));
   await client.invalidateQueries({ queryKey: ["ritual-history"] });
-  await screen.findByText("Last available results");
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith("Couldn’t load ritual history.", expect.any(Object)),
+  );
+  expect(screen.queryByText("Last available results")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Morning Ritual/ })).toBeEnabled();
   expect(screen.getByRole("combobox", { name: "Rows per page" })).toBeEnabled();
   expect(screen.queryByText(/No rituals|No ritual history/)).not.toBeInTheDocument();
   mocks.history.mockResolvedValue({ items: [occurrence], nextCursor: null });
-  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
-  await waitFor(() => expect(screen.queryByText("Last available results")).not.toBeInTheDocument());
+  const attempts = mocks.history.mock.calls.length;
+  const action = vi.mocked(toast.error).mock.calls.at(-1)?.[1]?.action;
+  if (!action || typeof action !== "object" || !("onClick" in action))
+    throw new Error("Missing toast retry");
+  render(
+    <button type="button" onClick={action.onClick}>
+      Retry history
+    </button>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Retry history" }));
+  await waitFor(() => expect(mocks.history).toHaveBeenCalledTimes(attempts + 1));
+  await waitFor(() => expect(toast.dismiss).toHaveBeenCalled());
 });
 
 it("restores the full toolbar after Show All and keeps a direct path back to the current week", async () => {

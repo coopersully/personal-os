@@ -98,3 +98,19 @@ describe("query feedback", () => {
     );
   });
 });
+
+it("keeps initial navigation errors entirely out of layout with a toast retry", () => {
+  const retry = vi.fn();
+  const view = render(
+    <QueryFeedback
+      query={{ isError: true, error: new Error("offline"), refetch: retry }}
+      title="Couldn’t load navigation."
+      toastOnly
+    />,
+  );
+  expect(view.container).toBeEmptyDOMElement();
+  expect(toast.error).toHaveBeenCalledWith(
+    "Couldn’t load navigation.",
+    expect.objectContaining({ action: expect.objectContaining({ label: "Try again" }) }),
+  );
+});

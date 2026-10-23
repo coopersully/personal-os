@@ -13,15 +13,17 @@ export function InlineError({
   title = "Couldn’t load this material.",
   retry,
   stale = false,
+  toastOnly = false,
 }: {
   error: unknown;
   title?: string;
   retry?: () => unknown;
   stale?: boolean;
+  toastOnly?: boolean;
 }) {
   const settingsFeedback = useSettingsError(error, title, retry);
   useErrorToast(error, title, retry, !settingsFeedback);
-  if (settingsFeedback || stale) return null;
+  if (settingsFeedback || stale || toastOnly) return null;
   const description =
     error instanceof ApiClientError && error.status === 401
       ? "Your session has expired. Sign in again to continue."
@@ -55,16 +57,19 @@ export function QueryFeedback({
   query,
   title,
   staleOnly = false,
+  toastOnly = false,
 }: {
   query: { isError: boolean; error: unknown; data?: unknown; refetch?: () => unknown };
   title: string;
   staleOnly?: boolean;
+  toastOnly?: boolean;
 }) {
   if (!query.isError || (staleOnly && query.data === undefined)) return null;
   return (
     <InlineError
       error={query.error}
       title={title}
+      toastOnly={toastOnly}
       stale={query.data !== undefined}
       {...(query.refetch ? { retry: query.refetch } : {})}
     />

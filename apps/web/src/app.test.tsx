@@ -4247,11 +4247,15 @@ describe("ilo web app", () => {
   it("keeps the Tasks workspace actionable when Project navigation fails", async () => {
     mocks.listTaskProjects.mockRejectedValueOnce(new Error("Projects are temporarily unavailable"));
     const view = setup("/tasks");
-    await waitFor(() =>
-      expect(
-        within(screen.getByRole("complementary", { name: "Tasks Sidebar" })).getByRole("status"),
-      ).toHaveTextContent(/Couldn’t load (projects|this material)/),
-    );
+    expect(await screen.findByText("Couldn’t load projects.")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("complementary", { name: "Tasks Sidebar" })).queryByRole("status"),
+    ).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole("complementary", { name: "Tasks Sidebar" })).queryByText(
+        /Couldn’t load/,
+      ),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create in Tasks" })).toBeInTheDocument();
     expect(await screen.findByText("Draft brief")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Complete Draft brief" })).toBeEnabled();
@@ -4644,7 +4648,9 @@ describe("ilo web app", () => {
       ),
     );
 
-    expect(await screen.findByText(/Couldn’t load this material/)).toBeInTheDocument();
+    expect(
+      await screen.findByRole("region", { name: /Couldn’t load this material/ }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Draft brief")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Retry loading more items" }));
     expect(await screen.findByText("Recovered next page Task")).toBeInTheDocument();
@@ -4832,7 +4838,9 @@ describe("ilo web app", () => {
 
     mocks.listTasks.mockRejectedValue(new Error("Tasks are temporarily unavailable"));
     const failed = setup("/tasks?view=upcoming");
-    expect(await screen.findByText(/Couldn’t load this material/)).toBeInTheDocument();
+    expect(
+      await screen.findByRole("region", { name: /Couldn’t load this material/ }),
+    ).toBeInTheDocument();
     failed.unmount();
 
     mocks.listTasks.mockResolvedValue({ items: [], nextCursor: null });
@@ -5036,11 +5044,15 @@ describe("ilo web app", () => {
 
     mocks.listTaskLists.mockRejectedValueOnce(new Error("Lists are temporarily unavailable"));
     const listFailure = setup("/tasks");
-    await waitFor(() =>
-      expect(
-        within(screen.getByRole("complementary", { name: "Tasks Sidebar" })).getByRole("status"),
-      ).toHaveTextContent(/Couldn’t load (lists|this material)/),
-    );
+    expect(await screen.findByText("Couldn’t load lists.")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("complementary", { name: "Tasks Sidebar" })).queryByRole("status"),
+    ).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole("complementary", { name: "Tasks Sidebar" })).queryByText(
+        /Couldn’t load/,
+      ),
+    ).not.toBeInTheDocument();
     await browser.click(
       within(screen.getByRole("complementary", { name: "Tasks Sidebar" })).getByRole("button", {
         name: "Retry Lists",
@@ -5051,11 +5063,15 @@ describe("ilo web app", () => {
 
     mocks.listTaskProjects.mockRejectedValueOnce(new Error("Projects are temporarily unavailable"));
     const projectFailure = setup("/tasks");
-    await waitFor(() =>
-      expect(
-        within(screen.getByRole("complementary", { name: "Tasks Sidebar" })).getByRole("status"),
-      ).toHaveTextContent(/Couldn’t load (projects|this material)/),
-    );
+    expect(await screen.findByText("Couldn’t load projects.")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("complementary", { name: "Tasks Sidebar" })).queryByRole("status"),
+    ).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole("complementary", { name: "Tasks Sidebar" })).queryByText(
+        /Couldn’t load/,
+      ),
+    ).not.toBeInTheDocument();
     await browser.click(
       within(screen.getByRole("complementary", { name: "Tasks Sidebar" })).getByRole("button", {
         name: "Retry Projects",
@@ -5073,7 +5089,9 @@ describe("ilo web app", () => {
       return Promise.resolve({ items: [task], nextCursor: null });
     });
     const taskFailure = setup("/tasks");
-    expect(await screen.findByText(/Couldn’t load this material/)).toBeInTheDocument();
+    expect(
+      await screen.findByRole("region", { name: /Couldn’t load this material/ }),
+    ).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Retry Tasks" }));
     expect(await screen.findByText("Draft brief")).toBeInTheDocument();
     taskFailure.unmount();
@@ -5093,9 +5111,13 @@ describe("ilo web app", () => {
       items: [inboxTaskList, workTaskList],
       nextCursor: null,
     });
-    await browser.click(screen.getByRole("button", { name: "Try again" }));
+    await browser.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Try again" }),
+    );
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument(),
+      expect(
+        within(screen.getByRole("dialog")).queryByRole("button", { name: "Try again" }),
+      ).not.toBeInTheDocument(),
     );
     listFailure.unmount();
 
@@ -5108,9 +5130,13 @@ describe("ilo web app", () => {
       await within(screen.getByRole("dialog")).findByText(/Couldn’t load (projects|this material)/),
     ).toBeInTheDocument();
     mocks.listTaskProjects.mockResolvedValue({ items: [launchTaskProject], nextCursor: null });
-    await browser.click(screen.getByRole("button", { name: "Try again" }));
+    await browser.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Try again" }),
+    );
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument(),
+      expect(
+        within(screen.getByRole("dialog")).queryByRole("button", { name: "Try again" }),
+      ).not.toBeInTheDocument(),
     );
     projectFailure.unmount();
   });
@@ -8999,6 +9025,9 @@ describe("ilo web app", () => {
     mocks.listMailboxes.mockRejectedValueOnce(new Error("mailboxes unavailable"));
     const mailboxErrorView = setup("/mail");
     expect((await screen.findAllByText("Couldn’t load mailboxes.")).length).toBeGreaterThan(0);
+    const mailboxNav = screen.getByRole("navigation", { name: "Mailboxes" });
+    expect(within(mailboxNav).queryByText("Couldn’t load mailboxes.")).not.toBeInTheDocument();
+    expect(mailboxNav.querySelector('[data-slot="empty"]')).toBeNull();
     mailboxErrorView.unmount();
 
     mocks.listMailThreads.mockRejectedValueOnce(new Error("mail unavailable"));
@@ -9017,7 +9046,9 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     await browser.click(await screen.findByRole("button", { name: "Compose a message" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Mail accounts are unavailable");
-    await browser.click(screen.getByRole("button", { name: "Try again" }));
+    await browser.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Try again" }),
+    );
     expect(await screen.findByLabelText("From")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled();
     setupErrorView.unmount();

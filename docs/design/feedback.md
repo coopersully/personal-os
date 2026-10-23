@@ -29,6 +29,10 @@ existing content and use one deduplicated Sonner error with a retry action; neve
 freshness/error row, banner, or Alert into workspace chrome, navigation, sidebars, or bento layout.
 Do not shift or cover neighboring content to announce a failed read. Useful domain warnings and
 always-present source timestamps remain content, not action feedback.
+Navigation/sidebar reads use shared `toastOnly` feedback even for initial failures; bounded
+initial recovery regions belong inside data content, never in workspace chrome. Preserve a
+compact existing menu retry when useful. If several reads fail, target the query whose missing
+data blocks the action, not a different failed read that still has retained data.
 
 Account verification is the deliberate blocking exception: when the account read fails for a
 non-authentication reason, show the shared recovery dialog above the existing layout. It has no

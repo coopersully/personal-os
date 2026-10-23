@@ -566,7 +566,9 @@ table chrome while keeping editable criteria and a safe way to broaden/return.
 Verify recovery transitions, not just a populated screenshot. Keep settings errors
 in Sonner; initial unavailability retains bounded recovery in its own content area. Cached
 refresh errors never insert rows/banners into workspace chrome, sidebars, navigation, or bento
-layout. Use toast retry plus existing refresh controls. Only account-wide non-authentication
+layout. Initial navigation/sidebar failures also use `toastOnly`; an initial Empty recovery
+region belongs to data content. Retry the missing blocking read when other sources have stale
+retained data. Use toast retry plus existing refresh controls. Only account-wide non-authentication
 verification failure gates the app with the shared non-dismissible recovery dialog, through
 pending retry until confirmed query success. Keep 401/private-cache and public/auth flows intact.
 Never duplicate failure prose or turn recovery into a record mutation.

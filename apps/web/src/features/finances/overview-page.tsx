@@ -17,15 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemTitle,
-} from "@/components/ui/item";
+import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Pagination, PaginationContent, PaginationItem } from "@/components/ui/pagination";
 import {
@@ -68,27 +60,15 @@ export function FinanceOverviewPage() {
     queryKey: ["finance-budget-current"],
     queryFn: async () => requireFinanceResult(await api.getFinanceBudget()),
   });
-  const reviews = useQuery({
-    queryKey: ["agent-access-work-items", "finance-overview", me.data?.id],
-    queryFn: () => api.listAgentAccessWorkItems({ domain: "finances", limit: 10 }),
-    enabled: !!me.data && !accessDenied(me.error),
-    refetchInterval: 60_000,
-  });
   const status = useQuery({ queryKey: ["finance-status"], queryFn: () => api.getFinanceStatus() });
-  const playbook = useQuery({ queryKey: ["finance-playbook"], queryFn: api.getFinancePlaybook });
   const maintenance = useQuery({
     queryKey: ["finance-maintenance-history", 3],
     queryFn: () => api.getFinanceMaintenanceHistory({ limit: 3 }),
   });
   const plan = budget.data?.data;
-  const reviewCount = reviews.data?.summary.byDomain.finances;
-  const reviewUnavailable = reviews.data?.unavailableDomains.includes("finances");
-  const reviewDenied = accessDenied(me.error) || accessDenied(reviews.error);
-  const reviewsKnown =
-    reviews.isSuccess && !reviewUnavailable && !reviewDenied && typeof reviewCount === "number";
   const latestReview = status.data?.details.latestReview;
-  const nextPriority =
-    playbook.data?.assessment.blockers[0] ?? playbook.data?.assessment.nextActions[0];
+  const latestMaintenance = maintenance.data?.items[0];
+  const outstanding = status.data?.details.reimbursements.outstanding ?? 0;
   return (
     <div className="flex min-w-0 flex-col gap-8">
       <FinanceSourceState label="Financial position" query={snapshot} />
@@ -171,222 +151,81 @@ export function FinanceOverviewPage() {
         </Collapsible>
       ) : null}
       <OverviewUpcomingMoney />
-      <div className="grid gap-6 lg:grid-cols-2">
-        {reviewsKnown && reviewCount === 0 ? (
-          <OverviewSection title="Next step">
-            <ItemGroup>
-              <Item variant="outline">
-                <ItemContent>
-                  <ItemTitle>
-                    {snapshot.data && !snapshot.data.data.ledger.trustworthy
-                      ? "Confirm the evidence behind your position"
-                      : plan?.status === "proposed"
-                        ? "Inspect your proposed plan"
-                        : "Keep your financial context current"}
-                  </ItemTitle>
-                  <ItemDescription>
-                    {snapshot.data && !snapshot.data.data.ledger.trustworthy
-                      ? "Check account ownership, inclusion, and source freshness."
-                      : plan?.status === "proposed"
-                        ? "Your proposed version is waiting for a decision."
-                        : "Configure your financial profile and accounts."}
-                  </ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  <Button asChild size="sm">
-                    <Link
-                      to={
-                        snapshot.data && !snapshot.data.data.ledger.trustworthy
-                          ? "/finances/accounts"
-                          : plan?.status === "proposed"
-                            ? "/finances/plan"
-                            : "/finances/setup"
-                      }
-                    >
-                      {snapshot.data && !snapshot.data.data.ledger.trustworthy
-                        ? "Inspect accounts"
-                        : plan?.status === "proposed"
-                          ? "Review proposal"
-                          : "Update financial profile"}
-                    </Link>
-                  </Button>
-                </ItemActions>
-              </Item>
-            </ItemGroup>
-          </OverviewSection>
-        ) : null}
-        <OverviewSection title="Complete plan">
-          <FinanceSourceState label="Complete plan" query={budget} />
-          {plan ? (
-            <ItemGroup>
-              <Item variant="outline">
-                <ItemContent>
-                  <ItemTitle>
-                    {plan.effectiveFrom}{" "}
-                    <Badge variant="secondary">
-                      {plan.status === "proposed"
-                        ? "Proposed"
-                        : plan.status === "active"
-                          ? "Active"
-                          : plan.status === "retired"
-                            ? "Retired"
-                            : "Incomplete"}{" "}
-                      · Version {plan.version}
-                    </Badge>
-                  </ItemTitle>
-                  <ItemDescription>{plan.rationale}</ItemDescription>
-                  <p className="text-sm">
-                    {financeAmount(plan.allocatedTotal)} allocated from{" "}
-                    {financeAmount(plan.expectedResources)} in resources · {plan.allocations.length}{" "}
-                    allocations
-                  </p>
-                  <p className="text-muted-foreground text-xs">
-                    The complete version includes spending, savings, debt, goals, and buffer
-                    allocations.
-                  </p>
-                </ItemContent>
-                <ItemActions>
-                  <Button asChild size="sm" variant="outline">
-                    <Link to="/finances/plan">Inspect complete plan</Link>
-                  </Button>
-                </ItemActions>
-              </Item>
-            </ItemGroup>
-          ) : budget.isSuccess ? (
-            <Empty>
-              <EmptyHeader>
-                <EmptyTitle>No complete plan yet</EmptyTitle>
-                <EmptyDescription>
-                  Build a plan from your resources and priorities.
-                </EmptyDescription>
-              </EmptyHeader>
-              <Button asChild size="sm">
-                <Link to="/finances/plan">Create plan</Link>
+      <OverviewSection title="Complete plan">
+        <FinanceSourceState label="Complete plan" query={budget} />
+        {plan ? (
+          <Item variant="outline" className="flex-nowrap">
+            <ItemContent>
+              <ItemTitle>
+                {plan.effectiveFrom}{" "}
+                <Badge variant="secondary">{plan.status.replaceAll("_", " ")}</Badge>
+              </ItemTitle>
+              <ItemDescription>
+                {financeAmount(plan.allocatedTotal)} allocated ·{" "}
+                {financeAmount(plan.expectedResources - plan.allocatedTotal)} unassigned
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Button asChild size="sm" variant="outline">
+                <Link to="/finances/plan">View budget</Link>
               </Button>
-            </Empty>
-          ) : null}
-        </OverviewSection>
-        <OverviewSection title="Near-term context">
-          <FinanceSourceState label="Cash-flow context" query={status} />
-          {status.data ? (
-            <ItemGroup>
-              <Item variant="outline">
-                <ItemContent>
-                  <ItemTitle>Cash-flow outlook</ItemTitle>
-                  <ItemDescription>
-                    Inspect upcoming income, outflows, and account coverage before using a forecast.
-                  </ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  <Button asChild size="sm" variant="ghost" className="self-start">
-                    <Link to="/finances/cashflow">Inspect forecast</Link>
-                  </Button>
-                </ItemActions>
-              </Item>
-              <Item variant="outline">
-                <ItemContent>
-                  <ItemTitle>Outstanding reimbursements</ItemTitle>
-                  <ItemDescription>
-                    {financeAmount(status.data.details.reimbursements.outstanding)} · Expected
-                    reimbursement records
-                  </ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  <Button asChild size="sm" variant="ghost" className="self-start">
-                    <Link to="/finances/cashflow?view=reimbursements">Inspect reimbursements</Link>
-                  </Button>
-                </ItemActions>
-              </Item>
-            </ItemGroup>
-          ) : null}
-        </OverviewSection>
-        <OverviewSection title="Next wealth-building priority">
-          <FinanceSourceState label="Wealth-building priorities" query={playbook} />
-          {nextPriority ? (
-            <ItemGroup>
-              <Item variant="outline">
-                <ItemContent>
-                  <ItemTitle>{nextPriority}</ItemTitle>
-                  <ItemDescription>
-                    Based on the saved financial profile · Playbook{" "}
-                    {playbook.data?.playbook.version}
-                  </ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  <Button asChild size="sm" variant="ghost" className="self-start">
-                    <Link to="/finances/wealth">Inspect wealth and goals</Link>
-                  </Button>
-                </ItemActions>
-              </Item>
-            </ItemGroup>
-          ) : null}
-        </OverviewSection>
-      </div>
-      <Button asChild variant="outline">
-        <Link to="/finances/spending">Explore Spending</Link>
-      </Button>
-      <FinanceSourceState label="Account settings" query={me} />
-      <OverviewSection title="What changed">
-        <Button asChild size="sm" variant="ghost" className="self-start">
-          <Link to="/finances/activity">Open Activity</Link>
-        </Button>
-        <FinanceSourceState label="Review history" query={status} />
+            </ItemActions>
+          </Item>
+        ) : budget.isSuccess ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+            <p className="text-muted-foreground">No plan yet.</p>
+            <Button asChild size="sm" variant="outline">
+              <Link to="/finances/plan">Create plan</Link>
+            </Button>
+          </div>
+        ) : null}
+      </OverviewSection>
+      <FinanceSourceState label="Recent Finance context" query={status} />
+      {outstanding > 0 ? (
+        <Item variant="outline" className="flex-nowrap">
+          <ItemContent>
+            <ItemTitle>Outstanding reimbursements</ItemTitle>
+            <ItemDescription>{financeAmount(outstanding)} expected back</ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <Button asChild size="sm" variant="outline">
+              <Link to="/finances/cashflow?view=reimbursements">View reimbursements</Link>
+            </Button>
+          </ItemActions>
+        </Item>
+      ) : null}
+      <OverviewSection
+        title="What changed"
+        action={
+          <Button asChild size="sm" variant="outline">
+            <Link to="/finances/activity">Open Activity</Link>
+          </Button>
+        }
+      >
         <FinanceSourceState label="Maintenance history" query={maintenance} />
-        {latestReview ? (
-          <ItemGroup>
-            <Item variant="outline">
-              <ItemContent>
-                <ItemTitle>Latest period review</ItemTitle>
-                <ItemDescription>
-                  {financeObservedAt(latestReview.completedAt)} ·{" "}
-                  {latestReview.status.replaceAll("_", " ")}
-                </ItemDescription>
-              </ItemContent>
-              <ItemActions>
-                <Button asChild size="sm" variant="outline">
-                  <Link to={`/finances/reviews/${latestReview.id}`}>Open review</Link>
-                </Button>
-              </ItemActions>
-            </Item>
-          </ItemGroup>
-        ) : status.isSuccess ? (
-          <p className="text-muted-foreground text-sm">No completed period review.</p>
-        ) : null}
-        {maintenance.data?.items.length ? (
-          <Collapsible>
-            <CollapsibleTrigger asChild>
-              <Button variant="ghost" size="sm">
-                Recent maintenance ({maintenance.data.items.length})
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              <ItemGroup>
-                {maintenance.data.items.map((run) => (
-                  <Item key={run.run?.id ?? run.recovery?.legacyRunId} variant="outline">
-                    <ItemContent>
-                      <ItemTitle>
-                        {run.run ? maintenanceLabels[run.run.status] : "Maintenance recovery"}
-                      </ItemTitle>
-                      <ItemDescription>
-                        {run.recovery?.reason ??
-                          run.nextAction?.reason ??
-                          (run.run?.status === "completed"
-                            ? "The recorded maintenance run completed."
-                            : "Inspect the recorded run and its evidence.")}
-                      </ItemDescription>
-                    </ItemContent>
-                    <ItemActions>
-                      <Button asChild size="sm" variant="ghost" className="self-start">
-                        <Link to="/finances/accounts">Review accounts</Link>
-                      </Button>
-                    </ItemActions>
-                  </Item>
-                ))}
-              </ItemGroup>
-            </CollapsibleContent>
-          </Collapsible>
-        ) : maintenance.isSuccess ? (
-          <p className="text-muted-foreground text-sm">No recorded maintenance runs.</p>
+        {latestReview || latestMaintenance ? (
+          <div className="flex flex-col gap-2 text-sm">
+            {latestReview ? (
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <span>Period review · {latestReview.status.replaceAll("_", " ")}</span>
+                <Link
+                  className="text-muted-foreground underline underline-offset-4"
+                  to={`/finances/reviews/${latestReview.id}`}
+                >
+                  {financeObservedAt(latestReview.completedAt)}
+                </Link>
+              </div>
+            ) : null}
+            {latestMaintenance ? (
+              <p>
+                {latestMaintenance.run
+                  ? maintenanceLabels[latestMaintenance.run.status]
+                  : "Maintenance recovery"}
+              </p>
+            ) : null}
+          </div>
+        ) : status.isSuccess && maintenance.isSuccess ? (
+          <p className="text-sm text-muted-foreground">No recorded changes yet.</p>
         ) : null}
       </OverviewSection>
       {me.data && !accessDenied(me.error) ? <FinanceOverviewSettings key="view-settings" /> : null}

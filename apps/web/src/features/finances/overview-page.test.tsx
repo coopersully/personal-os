@@ -111,16 +111,10 @@ it("omits the duplicate decision summary while keeping supporting navigation", a
   expect(screen.queryByRole("region", { name: "Needs you" })).not.toBeInTheDocument();
   expect(screen.queryByText("Private first review question")).not.toBeInTheDocument();
   expect(api.getFinanceInbox).not.toHaveBeenCalled();
-  await waitFor(() =>
-    expect(api.listAgentAccessWorkItems).toHaveBeenCalledWith({ domain: "finances", limit: 10 }),
-  );
+  expect(api.listAgentAccessWorkItems).not.toHaveBeenCalled();
   expect(screen.getByRole("link", { name: "Open Activity" })).toHaveAttribute(
     "href",
     "/finances/activity",
-  );
-  expect(screen.getByRole("link", { name: "Explore Spending" })).toHaveAttribute(
-    "href",
-    "/finances/spending",
   );
 });
 
@@ -252,19 +246,6 @@ it("waits for a planning timezone without guessing upcoming dates", async () => 
   expect(
     screen.queryByText("No unmatched scheduled money in this date range."),
   ).not.toBeInTheDocument();
-});
-
-it("withholds an all-clear and next-step advice when canonical review coverage is unavailable", async () => {
-  api.listAgentAccessWorkItems.mockResolvedValue({
-    summary: { byDomain: { finances: 0 } },
-    unavailableDomains: ["finances"],
-    items: [],
-    nextCursor: null,
-  });
-  mount();
-  await waitFor(() => expect(api.listAgentAccessWorkItems).toHaveBeenCalled());
-  expect(screen.queryByText("No items need review")).not.toBeInTheDocument();
-  expect(screen.queryByRole("region", { name: "Next step" })).not.toBeInTheDocument();
 });
 
 it.each([
@@ -400,5 +381,58 @@ it("keeps financial evidence in a compact disclosure near totals", async () => {
   expect(screen.getByRole("link", { name: "Review accounts" })).toHaveAttribute(
     "href",
     "/finances/accounts",
+  );
+});
+
+it("keeps plan and change summaries compact and omits duplicate Finance prompts", async () => {
+  api.getFinanceBudget.mockResolvedValue(
+    envelope({
+      effectiveFrom: "2026-10",
+      status: "active",
+      allocatedTotal: 8000,
+      expectedResources: 8250,
+      rationale: "Detailed budget rationale",
+      version: 1,
+      allocations: [],
+    }),
+  );
+  mount();
+  expect(await screen.findByText("$8,000.00 allocated · $250.00 unassigned")).toBeVisible();
+  expect(screen.getByRole("link", { name: "View budget" })).toHaveAttribute(
+    "href",
+    "/finances/plan",
+  );
+  expect(await screen.findByText("No recorded changes yet.")).toBeVisible();
+  expect(screen.queryByText("Detailed budget rationale")).not.toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Near-term context" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Outstanding reimbursements")).not.toBeInTheDocument();
+  expect(api.getFinancePlaybook).not.toHaveBeenCalled();
+});
+
+it("shows positive reimbursements and only the latest recorded maintenance summary", async () => {
+  api.getFinanceStatus.mockResolvedValue({
+    details: {
+      latestReview: { id: "review-1", completedAt: "2026-10-18T12:00:00Z", status: "completed" },
+      reimbursements: { outstanding: 125 },
+    },
+  });
+  api.getFinanceMaintenanceHistory.mockResolvedValue({
+    items: [
+      { run: { id: "latest", status: "completed" } },
+      { run: { id: "older", status: "failed_terminal" } },
+    ],
+  });
+  mount();
+  expect(await screen.findByText("$125.00 expected back")).toBeVisible();
+  expect(screen.getByRole("link", { name: "View reimbursements" })).toHaveAttribute(
+    "href",
+    "/finances/cashflow?view=reimbursements",
+  );
+  expect(await screen.findByText("Maintenance complete")).toBeVisible();
+  expect(screen.queryByText("Maintenance failed")).not.toBeInTheDocument();
+  expect(screen.queryByText("No recorded changes yet.")).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /Oct 18/ })).toHaveAttribute(
+    "href",
+    "/finances/reviews/review-1",
   );
 });

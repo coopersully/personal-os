@@ -41,8 +41,7 @@ design §§4 and 13 retain the accepted direction.
 ### Daily summary
 
 Overview leads with compact linked balance metrics and an About these totals disclosure, then upcoming expected money and planning context. The disclosure replaces the Financial position card and retains freshness, reconciliation, required evidence gaps and Accounts navigation. Reviews remain available through the shared sidebar entry; Overview
-does not duplicate the decision summary or its action links. Unavailable or denied decision reads
-still suppress all-clear next-step advice.
+does not duplicate the decision summary or its action links. Overview makes no all-clear review claim and does not fetch a second decision summary.
 
 Recorded reviews and maintenance link to Activity evidence rather than implying a new completed
 action. Upcoming money uses the shared table with expected date, linked item and signed expected amount. Income uses success color and +;
@@ -56,7 +55,7 @@ on one page. Do not repeat the date-range/timezone explanatory line above it. Pr
 amounts for partial occurrences, explicit currencies and incomplete-source caveats. Its Cash flow
 link sits opposite the Coming next heading and retains the exact agenda range.
 Unavailable recurring records appear in the Coming next header description as items not included yet, with dates/amounts to confirm in Cash flow. Open upcoming money uses the standard outline button opposite the heading. Expected movements are not booked money or a safe-to-spend
-total. Historical maintenance and reviews follow the position and planning material.
+total. Complete plan is a single status/allocation/unassigned summary linking to Budget; rationale and allocation details stay on Budget. Remove the duplicate forecast, wealth-priority and generic next-step/navigation prompts. Show a reimbursement summary only for a positive outstanding amount. What changed shows only the latest recorded period review and maintenance status with Activity navigation; use one empty-state line when neither exists.
 
 ### Spending dashboard
 

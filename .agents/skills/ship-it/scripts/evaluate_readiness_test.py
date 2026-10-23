@@ -181,9 +181,9 @@ class EvaluateReadinessTest(unittest.TestCase):
         state["ci"]["checks"].pop()
         self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
 
-    def test_hosted_shards_require_all_coverage_and_browser_members(self):
+    def test_hosted_shards_require_all_browser_members_and_node_quality(self):
         coverage = {"repository": "Repository contracts", "lint": "Lint and format",
-                    "types-tests-coverage-builds": ["Node quality"] + [f"Coverage shard ({i}/4)" for i in range(1, 5)],
+                    "types-tests-coverage-builds": "Node quality",
                     "browser": [f"Browser acceptance ({project}, {i}/4)"
                                 for project in ("desktop-chromium", "mobile-chromium") for i in range(1, 5)]}
         state = ready_state(verification={"mode": "hosted", "pnpmVerify": "NOT_RUN",

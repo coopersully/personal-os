@@ -63,29 +63,27 @@ Fix a demonstrated bottleneck. Never parallelize expensive full verifiers on thi
 use the existing runner lock. Do not trade complete pagination, policy authentication, fsync/atomic
 checkpoints or final protected merge enforcement for speed. Report latency and source gaps honestly.
 
-## Hosted execution shards
+## Hosted browser shards
 
-CI partitions the complete Vitest suite into four file shards on separate Ubuntu runners. Each
-runner retains two workers and the root configuration's full source coverage inventory. Only the
-shard configuration defers global thresholds: partial suites cannot meet a repository-wide floor.
-Every shard must succeed and upload its blob. Node quality requires exactly the four expected blobs,
-then merges them with the **root** Vitest configuration, enforcing the unchanged 95% statements,
-functions and lines / 94% branches floors. Missing, failed or canceled shards block acceptance.
-Types, production builds and the production dependency audit remain required in Node quality.
-The local `pnpm check:node` and `pnpm verify` retain their complete, unsharded behavior.
+Browser acceptance uses four file shards per browser project, each with its own Ubuntu runner,
+application processes and PostgreSQL container. `fullyParallel: false` and one worker preserve
+ordering within a test file; no shared local worker increase is introduced. Every matrix member
+remains required. Failure artifacts include project and shard to avoid concurrent name collisions.
+Local `pnpm test:e2e` and complete `pnpm verify` retain their unsharded behavior.
 
-Browser acceptance uses four file shards per browser project, each with its own runner, application
-processes and PostgreSQL container. `fullyParallel: false` and one worker preserve ordering within
-a test file; no shared local worker increase is introduced. Every matrix member remains required.
-Artifacts include both project and shard so concurrent failures cannot overwrite one another.
+The boundary owner is the CI workflow. GitHub-hosted capacity and normal test dependency downloads
+remain required; repository permissions remain read-only. Jobs retain their existing timeouts,
+cancellation and retry policy. Missing, failed or canceled selected jobs block acceptance. Local
+discovery proves the test partition, not hosted scheduling, installation reliability or elapsed time.
 
-The boundary owner is the CI workflow. GitHub-hosted job capacity and artifact upload/download are
-required; permissions remain read-only for repository contents. Reports are run-scoped, retained
-for seven days, and never restored from another candidate's cache. Jobs retain bounded timeouts,
-normal cancellation and existing retry policy. Missing artifacts fail closed before merging;
-provider or capacity failure requires diagnosis, not a reduced suite. Green local fixture tests
-cannot prove hosted scheduling, artifact availability or elapsed time.
+Measure the slowest shard, setup time, queueing and total runner minutes separately. Four shards
+trade more runner capacity for lower elapsed time; a large single file or slow browser dependency
+installation can limit gains. Five-minute ordinary PR CI remains a target, not a coverage exception.
 
-Measure the slowest shard and aggregate job, setup time and total runner minutes separately. Four
-shards trade more runner capacity for lower elapsed time; queueing and a large single test file can
-limit gains. Five-minute ordinary PR CI is a target, not a claimed result or a coverage exception.
+Node quality deliberately retains the original unsharded `pnpm check:node`. Vitest 3.2.7 blob
+aggregation merges post-conversion Istanbul maps, which can infer hits for an uncovered nested
+branch from an enclosing covered range in another shard. A measured trial changed unchanged-source
+branch coverage from 94.00% to 96.61%; it is not equivalent evidence. Future coverage distribution
+must demonstrate branch-hit equivalence against the single-run raw-V8 aggregation, including nested
+uncovered branches, before replacing the existing coverage gate. Unchanged threshold numbers alone
+do not prove equivalent enforcement.

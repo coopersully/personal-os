@@ -22,7 +22,7 @@ Compare the workflow against the candidate's verifier inputs; check names alone 
 | --- | --- |
 | `pnpm check:repo` | Repository contracts |
 | `pnpm lint` | Lint and format |
-| `pnpm check:node` (types, coverage, builds) | All four Coverage shard jobs **and** Node quality (complete merged coverage, types, builds) |
+| `pnpm check:node` (types, coverage, builds) | Node quality |
 | `pnpm test:e2e` | All four Browser acceptance shards for **each** of desktop-chromium and mobile-chromium |
 
 Every row must name distinct stage jobs, include every matrix member, and be successful for hosted full equivalence, even if scoped CI omitted

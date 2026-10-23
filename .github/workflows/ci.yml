@@ -115,9 +115,39 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
 
+  coverage-shards:
+    name: Coverage shard (${{ matrix.shard }}/4)
+    needs: changes
+    if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.node == 'true' || needs.changes.outputs.database == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.1.2
+      - uses: actions/setup-node@v7
+        with:
+          cache: pnpm
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - name: Run coverage shard
+        run: pnpm exec vitest run --config vitest.shard.config.ts --coverage --shard=${{ matrix.shard }}/4 --reporter=default --reporter=blob
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: .vitest-reports/blob-${{ matrix.shard }}-4.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
   quality:
     name: Node quality
-    needs: changes
+    needs: [changes, coverage-shards]
     if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.node == 'true' || needs.changes.outputs.database == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -131,11 +161,23 @@ jobs:
           cache: pnpm
           node-version: 22
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check:node
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-shard-*
+          path: .vitest-reports
+          merge-multiple: true
+      - name: Test coverage aggregation contract
+        run: node --test .github/scripts/coverage-shards.integration.test.mjs
+      - name: Require every coverage shard
+        run: node .github/scripts/coverage-shards.mjs .vitest-reports 4
+      - name: Enforce complete coverage
+        run: pnpm exec vitest run --coverage --merge-reports=.vitest-reports
+      - run: pnpm typecheck
+      - run: pnpm build
       - run: pnpm audit --prod
 
   browser:
-    name: Browser acceptance (${{ matrix.project }})
+    name: Browser acceptance (${{ matrix.project }}, ${{ matrix.shard }}/4)
     needs: changes
     if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.browser == 'true' }}
     runs-on: ubuntu-latest
@@ -144,6 +186,7 @@ jobs:
       fail-fast: false
       matrix:
         project: [desktop-chromium, mobile-chromium]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -159,11 +202,11 @@ jobs:
           grep -rl "dl.google.com/linux/chrome" /etc/apt/sources.list.d 2>/dev/null \
             | xargs -r sudo rm -f
           pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e --project=${{ matrix.project }}
+      - run: pnpm test:e2e --project=${{ matrix.project }} --shard=${{ matrix.shard }}/4
       - if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report-${{ matrix.project }}
+          name: playwright-report-${{ matrix.project }}-${{ matrix.shard }}
           path: |
             playwright-report
             test-results
@@ -213,6 +256,7 @@ jobs:
       - infrastructure
       - repository
       - lint-and-format
+      - coverage-shards
       - quality
       - browser
       - desktop

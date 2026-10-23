@@ -181,6 +181,29 @@ class EvaluateReadinessTest(unittest.TestCase):
         state["ci"]["checks"].pop()
         self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
 
+    def test_hosted_shards_require_all_coverage_and_browser_members(self):
+        coverage = {"repository": "Repository contracts", "lint": "Lint and format",
+                    "types-tests-coverage-builds": ["Node quality"] + [f"Coverage shard ({i}/4)" for i in range(1, 5)],
+                    "browser": [f"Browser acceptance ({project}, {i}/4)"
+                                for project in ("desktop-chromium", "mobile-chromium") for i in range(1, 5)]}
+        state = ready_state(verification={"mode": "hosted", "pnpmVerify": "NOT_RUN",
+            "equivalenceVerified": True, "localOnlyComplete": True, "equivalentChecks": coverage})
+        names = [name for value in coverage.values() for name in (value if isinstance(value, list) else [value])]
+        for name in names:
+            state["ci"]["expectedSelectedChecks"].append(name)
+            state["ci"]["expectedCheckApps"][name] = 15368
+            state["ci"]["checks"].append(dict(state["ci"]["checks"][0], name=name))
+        self.assertEqual(evaluate(state)["decision"], "MERGE")
+        for name in names:
+            check = next(check for check in state["ci"]["checks"] if check["name"] == name)
+            for conclusion in ("FAILURE", "CANCELLED", "SKIPPED"):
+                check["conclusion"] = conclusion
+                self.assertNotEqual(evaluate(state)["decision"], "MERGE", (name, conclusion))
+            check["conclusion"] = "SUCCESS"
+            state["ci"]["checks"].remove(check)
+            self.assertNotEqual(evaluate(state)["decision"], "MERGE", name)
+            state["ci"]["checks"].append(check)
+
     def test_selected_job_must_exist_and_succeed_with_expected_provider(self):
         state = ready_state()
         state["ci"]["expectedSelectedChecks"] = ["Browser acceptance"]

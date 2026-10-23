@@ -212,6 +212,7 @@ const fullScopeJobs = [
   "repository",
   "lint-and-format",
   "quality",
+  "coverage-shards",
   "browser",
   "desktop",
 ];
@@ -267,4 +268,49 @@ test("full opt-in rejects a missing gate even when later jobs retain theirs", ()
       `A later job must not satisfy the missing ${job} gate.`,
     );
   }
+});
+
+test("coverage merge requires exactly one report from every shard", async () => {
+  const { validateCoverageShards } = await import("./coverage-shards.mjs");
+  const reports = [1, 2, 3, 4].map((index) => `blob-${index}-4.json`);
+  assert.doesNotThrow(() => validateCoverageShards([...reports].reverse(), 4));
+  for (const files of [
+    [],
+    reports.slice(1),
+    [...reports, "blob.json"],
+    [reports[0], reports[0], ...reports.slice(2)],
+    reports.map((name) => name.replace("-4.json", "-3.json")),
+  ]) {
+    assert.throws(() => validateCoverageShards(files, 4), /Expected exactly/);
+  }
+  for (const count of [0, 1, -1, 2.5, Number.NaN]) {
+    assert.throws(() => validateCoverageShards(reports, count), /Invalid shard count/);
+  }
+});
+
+test("sharded CI retains complete coverage enforcement and browser matrix", () => {
+  const workflow = readFileSync(resolve(scriptDirectory, "../workflows/ci.yml"), "utf8");
+  const blocks = workflowJobBlocks(workflow);
+  const quality = blocks.find((block) => block.startsWith("  quality:\n"));
+  const shards = blocks.find((block) => block.startsWith("  coverage-shards:\n"));
+  const browser = blocks.find((block) => block.startsWith("  browser:\n"));
+  const required = blocks.find((block) => block.startsWith("  required:\n"));
+  assert.match(quality, /needs: \[changes, coverage-shards\]/);
+  assert.match(quality, /node \.github\/scripts\/coverage-shards.mjs \.vitest-reports 4/);
+  assert.match(quality, /pnpm exec vitest run --coverage --merge-reports=\.vitest-reports/);
+  assert.doesNotMatch(quality, /vitest.shard.config|thresholds|continue-on-error/);
+  assert.match(quality, /pnpm typecheck/);
+  assert.match(quality, /pnpm build/);
+  assert.match(quality, /pnpm audit --prod/);
+  assert.match(shards, /shard: \[1, 2, 3, 4\]/);
+  assert.match(shards, /--coverage --shard=\$\{\{ matrix.shard \}\}\/4/);
+  assert.match(shards, /include-hidden-files: true/);
+  assert.match(shards, /if-no-files-found: error/);
+  assert.match(browser, /shard: \[1, 2, 3, 4\]/);
+  assert.match(browser, /--project=\$\{\{ matrix.project \}\} --shard=\$\{\{ matrix.shard \}\}\/4/);
+  assert.match(required, /- coverage-shards\n/);
+  assert.match(required, /- quality\n/);
+  assert.match(required, /- browser\n/);
+  assert.equal(requiredGate({ "coverage-shards": "failure", quality: "skipped" }), false);
+  assert.equal(requiredGate({ "coverage-shards": "cancelled", quality: "skipped" }), false);
 });

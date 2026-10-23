@@ -7,7 +7,15 @@ import {
   useInfiniteQuery,
   useQuery,
 } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -18,7 +26,7 @@ import {
   financeConnectionProblems,
   readConnectionSnoozes,
 } from "../features/connections/recovery-policy";
-import { canRetryRead } from "../lib/read-recovery";
+import { canRetryRead, useReadRecovery } from "../lib/read-recovery";
 import { SettingsFeedbackContext, useSettingsError } from "../lib/settings-feedback";
 import { AppRecovery } from "./app-recovery";
 import { QueryFeedback } from "./async-state";
@@ -203,6 +211,9 @@ it("blocks failed reads, retries safely, and retains content until success witho
   );
   expect(screen.getByRole("button", { name: "Trying again…" })).toHaveFocus();
   expect(screen.getByRole("dialog")).toBeVisible();
+  // aria-disabled preserves focus, so activation must also be guarded in the handler.
+  fireEvent.click(screen.getByRole("button", { name: "Trying again…" }));
+  expect(fetcher).toHaveBeenCalledTimes(2);
   await act(async () => succeed("Loaded records"));
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   expect(screen.getByText("Loaded records")).toBeVisible();
@@ -535,4 +546,129 @@ it("preserves an already-open editor and its draft beneath recovery", async () =
   await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }));
   expect(await screen.findByRole("dialog", { name: "Existing editor" })).toBeVisible();
   expect(screen.getByRole("textbox", { name: "Draft" })).toHaveValue("Keep my draft");
+});
+
+it("releases read recovery when disabled and does not retain a removed query", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  clients.push(client);
+  const fetcher = vi.fn().mockRejectedValue(new Error("offline"));
+  const { result, rerender } = renderHook(
+    ({ enabled }) => {
+      useQuery({ queryKey: ["recoverable"], queryFn: fetcher });
+      return useReadRecovery(enabled);
+    },
+    {
+      initialProps: { enabled: false },
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    },
+  );
+  await waitFor(() => expect(client.getQueryState(["recoverable"])?.status).toBe("error"));
+  expect(result.current).toEqual([]);
+  rerender({ enabled: true });
+  await waitFor(() => expect(result.current).toHaveLength(1));
+  rerender({ enabled: false });
+  expect(result.current).toEqual([]);
+  rerender({ enabled: true });
+  await waitFor(() => expect(result.current).toHaveLength(1));
+  fetcher.mockResolvedValue("recovered");
+  await act(async () => client.removeQueries({ queryKey: ["recoverable"] }));
+  await waitFor(() => expect(result.current).toEqual([]));
+});
+
+it("leaves installation-owned read failures with their own feedback and recovery", async () => {
+  function InstallationRead() {
+    const query = useQuery({
+      queryKey: ["installation-status"],
+      queryFn: () => Promise.reject(new Error("native status unavailable")),
+      meta: { sessionIndependent: true },
+    });
+    useSettingsError(query.error, "Couldn’t check installation");
+    return null;
+  }
+  setup(
+    <SettingsFeedbackContext.Provider value={true}>
+      <InstallationRead />
+    </SettingsFeedbackContext.Provider>,
+  );
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith("Couldn’t check installation", expect.anything()),
+  );
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+it("hands a retry that becomes forbidden back to the access correction flow", async () => {
+  const fetcher = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("offline"))
+    .mockRejectedValue(
+      new ApiClientError({ status: 403, code: "forbidden", message: "access revoked" }),
+    );
+  setup(<Read fetcher={fetcher} />);
+  await userEvent.setup().click(await screen.findByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(screen.getByText("Couldn’t load records")).toBeVisible();
+});
+
+it("still signs out safely when the browser refuses snooze removal", async () => {
+  mocks.connectors.mockResolvedValue([account()]);
+  const { client, rerender } = setup();
+  await userEvent
+    .setup()
+    .click(await screen.findByRole("button", { name: "Snooze for 15 minutes" }));
+  vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+    throw new Error("unavailable");
+  });
+  rerender(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <AppRecovery owner={undefined} accountBlocked={false}>
+          <p>Signed out</p>
+        </AppRecovery>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  expect(screen.getByText("Signed out")).toBeVisible();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+it.each([
+  ["service_attention", "A service issue is preventing updates."],
+  ["retrying", "Sync is delayed. nohmi is retrying automatically."],
+] as const)("explains %s without asking users to reconnect valid credentials", async (state, copy) => {
+  mocks.connectors.mockResolvedValue([{ ...account(state), label: "", email: null }]);
+  setup();
+  const dialog = await screen.findByRole("dialog", { name: "Check your connections" });
+  expect(dialog).toHaveTextContent("Google account");
+  expect(dialog).toHaveTextContent(copy);
+  expect(dialog).not.toHaveTextContent("Reconnect this account");
+});
+
+it("recovers a failed read in the mobile drawer without showing connection choices", async () => {
+  mocks.mobile = true;
+  const fetcher = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue("Ready");
+  setup(<Read fetcher={fetcher} />);
+  const dialog = await screen.findByRole("dialog", { name: "Let’s reconnect" });
+  expect(dialog).toHaveAttribute("data-slot", "drawer-content");
+  expect(screen.queryByRole("button", { name: "Snooze for 15 minutes" })).not.toBeInTheDocument();
+  await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(screen.getByText("Ready")).toBeVisible();
+});
+
+it("clears repaired reminders in memory when storage stops accepting writes", async () => {
+  mocks.connectors.mockResolvedValue([account()]);
+  const { client } = setup();
+  await userEvent
+    .setup()
+    .click(await screen.findByRole("button", { name: "Snooze for 15 minutes" }));
+  vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+    throw new Error("unavailable");
+  });
+  await act(async () => client.setQueryData(["connectors"], [account("ready")]));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  await act(async () => client.setQueryData(["connectors"], [account()]));
+  expect(await screen.findByRole("dialog", { name: "Check your connections" })).toBeVisible();
 });

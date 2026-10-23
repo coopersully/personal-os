@@ -82,10 +82,18 @@ test("two editors retain attempted workspace values and explicitly recover repea
     );
     await second.getByRole("button", { name: "Refresh latest settings" }).click();
     await failedRead;
-    await expect(second.getByText("Couldn’t load preferences.")).toBeVisible();
-    await expect(second.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
+    const recovery = second.getByRole("dialog", { name: "Let’s reconnect" });
+    await expect(recovery).toBeVisible();
+    await expect(second.getByText("Your change: day")).toBeAttached();
+    await expect(
+      second.getByRole("button", { name: "Reapply reviewed change", includeHidden: true }),
+    ).toBeDisabled();
     expect(secondWrites).toBe(1);
     await second.unroute(`**${path}`);
+    await recovery.getByRole("button", { name: "Try again" }).click();
+    await expect(recovery).not.toBeVisible();
+    // Transport recovery does not approve or reapply the rejected edit. Review the latest
+    // conflict snapshot explicitly before the existing reapply flow can become available.
     await second.getByRole("button", { name: "Refresh latest settings" }).click();
     await expect(second.getByText("Latest: month")).toBeVisible();
     await second.screenshot({ path: info.outputPath("reviewed-conflict.png"), fullPage: true });

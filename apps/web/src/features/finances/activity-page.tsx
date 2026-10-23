@@ -232,7 +232,7 @@ function Activity({ readActivity, readEvidence }: Props) {
       <ItemGroup aria-label="Financial activity">
         {groupFinanceActivity(page?.entries ?? []).map((group) =>
           group.family && group.entries.length > 1 ? (
-            <Item key={group.key} role="listitem">
+            <Item key={group.key} variant="outline" role="listitem">
               <ItemContent>
                 <Collapsible>
                   <CollapsibleTrigger asChild>
@@ -242,10 +242,11 @@ function Activity({ readActivity, readEvidence }: Props) {
                   </CollapsibleTrigger>
                   <p className="text-xs text-muted-foreground break-all">Run · {group.runId}</p>
                   <CollapsibleContent>
-                    <ItemGroup>
+                    <ItemGroup className="mt-3 gap-3">
                       {group.entries.map((entry) => (
                         <FinanceActivityEntry
                           key={`${entry.id}:${entry.evidence?.nextCursor ?? entry.occurredAt}`}
+                          nested
                           entry={entry}
                           readEvidence={readEvidence}
                           onAccessDenied={clearAccess}

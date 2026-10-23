@@ -36,8 +36,10 @@ export function FinanceActivityEntry({
   entry,
   readEvidence,
   onAccessDenied,
+  nested = false,
 }: {
   entry: Entry;
+  nested?: boolean;
   readEvidence?: ReadFinanceActivityEvidence | undefined;
   onAccessDenied?: () => void;
 }) {
@@ -85,7 +87,7 @@ export function FinanceActivityEntry({
     }
   }
   return (
-    <Item role="listitem">
+    <Item variant={nested ? "secondary" : "outline"} role="listitem">
       <ItemContent>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <span className="font-medium break-words">{entry.action}</span>

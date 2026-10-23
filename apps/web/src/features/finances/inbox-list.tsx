@@ -41,7 +41,7 @@ export function FinanceInboxList({ result }: { result: FinanceToolResult<Finance
       )}
       <ItemGroup>
         {visible.map((item) => (
-          <Item key={item.id}>
+          <Item key={item.id} variant="outline">
             <ItemContent>
               <ItemTitle>
                 {item.context?.merchant ?? item.prompt ?? "Review financial activity"}

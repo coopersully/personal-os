@@ -5,6 +5,7 @@ import type {
 } from "@personal-os/domain";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Item } from "@/components/ui/item";
 import { formatMoney } from "./format";
 export function SpendingList({
   groups,
@@ -81,21 +82,25 @@ export function SpendingList({
           Monthly budget used {sort === "budget" ? (ascending ? "↑" : "↓") : ""}
         </Button>
       </div>
-      <ul>
+      <ul className="mt-3 flex flex-col gap-3">
         {ordered.map((group) => (
-          <li key={group.id}>
-            {row(group)}
-            {group.categories.length ? (
-              <details className="pl-4">
-                <summary className="cursor-pointer text-sm">Categories in {group.label}</summary>
-                <ul>
-                  {[...group.categories].sort(compare).map((category) => (
-                    <li key={category.id}>{row(category)}</li>
-                  ))}
-                </ul>
-              </details>
-            ) : null}
-          </li>
+          <Item key={group.id} variant="outline" className="block" asChild>
+            <li>
+              {row(group)}
+              {group.categories.length ? (
+                <details className="pl-4">
+                  <summary className="cursor-pointer text-sm">Categories in {group.label}</summary>
+                  <ul className="mt-3 flex flex-col gap-2">
+                    {[...group.categories].sort(compare).map((category) => (
+                      <Item key={category.id} variant="secondary" className="block" asChild>
+                        <li>{row(category)}</li>
+                      </Item>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+            </li>
+          </Item>
         ))}
       </ul>
     </section>

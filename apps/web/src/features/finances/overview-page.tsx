@@ -124,7 +124,7 @@ export function FinanceOverviewPage() {
           ) : null}
           {reviewsKnown ? (
             <ItemGroup>
-              <Item>
+              <Item variant="outline">
                 <ItemContent>
                   <ItemTitle>
                     {reviewCount
@@ -157,7 +157,7 @@ export function FinanceOverviewPage() {
         {reviewsKnown && reviewCount === 0 ? (
           <OverviewSection title="Next step">
             <ItemGroup>
-              <Item>
+              <Item variant="outline">
                 <ItemContent>
                   <ItemTitle>
                     {snapshot.data && !snapshot.data.data.ledger.trustworthy
@@ -201,7 +201,7 @@ export function FinanceOverviewPage() {
           <FinanceSourceState label="Complete plan" query={budget} />
           {plan ? (
             <ItemGroup>
-              <Item>
+              <Item variant="outline">
                 <ItemContent>
                   <ItemTitle>
                     {plan.effectiveFrom}{" "}
@@ -252,7 +252,7 @@ export function FinanceOverviewPage() {
           <FinanceSourceState label="Cash-flow context" query={status} />
           {status.data ? (
             <ItemGroup>
-              <Item>
+              <Item variant="outline">
                 <ItemContent>
                   <ItemTitle>Cash-flow outlook</ItemTitle>
                   <ItemDescription>
@@ -265,7 +265,7 @@ export function FinanceOverviewPage() {
                   </Button>
                 </ItemActions>
               </Item>
-              <Item>
+              <Item variant="outline">
                 <ItemContent>
                   <ItemTitle>Outstanding reimbursements</ItemTitle>
                   <ItemDescription>
@@ -286,7 +286,7 @@ export function FinanceOverviewPage() {
           <FinanceSourceState label="Wealth-building priorities" query={playbook} />
           {nextPriority ? (
             <ItemGroup>
-              <Item>
+              <Item variant="outline">
                 <ItemContent>
                   <ItemTitle>{nextPriority}</ItemTitle>
                   <ItemDescription>
@@ -316,7 +316,7 @@ export function FinanceOverviewPage() {
         <FinanceSourceState label="Maintenance history" query={maintenance} />
         {latestReview ? (
           <ItemGroup>
-            <Item>
+            <Item variant="outline">
               <ItemContent>
                 <ItemTitle>Latest period review</ItemTitle>
                 <ItemDescription>
@@ -344,7 +344,7 @@ export function FinanceOverviewPage() {
             <CollapsibleContent>
               <ItemGroup>
                 {maintenance.data.items.map((run) => (
-                  <Item key={run.run?.id ?? run.recovery?.legacyRunId}>
+                  <Item key={run.run?.id ?? run.recovery?.legacyRunId} variant="outline">
                     <ItemContent>
                       <ItemTitle>
                         {run.run ? maintenanceLabels[run.run.status] : "Maintenance recovery"}
@@ -442,7 +442,7 @@ function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: 
           {rows.length ? (
             <ItemGroup>
               {rows.slice(0, 3).map((row) => (
-                <Item key={row.key}>
+                <Item key={row.key} variant="outline">
                   <ItemContent>
                     <ItemTitle>{row.displayName}</ItemTitle>
                     <ItemDescription>

@@ -4,6 +4,9 @@ import { selectSetting, setSettingTime } from "./settings-controls.js";
 test("settings support field search, ritual history, and resumable setup replay", async ({
   page,
 }) => {
+  // This compound acceptance flow performs nine hard loads/reloads; CI traces
+  // spend about31s on those alone. Keep individual assertions at10s.
+  test.setTimeout(90_000);
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");

@@ -575,3 +575,44 @@ it("preserves a ritual draft through a conflict and unavailable refresh until ex
   );
   expect(mocks.save).toHaveBeenCalledTimes(2);
 });
+
+it("saves schedule presets, prevents removing the last custom day, and restores every day", async () => {
+  mocks.list.mockResolvedValue({ rituals: [] });
+  mocks.save.mockReset().mockImplementation(async (input) => ({
+    ...input,
+    id: input.kind,
+    revision: input.expectedRevision + 1,
+  }));
+  openSubpage("morning");
+  fireEvent.click(await screen.findByRole("button", { name: "Edit step 1" }));
+  const schedule = screen.getByLabelText("Include on");
+  for (const [mode, days] of [
+    ["weekdays", [1, 2, 3, 4, 5]],
+    ["weekends", [0, 6]],
+  ] as const) {
+    fireEvent.change(schedule, { target: { value: mode } });
+    await waitFor(() =>
+      expect(mocks.save).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          steps: expect.arrayContaining([expect.objectContaining({ days })]),
+        }),
+      ),
+    );
+  }
+  fireEvent.change(schedule, { target: { value: "custom" } });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Saturday" }));
+  expect(screen.getByRole("checkbox", { name: "Sunday" })).toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "Sunday" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Monday" }));
+  expect(screen.getByRole("checkbox", { name: "Sunday" })).toBeEnabled();
+  await waitFor(() =>
+    expect(mocks.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        steps: expect.arrayContaining([expect.objectContaining({ days: [0, 1] })]),
+      }),
+    ),
+  );
+  fireEvent.change(schedule, { target: { value: "daily" } });
+  await waitFor(() => expect(mocks.save.mock.calls.at(-1)?.[0].steps[0].days).toBeUndefined());
+  expect(screen.queryByRole("group", { name: "Days of the week" })).not.toBeInTheDocument();
+});

@@ -268,3 +268,33 @@ it("honors reduced motion while allowing manual scrubbing and releases a capture
   expect(disconnect).toHaveBeenCalledTimes(1);
   expect(listeners.size).toBe(0);
 });
+
+it.each([
+  "display",
+  "texture",
+])("keeps the ritual usable without a %s canvas context", (unavailable) => {
+  vi.stubGlobal("CanvasRenderingContext2D", class {});
+  const frame = vi.fn();
+  vi.stubGlobal("requestAnimationFrame", frame);
+  let first = true;
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => {
+    const display = first;
+    first = false;
+    return (
+      (display ? unavailable === "display" : unavailable === "texture") ? null : {}
+    ) as CanvasRenderingContext2D | null;
+  });
+  const view = render(
+    <div className="ritual-surface">
+      <RitualClouds kind="morning" />
+      <button type="button">Continue ritual</button>
+    </div>,
+  );
+  const button = view.getByRole("button", { name: "Continue ritual" });
+  const click = vi.fn();
+  button.addEventListener("click", click);
+  fireEvent.click(button);
+  expect(click).toHaveBeenCalledOnce();
+  expect(view.container.querySelector("canvas")).toHaveAttribute("aria-hidden", "true");
+  expect(frame).not.toHaveBeenCalled();
+});

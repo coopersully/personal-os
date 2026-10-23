@@ -64,6 +64,7 @@ function mount(child: React.ReactNode) {
 }
 beforeEach(() => {
   vi.resetAllMocks();
+  localStorage.clear();
   mocks.history.mockResolvedValue({ items: [occurrence], nextCursor: null });
   mocks.export.mockResolvedValue({ occurrences: [occurrence] });
   mocks.remove.mockResolvedValue(undefined);
@@ -523,4 +524,188 @@ it("exposes advanced columns and exports submitted answers without leaking draft
   expect(csv).toContain('"Time Zone"');
   expect(csv).toContain("A useful reflection");
   expect(csv).not.toContain("Unsubmitted private draft");
+});
+
+it("distinguishes saved, empty, unchecked, removed-step and rejected-action evidence", async () => {
+  const row = {
+    ...occurrence,
+    status: "skipped",
+    definition: {
+      ...occurrence.definition,
+      steps: [
+        { id: "done", kind: "checkbox", label: "Water" },
+        { id: "unchecked", kind: "checkbox", label: "Stretch", optional: true },
+        { id: "empty", kind: "short_text", label: "Reflection", optional: true },
+      ],
+    },
+    responses: [
+      {
+        id: "done",
+        stepId: "done",
+        value: true,
+        submitted: true,
+        recordedAt: "2026-09-29T10:00:00Z",
+      },
+      {
+        id: "unchecked",
+        stepId: "unchecked",
+        value: false,
+        submitted: false,
+        recordedAt: "2026-09-29T10:01:00Z",
+      },
+      {
+        id: "empty",
+        stepId: "empty",
+        value: "",
+        submitted: true,
+        recordedAt: "2026-09-29T10:02:00Z",
+      },
+      {
+        id: "removed",
+        stepId: "removed",
+        value: "Past answer",
+        submitted: true,
+        recordedAt: "2026-09-29T10:03:00Z",
+      },
+    ],
+    actions: [
+      {
+        id: "rejected",
+        kind: "skip_applied",
+        outcome: "rejected",
+        recordedAt: "2026-09-29T10:04:00Z",
+      },
+      {
+        id: "applied",
+        kind: "skip_applied",
+        outcome: "applied",
+        recordedAt: "2026-09-29T10:05:00Z",
+      },
+    ],
+  };
+  mocks.history.mockResolvedValue({ items: [row], nextCursor: null });
+  mount(<RitualHistory />);
+  fireEvent.click(await screen.findByRole("button", { name: /Morning Ritual/ }));
+  const dialog = screen.getByRole("dialog");
+  expect(within(dialog).getByText("Done", { exact: true })).toBeVisible();
+  expect(within(dialog).getByText("Not done (draft)")).toBeVisible();
+  expect(within(dialog).getByText("No answer", { exact: true })).toBeVisible();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Interaction Log" }));
+  expect(within(dialog).getByText("Unchecked (draft)", { exact: false })).toBeVisible();
+  expect(within(dialog).getByText("Removed step:")).toBeVisible();
+  expect(within(dialog).getByText("Not applied", { exact: false })).toBeVisible();
+  expect(within(dialog).getByText("Recorded", { exact: false })).toBeVisible();
+});
+
+it("explains configuration cancellation in the outcome column and filters it server-side", async () => {
+  mocks.history.mockResolvedValue({
+    items: [{ ...occurrence, status: "cancelled_configuration", responses: [], actions: [] }],
+    total: 1,
+    nextCursor: null,
+  });
+  mount(<RitualHistory />);
+  await screen.findByRole("button", { name: /Morning Ritual/ });
+  fireEvent.keyDown(screen.getByRole("button", { name: "Table actions" }), { key: "ArrowDown" });
+  fireEvent.click(screen.getByRole("menuitem", { name: "Table Options" }));
+  const written = screen.getByRole("checkbox", { name: "Written Answer" });
+  if (written.getAttribute("data-state") !== "checked") fireEvent.click(written);
+  const outcome = screen.getByRole("checkbox", { name: "Outcome" });
+  if (outcome.getAttribute("data-state") !== "checked") fireEvent.click(outcome);
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  expect(screen.getByText("Settings changed before this ritual finished")).toBeVisible();
+  expect(screen.getByText("No submitted written answer")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+  fireEvent.keyDown(screen.getByRole("button", { name: /^Status:/ }), { key: "ArrowDown" });
+  fireEvent.click(screen.getByRole("menuitemradio", { name: "Cancelled" }));
+  await waitFor(() =>
+    expect(mocks.history).toHaveBeenLastCalledWith(
+      undefined,
+      expect.objectContaining({ status: "cancelled_configuration" }),
+    ),
+  );
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "Filters" })).getByRole("button", { name: "Done" }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: /Morning Ritual/ }));
+  expect(
+    within(screen.getByRole("dialog")).queryByRole("button", { name: "Interaction Log" }),
+  ).not.toBeInTheDocument();
+  expect(within(screen.getByRole("dialog")).getAllByText("Not done")).toHaveLength(2);
+});
+
+it("recovers a now-empty cursor page without trapping the user beyond the last available record", async () => {
+  mocks.history.mockImplementation((cursor) =>
+    Promise.resolve(
+      cursor ? { items: [], nextCursor: null } : { items: [occurrence], nextCursor: "next" },
+    ),
+  );
+  mount(<RitualHistory />);
+  await screen.findByRole("button", { name: /Morning Ritual/ });
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Previous page" }));
+  expect(await screen.findByRole("button", { name: /Morning Ritual/ })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
+});
+
+it("applies month navigation and page-size changes through server criteria with a reset cursor", async () => {
+  mocks.history.mockResolvedValue({ items: [occurrence], nextCursor: "next" });
+  mount(<RitualHistory />);
+  await screen.findByRole("button", { name: /Morning Ritual/ });
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await waitFor(() => expect(mocks.history).toHaveBeenLastCalledWith("next", expect.anything()));
+  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+  fireEvent.keyDown(screen.getByRole("button", { name: /^Period:/ }), { key: "ArrowDown" });
+  fireEvent.click(screen.getByRole("menuitemradio", { name: "This Month" }));
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "Filters" })).getByRole("button", { name: "Done" }),
+  );
+  await waitFor(() =>
+    expect(mocks.history).toHaveBeenLastCalledWith(
+      undefined,
+      expect.objectContaining({ dateFrom: expect.stringMatching(/-01$/) }),
+    ),
+  );
+  const initial = mocks.history.mock.calls.at(-1)?.[1].dateFrom;
+  fireEvent.click(screen.getByRole("button", { name: "Previous month" }));
+  await waitFor(() => expect(mocks.history.mock.calls.at(-1)?.[1].dateFrom).not.toBe(initial));
+  fireEvent.click(screen.getByRole("button", { name: "Next month" }));
+  await waitFor(() => expect(mocks.history.mock.calls.at(-1)?.[1].dateFrom).toBe(initial));
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await waitFor(() => expect(mocks.history).toHaveBeenLastCalledWith("next", expect.anything()));
+  fireEvent.change(await screen.findByRole("combobox", { name: "Rows per page" }), {
+    target: { value: "25" },
+  });
+  await waitFor(() =>
+    expect(mocks.history).toHaveBeenLastCalledWith(
+      undefined,
+      expect.objectContaining({ limit: 25 }),
+    ),
+  );
+});
+
+it("summarizes multiple accepted snoozes while excluding a cancelled snooze", async () => {
+  mocks.history.mockResolvedValue({
+    items: [
+      {
+        ...occurrence,
+        actions: [
+          { id: "one", kind: "snooze_confirmed", outcome: "applied", recordedAt: occurrence.dueAt },
+          { id: "two", kind: "snooze_confirmed", outcome: "applied", recordedAt: occurrence.dueAt },
+          {
+            id: "three",
+            kind: "snooze_cancelled",
+            outcome: "applied",
+            recordedAt: occurrence.dueAt,
+          },
+        ],
+      },
+    ],
+    nextCursor: null,
+  });
+  localStorage.setItem(
+    "nohmi:data-view:ritual-history:account",
+    JSON.stringify({ order: ["ritual", "outcome"], hidden: [] }),
+  );
+  mount(<RitualHistory />);
+  expect(await screen.findByText(/Snoozed 2 times/)).toBeVisible();
 });

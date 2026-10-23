@@ -293,3 +293,13 @@ it("keeps mobile selection separate from opening and preserves wrapped custom de
   await user.click(screen.getByRole("button", { name: "Open First record" }));
   expect(props.onOpen).toHaveBeenCalledExactlyOnceWith(rows[0]);
 });
+
+it("resizes a column with a pointer and persists the accepted width", () => {
+  render(<DataTable {...props} rows={rows} />);
+  const resizer = screen.getByRole("separator", { name: "Resize Name" });
+  fireEvent.mouseDown(resizer, { clientX: 100 });
+  fireEvent.mouseMove(document, { clientX: 140 });
+  fireEvent.mouseUp(document, { clientX: 140 });
+  expect(resizer).toHaveAttribute("aria-valuenow", "200");
+  expect(JSON.parse(localStorage.getItem("nohmi:data-view:table-test")!).sizing.name).toBe(200);
+});

@@ -97,3 +97,36 @@ it("keeps read-only settings unavailable and releases forwarded refs on unmount"
   unmount();
   expect(ref).toHaveBeenLastCalledWith(null);
 });
+
+it("keeps a controlled value authoritative on form reset and accepts bounded 24-hour entry", async () => {
+  const user = userEvent.setup();
+  const change = vi.fn();
+  const { container } = render(
+    <form>
+      <SettingsTimeInput
+        type="time"
+        name="time"
+        aria-label="Time"
+        value="10:00"
+        min="09:00"
+        max="17:00"
+        onChange={change}
+      />
+      <button type="reset">Reset</button>
+    </form>,
+  );
+  const input = screen.getByRole("combobox", { name: "Time" });
+  await user.click(input);
+  await user.clear(input);
+  await user.type(input, "18:00");
+  expect(await screen.findByText("No matching times.")).toBeVisible();
+  await user.keyboard("{Escape}");
+  await user.click(screen.getByRole("button", { name: "Reset" }));
+  expect(input).toHaveValue("10:00 AM");
+  expect(new FormData(container.querySelector("form")!).get("time")).toBe("10:00");
+  await user.click(input);
+  await user.clear(input);
+  await user.type(input, "17");
+  await user.click(await screen.findByRole("option", { name: "5:00 PM" }));
+  expect(change).toHaveBeenCalledTimes(1);
+});

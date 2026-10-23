@@ -14,6 +14,7 @@ import {
 import { KeyMetric, KeyMetrics } from "@/components/key-metrics";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import {
@@ -430,13 +431,15 @@ function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: 
       ) : upcoming.data ? (
         <>
           {rows.length ? (
-            <div className="min-w-0 rounded-xl bg-card p-3">
-              <Table aria-label="Upcoming expected money">
+            <Card size="sm" className="min-w-0 overflow-hidden">
+              <Table aria-label="Upcoming expected money" className="table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Expected date</TableHead>
-                    <TableHead>Item</TableHead>
-                    <TableHead className="text-right">Expected amount</TableHead>
+                    <TableHead className="w-28 px-4 sm:w-36">Expected date</TableHead>
+                    <TableHead className="px-4">Item</TableHead>
+                    <TableHead className="w-32 px-4 text-right whitespace-normal leading-tight sm:w-40">
+                      Expected amount
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -454,10 +457,10 @@ function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: 
                             navigate(destination);
                         }}
                       >
-                        <TableCell>
+                        <TableCell className="px-4 py-3 text-muted-foreground">
                           {formatDateOnly(row.localDate, { dateStyle: "medium" })}
                         </TableCell>
-                        <TableCell className="min-w-36 whitespace-normal">
+                        <TableCell className="px-4 py-3 whitespace-normal break-words">
                           <Link
                             to={destination}
                             className="rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground/50"
@@ -471,7 +474,7 @@ function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: 
                           ) : null}
                         </TableCell>
                         <TableCell
-                          className={`text-right font-medium tabular-nums ${row.remainingExpectedCents === null ? "text-muted-foreground" : row.source.kind === "income" ? "text-success" : "text-destructive"}`}
+                          className={`px-4 py-3 text-right font-medium tabular-nums ${row.remainingExpectedCents === null ? "text-muted-foreground" : row.source.kind === "income" ? "text-success" : "text-destructive"}`}
                         >
                           {row.remainingExpectedCents === null
                             ? "Amount varies"
@@ -488,45 +491,43 @@ function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: 
                   })}
                 </TableBody>
               </Table>
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
-                <span>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 text-sm text-muted-foreground">
+                <span className="text-xs">
                   {start + 1}–{Math.min(start + pageSize, rows.length)} of {rows.length}
                 </span>
                 <Pagination aria-label="Upcoming money pagination" className="mx-0 w-auto">
-                  <PaginationContent>
+                  <PaginationContent className="gap-2">
                     <PaginationItem>
                       <Button
-                        size="sm"
+                        size="icon-sm"
                         variant="outline"
                         aria-label="Previous page"
                         disabled={currentPage === 0}
                         onClick={() => setPage(currentPage - 1)}
                       >
                         <ChevronLeftIcon />
-                        Previous
                       </Button>
                     </PaginationItem>
                     <PaginationItem>
-                      <span className="px-2">
+                      <span className="px-1 text-xs">
                         Page {currentPage + 1} of {Math.ceil(rows.length / pageSize)}
                       </span>
                     </PaginationItem>
                     <PaginationItem>
                       <Button
-                        size="sm"
+                        size="icon-sm"
                         variant="outline"
                         aria-label="Next page"
                         disabled={start + pageSize >= rows.length}
                         onClick={() => setPage(currentPage + 1)}
                       >
-                        Next
                         <ChevronRightIcon />
                       </Button>
                     </PaginationItem>
                   </PaginationContent>
                 </Pagination>
               </div>
-            </div>
+            </Card>
           ) : (
             <p>
               {upcoming.data.unavailableSources.length

@@ -49,7 +49,9 @@ Recorded reviews and maintenance link to Activity evidence rather than implying 
 action. Upcoming money uses the shared table with expected date, linked item and signed expected amount. Income uses success color and +;
 outflows use destructive color and −, matching Transactions, without a trailing currency code.
 Rows open the corresponding income/bill source in Cash flow; item links also support keyboard navigation. Show ten canonical occurrences per page across 30 owner-local dates, with
-standard previous/next chevrons, page count and visible range below the table. Six demo items fit
+standard previous/next icon buttons, page count and visible range in a separated footer.
+The shared Card contains an edge-to-edge table with aligned 16px horizontal cell padding,
+compact rows and wrapping item names; it has no extra padded frame around the table. Six demo items fit
 on one page. Do not repeat the date-range/timezone explanatory line above it. Preserve remaining
 amounts for partial occurrences, explicit currencies and incomplete-source caveats. Its Cash flow
 link retains the exact agenda range. Expected movements are not booked money or a safe-to-spend

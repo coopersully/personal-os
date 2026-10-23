@@ -82,6 +82,7 @@ final class ActiveReminderRouter {
       self.preferences != preferences || self.calendar.timeZone != calendar.timeZone
       || self.enabled != enabled
     self.preferences = preferences
+    presenter.setSoundEnabled(preferences.sound)
     self.calendar = calendar
     self.enabled = enabled
     if changed {
@@ -310,10 +311,6 @@ final class ActiveReminderRouter {
   private func renderThrowing() throws {
     guard let inventory else { return }
     let items = visible()
-    guard !items.isEmpty else {
-      presenter.hide()
-      return
-    }
     let cardErrors = Dictionary(
       uniqueKeysWithValues: items.compactMap { item -> (String, String)? in
         guard let error = errors[item.occurrenceID(identity: inventory.identity)] else {
@@ -356,6 +353,7 @@ final class ActiveReminderRouter {
     let id = item.occurrenceID(identity: inventory.identity)
     if current(item, inventory: inventory) {
       if value["outcome"] as? String == "completed" {
+        presenter.completed(item)
         acknowledged.insert("\(id)|\(item.sourceRevision)")
         shown.remove(id)
         claimed.remove(id)

@@ -444,19 +444,78 @@ select On/Off; changing the default leaves existing items alone. Desktop Notific
 pauses cards on the current Mac while ordinary system notification preferences continue to apply.
 
 The native companion presents each due task or reminder in its own compact, non-activating window.
-Match the shared TaskItem/ReminderItem row grammar: leading completion checkbox, 15-point title,
-and quiet due metadata. The title opens the source; completion stays pending until acknowledgement.
-There is no pagination, decorative stack, or dismissal control. Every pending item occupies its own
+Match the shared TaskItem/ReminderItem rows: a filled 16-point completion checkbox, medium
+15-point title, the app's neutral paper/ink palette, compact padding, and red overdue metadata.
+Align the left checkbox with the first title baseline, including wrapped titles. Both kinds use a
+small live relative due line (for example, “Due in 15 min 3 sec” or “Overdue by 2 hr”) and a separate
+absolute local date/time line. Update once per second with one shared visible-card clock; cache
+absolute labels until the day/time zone/locale changes. At minimum height use one title line so the
+time remains visible; larger cards allow two. The complete timestamp remains available as help. Keep the
+full card drag surface without a separate Task/Reminder/nohmi header. Align both completion controls
+to the top/start of the title row. A click opens the source or completes it; crossing a small drag
+threshold moves the card instead, including when starting over a title or checkbox. The title opens the source; completion stays pending until acknowledgement.
+There is no pagination, hidden-item stack, or dismissal control. Every pending item occupies its own
 screen area, so completing an item reclaims space without rearranging the others.
 
-Cards start at 320 × 88 points, with new arrivals placed in free visible space. Each can be dragged
-and resized independently (minimum 240 × 72), using native edges or the visible corner grip. Keep
-24-point edge snapping and save size/normalized position per account, item, and persistent display
-UUID. Refreshes and sibling completion preserve existing windows and geometry. When a display
+Target refinement: cards start at their smallest supported size, with new arrivals placed in free visible space. The current native implementation still starts at 320 × 88; the browser trial starts at 240 × 64. Each can be dragged
+and resized independently (minimum 240 × 72), using native edges or an invisible corner resize target; do not draw a resize grip.
+Use 16 corner, midpoint and quarter-edge targets plus available slots beside other cards. Exclude
+occupied footprints, including when restoring saved positions or resizing. A drop on an occupied
+anchor moves only the grabbed card into the nearest free slot. Guides are faded, card-sized
+placeholder footprints behind the grabbed card, with a stronger candidate highlight; never dots.
+In the browser trial, reveal at most three nearby, mutually non-overlapping footprints. Keep all
+valid anchors available for snapping without drawing the entire candidate map simultaneously.
+New sample cards use aligned rows with consistent 12-pixel gutters; the shared divider remains
+quiet with an icon button revealed on hover/focus. Unlocked dividers stop 12 pixels short of
+each end; locking animates them to full length. Dividers use the same one-pixel stroke and color
+as the card outline, with no doubled shared borders. Shift-clicking a join applies its lock or unlock action to every
+join in its geometrically connected component. Connected destination previews square only the
+corners that will touch neighbors; free destinations retain rounded corners.
+Preserve the grabbed card's size and reject slots that would move through the Dock or another card.
+Resolve placement through the pet's screen/Dock geometry, including its cached Accessibility Dock
+measurement, window metadata and conservative fallback when precise measurements are unavailable.
+Use clear corner lanes beside a measured Dock and avoid its actual footprint; keep the menu bar safe.
+Highlight the candidate while dragging and align on release with the pet's 12-point inset. Free
+placement remains available away from anchors; resizing an anchored card preserves that anchor, and Dock changes reposition attached cards safely.
+Cards released beside one another snap flush. Square only the contacting corners and draw one
+subtle divider along each shared edge, making them read as one surface. Each remains independently
+draggable when its join is unlocked; a short pull separates it and restores exposed corners without moving its neighbors.
+
+Browser-first target refinement (not yet native): clicking a shared border toggles that join’s lock.
+Dragging any member moves its connected locked group; unlocked neighbors stay put. Shaking a
+grabbed card gathers all visible active tasks and reminders into one locked, compact stack while
+keeping the pointer attached. Every item remains visible, with a compact column arrangement
+wrapping only when screen height requires it. Gather is also available as a menu command.
+Enablement and Low/Medium/High sensitivity mirror the pet’s shoo gesture thresholds; the gesture
+requires a held drag and never completes or dismisses an item. New joins default to unlocked.
+The browser playground is `apps/web/active-cards-playground.html`, served by `python3 apps/web/scripts/preview-active-cards.py` (loopback only, sample HTML only)
+or the worktree’s development runtime; it is not a production build entry. It uses sample records and simulated
+presence/Dock geometry, not native Accessibility or real notification delivery.
+
+Proposed settings live in Settings → Notifications → Active cards, with account-level creation
+defaults (separate tasks/reminders, both initially off, per-item overrides) and device-level
+card enablement/pause, return behavior, shake enablement/sensitivity, snapping/slot guides,
+new-join locking, volume and Reduce Motion. The existing single account default is unchanged in
+native/API storage; separate defaults are a browser proposal. Preferred display, placement
+restoration, screen-sharing privacy and honest permission/Focus state need native implementation.
+No maximum-visible or automatic collapsing setting should silently hide unfinished items.
+Right-click offers Complete/Retry completion, View in nohmi, and Separate card while joined.
+Pending or stale completion stays disabled; menu commands use the same acknowledged source actions.
+
+Save size/normalized position per account, item, and persistent display UUID. Refreshes and sibling completion preserve existing windows and geometry. When a display
 vanishes, fit the card onto an available display. If the screen fills, retain all windows with
 reachable drag handles rather than hiding items behind pagination. Lock/display sleep hides all
 cards; return requires fresh confirmation. Failure/conflict remains on the originating card with an
 actionable completion retry. Settings failures use Sonner.
+
+New cards pop in with the existing notification soft click; acknowledged completion pops out with
+a short original completion pluck. Respect the Notifications sound preference and system mute.
+Coalesce arrival audio for simultaneous cards. Grab, slot selection, docking, release, separation,
+resize endpoints, menu/open and completion-pending transitions use quiet cached samples and brief
+pulses; a completion failure uses a short low tone and shake with the retry still visible. Do not
+replay audio per pointer frame, countdown tick, routine refresh, lock/unlock, policy hiding or feed
+removal. Success audio remains reserved for acknowledged completion. Reduce Motion uses a
+short fade without scaling. Never retire a card or play success audio on an unacknowledged click.
 
 Elapsed input under 120 seconds is only one activity signal: session, loginwindow/lock and display
 state also gate presentation. Quiet hours, source enablement, OS permission, and preview privacy
@@ -471,3 +530,26 @@ Rare crash/cancellation duplicates remain possible; exactly-once delivery is not
 [design](../../superpowers/specs/2026-10-22-active-reminders-design.md) and
 [native probe evidence](../../superpowers/specs/2026-10-22-active-reminders-native-evidence.md)
 record the contract and distinguish local observations from signed-release certification.
+
+Browser trial refinement: active cards use a compact two-line layout, a 14-pixel title and an
+11-pixel monospace metadata row. Exact local time stays visible on the left (tomorrow or an
+explicit date when needed), with an abbreviated live countdown on the right; the complete local
+date/time is exposed as help and accessible text. Pending/error states never remove the timestamp.
+Context commands use semantic icons from the shared reicon registry. Earshot is a pinned optional
+authoring tool under `tools/audio`; the trial preloads the checked-in local WAVs, respects master
+sound controls, throttles repeated slot sounds, and does not sound on hover or countdown updates.
+See `tools/audio/README.md` for reproducibility, licensing, action mapping, and evidence limits.
+
+### Connected-card refinements
+
+Connected cards share one outline-weight separator, including partial joins
+between different sizes. Shared corners square off where a neighbor covers the
+corner. Placement engages when a dragged card's footprint touches a valid slot;
+the closest valid slot wins. Occupied slots remain unavailable.
+
+While a card menu is open, Shift targets its entire geometrically connected group
+(including unlocked joins): completion, snooze, unlocking, edge placement, and
+resetting sizes. Releasing Shift restores single-card actions. Resizing to minimum
+preserves joins and edge alignment and must not detach the card. Active delivery
+cannot be disabled from a card menu; manage that deliberately in desktop settings.
+Desktop sounds follow the shared contract in `../feedback.md`.

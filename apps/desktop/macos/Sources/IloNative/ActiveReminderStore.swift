@@ -12,12 +12,43 @@ struct ActiveReminderCardGeometry: Codable {
   var height: Double
 }
 struct ActiveReminderPlacement {
-  static func unoccupied(in area: CGRect, occupied: [CGRect]) -> CGRect {
+  static func anchors(in area: CGRect, size: CGSize) -> [CGRect] {
+    anchors(in: PetGeometry(bounds: area, obstacles: []), size: size)
+  }
+  static func anchors(in geometry: PetGeometry, size: CGSize) -> [CGRect] {
+    let bounds = (geometry.conservativeCardBounds ?? geometry.bounds).insetBy(dx: 12, dy: 12)
+    let width = min(size.width, bounds.width)
+    let height = min(size.height, bounds.height)
+    let points: [(CGFloat, CGFloat)] = [
+      (0, 1), (0.5, 1), (1, 1), (1, 0.5), (1, 0), (0.5, 0), (0, 0), (0, 0.5),
+      (0.25, 1), (0.75, 1), (1, 0.75), (1, 0.25),
+      (0.75, 0), (0.25, 0), (0, 0.25), (0, 0.75),
+    ]
+    return points.map { x, y in
+      geometry.fitCard(
+        CGRect(
+          x: bounds.minX + (bounds.width - width) * x,
+          y: bounds.minY + (bounds.height - height) * y, width: width, height: height))
+    }
+  }
+  static func anchor(for frame: CGRect, in area: CGRect) -> Int? {
+    anchor(for: frame, in: PetGeometry(bounds: area, obstacles: []))
+  }
+  static func anchor(for frame: CGRect, in geometry: PetGeometry) -> Int? {
+    let choices = anchors(in: geometry, size: frame.size).enumerated().map {
+      ($0.offset, hypot($0.element.midX - frame.midX, $0.element.midY - frame.midY))
+    }
+    guard let closest = choices.min(by: { $0.1 < $1.1 }), closest.1 <= 80 else { return nil }
+    return closest.0
+  }
+  static func fit(_ frame: CGRect, geometry: PetGeometry) -> CGRect { geometry.fitCard(frame) }
+  static func unoccupied(in geometry: PetGeometry, occupied: [CGRect]) -> CGRect {
+    let area = geometry.bounds
     for size in [CGSize(width: 320, height: 88), CGSize(width: 240, height: 72)] {
       let centered = fit(
         CGRect(
           x: area.midX - size.width / 2, y: area.midY - size.height / 2,
-          width: size.width, height: size.height), in: area, snap: false)
+          width: size.width, height: size.height), geometry: geometry)
       if !occupied.contains(where: { $0.intersects(centered.insetBy(dx: -6, dy: -6)) }) {
         return centered
       }
@@ -25,7 +56,7 @@ struct ActiveReminderPlacement {
       while y >= area.minY {
         var x = area.minX + 12
         while x + size.width <= area.maxX {
-          let frame = CGRect(origin: CGPoint(x: x, y: y), size: size)
+          let frame = fit(CGRect(origin: CGPoint(x: x, y: y), size: size), geometry: geometry)
           if !occupied.contains(where: { $0.intersects(frame.insetBy(dx: -6, dy: -6)) }) {
             return frame
           }
@@ -38,28 +69,9 @@ struct ActiveReminderPlacement {
     let offset = Double(occupied.count % 12) * 24
     return fit(
       CGRect(x: area.minX + offset, y: area.maxY - 88 - offset, width: 240, height: 88),
-      in: area, snap: false)
+      geometry: geometry)
   }
-  static func fit(_ frame: CGRect, in area: CGRect, snap: Bool) -> CGRect {
-    var frame = frame
-    frame.size.width = min(frame.width, area.width)
-    frame.size.height = min(frame.height, area.height)
-    frame.origin.x = min(max(frame.minX, area.minX), area.maxX - frame.width)
-    frame.origin.y = min(max(frame.minY, area.minY), area.maxY - frame.height)
-    if snap {
-      if frame.minX - area.minX <= 24 {
-        frame.origin.x = area.minX
-      } else if area.maxX - frame.maxX <= 24 {
-        frame.origin.x = area.maxX - frame.width
-      }
-      if frame.minY - area.minY <= 24 {
-        frame.origin.y = area.minY
-      } else if area.maxY - frame.maxY <= 24 {
-        frame.origin.y = area.maxY - frame.height
-      }
-    }
-    return frame
-  }
+
 }
 final class ActiveReminderStore {
   private struct DataModel: Codable {

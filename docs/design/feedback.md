@@ -225,3 +225,27 @@ their affected material, and each action has one notification owner. Uncertain
 mail creation stops automatic retries while retaining the draft for reconciliation.
 Concurrent mutation attempts cannot dismiss newer outcome feedback. Failed logout
 retains the session and recovery action.
+
+## Shared desktop sound pack
+
+All nohmi surfaces outside the main app or web app—including active task/reminder
+cards, the desktop pet, and rituals—use the same Earshot-authored sound language.
+This is a required frontend standard. Reuse semantic cues from the shared pack;
+do not invent a separate sonic identity for each feature or synthesize sounds at
+interaction time. The reproducible authoring setup, pinned Earshot version,
+licenses, seeds, and audit manifest live in `tools/audio/`.
+
+Use quiet, short tactile cues for pickup, placement, resizing, and lock/unlock;
+a gentle pop for arrival and gathering; a restrained positive cue for confirmed
+completion; and a distinct soft cue for failure. Match cues to meaningful state
+changes, not every pointer movement, hover, timer tick, or background refresh.
+Preload/cache local assets, coalesce rapid repeats and group actions, and avoid
+stacking voices. Completion sounds follow acknowledged success, never submission.
+Use brief matching motion; honor reduced motion independently of sound.
+
+All these surfaces must honor device sound enablement and volume, with a preview
+in desktop settings. Silence remains available and all outcomes remain visible
+without audio. Focus/quiet-hours behavior follows the delivery policy. New
+surfaces must use this pack; existing pet, ritual, and native reminder playback
+must migrate to it when updated. The browser active-card preview currently uses
+the Earshot pack; this standard does not claim every native surface has migrated.

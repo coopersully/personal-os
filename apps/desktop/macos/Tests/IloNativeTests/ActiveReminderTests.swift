@@ -88,8 +88,14 @@ final class ActiveReminderTests: XCTestCase {
     XCTAssertTrue(content.hitTest(innerGrip) is ActiveReminderResizeView)
     let headerPoint = CGPoint(
       x: content.bounds.midX,
-      y: content.isFlipped ? 8 : content.bounds.maxY - 8)
+      y: content.isFlipped ? 4 : content.bounds.maxY - 4)
     XCTAssertTrue(content.hitTest(headerPoint) is ActiveReminderDragView)
+    XCTAssertTrue(
+      content.hitTest(CGPoint(x: content.bounds.midX, y: content.bounds.midY))
+        is ActiveReminderDragView)
+    XCTAssertTrue(
+      content.hitTest(CGPoint(x: 18, y: content.bounds.maxY - 18))
+        is ActiveReminderDragView, "Checkbox accepts drag without completing")
     let secondFrame = second.frame
     first.setContentSize(NSSize(width: 370, height: 130))
     let resized = first.frame
@@ -192,14 +198,16 @@ final class ActiveReminderTests: XCTestCase {
     XCTAssertNotEqual(
       a.occurrenceID(identity: "server|owner"), a.occurrenceID(identity: "server|other"))
   }
-  func testPlacementSnapsAt24PointsAndFitsMissingDisplays() {
+  func testPlacementFitsMissingDisplaysInsideSafeGeometry() {
     let area = CGRect(x: -1000, y: 0, width: 1000, height: 800)
     let frame = ActiveReminderPlacement.fit(
-      CGRect(x: -980, y: 25, width: 360, height: 240), in: area, snap: true)
-    XCTAssertEqual(frame.minX, area.minX)
+      CGRect(x: -980, y: 25, width: 360, height: 240),
+      geometry: PetGeometry(bounds: area, obstacles: []))
+    XCTAssertEqual(frame.minX, -980)
     XCTAssertEqual(frame.minY, 25)
     let moved = ActiveReminderPlacement.fit(
-      CGRect(x: 4000, y: 4000, width: 360, height: 240), in: area, snap: false)
+      CGRect(x: 4000, y: 4000, width: 360, height: 240),
+      geometry: PetGeometry(bounds: area, obstacles: []))
     XCTAssertTrue(area.contains(moved))
   }
   func testReceiptsPersistWithoutTitlesAndStorageFailureThrows() throws {
@@ -288,6 +296,10 @@ private final class ActiveTestSink: ActiveReminderNotificationSink {
 }
 private final class ActiveTestPresenter: ActiveReminderPresenting {
   var isVisible = false
+  var completedIDs: [String] = []
+  var soundEnabled = true
+  func setSoundEnabled(_ enabled: Bool) { soundEnabled = enabled }
+  func completed(_ item: ActiveReminderCandidate) { completedIDs.append(item.cardID) }
   var items: [ActiveReminderCandidate] = []
   var pending = Set<String>()
   var error: String?
@@ -302,7 +314,7 @@ private final class ActiveTestPresenter: ActiveReminderPresenting {
     self.errors = errors
     self.error = items.compactMap { errors[$0.cardID] }.first
     self.stale = stale
-    isVisible = true
+    isVisible = !items.isEmpty
   }
   func hide() { isVisible = false }
 }
@@ -324,7 +336,9 @@ final class ActiveReminderLifecycleTests: XCTestCase {
       startTimer: false)
     var preferences = NotificationPreferences()
     preferences.enabled = true
+    preferences.sound = false
     router.configure(preferences: preferences, calendar: .current, enabled: true)
+    XCTAssertFalse(presenter.soundEnabled)
     let items = (1...2).map { index in
       ActiveReminderCandidate(
         id: "00000000-0000-4000-8000-00000000000\(index)", kind: index == 1 ? "task" : "reminder",
@@ -346,6 +360,7 @@ final class ActiveReminderLifecycleTests: XCTestCase {
     var result = try XCTUnwrap(requests.last)
     result["outcome"] = "failed"
     router.actionResult(result)
+    XCTAssertTrue(presenter.completedIDs.isEmpty)
     XCTAssertNotNil(presenter.errors[items[0].cardID])
     XCTAssertNil(presenter.errors[items[1].cardID])
     router.complete(items[1])
@@ -353,6 +368,7 @@ final class ActiveReminderLifecycleTests: XCTestCase {
     result = try XCTUnwrap(requests.last)
     result["outcome"] = "completed"
     router.actionResult(result)
+    XCTAssertEqual(presenter.completedIDs, [items[1].cardID])
     XCTAssertEqual(presenter.items.map(\.cardID), [items[0].cardID])
     XCTAssertNotNil(presenter.errors[items[0].cardID])
   }
@@ -597,5 +613,224 @@ extension ActiveReminderTests {
     header.mouseDragged(with: event)
     XCTAssertEqual(window.frame.origin, CGPoint(x: 160, y: 130))
     window.close()
+  }
+}
+
+extension ActiveReminderTests {
+  func testCardsUseSixteenAnchorsOnOffsetDisplays() {
+    let area = CGRect(x: -1500, y: 40, width: 1400, height: 900)
+    let size = CGSize(width: 320, height: 88)
+    let anchors = ActiveReminderPlacement.anchors(in: area, size: size)
+    XCTAssertEqual(
+      Array(anchors.prefix(8)), PetGeometry(bounds: area, obstacles: []).anchors(size: size))
+    XCTAssertEqual(anchors.count, 16)
+    for (index, frame) in anchors.enumerated() {
+      XCTAssertTrue(area.contains(frame))
+      XCTAssertEqual(ActiveReminderPlacement.anchor(for: frame, in: area), index)
+    }
+    XCTAssertNil(
+      ActiveReminderPlacement.anchor(
+        for: CGRect(x: area.midX - 160, y: area.midY - 44, width: 320, height: 88), in: area))
+  }
+  @MainActor
+  func testFeedbackOnlyOnNewArrivalAndAcknowledgedCompletionAndRespectsMute() throws {
+    var feedback: [ActiveReminderFeedback] = []
+    let presenter = ActiveReminderPanelController(feedback: { feedback.append($0) })
+    defer { presenter.reset() }
+    let item = ActiveReminderCandidate(
+      id: UUID().uuidString, kind: "task", title: "Sample", dueAt: "2026-10-22T12:00:00Z",
+      activeReminder: true, revision: 1)
+    try presenter.show([item], preview: true, pending: [], errors: [:], stale: false)
+    XCTAssertEqual(feedback, [.arrival])
+    presenter.hide()
+    try presenter.show([item], preview: true, pending: [item.cardID], errors: [:], stale: false)
+    XCTAssertEqual(feedback, [.arrival, .pending])
+    presenter.completed(item)
+    presenter.completed(item)
+    XCTAssertEqual(feedback, [.arrival, .pending, .completion])
+    XCTAssertTrue(presenter.panels.isEmpty)
+    presenter.setSoundEnabled(false)
+    try presenter.show([item], preview: true, pending: [], errors: [:], stale: false)
+    presenter.completed(item)
+    XCTAssertEqual(feedback, [.arrival, .pending, .completion])
+  }
+}
+
+extension ActiveReminderTests {
+  @MainActor
+  func testDragSnapsToPetAnchorAndResizeKeepsThatAnchorWithoutMovingSibling() async throws {
+    var dockVisible = false
+    let presenter = ActiveReminderPanelController(
+      feedback: { _ in },
+      geometry: { screen in
+        let area = screen.visibleFrame
+        return PetGeometry(
+          bounds: area,
+          obstacles: dockVisible
+            ? [CGRect(x: area.minX, y: area.minY, width: area.width, height: 80)] : [])
+      })
+    defer { presenter.reset() }
+    let items = (1...2).map { index in
+      ActiveReminderCandidate(
+        id: UUID().uuidString, kind: "task", title: "Anchor \(index)",
+        dueAt: "2026-10-22T12:00:00Z", activeReminder: true, revision: 1)
+    }
+    try presenter.show(items, preview: true, pending: [], errors: [:], stale: false)
+    let panel = try XCTUnwrap(presenter.panels[items[0].cardID])
+    let sibling = try XCTUnwrap(presenter.panels[items[1].cardID])
+    let siblingFrame = sibling.frame
+    let area = try XCTUnwrap(panel.screen).visibleFrame
+    let target = ActiveReminderPlacement.anchors(in: area, size: panel.frame.size)[4]
+    let header = try XCTUnwrap(
+      panel.contentView?.subviews.compactMap { $0 as? ActiveReminderDragView }.first)
+    let grip = try XCTUnwrap(
+      panel.contentView?.subviews.compactMap { $0 as? ActiveReminderResizeView }.first)
+    let event = try XCTUnwrap(
+      NSEvent.mouseEvent(
+        with: .leftMouseDown, location: .zero,
+        modifierFlags: [], timestamp: 0, windowNumber: panel.windowNumber, context: nil,
+        eventNumber: 1, clickCount: 1, pressure: 1))
+    var point = CGPoint(x: panel.frame.midX, y: panel.frame.maxY - 4)
+    header.pointer = { _ in point }
+    header.mouseDown(with: event)
+    point.x += target.minX - panel.frame.minX + 15
+    point.y += target.minY - panel.frame.minY + 15
+    header.mouseDragged(with: event)
+    header.mouseUp(with: event)
+    XCTAssertEqual(panel.frame, target)
+    try await Task.sleep(nanoseconds: 300_000_000)
+    XCTAssertEqual(panel.frame, target, "Saving must preserve the pet's 12-point inset")
+    grip.pointer = { _ in point }
+    grip.mouseDown(with: event)
+    point.x -= 40
+    point.y += 10
+    grip.mouseDragged(with: event)
+    grip.mouseUp(with: event)
+    XCTAssertEqual(
+      panel.frame, ActiveReminderPlacement.anchors(in: area, size: panel.frame.size)[4])
+    XCTAssertEqual(sibling.frame, siblingFrame)
+    dockVisible = true
+    try presenter.show(items, preview: true, pending: [], errors: [:], stale: false)
+    XCTAssertGreaterThanOrEqual(panel.frame.minY, area.minY + 88)
+    dockVisible = false
+    try presenter.show(items, preview: true, pending: [], errors: [:], stale: false)
+    XCTAssertEqual(
+      panel.frame, ActiveReminderPlacement.anchors(in: area, size: panel.frame.size)[4],
+      "An attached card returns to its edge anchor when the Dock hides")
+    header.mouseDown(with: event)
+    point.x += 10
+    header.mouseDragged(with: event)
+    let guide = try XCTUnwrap(
+      NSApp.windows.first {
+        $0.isVisible && $0.contentView is ActiveReminderSlotView
+      })
+    presenter.hide()
+    XCTAssertFalse(guide.isVisible, "Lock/policy hiding also removes in-progress drag guides")
+    header.mouseUp(with: event)
+  }
+}
+
+extension ActiveReminderTests {
+  func testReminderAnchorsAndFittingUseMeasuredDockAndConservativeFallback() {
+    let screen = CGRect(x: -1600, y: -100, width: 1600, height: 1000)
+    let visible = CGRect(x: -1600, y: -30, width: 1600, height: 902)
+    let dock = CGRect(x: -1000, y: -100, width: 400, height: 70)
+    let measured = PetDisplays.resolvedGeometry(
+      frame: screen, visible: visible,
+      dockFrames: [dock], hiddenDock: false)
+    let size = CGSize(width: 320, height: 88)
+    let anchors = ActiveReminderPlacement.anchors(in: measured, size: size)
+    XCTAssertEqual(anchors.count, 16)
+    XCTAssertEqual(anchors[4].minY, screen.minY + 12, "Use the clear corner lane beside the Dock")
+    for frame in anchors {
+      XCTAssertFalse(frame.intersects(dock.insetBy(dx: -8, dy: -8)))
+      XCTAssertEqual(ActiveReminderPlacement.fit(frame, geometry: measured), frame)
+    }
+    let fallback = PetDisplays.resolvedGeometry(
+      frame: screen, visible: visible,
+      dockFrames: [], hiddenDock: false)
+    XCTAssertTrue(
+      ActiveReminderPlacement.anchors(in: fallback, size: size)
+        .allSatisfy { $0.minY >= visible.minY + 12 })
+    let droppedOnDock = CGRect(x: -900, y: -88, width: 320, height: 88)
+    XCTAssertFalse(ActiveReminderPlacement.fit(droppedOnDock, geometry: measured).intersects(dock))
+  }
+  @MainActor
+  func testCardSurfaceDistinguishesClickFromDrag() throws {
+    let panel = NSPanel(
+      contentRect: CGRect(x: 100, y: 100, width: 320, height: 88),
+      styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+    defer { panel.close() }
+    let surface = ActiveReminderDragView(frame: panel.contentView!.bounds)
+    panel.contentView?.addSubview(surface)
+    var point = CGPoint(x: 180, y: 140)
+    surface.pointer = { _ in point }
+    var clicks = 0
+    surface.clicked = { _ in clicks += 1 }
+    let event = try XCTUnwrap(
+      NSEvent.mouseEvent(
+        with: .leftMouseDown, location: .zero,
+        modifierFlags: [], timestamp: 0, windowNumber: panel.windowNumber, context: nil,
+        eventNumber: 1, clickCount: 1, pressure: 1))
+    surface.mouseDown(with: event)
+    point.x += 2
+    surface.mouseDragged(with: event)
+    surface.mouseUp(with: event)
+    XCTAssertEqual(clicks, 1)
+    XCTAssertEqual(panel.frame.origin, CGPoint(x: 100, y: 100))
+    surface.mouseDown(with: event)
+    point.x += 30
+    surface.mouseDragged(with: event)
+    surface.mouseUp(with: event)
+    XCTAssertEqual(clicks, 1, "Dragging a checkbox must not complete it")
+    XCTAssertEqual(panel.frame.origin, CGPoint(x: 130, y: 100))
+  }
+}
+
+extension ActiveReminderTests {
+  @MainActor
+  func testWholeCardDragRetainsClickActionsAndPendingCompletionGuard() throws {
+    let presenter = ActiveReminderPanelController(feedback: { _ in })
+    defer { presenter.reset() }
+    let item = ActiveReminderCandidate(
+      id: UUID().uuidString, kind: "task", title: "Clickable",
+      dueAt: "2026-10-22T12:00:00Z", activeReminder: true, revision: 1)
+    var completed = 0
+    var opened = 0
+    presenter.complete = { _ in completed += 1 }
+    presenter.open = { _ in opened += 1 }
+    try presenter.show([item], preview: true, pending: [], errors: [:], stale: false)
+    let panel = try XCTUnwrap(presenter.panels[item.cardID])
+    let event = try XCTUnwrap(
+      NSEvent.mouseEvent(
+        with: .leftMouseDown, location: .zero,
+        modifierFlags: [], timestamp: 0, windowNumber: panel.windowNumber, context: nil,
+        eventNumber: 1, clickCount: 1, pressure: 1))
+    func surface() throws -> ActiveReminderDragView {
+      try XCTUnwrap(panel.contentView?.subviews.compactMap { $0 as? ActiveReminderDragView }.first)
+    }
+    var point = panel.convertPoint(toScreen: CGPoint(x: 18, y: panel.frame.height - 18))
+    let drag = try surface()
+    drag.pointer = { _ in point }
+    drag.mouseDown(with: event)
+    drag.mouseUp(with: event)
+    XCTAssertEqual(completed, 1)
+    drag.mouseDown(with: event)
+    point.x += 40
+    drag.mouseDragged(with: event)
+    drag.mouseUp(with: event)
+    XCTAssertEqual(completed, 1)
+    XCTAssertEqual(opened, 0)
+    point = panel.convertPoint(toScreen: CGPoint(x: 140, y: 30))
+    drag.mouseDown(with: event)
+    drag.mouseUp(with: event)
+    XCTAssertEqual(opened, 1)
+    try presenter.show([item], preview: true, pending: [item.cardID], errors: [:], stale: false)
+    let pending = try surface()
+    point = panel.convertPoint(toScreen: CGPoint(x: 18, y: panel.frame.height - 18))
+    pending.pointer = { _ in point }
+    pending.mouseDown(with: event)
+    pending.mouseUp(with: event)
+    XCTAssertEqual(completed, 1)
   }
 }

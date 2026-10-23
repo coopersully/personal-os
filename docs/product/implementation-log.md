@@ -7,7 +7,16 @@ a revision-bound account default for new items, and a device pause switch. Histo
 off. The separate owner-bound desktop feed pages beyond the daily brief and pet limits. macOS
 routes eligible due items to independent compact, draggable and resizable native cards while preserving ordinary system
 delivery when away; an incomplete item can appear after return. Completion waits for the existing
-API's revision-bound acknowledgement.
+API's revision-bound acknowledgement. The October 23 presentation refinement removes the extra
+header, follows the task/reminder checkbox, medium-title and overdue-date styling, shares the pet's
+16 anchor guides, uses the pet's measured Dock geometry, and preserves an attached anchor during resizing
+and Dock changes. The whole card accepts dragging, checkboxes align at the top, and resizing has no
+drawn corner grip. The later refinement filters occupied anchors, offers card-sized perimeter and
+neighbor drop slots, joins touching cards with flat corners/dividers, and restores corners when
+pulled apart. A shared live countdown retains local date/time, the checkbox aligns to the first
+baseline, and native menus reuse completion/open with pending/stale guards. Cached interaction
+sounds and short feedback animations avoid per-frame and per-tick playback. Arrival and acknowledged
+completion use brief pop effects and sounds, with muted and reduced-motion behavior.
 
 Native delivery prepares a delayed OS fallback before presentation and cancels it only after the
 card appears and its receipt is persisted. Removed feed items receive authoritative source reads
@@ -20,7 +29,7 @@ full-screen visibility and saved dragging with disposable synthetic items. See t
 [native evidence and remaining certification limits](../superpowers/specs/2026-10-22-active-reminders-native-evidence.md).
 Physical display sleep, the release-signed app, minimum-supported macOS and a real installed-client
 API journey still need release certification. This records branch-local implementation, not a
-merged or deployed release. The full native suite passes (76 Rust/120 Swift), as do type checks,
+merged or deployed release. The full native suite passes (76 Rust/134 Swift), as do type checks,
 lint and production builds. Browser acceptance records 151 passed, two skipped and one Finance
 chat-history failure; the active-reminder desktop/mobile cases pass. The full verifier remains
 unsuccessful because of the recorded Finance/database-test failures, so this branch is not release

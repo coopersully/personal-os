@@ -205,3 +205,11 @@ shared primitives; follow WAI-ARIA APG keyboard conventions for composite
 widgets. Automated checks do not replace keyboard, focus, zoom, reduced-motion,
 responsive, realistic-state, and assistive-technology inspection appropriate
 to the change.
+
+## Desktop surfaces and sound
+
+For UI outside the app/web app (including active cards, desktop pets, and rituals),
+apply the shared Earshot sound-pack contract in `docs/design/feedback.md`.
+Use the pinned reproducible tooling in `tools/audio`, semantic cached local cues,
+shared sound settings, and matching reduced-motion-aware transitions. Do not
+introduce a feature-specific sound pack or runtime synthesis.

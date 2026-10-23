@@ -480,7 +480,16 @@ The macOS companion implements active reminder cards for timed tasks and reminde
 (initially off) in Tasks settings. New items inherit that default unless explicitly overridden;
 existing items retain their flag. All due items appear independently without pagination; completing
 one reclaims its screen area while the other cards keep their positions and sizes. Desktop
-Notifications settings separately pause cards on one Mac.
+Notifications settings separately pause cards on one Mac. Cards follow the app's task/reminder row
+styling and use free perimeter/neighbor slots with the pet's Dock-aware placement. Occupied anchors
+are unavailable; faded card-sized placeholders preview the destination. Adjacent cards snap into a
+shared-looking surface with flat contacting corners and a divider, and can be pulled apart
+individually. The browser-first target refinement adds smallest-size arrivals, clickable lockable
+joins (locked connected cards move together), and configurable shake-to-gather into an all-visible
+locked stack that stays attached to the pointer. These grouping refinements are being evaluated in
+a local browser playground before native implementation. The left checkbox aligns with the first title line. A live relative due label always
+retains the absolute local date/time, and right-click exposes the existing source actions. Arrival and acknowledged
+completion use short pop animations and sound effects, respecting sound and Reduce Motion settings.
 While the person is away, ordinary system delivery continues. Returning reveals a card only after
 fresh confirmation that the item remains incomplete; successful completion on another client also
 retires it. Cards respect native notification enablement, source selection, permission, quiet hours,

@@ -42,7 +42,10 @@
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit -p integration/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json && pnpm --filter './apps/**' --filter './packages/**' --if-present run typecheck",
     "verify": "bash ./.codex/scripts/environment.sh verify",
-    "test:desktop-release": "node --test apps/desktop/scripts/*.test.mjs"
+    "test:desktop-release": "node --test apps/desktop/scripts/*.test.mjs",
+    "test:active-cards": "node apps/web/scripts/check-active-cards.cjs",
+    "audio:setup": "bash tools/audio/setup.sh",
+    "audio:render": ".tools/earshot/bin/python tools/audio/render-active-cards.py"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.1.2",

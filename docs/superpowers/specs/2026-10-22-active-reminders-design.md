@@ -164,11 +164,29 @@ screen space; completion reclaims that area without moving siblings. On a full s
 window with reachable drag handles, rather than introducing a hidden queue.
 
 Each card starts at 320 × 88 points and can be moved and resized independently down to 240 × 72.
-Use native resize edges and a visible corner grip. Snap within 24 points of a visible-frame edge.
+Use native resize edges and an invisible corner resize target, without a drawn grip. The full card
+is draggable, including over the title and checkbox; a short click still invokes that action and
+a drag never completes an item. Align both checkboxes to the top/start. Use 16 perimeter targets
+(corners, midpoints and quarter edges), the pet's candidate highlight and input-transparent guides.
+Resolve actual Dock geometry with the pet's Accessibility/metadata/fallback pipeline, fit safely
+around obstacles, and keep attached anchors aligned as the Dock changes. Use a 12-point inset.
+Keep free placement and preserve an attached anchor when resizing. Follow the actual row's filled
+checkbox, medium title, neutral palette and overdue date treatment, without a separate header.
+New arrivals pop in with the notification soft click; acknowledged completion pops out with a
+short completion pluck. Respect sound preferences, mute and Reduce Motion; refreshes, hiding,
+feed removal and failed completion remain quiet.
 Persist normalized position and size per account, item and display UUID, and restore to that display
 when available. Fit to usable bounds on monitor/resolution changes. Stay above ordinary app windows
 and available across Spaces without activating nohmi or stealing typing focus. Preview-off titles
-remain hidden. Pending/error/completion state belongs to the originating card.
+remain hidden. Pending/error/completion state belongs to the originating card. Occupied slots are unavailable;
+restoring colliding positions preserves card sizes while relocating only the colliding card.
+Preview free perimeter/neighbor destinations as faded card-sized footprints. Adjacent cards snap
+flush, square only touching corners and share a thin divider; pulling one away restores its own
+corners without moving siblings. Right-click uses existing complete/open actions and can separate
+a joined card. Align the left checkbox with the title's first baseline. A shared one-second clock
+updates relative due text while retaining absolute local date/time even at minimum height.
+Interaction feedback uses cached short sounds/pulses for semantic transitions, never continuous
+pointer movement or countdown ticks; pending/failure remains distinct from acknowledged success.
 
 Active-item system notifications expose Open and Complete. No card close, dismiss, or snooze action in this first release: the requested promise is persistence
 until completion. Opening the item leaves the card present. Device pause is the explicit escape

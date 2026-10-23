@@ -796,3 +796,9 @@ Settings controls and contextual Display menus use the same serialized save path
 Explicit URL choices remain temporary overrides. Device-specific shell geometry remains local.
 Tasks can save a default capture list and whether completed tasks appear in container views; explicit
 placement, lifecycle views, and URL filters take precedence.
+
+## Sound outside the app
+
+Desktop overlays, active cards, pets, and rituals must use the shared Earshot
+sound pack and interaction semantics in [feedback.md](feedback.md#shared-desktop-sound-pack).
+Treat audio, motion, mute, and volume as shared frontend behavior, not feature-specific decoration.

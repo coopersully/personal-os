@@ -7,6 +7,7 @@ import {
   localDateToIso,
 } from "@personal-os/domain";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
+import { createFinanceActivityService } from "./finance/activity-service.js";
 import { createFinanceBudgetBaselineQualificationService } from "./finance/baseline-qualification-service.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import { createFinanceSpendingService } from "./finance/spending-service.js";
@@ -24,6 +25,27 @@ it("reloads canonical planning fixtures without completing empty, recovery or on
     const service = createProfileBudgetService({ db: database.db, now: () => now });
     for (let pass = 0; pass < 2; pass++) {
       await loadQaFixtures(database.db, { accounts, now });
+      const activity = createFinanceActivityService({
+        db: database.db,
+        cursorSecret: "fixture-test-secret",
+      });
+      const demo = accounts.find((account) => account.key === "demo-full");
+      if (!demo) throw new Error("Demo fixture missing");
+      const page = await activity.listActivity(demo.id, { limit: 50 });
+      expect(page.entries).toHaveLength(5);
+      expect(
+        page.entries.every(
+          (entry) =>
+            entry.status === "applied" && entry.actor.type === "user" && entry.changes.length === 1,
+        ),
+      ).toBe(true);
+      const newest = page.entries[0];
+      if (!newest) throw new Error("Activity fixture missing");
+      expect(newest.explanation).toContain("Everyday checking");
+      expect((await activity.readEvidence(demo.id, newest.id)).changes).toHaveLength(1);
+      for (const account of accounts.filter((account) => account.key !== "demo-full")) {
+        expect((await activity.listActivity(account.id, { limit: 50 })).entries).toEqual([]);
+      }
       const runtime = createFinanceService({ db: database.db, now: () => now });
       await runtime.backfillLearning();
       await runtime.backfillLedgerIntegrity();

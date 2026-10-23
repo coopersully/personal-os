@@ -25,6 +25,7 @@ import {
   financeIncomeStreams,
   financeMerchantAliases,
   financeMerchants,
+  financeMutationRecords,
   financeOnboardingStates,
   financePlanningEvidence,
   financeProfiles,
@@ -51,6 +52,7 @@ import {
   taskLists,
   taskProjects,
   users,
+  workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import { addLocalDays, localDateAt, localDateTimeToUtc, localDateToIso } from "@personal-os/domain";
 import { and, eq, inArray, or } from "drizzle-orm";
@@ -58,6 +60,7 @@ import { createFinanceBudgetBaselineQualificationService } from "./finance/basel
 import { loadFinanceAuthorization } from "./finance/context.js";
 import { assessMail, type MailAssessmentSnapshot } from "./mail-assessment.js";
 import { MAIL_PLAYBOOK } from "./mail-playbook.js";
+import { financeActivityFixture } from "./qa-finance-activity.js";
 import { financeHistoryFixture } from "./qa-finance-history.js";
 import { financePlanningFixture } from "./qa-finance-planning.js";
 import { demoPlanningStory } from "./qa-planning-story.js";
@@ -188,6 +191,8 @@ export const qaFixtureAccounts = [
 type FixtureData = {
   attentionItems: Array<typeof attentionItems.$inferInsert>;
   auditEvents: Array<typeof auditEvents.$inferInsert>;
+  financeMutationRecords: (typeof financeMutationRecords.$inferInsert)[];
+  workspaceMaintenanceRuns: (typeof workspaceMaintenanceRuns.$inferInsert)[];
   calendarAccounts: Array<typeof calendarAccounts.$inferInsert>;
   calendarEvents: Array<typeof calendarEvents.$inferInsert>;
   calendars: Array<typeof calendars.$inferInsert>;
@@ -242,6 +247,8 @@ function emptyFixtureData(): FixtureData {
   return {
     attentionItems: [],
     auditEvents: [],
+    financeMutationRecords: [],
+    workspaceMaintenanceRuns: [],
     calendarAccounts: [],
     calendarEvents: [],
     calendars: [],
@@ -1996,6 +2003,13 @@ export async function loadQaFixtures(
       data.financePlanningEvidence.push(...planning.evidence);
       data.financeOnboardingStates.push(planning.onboarding);
       if (account.key === "demo-full") {
+        for (const goal of data.financeGoals.filter((goal) => goal.userId === account.id)) {
+          goal.createdAt = new Date(now.getTime() - 7 * 86_400_000);
+        }
+        const activity = financeActivityFixture(account.id, now);
+        data.auditEvents.push(...activity.audits);
+        data.financeMutationRecords.push(...activity.mutations);
+        data.workspaceMaintenanceRuns.push(...activity.runs);
         data.financeBudgetTaxonomies.push({
           id: fixtureId(account, 800),
           userId: account.id,
@@ -2285,7 +2299,11 @@ export async function loadQaFixtures(
       await transaction.insert(financeAlerts).values(data.financeAlerts);
     if (data.pinterestConnections.length)
       await transaction.insert(pinterestConnections).values(data.pinterestConnections);
+    if (data.workspaceMaintenanceRuns.length)
+      await transaction.insert(workspaceMaintenanceRuns).values(data.workspaceMaintenanceRuns);
     if (data.auditEvents.length) await transaction.insert(auditEvents).values(data.auditEvents);
+    if (data.financeMutationRecords.length)
+      await transaction.insert(financeMutationRecords).values(data.financeMutationRecords);
   });
   // The golden persona includes the same exact month/account/currency confirmation
   // as a manual setup, through the canonical prepare/confirm writers.

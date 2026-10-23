@@ -171,3 +171,5 @@ bundle cannot prove signed widget installation, login registration, or release d
 Full-demo coverage records certify all four accounts from the start of its four history months
 through yesterday in America/New_York. Rhythm shows populated historical days and confirmed zeros;
 today stays provisional and future days stay unknown. Reload recreates both records and coverage.
+
+The full demo also includes five recent fictional Finance Activity records: account ownership/planning confirmation, transaction categorization, and emergency-fund progress. Completed owner receipts and matching audits drive the real Activity projection and before/after disclosures. Dates are relative to fixture load; reloads replace the same stable records. Other personas keep empty Activity coverage. No live agent automation or financial action is executed by these history fixtures.

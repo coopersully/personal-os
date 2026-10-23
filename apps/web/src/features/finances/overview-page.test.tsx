@@ -344,6 +344,11 @@ it("shows six upcoming items together and paginates larger schedules with standa
   expect(screen.getByText("11–12 of 12")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Previous page" }));
   expect(within(table).getByText("Item 00")).toBeVisible();
+  fireEvent.change(screen.getByRole("combobox", { name: "Rows per page" }), {
+    target: { value: "25" },
+  });
+  expect(within(table).getAllByRole("row")).toHaveLength(13);
+  expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled();
 });
 
 it("links upcoming income and outflows to Cash flow and shows signed amounts without currency codes", async () => {

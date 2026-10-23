@@ -25,6 +25,7 @@ import {
   ItemGroup,
   ItemTitle,
 } from "@/components/ui/item";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Pagination, PaginationContent, PaginationItem } from "@/components/ui/pagination";
 import {
   Table,
@@ -405,6 +406,7 @@ function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: 
   const navigate = useNavigate();
   const [asOf] = useState(() => new Date().toISOString());
   const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(10);
   const range = cashflowScheduleRange(asOf, timezone);
   const upcoming = useQuery({
     queryKey: ["finance-recurring-occurrences", ownerId, timezone, range],
@@ -419,7 +421,6 @@ function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: 
             row.inCurrentSchedule && ["expected", "partially_matched"].includes(row.matchState),
         )
         .sort((a, b) => a.localDate.localeCompare(b.localDate) || a.key.localeCompare(b.key));
-  const pageSize = 10;
   const currentPage = Math.min(page, Math.max(0, Math.ceil(rows.length / pageSize) - 1));
   const start = currentPage * pageSize;
   const href = `/finances/cashflow?${new URLSearchParams({ cashflowFrom: range.from, cashflowTo: range.to, timeline: "agenda" })}`;
@@ -431,103 +432,126 @@ function OwnerUpcomingMoney({ ownerId, timezone }: { ownerId: string; timezone: 
       ) : upcoming.data ? (
         <>
           {rows.length ? (
-            <Card size="sm" className="min-w-0 overflow-hidden">
-              <Table aria-label="Upcoming expected money" className="table-fixed">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-28 px-4 sm:w-36">Expected date</TableHead>
-                    <TableHead className="px-4">Item</TableHead>
-                    <TableHead className="w-32 px-4 text-right whitespace-normal leading-tight sm:w-40">
-                      Expected amount
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rows.slice(start, start + pageSize).map((row) => {
-                    const destination = `/finances/cashflow?view=${row.source.kind === "income" ? "income" : "subscriptions"}&record=${encodeURIComponent(row.source.id)}`;
-                    return (
-                      <TableRow
-                        key={row.key}
-                        className="cursor-pointer"
-                        onClick={(event) => {
-                          if (
-                            !(event.target as Element).closest("a") &&
-                            !window.getSelection()?.toString()
-                          )
-                            navigate(destination);
-                        }}
-                      >
-                        <TableCell className="px-4 py-3 text-muted-foreground">
-                          {formatDateOnly(row.localDate, { dateStyle: "medium" })}
-                        </TableCell>
-                        <TableCell className="px-4 py-3 whitespace-normal break-words">
-                          <Link
-                            to={destination}
-                            className="rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground/50"
-                          >
-                            {row.displayName}
-                          </Link>
-                          {row.matchState === "partially_matched" ? (
-                            <p className="text-xs text-muted-foreground">
-                              Remaining after partial match
-                            </p>
-                          ) : null}
-                        </TableCell>
-                        <TableCell
-                          className={`px-4 py-3 text-right font-medium tabular-nums ${row.remainingExpectedCents === null ? "text-muted-foreground" : row.source.kind === "income" ? "text-success" : "text-destructive"}`}
+            <div className="flex min-w-0 flex-col gap-3">
+              <Card className="settings-panel min-w-0 gap-0 overflow-hidden py-0">
+                <Table aria-label="Upcoming expected money" className="table-fixed">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-28 px-4 sm:w-36">Expected date</TableHead>
+                      <TableHead className="px-4">Item</TableHead>
+                      <TableHead className="w-32 px-4 text-right whitespace-normal leading-tight sm:w-40">
+                        Expected amount
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.slice(start, start + pageSize).map((row) => {
+                      const destination = `/finances/cashflow?view=${row.source.kind === "income" ? "income" : "subscriptions"}&record=${encodeURIComponent(row.source.id)}`;
+                      return (
+                        <TableRow
+                          key={row.key}
+                          className="cursor-pointer"
+                          onClick={(event) => {
+                            if (
+                              !(event.target as Element).closest("a") &&
+                              !window.getSelection()?.toString()
+                            )
+                              navigate(destination);
+                          }}
                         >
-                          {row.remainingExpectedCents === null
-                            ? "Amount varies"
-                            : `${row.source.kind === "income" ? "+" : "−"}${new Intl.NumberFormat(
-                                undefined,
-                                {
-                                  style: "currency",
-                                  currency: row.currencyCode,
-                                },
-                              ).format(row.remainingExpectedCents / 100)}`}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-              <div className="flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3 text-sm text-muted-foreground">
+                          <TableCell className="px-4 py-2 text-muted-foreground">
+                            {formatDateOnly(row.localDate, { dateStyle: "medium" })}
+                          </TableCell>
+                          <TableCell className="px-4 py-2 whitespace-normal break-words">
+                            <Link
+                              to={destination}
+                              className="rounded-sm hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground/50"
+                            >
+                              {row.displayName}
+                            </Link>
+                            {row.matchState === "partially_matched" ? (
+                              <p className="text-xs text-muted-foreground">
+                                Remaining after partial match
+                              </p>
+                            ) : null}
+                          </TableCell>
+                          <TableCell
+                            className={`px-4 py-2 text-right font-medium tabular-nums ${row.remainingExpectedCents === null ? "text-muted-foreground" : row.source.kind === "income" ? "text-success" : "text-destructive"}`}
+                          >
+                            {row.remainingExpectedCents === null
+                              ? "Amount varies"
+                              : `${row.source.kind === "income" ? "+" : "−"}${new Intl.NumberFormat(
+                                  undefined,
+                                  {
+                                    style: "currency",
+                                    currency: row.currencyCode,
+                                  },
+                                ).format(row.remainingExpectedCents / 100)}`}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </Card>
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-1 text-xs text-muted-foreground">
                 <span className="text-xs">
                   {start + 1}–{Math.min(start + pageSize, rows.length)} of {rows.length}
                 </span>
-                <Pagination aria-label="Upcoming money pagination" className="mx-0 w-auto">
-                  <PaginationContent className="gap-2">
-                    <PaginationItem>
-                      <Button
-                        size="icon-sm"
-                        variant="outline"
-                        aria-label="Previous page"
-                        disabled={currentPage === 0}
-                        onClick={() => setPage(currentPage - 1)}
-                      >
-                        <ChevronLeftIcon />
-                      </Button>
-                    </PaginationItem>
-                    <PaginationItem>
-                      <span className="px-1 text-xs">
-                        Page {currentPage + 1} of {Math.ceil(rows.length / pageSize)}
-                      </span>
-                    </PaginationItem>
-                    <PaginationItem>
-                      <Button
-                        size="icon-sm"
-                        variant="outline"
-                        aria-label="Next page"
-                        disabled={start + pageSize >= rows.length}
-                        onClick={() => setPage(currentPage + 1)}
-                      >
-                        <ChevronRightIcon />
-                      </Button>
-                    </PaginationItem>
-                  </PaginationContent>
-                </Pagination>
+                <div className="flex flex-wrap items-center gap-4">
+                  <label htmlFor="upcoming-page-size" className="flex items-center gap-2">
+                    <span className="hidden sm:inline">Rows per page</span>
+                    <NativeSelect
+                      id="upcoming-page-size"
+                      aria-label="Rows per page"
+                      size="sm"
+                      value={pageSize}
+                      onChange={(event) => {
+                        setPageSize(Number(event.target.value));
+                        setPage(0);
+                      }}
+                    >
+                      {[10, 25, 50].map((size) => (
+                        <NativeSelectOption key={size} value={size}>
+                          {size}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                  </label>
+                  <Pagination aria-label="Upcoming money pagination" className="mx-0 w-auto">
+                    <PaginationContent className="gap-2">
+                      <PaginationItem>
+                        <Button
+                          size="icon-sm"
+                          variant="outline"
+                          aria-label="Previous page"
+                          disabled={currentPage === 0}
+                          onClick={() => setPage(currentPage - 1)}
+                        >
+                          <ChevronLeftIcon />
+                        </Button>
+                      </PaginationItem>
+                      <PaginationItem>
+                        <span className="px-1 text-xs">
+                          Page {currentPage + 1} of {Math.ceil(rows.length / pageSize)}
+                        </span>
+                      </PaginationItem>
+                      <PaginationItem>
+                        <Button
+                          size="icon-sm"
+                          variant="outline"
+                          aria-label="Next page"
+                          disabled={start + pageSize >= rows.length}
+                          onClick={() => setPage(currentPage + 1)}
+                        >
+                          <ChevronRightIcon />
+                        </Button>
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
+                </div>
               </div>
-            </Card>
+            </div>
           ) : (
             <p>
               {upcoming.data.unavailableSources.length

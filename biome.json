@@ -12,6 +12,7 @@
       "!**/target",
       "!.superpowers",
       "!.context",
+      "!.tools",
       "!apps/desktop/src-tauri/gen",
       "!apps/desktop/src-tauri/vendor",
       "!apps/web/dev-dist",

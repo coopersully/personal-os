@@ -34,6 +34,17 @@ export type DesktopSettings = {
   petWorkspaces: string[];
   widgetWorkspaces: string[];
   activeRemindersEnabled?: boolean;
+  activeCardInteractions?: {
+    shake: boolean;
+    sensitivity: "low" | "medium" | "high";
+    snapping: boolean;
+    guides: boolean;
+    autoLock: boolean;
+    sounds: boolean;
+    volume: number;
+    reducedMotion: boolean;
+    returnCards: boolean;
+  };
   notifications: NotificationSettings;
 };
 export type DesktopStatus = {

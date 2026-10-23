@@ -34,6 +34,7 @@ struct NativeSettings: Codable {
   var petWorkspaces: [String]
   var widgetWorkspaces: [String]?
   var activeRemindersEnabled: Bool? = nil
+  var activeCardInteractions: ActiveReminderInteractions? = nil
   var notifications: NotificationPreferences
 }
 struct WorkItem: Codable, Identifiable {

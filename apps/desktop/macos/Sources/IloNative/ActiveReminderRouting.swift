@@ -53,6 +53,8 @@ final class ActiveReminderRouter {
   private var routingEpoch = 0
   private var needsRevalidation = false
   private var previousActivity = false
+  private var interactions = ActiveReminderInteractions()
+  private var deferredWhileAway = Set<String>()
   var action: (([String: Any]) -> Void)?
   var lastError: String?
   var isActive: Bool { activity().isActive }
@@ -69,6 +71,10 @@ final class ActiveReminderRouter {
     if let panel = presenter as? ActiveReminderPanelController {
       panel.complete = { [weak self] item in self?.complete(item) }
       panel.open = { [weak self] item in self?.open(item) }
+      panel.snooze = { [weak self] item in self?.snooze(item) }
+      panel.settings = { [weak self] in
+        self?.action?(["action": "open", "path": "/settings?section=notifications"])
+      }
     }
     if startTimer {
       timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -77,12 +83,18 @@ final class ActiveReminderRouter {
     }
   }
   deinit { timer?.invalidate() }
+  func configureInteractions(_ value: ActiveReminderInteractions) {
+    interactions = value
+    (presenter as? ActiveReminderPanelController)?.interactions = value
+    ActiveReminderAudio.volume = Float(value.volume)
+    ActiveReminderAudio.preload()
+  }
   func configure(preferences: NotificationPreferences, calendar: Calendar, enabled: Bool) {
     let changed =
       self.preferences != preferences || self.calendar.timeZone != calendar.timeZone
       || self.enabled != enabled
     self.preferences = preferences
-    presenter.setSoundEnabled(preferences.sound)
+    presenter.setSoundEnabled(preferences.sound && interactions.sounds)
     self.calendar = calendar
     self.enabled = enabled
     if changed {
@@ -187,6 +199,7 @@ final class ActiveReminderRouter {
     preparing = []
     failedPreparation = []
     shown = []
+    deferredWhileAway = []
     acknowledged = []
     pending = [:]
     errors = [:]
@@ -196,7 +209,9 @@ final class ActiveReminderRouter {
     _ item: ActiveReminderCandidate, inventory: ActiveReminderInventory, at time: Date
   ) -> PlannedAlert {
     let due = parseDate(item.dueAt) ?? .distantFuture
-    let fire = AlertPlanner.afterQuietHours(due, preferences: preferences, calendar: calendar)
+    let wake = store?.snoozedUntil(item.occurrenceID(identity: inventory.identity)) ?? .distantPast
+    let fire = AlertPlanner.afterQuietHours(
+      max(due, wake), preferences: preferences, calendar: calendar)
     return PlannedAlert(
       identifier: item.occurrenceID(identity: inventory.identity), kind: item.kind,
       materialID: item.id,
@@ -235,6 +250,9 @@ final class ActiveReminderRouter {
     for item in inventory.items {
       let planned = alert(item, inventory: inventory, at: time)
       let id = planned.identifier
+      if !state.isActive && planned.fireAt <= time && !shown.contains(id) {
+        deferredWhileAway.insert(id)
+      }
       let allowed =
         enabled && preferences.enabled && sourceEnabled(item)
         && notifications.permission == "authorized" && !state.shouldHide
@@ -274,6 +292,7 @@ final class ActiveReminderRouter {
           self.tick()
         }
       case .show:
+        if deferredWhileAway.contains(id) && !interactions.returnCards { continue }
         guard !preparing.contains(id), store != nil else { continue }
         notifications.takeActiveOwnership(id)
         shown.insert(id)
@@ -325,6 +344,26 @@ final class ActiveReminderRouter {
   }
   private func render() {
     do { try renderThrowing() } catch { lastError = "The active reminder card could not appear." }
+  }
+  func snooze(_ item: ActiveReminderCandidate) {
+    guard let inventory, current(item, inventory: inventory),
+      !pending.values.contains(where: { $0.cardID == item.cardID }), let store
+    else { return }
+    let id = item.occurrenceID(identity: inventory.identity)
+    do {
+      try store.snooze(id, until: now().addingTimeInterval(15 * 60))
+      shown.remove(id)
+      claimed.remove(id)
+      preparing.remove(id)
+      notifications.retireActiveOccurrence(id)
+      notifications.ensureActiveOrdinary(
+        alert(item, inventory: inventory, at: now()), item: item,
+        inventory: inventory, preferences: preferences)
+      render()
+    } catch {
+      errors[id] = "Couldn’t snooze this item. Try again."
+      render()
+    }
   }
   func complete(_ item: ActiveReminderCandidate) {
     guard let inventory, inventory.isFresh(at: now()), current(item, inventory: inventory),

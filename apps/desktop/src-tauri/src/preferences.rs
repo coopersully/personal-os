@@ -56,3 +56,30 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 }
+
+#[cfg(test)]
+mod active_card_tests {
+    use crate::desktop::DesktopSettings;
+    #[test]
+    fn active_card_preferences_default_validate_and_round_trip() {
+        let mut value: DesktopSettings = serde_json::from_str("{}").unwrap();
+        assert!(value.active_card_interactions.shake);
+        assert!(value.active_card_interactions.snapping);
+        assert!(!value.active_card_interactions.auto_lock);
+        value.active_card_interactions.sensitivity = "high".into();
+        value.active_card_interactions.volume = 0.5;
+        value.validate().unwrap();
+        let restored: DesktopSettings =
+            serde_json::from_value(serde_json::to_value(&value).unwrap()).unwrap();
+        assert_eq!(restored.active_card_interactions.sensitivity, "high");
+        assert_eq!(restored.active_card_interactions.volume, 0.5);
+        assert_eq!(restored.notifications.preview, value.notifications.preview);
+        for volume in [-0.1, 1.1, f64::NAN] {
+            value.active_card_interactions.volume = volume;
+            assert!(value.validate().is_err());
+        }
+        value.active_card_interactions.volume = 0.35;
+        value.active_card_interactions.sensitivity = "invalid".into();
+        assert!(value.validate().is_err());
+    }
+}

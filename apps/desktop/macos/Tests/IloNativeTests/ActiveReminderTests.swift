@@ -89,7 +89,8 @@ final class ActiveReminderTests: XCTestCase {
     let headerPoint = CGPoint(
       x: content.bounds.midX,
       y: content.isFlipped ? 4 : content.bounds.maxY - 4)
-    XCTAssertTrue(content.hitTest(headerPoint) is ActiveReminderDragView)
+    XCTAssertTrue(
+      content.hitTest(headerPoint) is ActiveReminderResizeView, "The invisible top edge resizes")
     XCTAssertTrue(
       content.hitTest(CGPoint(x: content.bounds.midX, y: content.bounds.midY))
         is ActiveReminderDragView)
@@ -267,6 +268,7 @@ private final class ActiveTestSink: ActiveReminderNotificationSink {
   var finished: [String] = []
   var retired: [String] = []
   var prepared: [String] = []
+  var ensured: [PlannedAlert] = []
   var restores = 0
   var handedOff: [ActiveReminderCandidate] = []
   var holdPreparation = false
@@ -274,7 +276,7 @@ private final class ActiveTestSink: ActiveReminderNotificationSink {
   func ensureActiveOrdinary(
     _ alert: PlannedAlert, item: ActiveReminderCandidate, inventory: ActiveReminderInventory,
     preferences: NotificationPreferences
-  ) {}
+  ) { ensured.append(alert) }
   func handoffActiveOrdinary(
     _ alert: PlannedAlert, item: ActiveReminderCandidate,
     inventory: ActiveReminderInventory, preferences: NotificationPreferences
@@ -832,5 +834,54 @@ extension ActiveReminderTests {
     pending.mouseDown(with: event)
     pending.mouseUp(with: event)
     XCTAssertEqual(completed, 1)
+  }
+}
+
+extension ActiveReminderLifecycleTests {
+  @MainActor
+  func testSnoozeSurvivesRouterRestartAndReturnsOnlyAfterWakeWithFreshFeed() throws {
+    var time = Date()
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let url = root.appendingPathComponent("state")
+    let sink = ActiveTestSink()
+    let presenter = ActiveTestPresenter()
+    let item = ActiveReminderCandidate(
+      id: UUID().uuidString, kind: "task", title: "Snooze fixture",
+      dueAt: ISO8601DateFormatter().string(from: time), activeReminder: true, revision: 1)
+    func router() -> ActiveReminderRouter {
+      let router = ActiveReminderRouter(
+        notifications: sink, presenter: presenter,
+        activity: { MacActivityState(isActive: true, isAvailable: true, shouldHide: false) },
+        now: { time },
+        makeStore: { try ActiveReminderStore(url: url, identity: $0) }, startTimer: false)
+      var preferences = NotificationPreferences()
+      preferences.enabled = true
+      router.configure(preferences: preferences, calendar: .current, enabled: true)
+      return router
+    }
+    func inventory() -> ActiveReminderInventory {
+      ActiveReminderInventory(
+        serverUrl: "https://fixture.test", accountId: "owner", generation: 1,
+        generatedAt: ISO8601DateFormatter().string(from: time), items: [item])
+    }
+    var first: ActiveReminderRouter? = router()
+    try first?.ingest(inventory())
+    XCTAssertEqual(presenter.items.count, 1)
+    first?.snooze(item)
+    XCTAssertTrue(presenter.items.isEmpty)
+    XCTAssertEqual(
+      try XCTUnwrap(sink.ensured.last).fireAt.timeIntervalSince(time), 900, accuracy: 0.01)
+    first = nil
+    let restored = router()
+    try restored.ingest(inventory())
+    XCTAssertTrue(presenter.items.isEmpty)
+    time = time.addingTimeInterval(899)
+    try restored.ingest(inventory())
+    XCTAssertTrue(presenter.items.isEmpty)
+    time = time.addingTimeInterval(2)
+    try restored.ingest(inventory())
+    XCTAssertEqual(presenter.items.map(\.cardID), [item.cardID])
+    XCTAssertTrue(presenter.pending.isEmpty)
   }
 }

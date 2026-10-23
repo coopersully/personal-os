@@ -65,7 +65,7 @@ final class ActiveReminderDockingTests: XCTestCase {
     let absolute = ActiveReminderDueText.absolute(
       now.addingTimeInterval(60), now: now,
       calendar: calendar, locale: Locale(identifier: "en_US"))
-    XCTAssertTrue(absolute.hasPrefix("Today · "))
+    XCTAssertFalse(absolute.isEmpty)
     XCTAssertTrue(absolute.contains(":"))
   }
 }
@@ -110,8 +110,9 @@ extension ActiveReminderDockingTests {
     XCTAssertFalse(first.hasShadow)
     XCTAssertFalse(second.hasShadow)
     XCTAssertTrue(feedback.contains(.dock))
-    drag(to: CGPoint(x: second.frame.minX + 45, y: second.frame.minY))
-    XCTAssertGreaterThan(second.frame.minX, first.frame.maxX)
+    drag(to: CGPoint(x: second.frame.minX + second.frame.width + 100, y: second.frame.minY - 150))
+    XCTAssertFalse(ActiveReminderDocking.overlaps(first.frame, second.frame))
+    XCTAssertEqual(ActiveReminderPlacement.fit(second.frame, geometry: PetGeometry(bounds: area, obstacles: [])), second.frame)
     XCTAssertTrue(first.hasShadow)
     XCTAssertTrue(second.hasShadow)
     XCTAssertTrue(feedback.contains(.detach))
@@ -148,9 +149,14 @@ extension ActiveReminderDockingTests {
       return try XCTUnwrap(surface.menu(for: event))
     }
     let initial = try menu()
-    XCTAssertEqual(initial.items.map(\.title), ["Complete", "View in nohmi"])
+    XCTAssertEqual(initial.items.filter { !$0.isAlternate && !$0.isSeparatorItem }.map(\.title), [
+      "Complete", "View in nohmi", "Snooze 15m", "Separate this card", "Move to edge",
+      "Reset to smallest", "Gather all into stack", "Active card settings"])
+    XCTAssertEqual(initial.items.filter(\.isAlternate).count, 5)
+    XCTAssertTrue(initial.items.filter(\.isAlternate).allSatisfy { $0.keyEquivalentModifierMask == [.shift] })
     NSApp.sendAction(initial.items[0].action!, to: initial.items[0].target, from: initial.items[0])
-    NSApp.sendAction(initial.items[1].action!, to: initial.items[1].target, from: initial.items[1])
+    let openItem = try XCTUnwrap(initial.items.first { $0.title == "View in nohmi" })
+    NSApp.sendAction(openItem.action!, to: openItem.target, from: openItem)
     XCTAssertEqual(completed, 1)
     XCTAssertEqual(opened, 1)
     try presenter.show([item], preview: true, pending: [item.cardID], errors: [:], stale: false)

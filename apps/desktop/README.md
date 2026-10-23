@@ -20,6 +20,23 @@ Settings → Notifications controls permission, due tasks/reminders, event lead 
 
 New mail uses durable API arrival IDs and per-device cursors. Initial imports, sent replies, drafts and replayed provider messages do not generate incoming-mail alerts. A persisted native outbox retries OS scheduling failures. Old mail is coalesced into a bounded account/day catch-up alert. The resident process refreshes around once per minute with jitter/backoff and on wake; actual arrival latency also depends on connector synchronization (currently approximately five minutes for stale mail accounts). Scheduled OS alerts can fire after Quit. Detecting new mail requires the app to remain running; this release does not use APNs.
 
+## Active cards
+
+Due opted-in tasks and reminders appear as independent 240 × 64 cards with live local time/countdowns. Drag anywhere, resize from invisible edges, and click a shared seam to lock a pair; Shift-click applies to the connected group. Locked pairs travel together. Shake a held card to gather the visible scene into a compact locked stack. Settings → Notifications includes this Mac’s interaction, return, sound/volume and Reduce Motion controls, independent of the existing account creation default.
+
+Right-click has eight commands with live native Shift group alternatives. Completion waits for each source acknowledgement. Snooze 15m persists locally before hiding the card and reschedules ordinary fallback. Group reset retains valid contacts, pair locks and docking, while screen/Dock occupancy checks reject unsafe layouts. Card state and pair intent remain account/server scoped.
+
+Build a disposable production-controller sample preview without account data:
+
+```sh
+python3 apps/desktop/macos/scripts/preview-active-cards.py --build-only
+# Open /tmp/nohmi-active-card-preview/nohmi Active Card Preview.app for native UI inspection.
+python3 apps/desktop/macos/scripts/preview-active-cards.py --stop
+pnpm exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/generate-active-card-native-icons.ts
+```
+
+The sample preview logs fake ACK/navigation actions under `/tmp/nohmi-active-card-preview` and exits after 15 minutes. It never connects to the API or reads real account storage. Its state JSON supports geometry inspection; creating `fail-next` in that folder fails the next sample completion. Native audio comes from the shared Earshot renderer (`pnpm audio:render`) and icons come from the shared reicon registry. Missing audio remains silent.
+
 ## Pinterest wallpaper
 
 Wallpaper settings and manual preview remain in Settings → Wallpaper. The resident process refreshes daily at 08:00 in the device's local time and catches up once after missed days. Success stamps and appearance fingerprints belong to the individual installation/server/account, so another Mac's application does not suppress this Mac's refresh.

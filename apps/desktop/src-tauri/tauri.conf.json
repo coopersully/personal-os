@@ -49,7 +49,7 @@
     "macOS": {
       "minimumSystemVersion": "14.0"
     },
-    "resources": ["sounds/*.wav"]
+    "resources": ["sounds/*.wav", "card-icons/*.png"]
   },
   "plugins": {
     "deep-link": {

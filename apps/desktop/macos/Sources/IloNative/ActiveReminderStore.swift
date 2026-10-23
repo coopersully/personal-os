@@ -44,7 +44,7 @@ struct ActiveReminderPlacement {
   static func fit(_ frame: CGRect, geometry: PetGeometry) -> CGRect { geometry.fitCard(frame) }
   static func unoccupied(in geometry: PetGeometry, occupied: [CGRect]) -> CGRect {
     let area = geometry.bounds
-    for size in [CGSize(width: 320, height: 88), CGSize(width: 240, height: 72)] {
+    for size in [CGSize(width: 240, height: 64)] {
       let centered = fit(
         CGRect(
           x: area.midX - size.width / 2, y: area.midY - size.height / 2,
@@ -68,7 +68,7 @@ struct ActiveReminderPlacement {
     // A finite screen can fill up; keep every window present and its drag handle reachable.
     let offset = Double(occupied.count % 12) * 24
     return fit(
-      CGRect(x: area.minX + offset, y: area.maxY - 88 - offset, width: 240, height: 88),
+      CGRect(x: area.minX + offset, y: area.maxY - 64 - offset, width: 240, height: 64),
       geometry: geometry)
   }
 
@@ -79,6 +79,8 @@ final class ActiveReminderStore {
     var receipts: [String: Double] = [:]
     var placements: [String: ActiveReminderPoint] = [:]
     var cards: [String: [String: ActiveReminderCardGeometry]]? = nil
+    var lockEdges: Set<ActiveReminderEdge>? = nil
+    var snoozes: [String: Double]? = nil
     var cardDisplays: [String: String]? = nil
   }
   private let url: URL
@@ -97,6 +99,23 @@ final class ActiveReminderStore {
       try FileManager.default.removeItem(at: url)
     }
     data = DataModel(identity: data.identity)
+  }
+  var lockEdges: Set<ActiveReminderEdge> { data.lockEdges ?? [] }
+  func saveLockEdges(_ edges: Set<ActiveReminderEdge>) throws {
+    var next = data
+    next.lockEdges = edges
+    try save(next)
+  }
+  func snoozedUntil(_ id: String) -> Date? {
+    data.snoozes?[id].map { Date(timeIntervalSince1970: $0) }
+  }
+  func snooze(_ id: String, until: Date) throws {
+    var next = data
+    var snoozes = next.snoozes ?? [:]
+    snoozes = snoozes.filter { $0.value > Date().timeIntervalSince1970 }
+    snoozes[id] = until.timeIntervalSince1970
+    next.snoozes = snoozes
+    try save(next)
   }
   func contains(_ id: String) -> Bool { data.receipts[id] != nil }
   func markShown(_ id: String, at now: Date) throws {

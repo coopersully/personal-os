@@ -26,6 +26,7 @@ final class ActiveReminderDragView: NSView {
     if let forwardScroll { forwardScroll(event) } else { super.scrollWheel(with: event) }
   }
   var dragStarted: (() -> Void)?
+  var controlledDrag: ((CGPoint) -> Void)?
   var menuProvider: (() -> NSMenu)?
   override func menu(for event: NSEvent) -> NSMenu? { menuProvider?() }
   var dragChanged: ((CGPoint) -> Void)?
@@ -38,6 +39,7 @@ final class ActiveReminderDragView: NSView {
       ?? NSEvent.mouseLocation
   }
   private var origin: (CGPoint, CGRect)?
+  var dragOrigin: CGPoint? { origin?.0 }
   override func mouseDown(with event: NSEvent) {
     if let window {
       origin = (location(event), window.frame)
@@ -50,8 +52,12 @@ final class ActiveReminderDragView: NSView {
     guard moved || hypot(current.x - point.x, current.y - point.y) >= 4 else { return }
     if !moved { dragStarted?() }
     moved = true
-    window?.setFrameOrigin(
-      CGPoint(x: frame.minX + current.x - point.x, y: frame.minY + current.y - point.y))
+    if let controlledDrag {
+      controlledDrag(current)
+    } else {
+      window?.setFrameOrigin(
+        CGPoint(x: frame.minX + current.x - point.x, y: frame.minY + current.y - point.y))
+    }
     dragChanged?(current)
   }
   override func mouseUp(with event: NSEvent) {
@@ -63,6 +69,8 @@ final class ActiveReminderDragView: NSView {
 }
 
 final class ActiveReminderResizeView: NSView {
+  enum Edge { case corner, north, south, east, west }
+  var edge: Edge = .corner
   var menuProvider: (() -> NSMenu)?
   override func menu(for event: NSEvent) -> NSMenu? { menuProvider?() }
   var resizeBegan: (() -> Void)?
@@ -75,7 +83,10 @@ final class ActiveReminderResizeView: NSView {
   }
   private var origin: (CGPoint, CGRect)?
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-  override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
+  override func resetCursorRects() {
+    addCursorRect(
+      bounds, cursor: edge == .north || edge == .south ? .resizeUpDown : .resizeLeftRight)
+  }
   override func mouseDown(with event: NSEvent) {
     if let window {
       origin = (location(event), window.frame)
@@ -85,12 +96,30 @@ final class ActiveReminderResizeView: NSView {
   override func mouseDragged(with event: NSEvent) {
     guard let window, let (point, frame) = origin else { return }
     let current = location(event)
-    let width = max(
-      window.contentMinSize.width, min(window.maxSize.width, frame.width + current.x - point.x))
-    let height = max(
-      window.contentMinSize.height, min(window.maxSize.height, frame.height - current.y + point.y))
-    window.setFrame(
-      CGRect(x: frame.minX, y: frame.maxY - height, width: width, height: height), display: true)
+    var next = frame
+    switch edge {
+    case .corner, .east:
+      next.size.width = max(
+        window.contentMinSize.width, min(window.maxSize.width, frame.width + current.x - point.x))
+    case .west:
+      next.size.width = max(
+        window.contentMinSize.width, min(window.maxSize.width, frame.width - current.x + point.x))
+      next.origin.x = frame.maxX - next.width
+    default: break
+    }
+    switch edge {
+    case .corner, .south:
+      next.size.height = max(
+        window.contentMinSize.height, min(window.maxSize.height, frame.height - current.y + point.y)
+      )
+      next.origin.y = frame.maxY - next.height
+    case .north:
+      next.size.height = max(
+        window.contentMinSize.height, min(window.maxSize.height, frame.height + current.y - point.y)
+      )
+    default: break
+    }
+    window.setFrame(next, display: true)
     resizeChanged?()
   }
   override func mouseUp(with event: NSEvent) {
@@ -106,7 +135,22 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting {
   var panels: [String: NSPanel] { windows.mapValues(\.panel) }
   var complete: ((ActiveReminderCandidate) -> Void)?
   var open: ((ActiveReminderCandidate) -> Void)?
-  var store: ActiveReminderStore?
+  var snooze: ((ActiveReminderCandidate) -> Void)?
+  var settings: (() -> Void)?
+  var interactions = ActiveReminderInteractions()
+  private(set) var locks = Set<ActiveReminderEdge>()
+  private var groupAnchors: [String: Int] = [:]
+  private var updatingGroup = false
+  private var gesture: GroupGesture?
+  private struct GroupGesture {
+    var id: String
+    var origin: CGPoint
+    var frames: [String: CGRect]
+    var candidate: ActiveReminderSlot?
+    var shake: PetShoo
+    var gathered = false
+  }
+  var store: ActiveReminderStore? { didSet { locks = store?.lockEdges ?? [] } }
   private let mouseButtons: () -> Int
   private let feedback: (ActiveReminderFeedback) -> Void
   private let geometry: (NSScreen) -> PetGeometry
@@ -122,12 +166,24 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting {
     }
   }
   private func updateConnections() {
+    guard !updatingGroup else { return }
+    let present = Set(windows.keys)
+    // Hidden windows keep lock intent; source retirement and a visible separation remove edges.
+    let geometric = ActiveReminderGrouping.edges(visibleFrames)
+    locks = locks.filter {
+      present.contains($0.a) && present.contains($0.b)
+        && (windows[$0.a]?.panel.isVisible != true || windows[$0.b]?.panel.isVisible != true
+          || geometric.contains($0))
+    }
+    if let store, store.lockEdges != locks { try? store.saveLockEdges(locks) }
     for (id, window) in windows {
       let occupied = Dictionary(
         uniqueKeysWithValues: windows.compactMap { key, other in
           key != id && other.panel.isVisible ? (key, other.panel.frame) : nil
         })
-      window.updateSeams(ActiveReminderDocking.seams(frame: window.panel.frame, occupied: occupied))
+      window.updateSeams(
+        ActiveReminderDocking.seams(frame: window.panel.frame, occupied: occupied),
+        occupied: occupied, locks: locks)
     }
   }
   private func play(_ event: ActiveReminderFeedback) { if soundEnabled { feedback(event) } }
@@ -167,6 +223,8 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting {
       hide()
       throw NativeError.message("No display is available for active reminders.")
     }
+    refitGroups()
+    updatingGroup = true
     var failure: Error?
     for item in items {
       let window: ActiveReminderCardWindow
@@ -188,9 +246,18 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting {
             })
         }
         window.layoutChanged = { [weak self] in self?.updateConnections() }
+        window.dragBegan = { [weak self] in self?.beginGroupDrag(item.cardID) }
+        window.dragMoved = { [weak self] point in self?.moveGroupDrag(point) }
+        window.dragFinished = { [weak self] in self?.endGroupDrag() }
+        window.menuFactory = { [weak self] in self?.menu(for: item.cardID) ?? NSMenu() }
+        window.toggleJoin = { [weak self] peer, all in
+          self?.toggleJoin(item.cardID, peer: peer, all: all)
+        }
         window.feedback = { [weak self] event in self?.play(event) }
         windows[item.cardID] = window
       }
+      window.interactions = interactions
+      window.item = item
       do {
         try window.show(
           item: item, preview: preview, pending: pending.contains(item.cardID),
@@ -200,6 +267,7 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting {
         if isNew && soundEnabled { feedback(.arrival) }
       } catch { failure = error }
     }
+    updatingGroup = false
     updateConnections()
     if let failure { throw failure }
   }
@@ -219,6 +287,7 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting {
   func hide() {
     clockTimer?.invalidate()
     clockTimer = nil
+    gesture = nil
     for window in windows.values { window.hide() }
     for window in retiring.values { window.close() }
     retiring = [:]
@@ -230,6 +299,9 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting {
     for window in retiring.values { window.close() }
     retiring = [:]
     windows = [:]
+    locks = []
+    gesture = nil
+    groupAnchors = [:]
     store = nil
   }
   deinit {
@@ -251,7 +323,8 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
   private var arrived = false
   private var dragCandidate: ActiveReminderSlot?
   private var resizeAnchor: Int?
-  private var attachedAnchor: Int?
+  private var lastResizeFrame: CGRect?
+  var attachedAnchor: Int?
   var occupied: () -> [String: CGRect] = { [:] }
   var layoutChanged: () -> Void = {}
   var feedback: (ActiveReminderFeedback) -> Void = { _ in }
@@ -259,16 +332,24 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
   private let clock: ActiveReminderClock
   private var interacting = false
   private var guideGeneration = 0
-  private var completeAction: () -> Void = {}
-  private var openAction: () -> Void = {}
-  private var canComplete = true
-  private var hadPending = false
-  private var lastCompletionError: String?
-  private let guides = ActiveReminderSlotView(frame: .zero)
-  private let guidePanel = ActiveReminderWindow(
+  fileprivate var completeAction: () -> Void = {}
+  fileprivate var openAction: () -> Void = {}
+  var item: ActiveReminderCandidate?
+  var interactions = ActiveReminderInteractions()
+  var dragBegan: (() -> Void)?
+  var dragMoved: ((CGPoint) -> Void)?
+  var dragFinished: (() -> Void)?
+  var menuFactory: (() -> NSMenu)?
+  var toggleJoin: ((String, Bool) -> Void)?
+  private var seamView: ActiveReminderSeamView?
+  var canComplete = true
+  fileprivate var hadPending = false
+  fileprivate var lastCompletionError: String?
+  let guides = ActiveReminderSlotView(frame: .zero)
+  let guidePanel = ActiveReminderWindow(
     contentRect: .zero,
     styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-  private var arranging = false
+  var arranging = false
   private var settle: DispatchWorkItem?
   init(
     item: ActiveReminderCandidate, screen: NSScreen, occupied: [CGRect],
@@ -286,10 +367,11 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
     panel.hidesOnDeactivate = false
     panel.isReleasedWhenClosed = false
     panel.isMovable = true
+    panel.acceptsMouseMovedEvents = true
     panel.isOpaque = false
     panel.backgroundColor = .clear
     panel.hasShadow = true
-    panel.contentMinSize = NSSize(width: 240, height: 72)
+    panel.contentMinSize = NSSize(width: 240, height: 64)
     panel.maxSize = geometry(screen).bounds.size
     panel.delegate = self
     panel.setAccessibilityLabel("nohmi \(item.kind)")
@@ -306,7 +388,7 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
     let area = geometry(screen).bounds
     let frame: CGRect
     if let saved = store?.cardPlacement(card: cardID, display: PetDisplays.id(screen)) {
-      let size = CGSize(width: max(240, saved.width), height: max(72, saved.height))
+      let size = CGSize(width: max(240, saved.width), height: max(64, saved.height))
       frame = CGRect(
         x: area.minX + max(0, area.width - size.width) * saved.x,
         y: area.minY + max(0, area.height - size.height) * saved.y, width: size.width,
@@ -376,9 +458,15 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
         self.guideGeneration += 1
         self.feedback(self.appearance.seams.isJoined ? .detach : .grab)
         self.pulse()
+        self.dragBegan?()
       }
-      header.dragChanged = { [weak self] _ in self?.updateAnchors() }
-      header.dragEnded = { [weak self] in self?.finishDrag() }
+      header.controlledDrag = dragMoved
+      header.dragChanged = { [weak self] _ in if self?.dragMoved == nil { self?.updateAnchors() } }
+      header.dragEnded = { [weak self] in
+        guard let self else { return }
+        self.interacting = false
+        if let dragFinished = self.dragFinished { dragFinished() } else { self.finishDrag() }
+      }
       header.clicked = { [weak self] point in
         guard let self, let content = self.panel.contentView else { return }
         let local = self.panel.convertPoint(fromScreen: point)
@@ -393,6 +481,11 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
         }
       }
       container.addSubview(header)
+      let seams = ActiveReminderSeamView(frame: container.bounds)
+      seams.autoresizingMask = [.width, .height]
+      seams.toggle = { [weak self] peer, all in self?.toggleJoin?(peer, all) }
+      container.addSubview(seams)
+      seamView = seams
       let grip = ActiveReminderResizeView(
         frame: CGRect(x: container.bounds.width - 24, y: 0, width: 24, height: 24))
       grip.autoresizingMask = [.minXMargin, .maxYMargin]
@@ -405,6 +498,32 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
       grip.setAccessibilityRole(.growArea)
       grip.setAccessibilityLabel("Resize \(item.kind)")
       container.addSubview(grip)
+      for edge in [ActiveReminderResizeView.Edge.north, .south, .east, .west] {
+        let strip = ActiveReminderResizeView(frame: .zero)
+        strip.edge = edge
+        switch edge {
+        case .north:
+          strip.frame = CGRect(
+            x: 5, y: container.bounds.height - 5, width: container.bounds.width - 10, height: 5)
+          strip.autoresizingMask = [.width, .minYMargin]
+        case .south:
+          strip.frame = CGRect(x: 5, y: 0, width: container.bounds.width - 30, height: 5)
+          strip.autoresizingMask = [.width, .maxYMargin]
+        case .east:
+          strip.frame = CGRect(
+            x: container.bounds.width - 5, y: 24, width: 5, height: container.bounds.height - 29)
+          strip.autoresizingMask = [.height, .minXMargin]
+        case .west:
+          strip.frame = CGRect(x: 0, y: 5, width: 5, height: container.bounds.height - 10)
+          strip.autoresizingMask = [.height, .maxXMargin]
+        default: break
+        }
+        strip.resizeBegan = grip.resizeBegan
+        strip.resizeChanged = grip.resizeChanged
+        strip.resizeEnded = grip.resizeEnded
+        strip.menuProvider = grip.menuProvider
+        container.addSubview(strip, positioned: .below, relativeTo: seams)
+      }
       panel.contentView = container
       signature = next
     }
@@ -445,7 +564,7 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
     }
     return fitted
   }
-  private func currentScreen() -> NSScreen? {
+  func currentScreen() -> NSScreen? {
     NSScreen.screens.first { $0.frame.contains(CGPoint(x: panel.frame.midX, y: panel.frame.midY)) }
       ?? NSScreen.screens.first { $0.frame.intersects(panel.frame) } ?? NSScreen.main
   }
@@ -469,7 +588,7 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
     opacity.toValue = appearing ? 1 : 0
     opacity.duration = appearing ? 0.25 : 0.18
     layer.add(opacity, forKey: "reminder-opacity")
-    guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+    guard !reduceMotion else { return }
     let scale = CAKeyframeAnimation(keyPath: "transform.scale")
     scale.values = appearing ? [0.88, 1.025, 1] : [1, 1.035, 0.82]
     scale.keyTimes = [0, 0.65, 1]
@@ -480,8 +599,13 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
   private func fitDuringGesture() {
     guard let screen = currentScreen() else { return }
     arranging = true
-    panel.setFrame(
-      ActiveReminderPlacement.fit(panel.frame, geometry: geometry(screen)), display: true)
+    let fitted = ActiveReminderPlacement.fit(panel.frame, geometry: geometry(screen))
+    if !occupied().values.contains(where: { ActiveReminderDocking.overlaps(fitted, $0) }) {
+      panel.setFrame(fitted, display: true)
+      lastResizeFrame = fitted
+    } else if let lastResizeFrame {
+      panel.setFrame(lastResizeFrame, display: true)
+    }
     arranging = false
   }
   private func availableSlots(on screen: NSScreen) -> [ActiveReminderSlot] {
@@ -543,14 +667,22 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
     layoutChanged()
     scheduleSave()
   }
-  func updateSeams(_ seams: ActiveReminderSeams) {
+  func updateSeams(
+    _ seams: ActiveReminderSeams, occupied: [String: CGRect] = [:],
+    locks: Set<ActiveReminderEdge> = []
+  ) {
+    seamView?.update(
+      frame: panel.frame, occupied: occupied, locks: locks, id: cardID, reduced: reduceMotion)
     guard appearance.seams != seams else { return }
     appearance.seams = seams
     panel.hasShadow = !seams.isJoined
   }
+  private var reduceMotion: Bool {
+    interactions.reducedMotion || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+  }
   private func pulse(failure: Bool = false) {
     guard let layer = panel.contentView?.layer,
-      !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+      !reduceMotion
     else { return }
     let effect = CAKeyframeAnimation(
       keyPath: failure ? "transform.translation.x" : "transform.scale")
@@ -559,6 +691,7 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
     layer.add(effect, forKey: "reminder-feedback")
   }
   private func makeMenu() -> NSMenu {
+    if let menuFactory { return menuFactory() }
     feedback(.menu)
     let menu = NSMenu()
     menu.autoenablesItems = false
@@ -587,20 +720,37 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
     feedback(.open)
     openAction()
   }
-  @objc private func menuSeparate() {
+  @objc func menuSeparate() {
     guard let screen = currentScreen() else { return }
     attachedAnchor = nil
     let layout = geometry(screen)
     let others = occupied()
-    let frames = [
-      CGPoint(x: 24, y: 0), CGPoint(x: -24, y: 0), CGPoint(x: 0, y: -24), CGPoint(x: 0, y: 24),
-    ]
-    .map { layout.fitCard(panel.frame.offsetBy(dx: $0.x, dy: $0.y)) }
-    let target =
-      frames.first { frame in
-        !others.values.contains { ActiveReminderDocking.overlaps(frame, $0) }
+    var frames: [CGRect] = []
+    for distance in stride(
+      from: CGFloat(24), through: max(layout.bounds.width, layout.bounds.height), by: 24)
+    {
+      for offset in [
+        CGPoint(x: distance, y: 0), CGPoint(x: -distance, y: 0), CGPoint(x: 0, y: -distance),
+        CGPoint(x: 0, y: distance),
+      ] {
+        let frame = layout.fitCard(panel.frame.offsetBy(dx: offset.x, dy: offset.y))
+        if !others.values.contains(where: { ActiveReminderDocking.overlaps(frame, $0) })
           && !ActiveReminderDocking.seams(frame: frame, occupied: others).isJoined
-      } ?? ActiveReminderPlacement.unoccupied(in: layout, occupied: Array(others.values))
+        {
+          frames.append(frame)
+        }
+      }
+      if !frames.isEmpty { break }
+    }
+    guard
+      let target = frames.min(by: {
+        hypot($0.minX - panel.frame.minX, $0.minY - panel.frame.minY)
+          < hypot($1.minX - panel.frame.minX, $1.minY - panel.frame.minY)
+      })
+    else {
+      feedback(.failure)
+      return
+    }
     panel.setFrame(target, display: true)
     feedback(.detach)
     pulse()
@@ -623,6 +773,7 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
   private func beginResize() {
     hideGuides(animated: false)
     interacting = true
+    lastResizeFrame = panel.frame
     feedback(.resize)
     pulse()
     guard let screen = currentScreen() else { return }
@@ -658,7 +809,7 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
     layoutChanged()
     scheduleSave()
   }
-  private func scheduleSave() {
+  func scheduleSave() {
     guard !arranging else { return }
     settle?.cancel()
     let work = DispatchWorkItem { [weak self] in self?.saveGeometry() }
@@ -686,5 +837,303 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
     } catch {
       // Geometry failure must not retire an incomplete card.
     }
+  }
+}
+
+private final class ActiveReminderMenuItem: NSMenuItem {
+  var run: (() -> Void)?
+  init(_ title: String, run: @escaping () -> Void) {
+    super.init(title: title, action: #selector(invoke), keyEquivalent: "")
+    self.run = run
+    target = self
+  }
+  required init(coder: NSCoder) { fatalError("init(coder:) is unsupported") }
+  @objc private func invoke() { if isEnabled { run?() } }
+}
+
+extension ActiveReminderPanelController {
+  var visibleFrames: [String: CGRect] {
+    windows.filter { $0.value.panel.isVisible }.mapValues { $0.panel.frame }
+  }
+  func component(_ id: String, geometric: Bool = false) -> Set<String> {
+    let edges = ActiveReminderGrouping.edges(visibleFrames)
+    return ActiveReminderGrouping.component(
+      id, edges: geometric ? edges : edges.intersection(locks))
+  }
+  func toggleJoin(_ id: String, peer: String, all: Bool) {
+    let edge = ActiveReminderEdge(id, peer)
+    let geometric = ActiveReminderGrouping.edges(visibleFrames)
+    guard geometric.contains(edge) else { return }
+    let targets = all ? geometric.filter { component(id, geometric: true).contains($0.a) } : [edge]
+    let unlocking = locks.contains(edge)
+    if unlocking { locks.subtract(targets) } else { locks.formUnion(targets) }
+    play(unlocking ? .unlock : .lock)
+    updateConnections()
+  }
+  private func layout(for frames: [String: CGRect]) -> PetGeometry? {
+    let box = ActiveReminderGrouping.bounds(frames)
+    guard
+      let screen = NSScreen.screens.first(where: {
+        $0.frame.contains(CGPoint(x: box.midX, y: box.midY))
+      }) ?? NSScreen.main
+    else { return nil }
+    return geometry(screen)
+  }
+  private func apply(_ frames: [String: CGRect], save: Bool = false) {
+    updatingGroup = true
+    for (id, frame) in frames {
+      guard let window = windows[id] else { continue }
+      window.arranging = true
+      window.attachedAnchor = nil
+      window.panel.setFrame(frame, display: true)
+      window.arranging = false
+      if save { window.scheduleSave() }
+    }
+    updatingGroup = false
+    updateConnections()
+  }
+  private func groupKey(_ ids: Set<String>) -> String { ids.sorted().joined(separator: "|") }
+  private func refitGroups() {
+    guard gesture == nil, mouseButtons() & 1 == 0 else { return }
+    var visited = Set<String>()
+    for id in visibleFrames.keys.sorted() where !visited.contains(id) {
+      let ids = component(id)
+      visited.formUnion(ids)
+      guard ids.count > 1 else { continue }
+      let frames = visibleFrames.filter { ids.contains($0.key) }
+      guard let layout = layout(for: frames) else { continue }
+      let box = ActiveReminderGrouping.bounds(frames)
+      let target: CGRect
+      if let anchor = groupAnchors[groupKey(ids)] {
+        target = ActiveReminderPlacement.anchors(in: layout, size: box.size)[anchor]
+      } else {
+        target = layout.fitCard(box)
+      }
+      let next = ActiveReminderGrouping.translated(
+        frames, dx: target.minX - box.minX, dy: target.minY - box.minY)
+      if ActiveReminderGrouping.valid(
+        next, geometry: layout, occupied: visibleFrames.filter({ !ids.contains($0.key) }))
+      {
+        apply(next)
+      }
+    }
+  }
+  private func groupSlots(_ frames: [String: CGRect], layout: PetGeometry) -> [ActiveReminderSlot] {
+    let occupied = visibleFrames.filter { frames[$0.key] == nil }
+    return ActiveReminderDocking.slots(
+      size: ActiveReminderGrouping.bounds(frames).size,
+      geometry: layout, occupied: occupied)
+  }
+  private func beginGroupDrag(_ id: String) {
+    let frames = visibleFrames.filter { component(id).contains($0.key) }
+    groupAnchors[groupKey(Set(frames.keys))] = nil
+    gesture = GroupGesture(
+      id: id, origin: NSEvent.mouseLocation, frames: frames,
+      shake: PetShoo(sensitivity: interactions.sensitivity))
+    // Drag tests and event synthesis need the same pointer used by the receiving surface.
+    if let surface = windows[id]?.panel.contentView?.subviews.compactMap({
+      $0 as? ActiveReminderDragView
+    }).first {
+      gesture?.origin = surface.dragOrigin ?? NSEvent.mouseLocation
+    }
+  }
+  private func moveGroupDrag(_ point: CGPoint) {
+    guard var drag = gesture, let layout = layout(for: drag.frames) else { return }
+    let old = ActiveReminderGrouping.bounds(drag.frames)
+    let target = layout.fitCard(
+      old.offsetBy(dx: point.x - drag.origin.x, dy: point.y - drag.origin.y))
+    var frames = ActiveReminderGrouping.translated(
+      drag.frames, dx: target.minX - old.minX, dy: target.minY - old.minY)
+    let others = visibleFrames.filter { drag.frames[$0.key] == nil }
+    if ActiveReminderGrouping.valid(frames, geometry: layout, occupied: others) {
+      apply(frames)
+    } else {
+      frames = visibleFrames.filter { drag.frames[$0.key] != nil }
+    }
+    if interactions.shake && !drag.gathered
+      && drag.shake.update(
+        point: point,
+        time: ProcessInfo.processInfo.systemUptime, eligible: true, overArtwork: true,
+        region: CGRect(x: -100000, y: -100000, width: 200000, height: 200000))
+    {
+      if gather(drag.id) {
+        drag.gathered = true
+        drag.origin = point
+        drag.frames = visibleFrames
+        frames = drag.frames
+      }
+    }
+    let slots = groupSlots(frames, layout: layout)
+    let candidate =
+      interactions.snapping ? ActiveReminderGrouping.candidate(frames, slots: slots) : nil
+    if candidate?.frame != drag.candidate?.frame, candidate != nil { play(.slot) }
+    drag.candidate = candidate
+    gesture = drag
+    guard let window = windows[drag.id] else { return }
+    if interactions.snapping && interactions.guides {
+      let area = layout.bounds
+      window.guidePanel.setFrame(area, display: false)
+      let suggestions = ActiveReminderGrouping.guideSlots(
+        slots, frame: ActiveReminderGrouping.bounds(frames), selected: candidate)
+      window.guides.slots = suggestions.map { $0.frame.offsetBy(dx: -area.minX, dy: -area.minY) }
+      window.guides.candidate = candidate?.frame.offsetBy(dx: -area.minX, dy: -area.minY)
+      window.guides.occupied = others.mapValues { $0.offsetBy(dx: -area.minX, dy: -area.minY) }
+      window.guides.members = frames.mapValues {
+        $0.offsetBy(
+          dx: -ActiveReminderGrouping.bounds(frames).minX,
+          dy: -ActiveReminderGrouping.bounds(frames).minY)
+      }
+      window.guidePanel.alphaValue = 1
+      window.guidePanel.order(.below, relativeTo: window.panel.windowNumber)
+    }
+  }
+  private func endGroupDrag() {
+    guard let drag = gesture else { return }
+    gesture = nil
+    windows[drag.id]?.guidePanel.orderOut(nil)
+    var frames = visibleFrames.filter { drag.frames[$0.key] != nil }
+    if let candidate = drag.candidate, let layout = layout(for: frames) {
+      let box = ActiveReminderGrouping.bounds(frames)
+      let snapped = ActiveReminderGrouping.translated(
+        frames, dx: candidate.frame.minX - box.minX, dy: candidate.frame.minY - box.minY)
+      if ActiveReminderGrouping.valid(
+        snapped, geometry: layout, occupied: visibleFrames.filter({ frames[$0.key] == nil }))
+      {
+        frames = snapped
+      }
+    }
+    apply(frames, save: true)
+    if let anchor = drag.candidate?.anchor { groupAnchors[groupKey(Set(frames.keys))] = anchor }
+    if interactions.autoLock {
+      locks.formUnion(
+        ActiveReminderGrouping.edges(visibleFrames).filter {
+          frames[$0.a] != nil || frames[$0.b] != nil
+        })
+    }
+    // Single anchored cards retain the exact target as Dock geometry changes.
+    if frames.count == 1, let anchor = drag.candidate?.anchor {
+      windows[drag.id]?.attachedAnchor = anchor
+    }
+    play(drag.candidate == nil ? .release : drag.candidate?.neighbor == nil ? .snap : .dock)
+    updateConnections()
+  }
+  @discardableResult
+  func gather(_ first: String) -> Bool {
+    let frames = visibleFrames
+    guard let firstFrame = frames[first], let layout = layout(for: frames),
+      let stack = ActiveReminderGrouping.stack(
+        [first] + frames.keys.filter { $0 != first }.sorted(), near: firstFrame, geometry: layout)
+    else {
+      play(.failure)
+      return false
+    }
+    locks = ActiveReminderGrouping.edges(stack)
+    apply(stack, save: true)
+    play(.gather)
+    return true
+  }
+  func resetSizes(_ id: String, all: Bool) {
+    let ids = component(id, geometric: true)
+    let frames = visibleFrames.filter { ids.contains($0.key) }
+    guard let layout = layout(for: frames),
+      let next = ActiveReminderGrouping.reset(
+        frames, targets: all ? ids : [id], geometry: layout,
+        occupied: visibleFrames.filter({ !ids.contains($0.key) }))
+    else {
+      play(.failure)
+      return
+    }
+    let retained = locks
+    apply(next, save: true)
+    locks = retained.intersection(ActiveReminderGrouping.edges(visibleFrames))
+    for (key, frame) in next {
+      windows[key]?.attachedAnchor = ActiveReminderPlacement.anchors(in: layout, size: frame.size)
+        .firstIndex(where: { $0.equalTo(frame) })
+    }
+    play(.resize)
+    updateConnections()
+  }
+  func moveToEdge(_ id: String, all: Bool) {
+    let ids = component(id, geometric: all)
+    let frames = visibleFrames.filter { ids.contains($0.key) }
+    guard let layout = layout(for: frames) else { return }
+    let box = ActiveReminderGrouping.bounds(frames)
+    let slots = groupSlots(frames, layout: layout).filter { $0.anchor != nil }
+    guard
+      let nearest = ActiveReminderDocking.nearest(
+        to: box, slots: slots, radius: .greatestFiniteMagnitude)
+    else {
+      play(.failure)
+      return
+    }
+    apply(
+      ActiveReminderGrouping.translated(
+        frames, dx: nearest.frame.minX - box.minX, dy: nearest.frame.minY - box.minY), save: true)
+    groupAnchors[groupKey(ids)] = nearest.anchor
+    if frames.count == 1 { windows[id]?.attachedAnchor = nearest.anchor }
+    play(.snap)
+  }
+  func separate(_ id: String, all: Bool) {
+    if all {
+      let ids = component(id, geometric: true)
+      locks = locks.filter { !ids.contains($0.a) || !ids.contains($0.b) }
+      updateConnections()
+      play(.unlock)
+      return
+    }
+    locks = locks.filter { !$0.contains(id) }
+    windows[id]?.menuSeparate()
+  }
+  func menu(for id: String) -> NSMenu {
+    play(.menu)
+    let menu = NSMenu()
+    menu.autoenablesItems = false
+    var glyphIndex = 0
+    let glyphs: [ActiveReminderGlyph.Kind] = [
+      .complete, .open, .snooze, .separate, .edge, .reset, .gather, .settings,
+    ]
+    func add(
+      _ title: String, group: String? = nil, enabled: Bool = true,
+      _ command: @escaping (Bool) -> Void
+    ) {
+      let item = ActiveReminderMenuItem(title) { command(false) }
+      item.image = ActiveReminderGlyph.image(glyphs[glyphIndex])
+      glyphIndex += 1
+      item.keyEquivalentModifierMask = []
+      item.isEnabled = enabled
+      menu.addItem(item)
+      if let group {
+        let alternate = ActiveReminderMenuItem(group) { command(true) }
+        alternate.image =
+          group == "Unlock this group" ? ActiveReminderGlyph.image(.unlock) : item.image
+        alternate.isAlternate = true
+        alternate.keyEquivalentModifierMask = [.shift]
+        alternate.isEnabled = enabled
+        menu.addItem(alternate)
+      }
+    }
+    func targets(_ all: Bool) -> [ActiveReminderCardWindow] {
+      let ids = all ? self.component(id, geometric: true) : [id]
+      return ids.sorted().compactMap { self.windows[$0] }
+    }
+    let pending = windows[id]?.hadPending ?? false
+    let title =
+      pending
+      ? "Completing…" : windows[id]?.lastCompletionError == nil ? "Complete" : "Retry completion"
+    add(title, group: "Complete group", enabled: windows[id]?.canComplete ?? false) { all in
+      for window in targets(all) where window.canComplete { window.completeAction() }
+    }
+    add("View in nohmi") { _ in self.windows[id]?.openAction() }
+    add("Snooze 15m", group: "Snooze group 15m", enabled: !pending) { all in
+      for window in targets(all) { if let item = window.item { self.snooze?(item) } }
+    }
+    menu.addItem(.separator())
+    add("Separate this card", group: "Unlock this group") { self.separate(id, all: $0) }
+    add("Move to edge", group: "Move group to edge") { self.moveToEdge(id, all: $0) }
+    add("Reset to smallest", group: "Reset group to smallest") { self.resetSizes(id, all: $0) }
+    menu.addItem(.separator())
+    add("Gather all into stack") { _ in self.gather(id) }
+    add("Active card settings") { _ in self.settings?() }
+    return menu
   }
 }

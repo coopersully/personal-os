@@ -445,10 +445,8 @@ pauses cards on the current Mac while ordinary system notification preferences c
 
 The native companion presents each due task or reminder in its own compact, non-activating window.
 Match the shared TaskItem/ReminderItem rows: a filled 16-point completion checkbox, medium
-15-point title, the app's neutral paper/ink palette, compact padding, and red overdue metadata.
-Align the left checkbox with the first title baseline, including wrapped titles. Both kinds use a
-small live relative due line (for example, “Due in 15 min 3 sec” or “Overdue by 2 hr”) and a separate
-absolute local date/time line. Update once per second with one shared visible-card clock; cache
+14-point title, the app's neutral paper/ink palette, compact padding, and red overdue metadata.
+Align the left checkbox with the first title baseline, including wrapped titles. Both kinds use one compact 11-point monospaced metadata row: exact local time on the left and an abbreviated live countdown on the right (for example, “in 15m 03s” or “2h 00m late”). Update once per second with one shared visible-card clock; cache
 absolute labels until the day/time zone/locale changes. At minimum height use one title line so the
 time remains visible; larger cards allow two. The complete timestamp remains available as help. Keep the
 full card drag surface without a separate Task/Reminder/nohmi header. Align both completion controls
@@ -457,8 +455,7 @@ threshold moves the card instead, including when starting over a title or checkb
 There is no pagination, hidden-item stack, or dismissal control. Every pending item occupies its own
 screen area, so completing an item reclaims space without rearranging the others.
 
-Target refinement: cards start at their smallest supported size, with new arrivals placed in free visible space. The current native implementation still starts at 320 × 88; the browser trial starts at 240 × 64. Each can be dragged
-and resized independently (minimum 240 × 72), using native edges or an invisible corner resize target; do not draw a resize grip.
+Cards start at their smallest supported size, 240 × 64, with new arrivals placed in free visible space. Each can be dragged and resized independently from any invisible edge or the corner target; do not draw a resize grip.
 Use 16 corner, midpoint and quarter-edge targets plus available slots beside other cards. Exclude
 occupied footprints, including when restoring saved positions or resizing. A drop on an occupied
 anchor moves only the grabbed card into the nearest free slot. Guides are faded, card-sized
@@ -481,7 +478,7 @@ Cards released beside one another snap flush. Square only the contacting corners
 subtle divider along each shared edge, making them read as one surface. Each remains independently
 draggable when its join is unlocked; a short pull separates it and restores exposed corners without moving its neighbors.
 
-Browser-first target refinement (not yet native): clicking a shared border toggles that join’s lock.
+Native and browser behavior: clicking a shared border toggles that join’s lock.
 Dragging any member moves its connected locked group; unlocked neighbors stay put. Shaking a
 grabbed card gathers all visible active tasks and reminders into one locked, compact stack while
 keeping the pointer attached. Every item remains visible, with a compact column arrangement
@@ -492,15 +489,9 @@ The browser playground is `apps/web/active-cards-playground.html`, served by `py
 or the worktree’s development runtime; it is not a production build entry. It uses sample records and simulated
 presence/Dock geometry, not native Accessibility or real notification delivery.
 
-Proposed settings live in Settings → Notifications → Active cards, with account-level creation
-defaults (separate tasks/reminders, both initially off, per-item overrides) and device-level
-card enablement/pause, return behavior, shake enablement/sensitivity, snapping/slot guides,
-new-join locking, volume and Reduce Motion. The existing single account default is unchanged in
-native/API storage; separate defaults are a browser proposal. Preferred display, placement
-restoration, screen-sharing privacy and honest permission/Focus state need native implementation.
+Settings live in Settings → Notifications → Active reminder cards, with device-local card enablement/pause, return behavior, shake enablement/sensitivity, snapping/slot guides, new-join locking, sound/volume and Reduce Motion. The existing account creation default and delivery controls remain unchanged; separate task/reminder defaults remain a browser proposal. Placement restoration uses the existing persistent display UUID. Screen-sharing privacy and automatic Focus suppression remain outside this card-interaction refinement; the existing preview and permission controls remain authoritative.
 No maximum-visible or automatic collapsing setting should silently hide unfinished items.
-Right-click offers Complete/Retry completion, View in nohmi, and Separate card while joined.
-Pending or stale completion stays disabled; menu commands use the same acknowledged source actions.
+Right-click always offers eight visible commands: Complete/Retry completion, View in nohmi, Snooze 15m; Separate this card, Move to edge, Reset to smallest; Gather all into stack, and Active card settings. Two separators divide these groups. AppKit alternate menu items track Shift live for group completion/snooze, Unlock this group, group edge placement and group reset. Native modifier swaps retain keyboard focus and menu geometry using platform behavior; they do not reproduce the browser’s CSS label animation. Pending or stale completion stays disabled, group completion sends individual acknowledged source operations, and a failed item keeps its own retry state. There is no per-card active-off action. Snooze persists a 15-minute account/occurrence-local deadline before removing the card and reuses ordinary notification scheduling for fallback; fresh return/delivery gates still apply.
 
 Save size/normalized position per account, item, and persistent display UUID. Refreshes and sibling completion preserve existing windows and geometry. When a display
 vanishes, fit the card onto an available display. If the screen fills, retain all windows with
@@ -508,13 +499,12 @@ reachable drag handles rather than hiding items behind pagination. Lock/display 
 cards; return requires fresh confirmation. Failure/conflict remains on the originating card with an
 actionable completion retry. Settings failures use Sonner.
 
-New cards pop in with the existing notification soft click; acknowledged completion pops out with
-a short original completion pluck. Respect the Notifications sound preference and system mute.
+New cards pop in with the bundled Earshot arrival sample; acknowledged completion pops out with the bundled completion pluck. Respect the Notifications sound preference and system mute.
 Coalesce arrival audio for simultaneous cards. Grab, slot selection, docking, release, separation,
 resize endpoints, menu/open and completion-pending transitions use quiet cached samples and brief
 pulses; a completion failure uses a short low tone and shake with the retry still visible. Do not
-replay audio per pointer frame, countdown tick, routine refresh, lock/unlock, policy hiding or feed
-removal. Success audio remains reserved for acknowledged completion. Reduce Motion uses a
+replay audio per pointer frame, countdown tick, routine refresh, screen lock/unlock, policy hiding or feed
+removal. Explicit join lock/unlock commands play their semantic switch cue. Success audio remains reserved for acknowledged completion. Reduce Motion uses a
 short fade without scaling. Never retire a card or play success audio on an unacknowledged click.
 
 Elapsed input under 120 seconds is only one activity signal: session, loginwindow/lock and display
@@ -553,3 +543,13 @@ resetting sizes. Releasing Shift restores single-card actions. Resizing to minim
 preserves joins and edge alignment and must not detach the card. Active delivery
 cannot be disabled from a card menu; manage that deliberately in desktop settings.
 Desktop sounds follow the shared contract in `../feedback.md`.
+
+### Native active-card parity checkpoint (2026-10-23)
+
+The native controller owns a pair-edge lock graph, independently of geometric contact. Shift-click applies a seam’s lock action across its geometric component. Pair intent and card geometry are scoped to the existing account/server store; source retirement prunes affected pairs and account reset clears them. A held drag uses the pet’s Low/Medium/High reversal thresholds to gather visible cards into a compact locked stack, preserving the continuing pointer gesture. Group slots exclude their members from occupancy, use the whole footprint, and show at most three nearby disjoint suggestions. Shared-edge buttons are accessible while their glyph appears only on hover or keyboard focus. Locking animates the one-pixel divider from inset to full length; Reduce Motion makes the change immediate.
+
+Single and group minimum-size reset reflows the original contact graph and retains valid pair locks and docked outer edges. A geometry change is accepted only if every card remains on the display, outside Dock obstacles and other cards, with the original contacts preserved; an impossible reset retains the previous layout. Group edge attachment refits the component together when Dock geometry changes.
+
+Earshot audio is bundled locally and preloaded/cached, honors notification mute plus card mute/volume, coalesces arrivals and throttles repeated slot feedback. Missing samples are silent; no unrelated system-sound fallback is used. `tools/audio/render-active-cards.py` reproduces the shared browser/native pack. `apps/web/scripts/generate-active-card-native-icons.ts` generates the packaged monochrome artwork from the shared reicon registry.
+
+The disposable sample-only app is built with `python3 apps/desktop/macos/scripts/preview-active-cards.py --build-only`; it compiles the production controller and bundles its resources without connecting to an account. Native controller, geometry, persistence, snooze, held-shake, menu and lifecycle tests establish source parity. This is branch-local implementation evidence; signed-release, real OS notification, physical sleep/display and live account certification retain their existing release gates.

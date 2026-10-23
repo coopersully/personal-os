@@ -47,9 +47,7 @@
             "to_s": null
           },
           "layers": {
-            "attacks": [
-              0.033
-            ],
+            "attacks": [0.033],
             "count": 1,
             "pre_swell_ms": 0.0
           },
@@ -105,9 +103,7 @@
             "to_s": null
           },
           "layers": {
-            "attacks": [
-              0.013
-            ],
+            "attacks": [0.013],
             "count": 1,
             "pre_swell_ms": 0.0
           },
@@ -163,9 +159,7 @@
             "to_s": null
           },
           "layers": {
-            "attacks": [
-              0.013
-            ],
+            "attacks": [0.013],
             "count": 1,
             "pre_swell_ms": 0.0
           },
@@ -221,9 +215,7 @@
             "to_s": null
           },
           "layers": {
-            "attacks": [
-              0.013
-            ],
+            "attacks": [0.013],
             "count": 1,
             "pre_swell_ms": 0.0
           },
@@ -279,9 +271,7 @@
             "to_s": null
           },
           "layers": {
-            "attacks": [
-              0.013
-            ],
+            "attacks": [0.013],
             "count": 1,
             "pre_swell_ms": 0.0
           },
@@ -342,10 +332,7 @@
             "to_s": null
           },
           "layers": {
-            "attacks": [
-              0.013,
-              0.058
-            ],
+            "attacks": [0.013, 0.058],
             "count": 2,
             "pre_swell_ms": 0.0
           },
@@ -401,9 +388,7 @@
             "to_s": 0.031
           },
           "layers": {
-            "attacks": [
-              0.048
-            ],
+            "attacks": [0.048],
             "count": 1,
             "pre_swell_ms": 15.0
           },
@@ -459,9 +444,7 @@
             "to_s": null
           },
           "layers": {
-            "attacks": [
-              0.052
-            ],
+            "attacks": [0.052],
             "count": 1,
             "pre_swell_ms": 15.0
           },
@@ -522,9 +505,7 @@
             "to_s": null
           },
           "layers": {
-            "attacks": [
-              0.028
-            ],
+            "attacks": [0.028],
             "count": 1,
             "pre_swell_ms": 0.0
           },
@@ -580,9 +561,7 @@
             "to_s": null
           },
           "layers": {
-            "attacks": [
-              0.013
-            ],
+            "attacks": [0.013],
             "count": 1,
             "pre_swell_ms": 0.0
           },

@@ -2,6 +2,8 @@
 import hashlib
 import json
 import os
+import shutil
+import subprocess
 from pathlib import Path
 os.environ.setdefault("EARSHOT_OFFLINE", "1")
 os.environ.setdefault("EARSHOT_THREADS", "2")
@@ -26,9 +28,14 @@ report = {"earshot": "0.4.0", "revision": "591fa3e028032e6dce56620a20e932e35667e
 for event, (sound, peak) in RECIPES.items():
     path = OUT / f"{event}.wav"
     result = sfx_render(sound, out=str(path), peak_db=peak, sr=44100)
+    native = ROOT / "apps/desktop/src-tauri/sounds" / f"earshot-{event}.wav"
+    native.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(path, native)
     meta = result["meta"]
     print(result["summary"], flush=True)
     if not meta["checks"]["ok"]:
         raise SystemExit(f"Earshot audit failed for {event}")
     report["sounds"][event] = {"bank_id": sound, "peak_db": peak, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "audit": meta}
 (OUT / "manifest.json").write_text(json.dumps(report, indent=2) + "\n")
+
+subprocess.run(["pnpm", "exec", "biome", "format", "--write", str(OUT / "manifest.json")], cwd=ROOT, check=True)

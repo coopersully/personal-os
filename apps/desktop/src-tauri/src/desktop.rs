@@ -45,6 +45,34 @@ impl Default for NotificationSettings {
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct ActiveCardInteractions {
+    pub shake: bool,
+    pub sensitivity: String,
+    pub snapping: bool,
+    pub guides: bool,
+    pub auto_lock: bool,
+    pub sounds: bool,
+    pub volume: f64,
+    pub reduced_motion: bool,
+    pub return_cards: bool,
+}
+impl Default for ActiveCardInteractions {
+    fn default() -> Self {
+        Self {
+            shake: true,
+            sensitivity: "medium".into(),
+            snapping: true,
+            guides: true,
+            auto_lock: false,
+            sounds: true,
+            volume: 0.35,
+            reduced_motion: false,
+            return_cards: true,
+        }
+    }
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct DesktopSettings {
     pub server_url: String,
     pub launch_at_login: bool,
@@ -64,6 +92,7 @@ pub struct DesktopSettings {
     pub pet_workspaces: Vec<String>,
     pub widget_workspaces: Vec<String>,
     pub active_reminders_enabled: bool,
+    pub active_card_interactions: ActiveCardInteractions,
     pub notifications: NotificationSettings,
 }
 impl Default for DesktopSettings {
@@ -87,6 +116,7 @@ impl Default for DesktopSettings {
             pet_workspaces: vec!["tasks".into(), "reminders".into(), "calendar".into()],
             widget_workspaces: vec!["tasks".into(), "reminders".into(), "calendar".into()],
             active_reminders_enabled: true,
+            active_card_interactions: ActiveCardInteractions::default(),
             notifications: NotificationSettings::default(),
         }
     }
@@ -94,6 +124,15 @@ impl Default for DesktopSettings {
 impl DesktopSettings {
     pub fn validate(&mut self) -> Result<(), String> {
         self.server_url = canonical_server(&self.server_url)?;
+        if !["low", "medium", "high"].contains(&self.active_card_interactions.sensitivity.as_str())
+        {
+            return Err("Choose Low, Medium, or High card shake sensitivity.".into());
+        }
+        if !self.active_card_interactions.volume.is_finite()
+            || !(0.0..=1.0).contains(&self.active_card_interactions.volume)
+        {
+            return Err("Choose a card sound volume between 0% and 100%.".into());
+        }
         let windows = ["today", "week", "month", "next7", "next30", "allUpcoming"];
         if !windows.contains(&self.pet_task_window.as_str())
             || !windows.contains(&self.pet_reminder_window.as_str())

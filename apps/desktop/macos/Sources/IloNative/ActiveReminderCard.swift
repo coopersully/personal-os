@@ -26,15 +26,25 @@ final class ActiveReminderAppearance: ObservableObject {
 private struct ActiveReminderDueLabel: View {
   let due: Date
   @ObservedObject var clock: ActiveReminderClock
+  var status: String?
+  var detail: String?
   var body: some View {
-    VStack(alignment: .leading, spacing: 1) {
-      Text(ActiveReminderDueText.relative(due, now: clock.now))
-        .foregroundStyle(due < clock.now ? CommitmentColors.danger : CommitmentColors.muted)
+    HStack(spacing: 6) {
       Text(clock.absoluteLabel(for: due)).foregroundStyle(CommitmentColors.muted)
+      Spacer(minLength: 0)
+      Text(status ?? ActiveReminderDueText.compact(due, now: clock.now))
+        .foregroundStyle(
+          due < clock.now || status == "Retry completion"
+            ? CommitmentColors.danger : CommitmentColors.muted)
     }
-    .font(.system(size: 11)).lineLimit(1).fixedSize(horizontal: false, vertical: true)
-    .help(due.formatted(date: .complete, time: .complete))
-    .accessibilityElement(children: .combine)
+    .font(.system(size: 11, design: .monospaced)).lineLimit(1)
+    .help(
+      [detail, due.formatted(date: .complete, time: .complete)].compactMap { $0 }.joined(
+        separator: "\n")
+    )
+    .accessibilityLabel(
+      "Due " + due.formatted(date: .complete, time: .complete) + ", "
+        + (detail ?? status ?? ActiveReminderDueText.relative(due, now: clock.now)))
   }
 }
 struct ActiveReminderCard: View {
@@ -70,26 +80,23 @@ struct ActiveReminderCard: View {
           )
           .help(error == nil ? "Mark complete" : "Try again")
           .keyboardShortcut(.return, modifiers: .command)
-          VStack(alignment: .leading, spacing: isTask ? 2 : 4) {
+          VStack(alignment: .leading, spacing: 4) {
             Button(action: open) {
               Text(preview ? item.title : "A \(item.kind) is due")
-                .font(.system(size: 15, weight: .medium)).lineSpacing(2)
+                .font(.system(size: 14, weight: .medium)).lineSpacing(2)
                 .multilineTextAlignment(.leading).lineLimit(bounds.size.height < 84 ? 1 : 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
             }.buttonStyle(.plain).help("Open \(item.kind) in nohmi")
             if let due = parseDate(item.dueAt) {
-              ActiveReminderDueLabel(due: due, clock: clock)
-            }
-            if let error {
-              Text(error).font(.system(size: 11)).foregroundStyle(CommitmentColors.danger)
-                .fixedSize(horizontal: false, vertical: true)
-            } else if stale {
-              Text("Reconnect to update").font(.system(size: 11))
-                .foregroundStyle(CommitmentColors.muted)
+              ActiveReminderDueLabel(
+                due: due, clock: clock,
+                status: error != nil
+                  ? "Retry completion" : stale ? "Sync needed" : pending ? "Saving…" : nil,
+                detail: error)
             }
           }
-        }.padding(.horizontal, 10).padding(.vertical, 10).padding(.trailing, 12)
+        }.padding(.horizontal, 10).padding(.vertical, 10)
       }
     }
     .foregroundStyle(CommitmentColors.ink)
@@ -108,9 +115,20 @@ struct ActiveReminderCard: View {
         value: corners.rawValue)
     }
     .overlay {
-      Canvas { context, _ in
-        for rect in appearance.seams.dividers {
-          context.fill(Path(rect), with: .color(CommitmentColors.muted.opacity(0.25)))
+      Canvas { context, size in
+        let corners = appearance.seams.corners
+        let shape = UnevenRoundedRectangle(
+          topLeadingRadius: corners.contains(.topLeft) ? 0 : 6,
+          bottomLeadingRadius: corners.contains(.bottomLeft) ? 0 : 6,
+          bottomTrailingRadius: corners.contains(.bottomRight) ? 0 : 6,
+          topTrailingRadius: corners.contains(.topRight) ? 0 : 6)
+        context.stroke(
+          shape.path(in: CGRect(origin: .zero, size: size).insetBy(dx: 0.5, dy: 0.5)),
+          with: .color(Color(nsColor: .separatorColor)), lineWidth: 1)
+        for rect in appearance.seams.sharedEdges {
+          context.fill(
+            Path(rect.insetBy(dx: rect.width == 1 ? -1 : 0, dy: rect.height == 1 ? -1 : 0)),
+            with: .color(CommitmentColors.paper))
         }
       }.allowsHitTesting(false)
     }

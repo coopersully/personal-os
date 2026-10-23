@@ -14,7 +14,7 @@ and Dock changes. The whole card accepts dragging, checkboxes align at the top, 
 drawn corner grip. The later refinement filters occupied anchors, offers card-sized perimeter and
 neighbor drop slots, joins touching cards with flat corners/dividers, and restores corners when
 pulled apart. A shared live countdown retains local date/time, the checkbox aligns to the first
-baseline, and native menus reuse completion/open with pending/stale guards. Cached interaction
+baseline, and native menus retain pending/stale completion guards. The completed native port adds pair-edge locks, locked group movement, held-shake gathering using pet sensitivity, footprint slots, partial-join separators and accessible seam controls. Minimum-size reset preserves contact topology and edge docking. Eight stable context commands include durable 15-minute snooze and live AppKit Shift group alternatives. Device-local movement, sounds/volume and reduced-motion settings preserve existing account defaults and notification delivery. Reproducible bundled Earshot audio and shared reicon artwork are used by native cards. Cached interaction
 sounds and short feedback animations avoid per-frame and per-tick playback. Arrival and acknowledged
 completion use brief pop effects and sounds, with muted and reduced-motion behavior.
 
@@ -29,7 +29,7 @@ full-screen visibility and saved dragging with disposable synthetic items. See t
 [native evidence and remaining certification limits](../superpowers/specs/2026-10-22-active-reminders-native-evidence.md).
 Physical display sleep, the release-signed app, minimum-supported macOS and a real installed-client
 API journey still need release certification. This records branch-local implementation, not a
-merged or deployed release. The full native suite passes (76 Rust/134 Swift), as do type checks,
+merged or deployed release. The native parity suite passes (77 Rust/143 Swift), as do type checks,
 lint and production builds. Browser acceptance records 151 passed, two skipped and one Finance
 chat-history failure; the active-reminder desktop/mobile cases pass. The full verifier remains
 unsuccessful because of the recorded Finance/database-test failures, so this branch is not release

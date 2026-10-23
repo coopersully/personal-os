@@ -814,6 +814,10 @@ function DesktopSettingsContent({
             <FieldDescription>
               System notifications follow your notification settings while cards are paused.
             </FieldDescription>
+            <ActiveCardControls
+              value={draft.activeCardInteractions}
+              onChange={(activeCardInteractions) => update({ activeCardInteractions })}
+            />
           </SettingsSection>
         ) : null}
         {section === "notifications" ? (
@@ -1089,5 +1093,91 @@ function DesktopSettingsContent({
       ) : null}
       {!connectionOnly && section === "desktop" ? <DesktopUpdates /> : null}
     </div>
+  );
+}
+
+function ActiveCardControls({
+  value,
+  onChange,
+}: {
+  value: DesktopSettings["activeCardInteractions"];
+  onChange: (value: NonNullable<DesktopSettings["activeCardInteractions"]>) => void;
+}) {
+  const prefs = {
+    shake: true,
+    sensitivity: "medium" as const,
+    snapping: true,
+    guides: true,
+    autoLock: false,
+    sounds: true,
+    volume: 0.35,
+    reducedMotion: false,
+    returnCards: true,
+    ...value,
+  };
+  const patch = (change: Partial<typeof prefs>) => onChange({ ...prefs, ...change });
+  return (
+    <FieldGroup>
+      <Toggle
+        label="Return with unfinished cards"
+        value={prefs.returnCards}
+        onChange={(returnCards) => patch({ returnCards })}
+      />
+      <Toggle label="Shake to gather" value={prefs.shake} onChange={(shake) => patch({ shake })} />
+      <Field>
+        <FieldLabel htmlFor="active-card-sensitivity">Shake sensitivity</FieldLabel>
+        <NativeSelect
+          id="active-card-sensitivity"
+          value={prefs.sensitivity}
+          disabled={!prefs.shake}
+          onChange={(event) =>
+            patch({ sensitivity: event.target.value as "low" | "medium" | "high" })
+          }
+        >
+          <NativeSelectOption value="low">Low</NativeSelectOption>
+          <NativeSelectOption value="medium">Medium</NativeSelectOption>
+          <NativeSelectOption value="high">High</NativeSelectOption>
+        </NativeSelect>
+      </Field>
+      <Toggle
+        label="Snap to edges and other cards"
+        value={prefs.snapping}
+        onChange={(snapping) => patch({ snapping })}
+      />
+      <Toggle
+        label="Show placement slots"
+        value={prefs.guides}
+        onChange={(guides) => patch({ guides })}
+      />
+      <Toggle
+        label="Lock new joins automatically"
+        value={prefs.autoLock}
+        onChange={(autoLock) => patch({ autoLock })}
+      />
+      <Toggle
+        label="Active card sounds"
+        value={prefs.sounds}
+        onChange={(sounds) => patch({ sounds })}
+      />
+      <Field>
+        <FieldLabel htmlFor="active-card-volume">
+          Card volume · {Math.round(prefs.volume * 100)}%
+        </FieldLabel>
+        <input
+          id="active-card-volume"
+          type="range"
+          min="0"
+          max="100"
+          value={Math.round(prefs.volume * 100)}
+          disabled={!prefs.sounds}
+          onChange={(event) => patch({ volume: Number(event.target.value) / 100 })}
+        />
+      </Field>
+      <Toggle
+        label="Reduce card motion"
+        value={prefs.reducedMotion}
+        onChange={(reducedMotion) => patch({ reducedMotion })}
+      />
+    </FieldGroup>
   );
 }

@@ -207,6 +207,7 @@ final class NativeCompanion {
       visibleSettings.petEnabled = petShouldBeVisible(
         enabled: s.petEnabled, hasSnapshot: snapshot != nil)
       pet.configure(visibleSettings, preserveAppearance: appearance.active)
+      activeReminders.configureInteractions(s.activeCardInteractions ?? ActiveReminderInteractions())
       activeReminders.configure(preferences: s.notifications, calendar: snapshot?.calendar ?? .current, enabled: s.activeRemindersEnabled ?? true)
       if let snapshot { publish(snapshot) }
       return status()
@@ -370,6 +371,7 @@ final class NativeCompanion {
   private func publish(_ s: NativeSnapshot) {
     guard let settings else { return }
     notifications.reconcile(s, preferences: settings.notifications)
+    activeReminders.configureInteractions(settings.activeCardInteractions ?? ActiveReminderInteractions())
     activeReminders.configure(preferences: settings.notifications, calendar: s.calendar, enabled: settings.activeRemindersEnabled ?? true)
     do {
       try SharedSnapshotStore.write(

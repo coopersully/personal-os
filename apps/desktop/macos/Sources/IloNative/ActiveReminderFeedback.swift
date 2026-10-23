@@ -5,14 +5,14 @@ enum ActiveReminderFeedback: Equatable {
     open
   var asset: String {
     switch self {
-    case .completion: return "active-reminder-soft-complete"
-    case .grab, .pending, .menu, .open: return "notification-soft-click"
-    case .snap, .dock: return "active-reminder-soft-snap"
-    case .detach: return "active-reminder-soft-detach"
-    case .resize, .release: return "active-reminder-soft-resize"
-    case .failure: return "active-reminder-soft-error"
-    case .slot: return "active-reminder-soft-slot"
-    case .arrival: return "notification-soft-click"
+    case .completion: return "earshot-complete"
+    case .grab, .pending, .menu, .open: return "earshot-grab"
+    case .snap, .dock: return "earshot-snap"
+    case .detach: return "earshot-unlock"
+    case .resize, .release: return "earshot-resize"
+    case .failure: return "earshot-error"
+    case .slot: return "earshot-slot"
+    case .arrival: return "earshot-arrive"
     }
   }
 }

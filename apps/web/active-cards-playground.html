@@ -30,6 +30,7 @@ body{font-variant-numeric:tabular-nums}
 #status,select,input[type=number]{font-variant-numeric:tabular-nums}
 #menu button{display:flex;align-items:center;gap:9px;font-variant-numeric:tabular-nums}
 #menu img{flex:none;opacity:.7}
+#menu button{height:34px;white-space:nowrap;font-size:12px}#menu button span{overflow:hidden;text-overflow:ellipsis}#menu .label{height:28px;white-space:nowrap}.menu-change{animation:menu-change .14s ease-out}@keyframes menu-change{from{opacity:.35;transform:translateY(2px)}to{opacity:1;transform:translateY(0)}}
 @media(prefers-color-scheme:dark){#menu img{filter:invert(1)}}
 </style></head><body>
 <header><strong>nohmi</strong><span>Active cards · interaction playground</span><nav><button id="add">Add sample</button><button id="create-open">New item</button><button id="gather">Gather all</button><button id="settings-open">Settings</button><button id="reset">Reset</button></nav></header>
@@ -179,20 +180,18 @@ function resetSizes(c,all){
  if(group.some(v=>occupied(v,group.map(c=>c.id)))){for(const v of group)Object.assign(v,before.find(o=>o.id===v.id));toast('Make room beside this group before resizing.')}else sound('resize');layout();
 }
 function menu(c,x,y,shifted=menuShift,quiet=false){
- const focusIndex=[...$('#menu').querySelectorAll('button')].indexOf(document.activeElement);closeMenu();if(!quiet)sound('menu');menuCard=c;menuShift=shifted;menuPosition={x,y};const group=connected(c,true),batch=shifted&&group.length>1,targets=batch?group:[c];let m=$('#menu');m.hidden=false;
- let label=document.createElement('div');label.className='label';label.textContent=batch?group.length+' connected cards':(c.kind==='task'?'Task':'Reminder')+' · Hold Shift for group';m.append(label);
- const item=(text,icon,fn,disabled=false)=>{let b=document.createElement('button');b.role='menuitem';b.innerHTML=menuIcons[icon];let label=document.createElement('span');label.textContent=text;b.append(label);b.disabled=disabled;b.onclick=()=>{closeMenu();fn()};m.append(b)};const rule=()=>m.append(document.createElement('hr'));
+ const previous=[...$('#menu').querySelectorAll('button')].map(b=>b.textContent),previousLabel=$('#menu .label')?.textContent;let itemIndex=0;const focusIndex=[...$('#menu').querySelectorAll('button')].indexOf(document.activeElement);closeMenu();if(!quiet)sound('menu');menuCard=c;menuShift=shifted;menuPosition={x,y};const group=connected(c,true),batch=shifted&&group.length>1,targets=batch?group:[c];let m=$('#menu');m.hidden=false;
+ let label=document.createElement('div');label.className='label';label.textContent=batch?group.length+' connected cards':(c.kind==='task'?'Task':'Reminder')+' · Hold Shift for group';if(quiet&&previousLabel!==label.textContent)label.classList.add('menu-change');m.append(label);
+ const item=(text,icon,fn,disabled=false)=>{let b=document.createElement('button');b.role='menuitem';b.innerHTML=menuIcons[icon];let label=document.createElement('span');label.textContent=text;if(quiet&&previous[itemIndex]!==text){label.classList.add('menu-change');b.querySelector('img')?.classList.add('menu-change')}itemIndex++;b.append(label);b.disabled=disabled;b.onclick=()=>{closeMenu();fn()};m.append(b)};const rule=()=>m.append(document.createElement('hr'));
  item(batch?'Complete group':c.error?'Retry completion':c.pending?'Completing…':'Complete','complete',()=>targets.forEach(complete),targets.some(v=>v.pending)||prefs.stale);
- item('View in nohmi…','open',()=>openDetail(c));rule();
+ item('View in nohmi…','open',()=>openDetail(c));
  item(batch?'Snooze group for 15 minutes':'Snooze for 15 minutes','snooze',()=>{targets.forEach(v=>v.snooze=Date.now()+900000);layout();toast('Snoozed for 15 minutes',{label:'Undo',run:()=>{targets.forEach(v=>v.snooze=0);layout()}})});rule();
  item(batch?'Unlock this group':'Separate this card',batch?'unlock':'separate',()=>batch?unlockGroup(group):detach(c),group.length<2);
- if(!batch)item('Unlock this group','unlock',()=>unlockGroup(group),group.length<2);
- item('Gather all into a stack','gather',()=>gather(c));
- item(batch?'Move group to a free edge slot':'Move to a free edge slot','dock',()=>{let g=batch?group:connected(c),r=bbox(g),p=slots(g).find(p=>!p.neighbor&&Math.hypot(p.x-r.x,p.y-r.y)>8);if(p){shift(g,p.x,p.y);sound('snap');layout()}else toast('No free edge slot')});
- item(batch?'Reset group to smallest size':'Reset to smallest size','resize',()=>resetSizes(c,batch));rule();item('Active card settings…','settings',()=>$('#settings').showModal());
+ item(batch?'Move group to edge':'Move to edge','dock',()=>{let g=batch?group:connected(c),r=bbox(g),p=slots(g).find(p=>!p.neighbor&&Math.hypot(p.x-r.x,p.y-r.y)>8);if(p){shift(g,p.x,p.y);sound('snap');layout()}else toast('No free edge slot')});
+ item(batch?'Reset group to smallest size':'Reset to smallest size','resize',()=>resetSizes(c,batch));rule();item('Gather all into a stack','gather',()=>gather(c));item('Active card settings…','settings',()=>$('#settings').showModal());
  m.style.left=Math.min(x,innerWidth-244)+'px';m.style.top=Math.max(8,Math.min(y,innerHeight-m.offsetHeight-8))+'px';const buttons=[...m.querySelectorAll('button')];(quiet&&buttons[focusIndex]&&!buttons[focusIndex].disabled?buttons[focusIndex]:m.querySelector('button:not(:disabled)')).focus();menuOrigin=c.el.querySelector('.more');
 }
-for(const type of ['keydown','keyup'])document.addEventListener(type,e=>{if(e.key!=='Shift')return;menuShift=type==='keydown';if(menuCard){const c=menuCard,{x,y}=menuPosition;menu(c,x,y,menuShift,true)}});
+for(const type of ['keydown','keyup'])document.addEventListener(type,e=>{if(e.key!=='Shift'||e.repeat)return;menuShift=type==='keydown';if(menuCard){const c=menuCard,{x,y}=menuPosition;menu(c,x,y,menuShift,true)}});
 window.addEventListener('blur',()=>{menuShift=false;closeMenu()});
 $('#menu').onkeydown=e=>{let buttons=[...$('#menu').querySelectorAll('button:not(:disabled)')],i=buttons.indexOf(document.activeElement);if(['ArrowDown','ArrowUp','Home','End'].includes(e.key)){e.preventDefault();buttons[e.key==='Home'?0:e.key==='End'?buttons.length-1:(i+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length].focus()}if(e.key==='Escape'){closeMenu();menuOrigin?.focus()}};document.addEventListener('pointerdown',e=>{if(!e.target.closest('#menu'))closeMenu()});document.addEventListener('keydown',e=>{if(e.key==='Escape'){cancel();closeMenu()}});
 function dock(){let p=$('#dock-position').value,d=$('#dock');d.hidden=p==='hidden';d.style.cssText=p==='bottom'?'left:calc(50% - 140px);bottom:10px;width:280px;height:48px':`${p}:10px;top:calc(50% - 120px);height:240px;width:48px;writing-mode:vertical-rl`;let done=new Set();for(let c of visible()){if(done.has(c.id))continue;let group=connected(c),r=bbox(group);group.forEach(c=>done.add(c.id));let p=free(r,group.map(c=>c.id));if(p)shift(group,p.x,p.y)}layout()}

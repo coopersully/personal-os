@@ -39,3 +39,4 @@ for event, (sound, peak) in RECIPES.items():
 (OUT / "manifest.json").write_text(json.dumps(report, indent=2) + "\n")
 
 subprocess.run(["pnpm", "exec", "biome", "format", "--write", str(OUT / "manifest.json")], cwd=ROOT, check=True)
+shutil.copyfile(OUT / "manifest.json", ROOT / "apps/desktop/src-tauri/sounds/earshot-manifest.json")

@@ -49,7 +49,12 @@
     "macOS": {
       "minimumSystemVersion": "14.0"
     },
-    "resources": ["sounds/*.wav", "card-icons/*.png"]
+    "resources": [
+      "sounds/*.wav",
+      "card-icons/*.png",
+      "sounds/EARSHOT-LICENSE.txt",
+      "sounds/earshot-manifest.json"
+    ]
   },
   "plugins": {
     "deep-link": {

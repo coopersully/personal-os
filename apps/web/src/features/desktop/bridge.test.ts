@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { transferableAbortController } from "node:util";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
@@ -10,6 +11,11 @@ beforeEach(() => {
   invoke.mockReset();
   resetDesktopConnection();
 });
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
 describe("desktop API transport", () => {
   it("uses selected native origin and only sends the API path", async () => {
     invoke
@@ -66,8 +72,12 @@ describe("desktop API transport", () => {
     invoke.mockRejectedValueOnce(new Error("Unavailable"));
     await expect(desktopFetch("https://api.test/v1/me")).rejects.toThrow("Unavailable");
     invoke.mockResolvedValueOnce({ settings: { serverUrl: "https://api.test" } });
+    // Request is Node's native Fetch implementation in jsdom. Its signal fixture
+    // must come from that same realm, rather than jsdom's DOM AbortController.
+    const cancelled = transferableAbortController();
+    cancelled.abort();
     await expect(
-      desktopFetch("https://api.test/v1/me", { signal: AbortSignal.abort() }),
+      desktopFetch("https://api.test/v1/me", { signal: cancelled.signal }),
     ).rejects.toThrow("Request cancelled");
     expect(invoke).toHaveBeenCalledTimes(2);
   });
@@ -105,8 +115,16 @@ describe("desktop API transport", () => {
     Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
   });
   it("honors cancellation while a native request is in flight", async () => {
-    const controller = new AbortController();
-    const removeAbortListener = vi.spyOn(controller.signal, "removeEventListener");
+    const controller = transferableAbortController();
+    const NativeRequest = Request;
+    const requests: Request[] = [];
+    class ObservedRequest extends NativeRequest {
+      constructor(input: RequestInfo | URL, init?: RequestInit) {
+        super(input, init);
+        requests.push(this);
+      }
+    }
+    vi.stubGlobal("Request", ObservedRequest);
     let resolveRequest: ((value: { status: number; body: string }) => void) | undefined;
     const nativeRequest = new Promise<{ status: number; body: string }>((resolve) => {
       resolveRequest = resolve;
@@ -116,13 +134,19 @@ describe("desktop API transport", () => {
       .mockReturnValueOnce(nativeRequest);
     const response = desktopFetch("https://api.test/v1/tasks", { signal: controller.signal });
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(2));
+    // Request follows the caller's signal; observe the bridge's actual signal
+    // rather than assuming the input signal and its followed signal are identical.
+    const requestSignal = requests[0]?.signal;
+    expect(requestSignal).toBeDefined();
+    expect(requestSignal).not.toBe(controller.signal);
+    const removeAbortListener = vi.spyOn(requestSignal as AbortSignal, "removeEventListener");
     controller.abort();
     await expect(response).rejects.toThrow("Request cancelled");
     expect(removeAbortListener).toHaveBeenCalledWith("abort", expect.any(Function));
     resolveRequest?.({ status: 200, body: '{"ok":true}' });
   });
   it("honors cancellation raised while dispatching the native request", async () => {
-    const controller = new AbortController();
+    const controller = transferableAbortController();
     invoke
       .mockResolvedValueOnce({ settings: { serverUrl: "https://api.test" } })
       .mockImplementationOnce(() => {

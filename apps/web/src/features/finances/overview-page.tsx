@@ -5,10 +5,11 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
+  ArrowRightIcon,
   BankIcon,
-  ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  InfoIcon,
   ReceiptIcon,
   WalletIcon,
 } from "@/components/icons";
@@ -28,6 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "../../api.js";
 import { formatCompactMoney } from "./format";
 import { FinanceOverviewSettings } from "./overview-settings";
@@ -73,81 +75,90 @@ export function FinanceOverviewPage() {
     <div className="flex min-w-0 flex-col gap-8">
       <FinanceSourceState label="Financial position" query={snapshot} />
       {snapshot.data ? (
-        <KeyMetrics label="Finance key metrics">
-          <KeyMetric
-            compact
-            to="/finances/accounts"
-            label="Cash"
-            value={
-              snapshot.data.data.cash === null
-                ? "Unavailable"
-                : formatCompactMoney(snapshot.data.data.cash)
+        <Collapsible>
+          <OverviewSection
+            title="At a glance"
+            action={
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <CollapsibleTrigger asChild>
+                    <Button size="icon-sm" variant="ghost" aria-label="About these totals">
+                      <InfoIcon className="size-4" />
+                    </Button>
+                  </CollapsibleTrigger>
+                </TooltipTrigger>
+                <TooltipContent>About these totals</TooltipContent>
+              </Tooltip>
             }
-            exactValue={financeAmount(snapshot.data.data.cash)}
-            icon={BankIcon}
-            description="Recorded planning cash · your share"
-          />
-          <KeyMetric
-            compact
-            to="/finances/spending?period=month&pending=0"
-            label="Spent this month"
-            value={
-              snapshot.data.data.budget.spent === null
-                ? "Unavailable"
-                : formatCompactMoney(snapshot.data.data.budget.spent)
-            }
-            exactValue={financeAmount(snapshot.data.data.budget.spent)}
-            icon={ReceiptIcon}
-            description="Posted personal expenses · no pending or transfers"
-          />
-          <KeyMetric
-            compact
-            to="/finances/wealth"
-            label="Net worth"
-            value={
-              snapshot.data.data.netWorth === null
-                ? "Unavailable"
-                : formatCompactMoney(snapshot.data.data.netWorth)
-            }
-            exactValue={financeAmount(snapshot.data.data.netWorth)}
-            icon={WalletIcon}
-            description="Planning assets minus debt · your share"
-          />
-        </KeyMetrics>
-      ) : null}
-
-      {snapshot.data ? (
-        <Collapsible className="-mt-5 flex min-w-0 flex-col gap-3">
-          <CollapsibleTrigger asChild>
-            <Button size="sm" variant="ghost" className="group self-start">
-              About these totals ·{" "}
-              {snapshot.data.data.ledger.trustworthy ? "Current evidence" : "Partial evidence"}
-              <ChevronDownIcon className="size-4 group-data-[state=open]:rotate-180" />
-            </Button>
-          </CollapsibleTrigger>
-          <CollapsibleContent className="flex flex-col gap-2 px-2 text-xs text-muted-foreground">
-            <p>
-              As of {financeObservedAt(snapshot.data.data.asOf)} ·{" "}
-              {snapshot.data.data.ledger.reconciledThrough
-                ? `Reconciled through ${snapshot.data.data.ledger.reconciledThrough}`
-                : "Reconciliation date unavailable"}
-            </p>
-            <p>
-              Balances use recorded amounts from planning accounts and your ownership share.
-              Spending opens this month without pending transactions. Its total can differ with
-              account or date filters, pending transactions, and refund adjustments.
-            </p>
-            {snapshot.data.communication.requiredDisclosures.length ? (
-              <ul className="list-disc pl-4">
-                {snapshot.data.communication.requiredDisclosures.map((disclosure) => (
-                  <li key={disclosure.message}>{disclosure.message}</li>
-                ))}
-              </ul>
-            ) : null}
-            <Link to="/finances/accounts" className="self-start underline underline-offset-4">
-              Review accounts
-            </Link>
-          </CollapsibleContent>
+          >
+            <CollapsibleContent className="flex flex-col gap-2 px-2 text-xs text-muted-foreground">
+              <p>
+                {snapshot.data.data.ledger.trustworthy ? "Current evidence" : "Partial evidence"}
+              </p>
+              <p>
+                As of {financeObservedAt(snapshot.data.data.asOf)} ·{" "}
+                {snapshot.data.data.ledger.reconciledThrough
+                  ? `Reconciled through ${snapshot.data.data.ledger.reconciledThrough}`
+                  : "Reconciliation date unavailable"}
+              </p>
+              <p>
+                Balances use recorded amounts from planning accounts and your ownership share.
+                Spending opens this month without pending transactions. Its total can differ with
+                account or date filters, pending transactions, and refund adjustments.
+              </p>
+              {snapshot.data.communication.requiredDisclosures.length ? (
+                <ul className="list-disc pl-4">
+                  {snapshot.data.communication.requiredDisclosures.map((disclosure) => (
+                    <li key={disclosure.message}>{disclosure.message}</li>
+                  ))}
+                </ul>
+              ) : null}
+              <Link to="/finances/accounts" className="self-start underline underline-offset-4">
+                Review accounts
+              </Link>
+            </CollapsibleContent>
+            <KeyMetrics label="Finance key metrics">
+              <KeyMetric
+                compact
+                to="/finances/accounts"
+                label="Cash"
+                value={
+                  snapshot.data.data.cash === null
+                    ? "Unavailable"
+                    : formatCompactMoney(snapshot.data.data.cash)
+                }
+                exactValue={financeAmount(snapshot.data.data.cash)}
+                icon={BankIcon}
+                description="Recorded planning cash · your share"
+              />
+              <KeyMetric
+                compact
+                to="/finances/spending?period=month&pending=0"
+                label="Spent this month"
+                value={
+                  snapshot.data.data.budget.spent === null
+                    ? "Unavailable"
+                    : formatCompactMoney(snapshot.data.data.budget.spent)
+                }
+                exactValue={financeAmount(snapshot.data.data.budget.spent)}
+                icon={ReceiptIcon}
+                description="Posted personal expenses · no pending or transfers"
+              />
+              <KeyMetric
+                compact
+                to="/finances/wealth"
+                label="Net worth"
+                value={
+                  snapshot.data.data.netWorth === null
+                    ? "Unavailable"
+                    : formatCompactMoney(snapshot.data.data.netWorth)
+                }
+                exactValue={financeAmount(snapshot.data.data.netWorth)}
+                icon={WalletIcon}
+                description="Planning assets minus debt · your share"
+              />
+            </KeyMetrics>
+          </OverviewSection>
         </Collapsible>
       ) : null}
       <OverviewUpcomingMoney />
@@ -197,9 +208,16 @@ export function FinanceOverviewPage() {
       <OverviewSection
         title="What changed"
         action={
-          <Button asChild size="sm" variant="outline">
-            <Link to="/finances/activity">Open Activity</Link>
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button asChild size="icon-sm" variant="ghost">
+                <Link to="/finances/activity" aria-label="Open Activity">
+                  <ArrowRightIcon className="size-4" />
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Open Activity</TooltipContent>
+          </Tooltip>
         }
       >
         <FinanceSourceState label="Maintenance history" query={maintenance} />
@@ -324,9 +342,16 @@ function OwnerUpcomingMoney({
     <OverviewSection
       title="Coming next"
       action={
-        <Button asChild size="sm" variant="outline">
-          <Link to={href}>Open upcoming money</Link>
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button asChild size="icon-sm" variant="ghost">
+              <Link to={href} aria-label="Open upcoming money">
+                <ArrowRightIcon className="size-4" />
+              </Link>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Open upcoming money</TooltipContent>
+        </Tooltip>
       }
       description={
         excluded

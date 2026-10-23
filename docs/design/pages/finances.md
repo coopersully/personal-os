@@ -40,7 +40,7 @@ design §§4 and 13 retain the accepted direction.
 
 ### Daily summary
 
-Overview leads with compact linked balance metrics and an About these totals disclosure, then upcoming expected money and planning context. The disclosure replaces the Financial position card and retains freshness, reconciliation, required evidence gaps and Accounts navigation. Reviews remain available through the shared sidebar entry; Overview
+Overview leads with an At a glance heading and compact linked balance metrics. A small ghost info button opposite the heading opens the About these totals disclosure, then upcoming expected money and planning context. The disclosure replaces the Financial position card and retains freshness, reconciliation, required evidence gaps and Accounts navigation. Reviews remain available through the shared sidebar entry; Overview
 does not duplicate the decision summary or its action links. Overview makes no all-clear review claim and does not fetch a second decision summary.
 
 Recorded reviews and maintenance link to Activity evidence rather than implying a new completed
@@ -54,7 +54,7 @@ Pagination sits outside the Card; it does not form an extra table row or padded 
 on one page. Do not repeat the date-range/timezone explanatory line above it. Preserve remaining
 amounts for partial occurrences, explicit currencies and incomplete-source caveats. Its Cash flow
 link sits opposite the Coming next heading and retains the exact agenda range.
-Unavailable recurring records appear in the Coming next header description as items not included yet, with dates/amounts to confirm in Cash flow. Open upcoming money uses the standard outline button opposite the heading. Expected movements are not booked money or a safe-to-spend
+Unavailable recurring records appear in the Coming next header description as items not included yet, with dates/amounts to confirm in Cash flow. Open upcoming money and Open Activity use small ghost arrow icon links opposite their section headings, with accessible names and tooltips. Expected movements are not booked money or a safe-to-spend
 total. Complete plan is a single status/allocation/unassigned summary linking to Budget; rationale and allocation details stay on Budget. Remove the duplicate forecast, wealth-priority and generic next-step/navigation prompts. Show a reimbursement summary only for a positive outstanding amount. What changed shows only the latest recorded period review and maintenance status with Activity navigation; use one empty-state line when neither exists.
 
 ### Spending dashboard

@@ -370,8 +370,11 @@ it("keeps financial evidence in a compact disclosure near totals", async () => {
   });
   mount();
   const disclosure = await screen.findByRole("button", {
-    name: /About these totals · Partial evidence/,
+    name: /About these totals/,
   });
+  const summary = screen.getByRole("region", { name: "At a glance" });
+  expect(within(summary).getByRole("heading", { name: "At a glance" })).toBeVisible();
+  expect(within(summary).getByRole("button", { name: "About these totals" })).toBe(disclosure);
   expect(disclosure).toHaveAttribute("aria-expanded", "false");
   expect(screen.queryByRole("region", { name: "Financial position" })).not.toBeInTheDocument();
   expect(screen.queryByText("One account needs confirmation.")).not.toBeInTheDocument();

@@ -29,7 +29,7 @@ export function KeyMetric({
         </CardTitle>
         {description && !compact ? <CardDescription>{description}</CardDescription> : null}
       </CardHeader>
-      <CardContent className="mt-auto">
+      <CardContent className={compact ? undefined : "mt-auto"}>
         <p
           title={exactValue}
           className={`break-words font-semibold tabular-nums ${compact ? "text-2xl" : "text-3xl"}`}

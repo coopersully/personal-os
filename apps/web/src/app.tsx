@@ -565,6 +565,9 @@ function SessionApp() {
   const me = useQuery({ queryFn: api.getMe, queryKey: ["me"] });
   return (
     <>
+      <Toaster
+        theme={typeof window.matchMedia === "function" ? (me.data?.theme ?? "system") : "light"}
+      />
       <AppContent me={me} />
       <AccountRecoveryDialog
         query={me}
@@ -577,9 +580,6 @@ function SessionApp() {
       >
         {isTauri() ? <DesktopSettingsPanel connectionOnly /> : null}
       </AccountRecoveryDialog>
-      <Toaster
-        theme={typeof window.matchMedia === "function" ? (me.data?.theme ?? "system") : "light"}
-      />
     </>
   );
 }

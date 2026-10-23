@@ -204,3 +204,242 @@ extension ActiveReminderGroupingTests {
         presenter.visibleFrames, geometry: PetGeometry(bounds: area, obstacles: []), occupied: [:]))
   }
 }
+
+extension ActiveReminderGroupingTests {
+  private func fixture(_ index: Int, kind: String = "task") -> ActiveReminderCandidate {
+    ActiveReminderCandidate(
+      id: "00000000-0000-4000-8000-\(String(format: "%012d", index))", kind: kind,
+      title: kind == "task" ? "Send the draft" : "Take a stretch break",
+      dueAt: "2026-10-23T10:00:00Z",
+      activeReminder: true, revision: kind == "task" ? 1 : nil,
+      updatedAt: kind == "reminder" ? "2026-10-23T09:00:00Z" : nil)
+  }
+  @MainActor
+  private func pointerEvent(_ panel: NSPanel) throws -> NSEvent {
+    try XCTUnwrap(
+      NSEvent.mouseEvent(
+        with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+        windowNumber: panel.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+  }
+  @MainActor
+  func testRejectedResizeKeepsPairLockBeforeAndAfterRelease() throws {
+    let presenter = ActiveReminderPanelController(
+      feedback: { _ in }, geometry: { PetGeometry(bounds: $0.visibleFrame, obstacles: []) })
+    defer { presenter.reset() }
+    let items = [fixture(1), fixture(2)]
+    try presenter.show(items, preview: true, pending: [], errors: [:], stale: false)
+    let a = try XCTUnwrap(presenter.panels[items[0].cardID])
+    let b = try XCTUnwrap(presenter.panels[items[1].cardID])
+    let area = try XCTUnwrap(a.screen).visibleFrame
+    a.setFrame(
+      CGRect(x: area.minX + 100, y: area.minY + 150, width: 240, height: 100), display: true)
+    b.setFrame(CGRect(x: a.frame.maxX, y: a.frame.minY, width: 240, height: 100), display: true)
+    presenter.toggleJoin(items[0].cardID, peer: items[1].cardID, all: false)
+    let frames = presenter.visibleFrames
+    let edges = presenter.locks
+    let resize = try XCTUnwrap(
+      a.contentView?.subviews.compactMap { $0 as? ActiveReminderResizeView }.first {
+        $0.edge == .east
+      })
+    var point = CGPoint(x: a.frame.maxX, y: a.frame.midY)
+    resize.pointer = { _ in point }
+    let event = try pointerEvent(a)
+    resize.mouseDown(with: event)
+    point.x += 30
+    resize.mouseDragged(with: event)
+    XCTAssertEqual(presenter.visibleFrames, frames)
+    XCTAssertEqual(
+      presenter.locks, edges, "A rejected proposal must never prune accepted lock intent")
+    resize.mouseUp(with: event)
+    XCTAssertEqual(presenter.visibleFrames, frames)
+    XCTAssertEqual(presenter.locks, edges)
+    XCTAssertEqual(presenter.component(items[0].cardID), Set(items.map(\.cardID)))
+  }
+  @MainActor
+  func testHiddenLockedStackRefitsTogetherWhenDockSafeAreaChanges() throws {
+    var bottomInset: CGFloat = 0
+    let presenter = ActiveReminderPanelController(
+      feedback: { _ in },
+      geometry: { screen in
+        let frame = screen.visibleFrame
+        return PetGeometry(
+          bounds: CGRect(
+            x: frame.minX, y: frame.minY + bottomInset,
+            width: frame.width, height: frame.height - bottomInset), obstacles: [])
+      })
+    presenter.interactions.snapping = false
+    presenter.interactions.shake = false
+    defer { presenter.reset() }
+    let items = [fixture(1), fixture(2), fixture(3)]
+    try presenter.show(items, preview: true, pending: [], errors: [:], stale: false)
+    XCTAssertTrue(presenter.gather(items[0].cardID))
+    let panel = try XCTUnwrap(presenter.panels[items[0].cardID])
+    let area = try XCTUnwrap(panel.screen).visibleFrame
+    let surface = try XCTUnwrap(
+      panel.contentView?.subviews.compactMap { $0 as? ActiveReminderDragView }.first)
+    var point = CGPoint(x: panel.frame.midX, y: panel.frame.midY)
+    surface.pointer = { _ in point }
+    let event = try pointerEvent(panel)
+    surface.mouseDown(with: event)
+    let box = ActiveReminderGrouping.bounds(presenter.visibleFrames)
+    point.x += area.minX + 200 - box.minX
+    point.y += area.minY + 12 - box.minY
+    surface.mouseDragged(with: event)
+    surface.mouseUp(with: event)
+    let before = presenter.visibleFrames
+    let edges = presenter.locks
+    presenter.hide()
+    bottomInset = 30
+    try presenter.show(items, preview: true, pending: [], errors: [:], stale: false)
+    for (id, frame) in before {
+      XCTAssertEqual(presenter.panels[id]?.frame, frame.offsetBy(dx: 0, dy: 30))
+    }
+    XCTAssertEqual(presenter.locks, edges)
+    XCTAssertEqual(presenter.component(items[0].cardID), Set(items.map(\.cardID)))
+    XCTAssertTrue(
+      ActiveReminderGrouping.valid(
+        presenter.visibleFrames,
+        geometry: PetGeometry(
+          bounds: CGRect(
+            x: area.minX, y: area.minY + 30, width: area.width, height: area.height - 30),
+          obstacles: []), occupied: [:]))
+  }
+}
+
+extension ActiveReminderGroupingTests {
+  @MainActor
+  func testHeldCardAndLockedGroupTransferToOffsetDisplayWithDockAndStayThere() async throws {
+    let screen = try XCTUnwrap(NSScreen.main)
+    let source = screen.visibleFrame
+    let destination = CGRect(
+      x: source.minX - source.width - 80, y: source.minY - 300,
+      width: source.width, height: source.height)
+    let dock = CGRect(x: destination.midX - 150, y: destination.minY, width: 300, height: 80)
+    let sourceGeometry = PetGeometry(bounds: source, obstacles: [])
+    let destinationGeometry = PetGeometry(
+      bounds: CGRect(
+        x: destination.minX, y: destination.minY,
+        width: destination.width, height: destination.height - 22), obstacles: [dock])
+    let displays = [
+      ActiveReminderDisplay(frame: source, geometry: sourceGeometry),
+      ActiveReminderDisplay(frame: destination, geometry: destinationGeometry),
+    ]
+    for count in [1, 2] {
+      let presenter = ActiveReminderPanelController(
+        feedback: { _ in }, geometry: { _ in sourceGeometry }, displays: { displays })
+      presenter.interactions.snapping = false
+      presenter.interactions.shake = false
+      defer { presenter.reset() }
+      let items = (1...(count + 1)).map { fixture($0) }
+      try presenter.show(items, preview: true, pending: [], errors: [:], stale: false)
+      let panels = try items.map { try XCTUnwrap(presenter.panels[$0.cardID]) }
+      for i in 0..<count {
+        panels[i].setFrameOrigin(CGPoint(x: source.midX - 120, y: source.midY + CGFloat(i) * 64))
+      }
+      let otherSurface = try XCTUnwrap(
+        panels[count].contentView?.subviews.compactMap { $0 as? ActiveReminderDragView }.first)
+      var otherPoint = CGPoint(x: panels[count].frame.midX, y: panels[count].frame.midY)
+      otherSurface.pointer = { _ in otherPoint }
+      let otherEvent = try pointerEvent(panels[count])
+      otherSurface.mouseDown(with: otherEvent)
+      otherPoint.x += destination.minX + 24 - panels[count].frame.minX
+      otherPoint.y += destination.maxY - 110 - panels[count].frame.minY
+      otherSurface.mouseDragged(with: otherEvent)
+      otherSurface.mouseUp(with: otherEvent)
+      if count == 2 { presenter.toggleJoin(items[0].cardID, peer: items[1].cardID, all: false) }
+      let before = panels.map(\.frame)
+      let locks = presenter.locks
+      let surface = try XCTUnwrap(
+        panels[0].contentView?.subviews.compactMap { $0 as? ActiveReminderDragView }.first)
+      var point = CGPoint(x: panels[0].frame.midX, y: panels[0].frame.midY)
+      surface.pointer = { _ in point }
+      let event = try pointerEvent(panels[0])
+      surface.mouseDown(with: event)
+      point = CGPoint(x: destination.midX, y: destination.minY + 35)
+      XCTAssertTrue(
+        dock.contains(point), "Select the physical display even when its Dock covers the pointer")
+      surface.mouseDragged(with: event)
+      surface.mouseUp(with: event)
+      let moved = panels.map(\.frame)
+      let dx = moved[0].minX - before[0].minX
+      let dy = moved[0].minY - before[0].minY
+      for i in 0..<count {
+        XCTAssertEqual(moved[i], before[i].offsetBy(dx: dx, dy: dy))
+        XCTAssertTrue(destination.contains(moved[i]))
+        XCTAssertFalse(source.contains(CGPoint(x: moved[i].midX, y: moved[i].midY)))
+      }
+      XCTAssertEqual(
+        panels[count].frame, before[count], "Unrelated target-display occupancy stays fixed")
+      XCTAssertTrue(
+        ActiveReminderGrouping.valid(
+          presenter.visibleFrames, geometry: destinationGeometry, occupied: [:]))
+      XCTAssertEqual(presenter.locks, locks)
+      try await Task.sleep(nanoseconds: 300_000_000)
+      XCTAssertEqual(
+        panels.map(\.frame), moved, "Settled placement must not jump back to the starting display")
+      otherSurface.mouseDown(with: otherEvent)
+      otherPoint.x += source.midX - panels[count].frame.midX
+      otherPoint.y += source.midY - panels[count].frame.midY
+      otherSurface.mouseDragged(with: otherEvent)
+      otherSurface.mouseUp(with: otherEvent)
+      XCTAssertTrue(presenter.gather(items[0].cardID))
+      XCTAssertTrue(
+        presenter.visibleFrames.values.allSatisfy { destination.contains($0) },
+        "Gather uses the chosen card's display instead of the scattered inventory's midpoint")
+      XCTAssertEqual(presenter.component(items[0].cardID).count, items.count)
+    }
+  }
+  @MainActor
+  func testCompletionShapesAndDeviceReducedMotionUpdateExistingRenderer() throws {
+    let presenter = ActiveReminderPanelController(feedback: { _ in })
+    defer { presenter.reset() }
+    let items = [fixture(1), fixture(2, kind: "reminder")]
+    try presenter.show(items, preview: true, pending: [], errors: [:], stale: false)
+    let hosting = try items.map { item in
+      try XCTUnwrap(
+        presenter.panels[item.cardID]?.contentView?.subviews.compactMap {
+          $0 as? NSHostingView<ActiveReminderCard>
+        }.first)
+    }
+    let rect = CGRect(x: 0, y: 0, width: 16, height: 16)
+    XCTAssertTrue(
+      ActiveReminderCompletionShape(kind: hosting[0].rootView.item.kind).path(in: rect).contains(
+        CGPoint(x: 2, y: 2)))
+    XCTAssertFalse(
+      ActiveReminderCompletionShape(kind: hosting[1].rootView.item.kind).path(in: rect).contains(
+        CGPoint(x: 2, y: 2)))
+    XCTAssertTrue(
+      ActiveReminderCompletionShape(kind: "reminder").path(in: rect).contains(CGPoint(x: 8, y: 8)))
+    let appearance = hosting.map { $0.rootView.appearance }
+    presenter.interactions.reducedMotion = true
+    for (i, view) in hosting.enumerated() {
+      XCTAssertTrue(view.rootView.appearance === appearance[i])
+      XCTAssertTrue(view.rootView.appearance.reducedMotion)
+      XCTAssertEqual(view.rootView.appearance.cornerAnimationDuration, 0)
+      XCTAssertTrue(
+        presenter.panels[items[i].cardID]?.contentView?.subviews.contains(where: { $0 === view })
+          == true,
+        "Preference changes update the existing renderer without an inventory revision")
+    }
+    presenter.interactions.reducedMotion = false
+    for view in hosting {
+      XCTAssertEqual(
+        view.rootView.appearance.reducedMotion,
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+      XCTAssertEqual(
+        view.rootView.appearance.cornerAnimationDuration,
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.12)
+    }
+    let output = URL(fileURLWithPath: "/tmp/nohmi-active-card-round1")
+    try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+    for view in hosting {
+      view.layoutSubtreeIfNeeded()
+      view.displayIfNeeded()
+      RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+      let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+      view.cacheDisplay(in: view.bounds, to: rep)
+      let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+      try png.write(to: output.appendingPathComponent("\(view.rootView.item.kind).png"))
+    }
+  }
+}

@@ -1,5 +1,20 @@
 import AppKit
 
+/// Physical display selection stays separate from its safe card geometry (menu bar/Dock excluded).
+struct ActiveReminderDisplay {
+  var frame: CGRect
+  var geometry: PetGeometry
+  static func closest(to point: CGPoint, in displays: [Self]) -> Self? {
+    if let containing = displays.first(where: { $0.frame.contains(point) }) { return containing }
+    func distance(_ display: Self) -> CGFloat {
+      let x = min(max(point.x, display.frame.minX), display.frame.maxX)
+      let y = min(max(point.y, display.frame.minY), display.frame.maxY)
+      return hypot(x - point.x, y - point.y)
+    }
+    return displays.min { distance($0) < distance($1) }
+  }
+}
+
 struct ActiveReminderInteractions: Codable, Equatable {
   var shake = true
   var sensitivity = "medium"

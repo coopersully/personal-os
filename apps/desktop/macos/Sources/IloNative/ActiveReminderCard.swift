@@ -22,6 +22,8 @@ private enum CommitmentColors {
 }
 final class ActiveReminderAppearance: ObservableObject {
   @Published var seams = ActiveReminderSeams()
+  @Published var reducedMotion = false
+  var cornerAnimationDuration: Double { reducedMotion ? 0 : 0.12 }
 }
 private struct ActiveReminderDueLabel: View {
   let due: Date
@@ -47,6 +49,12 @@ private struct ActiveReminderDueLabel: View {
         + (detail ?? status ?? ActiveReminderDueText.relative(due, now: clock.now)))
   }
 }
+struct ActiveReminderCompletionShape: Shape {
+  var kind: String
+  func path(in rect: CGRect) -> Path {
+    kind == "task" ? RoundedRectangle(cornerRadius: 3).path(in: rect) : Circle().path(in: rect)
+  }
+}
 struct ActiveReminderCard: View {
   @ObservedObject var appearance: ActiveReminderAppearance
   let clock: ActiveReminderClock
@@ -57,14 +65,13 @@ struct ActiveReminderCard: View {
   var stale: Bool
   var complete: () -> Void
   var open: () -> Void
-  private var isTask: Bool { item.kind == "task" }
   var body: some View {
     GeometryReader { bounds in
       ScrollView {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
           Button(action: complete) {
             ZStack {
-              RoundedRectangle(cornerRadius: 3)
+              ActiveReminderCompletionShape(kind: item.kind)
                 .fill(CommitmentColors.input.opacity(0.7)).frame(width: 16, height: 16)
               if pending { ProgressView().controlSize(.mini).scaleEffect(0.65) }
             }.frame(width: 16, height: 20, alignment: .top)
@@ -111,8 +118,14 @@ struct ActiveReminderCard: View {
       )
       .fill(CommitmentColors.paper)
       .animation(
-        .easeOut(duration: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.12),
+        .easeOut(duration: appearance.cornerAnimationDuration),
         value: corners.rawValue)
+    }
+    .transaction {
+      if appearance.reducedMotion {
+        $0.animation = nil
+        $0.disablesAnimations = true
+      }
     }
     .overlay {
       Canvas { context, size in

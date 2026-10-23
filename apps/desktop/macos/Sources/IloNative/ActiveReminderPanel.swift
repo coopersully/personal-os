@@ -137,7 +137,13 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting {
   var open: ((ActiveReminderCandidate) -> Void)?
   var snooze: ((ActiveReminderCandidate) -> Void)?
   var settings: (() -> Void)?
-  var interactions = ActiveReminderInteractions()
+  var interactions = ActiveReminderInteractions() {
+    didSet {
+      for window in windows.values { window.interactions = interactions }
+      updateConnections()
+    }
+  }
+  private var resizing = Set<String>()
   private(set) var locks = Set<ActiveReminderEdge>()
   private var groupAnchors: [String: Int] = [:]
   private var updatingGroup = false
@@ -154,6 +160,7 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting {
   private let mouseButtons: () -> Int
   private let feedback: (ActiveReminderFeedback) -> Void
   private let geometry: (NSScreen) -> PetGeometry
+  private let displays: () -> [ActiveReminderDisplay]
   private var soundEnabled = true
   private var retiring: [String: ActiveReminderCardWindow] = [:]
   private let clock = ActiveReminderClock()
@@ -173,7 +180,7 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting {
     locks = locks.filter {
       present.contains($0.a) && present.contains($0.b)
         && (windows[$0.a]?.panel.isVisible != true || windows[$0.b]?.panel.isVisible != true
-          || geometric.contains($0))
+          || resizing.contains($0.a) || resizing.contains($0.b) || geometric.contains($0))
     }
     if let store, store.lockEdges != locks { try? store.saveLockEdges(locks) }
     for (id, window) in windows {
@@ -194,11 +201,16 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting {
   init(
     mouseButtons: @escaping () -> Int = { NSEvent.pressedMouseButtons },
     feedback: @escaping (ActiveReminderFeedback) -> Void = ActiveReminderAudio.play,
-    geometry: @escaping (NSScreen) -> PetGeometry = PetDisplays.geometry
+    geometry: @escaping (NSScreen) -> PetGeometry = PetDisplays.geometry,
+    displays: (() -> [ActiveReminderDisplay])? = nil
   ) {
     self.mouseButtons = mouseButtons
     self.feedback = feedback
     self.geometry = geometry
+    self.displays =
+      displays ?? {
+        NSScreen.screens.map { ActiveReminderDisplay(frame: $0.frame, geometry: geometry($0)) }
+      }
     super.init()
   }
   func show(
@@ -206,6 +218,7 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting {
     pending: Set<String>, errors: [String: String], stale: Bool
   ) throws {
     let valid = Set(items.map(\.cardID))
+    resizing.formIntersection(valid)
     for key in Array(windows.keys) where !valid.contains(key) {
       windows.removeValue(forKey: key)?.close()
     }
@@ -223,7 +236,7 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting {
       hide()
       throw NativeError.message("No display is available for active reminders.")
     }
-    refitGroups()
+    refitGroups(includingHidden: true)
     updatingGroup = true
     var failure: Error?
     for item in items {
@@ -246,6 +259,12 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting {
             })
         }
         window.layoutChanged = { [weak self] in self?.updateConnections() }
+        window.resizeStarted = { [weak self] in self?.resizing.insert(item.cardID) }
+        window.resizeFinished = { [weak self] in
+          self?.resizing.remove(item.cardID)
+          self?.updateConnections()
+        }
+        window.frameLayout = { [weak self] frame in self?.layout(for: [item.cardID: frame]) }
         window.dragBegan = { [weak self] in self?.beginGroupDrag(item.cardID) }
         window.dragMoved = { [weak self] point in self?.moveGroupDrag(point) }
         window.dragFinished = { [weak self] in self?.endGroupDrag() }
@@ -288,6 +307,7 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting {
     clockTimer?.invalidate()
     clockTimer = nil
     gesture = nil
+    resizing = []
     for window in windows.values { window.hide() }
     for window in retiring.values { window.close() }
     retiring = [:]
@@ -299,6 +319,7 @@ final class ActiveReminderPanelController: NSObject, ActiveReminderPresenting {
     for window in retiring.values { window.close() }
     retiring = [:]
     windows = [:]
+    resizing = []
     locks = []
     gesture = nil
     groupAnchors = [:]
@@ -335,7 +356,14 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
   fileprivate var completeAction: () -> Void = {}
   fileprivate var openAction: () -> Void = {}
   var item: ActiveReminderCandidate?
-  var interactions = ActiveReminderInteractions()
+  var interactions = ActiveReminderInteractions() {
+    didSet {
+      if appearance.reducedMotion != reduceMotion { appearance.reducedMotion = reduceMotion }
+    }
+  }
+  var frameLayout: ((CGRect) -> PetGeometry?)?
+  var resizeStarted: (() -> Void)?
+  var resizeFinished: (() -> Void)?
   var dragBegan: (() -> Void)?
   var dragMoved: ((CGPoint) -> Void)?
   var dragFinished: (() -> Void)?
@@ -545,7 +573,7 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
     }
   }
   private func fittedFrame(on screen: NSScreen) -> CGRect {
-    let layout = geometry(screen)
+    let layout = frameLayout?(panel.frame) ?? geometry(screen)
     let others = occupied()
     if let anchor = attachedAnchor {
       let target = ActiveReminderPlacement.anchors(in: layout, size: panel.frame.size)[anchor]
@@ -774,6 +802,7 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
     hideGuides(animated: false)
     interacting = true
     lastResizeFrame = panel.frame
+    resizeStarted?()
     feedback(.resize)
     pulse()
     guard let screen = currentScreen() else { return }
@@ -794,6 +823,7 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
       arranging = false
     }
     resizeAnchor = nil
+    resizeFinished?()
     feedback(.release)
     pulse()
     layoutChanged()
@@ -822,7 +852,7 @@ private final class ActiveReminderCardWindow: NSObject, NSWindowDelegate {
       return
     }
     guard let screen = currentScreen() else { return }
-    let area = geometry(screen).bounds
+    let area = (frameLayout?(panel.frame) ?? geometry(screen)).bounds
     arranging = true
     panel.setFrame(
       fittedFrame(on: screen), display: true)
@@ -870,14 +900,10 @@ extension ActiveReminderPanelController {
     play(unlocking ? .unlock : .lock)
     updateConnections()
   }
-  private func layout(for frames: [String: CGRect]) -> PetGeometry? {
+  private func layout(for frames: [String: CGRect], pointer: CGPoint? = nil) -> PetGeometry? {
     let box = ActiveReminderGrouping.bounds(frames)
-    guard
-      let screen = NSScreen.screens.first(where: {
-        $0.frame.contains(CGPoint(x: box.midX, y: box.midY))
-      }) ?? NSScreen.main
-    else { return nil }
-    return geometry(screen)
+    return ActiveReminderDisplay.closest(
+      to: pointer ?? CGPoint(x: box.midX, y: box.midY), in: displays())?.geometry
   }
   private func apply(_ frames: [String: CGRect], save: Bool = false) {
     updatingGroup = true
@@ -893,14 +919,16 @@ extension ActiveReminderPanelController {
     updateConnections()
   }
   private func groupKey(_ ids: Set<String>) -> String { ids.sorted().joined(separator: "|") }
-  private func refitGroups() {
-    guard gesture == nil, mouseButtons() & 1 == 0 else { return }
+  private func refitGroups(includingHidden: Bool = false) {
+    guard gesture == nil, resizing.isEmpty, mouseButtons() & 1 == 0 else { return }
+    let available = includingHidden ? windows.mapValues { $0.panel.frame } : visibleFrames
+    let edges = ActiveReminderGrouping.edges(available).intersection(locks)
     var visited = Set<String>()
-    for id in visibleFrames.keys.sorted() where !visited.contains(id) {
-      let ids = component(id)
+    for id in available.keys.sorted() where !visited.contains(id) {
+      let ids = ActiveReminderGrouping.component(id, edges: edges)
       visited.formUnion(ids)
       guard ids.count > 1 else { continue }
-      let frames = visibleFrames.filter { ids.contains($0.key) }
+      let frames = available.filter { ids.contains($0.key) }
       guard let layout = layout(for: frames) else { continue }
       let box = ActiveReminderGrouping.bounds(frames)
       let target: CGRect
@@ -912,7 +940,7 @@ extension ActiveReminderPanelController {
       let next = ActiveReminderGrouping.translated(
         frames, dx: target.minX - box.minX, dy: target.minY - box.minY)
       if ActiveReminderGrouping.valid(
-        next, geometry: layout, occupied: visibleFrames.filter({ !ids.contains($0.key) }))
+        next, geometry: layout, occupied: available.filter({ !ids.contains($0.key) }))
       {
         apply(next)
       }
@@ -938,10 +966,11 @@ extension ActiveReminderPanelController {
     }
   }
   private func moveGroupDrag(_ point: CGPoint) {
-    guard var drag = gesture, let layout = layout(for: drag.frames) else { return }
+    guard var drag = gesture else { return }
     let old = ActiveReminderGrouping.bounds(drag.frames)
-    let target = layout.fitCard(
-      old.offsetBy(dx: point.x - drag.origin.x, dy: point.y - drag.origin.y))
+    let proposed = old.offsetBy(dx: point.x - drag.origin.x, dy: point.y - drag.origin.y)
+    guard var layout = layout(for: [drag.id: proposed], pointer: point) else { return }
+    let target = layout.fitCard(proposed)
     var frames = ActiveReminderGrouping.translated(
       drag.frames, dx: target.minX - old.minX, dy: target.minY - old.minY)
     let others = visibleFrames.filter { drag.frames[$0.key] == nil }
@@ -949,6 +978,7 @@ extension ActiveReminderPanelController {
       apply(frames)
     } else {
       frames = visibleFrames.filter { drag.frames[$0.key] != nil }
+      if let acceptedLayout = self.layout(for: frames) { layout = acceptedLayout }
     }
     if interactions.shake && !drag.gathered
       && drag.shake.update(
@@ -1020,7 +1050,7 @@ extension ActiveReminderPanelController {
   @discardableResult
   func gather(_ first: String) -> Bool {
     let frames = visibleFrames
-    guard let firstFrame = frames[first], let layout = layout(for: frames),
+    guard let firstFrame = frames[first], let layout = layout(for: [first: firstFrame]),
       let stack = ActiveReminderGrouping.stack(
         [first] + frames.keys.filter { $0 != first }.sorted(), near: firstFrame, geometry: layout)
     else {

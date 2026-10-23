@@ -29,7 +29,7 @@ full-screen visibility and saved dragging with disposable synthetic items. See t
 [native evidence and remaining certification limits](../superpowers/specs/2026-10-22-active-reminders-native-evidence.md).
 Physical display sleep, the release-signed app, minimum-supported macOS and a real installed-client
 API journey still need release certification. This records branch-local implementation, not a
-merged or deployed release. The native parity suite passes (77 Rust/143 Swift), as do type checks,
+merged or deployed release. The native parity suite passes (77 Rust/147 Swift), as do type checks,
 lint and production builds. Browser acceptance records 151 passed, two skipped and one Finance
 chat-history failure; the active-reminder desktop/mobile cases pass. The full verifier remains
 unsuccessful because of the recorded Finance/database-test failures, so this branch is not release

@@ -41,7 +41,43 @@ account query confirms success. A failed manual retry updates one loading Sonner
 Never duplicate the initial dialog explanation in a toast. Preserve native server configuration
 inside this recovery path. Authoritative 401 handling still clears private state and routes to
 sign-in; password-reset/email-verification flows and the anonymous public landing remain usable.
-A locally failed dataset must never lock the whole app behind this dialog.
+Authenticated read/load failures share this recovery surface app-wide: desktop dialog, mobile
+drawer. Keep one interruption at a time, with account verification first, failed reads next, and
+connection reminders last. Retry only failed reads and keep the gate open through pending work
+until the authoritative queries succeed. Keep drafts and existing layout mounted. Never replay a
+mutation with an uncertain outcome. Authentication, permission, missing-resource, and validation
+responses follow their sign-in/access/correction flows rather than an unresolvable Retry gate.
+Installation-owned background checks stay outside this signed-in data gate. The initial recovery
+explanation belongs in the dialog; manual retry failures update one loading-to-error Sonner toast.
+Retry preserves the failed request’s scope, including the direction of a paginated “load more”
+request; refreshing page one is not recovery for a failed next page.
+Keep keyboard focus on Retry while it is pending and after a failed attempt. Mark it busy and
+unavailable, and guard duplicate activation, without removing the focused control from tab order.
+Place recovery-action Sonner feedback at the top center so it cannot cover a mobile drawer’s
+title or retry controls.
+
+Check connected-account health as soon as a signed-in session opens, regardless of workspace.
+Use server-projected aggregate and enabled-capability health: reconnect, service attention, and
+automatic retry delays warrant a reminder; ready and ordinary syncing do not. Do not infer a failure
+from an old sync timestamp alone, or invent a freshness deadline in the renderer. Describe automatic
+recovery honestly rather than telling users to reconnect when credentials are still valid.
+
+Connection reminders require an explicit **Review connections** or **Snooze for 15 minutes** decision;
+no X, Escape, backdrop, or swipe dismissal. Review opens the repair destination and temporarily
+snoozes the reminder so it cannot obstruct repair. Store only account IDs, health-state keys, and
+expiry times in session storage, scoped to the signed-in owner and app origin. A new account or
+changed failure state surfaces immediately; repaired states clear their snooze. Recheck expiry on
+return from a hidden tab and after the timer expires. Storage failure must still allow an in-memory
+snooze. Never present a snooze as repair or permanently suppress an unresolved problem.
+
+The app shell owns this queue and the shared `RecoverySurface`; feature pages must not repeat
+connection banners. Domain adapters must use existing authoritative health contracts; providers
+without a health projection need one before they can participate. These gates concern reads and
+connection readiness, not every ordinary action or field-validation failure.
+Recovery also owns modal priority. Shared Dialog, Drawer, and Sheet roots defer newly opening
+page overlays until recovery finishes; an already-open editor stays mounted beneath recovery
+and keeps its draft. Recovery’s own nested repair dialogs remain available. Do not solve this
+with arbitrary delays, competing z-index values, or dismissing the user’s editor.
 
 Successful absence uses Empty; failed reads never masquerade as an empty collection. Follow the
 [data-page state matrix](system.md#data-page-state-and-recovery-contract).

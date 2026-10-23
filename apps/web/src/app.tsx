@@ -312,6 +312,7 @@ import { TaskCreationProgress } from "@/features/tasks/creation-progress";
 import { api, isUnauthorized } from "./api.js";
 import { scrollTimelineToMinute } from "./calendar-timeline.js";
 import { AccountRecoveryDialog } from "./components/account-recovery-dialog.js";
+import { AppRecovery } from "./components/app-recovery";
 import { InlineError, PageLoading, QueryFeedback } from "./components/async-state.js";
 import { AuthFooter } from "./components/auth-footer.js";
 import { useConfirmAction } from "./components/confirm-action.js";
@@ -565,7 +566,12 @@ function SessionApp() {
   const me = useQuery({ queryFn: api.getMe, queryKey: ["me"] });
   return (
     <>
-      <AppContent me={me} />
+      <AppRecovery
+        owner={tokens.get("verifyEmail") || tokens.get("resetPassword") ? undefined : me.data?.id}
+        accountBlocked={!me.isSuccess}
+      >
+        <AppContent me={me} />
+      </AppRecovery>
       <AccountRecoveryDialog
         query={me}
         enabled={
@@ -613,11 +619,9 @@ function AppContent({ me }: { me: UseQueryResult<User> }) {
   }
   if (me.isError && !me.data)
     return (
-      <>
-        <main className="center-screen">
-          <Spinner label="Waiting for account connection" />
-        </main>
-      </>
+      <main className="center-screen">
+        <Spinner label="Waiting for account connection" />
+      </main>
     );
   return (
     <TooltipProvider>

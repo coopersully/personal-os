@@ -1011,12 +1011,15 @@ retain a sensible focus target; primary recovery actions need visible keyboard f
 
 Query failures are not evidence of absence. Preserve criteria, drafts, column preferences,
 and valid cached records across retry; recovery must restore the populated view without
-requiring a reload. Never show raw server diagnostics. Settings use one deduplicated Sonner
-error owner (including load errors), with no duplicate inline error paragraph/Alert. An initial unavailable dataset retains neutral recovery inside its content boundary. Cached
-refresh errors use a toast retry action and preserve existing scope/refresh controls; never insert
-new availability rows, alerts, or banners into workspace/navigation/sidebar layout. Account-wide
-verification failures use the non-dismissible recovery dialog defined in [feedback](feedback.md),
-remaining open through retry until confirmed success. Local dataset failures never gate the app. Full-page route errors retain their separate ErrorPage contract.
+requiring a reload. Never show raw server diagnostics. In the signed-in app shell, retryable
+read failures use the shared recovery queue defined in [feedback](feedback.md): account verification
+first, active data reads next, snoozable connection reminders last. The desktop dialog/mobile
+drawer remains open through retry until authoritative success. One manual retry owns one
+loading-to-error Sonner toast; suppress duplicate read-error notifications beneath the gate.
+Outside that shell, initial unavailability retains bounded recovery in its content area and cached
+refresh failures retain the toast retry fallback described above. Never insert new availability rows,
+alerts, or banners into workspace/navigation/sidebar layout. Access and correction responses keep
+their specific recovery flows; full-page route errors retain their separate ErrorPage contract.
 Do not claim a refresh succeeded before the authoritative query returns. Keep export and
 selection scope honest during partial, stale, or paginated views.
 

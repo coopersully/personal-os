@@ -825,12 +825,13 @@ All Time absence. “Show all history” clears only query criteria, not ritual 
 layout. All Time absence offers no invented create-history action. Keep a previous-page
 escape when a later cursor page is empty.
 
-Loading uses bounded shared skeleton rows. Initial failure shows history availability and
-Retry, with the error announced once through Sonner. No duplicate inline error message or
-empty-success message. Failed refresh preserves valid last results without inserting a new
-row or banner; use Sonner with Retry and retain existing refresh/scope controls. Account-wide
-non-authentication read failure uses the shared non-dismissible recovery dialog until confirmed
-success, as specified in `../feedback.md`. Recovery keeps the criteria and restores the table; no destructive action is part
+Loading uses bounded shared skeleton rows. Signed-in read failures use the app-wide recovery
+queue: one desktop dialog/mobile drawer, account verification before local data failures, and
+confirmed retry before returning. Preserve valid last results, drafts, and scope controls beneath
+the gate; never insert a new row or banner. Manual retry failures update one Sonner toast, without
+duplicating the initial explanation. Outside the signed-in shell, shared data components retain
+their bounded initial-retry and cached-toast fallback. Follow `../feedback.md`, including access
+and correction exceptions. Recovery keeps the criteria and restores the table; no destructive action is part
 of empty/error recovery. Use `DataViewEmpty`, `DataViewLoading`, and `DataViewRecovery`.
 
 Settings collection states now share `data-view-state` across Ritual History, Goals,

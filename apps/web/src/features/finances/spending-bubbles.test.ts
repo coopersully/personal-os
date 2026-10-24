@@ -145,7 +145,10 @@ it("keeps selected-period circle sizing independent of qualified monthly fill an
   expect(screen.getByRole("button", { name: /Groceries:/ })).toHaveAccessibleName(
     /Over budget \$10.00/,
   );
-  expect(screen.getByRole("button", { name: /Groceries:/ })).toHaveClass("border-0");
+  expect(screen.getByRole("button", { name: /Groceries:/ })).toHaveClass(
+    "border-transparent",
+    "focus-visible:border-foreground/50",
+  );
   expect(
     screen
       .getByRole("button", { name: /Groceries:/ })
@@ -347,7 +350,7 @@ it("defensively renders a zero target separately from null without infinite util
   expect(selected()).toHaveAccessibleName(
     /Monthly budget used \$2.50 of \$0.00; Over budget \$2.50/,
   );
-  expect(selected()).toHaveClass("border-0");
+  expect(selected()).toHaveClass("border-transparent", "focus-visible:border-foreground/50");
   expect(selected()).toHaveTextContent("Over budget");
   expect(fillAnimation.props.at(-1)).toMatchObject({ animate: { clipPath: "inset(0% 0 0 0)" } });
   for (const usedCents of [0, -100]) {
@@ -362,7 +365,7 @@ it("defensively renders a zero target separately from null without infinite util
     );
     expect(selected()).toHaveAccessibleName(/No utilization/);
     expect(selected()).not.toHaveAccessibleName(/Over budget|Infinity|NaN/);
-    expect(selected()).toHaveClass("border-0");
+    expect(selected()).toHaveClass("border-transparent", "focus-visible:border-foreground/50");
     expect(fillAnimation.props.at(-1)).toMatchObject({
       animate: { clipPath: "inset(100% 0 0 0)" },
     });

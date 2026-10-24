@@ -25,12 +25,21 @@ The planner reuses `verification-plan.mjs` and the existing CI dependency classi
 
 Implementation/durable changes require Nohmi Linear tracking under the standing repository grant.
 A request to build, track, test, publish and merge safely may supply the remaining scoped grants together.
-Merge intent must be explicit: “get this merged,” “merge when safe,” or “ship it” qualifies;
-implementation or PR publication alone does not. Without it, stop before merge.
-Record its actual scope once. Do not ask again when it is already clear. Separate new-chat, sidebar,
+For assigned oversight outcomes, Cooper's standing authority in `AGENTS.md` includes normal protected
+merge of the outcome and necessary bounded prerequisites after review and verification. The outcome
+owner self-reviews and assesses delegated work; this never replaces applicable independent review.
+Outside that assignment, explicit merge intent such as “get this merged” or “ship it” supplies the
+grant. Honor narrower read-only, plan-only, draft-only or no-merge requests and later revocations.
+Record the source and actual scope once. Choose reasonable scope-consistent defaults, without routine
+clarification or repeated per-PR permission. Ask only for indispensable missing information or an
+explicit platform approval. Separate new-chat, sidebar,
 recurrence and production-effect authority still follows epic/handoff contracts. Plan mode can
 produce an issue proposal without creating it. Existing work enters at its next missing evidence,
 not at a fixed first step. Coordinators delegate implementation; choosing a mode never changes role.
+Carry the agreed intent, rationale, non-goals, unfinished obligations and grants through the handoff.
+Use repository oversight’s local lifecycle and monitoring references; do not require a personal skill
+install, add a supervisor layer or reconfirm settled decisions. Planning, dispatch, acknowledgement,
+implementation, review and acceptance each require their own evidence, separate from waiting/blocked.
 
 ## Step contracts
 

@@ -1,4 +1,5 @@
 import {
+  isoDateTimeSchema,
   ritualActionInputSchema,
   ritualDefinitionInputSchema,
   ritualResponseInputSchema,
@@ -43,7 +44,7 @@ export function registerRitualRoutes({
               .refine((value) => {
                 const [time, id, extra] = value.split("|");
                 return (
-                  z.iso.datetime({ offset: true }).safeParse(time).success &&
+                  isoDateTimeSchema.safeParse(time).success &&
                   (!id || z.uuid().safeParse(id).success) &&
                   extra === undefined
                 );

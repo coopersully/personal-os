@@ -146,8 +146,10 @@ time alone cannot release it. Follow checked-in lifecycle commands and give shar
 failures one diagnosis owner rather than launching duplicate repairs.
 
 Reserve shared migration publication and central composition changes with an implementation owner.
-Require the exact prerequisite milestone to be merged and present in the dependent base before
-releasing dependent writes. A whole task's "done" status or an unrelated merged PR is insufficient.
+Require the exact prerequisite milestone on the dependent integration base before releasing writes.
+Stable reviewed source may satisfy source inclusion without a separate merge; a specifically required
+merged prerequisite must be merged and present. A whole task's "done" status or an unrelated merged
+PR is insufficient.
 Follow the database skill's immutable published-migration rules. If a baseline failure is reproduced
 on clean main, map it to one bounded repair issue/owner and keep independent work moving. Do not
 weaken tests, expand the feature PR, or create duplicate repair issues to bypass the failure.
@@ -236,7 +238,11 @@ Only the assigned orchestrator merges the assigned PR after verifying:
    review summaries are addressed with evidence. Resolve only handled or demonstrably inapplicable
    findings. An unresolved disagreement goes back to the reviewer or head; do not dismiss it merely
    to clear a gate. Required approvals are satisfied and current.
-6. The user has authorized this network's merge scope and the actor has normal merge permission.
+6. Cooper's standing oversight grant in `AGENTS.md` covers the assigned outcome and necessary bounded
+   prerequisites, unless a narrower instruction or revocation applies. Record that source and scope;
+   do not request per-PR or prerequisite permission again. The outcome orchestrator self-reviews and
+   reviews delegated implementation; this is distinct from the independent review in gate 4.
+   The actor has normal merge permission.
    The network never changes protections, uses administrator bypass, or leaves deferred auto-merge
    enabled. A queue-only merge path without equivalent final gate enforcement is a blocker.
 
@@ -272,8 +278,10 @@ scheduled follow-ups; subagent workers have no separate heartbeat by default. Du
 use bounded agent waits and resume the same worker for actionable remediation. Before yielding,
 record the worker's checkpoint, liveness, pending operation, and next trigger. A sleeping parent is
 not proof its children stopped; reconcile them on every wakeup. Reuse existing task heartbeats when enabled;
-do not create competing schedules. Notify only on meaningful progress, completion, failure, or a
-decision requiring the user. Retry transient failures with backoff; stop repeating an unchanged
+do not create competing schedules. Scheduled oversight wakes follow the repository oversight skill’s
+short visible report preference, including unchanged state, unless the user explicitly requests quiet
+or muted reporting. Other updates notify on meaningful progress, completion, failure or a decision.
+Retry transient failures with backoff; stop repeating an unchanged
 failing action and report the missing capability or decision.
 
 Treat process liveness, meaningful progress, external waiting, and completion as distinct states.
@@ -298,7 +306,8 @@ review-ready, merge-ready, merged, and release-accepted. Give an ETA range and c
 remaining work and observed durations support it; otherwise state the unknown. Include a concise
 purpose with every PR number and Linear key. Do not expose private registry or personal source data.
 
-Persist unchanged waits without repeated parent messages or notifications. A new head, completed
+Persist unchanged waits without repeated worker callbacks or polling narration; the scheduled
+oversight report preference above still applies. A new head, completed
 milestone, finding, required action, or changed blocker can justify an update; a polling tick alone
 cannot. Keep a repeated permission blocker quiet after an actionable report until evidence changes.
 

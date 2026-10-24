@@ -1,3 +1,4 @@
+import { financeBudgetAllocationSchema, financeBudgetResourceSchema } from "./budget.js";
 import {
   financeBudgetPolicyEvaluationInputSchema,
   financeBudgetPolicyEvaluationSchema,
@@ -21,6 +22,25 @@ const terms = () => ({
 });
 
 describe("explicit hypothetical budget policy terms", () => {
+  it("keeps persisted policy timestamps at second precision", () => {
+    expect(
+      financeBudgetPolicyTermsSchema.safeParse({ ...terms(), expiresAt: "2026-10-01T04:00Z" })
+        .success,
+    ).toBe(false);
+    expect(
+      financeBudgetPolicyEvaluationInputSchema.safeParse({
+        ...availableEvaluation(),
+        evaluatedAt: "2026-09-20T12:00Z",
+      }).success,
+    ).toBe(false);
+    expect(
+      financeBudgetPolicyEvaluationSchema.safeParse({
+        ...preview(),
+        evaluatedAt: "2026-09-20T12:00Z",
+      }).success,
+    ).toBe(false);
+  });
+
   it("requires every term, without injecting authority or defaults", () => {
     const input = terms();
     expect(financeBudgetPolicyTermsSchema.parse(input)).toEqual(input);
@@ -117,6 +137,60 @@ const evaluation = () => ({
   candidate: snapshot(),
   position: { state: "unavailable", reason: "producer_not_registered" },
   usage: { state: "unavailable", reason: "missing_evidence" },
+});
+
+describe("persisted budget identity lengths", () => {
+  it.each([60, 61])("preserves the 120 UTF-16-unit key limit at %s emoji", (count) => {
+    const key = "😀".repeat(count);
+    const valid = count === 60;
+    expect(financeBudgetResourceSchema.safeParse({ key, kind: "income", amount: 1 }).success).toBe(
+      valid,
+    );
+    expect(
+      financeBudgetAllocationSchema.safeParse({ key, kind: "buffer", amount: 1 }).success,
+    ).toBe(valid);
+    const plan = snapshot();
+    for (const field of ["resources", "allocations"] as const)
+      expect(
+        financeBudgetPolicyPlanSnapshotSchema.safeParse({
+          ...plan,
+          [field]: [{ ...plan[field][0], key }],
+        }).success,
+      ).toBe(valid);
+  });
+
+  it.each([100, 101])("preserves the 200 UTF-16-unit revision limit at %s emoji", (count) => {
+    const revision = "😀".repeat(count);
+    const valid = count === 100;
+    expect(
+      financeBudgetPolicyTermsSchema.safeParse({
+        ...terms(),
+        baseline: { ...ref, revision },
+      }).success,
+    ).toBe(valid);
+    for (const field of ["positionRevision", "usageRevision"] as const)
+      expect(
+        financeBudgetPolicyRevisionTupleSchema.safeParse({
+          ...revisions(),
+          [field]: revision,
+        }).success,
+      ).toBe(valid);
+    const input = evaluation();
+    expect(
+      financeBudgetPolicyEvaluationInputSchema.safeParse({
+        ...input,
+        usage: {
+          state: "available",
+          userId: id,
+          period: input.terms.period,
+          revision,
+          accounting: "gross_positive_allocation_deltas",
+          scope: "user_month_all_policy_versions",
+          consumedCents: 0,
+        },
+      }).success,
+    ).toBe(valid);
+  });
 });
 
 describe("unregistered policy evaluation boundaries", () => {

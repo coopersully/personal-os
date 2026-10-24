@@ -175,9 +175,18 @@ original snapshot disclosures and honest coverage are preserved; genuine in-scop
 still withholds comparison. Live QA first exposed this at failed integration `bdfc951e`; its fixture
 and screenshot are retained separately from the repaired candidate's future verification.
 
-Today Rhythm groups hourly evidence only when transaction metadata has an actual offset-bearing
+Single-day Rhythm groups hourly evidence only when transaction metadata has an actual offset-bearing
 purchase timestamp matching the contribution's local calendar date. Date-only source records and
 unmatched/invalid timestamps stay in an explicit untimed subtotal; updatedAt never supplies purchase
 time. Current canonical transactions store date-only evidence, so hourly amounts are unavailable for
-those records. Hour cells inspect amounts, while the day action retains the existing exact day
+those records. Hour cells inspect amounts, while the untimed block retains the existing exact day
 reference; do not create a date-only link that claims to select an hour.
+
+Rhythm display grain derives from inclusive scope length rather than the named period preset:
+1 day hourly, up to 62 days daily, up to 366 weekly, up to 1096 monthly, then yearly. Aggregate net,
+positive spending, refunds and pending in exact cents; union source contribution/transaction IDs.
+Weekly intervals follow the saved week start; calendar months/years and all intervals clip to scope.
+A combined block can be complete only when every expected day has complete evidence. Partial
+calendar intervals and uncertain evidence remain disclosed in hover/focus details. The open block
+grid has no containing Card or duplicate date/timezone context; the untimed subtotal is a distinct
+labelled block, not an extra paragraph or action row.

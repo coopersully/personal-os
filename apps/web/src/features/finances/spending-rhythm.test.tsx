@@ -5,6 +5,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { FinanceSpendingRhythm, spendingHourlyBins } from "./spending-rhythm";
+import { rhythmGrain, spendingRhythmBins } from "./spending-rhythm-bins";
 
 afterEach(() => cleanup());
 
@@ -109,19 +110,23 @@ it("preserves observed positive and refund tones independently of uncertain cove
   expect(refund).toHaveAccessibleName(/Net refund.*Partial coverage|Partial coverage/);
   expect(zero).not.toHaveTextContent("Zero");
 });
-it("rotates calendar labels and leading offsets for Monday", () => {
-  const { container, rerender } = render(
-    <FinanceSpendingRhythm
-      dashboard={observedDashboard()}
-      onSelect={vi.fn()}
-      weekStartsOn="monday"
-    />,
-  );
-  expect(container.querySelector("fieldset .grid")?.firstElementChild).toHaveTextContent("Mon");
-  expect(container.querySelectorAll("[data-calendar-padding]")).toHaveLength(6);
-  rerender(<FinanceSpendingRhythm dashboard={observedDashboard()} onSelect={vi.fn()} />);
-  expect(container.querySelector("fieldset .grid")?.firstElementChild).toHaveTextContent("Sun");
-  expect(container.querySelectorAll("[data-calendar-padding]")).toHaveLength(0);
+it("aligns weekly blocks to the saved week start and preserves exact contributions", () => {
+  const value = observedDashboard();
+  value.snapshot.scope.through = "2026-06-01";
+  const monday = spendingRhythmBins(value, "monday");
+  expect(monday.grain).toBe("Weekly");
+  expect(monday.bins[0]?.date).toBe("2026-03-01");
+  expect(monday.bins[0]?.through).toBe("2026-03-01");
+  expect(monday.bins[0]?.partial).toBe(true);
+  expect(monday.bins[1]?.date).toBe("2026-03-02");
+  const sunday = spendingRhythmBins(value);
+  expect(sunday.bins[0]?.through).toBe("2026-03-07");
+  expect(sunday.bins[0]?.netCents).toBe(50);
+  expect(sunday.bins[0]?.coverage).not.toBe("complete");
+  expect(sunday.bins[0]?.drillDown.scope).toMatchObject({
+    from: "2026-03-01",
+    through: "2026-03-07",
+  });
 });
 it("retains a calendar tabstop and focused detail when the range becomes shorter or empty", async () => {
   const dashboard = observedDashboard();
@@ -141,7 +146,7 @@ it("retains a calendar tabstop and focused detail when the range becomes shorter
     "tabindex",
     "0",
   );
-  expect(screen.getByText(/2026-03-01:.*Positive spending/)).toBeInTheDocument();
+  expect(screen.getByText(/2026-03-01:.*Missing coverage/)).toBeInTheDocument();
   rerender(
     <FinanceSpendingRhythm
       dashboard={{ ...dashboard, snapshot: { ...dashboard.snapshot, bins: [] } }}
@@ -203,11 +208,13 @@ it("keeps date-only spending out of hourly totals rather than assigning midnight
   expect(result.hours).toHaveLength(24);
   expect(result.hours.every((hour) => hour.count === 0)).toBe(true);
   expect(result.untimedCents).toBe(1250);
-  render(<FinanceSpendingRhythm dashboard={value} hourly onSelect={vi.fn()} />);
+  render(<FinanceSpendingRhythm dashboard={value} onSelect={vi.fn()} />);
   expect(screen.getByText("Hourly spending")).toBeInTheDocument();
-  expect(screen.getByText("Time not provided · 1 item")).toBeInTheDocument();
   expect(
-    screen.getByRole("button", { name: /12 AM: Hourly amount unavailable/ }),
+    screen.getByRole("button", { name: /Time not provided: \$12.50; 1 item/ }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: /12 AM:.*Hourly amount unavailable/ }),
   ).toBeInTheDocument();
 });
 it("groups only timestamped evidence into its local purchase hour, preserving unassigned adjustments", () => {
@@ -230,4 +237,74 @@ it("groups only timestamped evidence into its local purchase hour, preserving un
   expect(result.hours[22]).toMatchObject({ count: 1, netCents: 2000 });
   expect(result.untimedCents).toBe(-500);
   expect(result.hours.reduce((sum, hour) => sum + hour.netCents, result.untimedCents)).toBe(1500);
+});
+
+it.each([
+  [1, "Hourly"],
+  [2, "Daily"],
+  [62, "Daily"],
+  [63, "Weekly"],
+  [366, "Weekly"],
+  [367, "Monthly"],
+  [1096, "Monthly"],
+  [1097, "Yearly"],
+] as const)("chooses grain automatically for %i selected days", (days, grain) => {
+  const from = "2024-01-01";
+  const through = new Date(Date.parse(`${from}T12:00:00Z`) + (days - 1) * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+  expect(rhythmGrain(from, through)).toBe(grain);
+});
+it("groups leap-month and year boundaries without losing refunds, pending amounts or exact IDs", () => {
+  const value = observedDashboard();
+  const base = value.snapshot.bins[0];
+  if (!base) throw new Error("Missing fixture bin");
+  value.snapshot.scope = { ...value.snapshot.scope, from: "2024-02-15", through: "2026-03-01" };
+  value.snapshot.bins = [
+    {
+      ...base,
+      date: "2024-02-28",
+      netCents: 150,
+      positiveAreaCents: 150,
+      coverage: "complete",
+      drillDown: { ...base.drillDown, contributionIds: ["a"], transactionIds: ["t"] },
+    },
+    {
+      ...base,
+      date: "2024-02-29",
+      netCents: -50,
+      negativeAdjustmentCents: 50,
+      pendingCents: 20,
+      coverage: "complete",
+      drillDown: { ...base.drillDown, contributionIds: ["b"], transactionIds: ["t"] },
+    },
+    { ...base, date: "2025-01-01", netCents: 200 },
+  ];
+  const monthly = spendingRhythmBins(value);
+  expect(monthly.grain).toBe("Monthly");
+  expect(monthly.bins[0]).toMatchObject({
+    date: "2024-02-15",
+    through: "2024-02-29",
+    netCents: 100,
+    negativeAdjustmentCents: 50,
+    pendingCents: 20,
+    partial: true,
+    coverage: "partial",
+  });
+  expect(monthly.bins[0]?.drillDown.contributionIds).toEqual(["a", "b"]);
+  expect(monthly.bins[0]?.drillDown.transactionIds).toEqual(["t"]);
+  value.snapshot.scope.through = "2028-03-01";
+  const yearly = spendingRhythmBins(value);
+  expect(yearly.grain).toBe("Yearly");
+  expect(yearly.bins[0]?.through).toBe("2024-12-31");
+  expect(yearly.bins.reduce((sum, bin) => sum + bin.netCents, 0)).toBe(300);
+});
+it("renders only an open heading and blocks, with no duplicate context or containing Card", () => {
+  const { container } = render(
+    <FinanceSpendingRhythm dashboard={observedDashboard()} onSelect={vi.fn()} />,
+  );
+  expect(screen.getByRole("heading", { name: "Daily spending" })).toBeInTheDocument();
+  expect(container.querySelector('[data-slot="card"]')).toBeNull();
+  expect(screen.queryByText("UTC")).not.toBeInTheDocument();
+  expect(screen.queryByText("Daily spending list")).not.toBeInTheDocument();
 });

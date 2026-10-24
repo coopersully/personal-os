@@ -823,7 +823,6 @@ export function FinanceSpendingPage() {
               {view === "rhythm" ? (
                 <FinanceSpendingRhythm
                   dashboard={result}
-                  hourly={period === "today"}
                   weekStartsOn={
                     calendar.data?.preferences.weekStartsOn ??
                     getDefaultWorkspacePreferences("calendar").weekStartsOn

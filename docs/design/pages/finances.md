@@ -103,10 +103,15 @@ Trends uses the shared Card composition and a responsive net-spending line chart
 quiet grid/axes and formatted dates. Focus lives in the primary navigation. The comparison stays in
 the chart header; detailed period rows, source/coverage and group changes live in its info dialog.
 Signed points preserve net refunds; exact selections remain available by pointer and keyboard.
-Rhythm uses compact month Cards with square date cells, a shared green intensity scale, neutral
-confirmed-zero days and muted future days. Dashed cells indicate incomplete evidence; hover/focus
-opens the shared tooltip with exact amount and status. Keep keyboard date navigation and exact
-drilldown, without a duplicate daily list or prose block below the calendar.
+Rhythm is an open contribution-style heatmap: only a grain-aware heading and small rounded square
+blocks, without containing Cards, duplicate date/timezone context, a legend, or a footer. Select grain
+by inclusive range length: 1 day → hourly; 2–62 → daily; 63–366 → weekly; 367–1096 → monthly;
+longer → yearly. Weekly blocks follow the saved week start; monthly/yearly blocks follow calendar
+boundaries. Clip boundary blocks to the selected range and identify partial periods in tooltips.
+Color intensity represents net spending per block; confirmed zero, missing evidence, net refunds
+and future periods stay distinct. Hover/focus reveals exact dates, amount and qualifications; pointer
+or keyboard activation opens the exact daily/coarse-period selection. For hourly data, retain an
+explicit ? block for untimed purchases, with the amount and explanation in its tooltip.
 See the [spending contract](../../engineering/finance-spending.md) for coverage and disclosure rules.
 
 
@@ -768,7 +773,7 @@ Spending list glyphs sit in padded square frames with a subtle contrasting surfa
 
 The Trends focus picker uses the same quiet muted value treatment as the date range. Its all-option
 follows the effective grouping (All buckets or All categories), and its catalog retains the full
-unfiltered group choices after selection. Today uses a 24-hour local-time Rhythm grid. Only source
+unfiltered group choices after selection. Every single-day selection uses 24 local-time hour blocks. Only source
 purchase timestamps establish an hour; date-only transactions remain in Time not provided, never
 midnight or the record-update hour. The current transaction source supplies dates only. Hourly zero
 requires complete evidence and no untimed contributions; future and unknown hours remain distinct.

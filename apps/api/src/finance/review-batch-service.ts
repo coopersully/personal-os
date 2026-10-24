@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import * as databaseSchema from "@personal-os/database";
 import {
   accessTokens,
   auditEvents,
@@ -21,6 +22,8 @@ import {
   previewFinanceReviewBatchInputSchema,
 } from "@personal-os/domain";
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
+import type { Pool, PoolClient, QueryConfig, QueryResultRow } from "pg";
 import { AppError } from "../errors.js";
 import { lockReimbursementTopology } from "../finance-reimbursement-locks.js";
 import { type createFinanceService, isProviderTransfer } from "../finance-service.js";
@@ -87,12 +90,14 @@ export function createFinanceReviewBatchService({
   finance,
   elapsedNow = () => performance.now(),
   executionBudgetMs = 45_000,
+  transactionBudgetMs = 10_000,
 }: {
   db: Database;
   now: () => Date;
   finance: Finance;
   elapsedNow?: () => number;
   executionBudgetMs?: number;
+  transactionBudgetMs?: number;
 }) {
   async function authorize(tx: Transaction, context: Context, mode: "read" | "write" | "execute") {
     const principal = context.principal;
@@ -476,38 +481,115 @@ export function createFinanceReviewBatchService({
             throw error;
           }
         }
+        let activeClient: PoolClient | undefined;
+        let released = false;
+        let discarded = false;
+        const discard = () => {
+          if (activeClient && !released) {
+            released = true;
+            discarded = true;
+            activeClient.release(true);
+          }
+        };
+        async function transactionWork(): Promise<T> {
+          // The repository database factory exposes Drizzle's public $client pool.
+          // Own one checkout until session configuration is restored or discarded.
+          const pool = (db as Database & { $client: Pool }).$client;
+          const client = await pool.connect();
+          activeClient = client;
+          let reusable = false;
+          let previousTimeout: string | undefined;
+          const onError = (error: Error) => {
+            if (isInterrupted(error)) observedInterruption = error;
+          };
+          client.on("error", onError);
+          const sessionQuery = <R extends QueryResultRow = QueryResultRow>(
+            text: string,
+            values?: string[],
+          ) => {
+            // node-postgres supports a per-query client deadline; its type package
+            // currently declares this option only on the connection configuration.
+            const query: QueryConfig & { query_timeout: number } = {
+              text,
+              values,
+              query_timeout: Math.max(1, Math.min(3_000, remaining())),
+            };
+            return client.query<R>(query);
+          };
+          try {
+            check();
+            const settings = await sessionQuery<{ timeout: string }>(
+              "SELECT current_setting('transaction_timeout') AS timeout",
+            );
+            previousTimeout = settings.rows[0]?.timeout;
+            if (previousTimeout === undefined)
+              throw new AppError(
+                "internal_error",
+                "The transaction deadline setting is unavailable.",
+              );
+            check();
+            const timeout = Math.max(1, Math.min(transactionBudgetMs, 10_000, remaining()));
+            // PG17 arms transaction_timeout at StartTransaction. SET LOCAL after
+            // BEGIN changes the setting but does not start that transaction's timer.
+            await sessionQuery("SELECT set_config('transaction_timeout', $1, false)", [
+              `${timeout}ms`,
+            ]);
+            check();
+            const sessionDb: Database = drizzle(client, { schema: databaseSchema });
+            const result = await sessionDb.transaction((tx) =>
+              preserve(async () => {
+                check();
+                const statementTimeout = Math.max(1, Math.floor(timeout / 2));
+                await tx.execute(sql.raw(`SET LOCAL statement_timeout = '${statementTimeout}ms'`));
+                await tx.execute(
+                  sql.raw(`SET LOCAL lock_timeout = '${Math.min(3_000, statementTimeout)}ms'`),
+                );
+                const value = await run(tx, preserve);
+                check();
+                return value;
+              }),
+            );
+            reusable = true;
+            return result;
+          } finally {
+            if (
+              !released &&
+              reusable &&
+              previousTimeout !== undefined &&
+              !stopped &&
+              remaining() > 0
+            ) {
+              try {
+                await sessionQuery("SELECT set_config('transaction_timeout', $1, false)", [
+                  previousTimeout,
+                ]);
+                if (!released) {
+                  released = true;
+                  client.release();
+                }
+              } catch {
+                // The transaction is already committed. Cleanup failure must not
+                // relabel its durable outcome; discard the contaminated session.
+                discard();
+              }
+            } else discard();
+            if (discarded) client.once("end", () => client.removeListener("error", onError));
+            else client.removeListener("error", onError);
+          }
+        }
         let timer: ReturnType<typeof setTimeout> | undefined;
         let abort = () => {};
         const interruption = new Promise<never>((_, reject) => {
           abort = () => {
             stopped = true;
+            discard();
             reject(interrupted);
           };
           timer = setTimeout(abort, remaining());
           context.signal?.addEventListener("abort", abort, { once: true });
         });
         try {
-          return await Promise.race([
-            db.transaction((tx) =>
-              preserve(async () => {
-                // Pool acquisition can finish after the response; never start queued work then.
-                check();
-                const timeout = Math.max(1, Math.min(10_000, remaining()));
-                // PostgreSQL 17 bounds the whole transaction, including many short statements.
-                await tx.execute(sql.raw(`SET LOCAL transaction_timeout = '${timeout}ms'`));
-                const statementTimeout = Math.max(1, Math.floor(timeout / 2));
-                await tx.execute(sql.raw(`SET LOCAL statement_timeout = '${statementTimeout}ms'`));
-                await tx.execute(
-                  sql.raw(`SET LOCAL lock_timeout = '${Math.min(3_000, statementTimeout)}ms'`),
-                );
-                check();
-                const result = await run(tx, preserve);
-                check();
-                return result;
-              }),
-            ),
-            interruption,
-          ]);
+          return await Promise.race([transactionWork(), interruption]);
         } catch (error) {
           throw observedInterruption ?? error;
         } finally {

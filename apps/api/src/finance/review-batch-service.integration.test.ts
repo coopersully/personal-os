@@ -23,7 +23,7 @@ import {
   previewFinanceReviewBatchInputSchema,
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { createFinanceService } from "../finance-service.js";
 import type { Principal } from "../types.js";
 import { createFinanceReviewBatchService } from "./review-batch-service.js";
@@ -648,6 +648,103 @@ describe.sequential("durable Finance review batches", () => {
         .from(financeClassificationDecisions)
         .where(eq(financeClassificationDecisions.userId, f.userId)),
     ).toHaveLength(2);
+  });
+  it("recovers a real PostgreSQL transaction_timeout despite rollback masking 25P04", async () => {
+    const f = await fixture(3);
+    const run = await f.service.preview(f.input, f.context);
+    let calls = 0;
+    let observedCode: unknown;
+    let rollbackFailure: unknown;
+    const observedDb = new Proxy(database.db, {
+      get(target, key, receiver) {
+        if (key !== "transaction") return Reflect.get(target, key, receiver);
+        return async (...args: Parameters<typeof database.db.transaction>) => {
+          try {
+            return await target.transaction(...args);
+          } catch (error) {
+            rollbackFailure = error;
+            throw error;
+          }
+        };
+      },
+    });
+    const slow = createFinanceReviewBatchService({
+      db: observedDb,
+      now,
+      finance: {
+        ...f.finance,
+        async applyCategorizations(...args) {
+          calls++;
+          const result = await f.finance.applyCategorizations(...args);
+          if (calls === 2) {
+            const tx = required(args[2]);
+            // Shorten only this test transaction's server deadline after real ledger,
+            // classification and audit writes. Disable statement timeout so the
+            // database must terminate the transaction/session with 25P04, rather
+            // than cancel a statement with 57014 or hit the JS request deadline.
+            await tx.execute(sql`SET LOCAL transaction_timeout = '500ms'`);
+            await tx.execute(sql`SET LOCAL statement_timeout = '0'`);
+            try {
+              await tx.execute(sql`SELECT pg_sleep(1)`);
+            } catch (error) {
+              let cause: unknown = error;
+              while (typeof cause === "object" && cause !== null) {
+                if ("code" in cause) {
+                  observedCode = cause.code;
+                  break;
+                }
+                cause = "cause" in cause ? cause.cause : null;
+              }
+              throw error;
+            }
+            throw new Error("PostgreSQL did not enforce the transaction timeout");
+          }
+          return result;
+        },
+      },
+    });
+    const partial = await slow.execute(run.id, { fingerprint: run.fingerprint }, f.context);
+    expect(observedCode).toBe("25P04");
+    // Observe the actual outer Drizzle rejection, not a synthetic substitute:
+    // rollback on the terminated connection masks the original server error.
+    expect(rollbackFailure).toMatchObject({ query: "rollback" });
+    expect(calls).toBe(2);
+    expect(partial).toMatchObject({ status: "in_progress", pendingCount: 2 });
+    expect(partial.outcomes).toEqual([expect.objectContaining({ index: 0, status: "applied" })]);
+    // Read durable state on a new transaction/connection: no optimistic receipt or
+    // classification/audit from the terminated writer may survive.
+    expect(await f.service.get(run.id, f.context)).toEqual(partial);
+    for (const [index, decision] of f.decisions.entries())
+      expect((await transaction(decision.transactionId))?.needsReview).toBe(index !== 0);
+    const classifications = () =>
+      database.db
+        .select()
+        .from(financeClassificationDecisions)
+        .where(eq(financeClassificationDecisions.userId, f.userId));
+    const audits = () =>
+      database.db.select().from(auditEvents).where(eq(auditEvents.userId, f.userId));
+    expect(await classifications()).toEqual([
+      expect.objectContaining({ transactionId: required(f.decisions[0]).transactionId }),
+    ]);
+    expect(await audits()).toEqual([
+      expect.objectContaining({
+        entityId: required(f.decisions[0]).transactionId,
+        action: "finance.transaction_categorized",
+      }),
+    ]);
+    const resumed = createFinanceReviewBatchService({ db: database.db, now, finance: f.finance });
+    const completed = await resumed.execute(run.id, { fingerprint: run.fingerprint }, f.context);
+    expect(completed).toMatchObject({ status: "completed", pendingCount: 0 });
+    expect(completed.outcomes.map((outcome) => outcome.status)).toEqual([
+      "applied",
+      "applied",
+      "applied",
+    ]);
+    expect(await resumed.execute(run.id, { fingerprint: run.fingerprint }, f.context)).toEqual(
+      completed,
+    );
+    expect(await classifications()).toHaveLength(3);
+    expect(await audits()).toHaveLength(3);
   });
   it("bounds pool acquisition and never starts work acquired after the deadline", async () => {
     const f = await fixture();

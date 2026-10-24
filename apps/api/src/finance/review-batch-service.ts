@@ -456,8 +456,26 @@ export function createFinanceReviewBatchService({
       const check = () => {
         if (stopped || context.signal?.aborted || remaining() <= 0) throw interrupted;
       };
-      async function bounded<T>(run: (tx: Transaction) => Promise<T>): Promise<T> {
+      async function bounded<T>(
+        run: (
+          tx: Transaction,
+          preserve: <R>(operation: () => Promise<R>) => Promise<R>,
+        ) => Promise<T>,
+      ): Promise<T> {
         check();
+        let observedInterruption: unknown;
+        async function preserve<R>(operation: () => Promise<R>): Promise<R> {
+          try {
+            return await operation();
+          } catch (error) {
+            // PostgreSQL transaction_timeout terminates the connection. Drizzle's
+            // subsequent savepoint/outer rollback can mask its original SQLSTATE.
+            // Retain only an observed interruption, never infer one from a generic
+            // connection failure (which could represent an uncertain commit).
+            if (isInterrupted(error)) observedInterruption = error;
+            throw error;
+          }
+        }
         let timer: ReturnType<typeof setTimeout> | undefined;
         let abort = () => {};
         const interruption = new Promise<never>((_, reject) => {
@@ -470,24 +488,28 @@ export function createFinanceReviewBatchService({
         });
         try {
           return await Promise.race([
-            db.transaction(async (tx) => {
-              // Pool acquisition can finish after the response; never start queued work then.
-              check();
-              const timeout = Math.max(1, Math.min(10_000, remaining()));
-              // PostgreSQL 17 bounds the whole transaction, including many short statements.
-              await tx.execute(sql.raw(`SET LOCAL transaction_timeout = '${timeout}ms'`));
-              const statementTimeout = Math.max(1, Math.floor(timeout / 2));
-              await tx.execute(sql.raw(`SET LOCAL statement_timeout = '${statementTimeout}ms'`));
-              await tx.execute(
-                sql.raw(`SET LOCAL lock_timeout = '${Math.min(3_000, statementTimeout)}ms'`),
-              );
-              check();
-              const result = await run(tx);
-              check();
-              return result;
-            }),
+            db.transaction((tx) =>
+              preserve(async () => {
+                // Pool acquisition can finish after the response; never start queued work then.
+                check();
+                const timeout = Math.max(1, Math.min(10_000, remaining()));
+                // PostgreSQL 17 bounds the whole transaction, including many short statements.
+                await tx.execute(sql.raw(`SET LOCAL transaction_timeout = '${timeout}ms'`));
+                const statementTimeout = Math.max(1, Math.floor(timeout / 2));
+                await tx.execute(sql.raw(`SET LOCAL statement_timeout = '${statementTimeout}ms'`));
+                await tx.execute(
+                  sql.raw(`SET LOCAL lock_timeout = '${Math.min(3_000, statementTimeout)}ms'`),
+                );
+                check();
+                const result = await run(tx, preserve);
+                check();
+                return result;
+              }),
+            ),
             interruption,
           ]);
+        } catch (error) {
+          throw observedInterruption ?? error;
         } finally {
           clearTimeout(timer);
           context.signal?.removeEventListener("abort", abort);
@@ -513,7 +535,7 @@ export function createFinanceReviewBatchService({
       for (let count = 0; count < input.limit; count++) {
         if (context.signal?.aborted || remaining() < Math.min(10_000, budget / 10)) break;
         try {
-          const progressed = await bounded(async (tx) => {
+          const progressed = await bounded(async (tx, preserve) => {
             await authorize(tx, context, "execute");
             const row = await find(tx, id, context);
             if (row.fingerprint !== input.fingerprint)
@@ -531,61 +553,66 @@ export function createFinanceReviewBatchService({
             let outcome: FinanceReviewBatchOutcome;
             try {
               // A savepoint rolls back all writer effects before a business failure receipt commits.
-              outcome = await tx.transaction(async (itemTx) => {
-                const transferReview = await validate(
-                  itemTx,
-                  decision,
-                  context.principal.userId,
-                  true,
-                  context.principal.actorType === "agent",
-                );
-                check();
-                // Deliberately reconstruct context: internal prepared-action/maintenance capabilities
-                // must never be inherited from a batch caller or persisted preview.
-                const writerContext = {
-                  principal: context.principal,
-                  requestId: context.requestId,
-                  financeReviewBatchScope: {
-                    transactionId: decision.transactionId,
-                    transferReview: transferReview?.transferReview === true,
-                    transferCounterpart: transferReview?.transferCounterpart,
-                    reviewId: decision.kind === "review" ? decision.reviewId : null,
-                  },
-                };
-                let status: FinanceReviewBatchOutcome["status"];
-                if (decision.kind === "review") {
-                  const result = await finance.resolveReview(
-                    decision.reviewId,
+              outcome = await tx.transaction((itemTx) =>
+                preserve(async () => {
+                  const transferReview = await validate(
+                    itemTx,
                     decision,
-                    writerContext,
-                    itemTx,
+                    context.principal.userId,
+                    true,
+                    context.principal.actorType === "agent",
                   );
-                  status =
-                    "deferred" in result
-                      ? "deferred"
-                      : result.applied
-                        ? "applied"
-                        : "review_required";
-                } else {
-                  const [result] = await finance.applyCategorizations(
-                    { decisions: [decision] },
-                    writerContext,
-                    itemTx,
-                  );
-                  if (!result)
-                    throw new AppError("internal_error", "The categorization outcome is missing.");
-                  status = result.applied ? "applied" : "review_required";
-                }
-                check();
-                return {
-                  index,
-                  transactionId: decision.transactionId,
-                  status,
-                  error: null,
-                  recovery: status === "applied" ? ("none" as const) : ("new_preview" as const),
-                  completedAt: now().toISOString(),
-                };
-              });
+                  check();
+                  // Deliberately reconstruct context: internal prepared-action/maintenance capabilities
+                  // must never be inherited from a batch caller or persisted preview.
+                  const writerContext = {
+                    principal: context.principal,
+                    requestId: context.requestId,
+                    financeReviewBatchScope: {
+                      transactionId: decision.transactionId,
+                      transferReview: transferReview?.transferReview === true,
+                      transferCounterpart: transferReview?.transferCounterpart,
+                      reviewId: decision.kind === "review" ? decision.reviewId : null,
+                    },
+                  };
+                  let status: FinanceReviewBatchOutcome["status"];
+                  if (decision.kind === "review") {
+                    const result = await finance.resolveReview(
+                      decision.reviewId,
+                      decision,
+                      writerContext,
+                      itemTx,
+                    );
+                    status =
+                      "deferred" in result
+                        ? "deferred"
+                        : result.applied
+                          ? "applied"
+                          : "review_required";
+                  } else {
+                    const [result] = await finance.applyCategorizations(
+                      { decisions: [decision] },
+                      writerContext,
+                      itemTx,
+                    );
+                    if (!result)
+                      throw new AppError(
+                        "internal_error",
+                        "The categorization outcome is missing.",
+                      );
+                    status = result.applied ? "applied" : "review_required";
+                  }
+                  check();
+                  return {
+                    index,
+                    transactionId: decision.transactionId,
+                    status,
+                    error: null,
+                    recovery: status === "applied" ? ("none" as const) : ("new_preview" as const),
+                    completedAt: now().toISOString(),
+                  };
+                }),
+              );
             } catch (error) {
               if (
                 !(error instanceof AppError) ||

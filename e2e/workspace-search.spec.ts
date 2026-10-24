@@ -156,7 +156,10 @@ test("Calendar remembers its view and opening and snap preferences", async ({ pa
   }
 });
 
-test("Tasks keeps view switching and utilities in one responsive header", async ({ page }) => {
+test("Tasks keeps view switching and utilities in one responsive header", async ({
+  page,
+  isMobile,
+}) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
@@ -249,7 +252,40 @@ test("Tasks keeps view switching and utilities in one responsive header", async 
     await expect(header.getByRole("button", { name: "Display", exact: true })).toBeFocused();
     await expect
       .poll(() => header.evaluate((el) => el.getBoundingClientRect().height))
-      .toBeLessThan(65);
+      .toBeLessThanOrEqual(isMobile ? 84 : 64);
+    if (isMobile) {
+      // The accepted mobile header has one utility row, then the full-width scope selector.
+      const utilities = [
+        header.getByRole("button", { name: "Switch workspace", exact: true }),
+        header.getByRole("combobox", { name: "Search Tasks", exact: true }),
+        ...["Filters", "Sort", "Display"].map((name) =>
+          header.getByRole("button", { name, exact: true }),
+        ),
+      ];
+      const view = header.getByRole("button", { name: "Tasks view: Inbox", exact: true });
+      const headerBox = await header.boundingBox();
+      const viewBox = await view.boundingBox();
+      if (!headerBox || !viewBox) throw new Error("Missing mobile Tasks header or scope selector");
+      const boxes = await Promise.all(utilities.map((control) => control.boundingBox()));
+      let previousRight = headerBox.x;
+      const centers: number[] = [];
+      for (const box of boxes) {
+        if (!box) throw new Error("Missing mobile Tasks utility");
+        expect(box.width).toBeGreaterThan(0);
+        expect(box.x).toBeGreaterThanOrEqual(previousRight - 1);
+        expect(box.x + box.width).toBeLessThanOrEqual(headerBox.x + headerBox.width + 1);
+        expect(box.y).toBeGreaterThanOrEqual(headerBox.y);
+        expect(box.y + box.height).toBeLessThanOrEqual(viewBox.y + 1);
+        centers.push(box.y + box.height / 2);
+        previousRight = box.x + box.width;
+      }
+      expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(2);
+      const switcherBox = boxes[0];
+      if (!switcherBox) throw new Error("Missing mobile workspace switcher");
+      expect(viewBox.x).toBeCloseTo(switcherBox.x, 0);
+      expect(viewBox.width).toBeGreaterThanOrEqual(headerBox.width - 32);
+      expect(viewBox.y + viewBox.height).toBeLessThanOrEqual(headerBox.y + headerBox.height + 1);
+    }
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBeTruthy();
@@ -846,7 +882,21 @@ test("Finance consolidates contextual controls and preserves responsive creation
       await expect(
         header.getByRole("group", { name: "Transaction view", exact: true }),
       ).toBeVisible();
-      await expect(header.getByRole("button", { name: "Export", exact: true })).toBeVisible();
+      // Table exports share the record toolbar's overflow, not the workspace header.
+      await expect(header.getByRole("button", { name: "Export", exact: true })).toHaveCount(0);
+      const tableActions = page
+        .getByRole("region", { name: "Transactions view", exact: true })
+        .getByRole("button", { name: "Table actions", exact: true });
+      await expect(tableActions).toBeVisible();
+      await tableActions.click();
+      await expect(
+        page.getByRole("menuitem", { name: "Table Options", exact: true }),
+      ).toBeVisible();
+      const exportPage = page.getByRole("menuitem", { name: "Export Page", exact: true });
+      await expect(exportPage).toBeVisible();
+      await expect(exportPage).toBeEnabled();
+      await exportPage.press("Escape");
+      await expect(tableActions).toBeFocused();
     } else if (path === "/finances/accounts") {
       await expect(header.getByRole("link", { name: "Import records", exact: true })).toBeVisible();
       await expect(header.getByRole("button", { name: "Add account", exact: true })).toBeVisible();

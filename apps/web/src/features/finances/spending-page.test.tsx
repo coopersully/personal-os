@@ -221,7 +221,8 @@ it("opens exact contribution detail and explains qualifications without exposing
   expect(dialog).toHaveTextContent("$2.00");
   expect(screen.queryByText("ownership_unknown")).not.toBeInTheDocument();
   fireEvent.keyDown(dialog, { key: "Escape" });
-  fireEvent.click(screen.getByText("About these totals"));
+  fireEvent.click(screen.getByRole("button", { name: "Spending breakdown" }));
+  fireEvent.click(screen.getByText("Coverage and accounting details"));
   expect(screen.getByText(/Some account ownership is unknown/)).toBeVisible();
   expect(screen.getByText("ownership_unknown · private-source-id")).not.toBeVisible();
 });
@@ -318,7 +319,8 @@ it("offers scope confirmation only for an unavailable single-month comparison", 
     },
   }));
   mount("?period=custom&from=2026-09-01&through=2026-09-30");
-  fireEvent.click(await screen.findByRole("button", { name: "About these totals" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Spending breakdown" }));
+  fireEvent.click(screen.getByText("Coverage and accounting details"));
   await screen.findByText("Confirm this month's budget scope");
   cleanup();
   mount("?period=custom&from=2026-08-01&through=2026-09-30");
@@ -341,18 +343,22 @@ it("uses qualified whole-month usage alongside selected-day amounts without chan
       includesPending: true,
       basis: "personal_cost",
       subtractsRefunds: true,
-      groups: [{ groupId: "food", budgetCents: 10000, usedCents: 2500, overspent: false }],
+      groups: [
+        { groupId: "food", budgetCents: 10000, usedCents: 2500, overspent: false },
+        { groupId: "child-category", budgetCents: 10000, usedCents: 2500, overspent: false },
+      ],
     },
   }));
   mount("?view=list&period=today&from=2026-09-08");
   await screen.findByText("Observed monthly $25.00 of $100.00 · 25.0%");
-  expect(screen.getAllByRole("button", { name: /^Sep 8, 2026; show/ })).toHaveLength(2);
-  fireEvent.click(screen.getByRole("button", { name: "About these totals" }));
+  expect(screen.getByText("Sep: 25% of $100.00")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Spending breakdown" }));
+  fireEvent.click(screen.getByText("Coverage and accounting details"));
   expect(screen.getByText(/America\/Chicago/)).toBeVisible();
   expect(screen.getByText(/Confirmed later/)).toBeVisible();
   fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
   expect(screen.queryByText("Confirm this month's budget scope")).not.toBeInTheDocument();
-  if (screen.queryByRole("dialog", { name: "About these totals" }))
+  if (screen.queryByRole("dialog", { name: "Spending breakdown" }))
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
   fireEvent.click(screen.getByRole("button", { name: "Groceries" }));
   const detail = await screen.findByRole("dialog");
@@ -483,7 +489,8 @@ it("explains empty selected data and unsupported source money without showing un
   });
   mount("?accounts=&categories=&pending=0");
   await screen.findByText("No spending in this selection");
-  fireEvent.click(screen.getByRole("button", { name: "About these totals" }));
+  fireEvent.click(screen.getByRole("button", { name: "Spending breakdown" }));
+  fireEvent.click(screen.getByText("Coverage and accounting details"));
   expect(screen.getByText(/Buckets unavailable; showing categories/)).toBeVisible();
   expect(screen.getByText("Excluded uncategorized: $1.25")).toBeVisible();
   expect(screen.getByText("Negative adjustments: $0.75")).toBeVisible();
@@ -609,7 +616,7 @@ it("saves explicit grouping and period choices, navigates periods, and retains e
   );
 });
 
-it("summarizes the selected range and discloses pending and coverage on focus", async () => {
+it("opens the selected spending chart, breakdown, and qualifications from the total", async () => {
   mount("?view=bubbles&period=custom&from=2020-01-01&through=2020-01-03&pending=1");
   await screen.findByText("Daily average");
   expect(screen.getByText("$3.00")).toBeVisible();
@@ -617,18 +624,16 @@ it("summarizes the selected range and discloses pending and coverage on focus", 
   expect(
     screen.getByRole("button", { name: "Inspect largest spending group: Groceries" }),
   ).toBeVisible();
-  fireEvent.focus(screen.getByRole("button", { name: "About this spending total" }));
-  expect(await screen.findByRole("tooltip")).toHaveTextContent(
-    "Includes pending transactions. Amounts may change when they post.",
-  );
-  expect(screen.getByRole("tooltip")).toHaveTextContent("Partial coverage.");
-  expect(screen.getByText("Total spending")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Spending breakdown" }));
+  expect(await screen.findByRole("dialog")).toHaveTextContent("Includes pending transactions");
+  expect(screen.getByRole("dialog")).toHaveTextContent("Partial or unverified coverage");
+  expect(screen.getByText("Daily spending")).toBeVisible();
+  expect(screen.getByText("Breakdown")).toBeVisible();
 });
 
 it("does not invent an average for an entirely future range", async () => {
   mount("?view=bubbles&period=custom&from=2099-01-01&through=2099-01-03&pending=0");
   expect(await screen.findByText("No elapsed days")).toBeVisible();
-  fireEvent.focus(screen.getByRole("button", { name: "About this spending total" }));
-  expect(await screen.findByRole("tooltip")).toHaveTextContent("Partial coverage.");
-  expect(screen.getByRole("tooltip")).not.toHaveTextContent("Includes pending");
+  fireEvent.click(screen.getByRole("button", { name: "Spending breakdown" }));
+  expect(await screen.findByRole("dialog")).toHaveTextContent("Posted transactions only");
 });

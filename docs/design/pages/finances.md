@@ -699,8 +699,14 @@ Spending summary uses compact Cards for selected-scope spending, recorded daily 
 and the largest positive spending group. The average divides recorded spending through today
 by elapsed calendar days in the selection (including zero-spend days), never future days;
 future-only selections show no average. The largest group opens its existing drill-down.
-The Total spending card combines pending inclusion and incomplete coverage in one accessible
-asterisk tooltip next to the total, with full evidence in About these totals. Summary titles
-and single-line footer rows stay compact; the largest spending group is labelled Top group.
+The Total spending card opens a standard dialog with a daily net-spending chart, posted/pending
+split, group breakdown, and progressively disclosed coverage/accounting details. No asterisk
+or separate About button is shown. Daily average says Through today for a range containing today;
+historical ranges retain elapsed-day context. Card fills show whole-month observed usage over
+qualified monthly budgets for the displayed groups and budget accounts, independent of the selected
+range. Total and average share total usage; Top group uses its own budget. Count parent groups
+only, include unbudgeted usage in the numerator, clamp visual fills at 100% while retaining the
+actual percentage, and omit fills when no positive qualified budget exists.
+Summary titles and footer rows stay compact and single-line.
 View selection pairs Bubbles, List, Trends, and Rhythm with bubble, list, line-chart,
 and calendar-grid glyphs consistently in the trigger and menu.

@@ -11,10 +11,8 @@ import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "@/api";
 import { QueryFeedback } from "@/components/async-state";
-import { DateDisplay } from "@/components/date-display";
 import {
   BubblesIcon,
-  CircleHelpIcon,
   FilterIcon,
   RhythmCalendarIcon,
   SpendingListIcon,
@@ -24,7 +22,6 @@ import { SettingsControlsContext } from "@/components/settings-controls-context"
 import { Field, FieldGroup, FieldLabel } from "@/components/settings-field";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -36,7 +33,6 @@ import {
 } from "@/components/ui/dialog";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import {
   useSaveWorkspacePreferences,
@@ -60,6 +56,7 @@ import {
 } from "./spending-period";
 import { parseSpendingRecovery, spendingRecoveryControls } from "./spending-reference";
 import { FinanceSpendingRhythm } from "./spending-rhythm";
+import { SpendingSummary, SpendingSummaryBreakdown } from "./spending-summary";
 import { FinanceSpendingTrends, spendingComparisonScopes } from "./spending-trends";
 
 const qualificationCopy: Record<string, string> = {
@@ -616,201 +613,107 @@ export function FinanceSpendingPage() {
       {data.isLoading ? <Skeleton className="h-72 w-full" /> : null}
       {result ? (
         <>
-          <TooltipProvider>
-            <div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3">
-              <Card size="sm" className="col-span-2 sm:col-span-1">
-                <CardHeader>
-                  <CardTitle>
-                    {result.snapshot.scope.basis === "personal_cost"
-                      ? "Total spending"
-                      : "Full outflow"}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-2">
-                  <div className="flex items-start gap-1">
-                    <p className="text-2xl font-semibold tracking-tight tabular-nums lg:text-3xl">
-                      {formatMoney(result.snapshot.netCents / 100)}
-                    </p>
-                    {result.snapshot.scope.includePending ||
-                    result.snapshot.coverage !== "complete" ? (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <button
-                            type="button"
-                            aria-label="About this spending total"
-                            className="text-muted-foreground px-1 text-lg"
-                          >
-                            *
-                          </button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <span className="flex flex-col gap-1">
-                            {result.snapshot.coverage !== "complete" ? (
-                              <span>
-                                {result.snapshot.coverage === "partial"
-                                  ? "Partial coverage."
-                                  : "Unverified coverage."}{" "}
-                                {result.snapshot.bins.some(
-                                  (bin) =>
-                                    bin.future ||
-                                    (bin.date === today && bin.coverage !== "complete"),
-                                )
-                                  ? "This range includes future or unfinished days."
-                                  : "Some dates or accounts do not have verified history."}
-                              </span>
-                            ) : null}
-                            {result.snapshot.scope.includePending ? (
-                              <span>
-                                Includes pending transactions. Amounts may change when they post.
-                              </span>
-                            ) : null}
-                          </span>
-                        </TooltipContent>
-                      </Tooltip>
-                    ) : null}
-                  </div>
-                  <div className="flex min-w-0 items-center gap-1 whitespace-nowrap text-xs text-muted-foreground [&_button]:min-w-0 [&_time]:truncate">
-                    <DateDisplay value={result.snapshot.scope.from} timeZone={timezone ?? "UTC"} />
-                    <span aria-hidden="true">–</span>
-                    <DateDisplay
-                      value={result.snapshot.scope.through}
-                      timeZone={timezone ?? "UTC"}
-                    />
-                  </div>
-                </CardContent>
-              </Card>
-              <Card size="sm">
-                <CardHeader>
-                  <CardTitle>Daily average</CardTitle>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-2">
-                  <p className="text-2xl font-semibold tracking-tight tabular-nums lg:text-3xl">
-                    {summaryDays ? formatMoney(summaryCents / summaryDays / 100) : "—"}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {summaryDays
-                      ? `${summaryDays} ${summaryDays === 1 ? "day" : "days"} elapsed`
-                      : "No elapsed days"}
-                  </p>
-                </CardContent>
-              </Card>
-              <Card size="sm">
-                <CardHeader>
-                  <CardTitle>Top group</CardTitle>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-2">
-                  <p className="text-2xl font-semibold tracking-tight tabular-nums lg:text-3xl">
-                    {largestGroup ? formatMoney(largestGroup.netCents / 100) : "—"}
-                  </p>
-                  {largestGroup ? (
-                    <button
-                      type="button"
-                      className="max-w-full truncate text-left text-xs text-muted-foreground hover:text-foreground"
-                      aria-label={`Inspect largest spending group: ${largestGroup.label}`}
-                      onClick={() => selectGroup(largestGroup)}
-                    >
-                      {largestGroup.label}
-                    </button>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">No spending yet</p>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </TooltipProvider>
-          <div className="flex justify-end">
+          <div>
             <Dialog>
-              <DialogTrigger asChild>
-                <Button variant="ghost" size="sm">
-                  <CircleHelpIcon />
-                  About these totals
-                </Button>
-              </DialogTrigger>
+              <SpendingSummary
+                result={result}
+                today={today}
+                days={summaryDays}
+                averageCents={summaryDays ? summaryCents / summaryDays : 0}
+                largestGroup={largestGroup}
+                onSelect={selectGroup}
+              />
               <DialogContent className="max-h-[85dvh] overflow-y-auto">
                 <DialogHeader>
-                  <DialogTitle>About these totals</DialogTitle>
+                  <DialogTitle>Spending breakdown</DialogTitle>
                   <DialogDescription>
-                    Coverage, accounting scope, and the evidence behind this view.
+                    Recorded spending, pending purchases, and budget context.
                   </DialogDescription>
                 </DialogHeader>
-                <p className="text-sm text-muted-foreground">
-                  Coverage: {result.snapshot.coverage} · Source: {result.source.freshness}
-                  {result.source.lastSyncedAt
-                    ? ` · Last synced ${result.source.lastSyncedAt}`
-                    : " · Last sync unknown"}
-                </p>
-                <SpendingMonthlyBudgetContext budget={result.monthlyBudget} />
-                {result.monthlyBudget?.state === "unavailable" &&
-                result.monthlyBudget.qualificationRequired &&
-                result.snapshot.scope.from.slice(0, 7) ===
-                  result.snapshot.scope.through.slice(0, 7) &&
-                timezone &&
-                user.data ? (
-                  <SpendingBudgetQualification
-                    key={`${user.data.id}:${result.snapshot.scope.from.slice(0, 7)}:${timezone}:${result.referenceRevision ?? result.snapshot.asOf}`}
-                    ownerId={user.data.id}
-                    month={result.snapshot.scope.from.slice(0, 7)}
-                    timezone={timezone}
-                    sourceRevision={result.referenceRevision ?? result.snapshot.asOf}
-                  />
-                ) : null}
-                {result.groupingFallback ? (
-                  <p>
-                    Buckets unavailable; showing categories. Your grouping preference is retained.
+                <SpendingSummaryBreakdown result={result} />
+                <details>
+                  <summary className="cursor-pointer text-sm font-medium">
+                    Coverage and accounting details
+                  </summary>
+                  <p className="text-sm text-muted-foreground">
+                    Coverage: {result.snapshot.coverage} · Source: {result.source.freshness}
+                    {result.source.lastSyncedAt
+                      ? ` · Last synced ${result.source.lastSyncedAt}`
+                      : " · Last sync unknown"}
                   </p>
-                ) : null}
-                {result.excludedUncategorizedCents !== 0 ? (
-                  <p>
-                    Excluded uncategorized: {formatMoney(result.excludedUncategorizedCents / 100)}
-                  </p>
-                ) : null}
-                {result.negativeAdjustmentCents > 0 ? (
-                  <p>Negative adjustments: {formatMoney(result.negativeAdjustmentCents / 100)}</p>
-                ) : null}
-                {result.currency.unsupported.length ? (
-                  <p>
-                    Unsupported currencies in source history:{" "}
-                    {result.currency.unsupported
-                      .map(
-                        (item) =>
-                          `${item.code ?? "Unspecified currency"} (${item.transactionIds.length} transactions)`,
-                      )
-                      .join(", ")}
-                    . No exchange rates applied.
-                  </p>
-                ) : null}
-                {result.source.reasons.length || result.snapshot.qualifications.length ? (
-                  <section aria-label="Evidence and limitations">
-                    <h3 className="text-sm font-medium">Evidence and limitations</h3>
-                    <ul className="flex flex-col gap-2 py-2">
-                      {[
-                        ...result.source.reasons.map((code) => ({
-                          code,
-                          sourceIds: [] as string[],
-                        })),
-                        ...result.snapshot.qualifications,
-                      ].map((item) => (
-                        <li key={`${item.code}:${item.sourceIds.join(",")}`}>
-                          <p>
-                            {qualificationCopy[item.code] ??
-                              "Some spending evidence needs review before these totals can be treated as complete."}
-                          </p>
-                          {item.sourceIds.length || !qualificationCopy[item.code] ? (
-                            <details>
-                              <summary className="cursor-pointer text-xs text-muted-foreground">
-                                Technical evidence references
-                              </summary>
-                              <p className="break-all text-xs text-muted-foreground">
-                                {item.code}
-                                {item.sourceIds.length ? ` · ${item.sourceIds.join(", ")}` : ""}
-                              </p>
-                            </details>
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
-                ) : null}
+                  <SpendingMonthlyBudgetContext budget={result.monthlyBudget} />
+                  {result.monthlyBudget?.state === "unavailable" &&
+                  result.monthlyBudget.qualificationRequired &&
+                  result.snapshot.scope.from.slice(0, 7) ===
+                    result.snapshot.scope.through.slice(0, 7) &&
+                  timezone &&
+                  user.data ? (
+                    <SpendingBudgetQualification
+                      key={`${user.data.id}:${result.snapshot.scope.from.slice(0, 7)}:${timezone}:${result.referenceRevision ?? result.snapshot.asOf}`}
+                      ownerId={user.data.id}
+                      month={result.snapshot.scope.from.slice(0, 7)}
+                      timezone={timezone}
+                      sourceRevision={result.referenceRevision ?? result.snapshot.asOf}
+                    />
+                  ) : null}
+                  {result.groupingFallback ? (
+                    <p>
+                      Buckets unavailable; showing categories. Your grouping preference is retained.
+                    </p>
+                  ) : null}
+                  {result.excludedUncategorizedCents !== 0 ? (
+                    <p>
+                      Excluded uncategorized: {formatMoney(result.excludedUncategorizedCents / 100)}
+                    </p>
+                  ) : null}
+                  {result.negativeAdjustmentCents > 0 ? (
+                    <p>Negative adjustments: {formatMoney(result.negativeAdjustmentCents / 100)}</p>
+                  ) : null}
+                  {result.currency.unsupported.length ? (
+                    <p>
+                      Unsupported currencies in source history:{" "}
+                      {result.currency.unsupported
+                        .map(
+                          (item) =>
+                            `${item.code ?? "Unspecified currency"} (${item.transactionIds.length} transactions)`,
+                        )
+                        .join(", ")}
+                      . No exchange rates applied.
+                    </p>
+                  ) : null}
+                  {result.source.reasons.length || result.snapshot.qualifications.length ? (
+                    <section aria-label="Evidence and limitations">
+                      <h3 className="text-sm font-medium">Evidence and limitations</h3>
+                      <ul className="flex flex-col gap-2 py-2">
+                        {[
+                          ...result.source.reasons.map((code) => ({
+                            code,
+                            sourceIds: [] as string[],
+                          })),
+                          ...result.snapshot.qualifications,
+                        ].map((item) => (
+                          <li key={`${item.code}:${item.sourceIds.join(",")}`}>
+                            <p>
+                              {qualificationCopy[item.code] ??
+                                "Some spending evidence needs review before these totals can be treated as complete."}
+                            </p>
+                            {item.sourceIds.length || !qualificationCopy[item.code] ? (
+                              <details>
+                                <summary className="cursor-pointer text-xs text-muted-foreground">
+                                  Technical evidence references
+                                </summary>
+                                <p className="break-all text-xs text-muted-foreground">
+                                  {item.code}
+                                  {item.sourceIds.length ? ` · ${item.sourceIds.join(", ")}` : ""}
+                                </p>
+                              </details>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  ) : null}
+                </details>
               </DialogContent>
             </Dialog>
           </div>

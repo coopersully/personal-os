@@ -2,10 +2,17 @@
 
 Use the existing outcome record and [handoff contract](../../../../docs/engineering/agent-handoffs.md).
 Keep actual stage separate from waiting/blocked conditions. Enter at the next missing obligation;
-no mandatory restart when changing helpers, resuming a chat or receiving a status question.
+no mandatory restart when changing helpers, resuming a chat or receiving a status question. First
+reconcile the [mandatory kickoff/adoption gate](../SKILL.md#mandatory-kickoff-and-adoption-gate).
+Existing implementation progress does not excuse missing setup; repair it before further dispatch.
 
 | Evidence | Next action within recorded authority |
 | --- | --- |
+| Fresh oversight start | Gather context/owners, reuse/create outcome section, resolve/link direct issues and dependencies, name/place dedicated chats, verify and retain receipts before dispatch |
+| Resumed oversight has missing setup | Reconcile live identities and repair only gaps; preserve completed setup and existing owners; no dispatch or setup-complete claim until verified |
+| Section/issues already match the outcome | Reuse their IDs and links; verify membership/names/ownership rather than duplicate writes |
+| Relevant chat is shared or belongs to another outcome | Retain its owner/title/placement; link it as a dependency and record the protected-chat exclusion |
+| Setup tool fails or identity is ambiguous | Record incomplete setup and next recovery condition; inspect partial effects, continue read-only context and withhold dispatch |
 | Equivalent work already active | Observe the existing owner; do not duplicate instructions or writers |
 | Scope or prerequisite contract unresolved | Research or obtain the specific decision while independent work proceeds |
 | Stable prerequisite available | Assess affected consumers; integrate/catch up when the next gate needs it |

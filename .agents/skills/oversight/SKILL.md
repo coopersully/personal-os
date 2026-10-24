@@ -5,6 +5,41 @@ description: Coordinate nohmi outcomes, implementation owners, dependencies, evi
 
 # nohmi oversight
 
+## Mandatory kickoff and adoption gate
+
+**Complete this gate first, on fresh starts and resumes, before implementation dispatch or claiming
+that oversight is established.** Read-only context gathering may proceed while setup is incomplete.
+An oversight assignment authorizes the bounded workstream sidebar organization, chat naming and
+Nohmi issue/link setup below; honor explicit read-only or narrower limits without claiming completion.
+This grant does not authorize new chats, unrelated/shared-chat changes, scheduling or cleanup.
+
+1. **Get context and inspect owners.** Read [agent context](../../../docs/engineering/agent-context.md),
+   relevant canonical requirements, live issues/PRs and the current work/instructions of existing
+   chats. Establish scope, acceptance, settled decisions, grants, current owners and dependencies.
+2. **Create or reuse the outcome section.** Inspect live sidebar sections and memberships first.
+   Reuse the section already serving this outcome; create one only when none matches. Save its actual
+   ID and name. A similar title alone does not prove shared ownership.
+3. **Resolve and link work.** Resolve the unique live Nohmi Project; match existing direct issues or
+   create the missing bounded issues before dispatch. Record issue links, human/implementation/
+   acceptance owners, dependencies, related existing scopes and chat identities/links. Preserve
+   completed scopes and existing assignments; do not create duplicate tracking or reopen settled work.
+4. **Name and place relevant chats.** Use verified live identities to give dedicated outcome chats
+   clear outcome/role titles and place them in the section. Reuse existing chats. Preserve explicit
+   user titles; reference unrelated or shared chats and their owners without renaming or moving them.
+   Titles and placement never prove checkout ownership or transfer it.
+5. **Verify and retain receipts.** Read back tool results for section membership, chat names and
+   issue links/ownership. Save their identifiers, source receipts, any protected-chat exclusions and
+   setup gaps in the existing continuity record (Linear/coordination record), not a new ledger.
+   Only verified coverage of all applicable steps satisfies this gate; an intention or tool call
+   alone does not. Report the direct issue link and setup result before implementation dispatch.
+
+On resume/adoption, reconcile the saved identifiers against live state and repair only missing or
+changed setup. Do not repeat successful writes, create another section/issue/chat, or restart accepted
+work. A failed/unavailable tool or ambiguous identity leaves setup incomplete: record the exact gap
+and next recovery condition, continue useful read-only context work, and withhold implementation
+dispatch and the setup-complete claim. Reconcile partial effects before retrying. No routine permission
+question is needed for the bounded setup already granted by the assignment.
+
 Own context, sequencing, evidence and acceptance from an agreed outcome through the authorized
 handoff. Preserve the user's decisions, rationale, non-goals and grants; do not restart brainstorming
 or ask them to approve settled choices again. Carry unfinished obligations forward until evidence
@@ -42,7 +77,8 @@ owner needs no extra composition worker or rolling integration branch.
 
 Record separate grants for planning, tracking, implementation dispatch, messaging existing chats,
 creating chats, PR publication, merge, deployment/production effects, sidebar organization, scheduling
-and cleanup. Cooper's standing repository instruction authorizes the assigned outcome owner to
+and cleanup. The kickoff gate supplies the bounded setup grant; record the assignment as its source.
+Cooper's standing repository instruction authorizes the assigned outcome owner to
 review and merge assigned work and necessary bounded prerequisites after the required gates; record
 that source once, without separate per-PR permission. Honor revocations and explicit read-only,
 plan-only, draft-only or no-merge limits. External messages and other separately controlled effects

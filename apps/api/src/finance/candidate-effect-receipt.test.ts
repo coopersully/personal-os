@@ -3,7 +3,7 @@ import {
   financeConversationEffectReceiptSchema,
 } from "@personal-os/domain";
 import { describe, expect, it } from "vitest";
-import { requireHumanBudgetApproval } from "./budget-authority.js";
+import { requireBudgetApproval } from "./budget-authority.js";
 import { financeCandidateEffectKey } from "./candidate-effect-receipt.js";
 import {
   decodeEffectEvidenceCursor,
@@ -72,7 +72,7 @@ describe("Finance effect lineage contracts", () => {
     };
     expect(financeConversationEffectReceiptSchema.parse(receipt).sourceMessageIds).toEqual([]);
     expect(() =>
-      requireHumanBudgetApproval({
+      requireBudgetApproval({
         userId: owner,
         actorId: candidate,
         actorType: "agent",

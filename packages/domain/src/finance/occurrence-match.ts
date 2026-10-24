@@ -60,6 +60,10 @@ export const financeOccurrenceMatchEventSchema = z.object({
   reimbursementRelationshipRevision: financeActualRevisionSchema.nullable(),
   reversesMatchId: idSchema.nullable(),
   actorUserId: idSchema,
+  approvalActor: z
+    .object({ type: z.literal("agent"), id: idSchema })
+    .strict()
+    .optional(),
   recordedAt: isoDateTimeSchema,
   rationale: z.string(),
 });

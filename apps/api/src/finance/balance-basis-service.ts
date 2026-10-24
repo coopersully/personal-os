@@ -44,7 +44,7 @@ import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
 import { lockReimbursementTopology } from "../finance-reimbursement-locks.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
-import { requireExplicitUser } from "./planning-evidence-service.js";
+import { requirePlanningConfirmation } from "./planning-evidence-service.js";
 import { resolveFinanceSpendingEvidence } from "./recognition.js";
 import { type CashflowTransaction, cashflowResult } from "./recurring-schedule-service.js";
 
@@ -344,6 +344,7 @@ export function basisValue(
     validUntil: row.validUntil.toISOString(),
     protectedFloorCents: row.protectedFloorCents,
     actorUserId: row.actorUserId,
+    ...(row.approvalActor ? { approvalActor: row.approvalActor } : {}),
     recordedAt: row.recordedAt.toISOString(),
     reflections: reflections.map((entry) => ({
       transactionId: entry.transactionId,
@@ -543,7 +544,7 @@ export function createFinanceBalanceBasisService({
       raw: ConfirmFinanceBalanceBasisInput,
       context: FinanceMutationContext,
     ) {
-      requireExplicitUser(context);
+      requirePlanningConfirmation(context);
       const input = confirmFinanceBalanceBasisInputSchema.parse(raw);
       if (Date.parse(input.asOf) > now().getTime())
         throw new AppError(
@@ -630,6 +631,8 @@ export function createFinanceBalanceBasisService({
             .values({
               userId: context.userId,
               actorUserId: context.userId,
+              approvalActor:
+                context.actorType === "agent" ? { type: "agent", id: context.actorId } : null,
               recordedAt: now(),
               accountId: account.id,
               basisRevision: input.expectedBasisRevision + 1,

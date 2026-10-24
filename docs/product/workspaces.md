@@ -3,7 +3,7 @@
 > October 18 Finance experience revision: the consolidated [design](../superpowers/specs/2026-10-18-finance-experience-design.md)
 > and [implementation plan](../superpowers/plans/2026-10-18-finance-experience.md) define the target for setup,
 > Spending, Chat, Automations, Activity, and manual workflow coverage. They supersede conflicting
-> earlier targets below, including ungated setup and agent budget self-approval. This is not a
+> earlier setup targets below. The current [Finance review-bypass policy](../design/pages/finances.md#accepted-direction-approvals-and-finance-activity) supersedes the budget-only human approval exception. This is not a
 > declaration that the redesigned experience has shipped.
 
 - Status: Target product contract; current implementation is recorded separately

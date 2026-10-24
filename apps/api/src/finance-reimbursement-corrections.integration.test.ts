@@ -1,8 +1,10 @@
 import { resolve } from "node:path";
 import {
+  accessTokens,
   auditEvents,
   createDatabaseClient,
   type DatabaseClient,
+  executionPolicySettings,
   financeAccounts,
   financeCategories,
   financeReimbursementMatches,
@@ -181,6 +183,72 @@ describe.sequential("Canonical reimbursement corrections", () => {
       context: { principal, requestId: crypto.randomUUID() },
     };
   }
+  it("allows an execution agent to correct reimbursements only under live bypass", async () => {
+    const f = await fixture();
+    const [token] = await database.db
+      .insert(accessTokens)
+      .values({
+        userId: f.owner.id,
+        name: "Correction agent",
+        tokenHash: crypto.randomUUID(),
+        scopes: ["finances:write", "finances:execute"],
+      })
+      .returning();
+    if (!token) throw new Error("Missing token");
+    await database.db
+      .insert(executionPolicySettings)
+      .values({ userId: f.owner.id, reviewBypassEnabled: true });
+    const context = {
+      principal: {
+        actorType: "agent" as const,
+        actorId: token.id,
+        userId: f.owner.id,
+        scopes: new Set(token.scopes),
+      },
+      requestId: "agent-correction",
+    };
+    const input = {
+      operation: "correct_expected" as const,
+      reimbursementId: f.claim.id,
+      expectedRevision: 1,
+      expectedAmount: 110,
+      payer: "Alex corrected",
+      dueDate: "2026-10-31",
+      rationale: "Corrected shared share",
+      evidence,
+      idempotencyKey: crypto.randomUUID(),
+    };
+    const corrected = await service.reconcile(input, context);
+    expect(corrected.expectedAmount).toBe(110);
+    const [audit] = await database.db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.entityId, f.claim.id));
+    expect(audit).toMatchObject({ actorType: "agent", actorId: token.id });
+    const unmatched = await service.reconcile(
+      {
+        operation: "unmatch_credit",
+        reimbursementId: f.claim.id,
+        expectedRevision: corrected.revision,
+        matchId: f.match.id,
+        rationale: "Wrong receipt",
+        evidence,
+        idempotencyKey: crypto.randomUUID(),
+      },
+      context,
+    );
+    expect(unmatched.receivedAmount).toBe(0);
+    await database.db
+      .update(executionPolicySettings)
+      .set({ reviewBypassEnabled: false })
+      .where(eq(executionPolicySettings.userId, f.owner.id));
+    await expect(
+      service.reconcile(
+        { ...input, expectedRevision: unmatched.revision, idempotencyKey: crypto.randomUUID() },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
+  });
   it("reads owned expense and receipt facts without substituting account currency", async () => {
     const f = await fixture();
     const result = await service.list(f.owner.id);

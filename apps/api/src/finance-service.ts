@@ -152,7 +152,7 @@ import { normalizedMerchant, titleCaseMerchant } from "./finance/merchant-identi
 import { createFinanceMerchantService } from "./finance/merchant-service.js";
 import {
   createFinancePlanningEvidenceService,
-  requireExplicitUser,
+  requirePlanningConfirmation,
 } from "./finance/planning-evidence-service.js";
 import { createProfileBudgetService } from "./finance/profile-budget-service.js";
 import { appendFinanceProfile } from "./finance/profile-writer.js";
@@ -5593,7 +5593,7 @@ export function createFinanceService({
       input: ManageFinanceRecurringItemInput,
       context: FinanceMutationContext,
     ) {
-      if (input.operation === "confirm_cost") requireExplicitUser(context);
+      if (input.operation === "confirm_cost") requirePlanningConfirmation(context);
       return executeFinanceIdempotently(
         db,
         context,
@@ -7614,11 +7614,11 @@ export function createFinanceService({
       context: MutationContext,
       executor?: FinanceActionWriteExecutor,
     ) {
-      const approval = requireActiveBudgetAuthority(input, context);
-      if (!context.financeBudgetApproval || !executor) {
+      const approval = await requireActiveBudgetAuthority(input, context, executor);
+      if (!executor) {
         throw new AppError(
           "forbidden",
-          "Submit this budget allocation for revision-bound human review before applying it.",
+          "Submit this budget allocation as an exact prepared action before applying it.",
         );
       }
       const write = async (tx: FinanceActionWriteExecutor) => {
@@ -7712,11 +7712,11 @@ export function createFinanceService({
       context: MutationContext,
       executor?: FinanceActionWriteExecutor,
     ): Promise<FinanceBudgetPlan> {
-      const approval = requireActiveBudgetAuthority(input, context);
-      if (!context.financeBudgetApproval || !executor) {
+      const approval = await requireActiveBudgetAuthority(input, context, executor);
+      if (!executor) {
         throw new AppError(
           "forbidden",
-          "Submit this budget plan for revision-bound human review before applying it.",
+          "Submit this budget plan as an exact prepared action before applying it.",
         );
       }
       const write = async (tx: FinanceActionWriteExecutor) => {

@@ -48,7 +48,7 @@ negative adjustment. Consumers that regroup categories into buckets must recompu
 nets while preserving the same contributions. No negative bubble area is implied.
 
 The v1 snapshot budget comparison remains explicitly unavailable (`historical_budget_not_resolved`).
-The separate dashboard `monthlyBudget` field reads immutable human-qualified monthly baselines. It
+The separate dashboard `monthlyBudget` field reads immutable explicitly qualified monthly baselines. It
 never guesses historical approval or account scope. Production observation remains separate work.
 The dashboard loader, route, typed client and views are described below.
 
@@ -125,11 +125,12 @@ Bubble area continues to represent selected-period spending. Translucent fill us
 circular-segment area for monthly utilization; negative use clamps to zero and overspend fills the
 circle with explicit overspend text. List rows expose precise monthly target/use and utilization.
 
-When the authority reports that qualification is required, a contextual human review flow requires
+When the authority reports that qualification is required, a contextual review flow requires
 explicit budget version, accounts, and USD selection. Prepare returns the exact review and fingerprint;
 confirmation sends only that evidence and a stable idempotency key. Changing scope or account session
 invalidates the preview. This action qualifies historical comparison; it does not infer an original
-approval or complete onboarding.
+approval or complete onboarding. The owner can confirm directly; an execution agent can confirm
+under persisted review bypass, with the actual confirming actor retained.
 
 
 ## Group visual identity

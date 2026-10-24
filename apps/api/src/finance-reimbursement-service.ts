@@ -27,6 +27,7 @@ import {
   lockReimbursementTopology,
 } from "./finance-reimbursement-locks.js";
 import type { Principal } from "./types.js";
+import { requireWorkspaceExecution } from "./workspace-execution.js";
 
 export function deriveReimbursementStatus({
   cancelledAt,
@@ -446,15 +447,20 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
         input.operation === "correct_expected" || input.operation === "unmatch_credit";
       if (
         correction &&
-        (context.principal.actorType !== "user" ||
-          context.principal.actorId !== context.principal.userId)
+        ((context.principal.actorType === "user" &&
+          context.principal.actorId !== context.principal.userId) ||
+          (context.principal.actorType === "agent" &&
+            (!context.principal.scopes.has("finances:write") ||
+              !context.principal.scopes.has("finances:execute"))))
       )
         throw new AppError(
           "forbidden",
-          "Reimbursement corrections require your explicit confirmation.",
+          "Reimbursement corrections require owner approval or authorized review bypass.",
         );
       const write = async (tx: ReimbursementWriter) => {
         const userId = context.principal.userId;
+        if (correction && context.principal.actorType === "agent")
+          await requireWorkspaceExecution(tx, context.principal, "finances", now());
         await lockReimbursementTopology(tx, userId);
         if (input.operation === "create") {
           const [allocation] = await tx
@@ -923,6 +929,7 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
           principal: context.principal,
           requestId: context.requestId,
         });
+        if (context.principal.actorType === "agent") authorization.requiresApprovalBypass = true;
         return executeFinanceIdempotently(
           db,
           authorization,

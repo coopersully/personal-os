@@ -518,6 +518,7 @@ describe("database schema contracts", () => {
       "0122_finance_reimbursement_relationship_generation",
       "0123_finance_maintenance_execution_binding",
       "0124_finance_transaction_coverage",
+      "0125_finance_bypass_confirmation_provenance",
     ]);
   });
 

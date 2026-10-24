@@ -20,7 +20,7 @@ import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
 import { lockReimbursementTopology } from "../finance-reimbursement-locks.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
-import { requireExplicitUser } from "./planning-evidence-service.js";
+import { requirePlanningConfirmation } from "./planning-evidence-service.js";
 export type CashflowTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 export function cashflowResult<T>(data: T, headline: string): FinanceToolResult<T> {
   return {
@@ -53,6 +53,7 @@ export function scheduleValue(
     currencyCode: row.currencyCode,
     supersedesId: row.supersedesId,
     actorUserId: row.actorUserId,
+    ...(row.approvalActor ? { approvalActor: row.approvalActor } : {}),
     recordedAt: row.recordedAt.toISOString(),
   });
 }
@@ -89,7 +90,7 @@ export function createFinanceRecurringScheduleService({
       raw: ConfirmFinanceRecurringScheduleInput,
       context: FinanceMutationContext,
     ) {
-      requireExplicitUser(context);
+      requirePlanningConfirmation(context);
       const input = confirmFinanceRecurringScheduleInputSchema.parse(raw);
       return executeFinanceIdempotently(
         db,
@@ -245,6 +246,8 @@ export function createFinanceRecurringScheduleService({
             .values({
               userId: context.userId,
               actorUserId: context.userId,
+              approvalActor:
+                context.actorType === "agent" ? { type: "agent", id: context.actorId } : null,
               recordedAt: now(),
               incomeStreamId: input.source.kind === "income" ? source.id : null,
               obligationId: input.source.kind === "obligation" ? source.id : null,
@@ -283,10 +286,7 @@ export function createFinanceRecurringScheduleService({
               requestId: context.requestId,
             }),
           );
-          return cashflowResult(
-            scheduleValue(saved),
-            "Your explicit recurring schedule was recorded.",
-          );
+          return cashflowResult(scheduleValue(saved), "Recurring schedule was recorded.");
         },
       );
     },

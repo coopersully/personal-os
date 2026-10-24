@@ -779,7 +779,7 @@ Execute the exact pending action after inspecting its evidence. The API revalida
 
 ## approve_finance_budget
 
-Budget activation requires exact authenticated human approval in nohmi. Agent calls cannot approve a budget, including with execution or review bypass; direct the user to review the proposal in nohmi.
+Activate the exact inspected budget version. Agents use agent_self_approval and require finances:write, finances:execute and persisted review bypass; otherwise direct the owner to review the proposal in nohmi.
 
 - Domain: finances; stage: commit; policy: approved_rule.
 - Grants (all): finances:write, finances:execute.
@@ -792,7 +792,10 @@ Budget activation requires exact authenticated human approval in nohmi. Agent ca
   "properties": {
     "approvalSource": {
       "type": "string",
-      "const": "user_instruction"
+      "enum": [
+        "user_instruction",
+        "agent_self_approval"
+      ]
     },
     "budgetVersionId": {
       "type": "string",
@@ -5391,7 +5394,7 @@ Read the latest complete budget version, all resources and allocations, its bala
 
 ## get_finance_budget_baseline_qualification
 
-Read the exact qualified monthly Finance budget baseline or why qualification is unavailable. Candidates are context for an explicit human decision; this read never confirms a baseline or approves a budget.
+Read the exact qualified monthly Finance budget baseline or why qualification is unavailable. Candidates are context for an exact approval under the current review policy; this read never confirms a baseline or approves a budget.
 
 - Domain: finances; stage: inspect; policy: read_only.
 - Grants (all): finances:read.
@@ -5546,7 +5549,7 @@ Read the active budget and disclose resources, allocations, buffer or deficit, a
 
 ## get_finance_cashflow
 
-Read legacy forecast income, obligations and alerts in their existing owner-wide scope. For qualified near-term advice, supply an explicit window to read the canonical occurrence/match evidence and qualified payday projection; preserve unavailable reasons and unknown amounts. Raw supporting context is separate from that qualified projection: current schedules and balance statements are account-scoped, and balance-statement sources cover capped all-known account history rather than only the calendar window. Preserve returned coverage/truncation flags; these independently read context records are not an atomic projection snapshot. Human statements, schedule/match confirmation, goal progress and balance confirmation require the authenticated human in nohmi; an agent cannot supply that consent.
+Read legacy forecast income, obligations and alerts in their existing owner-wide scope. For qualified near-term advice, supply an explicit window to read the canonical occurrence/match evidence and qualified payday projection; preserve unavailable reasons and unknown amounts. Raw supporting context is separate from that qualified projection: current schedules and balance statements are account-scoped, and balance-statement sources cover capped all-known account history rather than only the calendar window. Preserve returned coverage/truncation flags; these independently read context records are not an atomic projection snapshot. Schedule/match, goal-progress and balance confirmations require the owner or an execution agent with enabled review bypass; preserve the actual confirming actor and never fabricate evidence.
 
 - Domain: finances; stage: inspect; policy: read_only.
 - Grants (all): finances:read.
@@ -9556,7 +9559,7 @@ Record the host's observed active or paused state. Only the originally bound Fin
 
 ## prepare_finance_budget_baseline_qualification
 
-Prepare a durable, exact monthly baseline review for the selected budget version, accounts, currency and timezone. Reuse the idempotency key only for the same selection. Return the server snapshot and fingerprint for explicit human confirmation in nohmi; preparation never qualifies a baseline, activates a budget or supplies human consent.
+Prepare a durable, exact monthly baseline review for the selected budget version, accounts, currency and timezone. Reuse the idempotency key only for the same selection. Return the exact server snapshot and fingerprint for confirmation by the owner or an execution agent under enabled review bypass; preparation alone never qualifies a baseline or activates a budget.
 
 - Domain: finances; stage: prepare; policy: preview.
 - Grants (all): finances:write.
@@ -14025,7 +14028,7 @@ Set the conversation disposition using the current version and cited evidence. R
 
 ## setup_finances
 
-Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, preserve unknowns or record an explicit skip, and show the first plan with its missing evidence. Budget activation binds the current profile and proposal and requires exact authenticated human approval in nohmi. Agents can propose but cannot activate budgets, even with execution or review bypass. Do not ask the user to name a tool.
+Use this when the user asks to set up their finances, create or finish a financial profile, or make their first budget. Read get_finance_playbook first, then inspect existing state, return one question at a time, persist each answer, preserve unknowns or record an explicit skip, and show the first plan with its missing evidence. Budget activation binds the current profile and proposal. Agents can activate with finances:write, finances:execute and enabled review bypass using agent_self_approval; otherwise the owner approves in nohmi. Do not ask the user to name a tool.
 
 - Domain: finances; stage: commit; policy: approved_rule.
 - Grants (all): finances:write.
@@ -14144,7 +14147,10 @@ Use this when the user asks to set up their finances, create or finish a financi
       "properties": {
         "approvalSource": {
           "type": "string",
-          "const": "user_instruction"
+          "enum": [
+            "user_instruction",
+            "agent_self_approval"
+          ]
         },
         "budgetVersionId": {
           "type": "string",

@@ -3,7 +3,7 @@
 > October 18 Finance experience revision: the consolidated [design](../../superpowers/specs/2026-10-18-finance-experience-design.md)
 > and [implementation plan](../../superpowers/plans/2026-10-18-finance-experience.md) define the target for setup,
 > Spending, Chat, Automations, Activity, and manual workflow coverage. They supersede conflicting
-> earlier targets below, including ungated setup and agent budget self-approval. This is not a
+> earlier setup targets below. The review-bypass policy below supersedes their budget approval exception. This is not a
 > declaration that the redesigned experience has shipped.
 > The implementation merged in [PR #270 — Complete the Finance workspace and guarded agent workflows](https://github.com/coopersully/personal-os/pull/270).
 > The [implementation log](../../product/implementation-log.md) distinguishes this source checkpoint
@@ -166,7 +166,7 @@ edited. Client arithmetic provides form feedback; persisted totals are the
 server's result. The complete plan must balance to the cent.
 
 Approval names the displayed budget version ID and its expected version, with
-`approvalSource: user_instruction` and an idempotency key. A changed version,
+`approvalSource: user_instruction` for the owner or `agent_self_approval` for an execution agent under enabled review bypass, and an idempotency key. A changed version,
 failed request, or pending request keeps an explicit recovery state. Proposals
 remain visible before approval; a category-only budget view is not a substitute
 for the complete plan shared with MCP.
@@ -316,15 +316,18 @@ defaults and action boundaries remain in the Finance experience discussion.
 
 ### Accepted direction: approvals and Finance activity
 
-Budget activation and changes to the active budget always require explicit human approval of the
-exact proposal. Agents may prepare proposals; no automatic adjustment allowance or self-approval
-replaces that decision. This target supersedes earlier budget self-approval guidance.
+Persisted review bypass supplies standing approval for all Finance application approval gates,
+including budget activation, category allocations, maintenance budgets, and planning confirmations.
+With bypass off, exact changes retain their owner review boundary. Agents require the applicable
+write/execute scopes and keep their actual approval identity; bypass never replaces evidence,
+ownership, source revisions, credential checks, or provider consent. This policy supersedes the
+October 18 budget-specific human approval exception.
 
 Finance Activity exposes canonical human decisions and validated committed candidate-effect
 receipts, with links to supporting messages, audit evidence, and affected records. Proposed,
 failed, or no-change actions are not presented as completed financial effects. Routine actions may
 group by one run and action family; budget decisions remain individually inspectable with their
-human-approval provenance. Coverage is partial: historical actions without the required receipt
+actual approval provenance, including bypassed agent execution. Coverage is partial: historical actions without the required receipt
 are not inferred from conversation text. The [conversation contract](../../engineering/finance-conversation.md#activity-financial-scope)
 defines the implemented evidence boundary; design §8 retains the broader target.
 
@@ -367,9 +370,8 @@ and authorization; Finance routes there without duplicating those controls.
 
 Finance settings provides the canonical financial profile and planning preferences, plus
 separate payroll details. The **Let agents apply confident Finance changes** switch
-is off by default and remains a signed-in-user control for eligible non-budget Finance actions.
-It does not authorize an active budget change: every such change still requires exact authenticated
-human approval. Enabling it does not turn uncertainty into permission; questions and ambiguous
+is off by default and remains a signed-in-user control. When enabled it supplies standing approval
+for all Finance application actions, including changes to the active budget. Enabling it does not turn uncertainty into permission; questions and ambiguous
 activity still come to Review.
 
 ## Content contract
@@ -583,7 +585,7 @@ persistent labels. Merchant and category entry search existing names and permit 
 records are created by the transaction save. Budget navigation needs attention when prerequisites
 are incomplete or no active approved plan exists.
 
-Split allocations use the card surface inside the background-toned dialog so each allocation is distinct. The Transactions Add menu can save a reusable category without creating a transaction; the authenticated human-only endpoint validates the name, scopes storage to the owner, and records an audit event.
+Split allocations use the card surface inside the background-toned dialog so each allocation is distinct. The Transactions Add menu can save a reusable category without creating a transaction; the authenticated endpoint enforces current execution policy, validates the name, scopes storage to the owner, and records an audit event.
 
 KPI amounts use compact currency notation (for example, $23.6k), with exact values available on hover and to assistive technology. Overview labels monthly spending **Spent this month**, explicitly described as posted personal expenses with no pending transactions or transfers, and links to Spending for the current month with pending excluded. Compact Overview metrics link Cash to Accounts and Net worth to Wealth; smaller icons and values keep context close to each total. Their descriptions state recorded planning-account balances and ownership share, or posted personal expenses excluding pending/transfers. Adjacent context explains that Spending can differ through date/account filters, pending inclusion, and refund adjustments. Four-metric sets use four columns when space permits and otherwise a balanced 2×2 grid, never three plus one.
 
@@ -637,8 +639,7 @@ Goal comparisons appear before their input form and receive keyboard focus after
 comparison. Hypothetical, not-saved, and zero-growth limits stay visible; dates, anchors and horizon
 assumptions use a disclosure. Saved progress retains its exact goal version and evidence. Goal
 input errors use Sonner once, while static amount-format guidance stays beside the field. These
-presentation choices do not alter formulas, financial records, source qualification, or required
-human confirmation.
+presentation choices do not alter formulas, financial records, source qualification, or confirmation under the current review policy.
 
 ### Recurring cost comparison
 

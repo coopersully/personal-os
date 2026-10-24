@@ -26,7 +26,7 @@ import type {
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
-import { requireHumanBudgetApproval } from "./budget-authority.js";
+import { requireBudgetApproval } from "./budget-authority.js";
 import {
   executeFinanceIdempotently,
   type FinanceMutationContext,
@@ -35,7 +35,7 @@ import {
 } from "./context.js";
 import {
   createFinancePlanningEvidenceService,
-  requireExplicitUser,
+  requirePlanningConfirmation,
 } from "./planning-evidence-service.js";
 import { withFinanceBudgetPresentation } from "./presentation-service.js";
 import { lockFinanceProfileVersion } from "./profile-version-lock.js";
@@ -499,13 +499,26 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
     },
 
     async approveFinanceBudget(input: ApproveFinanceBudgetInput, context: FinanceMutationContext) {
-      requireFinanceMutation(context);
-      requireHumanBudgetApproval({
-        ...context,
-        scopes: new Set(context.canMutate ? ["finances:write"] : []),
-      });
-      if (input.approvalSource !== "user_instruction")
-        throw new AppError("forbidden", "Budget activation requires human approval.");
+      requireFinanceMutation(context, { approvalSource: input.approvalSource });
+      requireBudgetApproval(
+        {
+          ...context,
+          scopes:
+            context.actorType === "agent"
+              ? (context.executionPrincipal?.scopes ?? new Set())
+              : new Set(context.canMutate ? ["finances:write"] : []),
+        },
+        context.bypassEnabled,
+      );
+      if (
+        input.approvalSource !==
+        (context.actorType === "agent" ? "agent_self_approval" : "user_instruction")
+      )
+        throw new AppError(
+          "forbidden",
+          "Budget approval source must match the authenticated actor.",
+        );
+      if (context.actorType === "agent") context.requiresApprovalBypass = true;
       return executeFinanceIdempotently(
         db,
         context,
@@ -578,7 +591,10 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
             if (!active) throw new AppError("internal_error", "The budget was not activated.");
             await tx.insert(auditEvents).values(
               auditValues({
-                action: "finance.budget.user_instruction_approved",
+                action:
+                  context.actorType === "agent"
+                    ? "finance.budget.agent_self_approved"
+                    : "finance.budget.user_instruction_approved",
                 after: {
                   approvalSource: input.approvalSource,
                   status: "active",
@@ -658,7 +674,7 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
     },
 
     async manageFinanceGoal(input: ManageFinanceGoalInput, context: FinanceMutationContext) {
-      if (input.operation === "confirm_progress") requireExplicitUser(context);
+      if (input.operation === "confirm_progress") requirePlanningConfirmation(context);
       return executeFinanceIdempotently(
         db,
         context,
@@ -680,7 +696,7 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
                 ...goalValue(source),
                 planningEvidence: evidence.kind === "goal" ? evidence : null,
               },
-              headline: "Your stated goal progress was recorded.",
+              headline: "Goal progress was recorded.",
             });
           }
           if (input.operation === "create") {

@@ -406,9 +406,10 @@ uncertain income, exceptional resources, and liquid reserves do not silently fun
 Bookkeeping remains available during setup. When setup requests budget approval, the host reads
 `get_finance_budget` and presents the exact proposal, including all resources, allocations,
 rationale, and assumptions. `approve_finance_budget` binds the displayed budget version and
-`expectedProfileVersionId`. Every activation requires authenticated human `user_instruction`
-approval in nohmi. Agents may create and revise proposals but cannot activate them with execution
-scope, review bypass, a prior policy, or conversation text. Setup approval additionally binds
+`expectedProfileVersionId`. With review bypass disabled, activation requires authenticated owner `user_instruction`
+approval in nohmi. With persisted review bypass enabled, an agent with `finances:write` and
+`finances:execute` may activate the exact proposal using `agent_self_approval`. The same standing
+approval applies to every Finance application approval gate; agent provenance is never relabeled as a human decision. Setup approval additionally binds
 the setup session version. Changed profiles and superseding proposals require fresh inspection.
 
 `get_finance_snapshot` provides the ownership-qualified position; `get_finance_budget` returns
@@ -480,17 +481,18 @@ create/match an internal reimbursement case; they never initiate a payment or
 any other external financial activity. The deprecated `resolve_finance_review`
 compatibility alias only translates legacy categorization answers. Legacy action-review
 approval/dismissal is available to the signed-in owner or explicitly authorized Finance execution
-agents with enabled review bypass and exact current work references, except active budget changes:
-those always require the authenticated owner. Legacy category allocations and complete plan writes
-have the same human boundary. Legacy `PUT /v1/finances/budget-plan` and `POST /v1/finances/budgets` submissions from humans
-also return a pending review; only approval of that durable review applies the plan. Approval
+agents with enabled review bypass and exact current work references, including active budget changes.
+Legacy category allocations and complete plan writes follow the same policy: with bypass disabled,
+`PUT /v1/finances/budget-plan` and `POST /v1/finances/budgets` submissions queue a durable review;
+with bypass enabled the exact prepared change applies directly. Approval
 revalidates the monthly plan and full allocation revision, including proposals for absent categories,
 and replaying an applied review returns its recorded result
 without replacing newer allocations. Bucket organization remains ordinary bookkeeping. Answering a budget
-evidence question queues the completed proposal; it does not approve it. Maintenance retains the
+evidence question follows the same persisted review policy for the completed proposal. Reimbursement expectation corrections and credit unmatching also follow that policy, retaining bounded evidence, current revisions and actual actor attribution. Maintenance retains the
 exact reviewed candidate and human approval identity separately from its executing agent, and
-revalidates all item fingerprints and source revisions before writing. New monthly baselines accept
-only human-approved versions; existing historical actor provenance remains readable. Canonical connection,
+revalidates all item fingerprints and source revisions before writing. Monthly baseline and planning confirmations accept the owner or an execution agent under persisted
+bypass. Confirmation records preserve the actual agent identity separately from the owner; existing
+human and historical approval provenance remains readable. Canonical connection,
 import, account correction, and typed transaction-relationship tools have their own scoped API
 contracts and are available to authorized MCP callers; no relationship operation moves money.
 

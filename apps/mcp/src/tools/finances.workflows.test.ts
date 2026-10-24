@@ -40,7 +40,7 @@ describe("Finance MCP workflows", () => {
   });
 
   it("forwards exact approval profile evidence and setup skips without hiding agent denial", async () => {
-    const approveFinanceBudget = vi.fn(async () => {
+    const approveFinanceBudget = vi.fn(async (): Promise<unknown> => {
       throw new ApiClientError({
         status: 403,
         code: "forbidden",
@@ -79,15 +79,23 @@ describe("Finance MCP workflows", () => {
     const tools = await client.listTools();
     expect(
       tools.tools.find((tool) => tool.name === "approve_finance_budget")?.description,
-    ).toContain("exact authenticated human approval");
+    ).toContain("persisted review bypass");
     const setupDescription = tools.tools.find(
       (tool) => tool.name === "setup_finances",
     )?.description;
-    expect(setupDescription).toContain("requires exact authenticated human approval in nohmi");
-    expect(setupDescription).toContain(
-      "cannot activate budgets, even with execution or review bypass",
-    );
-    expect(setupDescription).not.toContain("agent_self_approval");
+    expect(setupDescription).toContain("enabled review bypass using agent_self_approval");
+    const bypassInput = {
+      ...input,
+      approvalSource: "agent_self_approval",
+      idempotencyKey: "bypassed-decision",
+    };
+    approveFinanceBudget.mockResolvedValueOnce({ ...base, data: {} });
+    const applied = await client.callTool({
+      name: "approve_finance_budget",
+      arguments: bypassInput,
+    });
+    expect(approveFinanceBudget).toHaveBeenLastCalledWith(bypassInput);
+    expect(applied.isError).not.toBe(true);
     await client.close();
     await server.close();
   });

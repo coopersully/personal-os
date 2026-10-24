@@ -925,6 +925,13 @@
       "when": 1792692000000,
       "tag": "0124_finance_transaction_coverage",
       "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1792805833756,
+      "tag": "0125_finance_bypass_confirmation_provenance",
+      "breakpoints": true
     }
   ]
 }

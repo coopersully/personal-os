@@ -3862,6 +3862,7 @@ export const financePlanningEvidence = pgTable(
     currencyCode: text("currency_code").notNull(),
     fixedness: text("fixedness").$type<"fixed" | "variable">(),
     asOf: text("as_of").notNull(),
+    approvalActor: jsonb("approval_actor").$type<{ type: "agent"; id: string }>(),
     recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
     actorUserId: uuid("actor_user_id")
       .notNull()
@@ -3873,6 +3874,10 @@ export const financePlanningEvidence = pgTable(
     >(),
   },
   (table) => [
+    check(
+      "finance_planning_evidence_approval_actor_check",
+      sql`${table.approvalActor} IS NULL OR (jsonb_typeof(${table.approvalActor}) = 'object' AND ${table.approvalActor}->>'type' = 'agent' AND length(${table.approvalActor}->>'id') > 0) IS TRUE`,
+    ),
     check(
       "finance_planning_evidence_source_check",
       sql`(${table.goalId} IS NOT NULL) <> (${table.obligationId} IS NOT NULL)`,
@@ -3922,6 +3927,7 @@ export const financeRecurringScheduleVersions = pgTable(
     actorUserId: uuid("actor_user_id")
       .references(() => users.id, { onDelete: "cascade" })
       .notNull(),
+    approvalActor: jsonb("approval_actor").$type<{ type: "agent"; id: string }>(),
     recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
     incomeStreamId: uuid("income_stream_id"),
     obligationId: uuid("obligation_id"),
@@ -3938,6 +3944,10 @@ export const financeRecurringScheduleVersions = pgTable(
     supersedesId: uuid("supersedes_id"),
   },
   (table) => [
+    check(
+      "finance_recurring_schedule_versions_approval_actor_check",
+      sql`${table.approvalActor} IS NULL OR (jsonb_typeof(${table.approvalActor}) = 'object' AND ${table.approvalActor}->>'type' = 'agent' AND length(${table.approvalActor}->>'id') > 0) IS TRUE`,
+    ),
     check(
       "fin_schedule_source_check",
       sql`(${table.incomeStreamId} IS NOT NULL) <> (${table.obligationId} IS NOT NULL)`,
@@ -4062,6 +4072,7 @@ export const financeOccurrenceMatchEvents = pgTable(
     actorUserId: uuid("actor_user_id")
       .references(() => users.id, { onDelete: "cascade" })
       .notNull(),
+    approvalActor: jsonb("approval_actor").$type<{ type: "agent"; id: string }>(),
     recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
     occurrenceId: uuid("occurrence_id").notNull(),
     kind: text("kind").notNull(),
@@ -4076,6 +4087,10 @@ export const financeOccurrenceMatchEvents = pgTable(
     reversesMatchId: uuid("reverses_match_id"),
   },
   (table) => [
+    check(
+      "finance_occurrence_match_events_approval_actor_check",
+      sql`${table.approvalActor} IS NULL OR (jsonb_typeof(${table.approvalActor}) = 'object' AND ${table.approvalActor}->>'type' = 'agent' AND length(${table.approvalActor}->>'id') > 0) IS TRUE`,
+    ),
     check("fin_occ_match_kind_check", sql`${table.kind} IN ('match','reverse')`),
     check(
       "fin_occ_match_source_check",
@@ -4129,6 +4144,7 @@ export const financeCashBalanceBases = pgTable(
     actorUserId: uuid("actor_user_id")
       .references(() => users.id, { onDelete: "cascade" })
       .notNull(),
+    approvalActor: jsonb("approval_actor").$type<{ type: "agent"; id: string }>(),
     recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
     accountId: uuid("account_id").notNull(),
     basisRevision: integer("basis_revision").notNull(),
@@ -4141,6 +4157,10 @@ export const financeCashBalanceBases = pgTable(
     protectedFloorCents: bigint("protected_floor_cents", { mode: "number" }),
   },
   (table) => [
+    check(
+      "finance_cash_balance_bases_approval_actor_check",
+      sql`${table.approvalActor} IS NULL OR (jsonb_typeof(${table.approvalActor}) = 'object' AND ${table.approvalActor}->>'type' = 'agent' AND length(${table.approvalActor}->>'id') > 0) IS TRUE`,
+    ),
     check(
       "fin_balance_basis_revision_check",
       sql`${table.basisRevision} > 0 AND ${table.accountContextualRevision} > 0`,
@@ -5817,6 +5837,10 @@ export const financeBudgetBaselineQualifications = pgTable(
     reviewId: uuid("review_id").notNull(),
     snapshot: jsonb("snapshot").$type<Record<string, unknown>>().notNull(),
     fingerprint: text("fingerprint").notNull(),
+    confirmedByActorType: text("confirmed_by_actor_type")
+      .$type<"user" | "agent">()
+      .notNull()
+      .default("user"),
     confirmedByActorId: text("confirmed_by_actor_id").notNull(),
     confirmedAt: timestamp("confirmed_at", { withTimezone: true }).notNull(),
     qualificationKind: text("qualification_kind").$type<"current" | "retrospective">().notNull(),
@@ -5848,8 +5872,8 @@ export const financeBudgetBaselineQualifications = pgTable(
       sql`${table.qualificationKind} IN ('current', 'retrospective')`,
     ),
     check(
-      "finance_budget_baseline_qualifications_human_check",
-      sql`${table.confirmedByActorId} = ${table.userId}::text`,
+      "finance_budget_baseline_qualifications_actor_check",
+      sql`(${table.confirmedByActorType} = 'user' AND ${table.confirmedByActorId} = ${table.userId}::text) OR (${table.confirmedByActorType} = 'agent' AND length(${table.confirmedByActorId}) > 0)`,
     ),
   ],
 );

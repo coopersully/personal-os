@@ -12,7 +12,8 @@ describe("issued Finance automation prompts", () => {
       expect(b).toContain(second);
       expect(b).not.toContain(first);
       expect(a).toContain("maintain_finances");
-      expect(a).toContain("Never self-approve");
+      expect(a).toContain("including budgets, without individual approval");
+      expect(a).toContain("Otherwise obtain the required owner approval");
       expect(a).toContain("not a credential");
       expect(a).not.toContain("send_finance_message");
     }

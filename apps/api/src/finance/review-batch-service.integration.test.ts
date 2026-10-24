@@ -603,7 +603,9 @@ describe.sequential("durable Finance review batches", () => {
     const f = await fixture();
     const context = await agent(f.userId);
     const run = await f.service.preview(f.input, context);
-    context.principal.scopes.delete(missing);
+    context.principal.scopes = new Set(
+      [...context.principal.scopes].filter((scope) => scope !== missing),
+    );
     await expect(
       f.service.execute(run.id, { fingerprint: run.fingerprint }, context),
     ).rejects.toMatchObject({ code: "forbidden" });

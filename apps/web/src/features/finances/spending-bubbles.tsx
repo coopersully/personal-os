@@ -4,7 +4,7 @@ import type {
   FinanceSpendingMonthlyBudget,
 } from "@personal-os/domain";
 import { type HTMLMotionProps, motion, useDragControls, useReducedMotion } from "motion/react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDownIcon, RefreshIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -58,8 +58,8 @@ type Position = { x: number; y: number; radius: number };
 /** Bounded deterministic relaxation; no idle simulation or offscreen animation loop. */
 export function settleSpendingBubbles(nodes: Position[], pinned?: number) {
   const next = nodes.map((node) => ({ ...node }));
-  for (let iteration = 0; iteration < (pinned === undefined ? 160 : 32); iteration++) {
-    for (const node of pinned === undefined ? next : []) {
+  for (let iteration = 0; iteration < (pinned === undefined ? 240 : 48); iteration++) {
+    for (const node of pinned === undefined && iteration < 160 ? next : []) {
       node.x += (0.5 - node.x) * 0.002;
       node.y += (0.5 - node.y) * 0.002;
     }
@@ -74,8 +74,8 @@ export function settleSpendingBubbles(nodes: Position[], pinned?: number) {
         const required = a.radius + b.radius + 0.008;
         if (distance < required) {
           const amount = (required - distance) / 2;
-          const ux = distance ? dx / distance : 1;
-          const uy = distance ? dy / distance : 0;
+          const ux = distance ? dx / distance : Math.cos((i + j + 1) * 2.399963229728653);
+          const uy = distance ? dy / distance : Math.sin((i + j + 1) * 2.399963229728653);
           const aShare = i === pinned ? 0 : j === pinned ? 2 : 1;
           const bShare = j === pinned ? 0 : i === pinned ? 2 : 1;
           a.x -= ux * amount * aShare;
@@ -144,10 +144,10 @@ export function SpendingBubbles({
   }
   // Each new aggregate settles once; normalized positions survive period changes.
   // biome-ignore lint/correctness/useExhaustiveDependencies: signature captures the complete aggregate geometry.
-  useEffect(() => {
+  useLayoutEffect(() => {
     reset(true);
   }, [signature, layoutKey]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = container.current;
     if (!element) return;
     const measure = () => setWidth(element.clientWidth || 300);
@@ -199,6 +199,7 @@ export function SpendingBubbles({
               key={group.id}
               type="button"
               tabIndex={diameter < 44 ? -1 : 0}
+              initial={false}
               drag
               dragMomentum={false}
               dragElastic={0}
@@ -283,7 +284,7 @@ export function SpendingBubbles({
               <span
                 className="spending-bubble-material pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden rounded-full"
                 style={{
-                  backgroundColor: `color-mix(in srgb, ${visual.color} 15%, var(--background))`,
+                  backgroundColor: `color-mix(in srgb, ${visual.color} 30%, var(--background))`,
                 }}
               >
                 {fill !== null ? (
@@ -295,31 +296,31 @@ export function SpendingBubbles({
                     animate={{ clipPath: `inset(${(1 - fill) * 100}% 0 0 0)` }}
                     transition={{ duration: reduced ? 0 : 0.3, ease: "easeOut" }}
                     style={{
-                      backgroundColor: `color-mix(in srgb, ${visual.color} 35%, var(--background))`,
+                      backgroundColor: `color-mix(in srgb, ${visual.color} 65%, var(--background))`,
                     }}
                   />
                 ) : null}
+              </span>
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 rounded-full bg-foreground/0 group-hover:bg-foreground/5 group-focus-visible:bg-foreground/5"
+              />
+              {diameter >= 18 ? (
                 <span
                   aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 rounded-full bg-foreground/0 group-hover:bg-foreground/5 group-focus-visible:bg-foreground/5"
-                />
-                {diameter >= 18 ? (
-                  <span
-                    aria-hidden="true"
-                    data-spending-icon={visual.icon}
-                    className="absolute left-1/2 top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 shrink-0 [&>svg]:size-full"
-                  >
-                    <VisualIcon />
-                  </span>
-                ) : null}
-                {diameter >= 92 ? (
-                  <span className="absolute top-[calc(50%+0.75rem)] max-w-full px-2 text-center text-xs">
-                    <span className="block truncate">{group.label}</span>
-                    {formatMoney(group.netCents / 100)}
-                    {overage > 0 ? <span className="block">Over budget</span> : null}
-                  </span>
-                ) : null}
-              </span>
+                  data-spending-icon={visual.icon}
+                  className="absolute left-1/2 top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 shrink-0 [&>svg]:size-full"
+                >
+                  <VisualIcon />
+                </span>
+              ) : null}
+              {diameter >= 92 ? (
+                <span className="absolute top-[calc(50%+0.75rem)] max-w-full px-2 text-center text-xs">
+                  <span className="block truncate">{group.label}</span>
+                  {formatMoney(group.netCents / 100)}
+                  {overage > 0 ? <span className="block">Over budget</span> : null}
+                </span>
+              ) : null}
             </SpendingBubble>
           );
         })}

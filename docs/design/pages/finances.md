@@ -80,12 +80,16 @@ Bubbles are always draggable, including when reduced motion is enabled. Keep bod
 no drag elasticity or inertial throw. Resolve collisions while dragging with the active body pinned;
 on release, use a damped spring and center the aggregate bounds in the canvas. Preserve relative
 session positions across data changes. The heading is Breakdown and the sole layout action is an
-accessible reset icon button. Icons sit at each circle's center, with labels below.
+accessible reset icon button. Icons sit at each circle's center, with labels below. Settle geometry and measure before first paint;
+newly mounted circles start at their settled positions. Coincident circles separate in two dimensions,
+with a final collision-only cleanup after the centering attraction stops.
 
 Bubble materials reuse the editorial Design System & Branding workstream's three-phase 4×4 Bayer
 filter from `figure-grain.svg`. The Finance variant lives at `/effects/ordered-dither.svg`, lifts dark
-luminance for ordered thresholds and luminosity-composites the full quantized output with category color. Apply it to an
-inner circular material clipped to its own bounds; never filter the hit target or alter its geometry.
+luminance for ordered thresholds and uses the quantized texture as a bounded multiplicative shade,
+preserving category hue and saturation. Apply it to an
+inner circular background/fill material clipped to its own bounds; icons and labels are unfiltered
+siblings above it. Never filter the hit target or alter its geometry.
 Reduced motion disables the material animation/filter and automatic spring animation, while manual
 dragging and keyboard-accessible detail/reset controls remain available.
 

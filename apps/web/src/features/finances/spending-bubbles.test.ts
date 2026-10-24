@@ -214,6 +214,11 @@ it("uses assigned category tint and semantic icons with readable foregrounds at 
   expect(large).not.toHaveClass("text-primary");
   expect(large.querySelector('[data-spending-icon="groceries"] svg')).not.toBeNull();
   expect(large).toHaveTextContent("Groceries");
+  const material = large.querySelector(".spending-bubble-material");
+  expect(material).not.toBeNull();
+  expect(material?.querySelector("[data-spending-icon]")).toBeNull();
+  expect(material).toHaveTextContent("");
+  expect(large.querySelector("[data-spending-icon]")?.parentElement).toBe(large);
   const small = screen.getByRole("button", { name: /Living costs: \$1.00/ });
   expect(small.querySelector('[data-spending-icon="bucket"] svg')).not.toBeNull();
   expect(small).not.toHaveTextContent("Living costs");
@@ -469,4 +474,24 @@ it("centers settled bounds and keeps a dragged body fixed while resolving collis
   const [a, b] = pinned;
   if (!a || !b) throw new Error("Missing collision bodies");
   expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(0.23);
+});
+
+it("recovers crowded coincident layouts without overlaps or escaping bounds", () => {
+  for (const count of [6, 16, 32]) {
+    const radius = 0.28 / Math.sqrt(count);
+    const input = Array.from({ length: count }, () => ({ x: 0.5, y: 0.5, radius }));
+    const result = settleSpendingBubbles(input);
+    for (const [index, a] of result.entries()) {
+      expect(a.x).toBeGreaterThanOrEqual(a.radius - 1e-6);
+      expect(a.x).toBeLessThanOrEqual(1 - a.radius + 1e-6);
+      expect(a.y).toBeGreaterThanOrEqual(a.radius - 1e-6);
+      expect(a.y).toBeLessThanOrEqual(1 - a.radius + 1e-6);
+      for (const b of result.slice(index + 1))
+        expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(a.radius + b.radius - 1e-5);
+    }
+    const recovered = settleSpendingBubbles(result);
+    for (const [index, a] of recovered.entries())
+      for (const b of recovered.slice(index + 1))
+        expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(a.radius + b.radius - 1e-5);
+  }
 });

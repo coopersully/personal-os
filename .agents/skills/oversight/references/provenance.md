@@ -20,6 +20,12 @@ own the adapted verification policy and staged future work. The plan keeps repor
 patterns, multi-run measurements and a single experimental CI comparison separate. Historical evidence
 does not prove current readiness or justify blanket claims that retries or subagents are wasteful.
 
+Cooper's subsequent kickoff correction makes context, outcome-section reuse/creation, direct issue
+linking, dedicated-chat naming/placement and verified continuity receipts a mandatory first gate.
+This repository-specific bounded setup grant supplements the personal procedure; it does not expand
+new-chat, unrelated/shared-chat, scheduling or cleanup authority. This is procedural guidance, not
+a claim that a host automatically enforces the gate.
+
 ## Evaluate the instructions without launching work
 
 Read these cases against the skill and canonical contracts. They are review scenarios, not automated
@@ -27,6 +33,13 @@ runtime tests or proof a host tool works.
 
 | Scenario | Required decision/evidence |
 | --- | --- |
+| Fresh assignment with no section or direct issue | First inspect context/current owners; create only missing outcome section/issues, name/place dedicated chats, read back receipts and save IDs/links/ownership before dispatch or established-oversight claim |
+| Resumed work has an issue but missing sidebar setup | Preserve issue, accepted work and grants; repair missing section/membership/names and save receipts before further dispatch; do not restart implementation |
+| Existing section, direct issues and dedicated chats match | Reuse verified IDs and owners; no duplicate section/issue/chat or redundant mutation; record successful readback |
+| Shared or unrelated chat appears adjacent to the outcome | Do not rename/move it or claim its checkout; link the existing owner/dependency and record why it remains outside the section |
+| Linear setup summary and private registry disagree | Follow the recorded authoritative setup entry, reconcile with live tools, repair issue links/ownership/reference before dispatch; do not choose a stale copy or duplicate raw private receipts |
+| Sidebar write times out or tracker is unavailable | Inspect partial effects; setup remains incomplete, block dispatch/complete claim, continue read-only context; no invented receipt or repeated creation |
+| User explicitly limits the run to read-only | Preserve the narrower grant; inspect and identify missing setup without mutations or claiming it complete |
 | Assigned oversight outcome is reviewed and verified | Outcome owner self-reviews and performs normal protected merge under Cooper's standing scope; independent review and protections remain required |
 | Necessary bounded prerequisite blocks assigned outcome | Track, repair, review and verify it within inherited scope; no separate merge-permission question |
 | User explicitly requests only a draft or no merge | Honor that narrower limit; standing authority does not override it |

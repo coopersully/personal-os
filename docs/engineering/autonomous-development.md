@@ -73,12 +73,17 @@ planned prerequisite/merge order. Order is a navigation aid, not an additional d
 A portfolio head spanning epics stays outside their individual sections. Do not add another lead
 agent or create standalone workers just to fill the sidebar; subagents remain under their parent.
 
-Record section ID, member task/host IDs, exact titles, and intended display order in the private
-registry. Confirm all live members before reordering and preserve unrelated members. Reconcile
+Record section ID, member task/host IDs, exact titles, and intended display order in the outcome
+entry of the private registry, the authoritative setup record. Keep direct issue links/ownership and
+its registry reference reconciled under the kickoff gate; do not mirror raw host receipts in Linear. Confirm all live members before reordering and preserve unrelated members. Reconcile
 uncertain section creation before retrying; verify presentation after mutations. Respect explicit
 user titles and existing ownership. Section maintenance does not authorize new tasks, schedulers,
-project moves, archival, or deletion. A sidebar failure is a presentation gap, not a delivery failure.
-The personal launch reference defines the host-specific procedure.
+project moves, archival, or deletion. Apply the repository
+[mandatory kickoff/adoption gate](../../.agents/skills/oversight/SKILL.md#mandatory-kickoff-and-adoption-gate):
+missing or failed setup blocks new implementation dispatch and an established-oversight claim.
+Continue read-only context gathering and preserve already-running authorized owners; a presentation
+failure does not invalidate their completed source evidence. The repository gate remains authoritative
+when applying a personal host-specific launch reference.
 
 ## Intake and dispatch
 

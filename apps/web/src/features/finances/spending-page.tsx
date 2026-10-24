@@ -3,6 +3,7 @@ import {
   type FinanceSpendingGroup,
   type FinancesWorkspacePreferences,
   financeSpendingQuerySchema,
+  formatDateOnly,
   getDefaultWorkspacePreferences,
 } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
@@ -11,7 +12,14 @@ import { useSearchParams } from "react-router-dom";
 import { api } from "@/api";
 import { QueryFeedback } from "@/components/async-state";
 import { DateDisplay } from "@/components/date-display";
-import { CircleHelpIcon, FilterIcon } from "@/components/icons";
+import {
+  ActivityIcon,
+  CalendarIcon,
+  CircleHelpIcon,
+  FilterIcon,
+  GridIcon,
+  LayersIcon,
+} from "@/components/icons";
 import { SettingsControlsContext } from "@/components/settings-controls-context";
 import { Field, FieldGroup, FieldLabel } from "@/components/settings-field";
 import { Badge } from "@/components/ui/badge";
@@ -303,6 +311,49 @@ export function FinanceSpendingPage() {
     setSelectedDrillDown(drillDown);
   }
 
+  const scopeControls = (
+    <>
+      <fieldset disabled={disabled}>
+        <SpendingPeriodControls
+          period={rhythmDefault ? "custom" : period}
+          {...range}
+          onPeriod={(value) => {
+            const next = new URLSearchParams(params);
+            next.set("period", value);
+            next.delete("from");
+            next.delete("through");
+            changeParams(next);
+            save.mutate({ financeSpendingPeriod: value as SpendingPeriod });
+            setSelected(null);
+            setSelectedDrillDown(null);
+          }}
+          onDates={(from, through) => {
+            const next = new URLSearchParams(params);
+            next.set("period", "custom");
+            next.set("from", from);
+            next.set("through", through);
+            changeParams(next);
+            save.mutate({ financeSpendingPeriod: "custom" });
+            setSelected(null);
+            setSelectedDrillDown(null);
+          }}
+          onMove={(direction) => update("from", moveSpendingPeriod(period, range.from, direction))}
+        />
+      </fieldset>
+      <SpendingChoice
+        label="Group by"
+        showLabel={false}
+        value={choice("grouping", defaults.financeSpendingGrouping)}
+        options={[
+          ["auto", "Auto"],
+          ["buckets", "Buckets"],
+          ["categories", "Categories"],
+        ]}
+        disabled={disabled}
+        onChange={(value) => update("grouping", value, "financeSpendingGrouping")}
+      />
+    </>
+  );
   return (
     <div className="flex min-w-0 flex-col gap-6">
       {recovery.state === "invalid" ? (
@@ -340,10 +391,42 @@ export function FinanceSpendingPage() {
           </Button>
         </p>
       ) : null}
+      <WorkspaceHeaderControls label="Spending range" placement="title">
+        <span className="text-sm font-normal text-muted-foreground whitespace-nowrap">
+          {rhythmDefault
+            ? "last three months"
+            : period === "month" && range.from === monthRange.from
+              ? "this month"
+              : period === "month"
+                ? formatDateOnly(range.from, { month: "long", year: "numeric" })
+                : period === "today" && range.from === today
+                  ? "today"
+                  : period === "week" &&
+                      range.from ===
+                        spendingPeriod(
+                          "week",
+                          today,
+                          calendar.data?.preferences.weekStartsOn ?? "monday",
+                        ).from
+                    ? "this week"
+                    : `${formatDateOnly(range.from, { month: "short", day: "numeric" })} – ${formatDateOnly(range.through, { month: "short", day: "numeric", year: "numeric" })}`}
+        </span>
+      </WorkspaceHeaderControls>
       <WorkspaceHeaderControls label="Spending controls" placement="leading">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1 whitespace-nowrap">
           <SpendingChoice
             label="View"
+            icon={
+              view === "rhythm" ? (
+                <CalendarIcon />
+              ) : view === "trends" ? (
+                <ActivityIcon />
+              ) : view === "list" ? (
+                <GridIcon />
+              ) : (
+                <LayersIcon />
+              )
+            }
             value={view}
             options={[
               ["bubbles", "Bubbles"],
@@ -354,52 +437,8 @@ export function FinanceSpendingPage() {
             disabled={disabled}
             onChange={(value) => update("view", value, "financeSpendingView")}
           />
-          <div className="flex flex-wrap items-center gap-2">
-            <fieldset disabled={disabled}>
-              <SpendingPeriodControls
-                period={rhythmDefault ? "custom" : period}
-                {...range}
-                onPeriod={(value) => {
-                  const next = new URLSearchParams(params);
-                  next.set("period", value);
-                  next.delete("from");
-                  next.delete("through");
-                  changeParams(next);
-                  save.mutate({ financeSpendingPeriod: value as SpendingPeriod });
-                  setSelected(null);
-                  setSelectedDrillDown(null);
-                }}
-                onDates={(from, through) => {
-                  const next = new URLSearchParams(params);
-                  next.set("period", "custom");
-                  next.set("from", from);
-                  next.set("through", through);
-                  changeParams(next);
-                  save.mutate({ financeSpendingPeriod: "custom" });
-                  setSelected(null);
-                  setSelectedDrillDown(null);
-                }}
-                onMove={(direction) =>
-                  update("from", moveSpendingPeriod(period, range.from, direction))
-                }
-              />
-            </fieldset>
-            {rhythmDefault ? (
-              <p className="text-sm text-muted-foreground">
-                Last three calendar months · Recorded evidence only
-              </p>
-            ) : null}
-            <SpendingChoice
-              label="Group by"
-              value={choice("grouping", defaults.financeSpendingGrouping)}
-              options={[
-                ["auto", "Auto"],
-                ["buckets", "Buckets"],
-                ["categories", "Categories"],
-              ]}
-              disabled={disabled}
-              onChange={(value) => update("grouping", value, "financeSpendingGrouping")}
-            />
+          <div className="flex items-center gap-1">
+            <div className="spending-scope-controls flex items-center gap-1">{scopeControls}</div>
 
             <WorkspaceHeaderControls label="Spending filters">
               <Dialog>
@@ -420,6 +459,12 @@ export function FinanceSpendingPage() {
                         Choose what contributes to this view. Changes are saved as your defaults.
                       </DialogDescription>
                     </DialogHeader>
+                    <fieldset
+                      className="spending-compact-scope flex flex-col gap-3"
+                      aria-label="Period and grouping"
+                    >
+                      {scopeControls}
+                    </fieldset>
                     <FieldGroup>
                       <Field>
                         <FieldLabel>Accounting basis</FieldLabel>

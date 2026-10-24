@@ -285,7 +285,9 @@ it("queries comparable elapsed Trends periods with identical accounting filters 
 it("defaults Rhythm to three calendar months using saved Monday week start and respects explicit ranges", async () => {
   mount("?view=rhythm");
   await screen.findByRole("region", { name: "Spending rhythm" });
-  expect(screen.getByText(/Last three calendar months/)).toBeVisible();
+  expect(screen.getByRole("group", { name: "Spending range" })).toHaveTextContent(
+    "last three months",
+  );
   const query = vi.mocked(api.getFinanceSpending).mock.calls[0]?.[0];
   if (!query) throw new Error("No Rhythm query");
   const start = new Date(`${query.scope.from}T12:00:00Z`),

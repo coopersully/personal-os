@@ -691,3 +691,5 @@ shared Settings rows and checked priority choices without changing save, version
 Account rows align institution and account identity at the start, with type and recorded current balance at the end. Institution and type sit below the name. A shared Popover behind the account options button contains ownership, source observation details and edit/transaction actions. Debt uses destructive text and an Amount owed label; attention and recovery actions stay visible. Cash flow occurrences use distinct shared card surfaces, end-aligned expected amounts, and explicit money-in/money-out labels.
 
 The shared top navigation starts with the current Finance page name on desktop and mobile. The root Finance route is labelled Overview; page controls follow this identity.
+
+Spending keeps its route utilities on the primary navigation baseline. A small muted range label sits directly beside the page title (for example, “this month” or a formatted historical range); the view picker is an accessible icon button. At phone widths, period and grouping controls move into Spending options while the view, search, filter and review actions remain on the primary row.

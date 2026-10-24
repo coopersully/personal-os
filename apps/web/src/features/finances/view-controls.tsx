@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ChevronDownIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +17,7 @@ export function FinanceChoice({
   disabled = false,
   showLabel = true,
   displayValue,
+  icon,
 }: {
   label: string;
   value: string;
@@ -24,19 +26,24 @@ export function FinanceChoice({
   disabled?: boolean;
   showLabel?: boolean;
   displayValue?: string;
+  icon?: ReactNode;
 }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"
-          size="sm"
+          size={icon ? "icon-sm" : "sm"}
           disabled={disabled}
           aria-label={`${label}: ${displayValue ?? options.find(([id]) => id === value)?.[1] ?? "Selected categories"}`}
         >
-          {showLabel ? <span className="text-muted-foreground">{label}</span> : null}
-          {displayValue ?? options.find(([id]) => id === value)?.[1] ?? "Selected categories"}
-          <ChevronDownIcon />
+          {icon ?? (
+            <>
+              {showLabel ? <span className="text-muted-foreground">{label}</span> : null}
+              {displayValue ?? options.find(([id]) => id === value)?.[1] ?? "Selected categories"}
+              <ChevronDownIcon />
+            </>
+          )}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

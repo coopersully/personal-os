@@ -2054,6 +2054,9 @@ function WorkspaceAppBarForRoute({
             ? workspaceSwitcher
             : null}
           {identity}
+          {pathname === "/finances/spending" ? (
+            <WorkspaceHeaderControlsSlot placement="title" />
+          ) : null}
         </>
       }
       workspace={workspace}

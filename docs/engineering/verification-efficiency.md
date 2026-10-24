@@ -88,6 +88,21 @@ must demonstrate branch-hit equivalence against the single-run raw-V8 aggregatio
 uncovered branches, before replacing the existing coverage gate. Unchanged threshold numbers alone
 do not prove equivalent enforcement.
 
+## Early production audit
+
+Node quality runs the unchanged `pnpm audit --prod` immediately after frozen dependency
+installation and before `pnpm check:node`. An audit failure stops that job before expensive
+type, coverage and build work; successful candidates still run every existing check. The same
+Node job and required aggregate gate enforce failure. Other parallel jobs are not canceled by
+this reorder, so earlier detection does not imply lower whole-workflow elapsed time or runner cost.
+
+Measure time to the audit result separately from complete elapsed time and aggregate runner
+minutes. In historical run 40040586614, installation finished 17 seconds after Node job start,
+then `check:node` took 22m45s before a one-second audit failure. Moving that audit earlier would
+have detected that failure roughly 22m45s sooner; this is a counterfactual from recorded timings,
+not a measured candidate speedup. Preserve the single-run sharding comparison separately and
+record actual current-candidate setup, audit and execution timings before making further claims.
+
 ## Coordination and trustworthy reuse
 
 The normal repair loop is inspect the owner/contract/consumers, edit, run the smallest behavioral

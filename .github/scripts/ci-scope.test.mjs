@@ -292,3 +292,18 @@ test("browser shards retain both complete matrices and the original coverage com
   assert.equal(requiredGate({ quality: "success", browser: "failure" }), false);
   assert.equal(requiredGate({ quality: "success", browser: "cancelled" }), false);
 });
+
+test("production audit fails before expensive Node checks and still blocks readiness", () => {
+  const workflow = readFileSync(resolve(scriptDirectory, "../workflows/ci.yml"), "utf8");
+  const quality = workflowJobBlocks(workflow).find((block) => block.startsWith("  quality:\n"));
+  const commands = [...quality.matchAll(/^ {6}- run: (.+)$/gm)].map((match) => match[1]);
+  assert.deepEqual(commands, [
+    "pnpm install --frozen-lockfile",
+    "pnpm audit --prod",
+    "pnpm check:node",
+  ]);
+  // Default step success conditions must prevent later checks after an audit failure.
+  assert.doesNotMatch(quality, /continue-on-error|always\(\)|if: failure\(\)/);
+  assert.equal(requiredGate({ quality: "failure", browser: "success" }), false);
+  assert.equal(requiredGate({ quality: "cancelled", browser: "success" }), false);
+});

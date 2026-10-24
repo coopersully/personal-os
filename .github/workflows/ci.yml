@@ -131,8 +131,8 @@ jobs:
           cache: pnpm
           node-version: 22
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check:node
       - run: pnpm audit --prod
+      - run: pnpm check:node
 
   browser:
     name: Browser acceptance (${{ matrix.project }}, ${{ matrix.shard }}/4)

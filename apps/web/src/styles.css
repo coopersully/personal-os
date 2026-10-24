@@ -101,10 +101,10 @@
   --weather-sky-foreground: var(--content-primary);
   --weather-sky-muted: var(--content-secondary);
   --weather-sky-stat: var(--surface);
-  --workspace-calendar-accent: #0067b1;
-  --workspace-tasks-accent: #762bd4;
-  --workspace-mail-accent: #b51f58;
-  --workspace-finances-accent: #137c3d;
+  --workspace-calendar-accent: #0066ff;
+  --workspace-tasks-accent: #7928ff;
+  --workspace-mail-accent: #e60062;
+  --workspace-finances-accent: #008f45;
   --material-rose: #f3a7b7;
   --material-coral: #f2a58b;
   --material-amber: #eac26f;
@@ -827,10 +827,10 @@ p {
   --workspace-icon-accent: var(--content-secondary);
 
   align-items: center;
-  background: color-mix(in oklab, var(--workspace-icon-accent) 18%, var(--surface-raised));
-  border: 1px solid color-mix(in oklab, var(--workspace-icon-accent) 50%, var(--border-subtle));
+  background: var(--workspace-icon-accent);
+  border: 0;
   border-radius: var(--radius-lg);
-  color: var(--workspace-icon-accent);
+  color: #fff;
   display: inline-flex;
   flex: 0 0 auto;
   justify-content: center;
@@ -6062,10 +6062,10 @@ p {
   --weather-sky-foreground: var(--content-primary);
   --weather-sky-muted: var(--content-secondary);
   --weather-sky-stat: var(--surface);
-  --workspace-calendar-accent: #4bb8eb;
-  --workspace-tasks-accent: #c29bff;
-  --workspace-mail-accent: #ff7fa8;
-  --workspace-finances-accent: #3cae61;
+  --workspace-calendar-accent: #0066ff;
+  --workspace-tasks-accent: #7928ff;
+  --workspace-mail-accent: #e60062;
+  --workspace-finances-accent: #008f45;
   --success: var(--status-success);
   --background: var(--paper-deep);
   --foreground: var(--ink);

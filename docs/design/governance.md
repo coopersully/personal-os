@@ -177,6 +177,11 @@ Apply the accepted direction in `foundations.md` and control contracts in
   14–16px, chevrons 12px, with real text clearance and stable control padding.
 - Row collections have one padding owner. Repeated parts share proportions;
   long labels and touch targets fit without clipping or stretching glyphs.
+- Related actions sit side by side where they fit, with the recommended action
+  on the right. A lone action in a bounded surface has a visible button shape.
+- Copy expresses each idea once. Every secondary text block has a distinct job.
+- Shared row boundaries use a single quiet divider; unrelated controls are not
+  presented as one workflow merely to fill a specimen row.
 - Any glass surface has a documented transient purpose, neutral tint, readable
   labels, and inspected fallback. Ordinary material remains flat and opaque.
 

@@ -318,6 +318,32 @@ Inspect narrow, long-label, focused, open, and touch states. Verify actual glyph
 bounds as well as container bounds. Apply this target through shared owners;
 these rules are not a claim that every existing page already conforms.
 
+### Action groups, concise copy, and row boundaries
+
+Arrange related actions horizontally when their labels and touch targets fit.
+Place the least recommended action on the left and the recommended action on the
+right. Recommendation follows intent: safe cancellation may lead a destructive
+confirmation; a permission grant is never implied or preselected. Narrow layouts
+may wrap only when required for legibility, preserving semantic order.
+
+A lone action inside a card, alert, modal, or empty state needs a visible button
+surface. Use a filled neutral primary or secondary treatment. Reserve ghost
+buttons for supporting actions beside a stronger action or established navigation.
+
+Use one concise explanatory block for one idea. Do not automatically manufacture
+a title, subtitle, description, and helper that repeat the same status or next
+step. Retain separate labels, errors, and evidence only when they serve distinct
+jobs. A component slot being available is not a reason to fill it.
+
+Settings and control rows subdividing a shared block use one quiet, one-pixel,
+full-width separator. The shared border tone owns this boundary; do not double it
+with wrapper borders. Keep separators visible when dependent content is disabled.
+The final row must not add a redundant outer boundary. Group controls by one job;
+unrelated examples need separate labels and must not imply a fictional workflow.
+
+These are accepted target rules from the October 22 Figma review. Figma specimen
+updates do not establish an app-wide implementation migration.
+
 ### Contextual glass
 
 Glass is an exceptional neutral material for a transient floating action group,

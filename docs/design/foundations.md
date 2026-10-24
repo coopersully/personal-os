@@ -168,7 +168,7 @@ unrelated tools.
 - Light and dark themes carry the same roles and reading hierarchy. A feature
   consumes semantic roles and never chooses a raw color for one theme.
 - Calendar, Tasks, Mail, and Finances are first-class workspaces with clear,
-  high-chroma identity palettes. Their color is confined to the shared framed workspace
+  vivid, fully saturated identity palettes. Their color is confined to the shared solid workspace
   icon and related identity marks; it does not recolor a page, replace status,
   or compete with content hierarchy. Other features do not invent accents.
 
@@ -176,8 +176,9 @@ unrelated tools.
 
 - Treat Calendar, Tasks, Mail, and Finances as sub-apps inside nohmi. Each has one
   established glyph, label, route, and light/dark palette in the shared
-  workspace identity registry.
-- Use the framed `WorkspaceIcon` whenever the whole workspace is represented:
+  workspace identity registry. White glyphs sit on a solid vivid, fully saturated fill with no border,
+  inset frame, or shadow; the fill and glyph stay consistent across themes.
+- Use the solid `WorkspaceIcon` whenever the whole workspace is represented:
   the workspace switcher, primary navigation, onboarding workspace choice, and
   Agent Access product setup. Use ordinary unframed icons for actions, views,
   records, providers, and destinations inside a workspace.

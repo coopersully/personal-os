@@ -511,7 +511,7 @@ export function createFinanceReviewBatchService({
             // currently declares this option only on the connection configuration.
             const query: QueryConfig & { query_timeout: number } = {
               text,
-              values,
+              ...(values ? { values } : {}),
               query_timeout: Math.max(1, Math.min(3_000, remaining())),
             };
             return client.query<R>(query);
@@ -653,7 +653,9 @@ export function createFinanceReviewBatchService({
                     financeReviewBatchScope: {
                       transactionId: decision.transactionId,
                       transferReview: transferReview?.transferReview === true,
-                      transferCounterpart: transferReview?.transferCounterpart,
+                      ...(transferReview?.transferCounterpart
+                        ? { transferCounterpart: transferReview.transferCounterpart }
+                        : {}),
                       reviewId: decision.kind === "review" ? decision.reviewId : null,
                     },
                   };

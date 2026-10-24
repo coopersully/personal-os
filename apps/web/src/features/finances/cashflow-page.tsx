@@ -8,8 +8,8 @@ import { formatDateOnly, idSchema } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
+import { QueryFeedback } from "@/components/async-state";
 import { ChevronDownIcon, DollarIcon, PauseIcon, PlayIcon } from "@/components/icons";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -173,21 +173,7 @@ export function FinanceCashflowPage() {
           </DropdownMenu>
         </WorkspaceHeaderControls>
         {update.isError ? <MutationFeedback feedback={update.feedback} /> : null}
-        {recurring.isError ? (
-          <Alert variant="destructive">
-            <AlertTitle>
-              {recurring.data
-                ? "Recurring activity may be out of date"
-                : "Recurring activity unavailable"}
-            </AlertTitle>
-            <AlertDescription>
-              <p>{"Couldn’t refresh this information. Try again."}</p>
-              <Button size="sm" variant="outline" onClick={() => void recurring.refetch()}>
-                Retry recurring activity
-              </Button>
-            </AlertDescription>
-          </Alert>
-        ) : null}
+        <QueryFeedback query={recurring} title="Couldn’t load recurring activity." />
         {view === "scenarios" ? (
           <Card aria-label="Scenarios">
             <CardHeader>

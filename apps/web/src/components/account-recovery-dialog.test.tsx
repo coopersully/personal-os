@@ -38,7 +38,10 @@ it("requires confirmed recovery, prevents dismissal, and retains focus and works
   fireEvent.pointerDown(document.body);
   expect(screen.getByRole("dialog")).toBeVisible();
   await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }));
-  expect(screen.getByRole("button", { name: "Reconnecting…" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Reconnecting…" })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
   view.rerender(
     <AccountRecoveryDialog
       query={{ isError: false, isSuccess: false, isFetching: true, refetch }}

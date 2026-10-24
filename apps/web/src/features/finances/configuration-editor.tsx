@@ -1,5 +1,8 @@
 import { type FinanceProfileVersion, financeSetupPlanningSchema } from "@personal-os/domain";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useId, useRef } from "react";
+import { toast } from "sonner";
+import { QueryFeedback } from "@/components/async-state";
+import { RecoveryRequest } from "@/components/recovery-request";
 import { Button } from "@/components/ui/button";
 import { SettingsSection } from "../settings/settings-layout.js";
 import { FinanceConfigurationCollections } from "./configuration-collections.js";
@@ -16,18 +19,44 @@ import { useFinanceConfiguration } from "./use-finance-configuration.js";
 const text = (value: number | string | null | undefined) => value?.toString() ?? "";
 export function FinanceConfigurationEditor() {
   const query = useFinanceConfiguration();
+  const retryId = useId();
+  const retrying = useRef(false);
+  async function retryProfile() {
+    if (retrying.current) return;
+    retrying.current = true;
+    toast.loading("Trying again…", { id: retryId, position: "top-center" });
+    try {
+      const result = await query.refetch();
+      if (result.isError || result.data?.profile.state !== "loaded")
+        toast.error("Financial settings could not load. Try again.", {
+          id: retryId,
+          position: "top-center",
+        });
+      else toast.dismiss(retryId);
+    } catch {
+      toast.error("Financial settings could not load. Try again.", {
+        id: retryId,
+        position: "top-center",
+      });
+    } finally {
+      retrying.current = false;
+    }
+  }
   if (query.isPending) return <p role="status">Loading financial settings…</p>;
   if (query.isError || query.data?.profile.state !== "loaded")
     return (
       <>
-        <Alert>
-          <AlertDescription>
-            Financial settings could not load.{" "}
-            <Button variant="secondary" onClick={() => void query.refetch()}>
+        <QueryFeedback query={query} title="Financial settings could not load." toastOnly />
+        <RecoveryRequest
+          open={query.isSuccess && query.data?.profile.state !== "loaded"}
+          title="Financial settings could not load"
+          description="Retry loading your financial profile before editing these settings. Your other saved settings remain available."
+          actions={
+            <Button disabled={query.isFetching} onClick={() => void retryProfile()}>
               Retry
             </Button>
-          </AlertDescription>
-        </Alert>
+          }
+        />
         <FinanceIncomeEditor />
       </>
     );

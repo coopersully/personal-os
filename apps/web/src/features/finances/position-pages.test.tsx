@@ -1,10 +1,11 @@
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { renderWithFeedback as render } from "@/test-utils/feedback";
 import { FinanceCreateButton } from "./workspace-header";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { ApiClientError } from "@personal-os/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { type Action, toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -311,7 +312,7 @@ describe("Finance position pages", () => {
     else api.manageFinanceGoal.mockRejectedValueOnce(new Error("Network response lost"));
     mount(<FinanceWealthPage />);
     fireEvent.click(await screen.findByRole("button", { name: "Pause Emergency reserve" }));
-    await screen.findByText("Goal was not changed");
+    await screen.findByText(/Couldn’t .*update this goal/);
     fireEvent.click(screen.getByRole("button", { name: "Pause Emergency reserve" }));
     await waitFor(() => expect(api.manageFinanceGoal).toHaveBeenCalledTimes(2));
     const first = api.manageFinanceGoal.mock.calls[0]?.[0];
@@ -695,7 +696,7 @@ describe("Finance position pages", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Edit Shared checking" }));
     fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
     fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
-    expect(await screen.findByText("Account is still tracked")).toBeVisible();
+    expect(await screen.findByText(/Couldn’t .*disconnect this account/)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Stop tracking account" }));
     await waitFor(() => expect(api.disconnectFinanceAccount).toHaveBeenCalledTimes(2));
     const firstKey = api.disconnectFinanceAccount.mock.calls[0]?.[1].idempotencyKey;
@@ -793,7 +794,7 @@ describe("Finance position pages", () => {
     await waitFor(() =>
       expect(toast.success).toHaveBeenCalledWith("Account added", { id: pendingNotice }),
     );
-    expect(screen.queryByText("Account added")).not.toBeInTheDocument();
+    expect(screen.getByText("Account added").closest("[data-sonner-toast]")).not.toBeNull();
   });
 
   it("edits manual account semantics and keeps failed account creation recoverable", async () => {
@@ -857,8 +858,10 @@ describe("Finance position pages", () => {
       ),
     );
     expect(
-      screen.queryByText(/Couldn’t confirm whether we could create this account/),
-    ).not.toBeInTheDocument();
+      screen
+        .getByText(/Couldn’t confirm whether we could create this account/)
+        .closest("[data-sonner-toast]"),
+    ).not.toBeNull();
     expect(api.createFinanceAccount).toHaveBeenCalledWith(expect.objectContaining({ balance: 42 }));
   });
 
@@ -1200,7 +1203,7 @@ it("retries account coverage and syncs an account with blocked evidence", async 
   });
   api.syncFinanceAccount.mockResolvedValue({});
   mount(<FinanceAccountsPage />);
-  fireEvent.click(await screen.findByRole("button", { name: "Retry account coverage" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
   expect(await screen.findByText(/1 balance-only account/)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Sync account" }));
   await waitFor(() => expect(api.syncFinanceAccount).toHaveBeenCalledWith(account.id));
@@ -1243,7 +1246,9 @@ it.each([
     "/settings?page=finances",
   );
   if (state === "failed") {
-    expect(await screen.findByText("Financial position unavailable")).toBeVisible();
+    expect(
+      await screen.findByRole("region", { name: "Financial position unavailable" }),
+    ).toBeVisible();
   } else {
     const metrics = await screen.findByRole("region", { name: "Finance key metrics" });
     expect(within(metrics).getAllByText("Unavailable")).toHaveLength(3);

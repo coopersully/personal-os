@@ -2,7 +2,6 @@ import {
   type APIRequestContext,
   type BrowserContext,
   expect,
-  type Page,
   request,
   test,
 } from "@playwright/test";
@@ -67,7 +66,7 @@ test("two editors retain attempted workspace values and explicitly recover repea
     await expect(second.getByText("Your change: day")).toBeVisible();
     await expect(
       second.getByText(
-        "Another editor changed these settings. Your attempted change was rejected.",
+        "Another editor changed these settings. Review the latest values before applying your change.",
       ),
     ).toBeVisible();
     await expect(second.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
@@ -82,13 +81,38 @@ test("two editors retain attempted workspace values and explicitly recover repea
     );
     await second.getByRole("button", { name: "Refresh latest settings" }).click();
     await failedRead;
-    await expect(second.getByText("Couldn’t load preferences.")).toBeVisible();
-    await expect(second.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
+    const recovery = second.getByRole("dialog", { name: "Let’s reconnect" });
+    await expect(recovery).toBeVisible();
+    // The higher-priority read gate hides the conflict surface, but keeps its source mounted.
+    await expect(second.getByLabel("Preferred view")).toBeAttached();
     expect(secondWrites).toBe(1);
     await second.unroute(`**${path}`);
+    await recovery.getByRole("button", { name: "Try again" }).click();
+    await expect(recovery).not.toBeVisible();
+    // Transport recovery does not approve or reapply the rejected edit. Review the latest
+    // conflict snapshot explicitly before the existing reapply flow can become available.
     await second.getByRole("button", { name: "Refresh latest settings" }).click();
     await expect(second.getByText("Latest: month")).toBeVisible();
-    await second.screenshot({ path: info.outputPath("reviewed-conflict.png"), fullPage: true });
+    const choices = second.getByRole("dialog", {
+      name: "Workspace preference change has not been confirmed.",
+    });
+    await expect
+      .poll(() => choices.evaluate((element) => element.scrollWidth <= element.clientWidth))
+      .toBe(true);
+    const dialogBounds = await choices.boundingBox();
+    if (!dialogBounds) throw new Error("Recovery choices are not visible");
+    for (const name of ["Use latest settings", "Reapply reviewed change"]) {
+      const button = await choices.getByRole("button", { name }).boundingBox();
+      if (!button) throw new Error(`Missing ${name} button`);
+      expect(button.x).toBeGreaterThanOrEqual(dialogBounds.x);
+      expect(button.x + button.width).toBeLessThanOrEqual(dialogBounds.x + dialogBounds.width);
+    }
+    await second.screenshot({
+      path: info.outputPath("reviewed-conflict.png"),
+      fullPage: false,
+      animations: "disabled",
+      scale: "css",
+    });
     const firstAgain = page.waitForResponse(
       (response) => response.request().method() === "PATCH" && response.url().endsWith(path),
     );
@@ -106,7 +130,12 @@ test("two editors retain attempted workspace values and explicitly recover repea
     expect(secondWrites).toBe(3);
     const current = await (await page.request.get(path)).json();
     expect(current.preferences.weekStartsOn).toBe("monday");
-    await second.screenshot({ path: info.outputPath("recovered-settings.png"), fullPage: true });
+    await second.screenshot({
+      path: info.outputPath("recovered-settings.png"),
+      fullPage: false,
+      animations: "disabled",
+      scale: "css",
+    });
     expect(
       await second.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBeTruthy();
@@ -120,10 +149,9 @@ test("two editors retain attempted workspace values and explicitly recover repea
 });
 
 for (const workspace of ["calendar", "mail"] as const) {
-  test(`${workspace} contextual failure remains reviewable after SPA navigation to Settings`, async ({
+  test(`${workspace} contextual failure preserves workspace geometry and reviewed retry controls`, async ({
     page,
   }, info) => {
-    const mobile = !!info.project.use.isMobile;
     await page.goto("/login");
     await page.getByLabel("Email").fill("demo+full@nohmi.test");
     await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
@@ -180,15 +208,36 @@ for (const workspace of ["calendar", "mail"] as const) {
       const attempted =
         workspace === "calendar" ? "Your change: month" : "Your change: Full-width view";
       await expect(page.getByText(attempted)).toBeVisible();
+      await expect(page.getByRole("button", { name: "Refresh latest settings" })).toBeEnabled();
       await expect(page.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
-      await openSettingsSection(page, mobile, workspace === "calendar" ? "Calendar" : "Mail");
-      await expect(page.getByText(attempted)).toBeVisible();
+      const recovery = page.getByRole("dialog", {
+        name: "Workspace preference change has not been confirmed.",
+      });
+      await expect(recovery).toBeVisible();
+      await expect(
+        page
+          .locator("[data-sonner-toast]")
+          .filter({ hasText: /Couldn’t save workspace preferences/ }),
+      ).toHaveCount(0);
+      await expect(
+        page.locator(
+          ".calendar-app-bar__controls [data-slot=alert], .mail-page > [data-slot=alert]",
+        ),
+      ).toHaveCount(0);
+      await page.screenshot({
+        path: info.outputPath(`${workspace}-contextual-recovery.png`),
+        fullPage: false,
+        animations: "disabled",
+        scale: "css",
+      });
       await page.getByRole("button", { name: "Refresh latest settings" }).click();
       await expect(page.getByRole("button", { name: "Use latest settings" })).toBeEnabled();
       expect(writes).toBe(1);
       await page.screenshot({
         path: info.outputPath(`${workspace}-contextual-recovery-in-settings.png`),
-        fullPage: true,
+        fullPage: false,
+        animations: "disabled",
+        scale: "css",
       });
       await page.getByRole("button", { name: "Use latest settings" }).click();
       await expect(page.getByText(attempted)).toHaveCount(0);
@@ -197,34 +246,6 @@ for (const workspace of ["calendar", "mail"] as const) {
       await restoreSettings(restoreContext, path, origin, original?.preferences);
     }
   });
-}
-
-async function openSettingsSection(page: Page, mobile: boolean, label: string) {
-  if (mobile) {
-    await page.getByRole("button", { name: "Switch workspace" }).click();
-    await page
-      .getByRole("menu", { name: "Switch workspace" })
-      .getByRole("menuitem", { name: "Settings", exact: true })
-      .click();
-    await page.getByRole("button", { name: "Workspace actions" }).click();
-    const link = page
-      .getByRole("dialog", { name: "Settings" })
-      .locator(`a[href="/settings?page=${label.toLowerCase()}"]`);
-    await expect(link).toHaveAccessibleName(new RegExp(`^${label}(?:: Action required)?$`));
-    await expect(link).toHaveAttribute("href", `/settings?page=${label.toLowerCase()}`);
-    await link.click();
-  } else {
-    await page
-      .getByRole("navigation", { name: "Workspace navigation" })
-      .getByRole("link", { name: "Settings", exact: true })
-      .click();
-    const link = page
-      .getByRole("complementary", { name: "Account utility navigation" })
-      .locator(`a[href="/settings?page=${label.toLowerCase()}"]`);
-    await expect(link).toHaveAccessibleName(new RegExp(`^${label}(?:: Action required)?$`));
-    await expect(link).toHaveAttribute("href", `/settings?page=${label.toLowerCase()}`);
-    await link.click();
-  }
 }
 
 test("Finance account selection recovery stays readable after reopening and navigating to Settings", async ({
@@ -286,33 +307,38 @@ test("Finance account selection recovery stays readable after reopening and navi
     await page
       .getByRole("button", { name: "Spending account view selections", exact: true })
       .click();
-    const dialog = page.getByRole("dialog", { name: "Spending account view selections" });
+    const dialog = page.getByRole("dialog", {
+      name: "Spending account view selections",
+      includeHidden: true,
+    });
     const choice = dialog.getByLabel(/Everyday checking/);
     await expect(choice).toBeEnabled();
     await expect(choice).toBeChecked();
     await choice.click();
-    await expect(dialog.getByText("Your change: None selected")).toBeVisible();
+    const recovery = page.getByRole("dialog", {
+      name: "Workspace preference change has not been confirmed.",
+    });
+    await expect(recovery.getByText("Your change: None selected")).toBeVisible();
     await expect(choice).toBeDisabled();
-    await dialog.getByRole("button", { name: "Refresh latest settings" }).click();
-    await expect(dialog.getByText("Latest: Everyday checking", { exact: true })).toBeVisible();
+    await recovery.getByRole("button", { name: "Refresh latest settings" }).click();
+    await expect(recovery.getByText("Latest: Everyday checking", { exact: true })).toBeVisible();
     expect(writes).toBe(1);
     await page.keyboard.press("Escape");
-    await page
-      .getByRole("button", { name: "Review unsaved account selections", exact: true })
-      .click();
-    await expect(dialog.getByText("Your change: None selected")).toBeVisible();
-    await expect(dialog.getByText("Latest: Everyday checking", { exact: true })).toBeVisible();
-    await page.keyboard.press("Escape");
-    await openSettingsSection(page, !!info.project.use.isMobile, "Finances");
-    const preferences = page.getByRole("region", { name: /^Workspace preferences$/i });
+    await expect(recovery).toBeVisible();
+    await recovery.getByRole("link", { name: "Open Finance settings" }).click();
+    await expect(page).toHaveURL(/settings\?page=finances/);
+    const preferences = page.getByRole("dialog", {
+      name: "Workspace preference change has not been confirmed.",
+    });
     await expect(preferences.getByText("Your change: None selected")).toBeVisible();
-    await expect(preferences.getByText("Latest: Everyday checking", { exact: true })).toBeVisible();
     await preferences.getByRole("button", { name: "Refresh latest settings" }).click();
     await expect(preferences.getByRole("button", { name: "Use latest settings" })).toBeEnabled();
     expect(writes).toBe(1);
     await page.screenshot({
       path: info.outputPath("finance-contextual-recovery.png"),
-      fullPage: true,
+      fullPage: false,
+      animations: "disabled",
+      scale: "css",
     });
     await preferences.getByRole("button", { name: "Use latest settings" }).click();
     await expect(page.getByText("Your change: None selected")).toHaveCount(0);
@@ -384,7 +410,9 @@ test("Tasks failed project pin reaches Settings and reapplies only its reviewed 
     const pin = page.getByRole("button", { name: "Pin Autumn program opening", exact: true });
     await expect(pin).toBeEnabled();
     await pin.click();
-    await expect(pin).toBeDisabled();
+    await expect(
+      page.getByRole("link", { name: "Review unsaved pin preferences" }).first(),
+    ).toBeVisible();
     await page
       .getByRole("link", { name: "Review unsaved pin preferences", exact: true })
       .first()
@@ -400,7 +428,9 @@ test("Tasks failed project pin reaches Settings and reapplies only its reviewed 
     const reviewed = (await (await page.request.get(path)).json()) as WorkspaceSettings<"tasks">;
     await page.screenshot({
       path: info.outputPath("tasks-contextual-recovery.png"),
-      fullPage: true,
+      fullPage: false,
+      animations: "disabled",
+      scale: "css",
     });
     const replay = page.waitForResponse(
       (response) => response.request().method() === "PATCH" && response.url().endsWith(path),

@@ -235,7 +235,7 @@ it("shows exact partial batch failures and never labels them all successful", as
       name: "Complete",
     }),
   );
-  expect(await screen.findByText("1 updated, 1 not changed.")).toBeInTheDocument();
+  expect(await screen.findByText("1 updated, 1 not changed")).toBeInTheDocument();
   expect(screen.getByText(/Call Sam: Couldn’t confirm/)).toBeInTheDocument();
 });
 

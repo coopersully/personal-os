@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ListChecksIcon } from "@/components/icons";
+import { RecoveryRequest } from "@/components/recovery-request";
 import {
   ResponsiveDialog,
   ResponsiveDialogBody,
@@ -13,7 +14,6 @@ import {
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
 } from "@/components/responsive-dialog";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ItemGroup } from "@/components/ui/item";
@@ -359,26 +359,20 @@ function WorkspaceContent({ onEdit, onEditReminder, timeZone }: WorkspacePagePro
             </Button>
           </div>
         ) : null}
-        {result?.failed.length ? (
-          <Alert variant="destructive">
-            <AlertTitle>
-              {result.succeeded.length} updated, {result.failed.length} not changed.
-            </AlertTitle>
-            <AlertDescription>
-              <ul>
-                {result.failed.map((failure) => (
-                  <li key={failure.key}>
-                    {failure.title}: {failure.message}
-                  </li>
-                ))}
-              </ul>
-              <p>Refresh and reselect changed items before retrying.</p>
-              <Button size="sm" variant="ghost" onClick={() => setResult(null)}>
-                Dismiss
-              </Button>
-            </AlertDescription>
-          </Alert>
-        ) : null}
+        <RecoveryRequest
+          open={Boolean(result?.failed.length)}
+          title={`${result?.succeeded.length ?? 0} updated, ${result?.failed.length ?? 0} not changed`}
+          description="Review the affected items before retrying. Successful changes will not be repeated."
+          actions={<Button onClick={() => setResult(null)}>Return to tasks</Button>}
+        >
+          <ul className="grid max-h-64 gap-2 overflow-y-auto text-sm">
+            {result?.failed.map((failure) => (
+              <li key={failure.key}>
+                {failure.title}: {failure.message}
+              </li>
+            ))}
+          </ul>
+        </RecoveryRequest>
         {items.length ? (
           <>
             <div className="flex min-h-8 flex-wrap items-center justify-between gap-2">

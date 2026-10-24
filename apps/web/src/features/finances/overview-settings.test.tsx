@@ -90,8 +90,7 @@ it("opens truthful view selections without a snapshot, retains conflict after re
   await screen.findByText("Latest: Everyday checking");
   expect(update).toHaveBeenCalledTimes(1);
   fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
-  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-  fireEvent.click(screen.getByRole("button", { name: "Review unsaved account selections" }));
+  expect(screen.getByRole("dialog")).toBeVisible();
   expect(screen.getByText("Your change: None selected")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Reapply reviewed change" }));
   await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
@@ -215,7 +214,9 @@ it("keeps non-account preference recovery visible without offering an unrelated 
   expect(
     screen.queryByRole("button", { name: "Review unsaved account selections" }),
   ).not.toBeInTheDocument();
-  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("dialog", { name: "Workspace preference change has not been confirmed." }),
+  ).toBeVisible();
   expect(screen.getByRole("link", { name: "Open Finance settings" })).toHaveAttribute(
     "href",
     "/settings?page=finances",
@@ -257,7 +258,9 @@ it("replays a non-account cross-hook intent with unavailable account names witho
     expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeEnabled(),
   );
   expect(update).toHaveBeenCalledTimes(1);
-  expect(screen.getByRole("button", { name: "Spending account view selections" })).toBeDisabled();
+  expect(
+    screen.queryByRole("button", { name: "Spending account view selections", hidden: true }),
+  ).not.toBeInTheDocument();
   expect(
     screen.queryByRole("button", { name: "Review unsaved account selections" }),
   ).not.toBeInTheDocument();
@@ -294,6 +297,8 @@ it.each([
   fireEvent.click(screen.getByRole("button", { name: "Refresh latest settings" }));
   await screen.findByText("Latest: All eligible accounts (including newly added accounts)");
   expect(screen.getByRole("button", { name: "Reapply reviewed change" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "Spending account view selections" })).toBeDisabled();
+  expect(
+    screen.queryByRole("button", { name: "Spending account view selections", hidden: true }),
+  ).not.toBeInTheDocument();
   expect(update).toHaveBeenCalledTimes(1);
 });

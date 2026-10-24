@@ -301,7 +301,7 @@ it.each([
       : new Error("Network interrupted");
   const message =
     outcome === "conflict"
-      ? "Another editor changed these settings. Your attempted change was rejected."
+      ? "Another editor changed these settings. Review the latest values before applying your change."
       : "The change may have been saved. Refresh checks the current values without writing.";
   let rejectReplay!: (error: Error) => void;
 

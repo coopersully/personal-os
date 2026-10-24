@@ -1,9 +1,10 @@
 import { resolveWorkspaceSettings } from "@personal-os/domain";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { renderWithFeedback as render } from "@/test-utils/feedback";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { toast } from "sonner";
@@ -1645,7 +1646,8 @@ it.each([
     section === "transactions"
       ? "Couldn’t save this category. Your changes are still unsaved. Try again."
       : "Couldn’t save this transaction review. Your changes are still unsaved. Try again.";
-  expect(await within(dialog).findByText(message)).toBeVisible();
+  expect(await screen.findByText(message)).toBeVisible();
+  expect(within(dialog).queryByText(message)).not.toBeInTheDocument();
   expect(within(dialog).getByLabelText("Category")).toHaveValue("Dining");
   expect(screen.queryByText("private database details")).not.toBeInTheDocument();
   expect(screen.getAllByText(message)).toHaveLength(1);
@@ -1818,10 +1820,8 @@ it("keeps readable Finance account-selection recovery reachable after closing it
   );
   await user.click(screen.getByRole("button", { name: "Refresh latest settings" }));
   expect(await screen.findByText("Latest: Recovery checking")).toBeVisible();
+  // Recovery requires an explicit decision; Escape cannot abandon the retained selection.
   await user.keyboard("{Escape}");
-  await user.click(
-    await screen.findByRole("button", { name: "Review unsaved account selections" }),
-  );
   expect(await screen.findByText("Your change: None selected")).toBeVisible();
   expect(api.updateWorkspaceSettings).toHaveBeenCalledTimes(1);
 });

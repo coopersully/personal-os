@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import type { FinanceInboxCase, FinanceToolResult } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { vi } from "vitest";
+import { renderWithFeedback as render } from "@/test-utils/feedback";
 import { FinanceInboxList } from "./inbox-list.js";
 
 const api = vi.hoisted(() => ({
@@ -215,7 +216,7 @@ it("discloses failed, empty and truncated nearby activity", async () => {
   const client = mount([item("1")]);
   await userEvent.click(screen.getByRole("button", { name: "Review Merchant 1" }));
   await userEvent.click(screen.getByRole("button", { name: "Nearby account activity" }));
-  expect(await screen.findByText("Couldn’t load this material.")).toBeVisible();
+  expect((await screen.findAllByText("Couldn’t load this material."))[0]).toBeVisible();
   api.listFinanceTransactions.mockResolvedValueOnce({ items: [], nextCursor: null });
   await client.invalidateQueries({ queryKey: ["finance-review-nearby"] });
   expect(await screen.findByText("No other activity in this window.")).toBeVisible();

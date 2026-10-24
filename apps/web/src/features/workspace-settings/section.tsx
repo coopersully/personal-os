@@ -26,8 +26,12 @@ function PreferenceSection<W extends Workspace>({
   children,
   formatValue = preferenceValueLabel,
   recoveryUnavailable = false,
+  recoveryContent,
+  recoveryActions,
 }: {
   workspace: W;
+  recoveryContent?: ReactNode;
+  recoveryActions?: ReactNode;
   formatValue?: (value: unknown, key: string) => string;
   recoveryUnavailable?: boolean;
   children: (values: WorkspacePreferences<W>, save: Save<W>, disabled: boolean) => ReactNode;
@@ -45,7 +49,10 @@ function PreferenceSection<W extends Workspace>({
         workspace={workspace}
         formatValue={formatValue}
         unavailable={recoveryUnavailable}
-      />
+        recoveryActions={recoveryActions}
+      >
+        {recoveryContent}
+      </WorkspacePreferenceRecovery>
       <FieldGroup>
         {children(values, save, disabled)}
         <Toggle
@@ -275,6 +282,22 @@ function TasksPreferences() {
   return (
     <PreferenceSection
       workspace="tasks"
+      recoveryContent={
+        <>
+          <DataViewRecovery
+            query={lists}
+            title="Couldn’t load capture lists."
+            unavailableLabel="Capture lists unavailable"
+          />
+          {recovery?.attempted.pinnedProjectIds ? (
+            <DataViewRecovery
+              query={projects}
+              title="Couldn’t load pinned project names."
+              unavailableLabel="Pinned projects unavailable"
+            />
+          ) : null}
+        </>
+      }
       recoveryUnavailable={
         !!recovery &&
         ((!lists.isSuccess &&
@@ -302,16 +325,11 @@ function TasksPreferences() {
     >
       {(values, save, disabled) => (
         <>
-          <DataViewRecovery
-            query={lists}
-            title="Couldn’t load capture lists."
-            unavailableLabel="Capture lists unavailable"
-          />
-          {recovery?.attempted.pinnedProjectIds ? (
+          {!recovery ? (
             <DataViewRecovery
-              query={projects}
-              title="Couldn’t load pinned project names."
-              unavailableLabel="Pinned projects unavailable"
+              query={lists}
+              title="Couldn’t load capture lists."
+              unavailableLabel="Capture lists unavailable"
             />
           ) : null}
           <Choice
@@ -445,21 +463,7 @@ function FinancesPreferencesForSession() {
   return (
     <PreferenceSection
       workspace="finances"
-      recoveryUnavailable={needsAccountNames && !accounts}
-      formatValue={(value, key) => {
-        if (Array.isArray(value) && key.endsWith("AccountIds"))
-          return value.length
-            ? value
-                .map(
-                  (id) =>
-                    accounts?.find((account) => account.id === id)?.name ?? "Unavailable account",
-                )
-                .join(", ")
-            : "None selected";
-        return preferenceValueLabel(value, key);
-      }}
-    >
-      {(values, save, disabled) => (
+      recoveryContent={
         <>
           {needsAccountNames ? (
             <QueryFeedback
@@ -481,6 +485,24 @@ function FinancesPreferencesForSession() {
               </Button>
             </>
           ) : null}
+        </>
+      }
+      recoveryUnavailable={needsAccountNames && !accounts}
+      formatValue={(value, key) => {
+        if (Array.isArray(value) && key.endsWith("AccountIds"))
+          return value.length
+            ? value
+                .map(
+                  (id) =>
+                    accounts?.find((account) => account.id === id)?.name ?? "Unavailable account",
+                )
+                .join(", ")
+            : "None selected";
+        return preferenceValueLabel(value, key);
+      }}
+    >
+      {(values, save, disabled) => (
+        <>
           <Choice
             id="financeTransactionView"
             label="Transaction view"

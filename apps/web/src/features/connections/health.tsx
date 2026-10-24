@@ -1,6 +1,5 @@
 import type { ConnectedAccountHealth, ConnectorCapabilities } from "@personal-os/domain";
 import { AlertTriangleIcon, LinkOffIcon, RefreshIcon } from "@/components/icons";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
 import { Badge } from "../../components/ui/badge.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
 
@@ -106,35 +105,6 @@ export function ConnectionHealthDescription({
     return <>{health.message ?? "nohmi is resolving a connection issue."}</>;
   }
   return <>{lastSyncedAt ? `Synced ${formatRelativeTime(lastSyncedAt, now)}` : "Ready to sync"}</>;
-}
-
-export function ConnectionRecoveryAlert({
-  accounts,
-}: {
-  accounts: Array<{
-    health?: ConnectedAccountHealth;
-    id: string;
-    label: string;
-    syncStatus?: string;
-  }>;
-}) {
-  const reconnecting = accounts.filter(
-    (account) => connectionHealth(account).state === "reconnect",
-  );
-  if (reconnecting.length === 0) return null;
-  return (
-    <Alert variant="warning">
-      <AlertTriangleIcon aria-hidden="true" />
-      <AlertTitle>Reconnect {reconnecting.length === 1 ? "an account" : "accounts"}</AlertTitle>
-      <AlertDescription>
-        {reconnecting.map((account) => account.label).join(", ")} needs authorization before new
-        information can sync.
-      </AlertDescription>
-      <AlertAction>
-        <a href="/settings?page=connections">Review connections</a>
-      </AlertAction>
-    </Alert>
-  );
 }
 
 export function connectionHealth(account: {

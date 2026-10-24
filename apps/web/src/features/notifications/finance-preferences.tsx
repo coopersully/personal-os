@@ -114,6 +114,7 @@ function SessionFinanceNotificationPreferences({
             <FinanceNotificationPreferenceSummary status={recovery.reviewed} />
           ) : null}
           <SettingsSaveRecovery
+            toastId={reset.feedback?.toastId}
             outcome={recovery.outcome}
             title="Finance notification reset has not been confirmed."
             pending={query.isFetching || reset.isPending || !canEdit}

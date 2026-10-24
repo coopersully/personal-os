@@ -535,6 +535,13 @@ const mocks = vi.hoisted(() => ({
   getFinanceBudget: vi.fn(),
   getCanonicalFinanceBudgetStatus: vi.fn(),
   getFinanceInbox: vi.fn(),
+  getFinanceConfiguration: vi.fn(),
+  getFinanceConversationReadiness: vi.fn(),
+  getFinanceConversationUnread: vi.fn(),
+  listFinanceRecurringOccurrences: vi.fn(),
+  listFinanceRecurringItems: vi.fn(),
+  listFinanceMerchants: vi.fn(),
+  getNotificationStatus: vi.fn(),
   listFinanceReviewHistory: vi.fn(),
   getFinanceReviewHistoryItem: vi.fn(),
   answerFinanceReview: vi.fn(),
@@ -683,6 +690,16 @@ function memoryStorage(): Storage {
 }
 
 function setup(path = "/today") {
+  // Page fixtures begin after acknowledging their deliberately broken default connector.
+  // Restore that precondition for each renderer; dedicated recovery tests cover recurrence.
+  const key = `nohmi:connection-snooze:${window.location.origin}:${user.id}`;
+  sessionStorage.setItem(
+    key,
+    JSON.stringify({
+      ...JSON.parse(sessionStorage.getItem(key) ?? "{}"),
+      [`connector:${thirdId}:service_attention`]: Date.now() + 15 * 60_000,
+    }),
+  );
   const queryClient = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false, gcTime: 0 } },
   });
@@ -712,7 +729,32 @@ async function findSettingsLink(name: string) {
   ).findByRole("link", { name });
 }
 
+async function readRecovery() {
+  return screen.findByRole("dialog", { name: "Let’s reconnect" });
+}
+async function recoverRead() {
+  const dialog = await readRecovery();
+  await userEvent.setup().click(within(dialog).getByRole("button", { name: "Try again" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "Let’s reconnect" })).not.toBeInTheDocument(),
+  );
+}
+
 function defaults() {
+  // These auxiliary Finance capabilities are outside this legacy page fixture. Give them an
+  // explicit unavailable endpoint response instead of throwing a missing-mock TypeError.
+  const unavailableCapability = new ApiClientError({
+    status: 404,
+    code: "not_found",
+    message: "Capability is outside this fixture",
+  });
+  mocks.getFinanceConfiguration.mockRejectedValue(unavailableCapability);
+  mocks.getFinanceConversationReadiness.mockRejectedValue(unavailableCapability);
+  mocks.getFinanceConversationUnread.mockRejectedValue(unavailableCapability);
+  mocks.listFinanceRecurringOccurrences.mockRejectedValue(unavailableCapability);
+  mocks.listFinanceRecurringItems.mockRejectedValue(unavailableCapability);
+  mocks.listFinanceMerchants.mockRejectedValue(unavailableCapability);
+  mocks.getNotificationStatus.mockRejectedValue(unavailableCapability);
   mocks.searchWorkspace.mockResolvedValue({ items: [], nextOffset: null, coverage: "synced" });
   mocks.getWorkspaceSettings.mockImplementation(async (workspace) => ({
     workspace,
@@ -1527,6 +1569,14 @@ function completeFinancePlan() {
 }
 
 function configureFinanceWorkspace() {
+  const snoozeKey = `nohmi:connection-snooze:${window.location.origin}:${user.id}`;
+  sessionStorage.setItem(
+    snoozeKey,
+    JSON.stringify({
+      ...JSON.parse(sessionStorage.getItem(snoozeKey) ?? "{}"),
+      [`finance:${secondId}:reconnect`]: Date.now() + 15 * 60_000,
+    }),
+  );
   const transactions = [
     {
       accountId: id,
@@ -1759,6 +1809,7 @@ beforeEach(() => {
   }
   vi.stubGlobal("Date", TestDate);
   vi.stubGlobal("localStorage", memoryStorage());
+  vi.stubGlobal("sessionStorage", memoryStorage());
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     value: vi.fn().mockImplementation((query: string) => ({
@@ -3805,7 +3856,7 @@ describe("ilo web app", () => {
     await browser.type(screen.getByLabelText("Name"), "Work");
     await browser.click(screen.getByRole("button", { name: "Create List" }));
     expect(
-      await screen.findByText(/confirm whether we could save this (list|project)/),
+      (await screen.findAllByText(/confirm whether we could save this (list|project)/)).at(-1),
     ).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Cancel" }));
 
@@ -3873,7 +3924,7 @@ describe("ilo web app", () => {
     await browser.type(screen.getByLabelText("Name"), "Launch");
     await browser.click(screen.getByRole("button", { name: "Create Project" }));
     expect(
-      await screen.findByText(/confirm whether we could save this (list|project)/),
+      (await screen.findAllByText(/confirm whether we could save this (list|project)/)).at(-1),
     ).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Cancel" }));
 
@@ -4249,7 +4300,7 @@ describe("ilo web app", () => {
   it("keeps the Tasks workspace actionable when Project navigation fails", async () => {
     mocks.listTaskProjects.mockRejectedValueOnce(new Error("Projects are temporarily unavailable"));
     const view = setup("/tasks");
-    expect(await screen.findByText("Couldn’t load projects.")).toBeInTheDocument();
+    await recoverRead();
     expect(
       within(screen.getByRole("complementary", { name: "Tasks Sidebar" })).queryByRole("status"),
     ).not.toBeInTheDocument();
@@ -4290,7 +4341,7 @@ describe("ilo web app", () => {
     await browser.click(await screen.findByRole("button", { name: "Move and detach Project" }));
     const moveDialog = screen.getByRole("dialog");
     expect(
-      await within(moveDialog).findByText(/confirm whether we could move and save this task/),
+      await screen.findByText(/confirm whether we could move and save this task/),
     ).toBeInTheDocument();
     expect(moveDialog).toHaveTextContent("Move Task without its Project?");
     await browser.click(screen.getByRole("button", { name: "Move and detach Project" }));
@@ -4650,11 +4701,9 @@ describe("ilo web app", () => {
       ),
     );
 
-    expect(
-      await screen.findByRole("region", { name: /Couldn’t load this material/ }),
-    ).toBeInTheDocument();
+    expect(await readRecovery()).toBeInTheDocument();
     expect(screen.getByText("Draft brief")).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Retry loading more items" }));
+    await browser.click(within(await readRecovery()).getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Recovered next page Task")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Retry loading more items" })).toBeNull();
     view.unmount();
@@ -4840,9 +4889,7 @@ describe("ilo web app", () => {
 
     mocks.listTasks.mockRejectedValue(new Error("Tasks are temporarily unavailable"));
     const failed = setup("/tasks?view=upcoming");
-    expect(
-      await screen.findByRole("region", { name: /Couldn’t load this material/ }),
-    ).toBeInTheDocument();
+    expect(await readRecovery()).toBeInTheDocument();
     failed.unmount();
 
     mocks.listTasks.mockResolvedValue({ items: [], nextCursor: null });
@@ -5046,7 +5093,7 @@ describe("ilo web app", () => {
 
     mocks.listTaskLists.mockRejectedValueOnce(new Error("Lists are temporarily unavailable"));
     const listFailure = setup("/tasks");
-    expect(await screen.findByText("Couldn’t load lists.")).toBeInTheDocument();
+    await recoverRead();
     expect(
       within(screen.getByRole("complementary", { name: "Tasks Sidebar" })).queryByRole("status"),
     ).not.toBeInTheDocument();
@@ -5055,17 +5102,12 @@ describe("ilo web app", () => {
         /Couldn’t load/,
       ),
     ).not.toBeInTheDocument();
-    await browser.click(
-      within(screen.getByRole("complementary", { name: "Tasks Sidebar" })).getByRole("button", {
-        name: "Retry Lists",
-      }),
-    );
     expect(await screen.findByText("Draft brief")).toBeInTheDocument();
     listFailure.unmount();
 
     mocks.listTaskProjects.mockRejectedValueOnce(new Error("Projects are temporarily unavailable"));
     const projectFailure = setup("/tasks");
-    expect(await screen.findByText("Couldn’t load projects.")).toBeInTheDocument();
+    await recoverRead();
     expect(
       within(screen.getByRole("complementary", { name: "Tasks Sidebar" })).queryByRole("status"),
     ).not.toBeInTheDocument();
@@ -5074,11 +5116,6 @@ describe("ilo web app", () => {
         /Couldn’t load/,
       ),
     ).not.toBeInTheDocument();
-    await browser.click(
-      within(screen.getByRole("complementary", { name: "Tasks Sidebar" })).getByRole("button", {
-        name: "Retry Projects",
-      }),
-    );
     expect(await screen.findByText("Draft brief")).toBeInTheDocument();
     projectFailure.unmount();
 
@@ -5091,10 +5128,8 @@ describe("ilo web app", () => {
       return Promise.resolve({ items: [task], nextCursor: null });
     });
     const taskFailure = setup("/tasks");
-    expect(
-      await screen.findByRole("region", { name: /Couldn’t load this material/ }),
-    ).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Retry Tasks" }));
+    expect(await readRecovery()).toBeInTheDocument();
+    await browser.click(within(await readRecovery()).getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Draft brief")).toBeInTheDocument();
     taskFailure.unmount();
   });
@@ -5103,12 +5138,7 @@ describe("ilo web app", () => {
     mocks.listTaskLists.mockRejectedValue(new Error("Lists are temporarily unavailable"));
     const browser = userEvent.setup();
     const listFailure = setup("/tasks?view=today");
-    await browser.click(await screen.findByRole("button", { name: "Create in Tasks" }));
-    await browser.click(screen.getByRole("button", { name: "Task Something to do" }));
-    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
-    expect(
-      await within(screen.getByRole("dialog")).findByText(/Couldn’t load (lists|this material)/),
-    ).toBeInTheDocument();
+    await readRecovery();
     mocks.listTaskLists.mockResolvedValue({
       items: [inboxTaskList, workTaskList],
       nextCursor: null,
@@ -5116,30 +5146,17 @@ describe("ilo web app", () => {
     await browser.click(
       within(screen.getByRole("dialog")).getByRole("button", { name: "Try again" }),
     );
-    await waitFor(() =>
-      expect(
-        within(screen.getByRole("dialog")).queryByRole("button", { name: "Try again" }),
-      ).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     listFailure.unmount();
 
     mocks.listTaskProjects.mockRejectedValue(new Error("Projects are temporarily unavailable"));
     const projectFailure = setup("/tasks?view=today");
-    await browser.click(await screen.findByRole("button", { name: "Create in Tasks" }));
-    await browser.click(screen.getByRole("button", { name: "Task Something to do" }));
-    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
-    expect(
-      await within(screen.getByRole("dialog")).findByText(/Couldn’t load (projects|this material)/),
-    ).toBeInTheDocument();
+    await readRecovery();
     mocks.listTaskProjects.mockResolvedValue({ items: [launchTaskProject], nextCursor: null });
     await browser.click(
       within(screen.getByRole("dialog")).getByRole("button", { name: "Try again" }),
     );
-    await waitFor(() =>
-      expect(
-        within(screen.getByRole("dialog")).queryByRole("button", { name: "Try again" }),
-      ).not.toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     projectFailure.unmount();
   });
 
@@ -5187,6 +5204,7 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: "Move to Trash" }));
     expect(await screen.findByText(/Test reminder: Couldn’t confirm/)).toBeInTheDocument();
     expect(mocks.trashReminder).toHaveBeenCalledWith(reminder.id, reminder.updatedAt);
+    await browser.click(screen.getByRole("button", { name: "Return to tasks" }));
     expect(screen.getByRole("button", { name: "Test reminder options" })).toBeEnabled();
     deletionView.unmount();
   });
@@ -5308,7 +5326,7 @@ describe("ilo web app", () => {
 
   it("edits setup preferences without reopening onboarding and can view the guided experience", async () => {
     const browser = userEvent.setup();
-    sessionStorage.clear();
+    sessionStorage.removeItem(`nohmi.setup-replay.${user.id}`);
     const view = setup("/settings?page=profile&subpage=setup");
     expect(await screen.findByRole("heading", { name: "Setup", level: 1 })).toBeInTheDocument();
     const tasks = screen.getByRole("switch", { name: "Tasks" });
@@ -5482,7 +5500,14 @@ describe("ilo web app", () => {
     });
     const browser = userEvent.setup();
     const view = setup("/finances/review");
-    expect(await screen.findByText("Couldn’t load your review session.")).toBeInTheDocument();
+    await readRecovery();
+    mocks.listAgentAccessWorkItems.mockResolvedValue({
+      items: [],
+      nextCursor: null,
+      summary: { byDomain: {} },
+      unavailableDomains: [],
+    });
+    await recoverRead();
     await browser.click(screen.getByRole("button", { name: "Finance review history" }));
     expect(await screen.findByText("Cafe Example")).toBeInTheDocument();
     expect(mocks.listFinanceReviewHistory).toHaveBeenCalledWith({ limit: 20 });
@@ -5831,7 +5856,7 @@ describe("ilo web app", () => {
     empty.unmount();
     mocks.getFinanceSnapshot.mockRejectedValue(new Error("Finance service unavailable"));
     const failed = setup("/finances");
-    expect(await screen.findByText("Financial position unavailable")).toBeInTheDocument();
+    expect(await readRecovery()).toBeInTheDocument();
     expect(await screen.findByText("No complete plan yet")).toBeInTheDocument();
     failed.unmount();
   });
@@ -6604,7 +6629,7 @@ describe("ilo web app", () => {
   it("explains a completed-reminder query failure on Today", async () => {
     mocks.listReminders.mockRejectedValueOnce(new Error("Completed reminders unavailable"));
     const view = setup();
-    expect(await screen.findByText("Couldn’t load this material.")).toBeInTheDocument();
+    expect(await readRecovery()).toBeInTheDocument();
     view.unmount();
   });
 
@@ -7976,7 +8001,7 @@ describe("ilo web app", () => {
     const pasteFailure = await screen.findByText(
       /Couldn’t confirm whether we could paste this event/,
     );
-    expect(pasteFailure.closest("[data-calendar-feedback]")).not.toBeNull();
+    expect(pasteFailure.closest("[data-sonner-toast]")).not.toBeNull();
     expect(timeline).not.toContainElement(pasteFailure);
     mocks.createEvent.mockRejectedValueOnce(new Error("Network lost"));
     const item = screen.getByRole("button", { name: /^1:00 PM Focus block/ });
@@ -7985,7 +8010,7 @@ describe("ilo web app", () => {
     const duplicateFailure = await screen.findByText(
       /Couldn’t confirm whether we could duplicate this event/,
     );
-    expect(duplicateFailure.closest("[data-calendar-feedback]")).not.toBeNull();
+    expect(duplicateFailure.closest("[data-sonner-toast]")).not.toBeNull();
     expect(timeline).not.toContainElement(duplicateFailure);
     await waitFor(() =>
       expect(mocks.createEvent).toHaveBeenCalledWith(
@@ -8861,6 +8886,7 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
 
     expect(screen.queryByRole("button", { name: "Accounts" })).not.toBeInTheDocument();
+    await browser.click(await screen.findByRole("button", { name: "Snooze for 15 minutes" }));
     const densityTrigger = await screen.findByRole("button", { name: "Message list layout" });
     densityTrigger.focus();
     await browser.keyboard("{Enter}");
@@ -9021,20 +9047,18 @@ describe("ilo web app", () => {
 
     mocks.listConnectors.mockRejectedValueOnce(new Error("accounts unavailable"));
     const accountErrorView = setup("/mail");
-    expect((await screen.findAllByText("Couldn’t load mail accounts.")).length).toBeGreaterThan(0);
+    expect(await readRecovery()).toBeInTheDocument();
     accountErrorView.unmount();
 
     mocks.listMailboxes.mockRejectedValueOnce(new Error("mailboxes unavailable"));
     const mailboxErrorView = setup("/mail");
-    expect((await screen.findAllByText("Couldn’t load mailboxes.")).length).toBeGreaterThan(0);
-    const mailboxNav = screen.getByRole("navigation", { name: "Mailboxes" });
-    expect(within(mailboxNav).queryByText("Couldn’t load mailboxes.")).not.toBeInTheDocument();
-    expect(mailboxNav.querySelector('[data-slot="empty"]')).toBeNull();
+    expect(await readRecovery()).toBeInTheDocument();
+    expect(screen.queryByText("Couldn’t load mailboxes.")).not.toBeInTheDocument();
     mailboxErrorView.unmount();
 
     mocks.listMailThreads.mockRejectedValueOnce(new Error("mail unavailable"));
     const threadErrorView = setup("/mail");
-    expect(await screen.findByText("Couldn’t load conversations.")).toBeInTheDocument();
+    expect(await readRecovery()).toBeInTheDocument();
     threadErrorView.unmount();
 
     mocks.listMailThreads.mockResolvedValueOnce([]);
@@ -9046,11 +9070,8 @@ describe("ilo web app", () => {
     mocks.getMailSetupContext.mockRejectedValueOnce(new Error("mail setup unavailable"));
     const setupErrorView = setup("/mail");
     const browser = userEvent.setup();
+    await recoverRead();
     await browser.click(await screen.findByRole("button", { name: "Compose a message" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Mail accounts are unavailable");
-    await browser.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Try again" }),
-    );
     expect(await screen.findByLabelText("From")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save draft" })).toBeEnabled();
     setupErrorView.unmount();
@@ -9059,36 +9080,24 @@ describe("ilo web app", () => {
   it.each([
     "mail",
     "calendar",
-  ])("offers account read recovery in the %s account popover", async (workspace) => {
+  ])("gates account read recovery in the %s workspace until retry succeeds", async (workspace) => {
     mocks.listConnectors.mockRejectedValue(new Error("accounts unavailable"));
     setup(`/${workspace}`);
     const browser = userEvent.setup();
-    const trigger = await screen.findByRole("button", {
-      name:
-        workspace === "mail"
-          ? /mail accounts, attention required/
-          : /calendars, attention required/,
-    });
-    await browser.click(trigger);
+    const recovery = await screen.findByRole("dialog", { name: "Let’s reconnect" });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Reconnect 0 accounts" })).not.toBeInTheDocument();
-    const retry = screen.getByRole("button", {
-      name: workspace === "mail" ? "Retry loading mail accounts" : "Retry loading calendars",
-    });
     const reads = mocks.listConnectors.mock.calls.length;
     mocks.listConnectors.mockResolvedValue([]);
-    await browser.click(retry);
+    await browser.click(within(recovery).getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(mocks.listConnectors.mock.calls.length).toBeGreaterThan(reads));
-    await waitFor(() => expect(retry).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
   it("keeps background mail account failures from reopening sync details", async () => {
     mocks.listConnectors.mockRejectedValue(new Error("accounts unavailable"));
     const { queryClient } = setup("/mail");
-    const browser = userEvent.setup();
-    const details = await screen.findByRole("button", { name: "Mail sync details" });
-    expect(details).toHaveAttribute("aria-expanded", "false");
-    await browser.click(details);
-    expect(details).toHaveAttribute("aria-expanded", "true");
+    await readRecovery();
     mocks.listConnectors.mockResolvedValue([]);
     await act(async () => {
       await queryClient.invalidateQueries({ queryKey: ["connectors"] });
@@ -9100,10 +9109,9 @@ describe("ilo web app", () => {
     await act(async () => {
       await queryClient.invalidateQueries({ queryKey: ["connectors"] });
     });
-    expect(await screen.findByRole("button", { name: "Mail sync details" })).toHaveAttribute(
-      "aria-expanded",
-      "false",
-    );
+    expect(await readRecovery()).toBeInTheDocument();
+    const details = screen.getByRole("button", { name: "Mail sync details", hidden: true });
+    expect(details).toHaveAttribute("aria-expanded", "false");
   });
 
   it("refreshes partial mail sync results and retries only the failed account", async () => {
@@ -9278,12 +9286,12 @@ describe("ilo web app", () => {
 
     mocks.listEvents.mockRejectedValueOnce(new Error("week unavailable"));
     const calendarView = setup("/calendar");
-    expect(await screen.findByText("Couldn’t load calendar events.")).toBeInTheDocument();
+    expect(await readRecovery()).toBeInTheDocument();
     calendarView.unmount();
 
     mocks.listReminders.mockRejectedValueOnce(new Error("reminders unavailable"));
     const remindersErrorView = setup("/reminders");
-    expect(await screen.findByText("Couldn’t load this material.")).toBeInTheDocument();
+    expect(await readRecovery()).toBeInTheDocument();
     remindersErrorView.unmount();
 
     mocks.listReminders.mockResolvedValue({ items: [], nextCursor: null });
@@ -9489,6 +9497,7 @@ describe("ilo web app", () => {
     setup("/settings?page=connections");
     const browser = userEvent.setup();
 
+    await browser.click(await screen.findByRole("button", { name: "Snooze for 15 minutes" }));
     const googleRow = (await screen.findByText("Personal Google")).closest('[data-slot="item"]');
     if (!(googleRow instanceof HTMLElement)) {
       throw new Error("Google connection row was not rendered.");
@@ -9667,13 +9676,8 @@ describe("ilo web app", () => {
     view.unmount();
     mocks.listSessions.mockRejectedValue(new Error("private diagnostic"));
     setup("/settings?page=security&subpage=sessions");
-    await screen.findByRole("region", { name: "Devices unavailable" });
-    expect(
-      (await screen.findByText("Couldn’t load devices.")).closest("[data-sonner-toast]"),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Devices unavailable" })).not.toHaveTextContent(
-      "Couldn’t load devices.",
-    );
+    expect(await readRecovery()).toBeInTheDocument();
+    expect(screen.queryByText("private diagnostic")).not.toBeInTheDocument();
   });
 
   it("keeps goal and motive edge states explicit", async () => {
@@ -9717,7 +9721,8 @@ describe("ilo web app", () => {
     ).not.toBeInTheDocument();
     await browser.click(screen.getByRole("link", { name: "Completed Outcomes" }));
     const completedSections = await screen.findAllByRole("region", { name: "Completed Outcomes" });
-    const completedSection = completedSections[completedSections.length - 1]!;
+    const completedSection = completedSections.at(-1);
+    if (!completedSection) throw new Error("Completed outcomes section is missing");
     expect(
       within(completedSection).getByRole("button", { name: /^Completed goal/ }),
     ).toBeInTheDocument();
@@ -9769,17 +9774,11 @@ describe("ilo web app", () => {
     motives.unmount();
     mocks.listGoals.mockRejectedValue(new Error("Goals unavailable"));
     const brokenGoals = setup("/goals");
-    await screen.findByRole("region", { name: "Goals unavailable" });
-    expect(
-      (await screen.findByText("Couldn’t load goals.")).closest("[data-sonner-toast]"),
-    ).toBeInTheDocument();
+    expect(await readRecovery()).toBeInTheDocument();
     brokenGoals.unmount();
     mocks.listMotives.mockRejectedValue(new Error("Motives unavailable"));
     setup("/motives");
-    await screen.findByRole("region", { name: "Motives unavailable" });
-    expect(
-      (await screen.findByText("Couldn’t load motives.")).closest("[data-sonner-toast]"),
-    ).toBeInTheDocument();
+    expect(await readRecovery()).toBeInTheDocument();
   });
 
   it("manages private invitations from the admin-only settings surface", async () => {
@@ -9844,12 +9843,7 @@ describe("ilo web app", () => {
     const invitationError = vi.spyOn(toast, "error");
     const unavailable = setup("/settings?page=security&subpage=invitations");
     try {
-      await waitFor(() =>
-        expect(invitationError).toHaveBeenCalledWith(
-          "Couldn’t load invitations.",
-          expect.anything(),
-        ),
-      );
+      await recoverRead();
       expect(
         screen
           .getByRole("heading", { name: "Invitations", level: 2 })
@@ -10095,12 +10089,7 @@ describe("ilo web app", () => {
     expect(screen.getByLabelText("Mosaic fit")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Wallpaper" })).toBeInTheDocument();
     try {
-      await waitFor(() =>
-        expect(previewError).toHaveBeenCalledWith(
-          "Couldn’t load wallpaper preview.",
-          expect.anything(),
-        ),
-      );
+      await recoverRead();
       expect(
         screen
           .getByRole("heading", { name: "Pinterest wallpaper", level: 2 })
@@ -10166,12 +10155,7 @@ describe("ilo web app", () => {
     const settingsErrorToast = vi.spyOn(toast, "error");
     mocks.getPinterestWallpaperSettings.mockRejectedValueOnce(new Error("Settings unavailable"));
     const failedSettings = setup("/settings?page=wallpaper");
-    await waitFor(() =>
-      expect(settingsErrorToast).toHaveBeenCalledWith(
-        "Couldn’t load wallpaper settings.",
-        expect.anything(),
-      ),
-    );
+    await recoverRead();
     failedSettings.unmount();
     settingsErrorToast.mockRestore();
 
@@ -10289,13 +10273,12 @@ describe("ilo web app", () => {
       return originalInvoke?.(command);
     });
     setup("/settings?page=wallpaper");
-    await waitFor(() =>
-      expect(errorToast).toHaveBeenCalledWith("Couldn’t render wallpaper.", expect.anything()),
-    );
-    const preview = screen.getByRole("region", { name: "Wallpaper preview" });
+    await readRecovery();
+    expect(errorToast).not.toHaveBeenCalled();
+    const preview = screen.getByRole("region", { name: "Wallpaper preview", hidden: true });
     expect(within(preview).queryByText("Couldn’t render wallpaper.")).not.toBeInTheDocument();
     expect(screen.queryByText(/Preview unavailable/)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refresh wallpaper", hidden: true })).toBeDisabled();
     expect(
       screen.queryByRole("img", { name: "Wallpaper rendered for your display" }),
     ).not.toBeInTheDocument();
@@ -10303,7 +10286,7 @@ describe("ilo web app", () => {
     failed = false;
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeEnabled(),
+      expect(screen.getByRole("button", { name: "Refresh wallpaper", hidden: true })).toBeEnabled(),
     );
     expect(
       screen.getByRole("img", { name: "Wallpaper rendered for your display" }),

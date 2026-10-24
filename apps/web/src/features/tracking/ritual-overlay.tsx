@@ -525,14 +525,8 @@ export function RitualChecklist({
       ) : null}
     </section>
   );
-  return (
+  const presentation = (
     <div className="ritual-presentation">
-      <div
-        className="ritual-glow"
-        data-ritual-kind={occurrence.definition.kind}
-        aria-hidden="true"
-      />
-      <RitualClouds kind={occurrence.definition.kind} />
       <div className="ritual-logo">
         <NohmiBrandMark symbol />
       </div>
@@ -828,5 +822,14 @@ export function RitualChecklist({
         </div>
       ) : null}
     </div>
+  );
+  return (
+    <>
+      <div className="ritual-scene" aria-hidden="true">
+        <div className="ritual-glow" data-ritual-kind={occurrence.definition.kind} />
+        <RitualClouds kind={occurrence.definition.kind} />
+      </div>
+      {presentation}
+    </>
   );
 }

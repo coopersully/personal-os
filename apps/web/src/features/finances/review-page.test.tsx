@@ -1,3 +1,5 @@
+import { renderWithFeedback as render } from "@/test-utils/feedback";
+
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type {
@@ -7,7 +9,7 @@ import type {
   FinanceToolResult,
 } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { vi } from "vitest";
@@ -469,14 +471,18 @@ it("uses source references, proposal defaults, and paged related evidence conser
     });
   mount();
   expect(await screen.findByText("Proposed category: Dining")).toBeVisible();
-  expect(await screen.findByText("Couldn’t load this material.")).toBeVisible();
+  expect((await screen.findAllByText("Couldn’t load this material."))[0]).toBeVisible();
   expect(screen.getByText(/currency unavailable.*Pending.*Other/)).toBeVisible();
   await user.selectOptions(screen.getByLabelText("Resolution"), "link_transactions");
   expect(
     await screen.findByRole("option", { name: /Older item.*currency unavailable/ }),
   ).toBeVisible();
   await user.click(screen.getByRole("button", { name: "Earlier transactions" }));
-  expect(await screen.findAllByText("Couldn’t load this material.")).toHaveLength(2);
+  expect(
+    (await screen.findAllByText("Couldn’t load this material.")).filter(
+      (element) => !element.closest("[data-sonner-toast]"),
+    ),
+  ).toHaveLength(2);
   await user.click(screen.getByRole("button", { name: "Latest transactions" }));
   expect(await screen.findByRole("option", { name: /Older item/ })).toBeVisible();
 });
@@ -489,10 +495,10 @@ it("reloads failed inbox and category sources and renews a confirmed failed answ
     .mockRejectedValueOnce(new Error("previously failed; use a new idempotency key"))
     .mockResolvedValueOnce(response([]));
   mount();
-  expect(await screen.findByText("Couldn’t load this material.")).toBeVisible();
+  expect((await screen.findAllByText("Couldn’t load this material."))[0]).toBeVisible();
   await user.click(screen.getByRole("button", { name: "Reload review" }));
   expect(await screen.findByLabelText("Your answer")).toBeVisible();
-  expect(await screen.findByText("Couldn’t load this material.")).toBeVisible();
+  expect((await screen.findAllByText("Couldn’t load this material."))[0]).toBeVisible();
   await user.type(screen.getByLabelText("Your answer"), "Confirmed purchase");
   await user.click(screen.getByRole("button", { name: "Save answer" }));
   expect(
@@ -515,7 +521,7 @@ it("keeps saved notes inspectable when no unanswered question remains", async ()
   data.outcome = "work_remaining";
   api.getFinanceInbox.mockResolvedValue(data);
   mount();
-  expect(await screen.findByText("Note saved · awaiting maintenance")).toBeVisible();
+  expect(await screen.findByText("Note awaiting maintenance")).toBeVisible();
   expect(screen.getByText("A savings transfer")).toBeVisible();
   expect(screen.queryByText("Review question unavailable")).not.toBeInTheDocument();
   expect(screen.queryByText("No open Inbox questions")).not.toBeInTheDocument();
@@ -533,7 +539,7 @@ it("keeps legacy clarification evidence inspectable as a saved note", async () =
   data.outcome = "work_remaining";
   api.getFinanceInbox.mockResolvedValue(data);
   mount();
-  expect(await screen.findByText("Note saved · awaiting maintenance")).toBeVisible();
+  expect(await screen.findByText("Note awaiting maintenance")).toBeVisible();
   expect(screen.getByText("A legacy savings transfer note")).toBeVisible();
 });
 

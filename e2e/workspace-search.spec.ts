@@ -927,9 +927,9 @@ test("Finance consolidates contextual controls and preserves responsive creation
   await header.getByRole("button", { name: "Cash flow view" }).click();
   await page.getByRole("menuitemradio", { name: "Income", exact: true }).click();
   await expect(page).toHaveURL(/view=income/);
-  await expect(header.getByRole("button", { name: "Cash flow view" })).toHaveText("Income");
+  await expect(header.getByRole("button", { name: "Cash flow view" })).toHaveText("income");
   await page.reload();
-  await expect(header.getByRole("button", { name: "Cash flow view" })).toHaveText("Income");
+  await expect(header.getByRole("button", { name: "Cash flow view" })).toHaveText("income");
 
   await page.goto("/finances/plan");
   await page.getByRole("button", { name: "Budget buckets", exact: true }).click();
@@ -985,7 +985,11 @@ test("Finance consolidates contextual controls and preserves responsive creation
 
   await page.goto("/finances");
   await expect(page.getByRole("region", { name: "Complete plan", exact: true })).toBeVisible();
-  await expect(header.getByRole("group")).toHaveCount(0);
+  // Overview has no route-owned controls; shared search still contains input groups.
+  await expect(header.locator(".workspace-header-controls")).toHaveCount(0);
+  await expect(
+    header.getByRole("combobox", { name: "Search Finances", exact: true }),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: "Add in Transactions", exact: true })).toHaveCount(
     0,
   );

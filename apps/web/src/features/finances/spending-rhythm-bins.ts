@@ -26,7 +26,9 @@ export function spendingHourlyBins(dashboard: FinanceSpendingDashboard) {
       ? `${parts.get("year")}-${parts.get("month")}-${parts.get("day")}`
       : null;
     const bin =
-      localDate === contribution.date && localDate === dashboard.snapshot.scope.from
+      localDate === contribution.date &&
+      localDate >= dashboard.snapshot.scope.from &&
+      localDate <= dashboard.snapshot.scope.through
         ? hours[Number(parts?.get("hour"))]
         : undefined;
     if (bin) {
@@ -56,12 +58,16 @@ export function rhythmGrain(from: string, through: string) {
           ? "Monthly"
           : "Yearly";
 }
+export type RhythmGrain = ReturnType<typeof rhythmGrain>;
+export type RhythmGrainChoice = "Auto" | RhythmGrain;
+
 export function spendingRhythmBins(
   dashboard: FinanceSpendingDashboard,
   weekStartsOn: "sunday" | "monday" = "sunday",
+  choice: RhythmGrainChoice = "Auto",
 ) {
   const { scope, bins } = dashboard.snapshot;
-  const grain = rhythmGrain(scope.from, scope.through);
+  const grain = choice === "Auto" ? rhythmGrain(scope.from, scope.through) : choice;
   const grouped = new Map<
     string,
     { from: string; through: string; partial: boolean; days: FinanceSpendingDailyBin[] }

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { FinanceSpendingDashboard } from "@personal-os/domain";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { FinanceSpendingRhythm, spendingHourlyBins } from "./spending-rhythm";
@@ -153,7 +153,7 @@ it("retains a calendar tabstop and focused detail when the range becomes shorter
       onSelect={vi.fn()}
     />,
   );
-  expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  expect(screen.getByRole("group", { name: "Daily spending blocks" })).toBeEmptyDOMElement();
 });
 
 function completeDashboard(value: {
@@ -209,7 +209,7 @@ it("keeps date-only spending out of hourly totals rather than assigning midnight
   expect(result.hours.every((hour) => hour.count === 0)).toBe(true);
   expect(result.untimedCents).toBe(1250);
   render(<FinanceSpendingRhythm dashboard={value} onSelect={vi.fn()} />);
-  expect(screen.getByText("Hourly spending")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Rhythm" })).toBeInTheDocument();
   expect(
     screen.getByRole("button", { name: /Time not provided: \$12.50; 1 item/ }),
   ).toBeInTheDocument();
@@ -303,8 +303,42 @@ it("renders only an open heading and blocks, with no duplicate context or contai
   const { container } = render(
     <FinanceSpendingRhythm dashboard={observedDashboard()} onSelect={vi.fn()} />,
   );
-  expect(screen.getByRole("heading", { name: "Daily spending" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Rhythm" })).toBeInTheDocument();
   expect(container.querySelector('[data-slot="card"]')).toBeNull();
   expect(screen.queryByText("UTC")).not.toBeInTheDocument();
   expect(screen.queryByText("Daily spending list")).not.toBeInTheDocument();
+});
+
+it("offers every interval and returns to automatic grain", async () => {
+  render(<FinanceSpendingRhythm dashboard={observedDashboard()} onSelect={vi.fn()} />);
+  expect(screen.getByRole("button", { name: "Rhythm interval: Auto · daily" })).toBeInTheDocument();
+  for (const interval of ["Hourly", "Daily", "Weekly", "Monthly", "Yearly", "Auto"]) {
+    fireEvent.keyDown(screen.getByRole("button", { name: /^Rhythm interval:/ }), {
+      key: "ArrowDown",
+    });
+    await userEvent.click(screen.getByRole("menuitemradio", { name: interval }));
+    expect(
+      screen.getByRole("button", {
+        name: `Rhythm interval: ${interval === "Auto" ? "Auto · daily" : interval}`,
+      }),
+    ).toBeInTheDocument();
+  }
+});
+it("includes timestamped purchases across the whole selected range in hourly patterns", () => {
+  const value = observedDashboard();
+  value.snapshot.scope = {
+    ...value.snapshot.scope,
+    from: "2026-03-01",
+    through: "2026-03-03",
+    timezone: "UTC",
+  };
+  value.snapshot.contributions = [
+    { id: "a", transactionId: "a", date: "2026-03-01", netCents: 100 },
+    { id: "b", transactionId: "b", date: "2026-03-03", netCents: 200 },
+  ] as FinanceSpendingDashboard["snapshot"]["contributions"];
+  value.transactions = [
+    { id: "a", accountId: "a", merchant: "Cafe", date: "2026-03-01T10:00:00Z", pending: false },
+    { id: "b", accountId: "a", merchant: "Cafe", date: "2026-03-03T10:00:00Z", pending: false },
+  ];
+  expect(spendingHourlyBins(value).hours[10]).toMatchObject({ count: 2, netCents: 300 });
 });

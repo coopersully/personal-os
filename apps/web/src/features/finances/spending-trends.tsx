@@ -4,11 +4,12 @@ import type {
   FinanceSpendingDrillDown,
   FinanceSpendingScope,
 } from "@personal-os/domain";
+import type { ReactNode } from "react";
 import {
+  Area,
+  AreaChart,
   CartesianGrid,
   Tooltip as ChartTooltip,
-  Line,
-  LineChart,
   ReferenceLine,
   ResponsiveContainer,
   XAxis,
@@ -181,7 +182,9 @@ export function FinanceSpendingTrends({
   comparisonLoading = false,
   comparisonLabel = "Previous period",
   onSelect,
+  focusControl,
 }: {
+  focusControl?: ReactNode;
   dashboard: FinanceSpendingDashboard;
   comparison?: FinanceSpendingDashboard;
   comparisonLoading?: boolean;
@@ -197,7 +200,11 @@ export function FinanceSpendingTrends({
     comparison?.source.freshness !== "current";
   const chartData = bins.map((bin) => ({ ...bin, spending: bin.netCents / 100 }));
   return (
-    <section aria-label="Spending trends" className="min-w-0">
+    <section aria-label="Spending trends" className="flex min-w-0 flex-col gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-sm font-medium">Trends</h2>
+        {focusControl}
+      </div>
       <Card>
         <CardHeader>
           <CardTitle>Spending over time</CardTitle>
@@ -326,7 +333,7 @@ export function FinanceSpendingTrends({
             aria-label={`${grain} net spending chart`}
           >
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart
+              <AreaChart
                 data={chartData}
                 onClick={(state) => {
                   const bin = state?.activePayload?.[0]?.payload as
@@ -398,18 +405,21 @@ export function FinanceSpendingTrends({
                     );
                   }}
                 />
-                <Line
-                  type="linear"
+                <Area
+                  type="monotone"
                   dataKey="spending"
                   name="Net spending"
                   stroke="var(--workspace-finances-accent)"
                   strokeWidth={2}
+                  fill="var(--workspace-finances-accent)"
+                  fillOpacity={0.18}
+                  baseValue={0}
                   dot={false}
                   activeDot={{ r: 5 }}
                   isAnimationActive={false}
                   className="cursor-pointer"
                 />
-              </LineChart>
+              </AreaChart>
             </ResponsiveContainer>
           </div>
           <fieldset

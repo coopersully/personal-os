@@ -11,11 +11,12 @@ function chooseSort(name: RegExp) {
   fireEvent.click(screen.getByRole("menuitem", { name }));
 }
 
-it("sorts exact amounts, exposes negative groups, and expands bucket categories", async () => {
+it("sorts exact amounts and selects buckets without repeating their category breakdown", async () => {
   const groups = [
     {
       id: "a",
       label: "Travel",
+      kind: "bucket",
       netCents: 12345,
       pendingCents: 345,
       categories: [{ id: "child", label: "Rail", netCents: 12345, pendingCents: 345 }],
@@ -31,9 +32,10 @@ it("sorts exact amounts, exposes negative groups, and expands bucket categories"
   const list = screen.getAllByRole("list")[0];
   if (!list) throw new Error("Missing spending list");
   expect(within(list).getAllByRole("button")[0]).toHaveTextContent("Food");
-  await user.click(screen.getByLabelText("Categories in Travel"));
-  await user.click(screen.getByRole("button", { name: "Rail" }));
-  expect(select).toHaveBeenCalledWith(groups[0]?.categories[0]);
+  expect(screen.queryByLabelText("Categories in Travel")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Rail" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Travel" }));
+  expect(select).toHaveBeenCalledWith(groups[0]);
   expect(screen.getAllByText(/Budget unavailable/).length).toBeGreaterThan(0);
 });
 

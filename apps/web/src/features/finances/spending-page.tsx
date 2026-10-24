@@ -420,41 +420,40 @@ export function FinanceSpendingPage() {
       ),
   ] as const;
   const focusedCategories = params.get("categories")?.split(",").sort().join(",") ?? "all";
-  const scopeControls = (
-    <>
+  const trendFocus =
+    view === "trends" && result ? (
       <SpendingChoice
-        label="Group by"
+        label="Focus"
         showLabel={false}
-        value={choice("grouping", defaults.financeSpendingGrouping)}
-        options={[
-          ["auto", "Auto"],
-          ["buckets", "Buckets"],
-          ["categories", "Categories"],
-        ]}
-        disabled={disabled}
-        onChange={(value) => update("grouping", value, "financeSpendingGrouping")}
+        subtle
+        value={focusedCategories}
+        displayValue={
+          focusOptions.find(([id]) => id === focusedCategories)?.[1] ?? "Custom selection"
+        }
+        options={focusOptions}
+        onChange={(value) => {
+          if (value !== "all") return update("categories", value);
+          const next = new URLSearchParams(params);
+          next.delete("categories");
+          changeParams(next);
+          setSelected(null);
+          setSelectedDrillDown(null);
+        }}
       />
-      {view === "trends" && result ? (
-        <SpendingChoice
-          label="Focus"
-          showLabel={false}
-          subtle
-          value={focusedCategories}
-          displayValue={
-            focusOptions.find(([id]) => id === focusedCategories)?.[1] ?? "Custom selection"
-          }
-          options={focusOptions}
-          onChange={(value) => {
-            if (value !== "all") return update("categories", value);
-            const next = new URLSearchParams(params);
-            next.delete("categories");
-            changeParams(next);
-            setSelected(null);
-            setSelectedDrillDown(null);
-          }}
-        />
-      ) : null}
-    </>
+    ) : null;
+  const scopeControls = (
+    <SpendingChoice
+      label="Group by"
+      showLabel={false}
+      value={choice("grouping", defaults.financeSpendingGrouping)}
+      options={[
+        ["auto", "Auto"],
+        ["buckets", "Buckets"],
+        ["categories", "Categories"],
+      ]}
+      disabled={disabled}
+      onChange={(value) => update("grouping", value, "financeSpendingGrouping")}
+    />
   );
   return (
     <div className="flex min-w-0 flex-col gap-6" aria-busy={data.isFetching}>
@@ -813,6 +812,7 @@ export function FinanceSpendingPage() {
               </div>
               {view === "trends" ? (
                 <FinanceSpendingTrends
+                  focusControl={trendFocus}
                   dashboard={result}
                   comparisonLabel={comparisonScopes?.label ?? "Previous period"}
                   {...(comparison.data ? { comparison: comparison.data } : {})}

@@ -5,7 +5,12 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { formatCalendarDate } from "@/lib/date-format";
 import { cn } from "@/lib/utils";
 import { formatMoney } from "./format";
-import { spendingHourlyBins, spendingRhythmBins } from "./spending-rhythm-bins";
+import { SpendingChoice } from "./spending-controls";
+import {
+  type RhythmGrainChoice,
+  spendingHourlyBins,
+  spendingRhythmBins,
+} from "./spending-rhythm-bins";
 import { spendingBinStatus } from "./spending-trends";
 
 export { spendingHourlyBins } from "./spending-rhythm-bins";
@@ -19,10 +24,11 @@ export function FinanceSpendingRhythm({
   weekStartsOn?: "sunday" | "monday";
   onSelect: (drillDown: FinanceSpendingDrillDown) => void;
 }) {
+  const [grainChoice, setGrainChoice] = useState<RhythmGrainChoice>("Auto");
   const [focused, setFocused] = useState(0);
   const [shown, setShown] = useState<string | null>(null);
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
-  const result = spendingRhythmBins(dashboard, weekStartsOn);
+  const result = spendingRhythmBins(dashboard, weekStartsOn, grainChoice);
   const { hours, untimedCents, untimedCount } = spendingHourlyBins(dashboard);
   const hourly = result.grain === "Hourly";
   const parts = new Map(
@@ -39,13 +45,15 @@ export function FinanceSpendingRhythm({
   );
   const today = `${parts.get("year")}-${parts.get("month")}-${parts.get("day")}`;
   const selectedDay = dashboard.snapshot.scope.from;
+  const singleDay = selectedDay === dashboard.snapshot.scope.through;
   const blocks = hourly
     ? hours.map((hour) => {
         const future =
-          selectedDay > today || (selectedDay === today && hour.hour > Number(parts.get("hour")));
+          selectedDay > today ||
+          (singleDay && selectedDay === today && hour.hour > Number(parts.get("hour")));
         const complete =
           !future && dashboard.snapshot.coverage === "complete" && untimedCount === 0;
-        const label = `${hour.hour % 12 || 12} ${hour.hour < 12 ? "AM" : "PM"}`;
+        const label = `${hour.hour % 12 || 12} ${hour.hour < 12 ? "AM" : "PM"}${singleDay ? "" : " · across selected days"}`;
         return {
           key: String(hour.hour),
           label,
@@ -83,14 +91,41 @@ export function FinanceSpendingRhythm({
       future: false,
       incomplete: true,
       status: `${untimedCount} ${untimedCount === 1 ? "item" : "items"} · Purchase times not provided`,
-      drillDown: dashboard.snapshot.bins[0]?.drillDown ?? null,
+      drillDown: {
+        scope: dashboard.snapshot.scope,
+        contributionIds: dashboard.snapshot.contributions.map((item) => item.id),
+        transactionIds: [
+          ...new Set(dashboard.snapshot.contributions.map((item) => item.transactionId)),
+        ],
+      },
     });
   const maximum = Math.max(1, ...blocks.map((block) => Math.abs(block.netCents)));
   const focusedIndex = Math.min(focused, Math.max(0, blocks.length - 1));
   const selected = blocks[focusedIndex];
   return (
     <section aria-label="Spending rhythm" className="flex min-w-0 flex-col gap-3">
-      <h2 className="text-sm font-medium">{result.grain} spending</h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-sm font-medium">Rhythm</h2>
+        <SpendingChoice
+          label="Rhythm interval"
+          showLabel={false}
+          subtle
+          value={grainChoice}
+          displayValue={
+            grainChoice === "Auto" ? `Auto · ${result.grain.toLowerCase()}` : grainChoice
+          }
+          options={["Auto", "Hourly", "Daily", "Weekly", "Monthly", "Yearly"].map(
+            (value) => [value, value] as const,
+          )}
+          onChange={(value) => {
+            if (["Auto", "Hourly", "Daily", "Weekly", "Monthly", "Yearly"].includes(value)) {
+              setGrainChoice(value as RhythmGrainChoice);
+              setFocused(0);
+              setShown(null);
+            }
+          }}
+        />
+      </div>
       <TooltipProvider delayDuration={150}>
         <fieldset
           aria-label={`${result.grain} spending blocks`}

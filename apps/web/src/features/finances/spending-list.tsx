@@ -176,7 +176,7 @@ export function SpendingList({
           {ordered.map((group) => (
             <li key={group.id} className="min-w-0">
               {row(group)}
-              {group.categories.length ? (
+              {group.kind !== "bucket" && group.categories.length ? (
                 <details className="px-3 pb-2">
                   <summary
                     aria-label={`Categories in ${group.label}`}

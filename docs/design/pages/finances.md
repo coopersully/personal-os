@@ -74,7 +74,7 @@ Do not add a repeated list or explanatory footer beneath the canvas. Preserve ex
 recovery links and accounting queries.
 
 The spending bubble view defaults to configured budget buckets, or categories when no buckets are
-configured, and remembers the user's explicit grouping choice. Buckets support category drill-down.
+configured, and remembers the user's explicit grouping choice. Buckets open their existing detail view; inspect individual categories with category grouping.
 Both bucket and category contexts offer Transactions links preserving the selected group and period.
 Bubbles are always draggable, including when reduced motion is enabled. Keep bodies rigid:
 no drag elasticity or inertial throw. Resolve collisions while dragging with the active body pinned;
@@ -99,14 +99,14 @@ exact amounts, monthly usage and coverage are available through accessible names
 existing detail dialog. Zero and negative groups remain in List. Reduced motion disables automatic
 animation while preserving manual arrangement. Do not repeat the List below Bubbles.
 
-Trends uses the shared Card composition and a responsive net-spending line chart with Finance accent,
-quiet grid/axes and formatted dates. Focus lives in the primary navigation. The comparison stays in
+Trends uses the shared Card composition and a responsive net-spending area chart with Finance accent,
+quiet grid/axes and formatted dates. The bucket/category focus picker sits opposite the Trends section heading, above Spending over time. The comparison stays in
 the chart header; detailed period rows, source/coverage and group changes live in its info dialog.
-Signed points preserve net refunds; exact selections remain available by pointer and keyboard.
-Rhythm is an open contribution-style heatmap: only a grain-aware heading and fluid rounded square
+A smooth monotone line and quiet branded fill preserve signed net refunds; exact selections remain available by pointer and keyboard.
+Rhythm is an open contribution-style heatmap: only a Rhythm heading with an interval selector and fluid rounded square
 blocks, without containing Cards, duplicate date/timezone context, a legend, or a footer. Blocks fill the
-available width with a 3rem minimum, wrap responsively, and let content height grow with their count. Select grain
-by inclusive range length: 1 day → hourly; 2–62 → daily; 63–366 → weekly; 367–1096 → monthly;
+available width with a 3rem minimum, wrap responsively, and let content height grow with their count. Auto is the initial selection; the user can explicitly select Hourly, Daily, Weekly, Monthly, or
+Yearly for any range. In Auto, select grain by inclusive range length: 1 day → hourly; 2–62 → daily; 63–366 → weekly; 367–1096 → monthly;
 longer → yearly. Weekly blocks follow the saved week start; monthly/yearly blocks follow calendar
 boundaries. Clip boundary blocks to the selected range and identify partial periods in tooltips.
 Color intensity represents net spending per block; confirmed zero, missing evidence, net refunds
@@ -768,13 +768,18 @@ column headings. Show the group title and “z% ($used) of $budget used, $remain
 put the selected-period amount prominently at the end. Use “over” for negative remaining amounts;
 zero and missing budgets keep explicit bounded states. Omit row-level pending notices because
 pending inclusion is controlled in the filter. Preserve sorting in the Breakdown icon menu and
-progressive category disclosure. Background fills continue to represent monthly budget usage.
+direct bucket inspection. Background fills continue to represent monthly budget usage.
 
 Spending list glyphs sit in padded square frames with a subtle contrasting surface.
 
 The Trends focus picker uses the same quiet muted value treatment as the date range. Its all-option
 follows the effective grouping (All buckets or All categories), and its catalog retains the full
-unfiltered group choices after selection. Every single-day selection uses 24 local-time hour blocks. Only source
+unfiltered group choices after selection. Auto uses 24 local-time hour blocks for single-day selections. Only source
 purchase timestamps establish an hour; date-only transactions remain in Time not provided, never
 midnight or the record-update hour. The current transaction source supplies dates only. Hourly zero
 requires complete evidence and no untimed contributions; future and unknown hours remain distinct.
+
+Manual Hourly mode across multiple dates summarizes the local time-of-day pattern across all
+selected days (24 hour-of-day blocks). Its tooltips say across selected days; the untimed block opens
+the full selected period, preserving exact day/period reference scope. Bucket List rows omit nested
+category-breakdown disclosures; the bucket itself still opens its existing detail view.

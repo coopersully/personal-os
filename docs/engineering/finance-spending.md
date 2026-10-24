@@ -94,7 +94,7 @@ Full transaction-view integration and production/UI acceptance remain separate o
 Trends and Rhythm consume the same dated snapshots. Current named-period comparisons cap the
 current period to elapsed local dates and compare the equivalent elapsed previous period, labeling
 shorter-month caps. Complete named months compare complete prior months; custom ranges use the
-preceding equal-length local-date interval. Signed daily/weekly/monthly net line points and the accessible table in Trend details
+preceding equal-length local-date interval. Signed daily/weekly/monthly net area-chart points and the accessible table in Trend details
 share exact contribution references. Rhythm distinguishes observed positive and net-refund amounts,
 unknown/partial coverage, future dates and confirmed zero; it uses the person's saved week start.
 
@@ -190,3 +190,9 @@ A combined block can be complete only when every expected day has complete evide
 calendar intervals and uncertain evidence remain disclosed in hover/focus details. The open block
 grid has no containing Card or duplicate date/timezone context; the untimed subtotal is a distinct
 labelled block, not an extra paragraph or action row.
+
+Rhythm supports explicit display-only grain overrides with Auto as the initial mode. Manual hourly
+mode on multi-day selections aggregates matching local purchase hours across selected dates;
+source records without purchase times remain untimed. This display choice changes neither the
+ledger query nor stored budget/settings. Untimed selection uses the full selected scope and source
+membership, not only the first day.

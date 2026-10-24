@@ -306,7 +306,9 @@ it("defaults Rhythm to three calendar months using saved Monday week start and r
   expect(
     (end.getUTCFullYear() - start.getUTCFullYear()) * 12 + end.getUTCMonth() - start.getUTCMonth(),
   ).toBe(2);
-  expect(screen.getByRole("heading", { name: "Weekly spending" })).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Rhythm interval: Auto · weekly" }),
+  ).toBeInTheDocument();
   expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
   cleanup();
   vi.mocked(api.getFinanceSpending).mockClear();

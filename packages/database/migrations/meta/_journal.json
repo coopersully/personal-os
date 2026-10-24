@@ -932,6 +932,13 @@
       "when": 1792805833756,
       "tag": "0125_finance_bypass_confirmation_provenance",
       "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1792812516989,
+      "tag": "0126_finance_spending_list_default",
+      "breakpoints": true
     }
   ]
 }

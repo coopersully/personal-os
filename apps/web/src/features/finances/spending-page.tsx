@@ -104,7 +104,7 @@ export function FinanceSpendingPage() {
   const requestedView = choice("view", defaults.financeSpendingView);
   const view = ["bubbles", "list", "trends", "rhythm"].includes(requestedView)
     ? requestedView
-    : "bubbles";
+    : "list";
   const rhythmDefault =
     view === "rhythm" && !["period", "from", "through"].some((key) => params.has(key));
   const [openedAt] = useState(() => new Date().toISOString());

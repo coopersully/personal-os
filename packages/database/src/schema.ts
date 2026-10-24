@@ -5661,7 +5661,7 @@ export const financesWorkspaceSettings = pgTable(
     financeTransactionView: text("finance_transaction_view").notNull().default("table"),
     financeTransactionGroup: text("finance_transaction_group").notNull().default("none"),
     financeManualVisibility: text("finance_manual_visibility").notNull().default("auto"),
-    financeSpendingView: text("finance_spending_view").notNull().default("bubbles"),
+    financeSpendingView: text("finance_spending_view").notNull().default("list"),
     financeSpendingGrouping: text("finance_spending_grouping").notNull().default("auto"),
     financeSpendingIncludePending: boolean("finance_spending_include_pending")
       .notNull()

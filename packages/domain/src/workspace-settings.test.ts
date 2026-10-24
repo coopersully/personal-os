@@ -19,7 +19,7 @@ describe("workspace settings contracts", () => {
       includeArchivedInSearch: true,
       financeTransactionView: "table",
       financeManualVisibility: "auto",
-      financeSpendingView: "bubbles",
+      financeSpendingView: "list",
       financeSpendingGrouping: "auto",
       financeSpendingIncludePending: true,
       financeSpendingIncludeUncategorized: true,
@@ -31,6 +31,10 @@ describe("workspace settings contracts", () => {
       cashAccountIds: null,
       investmentAccountIds: null,
     });
+    expect(
+      resolveWorkspaceSettings("finances", { financeSpendingView: "bubbles" }).preferences
+        .financeSpendingView,
+    ).toBe("bubbles");
     expect(getDefaultWorkspacePreferences("calendar")).toMatchObject({
       weekStartsOn: "sunday",
       defaultEventDurationMinutes: 60,
@@ -92,7 +96,7 @@ it("adds Spending defaults without resetting existing account/transaction prefer
     spendAccountIds: [],
     financeTransactionView: "cards",
     financeTransactionGroup: "category",
-    financeSpendingView: "bubbles",
+    financeSpendingView: "list",
     financeSpendingGrouping: "auto",
     financeSpendingIncludePending: true,
   });

@@ -26,7 +26,7 @@ it("sorts exact amounts, exposes negative groups, and expands bucket categories"
   const list = screen.getAllByRole("list")[0];
   if (!list) throw new Error("Missing spending list");
   expect(within(list).getAllByRole("button")[0]).toHaveTextContent("Food");
-  await user.click(screen.getByText("Categories in Travel"));
+  await user.click(screen.getByLabelText("Categories in Travel"));
   await user.click(screen.getByRole("button", { name: "Rail" }));
   expect(select).toHaveBeenCalledWith(groups[0]?.categories[0]);
   expect(screen.getAllByText(/Budget unavailable/).length).toBeGreaterThan(0);
@@ -50,7 +50,7 @@ it("sorts qualified monthly utilization separately from selected-period spending
   } as FinanceSpendingMonthlyBudget;
   render(<SpendingList groups={groups} monthlyBudget={monthlyBudget} onSelect={vi.fn()} />);
   expect(
-    screen.getByText(/Observed monthly \$110.00 of \$100.00 · 110.0% · Over budget \$10.00/),
+    screen.getByTitle(/Observed monthly \$110.00 of \$100.00 · 110.0% · Over budget \$10.00/),
   ).toBeVisible();
   expect(screen.getByText("No budget limit")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: /Monthly budget used/ }));
@@ -127,7 +127,7 @@ it("keeps a zero-selected-activity qualified row visible and selects its own emp
   const select = vi.fn();
   render(<SpendingList groups={[group]} monthlyBudget={monthlyBudget} onSelect={select} />);
   expect(screen.getByText("$0.00")).toBeVisible();
-  expect(screen.getByText("Observed monthly $16.00 of $100.00 · 16.0%")).toBeVisible();
+  expect(screen.getByTitle("Observed monthly $16.00 of $100.00 · 16.0%")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Utilities" }));
   expect(select).toHaveBeenCalledWith(group);
   expect(select.mock.calls[0]?.[0].drillDown).toEqual({
@@ -179,7 +179,7 @@ it("reverses sorting and keeps unavailable budgets last with deterministic ties"
   const labels = () =>
     within(screen.getByRole("list"))
       .getAllByRole("button")
-      .map((button) => button.textContent);
+      .map((button) => button.getAttribute("aria-label"));
   fireEvent.click(screen.getByRole("button", { name: /Monthly budget used/ }));
   expect(labels()).toEqual(["Alpha", "Zulu", "Beta", "Missing", "Uncapped"]);
   fireEvent.click(screen.getByRole("button", { name: /Monthly budget used/ }));

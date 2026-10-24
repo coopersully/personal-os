@@ -350,7 +350,7 @@ it("uses qualified whole-month usage alongside selected-day amounts without chan
     },
   }));
   mount("?view=list&period=today&from=2026-09-08");
-  await screen.findByText("Observed monthly $25.00 of $100.00 · 25.0%");
+  await screen.findByTitle("Observed monthly $25.00 of $100.00 · 25.0%");
   expect(screen.getByText("$100.00 · 25%")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Spending breakdown" }));
   fireEvent.click(screen.getByText("Coverage and accounting details"));

@@ -725,3 +725,11 @@ transition smoothly between widths. Preserve the prior same-owner query result d
 scope refreshes, with the page marked busy; recovered references continue to require a fresh read.
 Reduced-motion preferences suppress digit and fill animations. The total footer is budget amount
 · usage percentage; daily average includes its elapsed day count and Through today when applicable.
+
+
+List is the default Spending view for new or unset preferences; saved explicit view choices and
+URL overrides remain authoritative. List uses a single shared Card with compact Item rows, selected-
+range amounts, monthly-budget Progress indicators and concise remaining/over amounts. Preserve
+exact monthly usage/coverage in accessible descriptions and hover details. Show pending amounts
+only when nonzero. Bucket categories remain progressively disclosed. Missing/zero limits, negative
+adjustments and budget sorting retain their distinct accounting meanings.

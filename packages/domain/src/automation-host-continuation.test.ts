@@ -13,7 +13,9 @@ import {
   automationHostScheduleSchema,
   automationHostScheduleUpdateInputSchema,
   automationHostSurfaceSchema,
+  nextScheduledAutomationHostSlot,
   observeAutomationHostScheduleHealth,
+  scheduledAutomationHostTriggerSchema,
 } from "./automation-host-continuation.js";
 
 type TriggerForHost<Schedule, Host> = Schedule extends {
@@ -49,10 +51,13 @@ describe("automation host schedule contract", () => {
       type: "recurring";
       recurrence: { type: "interval"; everyMinutes: number; timeZone: string };
     }>();
-    expectTypeOf<TriggerForHost<AutomationHostSchedule, "claude_code_routine">>().toEqualTypeOf<{
-      type: "event";
-      expectedMaximumLatencyMinutes: number;
-    }>();
+    expectTypeOf<TriggerForHost<AutomationHostSchedule, "claude_code_routine">>().toEqualTypeOf<
+      | {
+          type: "event";
+          expectedMaximumLatencyMinutes: number;
+        }
+      | { type: "scheduled"; localTimes: string[]; timeZone: string }
+    >();
     expectTypeOf<
       Extract<
         AutomationHostSchedule,
@@ -432,6 +437,7 @@ describe("automation host schedule contract", () => {
       observeAutomationHostScheduleHealth(active, new Date("2026-09-15T12:01:59.000Z")),
     ).toEqual({
       state: "expected",
+      expectationBasis: "host_reported",
       graceMilliseconds: 300000,
       overdueAt: "2026-09-15T12:07:00.000Z",
       lastObservedAt: "2026-09-15T11:59:30.000Z",
@@ -446,6 +452,7 @@ describe("automation host schedule contract", () => {
       ),
     ).toEqual({
       state: "overdue",
+      expectationBasis: "host_reported",
       graceMilliseconds: 300000,
       overdueAt: "2026-09-15T12:07:00.000Z",
       lastObservedAt: null,
@@ -582,4 +589,63 @@ it("validates exact immutable prompt identities and bounded history inputs", () 
     { beforeVersion: 1.5 },
   ])
     expect(automationHostPromptPageInputSchema.safeParse(invalid).success).toBe(false);
+});
+
+describe("Claude daily wall-clock slots", () => {
+  const trigger = {
+    type: "scheduled" as const,
+    localTimes: ["08:00", "20:00"],
+    timeZone: "America/New_York",
+  };
+  it.each([
+    ["2026-03-07T13:00:00Z", "2026-03-08T01:00:00.000Z"],
+    ["2026-03-08T01:00:00Z", "2026-03-08T12:00:00.000Z"],
+    ["2026-10-31T12:00:00Z", "2026-11-01T00:00:00.000Z"],
+    ["2026-11-01T00:00:00Z", "2026-11-01T13:00:00.000Z"],
+    ["2026-11-02T15:00:00Z", "2026-11-03T01:00:00.000Z"],
+  ])("derives the next local slot after %s", (after, expected) => {
+    expect(nextScheduledAutomationHostSlot(trigger, new Date(after))).toBe(expected);
+  });
+  it("skips nonexistent spring times and uses a repeated autumn time only once", () => {
+    expect(
+      nextScheduledAutomationHostSlot(
+        { ...trigger, localTimes: ["02:30"] },
+        new Date("2026-03-08T06:00:00Z"),
+      ),
+    ).toBe("2026-03-09T06:30:00.000Z");
+    expect(
+      nextScheduledAutomationHostSlot(
+        { ...trigger, localTimes: ["01:30"] },
+        new Date("2026-11-01T04:00:00Z"),
+      ),
+    ).toBe("2026-11-01T05:30:00.000Z");
+    expect(
+      nextScheduledAutomationHostSlot(
+        { ...trigger, localTimes: ["01:30"] },
+        new Date("2026-11-01T05:30:00Z"),
+      ),
+    ).toBe("2026-11-02T06:30:00.000Z");
+  });
+  it("validates bounded distinct wall times and IANA timezone", () => {
+    expect(
+      scheduledAutomationHostTriggerSchema.parse({ ...trigger, localTimes: ["20:00", "08:00"] })
+        .localTimes,
+    ).toEqual(trigger.localTimes);
+    for (const localTimes of [
+      [],
+      ["24:00"],
+      ["8:00"],
+      ["08:00", "08:00"],
+      ["08:60"],
+      Array(9).fill("08:00"),
+    ]) {
+      expect(
+        scheduledAutomationHostTriggerSchema.safeParse({ ...trigger, localTimes }).success,
+      ).toBe(false);
+    }
+    expect(
+      scheduledAutomationHostTriggerSchema.safeParse({ ...trigger, timeZone: "Mars/Olympus" })
+        .success,
+    ).toBe(false);
+  });
 });

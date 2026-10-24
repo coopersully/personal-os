@@ -563,3 +563,112 @@ it("shows the shared agent identity without replacing automation or host state",
   expect(screen.getByRole("heading", { name: "Finance host" })).toBeVisible();
   expect(screen.getByText(/This host missed its expected check-in/)).toBeVisible();
 });
+
+it("registers daily Claude wall times without interval or API credentials", async () => {
+  api.createAutomationHostSchedule.mockResolvedValue({});
+  const user = open();
+  await user.click(screen.getByRole("button", { name: "Register automation" }));
+  await user.selectOptions(screen.getByLabelText("Host"), "claude_scheduled");
+  await user.selectOptions(
+    await screen.findByLabelText("Authorized connection"),
+    "connection-original",
+  );
+  await user.clear(screen.getByLabelText("Timezone"));
+  await user.type(screen.getByLabelText("Timezone"), "America/New_York");
+  expect(screen.queryByLabelText("Interval in minutes")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Maximum event latency in minutes")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Register expected schedule" }));
+  await waitFor(() =>
+    expect(api.createAutomationHostSchedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hostSurface: "claude_code_routine",
+        tenantAuthorizationConnectionId: "connection-original",
+        trigger: {
+          type: "scheduled",
+          localTimes: ["08:00", "20:00"],
+          timeZone: "America/New_York",
+        },
+      }),
+    ),
+  );
+  expect(toast.success).toHaveBeenCalledWith(
+    "Automation registered. Set it up in your host.",
+    expect.anything(),
+  );
+  expect(
+    screen.queryByText("Automation registered. Set it up in your host."),
+  ).not.toBeInTheDocument();
+});
+it("shows scheduled cadence and delayed continuation without an API token form", async () => {
+  const scheduled = status("active", true);
+  api.listAutomationHostSchedules.mockResolvedValue([
+    {
+      ...scheduled,
+      schedule: {
+        ...scheduled.schedule,
+        trigger: {
+          type: "scheduled",
+          localTimes: ["08:00", "20:00"],
+          timeZone: "America/New_York",
+        },
+      },
+    },
+  ]);
+  const user = open();
+  expect(await screen.findByText(/Daily at 08:00 and 20:00/)).toBeInTheDocument();
+  expect(screen.getByText(/Projected next start/)).toBeInTheDocument();
+  expect(
+    screen.getByText(/Saved answers wait for the next scheduled invocation/),
+  ).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Review host setup" }));
+  expect(screen.getByRole("dialog", { name: "Finance host" })).toBeInTheDocument();
+  expect(screen.queryByLabelText("Routine API trigger token")).not.toBeInTheDocument();
+});
+
+it("shows the API token control for an event routine inside its setup dialog", async () => {
+  api.listAutomationHostSchedules.mockResolvedValue([status("active", true)]);
+  const user = open();
+  await user.click(await screen.findByRole("button", { name: "Review host setup" }));
+  expect(screen.getByRole("dialog", { name: "Finance host" })).toBeInTheDocument();
+  expect(screen.getByLabelText("Routine API trigger token")).toBeInTheDocument();
+});
+it("formats projected starts and grace deadlines in the declared zone instead of the browser zone", async () => {
+  // Model a Los Angeles browser even when the test runner's host uses another timezone.
+  const format = Date.prototype.toLocaleString;
+  const browser = vi.spyOn(Date.prototype, "toLocaleString").mockImplementation(function (
+    this: Date,
+    locales,
+    options,
+  ) {
+    return format.call(this, locales, { timeZone: "America/Los_Angeles", ...options });
+  });
+  try {
+    const scheduled = status("active", true);
+    api.listAutomationHostSchedules.mockResolvedValue([
+      {
+        ...scheduled,
+        schedule: {
+          ...scheduled.schedule,
+          trigger: {
+            type: "scheduled",
+            localTimes: ["08:00", "20:00"],
+            timeZone: "America/New_York",
+          },
+        },
+        health: {
+          ...scheduled.health,
+          nextExpectedAt: "2026-10-18T12:00:00Z",
+          overdueAt: "2026-10-18T12:15:00Z",
+          graceMilliseconds: 900000,
+        },
+      },
+    ]);
+    open();
+    const projected = await screen.findByText(/Projected next start/);
+    expect(projected).toHaveTextContent("8:00:00 AM EDT (America/New_York)");
+    expect(projected).toHaveTextContent("8:15:00 AM EDT (America/New_York)");
+    expect(projected).not.toHaveTextContent("5:00:00 AM");
+  } finally {
+    browser.mockRestore();
+  }
+});

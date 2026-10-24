@@ -31,7 +31,17 @@ function schedule(
   state = "setup_pending",
 ) {
   return {
-    schedule: { id, label: "My Finance host", hostSurface: surface, state, version: 3 },
+    schedule: {
+      id,
+      label: "My Finance host",
+      hostSurface: surface,
+      state,
+      version: 3,
+      trigger:
+        surface === "claude_code_routine"
+          ? { type: "event", expectedMaximumLatencyMinutes: 5 }
+          : { type: "recurring", recurrence: { everyMinutes: 5, timeZone: "America/New_York" } },
+    },
     health: { state },
   };
 }
@@ -327,4 +337,51 @@ it("preserves a safe visible failure when a host write rejects without an Error 
     expectedVersion: 3,
     expectedState: "paused",
   });
+});
+
+it("prepares a scheduled-only host with explicit timezone and daily times", async () => {
+  const user = userEvent.setup();
+  show();
+  await user.selectOptions(await screen.findByLabelText("Authorized host connection"), id);
+  await user.selectOptions(screen.getByLabelText("Host"), "claude_code_routine");
+  await user.selectOptions(screen.getByLabelText("Trigger"), "scheduled");
+  await user.clear(screen.getByLabelText("Timezone"));
+  await user.type(screen.getByLabelText("Timezone"), "America/New_York");
+  await user.click(screen.getByRole("button", { name: "Prepare host setup" }));
+  await waitFor(() =>
+    expect(mocks.createAutomationHostSchedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hostSurface: "claude_code_routine",
+        trigger: {
+          type: "scheduled",
+          localTimes: ["08:00", "20:00"],
+          timeZone: "America/New_York",
+        },
+      }),
+    ),
+  );
+});
+
+it.each([
+  "scheduled",
+  "event",
+] as const)("shows API credentials only for an active event host (%s)", async (type) => {
+  const active = schedule("claude_code_routine", "active");
+  mocks.listAutomationHostSchedules.mockResolvedValue([
+    {
+      ...active,
+      schedule: {
+        ...active.schedule,
+        trigger:
+          type === "scheduled"
+            ? { type, localTimes: ["08:00", "20:00"], timeZone: "America/New_York" }
+            : { type, expectedMaximumLatencyMinutes: 5 },
+      },
+    },
+  ]);
+  show();
+  expect(await screen.findByRole("region", { name: "My Finance host" })).toBeInTheDocument();
+  if (type === "event")
+    expect(screen.getByLabelText("Routine API trigger token")).toBeInTheDocument();
+  else expect(screen.queryByLabelText("Routine API trigger token")).not.toBeInTheDocument();
 });

@@ -35,7 +35,10 @@ import {
 } from "./automation-verification.js";
 import { HostPromptPanel } from "./host-prompt-panel.js";
 
-const date = (value: string | null) => (value ? new Date(value).toLocaleString() : "Not reported");
+const date = (value: string | null, timeZone?: string) =>
+  value
+    ? `${new Date(value).toLocaleString(undefined, timeZone ? { timeZone, timeZoneName: "short" } : undefined)}${timeZone ? ` (${timeZone})` : ""}`
+    : "Not reported";
 
 export function FinanceAutomationsPage() {
   const session = usePreferenceSession(useQueryClient());
@@ -144,6 +147,7 @@ function Automation({
   returnTo: string | null;
 }) {
   const { schedule, health } = status;
+  const timeZone = schedule.trigger.type === "scheduled" ? schedule.trigger.timeZone : undefined;
   const [label, setLabel] = useState(schedule.label);
   const [removeOpen, setRemoveOpen] = useState(false);
   const live = schedule.state === "active" || schedule.state === "paused";
@@ -179,16 +183,26 @@ function Automation({
         {schedule.hostSurface === "codex_desktop" ? "Codex desktop" : "Claude routine"} ·{" "}
         {schedule.trigger.type === "recurring"
           ? `Every ${schedule.trigger.recurrence.everyMinutes} minutes · ${schedule.trigger.recurrence.timeZone}`
-          : "Event-based · next run unknown"}
+          : schedule.trigger.type === "scheduled"
+            ? `Daily at ${schedule.trigger.localTimes.join(" and ")} · ${schedule.trigger.timeZone}`
+            : "Event-based · next run unknown"}
       </p>
       {cause ? <p>{cause}</p> : null}
-      {schedule.state === "active" && schedule.trigger.type === "recurring" ? (
+      {schedule.state === "active" && schedule.trigger.type !== "event" ? (
         <p>
-          Next expected start: {date(health.nextExpectedAt)}
-          {health.overdueAt ? ` · Overdue threshold: ${date(health.overdueAt)}` : ""}
+          {schedule.trigger.type === "scheduled" ? "Projected next start" : "Next expected start"}:{" "}
+          {date(health.nextExpectedAt, timeZone)}
+          {health.overdueAt ? ` · Overdue threshold: ${date(health.overdueAt, timeZone)}` : ""}
           {health.graceMilliseconds !== null
             ? ` · Grace: ${Math.round(health.graceMilliseconds / 60000)} minutes`
             : ""}
+        </p>
+      ) : null}
+      {schedule.trigger.type === "scheduled" ? (
+        <p>
+          The declared cadence projects this slot; provider configuration and execution are
+          unverified. Saved answers wait for the next scheduled invocation. Starts may be several
+          minutes late; no API wake-up is sent.
         </p>
       ) : null}
       <p>

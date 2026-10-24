@@ -39,6 +39,7 @@ export function AutomationRegistration({
   const [label, setLabel] = useState("Finance maintenance");
   const [connection, setConnection] = useState("");
   const [host, setHost] = useState("codex_desktop");
+  const [localTimes, setLocalTimes] = useState("08:00,20:00");
   const [minutes, setMinutes] = useState("1440");
   const [zone, setZone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
   const connections = useQuery({
@@ -94,10 +95,17 @@ export function AutomationRegistration({
                         }
                       : {
                           hostSurface: "claude_code_routine",
-                          trigger: {
-                            type: "event",
-                            expectedMaximumLatencyMinutes: Number(minutes),
-                          },
+                          trigger:
+                            host === "claude_scheduled"
+                              ? {
+                                  type: "scheduled",
+                                  localTimes: localTimes.split(",").map((time) => time.trim()),
+                                  timeZone: zone,
+                                }
+                              : {
+                                  type: "event",
+                                  expectedMaximumLatencyMinutes: Number(minutes),
+                                },
                         }),
                   }),
                 "Automation registered. Set it up in your host.",
@@ -149,28 +157,45 @@ export function AutomationRegistration({
                   <NativeSelectOption value="codex_desktop">
                     Codex desktop · recurring interval
                   </NativeSelectOption>
+                  <NativeSelectOption value="claude_scheduled">
+                    Claude routine · daily local times
+                  </NativeSelectOption>
                   <NativeSelectOption value="claude_code_routine">
                     Claude routine · event trigger
                   </NativeSelectOption>
                 </NativeSelect>
               </Field>
-              <Field>
-                <FieldLabel htmlFor={`${id}-minutes`}>
-                  {host === "codex_desktop"
-                    ? "Interval in minutes"
-                    : "Maximum event latency in minutes"}
-                </FieldLabel>
-                <Input
-                  id={`${id}-minutes`}
-                  type="number"
-                  min={1}
-                  max={host === "codex_desktop" ? 10080 : 60}
-                  required
-                  value={minutes}
-                  onChange={(event) => setMinutes(event.target.value)}
-                />
-              </Field>
-              {host === "codex_desktop" ? (
+              {host === "claude_scheduled" ? (
+                <Field>
+                  <FieldLabel htmlFor={`${id}-times`}>
+                    Daily local times (HH:mm, comma-separated)
+                  </FieldLabel>
+                  <Input
+                    id={`${id}-times`}
+                    required
+                    value={localTimes}
+                    onChange={(event) => setLocalTimes(event.target.value)}
+                  />
+                </Field>
+              ) : (
+                <Field>
+                  <FieldLabel htmlFor={`${id}-minutes`}>
+                    {host === "codex_desktop"
+                      ? "Interval in minutes"
+                      : "Maximum event latency in minutes"}
+                  </FieldLabel>
+                  <Input
+                    id={`${id}-minutes`}
+                    type="number"
+                    min={1}
+                    max={host === "codex_desktop" ? 10080 : 60}
+                    required
+                    value={minutes}
+                    onChange={(event) => setMinutes(event.target.value)}
+                  />
+                </Field>
+              )}
+              {host !== "claude_code_routine" ? (
                 <Field>
                   <FieldLabel htmlFor={`${id}-zone`}>Timezone</FieldLabel>
                   <Input
@@ -208,7 +233,11 @@ export function AutomationBinding({
   const [hostId, setHostId] = useState("");
   const [next, setNext] = useState("");
   const [token, setToken] = useState("");
-  if (schedule.state === "active" && schedule.hostSurface === "claude_code_routine")
+  if (
+    schedule.state === "active" &&
+    schedule.hostSurface === "claude_code_routine" &&
+    schedule.trigger.type === "event"
+  )
     return (
       <form
         onSubmit={(event) => {
@@ -272,6 +301,14 @@ export function AutomationBinding({
       }}
     >
       <FieldGroup>
+        {schedule.trigger.type === "scheduled" ? (
+          <p>
+            Create the Claude schedule at {schedule.trigger.localTimes.join(" and ")} in{" "}
+            {schedule.trigger.timeZone}, then bind its routine identifier. No API trigger token is
+            needed. Answers wait for the next scheduled invocation; starts may be several minutes
+            late.
+          </p>
+        ) : null}
         <Field>
           <FieldLabel htmlFor={`binding-${schedule.id}`}>Host automation identifier</FieldLabel>
           <Input

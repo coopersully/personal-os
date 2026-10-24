@@ -489,7 +489,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { openWorldHint: false },
       description:
-        "Record the host's observed active or paused state. Only the originally bound Finance maintenance connection may report observations. This does not create, repair or reschedule host work.",
+        "Record the host's observed active or paused state. Scheduled Claude routines report invocationObserved:true only during an actual invocation; generic active checks do not advance outstanding projected slots. Use the evidence timestamp, not receipt time. Only the originally bound Finance maintenance connection may report observations. This does not create, repair or reschedule host work.",
       inputSchema: z.object({
         scheduleId: id,
         observation: automationHostScheduleObservationInputSchema,

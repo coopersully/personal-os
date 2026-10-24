@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import {
   accessTokens,
+  auditEvents,
   automationHostSchedules,
   createDatabaseClient,
   type DatabaseClient,
@@ -330,6 +331,215 @@ describe.sequential("tenant-bound host schedules", () => {
     await expect(
       f.service.update(f.human, created.schedule.id, { expectedVersion: 3, label: "Again" }),
     ).rejects.toMatchObject({ code: "conflict" });
+  });
+  it("tracks scheduled Claude lifecycle, jitter and missed slots without dispatch credentials", async () => {
+    const f = await fixture();
+    // Explicitly unexpired authority while this test moves the server clock across DST.
+    await database.db
+      .update(accessTokens)
+      .set({ expiresAt: null })
+      .where(eq(accessTokens.id, f.token.id));
+    let clock = new Date("2026-10-31T12:01:00Z");
+    const service = createAutomationHostService({
+      db: database.db,
+      now: () => clock,
+      encryptionKey,
+    });
+    const created = await service.create(f.human, {
+      ...input(f.connectionId),
+      hostSurface: "claude_code_routine",
+      trigger: { type: "scheduled", localTimes: ["08:00", "20:00"], timeZone: "America/New_York" },
+    });
+    const id = created.schedule.id;
+    expect(created.schedule).toMatchObject({ state: "setup_pending", nextExpectedAt: null });
+    expect(created.prompt.latestIssued?.text).toContain("wait for the next scheduled invocation");
+    const bound = await service.bind(f.human, id, {
+      hostSurface: "claude_code_routine",
+      expectedVersion: 1,
+      expectedState: "setup_pending",
+      hostAutomationId: "trig_01ABCDEFGHJKLMNOPQRSTUVW",
+    });
+    expect(bound.schedule.nextExpectedAt).toBe("2026-11-01T00:00:00.000Z");
+    await expect(
+      service.saveFireToken(f.human, id, "sk-ant-oat01-abcdefghijklmno", 2),
+    ).rejects.toMatchObject({ code: "conflict" });
+    const [answer] = await database.db
+      .insert(financeAnswerContinuations)
+      .values({
+        userId: f.userId,
+        operationId: randomUUID(),
+        reviewCaseId: randomUUID(),
+        transactionId: randomUUID(),
+        resultingWorkRevision: 2n,
+        automationScheduleId: id,
+      })
+      .returning();
+    const fetch = vi.fn();
+    const dispatch = createFinanceHostDispatcher({
+      db: database.db,
+      now: () => clock,
+      encryptionKey,
+      fetch,
+    });
+    expect(await dispatch()).toEqual({ processed: 0 });
+    expect(fetch).not.toHaveBeenCalled();
+    expect((await service.continuations(f.agent, id)).continuations).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: answer?.id })]),
+    );
+    clock = new Date("2026-11-01T00:14:00Z");
+    expect((await service.list(f.human))[0]?.health.state).toBe("expected");
+    clock = new Date("2026-11-01T00:16:00Z");
+    expect((await service.list(f.human))[0]?.health.state).toBe("overdue");
+    clock = new Date("2026-11-02T14:00:00Z");
+    expect((await service.list(f.human))[0]?.schedule.nextExpectedAt).toBe(
+      "2026-11-01T00:00:00.000Z",
+    );
+    const observation = {
+      hostSurface: "claude_code_routine",
+      expectedVersion: 2,
+      expectedState: "active",
+      observedState: "active",
+      observedAt: clock.toISOString(),
+    };
+    await expect(service.observe(f.human, id, observation)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    await expect(
+      service.observe({ ...f.agent, authorizationConnectionId: randomUUID() }, id, observation),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      service.observe(f.agent, id, { ...observation, nextExpectedAt: "2099-01-01T00:00:00Z" }),
+    ).rejects.toThrow();
+    const observed = await service.observe(f.agent, id, {
+      ...observation,
+      invocationObserved: true,
+    });
+    expect(observed.schedule.nextExpectedAt).toBe("2026-11-03T01:00:00.000Z");
+    const paused = await service.observe(f.agent, id, {
+      ...observation,
+      expectedVersion: 3,
+      observedState: "paused",
+    });
+    expect(paused.schedule.nextExpectedAt).toBeNull();
+    expect(paused.health.state).toBe("paused");
+    clock = new Date("2026-11-04T14:00:00Z");
+    const resumed = await service.observe(f.agent, id, {
+      ...observation,
+      expectedVersion: 4,
+      expectedState: "paused",
+      observedAt: clock.toISOString(),
+    });
+    expect(resumed.schedule.nextExpectedAt).toBe("2026-11-05T01:00:00.000Z");
+    expect(resumed.health.state).toBe("expected");
+    // Even unexpected stored credentials must never make a scheduled declaration dispatchable.
+    await database.db
+      .update(automationHostSchedules)
+      .set({
+        encryptedFireCredentials: encryptJson(
+          { token: "sk-ant-oat01-abcdefghijklmno" },
+          encryptionKey,
+        ),
+      })
+      .where(eq(automationHostSchedules.id, id));
+    expect(await dispatch()).toEqual({ processed: 0 });
+    expect(fetch).not.toHaveBeenCalled();
+    const audits = await database.db.select().from(auditEvents).where(eq(auditEvents.entityId, id));
+    expect(audits.filter((a) => a.action === "finance.host_schedule.changed")).toHaveLength(4);
+    expect(audits.some((a) => a.actorType === "agent" && a.actorId === f.agent.actorId)).toBe(true);
+    await database.db
+      .update(accessTokens)
+      .set({ revokedAt: clock })
+      .where(eq(accessTokens.id, f.token.id));
+    await expect(
+      service.observe(f.agent, id, {
+        ...observation,
+        expectedVersion: 5,
+        observedAt: clock.toISOString(),
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+  });
+  it("does not hide an outstanding slot with delayed or generic active observations", async () => {
+    const f = await fixture();
+    let clock = new Date("2026-10-09T11:58:00Z");
+    const service = createAutomationHostService({
+      db: database.db,
+      now: () => clock,
+      encryptionKey,
+    });
+    const created = await service.create(f.human, {
+      ...input(f.connectionId),
+      hostSurface: "claude_code_routine",
+      trigger: { type: "scheduled", localTimes: ["08:00", "20:00"], timeZone: "America/New_York" },
+    });
+    const id = created.schedule.id;
+    await service.bind(f.human, id, {
+      hostSurface: "claude_code_routine",
+      expectedVersion: 1,
+      expectedState: "setup_pending",
+      hostAutomationId: "routine",
+    });
+    clock = new Date("2026-10-09T12:01:00Z");
+    const observation = {
+      hostSurface: "claude_code_routine",
+      expectedVersion: 2,
+      expectedState: "active",
+      observedState: "active",
+      observedAt: "2026-10-09T11:59:00Z",
+    };
+    const delayed = await service.observe(f.agent, id, {
+      ...observation,
+      invocationObserved: true,
+    });
+    expect(delayed.schedule.nextExpectedAt).toBe("2026-10-09T12:00:00.000Z");
+    expect(delayed.health).toMatchObject({
+      expectationBasis: "declared_cadence",
+      state: "expected",
+    });
+    await expect(
+      service.observe(f.agent, id, {
+        ...observation,
+        expectedVersion: 3,
+        observedAt: "2026-10-09T11:58:00Z",
+        invocationObserved: true,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    const generic = await service.observe(f.agent, id, {
+      ...observation,
+      expectedVersion: 3,
+      observedAt: clock.toISOString(),
+    });
+    expect(generic.schedule.nextExpectedAt).toBe("2026-10-09T12:00:00.000Z");
+    clock = new Date("2026-10-09T12:16:00Z");
+    const stillMissed = await service.observe(f.agent, id, {
+      ...observation,
+      expectedVersion: 4,
+      observedAt: clock.toISOString(),
+    });
+    expect(stillMissed.health.state).toBe("overdue");
+    const invoked = await service.observe(f.agent, id, {
+      ...observation,
+      expectedVersion: 5,
+      observedAt: clock.toISOString(),
+      invocationObserved: true,
+    });
+    expect(invoked.schedule.nextExpectedAt).toBe("2026-10-10T00:00:00.000Z");
+    expect(invoked.health.state).toBe("expected");
+    const audits = await database.db.select().from(auditEvents).where(eq(auditEvents.entityId, id));
+    expect(audits).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actorType: "agent",
+          actorId: f.agent.actorId,
+          after: expect.objectContaining({
+            observation: expect.objectContaining({
+              invocationObserved: true,
+              observedAt: clock.toISOString(),
+            }),
+            nextExpectedAt: "2026-10-10T00:00:00.000Z",
+          }),
+        }),
+      ]),
+    );
   });
   async function fireFixture() {
     const f = await fixture();
@@ -1286,7 +1496,7 @@ describe.sequential("tenant-bound host schedules", () => {
                   throw new Error("schedule");
                 await target
                   .update(automationHostSchedules)
-                  .set({ schedule: { ...saved.schedule, state: "paused" } })
+                  .set({ schedule: { ...saved.schedule, state: "paused", nextExpectedAt: null } })
                   .where(eq(automationHostSchedules.id, f.scheduleId));
               }
               if (mode === "other_run") await waitingRun(f);

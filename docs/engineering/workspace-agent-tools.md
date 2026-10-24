@@ -2058,23 +2058,56 @@ Register metadata for an externally managed schedule using this caller's existin
           "const": "claude_code_routine"
         },
         "trigger": {
-          "type": "object",
-          "properties": {
-            "type": {
-              "type": "string",
-              "const": "event"
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "event"
+                },
+                "expectedMaximumLatencyMinutes": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 60
+                }
+              },
+              "required": [
+                "type",
+                "expectedMaximumLatencyMinutes"
+              ],
+              "additionalProperties": false
             },
-            "expectedMaximumLatencyMinutes": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 60
+            {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "scheduled"
+                },
+                "localTimes": {
+                  "minItems": 1,
+                  "maxItems": 8,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                  }
+                },
+                "timeZone": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                }
+              },
+              "required": [
+                "type",
+                "localTimes",
+                "timeZone"
+              ],
+              "additionalProperties": false
             }
-          },
-          "required": [
-            "type",
-            "expectedMaximumLatencyMinutes"
-          ],
-          "additionalProperties": false
+          ]
         }
       },
       "required": [
@@ -9839,7 +9872,7 @@ Commit a previously previewed Project move using its preview token and current e
 
 ## observe_finance_host_schedule
 
-Record the host's observed active or paused state. Only the originally bound Finance maintenance connection may report observations. This does not create, repair or reschedule host work.
+Record the host's observed active or paused state. Scheduled Claude routines report invocationObserved:true only during an actual invocation; generic active checks do not advance outstanding projected slots. Use the evidence timestamp, not receipt time. Only the originally bound Finance maintenance connection may report observations. This does not create, repair or reschedule host work.
 
 - Domain: finances; stage: commit; policy: approved_rule.
 - Grants (all): finances:maintain.
@@ -10003,6 +10036,10 @@ Record the host's observed active or paused state. Only the originally bound Fin
             "observedState": {
               "type": "string",
               "const": "active"
+            },
+            "invocationObserved": {
+              "type": "boolean",
+              "const": true
             }
           },
           "required": [

@@ -1,5 +1,9 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import {
+  automationHostScheduleSchema,
+  observeAutomationHostScheduleHealth,
+} from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -41,11 +45,37 @@ function registration(pending = false) {
   );
   return userEvent.setup();
 }
+const scheduleId = "11111111-1111-4111-8111-111111111111";
 function binding(state: string, hostSurface: string, connectionAvailable = true, pending = false) {
-  const status = {
-    schedule: { id: "schedule", state, hostSurface, version: 9 },
+  const schedule = automationHostScheduleSchema.parse({
+    id: scheduleId,
+    tenantAuthorizationConnectionId: "22222222-2222-4222-8222-222222222222",
+    label: "Finance host",
+    effectiveScopes: ["finances:maintain"],
+    state,
+    hostSurface,
+    version: 9,
+    trigger:
+      hostSurface === "codex_desktop"
+        ? { type: "recurring", recurrence: { type: "interval", everyMinutes: 60, timeZone: "UTC" } }
+        : { type: "event", expectedMaximumLatencyMinutes: 5 },
+    hostAutomationId:
+      state === "setup_pending"
+        ? null
+        : hostSurface === "codex_desktop"
+          ? "host-job"
+          : "trig_abcdefghijklmno",
+    nextExpectedAt:
+      state === "active" && hostSurface === "codex_desktop" ? "2026-10-19T13:00:00Z" : null,
+    lastObservedAt: null,
+    createdAt: "2026-10-19T12:00:00Z",
+    updatedAt: "2026-10-19T12:00:00Z",
+  });
+  const status: HostStatus = {
+    schedule,
+    health: observeAutomationHostScheduleHealth(schedule, new Date("2026-10-19T12:00:00Z")),
     connectionAvailable,
-  } as HostStatus;
+  };
   render(<AutomationBinding status={status} pending={pending} perform={perform} />);
   return userEvent.setup();
 }
@@ -124,7 +154,7 @@ it("binds a recurring host using the local next-run instant and original revisio
   const { fireEvent } = await import("@testing-library/react");
   fireEvent.change(next, { target: { value: "2026-10-20T09:30" } });
   await user.click(screen.getByRole("button", { name: "Bind existing host job" }));
-  expect(api.bindAutomationHostSchedule).toHaveBeenCalledWith("schedule", {
+  expect(api.bindAutomationHostSchedule).toHaveBeenCalledWith(scheduleId, {
     hostSurface: "codex_desktop",
     expectedVersion: 9,
     expectedState: "setup_pending",
@@ -143,7 +173,7 @@ it.each([
   const user = binding("active", "claude_code_routine");
   await user.type(screen.getByLabelText("Routine API trigger token"), "private-trigger");
   await user.click(screen.getByRole("button", { name: "Save trigger token" }));
-  expect(api.saveAutomationHostFireToken).toHaveBeenCalledWith("schedule", {
+  expect(api.saveAutomationHostFireToken).toHaveBeenCalledWith(scheduleId, {
     token: "private-trigger",
     expectedVersion: 9,
   });

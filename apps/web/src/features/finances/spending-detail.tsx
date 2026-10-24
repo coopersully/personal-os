@@ -17,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { formatMoney } from "./format";
 import { SpendingMonthlyBudgetContext } from "./spending-budget-qualification";
+import { spendingGroupVisual } from "./spending-visual";
 /** Only bounded, reproducible selections can open the exact Transactions consumer. */
 export function spendingTransactionsDestination(
   data: FinanceSpendingDashboard,
@@ -85,6 +86,8 @@ export function SpendingDetail({
   onClose: () => void;
   onSelect: (group: FinanceSpendingGroup) => void;
 }) {
+  const visual = group ? spendingGroupVisual(group) : null;
+  const GroupIcon = visual?.Icon;
   const monthly =
     data.monthlyBudget?.state === "qualified" && group
       ? data.monthlyBudget.groups.find((item) => item.groupId === group.id)
@@ -123,7 +126,12 @@ export function SpendingDetail({
     <ResponsiveDialog open={!!selectedScope} onOpenChange={(open) => !open && onClose()}>
       <ResponsiveDialogContent>
         <ResponsiveDialogHeader>
-          <ResponsiveDialogTitle>{group?.label ?? "Spending detail"}</ResponsiveDialogTitle>
+          <ResponsiveDialogTitle className="flex items-center gap-2">
+            {GroupIcon ? (
+              <GroupIcon aria-hidden="true" className="size-4" style={{ color: visual?.color }} />
+            ) : null}
+            {group?.label ?? "Spending detail"}
+          </ResponsiveDialogTitle>
           <ResponsiveDialogDescription>
             {selectedScope?.scope.from} – {selectedScope?.scope.through} · Current category
             membership · USD

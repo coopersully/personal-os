@@ -273,7 +273,7 @@ export function SpendingBubbles({
                 touchAction: "none",
                 backgroundColor: visual.backgroundColor,
               }}
-              className={`group absolute left-0 top-0 flex flex-col items-center justify-center gap-1 overflow-hidden rounded-full p-0 text-foreground ${overage > 0 ? "border-2 border-(--status-warning-foreground)" : "border border-transparent hover:border-foreground/30 focus-visible:border-foreground/60"}`}
+              className="group absolute left-0 top-0 flex flex-col items-center justify-center gap-1 overflow-hidden rounded-full border-0 p-0 text-foreground"
               transition={
                 reduced
                   ? { duration: 0 }
@@ -290,11 +290,13 @@ export function SpendingBubbles({
                   <motion.span
                     aria-hidden="true"
                     data-budget-fill="true"
-                    className="pointer-events-none absolute inset-0 rounded-full"
+                    className="spending-bubble-fill pointer-events-none absolute inset-0 overflow-hidden rounded-full"
                     initial={false}
                     animate={{ clipPath: `inset(${(1 - fill) * 100}% 0 0 0)` }}
                     transition={{ duration: reduced ? 0 : 0.3, ease: "easeOut" }}
-                    style={{ backgroundColor: visual.fillColor }}
+                    style={{
+                      backgroundColor: `color-mix(in srgb, ${visual.color} 35%, var(--background))`,
+                    }}
                   />
                 ) : null}
                 <span

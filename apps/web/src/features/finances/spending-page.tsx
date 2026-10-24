@@ -356,7 +356,7 @@ export function FinanceSpendingPage() {
               ? formatDateOnly(range.from, { month: "short", day: "numeric", year: "numeric" })
               : `${formatDateOnly(range.from, { month: "short", day: "numeric" })} – ${formatDateOnly(range.through, { month: "short", day: "numeric", year: "numeric" })}`;
   const dateControls = (
-    <fieldset disabled={disabled}>
+    <fieldset disabled={disabled} className="min-w-0 w-full">
       <SpendingPeriodControls
         period={rhythmDefault ? "custom" : period}
         {...range}
@@ -453,7 +453,11 @@ export function FinanceSpendingPage() {
               <ChevronDownIcon />
             </Button>
           </PopoverTrigger>
-          <PopoverContent align="start" aria-label="Spending date range">
+          <PopoverContent
+            align="start"
+            aria-label="Spending date range"
+            className="w-80 max-w-[calc(100vw-2rem)]"
+          >
             {dateControls}
           </PopoverContent>
         </Popover>

@@ -729,7 +729,21 @@ Reduced-motion preferences suppress digit and fill animations. The total footer 
 
 List is the default Spending view for new or unset preferences; saved explicit view choices and
 URL overrides remain authoritative. List uses a single shared Card with compact Item rows, selected-
-range amounts, monthly-budget Progress indicators and concise remaining/over amounts. Preserve
+range amounts, category-colored full-row monthly-budget fills and concise remaining/over amounts. Preserve
 exact monthly usage/coverage in accessible descriptions and hover details. Show pending amounts
 only when nonzero. Bucket categories remain progressively disclosed. Missing/zero limits, negative
 adjustments and budget sorting retain their distinct accounting meanings.
+
+
+The title range picker opens presets, the range calendar, and date inputs directly; no nested
+Period menu is needed. Calendar ranges accept either click direction and single-day selections.
+Spending List rows use the same category/bucket tint as Bubbles, with a KPI-style background fill
+for monthly usage instead of a separate thin bar. Remove decorative row dividers and bubble
+borders; over-budget copy remains explicit. Apply the animated Bayer filter independently to
+both bubble base and the opaque budget fill, clipped inside the original circular silhouette.
+
+Category/bucket glyphs are inferred by the shared domain appearance resolver from their meaning
+(home, groceries, dining, travel, and so on), with safe generic fallbacks. API Spending metadata,
+List, Bubbles, legends, and detail headings use that vocabulary and the shared reicon registry.
+This applies automatically to existing records and every creation path, including MCP. Agents
+must not ask users to select cosmetic icons or narrate these automatic choices unless requested.

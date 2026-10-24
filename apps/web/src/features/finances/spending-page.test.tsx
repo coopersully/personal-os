@@ -600,8 +600,7 @@ it("saves explicit grouping and period choices, navigates periods, and retains e
   );
   fireEvent.click(screen.getByRole("button", { name: "Previous period" }));
   await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("from=2026-08-01"));
-  fireEvent.keyDown(screen.getByRole("button", { name: /^Period:/ }), { key: "ArrowDown" });
-  fireEvent.click(await screen.findByRole("menuitemradio", { name: "Custom" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Custom" }));
   await waitFor(() =>
     expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
       "finances",

@@ -697,3 +697,8 @@ Users can instead choose a category or link an exact related transaction immedia
 use the same authenticated, idempotent API and conditional case mutation. Failed saves retain the
 user's input and retry key. A saved note remains visibly outstanding until actually resolved, but is excluded from the next unanswered question. An Inbox containing only saved notes reports work remaining, not completion.
 An empty Inbox or a completed maintenance run does not establish budget balance or source completeness.
+
+
+Finance category and planning-bucket icons are presentation metadata inferred automatically by
+the domain from record meaning. Creating a category or bucket requires no icon decision. Agents
+should not ask users about or narrate cosmetic icon choices unless users explicitly request them.

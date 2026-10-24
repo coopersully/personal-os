@@ -646,7 +646,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: { idempotentHint: true, openWorldHint: false },
       description:
-        "Create or update a planning bucket and its category membership. Categories remain granular ledger labels; membership is exclusive within the active taxonomy.",
+        "Create or update a planning bucket and its category membership. Icons are assigned automatically from meaning; do not ask about or narrate cosmetic icon choices unless the user requests them. Categories remain granular ledger labels; membership is exclusive within the active taxonomy.",
       inputSchema: z.discriminatedUnion("operation", [
         z
           .object({

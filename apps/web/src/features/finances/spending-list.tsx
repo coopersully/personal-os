@@ -8,7 +8,6 @@ import { ChevronRightIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Item, ItemGroup } from "@/components/ui/item";
-import { Progress } from "@/components/ui/progress";
 import { formatMoney } from "./format";
 import { spendingGroupVisual } from "./spending-visual";
 export function SpendingList({
@@ -78,10 +77,21 @@ export function SpendingList({
           aria-label={group.label}
           aria-describedby={`${descriptionId}-${group.id}`}
           onClick={() => onSelect(group)}
-          className="grid w-full grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 text-left sm:grid-cols-[minmax(0,1fr)_7rem_minmax(12rem,1fr)]"
+          style={{ backgroundColor: visual.backgroundColor }}
+          className="relative isolate overflow-hidden grid w-full grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 text-left sm:grid-cols-[minmax(0,1fr)_7rem_minmax(12rem,1fr)]"
         >
+          {limit != null && limit > 0 ? (
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-y-0 left-0 -z-10 transition-[width] duration-500 motion-reduce:transition-none"
+              style={{
+                backgroundColor: visual.fillColor,
+                width: `${Math.min(100, Math.max(0, (used / limit) * 100))}%`,
+              }}
+            />
+          ) : null}
           <span className="flex min-w-0 items-center gap-2">
-            <Icon className="size-4 shrink-0 text-muted-foreground" />
+            <Icon className="size-4 shrink-0 text-foreground" />
             <span className="truncate text-sm font-medium">{group.label}</span>
           </span>
           <span className="flex items-center justify-end gap-2 text-sm font-medium tabular-nums sm:justify-end">
@@ -93,13 +103,6 @@ export function SpendingList({
             title={budgetCopy(group.id)}
           >
             <span className="truncate text-xs text-muted-foreground tabular-nums">{caption}</span>
-            {limit != null && limit > 0 ? (
-              <Progress
-                value={Math.min(100, Math.max(0, (used / limit) * 100))}
-                aria-label={`${group.label} monthly budget`}
-                aria-valuetext={budgetCopy(group.id)}
-              />
-            ) : null}
           </div>
           {group.pendingCents !== 0 ? (
             <span className="col-span-2 truncate text-xs text-muted-foreground sm:col-span-3">
@@ -149,7 +152,7 @@ export function SpendingList({
           </Button>
         </div>
         <ItemGroup role="presentation" className="gap-0">
-          <ul className="flex flex-col divide-y divide-border/50">
+          <ul className="flex flex-col gap-1">
             {ordered.map((group) => (
               <li key={group.id} className="min-w-0">
                 {row(group)}
@@ -162,7 +165,7 @@ export function SpendingList({
                       {group.categories.length}{" "}
                       {group.categories.length === 1 ? "category" : "categories"}
                     </summary>
-                    <ul className="mt-2 flex flex-col gap-1 border-l border-border/50 pl-2">
+                    <ul className="mt-2 flex flex-col gap-1 pl-2">
                       {[...group.categories].sort(compare).map((category) => (
                         <li key={category.id}>{row(category)}</li>
                       ))}

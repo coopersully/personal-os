@@ -22,6 +22,7 @@ import {
   type FinanceSpendingGroup,
   type FinanceSpendingQuery,
   type FinanceSpendingReferenceFilter,
+  financeGroupIcon,
   financeProvenanceSchema,
   financeSpendingDashboardSchema,
   financeSpendingQuerySchema,
@@ -96,7 +97,7 @@ export function buildFinanceSpendingDashboard(
                 return color && /^#[0-9a-fA-F]{6}$/.test(color) ? color : null;
               })()
             : null,
-        icon: id === "uncategorized" ? "uncategorized" : kind,
+        icon: financeGroupIcon(label, id === "uncategorized" ? "uncategorized" : kind),
       },
       categoryIds,
       netCents,

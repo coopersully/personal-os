@@ -8150,3 +8150,14 @@ html.pet-window #root {
 @media (prefers-reduced-motion: reduce) {
   .spending-bubble-material { animation: none; filter: none; }
 }
+
+/* Quantize the budget material independently so its moving boundary also carries Bayer texture. */
+.spending-bubble-fill { animation: spending-bubble-fill-dither 600ms steps(1, end) infinite; }
+@keyframes spending-bubble-fill-dither {
+  0%, 100% { filter: url("/effects/ordered-dither.svg#grain-c"); }
+  33% { filter: url("/effects/ordered-dither.svg#grain-a"); }
+  66% { filter: url("/effects/ordered-dither.svg#grain-b"); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spending-bubble-fill { animation: none; filter: none; }
+}

@@ -145,7 +145,7 @@ it("keeps selected-period circle sizing independent of qualified monthly fill an
   expect(screen.getByRole("button", { name: /Groceries:/ })).toHaveAccessibleName(
     /Over budget \$10.00/,
   );
-  expect(screen.getByRole("button", { name: /Groceries:/ })).toHaveClass("border-2");
+  expect(screen.getByRole("button", { name: /Groceries:/ })).toHaveClass("border-0");
   expect(
     screen
       .getByRole("button", { name: /Groceries:/ })
@@ -212,7 +212,7 @@ it("uses assigned category tint and semantic icons with readable foregrounds at 
   expect(large.getAttribute("style")).toContain("rgba(18, 52, 86");
   expect(large).toHaveClass("text-foreground");
   expect(large).not.toHaveClass("text-primary");
-  expect(large.querySelector('[data-spending-icon="category"] svg')).not.toBeNull();
+  expect(large.querySelector('[data-spending-icon="groceries"] svg')).not.toBeNull();
   expect(large).toHaveTextContent("Groceries");
   const small = screen.getByRole("button", { name: /Living costs: \$1.00/ });
   expect(small.querySelector('[data-spending-icon="bucket"] svg')).not.toBeNull();
@@ -342,7 +342,7 @@ it("defensively renders a zero target separately from null without infinite util
   expect(selected()).toHaveAccessibleName(
     /Monthly budget used \$2.50 of \$0.00; Over budget \$2.50/,
   );
-  expect(selected()).toHaveClass("border-2");
+  expect(selected()).toHaveClass("border-0");
   expect(selected()).toHaveTextContent("Over budget");
   fireEvent.click(screen.getByText("All spending groups (1)"));
   expect(screen.getByRole("button", { name: "Open Food details" })).toHaveAccessibleDescription(
@@ -361,7 +361,7 @@ it("defensively renders a zero target separately from null without infinite util
     );
     expect(selected()).toHaveAccessibleName(/No utilization/);
     expect(selected()).not.toHaveAccessibleName(/Over budget|Infinity|NaN/);
-    expect(selected()).not.toHaveClass("border-2");
+    expect(selected()).toHaveClass("border-0");
     expect(fillAnimation.props.at(-1)).toMatchObject({
       animate: { clipPath: "inset(100% 0 0 0)" },
     });

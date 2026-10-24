@@ -1090,3 +1090,25 @@ it("preserves typed pending recovery and strips only run routing from the strict
     await server.close();
   }
 });
+
+it("keeps category and bucket icon choices automatic in agent discovery", async () => {
+  const { registerFinanceManagementTools } = await import("./finances-management.js");
+  const server = new McpServer({ name: "finance-appearance", version: "1" });
+  const api = {} as PersonalOsApiClient;
+  registerFinanceTools(server, api);
+  registerFinanceManagementTools(server, api);
+  const client = new Client({ name: "appearance-client", version: "1" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  try {
+    const result = await client.listTools();
+    for (const name of ["create_finance_category", "manage_finance_budget_bucket"]) {
+      expect(result.tools.find((tool) => tool.name === name)?.description).toContain(
+        "do not ask about or narrate cosmetic icon choices",
+      );
+    }
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});

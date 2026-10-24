@@ -426,7 +426,7 @@ it("keeps tiny and long-named groups readable and selectable without inflating t
   expect(smallCircle).toHaveAttribute("tabindex", "-1");
   expect(screen.getByText(/Circle size: selected-period spending/)).toBeVisible();
 });
-it("restores touch scrolling when reduced motion disables an active arrangement", async () => {
+it("keeps arrangement available with reduced motion and offers only reset", () => {
   const groups = [
     {
       id: "food",
@@ -439,21 +439,34 @@ it("restores touch scrolling when reduced motion disables an active arrangement"
   ] as unknown as FinanceSpendingDashboard["groups"];
   const props = { groups, onSelect: vi.fn() };
   const { rerender } = render(createElement(SpendingBubbles, props));
-  fireEvent.keyDown(screen.getByRole("button", { name: "Layout" }), { key: "ArrowDown" });
-  fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Arrange bubbles" }));
-  await userEvent.keyboard("{Escape}");
   expect(screen.getByRole("button", { name: /Food:/ }).style.touchAction).toBe("none");
+  expect(screen.queryByRole("button", { name: "Layout" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Reset bubble layout" }));
   fillAnimation.reduced = true;
   rerender(createElement(SpendingBubbles, props));
-  fireEvent.keyDown(screen.getByRole("button", { name: "Layout" }), { key: "ArrowDown" });
-  expect(screen.getByRole("menuitemcheckbox", { name: "Arrange bubbles" })).toHaveAttribute(
-    "aria-disabled",
-    "true",
-  );
-  expect(screen.getByRole("menuitemcheckbox", { name: "Arrange bubbles" })).toHaveAttribute(
-    "aria-checked",
-    "false",
-  );
-  await userEvent.keyboard("{Escape}");
-  expect(screen.getByRole("button", { name: /Food:/ }).style.touchAction).toBe("pan-y");
+  expect(screen.getByRole("button", { name: /Food:/ }).style.touchAction).toBe("none");
+  expect(screen.getByText("Breakdown")).toBeVisible();
+});
+
+it("centers settled bounds and keeps a dragged body fixed while resolving collisions", () => {
+  const nodes = [
+    { x: 0.2, y: 0.3, radius: 0.15 },
+    { x: 0.2, y: 0.3, radius: 0.08 },
+  ];
+  const centered = settleSpendingBubbles(nodes);
+  expect(
+    (Math.min(...centered.map((node) => node.x - node.radius)) +
+      Math.max(...centered.map((node) => node.x + node.radius))) /
+      2,
+  ).toBeCloseTo(0.5);
+  expect(
+    (Math.min(...centered.map((node) => node.y - node.radius)) +
+      Math.max(...centered.map((node) => node.y + node.radius))) /
+      2,
+  ).toBeCloseTo(0.5);
+  const pinned = settleSpendingBubbles(nodes, 0);
+  expect(pinned[0]).toEqual(nodes[0]);
+  const [a, b] = pinned;
+  if (!a || !b) throw new Error("Missing collision bodies");
+  expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(0.23);
 });

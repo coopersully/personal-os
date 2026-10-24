@@ -629,7 +629,7 @@ it("opens the selected spending chart, breakdown, and qualifications from the to
   expect(await screen.findByRole("dialog")).toHaveTextContent("Includes pending transactions");
   expect(screen.getByRole("dialog")).toHaveTextContent("Partial or unverified coverage");
   expect(screen.getByText("Daily spending")).toBeVisible();
-  expect(screen.getByText("Breakdown")).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Breakdown" })).toBeVisible();
 });
 
 it("does not invent an average for an entirely future range", async () => {

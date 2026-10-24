@@ -76,10 +76,18 @@ presentation changes must preserve exact contributions, recovery links and accou
 The spending bubble view defaults to configured budget buckets, or categories when no buckets are
 configured, and remembers the user's explicit grouping choice. Buckets support category drill-down.
 Both bucket and category contexts offer Transactions links preserving the selected group and period.
-The visual direction is a draggable, elastic field attracted toward the center. Released bubbles
-remain roughly where placed, with a gentle center pull. Session-only position persistence, motion,
-and distinct drill-down/transaction interactions follow the accepted
-[design](../../superpowers/specs/2026-10-18-finance-experience-design.md#5-elastic-bubble-interaction).
+Bubbles are always draggable, including when reduced motion is enabled. Keep bodies rigid:
+no drag elasticity or inertial throw. Resolve collisions while dragging with the active body pinned;
+on release, use a damped spring and center the aggregate bounds in the canvas. Preserve relative
+session positions across data changes. The heading is Breakdown and the sole layout action is an
+accessible reset icon button. Icons sit at each circle's center, with labels below.
+
+Bubble materials reuse the editorial Design System & Branding workstream's three-phase 4×4 Bayer
+filter from `figure-grain.svg`. The Finance variant lives at `/effects/ordered-dither.svg`, lifts dark
+luminance for ordered thresholds and blends quantized output with original color. Apply it to an
+inner circular material clipped to its own bounds; never filter the hit target or alter its geometry.
+Reduced motion disables the material animation/filter and automatic spring animation, while manual
+dragging and keyboard-accessible detail/reset controls remain available.
 
 Use the assigned bucket/category color with a translucent tonal overlay filling upward inside the
 bubble; do not use a perimeter progress ring. Labels, icons, and controls remain legible above it.

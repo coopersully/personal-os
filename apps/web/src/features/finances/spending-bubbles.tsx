@@ -5,17 +5,9 @@ import type {
 } from "@personal-os/domain";
 import { type HTMLMotionProps, motion, useDragControls, useReducedMotion } from "motion/react";
 import { useEffect, useId, useRef, useState } from "react";
-import { ChevronDownIcon, SettingsIcon } from "@/components/icons";
+import { ChevronDownIcon, RefreshIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { formatMoney } from "./format";
 import { spendingGroupVisual } from "./spending-visual";
 
@@ -64,10 +56,10 @@ function monthlyBudgetLabel(
 }
 type Position = { x: number; y: number; radius: number };
 /** Bounded deterministic relaxation; no idle simulation or offscreen animation loop. */
-export function settleSpendingBubbles(nodes: Position[]) {
+export function settleSpendingBubbles(nodes: Position[], pinned?: number) {
   const next = nodes.map((node) => ({ ...node }));
-  for (let iteration = 0; iteration < 160; iteration++) {
-    for (const node of next) {
+  for (let iteration = 0; iteration < (pinned === undefined ? 160 : 32); iteration++) {
+    for (const node of pinned === undefined ? next : []) {
       node.x += (0.5 - node.x) * 0.002;
       node.y += (0.5 - node.y) * 0.002;
     }
@@ -84,15 +76,29 @@ export function settleSpendingBubbles(nodes: Position[]) {
           const amount = (required - distance) / 2;
           const ux = distance ? dx / distance : 1;
           const uy = distance ? dy / distance : 0;
-          a.x -= ux * amount;
-          a.y -= uy * amount;
-          b.x += ux * amount;
-          b.y += uy * amount;
+          const aShare = i === pinned ? 0 : j === pinned ? 2 : 1;
+          const bShare = j === pinned ? 0 : i === pinned ? 2 : 1;
+          a.x -= ux * amount * aShare;
+          a.y -= uy * amount * aShare;
+          b.x += ux * amount * bShare;
+          b.y += uy * amount * bShare;
         }
       }
     for (const node of next) {
       node.x = Math.max(node.radius, Math.min(1 - node.radius, node.x));
       node.y = Math.max(node.radius, Math.min(1 - node.radius, node.y));
+    }
+  }
+  if (pinned === undefined && next.length) {
+    const minX = Math.min(...next.map((node) => node.x - node.radius));
+    const maxX = Math.max(...next.map((node) => node.x + node.radius));
+    const minY = Math.min(...next.map((node) => node.y - node.radius));
+    const maxY = Math.max(...next.map((node) => node.y + node.radius));
+    const dx = 0.5 - (minX + maxX) / 2;
+    const dy = 0.5 - (minY + maxY) / 2;
+    for (const node of next) {
+      node.x += dx;
+      node.y += dy;
     }
   }
   return next;
@@ -110,8 +116,7 @@ export function SpendingBubbles({
 }) {
   const descriptionId = useId();
   const reduced = useReducedMotion();
-  const [arrange, setArrange] = useState(false);
-  const arranging = arrange && !reduced;
+  const dragOrigin = useRef<Position[]>([]);
   const positions = useRef(new Map<string, Position>());
   const [nodes, setNodes] = useState<Position[]>([]);
   const [width, setWidth] = useState(300);
@@ -155,26 +160,16 @@ export function SpendingBubbles({
   return (
     <section aria-label="Spending bubbles" className="flex min-w-0 flex-col gap-2">
       <div className="flex items-center justify-between gap-3 px-1">
-        <p className="text-sm font-medium">Spending breakdown</p>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm">
-              <SettingsIcon />
-              Layout
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuCheckboxItem
-              checked={arranging}
-              disabled={!!reduced}
-              onCheckedChange={(checked) => setArrange(checked)}
-            >
-              Arrange bubbles
-            </DropdownMenuCheckboxItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => reset(false)}>Reset layout</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <p className="text-sm font-medium">Breakdown</p>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Reset bubble layout"
+          title="Reset bubble layout"
+          onClick={() => reset(false)}
+        >
+          <RefreshIcon />
+        </Button>
       </div>
       <div
         ref={container}
@@ -204,9 +199,9 @@ export function SpendingBubbles({
               key={group.id}
               type="button"
               tabIndex={diameter < 44 ? -1 : 0}
-              drag={arranging}
+              drag
               dragMomentum={false}
-              dragElastic={0.12}
+              dragElastic={0}
               dragConstraints={container}
               animate={{ x: (node.x - node.radius) * width, y: (node.y - node.radius) * width }}
               onPointerDown={(event) => {
@@ -223,18 +218,42 @@ export function SpendingBubbles({
                 )
                   dragged.current = true;
               }}
+              onDragStart={() => {
+                dragOrigin.current = nodes.map((node) => ({ ...node }));
+              }}
+              onDrag={(_, info) => {
+                dragged.current = true;
+                const origin = dragOrigin.current[index];
+                if (!origin) return;
+                setNodes((current) =>
+                  settleSpendingBubbles(
+                    current.map((value, i) =>
+                      i === index
+                        ? {
+                            ...value,
+                            x: origin.x + info.offset.x / width,
+                            y: origin.y + info.offset.y / width,
+                          }
+                        : value,
+                    ),
+                    index,
+                  ),
+                );
+              }}
               onDragEnd={(_, info) => {
                 dragged.current = true;
-                const next = nodes.map((value, i) =>
-                  i === index
-                    ? {
-                        ...value,
-                        x: value.x + info.offset.x / width,
-                        y: value.y + info.offset.y / width,
-                      }
-                    : value,
+                const origin = dragOrigin.current[index] ?? node;
+                const settled = settleSpendingBubbles(
+                  nodes.map((value, i) =>
+                    i === index
+                      ? {
+                          ...value,
+                          x: origin.x + info.offset.x / width,
+                          y: origin.y + info.offset.y / width,
+                        }
+                      : value,
+                  ),
                 );
-                const settled = settleSpendingBubbles(next);
                 setNodes(settled);
                 settled.forEach((position, i) => {
                   positions.current.set(`${layoutKey}:${visible[i]?.id}`, position);
@@ -251,45 +270,54 @@ export function SpendingBubbles({
               style={{
                 width: diameter,
                 height: diameter,
-                touchAction: arranging ? "none" : "pan-y",
+                touchAction: "none",
                 backgroundColor: visual.backgroundColor,
               }}
               className={`group absolute left-0 top-0 flex flex-col items-center justify-center gap-1 overflow-hidden rounded-full p-0 text-foreground ${overage > 0 ? "border-2 border-(--status-warning-foreground)" : "border border-transparent hover:border-foreground/30 focus-visible:border-foreground/60"}`}
               transition={
-                reduced ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0.15 }
+                reduced
+                  ? { duration: 0 }
+                  : { type: "spring", stiffness: 500, damping: 42, mass: 0.9 }
               }
             >
-              {fill !== null ? (
-                <motion.span
-                  aria-hidden="true"
-                  data-budget-fill="true"
-                  className="pointer-events-none absolute inset-0 rounded-full"
-                  initial={false}
-                  animate={{ clipPath: `inset(${(1 - fill) * 100}% 0 0 0)` }}
-                  transition={{ duration: reduced ? 0 : 0.3, ease: "easeOut" }}
-                  style={{ backgroundColor: visual.fillColor }}
-                />
-              ) : null}
               <span
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-0 rounded-full bg-foreground/0 group-hover:bg-foreground/5 group-focus-visible:bg-foreground/5"
-              />
-              {diameter >= 18 ? (
+                className="spending-bubble-material pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden rounded-full"
+                style={{
+                  backgroundColor: `color-mix(in srgb, ${visual.color} 15%, var(--background))`,
+                }}
+              >
+                {fill !== null ? (
+                  <motion.span
+                    aria-hidden="true"
+                    data-budget-fill="true"
+                    className="pointer-events-none absolute inset-0 rounded-full"
+                    initial={false}
+                    animate={{ clipPath: `inset(${(1 - fill) * 100}% 0 0 0)` }}
+                    transition={{ duration: reduced ? 0 : 0.3, ease: "easeOut" }}
+                    style={{ backgroundColor: visual.fillColor }}
+                  />
+                ) : null}
                 <span
                   aria-hidden="true"
-                  data-spending-icon={visual.icon}
-                  className="relative size-4 shrink-0 [&>svg]:size-full"
-                >
-                  <VisualIcon />
-                </span>
-              ) : null}
-              {diameter >= 92 ? (
-                <span className="relative max-w-full px-2 text-center text-xs">
-                  <span className="block truncate">{group.label}</span>
-                  {formatMoney(group.netCents / 100)}
-                  {overage > 0 ? <span className="block">Over budget</span> : null}
-                </span>
-              ) : null}
+                  className="pointer-events-none absolute inset-0 rounded-full bg-foreground/0 group-hover:bg-foreground/5 group-focus-visible:bg-foreground/5"
+                />
+                {diameter >= 18 ? (
+                  <span
+                    aria-hidden="true"
+                    data-spending-icon={visual.icon}
+                    className="absolute left-1/2 top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 shrink-0 [&>svg]:size-full"
+                  >
+                    <VisualIcon />
+                  </span>
+                ) : null}
+                {diameter >= 92 ? (
+                  <span className="absolute top-[calc(50%+0.75rem)] max-w-full px-2 text-center text-xs">
+                    <span className="block truncate">{group.label}</span>
+                    {formatMoney(group.netCents / 100)}
+                    {overage > 0 ? <span className="block">Over budget</span> : null}
+                  </span>
+                ) : null}
+              </span>
             </SpendingBubble>
           );
         })}

@@ -12,8 +12,11 @@ import ExternalLinkSource from "reicon-react/icons/ArrowUpRightSquare";
 import BankSource from "reicon-react/icons/Bank";
 import BanknoteSource from "reicon-react/icons/Banknote";
 import ProjectSource from "reicon-react/icons/Box";
+import BubblesSource from "reicon-react/icons/Bubble";
 import CalendarSource from "reicon-react/icons/Calendar";
 import CalendarPlusSource from "reicon-react/icons/CalendarAdd";
+import RhythmCalendarSource from "reicon-react/icons/CalendarDays";
+import TrendChartSource from "reicon-react/icons/ChartLine";
 import CheckSource from "reicon-react/icons/Check";
 import CircleCheckSource from "reicon-react/icons/CheckCircle";
 import CheckSquareSource from "reicon-react/icons/CheckSquare";
@@ -53,6 +56,7 @@ import InfoSource from "reicon-react/icons/InfoCircle";
 import KeySource from "reicon-react/icons/Key";
 import LayersSource from "reicon-react/icons/Layers";
 import LinkOffSource from "reicon-react/icons/LinkOff";
+import SpendingListSource from "reicon-react/icons/List";
 import ListChecksSource from "reicon-react/icons/ListCheck";
 import LoaderSource from "reicon-react/icons/Loader";
 import MapPinSource from "reicon-react/icons/Location";
@@ -234,3 +238,8 @@ export const ProjectIcon: Icon = ProjectSource;
 export const UploadIcon: Icon = UploadSource;
 
 export const MerchantIcon: Icon = MerchantSource;
+
+export const BubblesIcon: Icon = BubblesSource;
+export const TrendChartIcon: Icon = TrendChartSource;
+export const SpendingListIcon: Icon = SpendingListSource;
+export const RhythmCalendarIcon: Icon = RhythmCalendarSource;

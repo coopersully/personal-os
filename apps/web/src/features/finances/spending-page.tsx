@@ -13,17 +13,18 @@ import { api } from "@/api";
 import { QueryFeedback } from "@/components/async-state";
 import { DateDisplay } from "@/components/date-display";
 import {
-  ActivityIcon,
-  CalendarIcon,
+  BubblesIcon,
   CircleHelpIcon,
   FilterIcon,
-  GridIcon,
-  LayersIcon,
+  RhythmCalendarIcon,
+  SpendingListIcon,
+  TrendChartIcon,
 } from "@/components/icons";
 import { SettingsControlsContext } from "@/components/settings-controls-context";
 import { Field, FieldGroup, FieldLabel } from "@/components/settings-field";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -35,6 +36,7 @@ import {
 } from "@/components/ui/dialog";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import {
   useSaveWorkspacePreferences,
@@ -240,6 +242,29 @@ export function FinanceSpendingPage() {
       (!data.isSuccess || data.isFetching || !data.isFetchedAfterMount))
       ? undefined
       : data.data;
+  const elapsedThrough =
+    result && result.snapshot.scope.through < today ? result.snapshot.scope.through : today;
+  const summaryDays = result
+    ? Math.max(
+        0,
+        Math.round(
+          (Date.parse(`${elapsedThrough}T00:00:00Z`) -
+            Date.parse(`${result.snapshot.scope.from}T00:00:00Z`)) /
+            86400000,
+        ) + 1,
+      )
+    : 0;
+  const summaryCents =
+    result?.snapshot.bins
+      .filter((bin) => bin.date <= today)
+      .reduce((sum, bin) => sum + bin.netCents, 0) ?? 0;
+  const largestGroup = result?.groups
+    .filter((group) => group.netCents > 0)
+    .reduce<(typeof result.groups)[number] | undefined>(
+      (largest, group) => (!largest || group.netCents > largest.netCents ? group : largest),
+      undefined,
+    );
+
   const recoveredGroup =
     recovery.state === "valid" && result && !data.isFetching && recovery.filter.groupId !== null
       ? result.groups
@@ -418,15 +443,21 @@ export function FinanceSpendingPage() {
             label="View"
             icon={
               view === "rhythm" ? (
-                <CalendarIcon />
+                <RhythmCalendarIcon />
               ) : view === "trends" ? (
-                <ActivityIcon />
+                <TrendChartIcon />
               ) : view === "list" ? (
-                <GridIcon />
+                <SpendingListIcon />
               ) : (
-                <LayersIcon />
+                <BubblesIcon />
               )
             }
+            optionIcons={{
+              bubbles: <BubblesIcon />,
+              list: <SpendingListIcon />,
+              trends: <TrendChartIcon />,
+              rhythm: <RhythmCalendarIcon />,
+            }}
             value={view}
             options={[
               ["bubbles", "Bubbles"],
@@ -585,36 +616,113 @@ export function FinanceSpendingPage() {
       {data.isLoading ? <Skeleton className="h-72 w-full" /> : null}
       {result ? (
         <>
-          <div className="flex flex-wrap items-end justify-between gap-4 px-1">
-            <div className="flex flex-col gap-1">
-              <p className="text-sm text-muted-foreground">
-                {result.snapshot.scope.basis === "personal_cost"
-                  ? "Personal spending"
-                  : "Full outflow"}
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-4xl font-semibold tracking-tight tabular-nums">
-                  {formatMoney(result.snapshot.netCents / 100)}
-                </p>
-                {result.snapshot.coverage !== "complete" ? (
-                  <Badge variant="secondary">
-                    {result.snapshot.coverage === "partial"
-                      ? "Partial coverage"
-                      : "Unverified coverage"}
-                  </Badge>
-                ) : null}
-              </div>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-                <span className="inline-flex flex-wrap items-center gap-1">
-                  <DateDisplay value={result.snapshot.scope.from} timeZone={timezone ?? "UTC"} />
-                  <span aria-hidden="true">–</span>
-                  <DateDisplay value={result.snapshot.scope.through} timeZone={timezone ?? "UTC"} />
-                </span>
-                <span>
-                  {result.snapshot.scope.includePending ? "Includes pending" : "Posted only"}
-                </span>
-              </div>
+          <TooltipProvider>
+            <div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3">
+              <Card size="sm" className="col-span-2 sm:col-span-1">
+                <CardHeader>
+                  <CardTitle>
+                    {result.snapshot.scope.basis === "personal_cost"
+                      ? "Personal spending"
+                      : "Full outflow"}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-2">
+                  <div className="flex items-start gap-1">
+                    <p className="text-2xl font-semibold tracking-tight tabular-nums lg:text-3xl">
+                      {formatMoney(result.snapshot.netCents / 100)}
+                    </p>
+                    {result.snapshot.scope.includePending ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            aria-label="Includes pending transactions"
+                            className="text-muted-foreground px-1 text-lg"
+                          >
+                            *
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          Includes pending transactions. Amounts may change when they post.
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                    <DateDisplay value={result.snapshot.scope.from} timeZone={timezone ?? "UTC"} />
+                    <span aria-hidden="true">–</span>
+                    <DateDisplay
+                      value={result.snapshot.scope.through}
+                      timeZone={timezone ?? "UTC"}
+                    />
+                  </div>
+                  {result.snapshot.coverage !== "complete" ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label="Why coverage is incomplete"
+                          className="w-fit"
+                        >
+                          <Badge variant="secondary">
+                            {result.snapshot.coverage === "partial"
+                              ? "Partial coverage"
+                              : "Unverified coverage"}
+                          </Badge>
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {result.snapshot.bins.some(
+                          (bin) =>
+                            bin.future || (bin.date === today && bin.coverage !== "complete"),
+                        )
+                          ? "This range includes future or unfinished days. Their history is not complete yet. Other evidence limitations are listed in About these totals."
+                          : "Some selected dates or accounts do not have verified transaction history. These totals reflect recorded spending. See About these totals for details."}
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : null}
+                </CardContent>
+              </Card>
+              <Card size="sm">
+                <CardHeader>
+                  <CardTitle>Daily average</CardTitle>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-2">
+                  <p className="text-2xl font-semibold tracking-tight tabular-nums lg:text-3xl">
+                    {summaryDays ? formatMoney(summaryCents / summaryDays / 100) : "—"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {summaryDays
+                      ? `Recorded spending · ${summaryDays} elapsed ${summaryDays === 1 ? "day" : "days"}`
+                      : "No elapsed days in this range"}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card size="sm">
+                <CardHeader>
+                  <CardTitle>Largest spending group</CardTitle>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-2">
+                  <p className="text-2xl font-semibold tracking-tight tabular-nums lg:text-3xl">
+                    {largestGroup ? formatMoney(largestGroup.netCents / 100) : "—"}
+                  </p>
+                  {largestGroup ? (
+                    <button
+                      type="button"
+                      className="w-fit text-sm text-muted-foreground hover:text-foreground"
+                      aria-label={`Inspect largest spending group: ${largestGroup.label}`}
+                      onClick={() => selectGroup(largestGroup)}
+                    >
+                      {largestGroup.label}
+                    </button>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">No spending in this range</p>
+                  )}
+                </CardContent>
+              </Card>
             </div>
+          </TooltipProvider>
+          <div className="flex justify-end">
             <Dialog>
               <DialogTrigger asChild>
                 <Button variant="ghost" size="sm">

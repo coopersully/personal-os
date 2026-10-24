@@ -608,3 +608,30 @@ it("saves explicit grouping and period choices, navigates periods, and retains e
     expect.objectContaining({ preferences: { financeSpendingPeriod: "custom" } }),
   );
 });
+
+it("summarizes the selected range and discloses pending and coverage on focus", async () => {
+  mount("?view=bubbles&period=custom&from=2020-01-01&through=2020-01-03&pending=1");
+  await screen.findByText("Daily average");
+  expect(screen.getByText("$3.00")).toBeVisible();
+  expect(screen.getByText("Recorded spending · 3 elapsed days")).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "Inspect largest spending group: Groceries" }),
+  ).toBeVisible();
+  fireEvent.focus(screen.getByRole("button", { name: "Includes pending transactions" }));
+  expect(await screen.findByRole("tooltip")).toHaveTextContent(
+    "Includes pending transactions. Amounts may change when they post.",
+  );
+  fireEvent.blur(screen.getByRole("button", { name: "Includes pending transactions" }));
+  fireEvent.focus(screen.getByRole("button", { name: "Why coverage is incomplete" }));
+  expect(await screen.findByRole("tooltip")).toHaveTextContent(
+    "do not have verified transaction history",
+  );
+});
+
+it("does not invent an average for an entirely future range", async () => {
+  mount("?view=bubbles&period=custom&from=2099-01-01&through=2099-01-03&pending=0");
+  expect(await screen.findByText("No elapsed days in this range")).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: "Includes pending transactions" }),
+  ).not.toBeInTheDocument();
+});

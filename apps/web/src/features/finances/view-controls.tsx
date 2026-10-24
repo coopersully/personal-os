@@ -18,6 +18,7 @@ export function FinanceChoice({
   showLabel = true,
   displayValue,
   icon,
+  optionIcons,
 }: {
   label: string;
   value: string;
@@ -27,6 +28,7 @@ export function FinanceChoice({
   showLabel?: boolean;
   displayValue?: string;
   icon?: ReactNode;
+  optionIcons?: Record<string, ReactNode>;
 }) {
   return (
     <DropdownMenu>
@@ -50,6 +52,7 @@ export function FinanceChoice({
         <DropdownMenuRadioGroup value={value} onValueChange={onChange} aria-label={label}>
           {options.map(([id, name]) => (
             <DropdownMenuRadioItem key={id} value={id}>
+              {optionIcons?.[id]}
               {name}
             </DropdownMenuRadioItem>
           ))}

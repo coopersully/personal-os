@@ -693,3 +693,13 @@ Account rows align institution and account identity at the start, with type and 
 The shared top navigation starts with the current Finance page name on desktop and mobile. The root Finance route is labelled Overview; page controls follow this identity.
 
 Spending keeps its route utilities on the primary navigation baseline. A small muted range label sits directly beside the page title (for example, “this month” or a formatted historical range); the view picker is an accessible icon button. At phone widths, period and grouping controls move into Spending options while the view, search, filter and review actions remain on the primary row.
+
+
+Spending summary uses compact Cards for selected-scope spending, recorded daily average,
+and the largest positive spending group. The average divides recorded spending through today
+by elapsed calendar days in the selection (including zero-spend days), never future days;
+future-only selections show no average. The largest group opens its existing drill-down.
+Pending inclusion is an accessible asterisk tooltip next to the total. Coverage stays visible
+with an adjacent hover/focus explanation, with full evidence in About these totals.
+View selection pairs Bubbles, List, Trends, and Rhythm with bubble, list, line-chart,
+and calendar-grid glyphs consistently in the trigger and menu.

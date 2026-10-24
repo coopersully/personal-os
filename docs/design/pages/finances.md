@@ -699,7 +699,8 @@ Spending summary uses compact Cards for selected-scope spending, recorded daily 
 and the largest positive spending group. The average divides recorded spending through today
 by elapsed calendar days in the selection (including zero-spend days), never future days;
 future-only selections show no average. The largest group opens its existing drill-down.
-Pending inclusion is an accessible asterisk tooltip next to the total. Coverage stays visible
-with an adjacent hover/focus explanation, with full evidence in About these totals.
+The Total spending card combines pending inclusion and incomplete coverage in one accessible
+asterisk tooltip next to the total, with full evidence in About these totals. Summary titles
+and single-line footer rows stay compact; the largest spending group is labelled Top group.
 View selection pairs Bubbles, List, Trends, and Rhythm with bubble, list, line-chart,
 and calendar-grid glyphs consistently in the trigger and menu.

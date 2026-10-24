@@ -622,7 +622,7 @@ export function FinanceSpendingPage() {
                 <CardHeader>
                   <CardTitle>
                     {result.snapshot.scope.basis === "personal_cost"
-                      ? "Personal spending"
+                      ? "Total spending"
                       : "Full outflow"}
                   </CardTitle>
                 </CardHeader>
@@ -631,24 +631,45 @@ export function FinanceSpendingPage() {
                     <p className="text-2xl font-semibold tracking-tight tabular-nums lg:text-3xl">
                       {formatMoney(result.snapshot.netCents / 100)}
                     </p>
-                    {result.snapshot.scope.includePending ? (
+                    {result.snapshot.scope.includePending ||
+                    result.snapshot.coverage !== "complete" ? (
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <button
                             type="button"
-                            aria-label="Includes pending transactions"
+                            aria-label="About this spending total"
                             className="text-muted-foreground px-1 text-lg"
                           >
                             *
                           </button>
                         </TooltipTrigger>
                         <TooltipContent>
-                          Includes pending transactions. Amounts may change when they post.
+                          <span className="flex flex-col gap-1">
+                            {result.snapshot.coverage !== "complete" ? (
+                              <span>
+                                {result.snapshot.coverage === "partial"
+                                  ? "Partial coverage."
+                                  : "Unverified coverage."}{" "}
+                                {result.snapshot.bins.some(
+                                  (bin) =>
+                                    bin.future ||
+                                    (bin.date === today && bin.coverage !== "complete"),
+                                )
+                                  ? "This range includes future or unfinished days."
+                                  : "Some dates or accounts do not have verified history."}
+                              </span>
+                            ) : null}
+                            {result.snapshot.scope.includePending ? (
+                              <span>
+                                Includes pending transactions. Amounts may change when they post.
+                              </span>
+                            ) : null}
+                          </span>
                         </TooltipContent>
                       </Tooltip>
                     ) : null}
                   </div>
-                  <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                  <div className="flex min-w-0 items-center gap-1 whitespace-nowrap text-xs text-muted-foreground [&_button]:min-w-0 [&_time]:truncate">
                     <DateDisplay value={result.snapshot.scope.from} timeZone={timezone ?? "UTC"} />
                     <span aria-hidden="true">–</span>
                     <DateDisplay
@@ -656,31 +677,6 @@ export function FinanceSpendingPage() {
                       timeZone={timezone ?? "UTC"}
                     />
                   </div>
-                  {result.snapshot.coverage !== "complete" ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          aria-label="Why coverage is incomplete"
-                          className="w-fit"
-                        >
-                          <Badge variant="secondary">
-                            {result.snapshot.coverage === "partial"
-                              ? "Partial coverage"
-                              : "Unverified coverage"}
-                          </Badge>
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        {result.snapshot.bins.some(
-                          (bin) =>
-                            bin.future || (bin.date === today && bin.coverage !== "complete"),
-                        )
-                          ? "This range includes future or unfinished days. Their history is not complete yet. Other evidence limitations are listed in About these totals."
-                          : "Some selected dates or accounts do not have verified transaction history. These totals reflect recorded spending. See About these totals for details."}
-                      </TooltipContent>
-                    </Tooltip>
-                  ) : null}
                 </CardContent>
               </Card>
               <Card size="sm">
@@ -693,14 +689,14 @@ export function FinanceSpendingPage() {
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {summaryDays
-                      ? `Recorded spending · ${summaryDays} elapsed ${summaryDays === 1 ? "day" : "days"}`
-                      : "No elapsed days in this range"}
+                      ? `${summaryDays} ${summaryDays === 1 ? "day" : "days"} elapsed`
+                      : "No elapsed days"}
                   </p>
                 </CardContent>
               </Card>
               <Card size="sm">
                 <CardHeader>
-                  <CardTitle>Largest spending group</CardTitle>
+                  <CardTitle>Top group</CardTitle>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-2">
                   <p className="text-2xl font-semibold tracking-tight tabular-nums lg:text-3xl">
@@ -709,14 +705,14 @@ export function FinanceSpendingPage() {
                   {largestGroup ? (
                     <button
                       type="button"
-                      className="w-fit text-sm text-muted-foreground hover:text-foreground"
+                      className="max-w-full truncate text-left text-xs text-muted-foreground hover:text-foreground"
                       aria-label={`Inspect largest spending group: ${largestGroup.label}`}
                       onClick={() => selectGroup(largestGroup)}
                     >
                       {largestGroup.label}
                     </button>
                   ) : (
-                    <p className="text-xs text-muted-foreground">No spending in this range</p>
+                    <p className="text-xs text-muted-foreground">No spending yet</p>
                   )}
                 </CardContent>
               </Card>

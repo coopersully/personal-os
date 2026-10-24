@@ -97,7 +97,12 @@ export function SpendingList({
             />
           ) : null}
           <span className="flex min-w-0 items-center gap-3">
-            <Icon className="size-4 shrink-0 text-foreground" />
+            <span
+              aria-hidden="true"
+              className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-foreground/15 bg-background/40"
+            >
+              <Icon className="size-5 text-foreground" />
+            </span>
             <span className="flex min-w-0 flex-col gap-1">
               <span className="truncate text-sm font-medium">{group.label}</span>
               <span

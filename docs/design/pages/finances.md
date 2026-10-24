@@ -84,7 +84,7 @@ accessible reset icon button. Icons sit at each circle's center, with labels bel
 
 Bubble materials reuse the editorial Design System & Branding workstream's three-phase 4×4 Bayer
 filter from `figure-grain.svg`. The Finance variant lives at `/effects/ordered-dither.svg`, lifts dark
-luminance for ordered thresholds and blends quantized output with original color. Apply it to an
+luminance for ordered thresholds and luminosity-composites the full quantized output with category color. Apply it to an
 inner circular material clipped to its own bounds; never filter the hit target or alter its geometry.
 Reduced motion disables the material animation/filter and automatic spring animation, while manual
 dragging and keyboard-accessible detail/reset controls remain available.
@@ -739,8 +739,8 @@ The title range picker opens presets, the range calendar, and date inputs direct
 Period menu is needed. Calendar ranges accept either click direction and single-day selections.
 Spending List rows use the same category/bucket tint as Bubbles, with a KPI-style background fill
 for monthly usage instead of a separate thin bar. Remove decorative row dividers and bubble
-borders; over-budget copy remains explicit. Apply the animated Bayer filter independently to
-both bubble base and the opaque budget fill, clipped inside the original circular silhouette.
+borders; over-budget copy remains explicit. Apply the animated Bayer filter once to the composed base and opaque budget fill, clipped inside
+the original circular silhouette.
 
 Category/bucket glyphs are inferred by the shared domain appearance resolver from their meaning
 (home, groceries, dining, travel, and so on), with safe generic fallbacks. API Spending metadata,
@@ -755,3 +755,5 @@ put the selected-period amount prominently at the end. Use “over” for negati
 zero and missing budgets keep explicit bounded states. Omit row-level pending notices because
 pending inclusion is controlled in the filter. Preserve sorting in the Breakdown icon menu and
 progressive category disclosure. Background fills continue to represent monthly budget usage.
+
+Spending list glyphs sit in padded square frames with a subtle contrasting surface.

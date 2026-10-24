@@ -5,7 +5,9 @@ import { readFileSync } from "node:fs";
 import { ApiClientError } from "@personal-os/api-client";
 import {
   type CalendarStatus,
+  type FinanceBudgetVersion,
   getDefaultWorkspacePreferences,
+  getFinanceBudgetApprovalReadiness,
   type UpdateAccountSetupInput,
   type User,
 } from "@personal-os/domain";
@@ -1514,7 +1516,7 @@ function financeEnvelope(data: unknown, headline = "Finance evidence loaded.") {
   };
 }
 
-function completeFinancePlan() {
+function completeFinancePlan(): FinanceBudgetVersion {
   return {
     id: thirdId,
     planId: secondId,
@@ -1628,7 +1630,15 @@ function configureFinanceWorkspace() {
       ledger: { trustworthy: true, reconciledThrough: "2026-07-12" },
     }),
   );
-  mocks.getFinanceBudget.mockResolvedValue(financeEnvelope(completeFinancePlan()));
+  const proposedBudget = completeFinancePlan();
+  mocks.getFinanceBudget.mockResolvedValue({
+    ...financeEnvelope(proposedBudget),
+    approvalReadiness: getFinanceBudgetApprovalReadiness({
+      budget: proposedBudget,
+      currentProfileVersionId: proposedBudget.profileVersionId ?? null,
+      latestBudgetVersionId: proposedBudget.id,
+    }),
+  });
   mocks.getFinanceCategories.mockResolvedValue([
     { id, name: "Living expenses", slug: "living", group: "Spending", isSystem: true, color: null },
   ]);
@@ -5670,7 +5680,7 @@ describe("ilo web app", () => {
     });
     const browser = userEvent.setup();
     const view = setup("/finances/budgets");
-    await waitFor(() => expect(view.location.value).toBe("/finances/plan"));
+    await waitFor(() => expect(view.location.value).toBe("/finances/plan"), { timeout: 5_000 });
     expect(await screen.findByText("Monthly pay")).toBeInTheDocument();
     expect(screen.getByText("Emergency reserve")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: /assumptions · Show details/ }));

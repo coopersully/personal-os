@@ -1,0 +1,113 @@
+/* This is an inert pointer overlay, above app chrome but never a hit target. */
+.dot-cursor {
+  position: fixed;
+  inset: 0 auto auto 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 100;
+  visibility: hidden;
+  mix-blend-mode: difference;
+  color: white;
+}
+.dot-cursor[data-visible] {
+  visibility: visible;
+}
+.dot-cursor > span {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 8px;
+  height: 8px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: currentColor;
+  border: 1.5px solid transparent;
+  font: 500 16px / 1 system-ui;
+  transition:
+    width 120ms ease,
+    height 120ms ease,
+    border-radius 120ms ease,
+    background-color 120ms ease;
+}
+.dot-cursor[data-state="link"] > span,
+.dot-cursor[data-state="grab"] > span {
+  width: 22px;
+  height: 22px;
+  border-color: currentColor;
+  background: transparent;
+}
+.dot-cursor[data-state="grabbing"] > span,
+.dot-cursor[data-state="link"][data-pressed="true"] > span {
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+}
+.dot-cursor[data-state="text"] > span {
+  width: 2px;
+  height: 22px;
+  border: 0;
+  border-radius: 1px;
+}
+.dot-cursor[data-state="vertical-text"] > span {
+  width: 22px;
+  height: 2px;
+  border: 0;
+  border-radius: 1px;
+}
+.dot-cursor[data-state="blocked"] > span,
+.dot-cursor[data-state="busy"] > span,
+.dot-cursor[data-state^="zoom"] > span,
+.dot-cursor[data-state="help"] > span,
+.dot-cursor[data-state="copy"] > span,
+.dot-cursor[data-state="alias"] > span,
+.dot-cursor[data-state="context-menu"] > span {
+  width: 22px;
+  height: 22px;
+  border-color: currentColor;
+  background: transparent;
+}
+.dot-cursor[data-state="blocked"] > span::after {
+  content: "";
+  position: absolute;
+  width: 19px;
+  height: 1.5px;
+  background: currentColor;
+  transform: rotate(-45deg);
+}
+.dot-cursor[data-state="busy"] > span {
+  border-top-color: transparent;
+  animation: cursor-busy 900ms linear infinite;
+}
+.dot-cursor[data-state^="resize"] > span,
+.dot-cursor[data-state="crosshair"] > span {
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  font-size: 24px;
+}
+.dot-cursor[data-state="resize-y"] > span {
+  transform: translate(-50%, -50%) rotate(90deg);
+}
+.dot-cursor[data-state="resize-nw"] > span {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+.dot-cursor[data-state="resize-ne"] > span {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+@keyframes cursor-busy {
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dot-cursor[data-state] > span {
+    transition: none;
+    animation: none;
+  }
+}
+@media (hover: none), (pointer: coarse), (forced-colors: active), (prefers-contrast: more) {
+  .dot-cursor {
+    display: none;
+  }
+}

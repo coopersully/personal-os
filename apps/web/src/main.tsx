@@ -8,6 +8,7 @@ import { RitualOverlay } from "./features/tracking/ritual-overlay.js";
 import "@fontsource-variable/geist";
 import { App } from "./app.js";
 import { MotionProvider } from "./components/motion-provider.js";
+import { PortfolioCursor } from "./components/portfolio-cursor/portfolio-cursor.js";
 import { queryWindowFocusPolicy } from "./features/desktop/query-policy.js";
 import { DesktopStartupGate } from "./features/desktop/updates.js";
 import { createAppQueryClient } from "./lib/query-client.js";
@@ -57,6 +58,7 @@ if (desktop && window.location.hash === "#pet")
 createRoot(root).render(
   <StrictMode>
     <MotionProvider>
+      <PortfolioCursor />
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           {desktop && window.location.hash === "#pet" ? (

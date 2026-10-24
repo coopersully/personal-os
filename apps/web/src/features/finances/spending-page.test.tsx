@@ -351,7 +351,7 @@ it("uses qualified whole-month usage alongside selected-day amounts without chan
   }));
   mount("?view=list&period=today&from=2026-09-08");
   await screen.findByText("Observed monthly $25.00 of $100.00 · 25.0%");
-  expect(screen.getByText("Sep: 25% of $100.00")).toBeVisible();
+  expect(screen.getByText("$100.00 · 25%")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Spending breakdown" }));
   fireEvent.click(screen.getByText("Coverage and accounting details"));
   expect(screen.getByText(/America\/Chicago/)).toBeVisible();
@@ -637,4 +637,26 @@ it("does not invent an average for an entirely future range", async () => {
   expect(await screen.findByText("No elapsed days")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Spending breakdown" }));
   expect(await screen.findByRole("dialog")).toHaveTextContent("Posted transactions only");
+});
+
+it("retains the mounted summary during a same-owner range refresh and marks it busy", async () => {
+  mount("?period=month&from=2026-09-01");
+  const total = await screen.findByRole("button", { name: "Spending breakdown" });
+  let complete: ((value: FinanceSpendingDashboard) => void) | undefined;
+  vi.mocked(api.getFinanceSpending).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: /^Date range:/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Previous period" }));
+  await waitFor(() => expect(total.closest("[aria-busy]")).toHaveAttribute("aria-busy", "true"));
+  expect(screen.getByRole("button", { name: "Spending breakdown" })).toBe(total);
+  await waitFor(() => expect(complete).toBeDefined());
+  const query = vi.mocked(api.getFinanceSpending).mock.calls.at(-1)?.[0];
+  if (!query || !complete) throw new Error("Missing range refresh");
+  complete(dashboard(query));
+  await waitFor(() => expect(total.closest("[aria-busy]")).toHaveAttribute("aria-busy", "false"));
+  expect(screen.getByRole("button", { name: "Spending breakdown" })).toBe(total);
 });

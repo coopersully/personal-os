@@ -204,6 +204,10 @@ export function FinanceSpendingPage() {
       recovery.state === "valid" ? recovery.filter.referenceRevision : null,
     ],
     enabled: queryEnabled,
+    placeholderData: (previous, previousQuery) =>
+      recovery.state !== "valid" && previousQuery?.queryKey[1] === user.data?.id
+        ? previous
+        : undefined,
     queryFn: () => {
       if (!activeQuery) throw new Error("Invalid spending filters");
       return api.getFinanceSpending(activeQuery);
@@ -397,7 +401,7 @@ export function FinanceSpendingPage() {
     </>
   );
   return (
-    <div className="flex min-w-0 flex-col gap-6">
+    <div className="flex min-w-0 flex-col gap-6" aria-busy={data.isFetching}>
       {recovery.state === "invalid" ? (
         <p>
           The recovered Spending reference is invalid or too large. No spending query has been run.

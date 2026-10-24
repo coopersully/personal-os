@@ -710,3 +710,10 @@ actual percentage, and omit fills when no positive qualified budget exists.
 Summary titles and footer rows stay compact and single-line.
 View selection pairs Bubbles, List, Trends, and Rhythm with bubble, list, line-chart,
 and calendar-grid glyphs consistently in the trigger and menu.
+
+
+Spending summary amounts roll their digits in the direction of value changes, and budget fills
+transition smoothly between widths. Preserve the prior same-owner query result during ordinary
+scope refreshes, with the page marked busy; recovered references continue to require a fresh read.
+Reduced-motion preferences suppress digit and fill animations. The total footer is budget amount
+· usage percentage; daily average includes its elapsed day count and Through today when applicable.

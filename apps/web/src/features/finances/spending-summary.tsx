@@ -1,5 +1,6 @@
 import type { FinanceSpendingDashboard, FinanceSpendingGroup } from "@personal-os/domain";
 import { formatDateOnly } from "@personal-os/domain";
+import { RollingNumber } from "@/components/rolling-number";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DialogTrigger } from "@/components/ui/dialog";
 import { formatMoney } from "./format";
@@ -16,12 +17,11 @@ export function spendingSummaryBudget(result: FinanceSpendingDashboard) {
   return { limit, used, rows, month: formatDateOnly(budget.period.from, { month: "short" }) };
 }
 function Fill({ used, limit }: { used: number; limit: number }) {
-  if (limit <= 0) return null;
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none absolute inset-y-0 left-0 bg-primary/10"
-      style={{ width: `${Math.min(100, Math.max(0, (used / limit) * 100))}%` }}
+      className="pointer-events-none absolute inset-y-0 left-0 bg-primary/10 transition-[width] duration-500 ease-out motion-reduce:transition-none"
+      style={{ width: `${Math.min(100, Math.max(0, limit > 0 ? (used / limit) * 100 : 0))}%` }}
     />
   );
 }
@@ -44,7 +44,7 @@ export function SpendingSummary({
   const groupBudget = budget?.rows.find((row) => row.groupId === largestGroup?.id);
   const progress =
     budget && budget.limit > 0
-      ? `${budget.month}: ${Math.round((budget.used / budget.limit) * 100)}% of ${formatMoney(budget.limit / 100)}`
+      ? `${formatMoney(budget.limit / 100)} · ${Math.round((budget.used / budget.limit) * 100)}%`
       : "Budget unavailable";
   const throughToday =
     result.snapshot.scope.from <= today && result.snapshot.scope.through >= today;
@@ -67,7 +67,10 @@ export function SpendingSummary({
             </CardHeader>
             <CardContent className="flex flex-col gap-2 pt-0">
               <p className="text-2xl font-semibold tracking-tight tabular-nums lg:text-3xl">
-                {formatMoney(result.snapshot.netCents / 100)}
+                <RollingNumber
+                  value={result.snapshot.netCents}
+                  formatted={formatMoney(result.snapshot.netCents / 100)}
+                />
               </p>
               <p className="truncate text-xs text-muted-foreground" title={progress}>
                 {progress}
@@ -83,10 +86,16 @@ export function SpendingSummary({
         </CardHeader>
         <CardContent className="relative flex flex-col gap-2">
           <p className="text-2xl font-semibold tracking-tight tabular-nums lg:text-3xl">
-            {days ? formatMoney(averageCents / 100) : "—"}
+            {days ? (
+              <RollingNumber value={averageCents} formatted={formatMoney(averageCents / 100)} />
+            ) : (
+              "—"
+            )}
           </p>
           <p className="truncate text-xs text-muted-foreground">
-            {days ? (throughToday ? "Through today" : `${days} days elapsed`) : "No elapsed days"}
+            {days
+              ? `${days} ${days === 1 ? "day" : "days"}${throughToday ? " · through today" : " elapsed"}`
+              : "No elapsed days"}
           </p>
         </CardContent>
       </Card>
@@ -97,7 +106,14 @@ export function SpendingSummary({
         </CardHeader>
         <CardContent className="relative flex flex-col gap-2">
           <p className="text-2xl font-semibold tracking-tight tabular-nums lg:text-3xl">
-            {largestGroup ? formatMoney(largestGroup.netCents / 100) : "—"}
+            {largestGroup ? (
+              <RollingNumber
+                value={largestGroup.netCents}
+                formatted={formatMoney(largestGroup.netCents / 100)}
+              />
+            ) : (
+              "—"
+            )}
           </p>
           {largestGroup ? (
             <button

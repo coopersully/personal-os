@@ -63,7 +63,9 @@ export function RecoverySurface({
     <Dialog open={open}>
       <DialogContent
         className={
-          children ? "max-h-[85svh] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden" : ""
+          children
+            ? "max-h-[85svh] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-lg"
+            : ""
         }
         showCloseButton={false}
         {...focus}

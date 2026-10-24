@@ -859,3 +859,11 @@ bounded before independent trailing controls, and inactive records faded on the 
 surface. Color values use a compact swatch/value trigger and a bounded shared picker
 popover with focus restoration. Server selection remains an explicit tested Connect
 flow even when its controls are flattened, because changing it signs the user out.
+
+### Full-screen ritual backgrounds
+
+The sky, glow and cloud canvas belong to the full viewport/window, independently of the
+width-constrained question card. Keep decorative layers outside the card's stacking context;
+thumbnail previews remain bounded to their own 16:9 scene. Native ritual surfaces fill the webview
+with fixed insets rather than relying on a dynamic viewport-height measurement. Check both axes
+of the background after entrance animations and after resizing, including short desktop windows.

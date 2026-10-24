@@ -1,7 +1,16 @@
 import type { Workspace } from "@personal-os/domain";
-import type { ReactNode } from "react";
+import { type ReactNode, useId } from "react";
 import { RecoveryRequest } from "@/components/recovery-request";
 import { Button } from "@/components/ui/button";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemFooter,
+  ItemGroup,
+  ItemTitle,
+} from "@/components/ui/item";
 import { useSaveWorkspacePreferences, useWorkspacePreferences } from "./preferences";
 
 /** Domain-owned callers supply reviewed values and exact-revision reapply actions. */
@@ -32,6 +41,7 @@ export function SettingsSaveRecovery({
   onAccept: () => void;
   onReapply: () => void;
 }) {
+  const descriptionId = useId();
   return (
     <RecoveryRequest
       toastId={toastId}
@@ -47,38 +57,84 @@ export function SettingsSaveRecovery({
       actions={
         <div className="grid w-full min-w-0 gap-2">
           {recoveryActions}
-          <Button type="button" variant="secondary" disabled={pending} onClick={onRefresh}>
-            Refresh latest settings
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={pending || !reviewed}
-            onClick={onAccept}
-          >
-            Use latest settings
-          </Button>
-          <Button
-            type="button"
-            disabled={pending || !reviewed || reapplyUnavailable}
-            onClick={onReapply}
-          >
-            Reapply reviewed change
-          </Button>
+          <ItemGroup className="grid gap-2 sm:grid-cols-2">
+            <Item variant="muted" className="min-w-0 flex-col flex-nowrap items-stretch">
+              <ItemContent>
+                <ItemTitle>Apply your change</ItemTitle>
+                <ItemDescription className="line-clamp-none" id={`${descriptionId}-apply`}>
+                  Save your attempted values after reviewing the latest settings.
+                </ItemDescription>
+              </ItemContent>
+              <ItemFooter className="basis-auto">
+                <Button
+                  aria-describedby={`${descriptionId}-apply`}
+                  className="w-full whitespace-normal"
+                  type="button"
+                  variant="secondary"
+                  disabled={pending || !reviewed || reapplyUnavailable}
+                  onClick={onReapply}
+                >
+                  Reapply reviewed change
+                </Button>
+              </ItemFooter>
+            </Item>
+            <Item variant="muted" className="min-w-0 flex-col flex-nowrap items-stretch">
+              <ItemContent>
+                <ItemTitle>Keep saved settings</ItemTitle>
+                <ItemDescription className="line-clamp-none" id={`${descriptionId}-keep`}>
+                  Discard your attempted change and use the saved values.
+                </ItemDescription>
+              </ItemContent>
+              <ItemFooter className="basis-auto">
+                <Button
+                  aria-describedby={`${descriptionId}-keep`}
+                  className="w-full"
+                  type="button"
+                  disabled={pending || !reviewed}
+                  onClick={onAccept}
+                >
+                  Use latest settings
+                </Button>
+              </ItemFooter>
+            </Item>
+          </ItemGroup>
         </div>
       }
     >
       <div className="grid min-w-0 gap-3">
         {children}
-        <dl className="grid min-w-0 gap-3 text-sm" aria-label={title}>
+        <ItemGroup className="gap-2" aria-label={title}>
           {rows.map((row) => (
-            <div className="min-w-0 break-words" key={row.label}>
-              <dt className="font-medium">{row.label}</dt>
-              <dd>Your change: {row.attempted}</dd>
-              <dd>Latest: {reviewed ? row.current : "Not loaded — refresh to review"}</dd>
-            </div>
+            <Item key={row.label} variant="muted">
+              <ItemContent>
+                <ItemTitle>{row.label}</ItemTitle>
+                <p>Your change: {row.attempted}</p>
+                <p className="text-muted-foreground">
+                  Latest: {reviewed ? row.current : "Not loaded — refresh to review"}
+                </p>
+              </ItemContent>
+            </Item>
           ))}
-        </dl>
+          <Item variant="muted">
+            <ItemContent>
+              <ItemTitle>Review saved values first</ItemTitle>
+              <ItemDescription className="line-clamp-none">
+                Read the saved values without changing them.
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Button
+                type="button"
+                variant={reviewed ? "secondary" : "default"}
+                disabled={pending}
+                onClick={onRefresh}
+                aria-label="Refresh latest settings"
+              >
+                Refresh
+              </Button>
+            </ItemActions>
+          </Item>
+        </ItemGroup>
       </div>
     </RecoveryRequest>
   );

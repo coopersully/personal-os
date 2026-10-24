@@ -312,3 +312,12 @@ their affected material, and each action has one notification owner. Uncertain
 mail creation stops automatic retries while retaining the draft for reconciliation.
 Concurrent mutation attempts cannot dismiss newer outcome feedback. Failed logout
 retains the session and recovery action.
+
+### Explaining recovery choices
+
+Use Shadcn Items to group a saved/attempted value comparison and to explain each recovery
+choice beside its action. Keep the read-only refresh step in the comparison area. Final choices
+belong in the footer, with their own concise consequence descriptions: reapply on the left as a
+secondary action, keep the latest saved values on the right as the primary safe choice. Stack in
+that order on phones. Neither choice becomes available until the latest values have been reviewed;
+this presentation must not weaken revision checks or automatically replay a write.

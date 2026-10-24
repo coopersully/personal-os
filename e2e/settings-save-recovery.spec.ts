@@ -93,9 +93,23 @@ test("two editors retain attempted workspace values and explicitly recover repea
     // conflict snapshot explicitly before the existing reapply flow can become available.
     await second.getByRole("button", { name: "Refresh latest settings" }).click();
     await expect(second.getByText("Latest: month")).toBeVisible();
+    const choices = second.getByRole("dialog", {
+      name: "Workspace preference change has not been confirmed.",
+    });
+    await expect
+      .poll(() => choices.evaluate((element) => element.scrollWidth <= element.clientWidth))
+      .toBe(true);
+    const dialogBounds = await choices.boundingBox();
+    if (!dialogBounds) throw new Error("Recovery choices are not visible");
+    for (const name of ["Use latest settings", "Reapply reviewed change"]) {
+      const button = await choices.getByRole("button", { name }).boundingBox();
+      if (!button) throw new Error(`Missing ${name} button`);
+      expect(button.x).toBeGreaterThanOrEqual(dialogBounds.x);
+      expect(button.x + button.width).toBeLessThanOrEqual(dialogBounds.x + dialogBounds.width);
+    }
     await second.screenshot({
       path: info.outputPath("reviewed-conflict.png"),
-      fullPage: true,
+      fullPage: false,
       animations: "disabled",
       scale: "css",
     });
@@ -118,7 +132,7 @@ test("two editors retain attempted workspace values and explicitly recover repea
     expect(current.preferences.weekStartsOn).toBe("monday");
     await second.screenshot({
       path: info.outputPath("recovered-settings.png"),
-      fullPage: true,
+      fullPage: false,
       animations: "disabled",
       scale: "css",
     });
@@ -212,7 +226,7 @@ for (const workspace of ["calendar", "mail"] as const) {
       ).toHaveCount(0);
       await page.screenshot({
         path: info.outputPath(`${workspace}-contextual-recovery.png`),
-        fullPage: true,
+        fullPage: false,
         animations: "disabled",
         scale: "css",
       });
@@ -221,7 +235,7 @@ for (const workspace of ["calendar", "mail"] as const) {
       expect(writes).toBe(1);
       await page.screenshot({
         path: info.outputPath(`${workspace}-contextual-recovery-in-settings.png`),
-        fullPage: true,
+        fullPage: false,
         animations: "disabled",
         scale: "css",
       });
@@ -322,7 +336,7 @@ test("Finance account selection recovery stays readable after reopening and navi
     expect(writes).toBe(1);
     await page.screenshot({
       path: info.outputPath("finance-contextual-recovery.png"),
-      fullPage: true,
+      fullPage: false,
       animations: "disabled",
       scale: "css",
     });
@@ -414,7 +428,7 @@ test("Tasks failed project pin reaches Settings and reapplies only its reviewed 
     const reviewed = (await (await page.request.get(path)).json()) as WorkspaceSettings<"tasks">;
     await page.screenshot({
       path: info.outputPath("tasks-contextual-recovery.png"),
-      fullPage: true,
+      fullPage: false,
       animations: "disabled",
       scale: "css",
     });

@@ -626,6 +626,11 @@ describe("Claude daily wall-clock slots", () => {
       ),
     ).toBe("2026-11-02T06:30:00.000Z");
   });
+  it("rejects an invalid observation clock before projecting a slot", () => {
+    expect(() => nextScheduledAutomationHostSlot(trigger, new Date(Number.NaN))).toThrow(
+      "Invalid schedule observation time.",
+    );
+  });
   it("validates bounded distinct wall times and IANA timezone", () => {
     expect(
       scheduledAutomationHostTriggerSchema.parse({ ...trigger, localTimes: ["20:00", "08:00"] })

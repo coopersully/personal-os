@@ -569,6 +569,32 @@ describe.sequential("tenant-bound host schedules", () => {
     if (!answer) throw new Error("answer");
     return { ...f, scheduleId: setup.schedule.id, answer };
   }
+  it("rejects scheduled invocation evidence on an event host without mutating its registration", async () => {
+    const f = await fireFixture();
+    const before = await f.service.list(f.human);
+    await expect(
+      f.service.observe(f.agent, f.scheduleId, {
+        hostSurface: "claude_code_routine",
+        expectedVersion: 3,
+        expectedState: "active",
+        observedState: "active",
+        observedAt: now().toISOString(),
+        invocationObserved: true,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    expect(await f.service.list(f.human)).toEqual(before);
+    expect(
+      (
+        await f.service.observe(f.agent, f.scheduleId, {
+          hostSurface: "claude_code_routine",
+          expectedVersion: 3,
+          expectedState: "active",
+          observedState: "active",
+          observedAt: now().toISOString(),
+        })
+      ).schedule,
+    ).toMatchObject({ version: 4, nextExpectedAt: null });
+  });
   it.each([
     "finances:maintain",
     "mail:read",

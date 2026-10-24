@@ -258,14 +258,34 @@ it("keeps uncertain delivery fenced until human inspection and shows a stale-rec
   expect(mocks.bindFinanceAnswerContinuation).not.toHaveBeenCalled();
 });
 
-it("binds Claude setup without inventing a next scheduled slot", async () => {
-  mocks.listAutomationHostSchedules.mockResolvedValue([schedule("claude_code_routine")]);
+it.each([
+  "event",
+  "scheduled",
+])("binds Claude %s setup without inventing a next scheduled slot", async (type) => {
+  const pending = schedule("claude_code_routine");
+  mocks.listAutomationHostSchedules.mockResolvedValue([
+    {
+      ...pending,
+      schedule: {
+        ...pending.schedule,
+        trigger:
+          type === "scheduled"
+            ? { type, localTimes: ["08:00", "20:00"], timeZone: "America/New_York" }
+            : pending.schedule.trigger,
+      },
+    },
+  ]);
   const user = userEvent.setup();
   show();
   await user.type(
     await screen.findByLabelText("Host automation identifier"),
     "trig_abcdefghijklmno",
   );
+  if (type === "scheduled")
+    expect(
+      screen.getByText(/Create a Claude schedule at 08:00 and 20:00 in America\/New_York/),
+    ).toBeInTheDocument();
+  expect(screen.queryByLabelText("Routine API trigger token")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Next host run")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Bind host" }));
   await waitFor(() =>
@@ -347,6 +367,11 @@ it("prepares a scheduled-only host with explicit timezone and daily times", asyn
   await user.selectOptions(screen.getByLabelText("Trigger"), "scheduled");
   await user.clear(screen.getByLabelText("Timezone"));
   await user.type(screen.getByLabelText("Timezone"), "America/New_York");
+  await user.clear(screen.getByLabelText("Daily local times (HH:mm, comma-separated)"));
+  await user.type(
+    screen.getByLabelText("Daily local times (HH:mm, comma-separated)"),
+    "07:30, 19:45",
+  );
   await user.click(screen.getByRole("button", { name: "Prepare host setup" }));
   await waitFor(() =>
     expect(mocks.createAutomationHostSchedule).toHaveBeenCalledWith(
@@ -354,7 +379,7 @@ it("prepares a scheduled-only host with explicit timezone and daily times", asyn
         hostSurface: "claude_code_routine",
         trigger: {
           type: "scheduled",
-          localTimes: ["08:00", "20:00"],
+          localTimes: ["07:30", "19:45"],
           timeZone: "America/New_York",
         },
       }),

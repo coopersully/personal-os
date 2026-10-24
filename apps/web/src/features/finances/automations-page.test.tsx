@@ -156,10 +156,32 @@ it("registers only existing authorized connections and retains a failed draft wi
     }),
   );
 });
-it("binds setup with the original registration revision and expected state", async () => {
-  api.listAutomationHostSchedules.mockResolvedValue([status("setup_pending", true)]);
+it.each([
+  "event",
+  "scheduled",
+])("binds %s setup with the original registration revision and expected state", async (type) => {
+  const pending = status("setup_pending", true);
+  api.listAutomationHostSchedules.mockResolvedValue([
+    {
+      ...pending,
+      schedule: {
+        ...pending.schedule,
+        trigger:
+          type === "scheduled"
+            ? { type, localTimes: ["08:00", "20:00"], timeZone: "America/New_York" }
+            : pending.schedule.trigger,
+      },
+    },
+  ]);
   const user = open();
   await user.click(await screen.findByRole("button", { name: "Finish setup" }));
+  if (type === "scheduled") {
+    expect(
+      screen.getByText(/Create the Claude schedule at 08:00 and 20:00 in America\/New_York/),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Next run in your local time")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Routine API trigger token")).not.toBeInTheDocument();
+  }
   await user.type(screen.getByLabelText("Host automation identifier"), "real-host-id");
   await user.click(screen.getByRole("button", { name: "Bind existing host job" }));
   await waitFor(() =>
@@ -564,7 +586,12 @@ it("shows the shared agent identity without replacing automation or host state",
   expect(screen.getByText(/This host missed its expected check-in/)).toBeVisible();
 });
 
-it("registers daily Claude wall times without interval or API credentials", async () => {
+it.each([
+  { localTimes: ["08:00", "20:00"] },
+  { localTimes: ["07:30", "19:45"] },
+])("registers daily Claude wall times $localTimes without interval or API credentials", async ({
+  localTimes,
+}) => {
   api.createAutomationHostSchedule.mockResolvedValue({});
   const user = open();
   await user.click(screen.getByRole("button", { name: "Register automation" }));
@@ -575,6 +602,11 @@ it("registers daily Claude wall times without interval or API credentials", asyn
   );
   await user.clear(screen.getByLabelText("Timezone"));
   await user.type(screen.getByLabelText("Timezone"), "America/New_York");
+  await user.clear(screen.getByLabelText("Daily local times (HH:mm, comma-separated)"));
+  await user.type(
+    screen.getByLabelText("Daily local times (HH:mm, comma-separated)"),
+    localTimes.join(", "),
+  );
   expect(screen.queryByLabelText("Interval in minutes")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Maximum event latency in minutes")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Register expected schedule" }));
@@ -585,7 +617,7 @@ it("registers daily Claude wall times without interval or API credentials", asyn
         tenantAuthorizationConnectionId: "connection-original",
         trigger: {
           type: "scheduled",
-          localTimes: ["08:00", "20:00"],
+          localTimes,
           timeZone: "America/New_York",
         },
       }),
@@ -671,4 +703,30 @@ it("formats projected starts and grace deadlines in the declared zone instead of
   } finally {
     browser.mockRestore();
   }
+});
+
+it("retains event registration with a chosen maximum latency", async () => {
+  api.createAutomationHostSchedule.mockResolvedValue({});
+  const user = open();
+  await user.click(screen.getByRole("button", { name: "Register automation" }));
+  await user.selectOptions(screen.getByLabelText("Host"), "claude_code_routine");
+  await user.selectOptions(
+    await screen.findByLabelText("Authorized connection"),
+    "connection-original",
+  );
+  await user.clear(screen.getByLabelText("Maximum event latency in minutes"));
+  await user.type(screen.getByLabelText("Maximum event latency in minutes"), "10");
+  expect(
+    screen.queryByLabelText("Daily local times (HH:mm, comma-separated)"),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Timezone")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Register expected schedule" }));
+  await waitFor(() =>
+    expect(api.createAutomationHostSchedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        hostSurface: "claude_code_routine",
+        trigger: { type: "event", expectedMaximumLatencyMinutes: 10 },
+      }),
+    ),
+  );
 });

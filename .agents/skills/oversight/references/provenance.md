@@ -27,7 +27,10 @@ runtime tests or proof a host tool works.
 
 | Scenario | Required decision/evidence |
 | --- | --- |
-| User already settled scope and authorized publication | Carry decisions and grant forward; request no repeated approval; stop before ungranted merge |
+| Assigned oversight outcome is reviewed and verified | Outcome owner self-reviews and performs normal protected merge under Cooper's standing scope; independent review and protections remain required |
+| Necessary bounded prerequisite blocks assigned outcome | Track, repair, review and verify it within inherited scope; no separate merge-permission question |
+| User explicitly requests only a draft or no merge | Honor that narrower limit; standing authority does not override it |
+| Routine implementation choice is unspecified | Choose a reasonable scope-consistent default; ask only for indispensable missing information or explicit platform approval |
 | Existing owner is idle with unpushed work | Inspect and preserve work; idle is not abandonment or permission for a replacement writer |
 | Dispatch creation times out | Reconcile partial creation by identity before retry; report uncertain, not acknowledged |
 | Single-owner feature | One owner/branch; no additional supervisor or mandatory composition worker |

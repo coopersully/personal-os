@@ -13,7 +13,7 @@ no mandatory restart when changing helpers, resuming a chat or receiving a statu
 | Implementation complete, required evidence missing | Request the named check or independent repository `deep-review` |
 | Requested draft not published | Use repository `create-pr`; record pending final gates honestly |
 | Reviewed candidate frozen | One verification owner obtains complete local or equivalent hosted evidence |
-| Current candidate reviewed and verified | Refresh live authority, eligibility, reviews, threads and protected merge gates |
+| Current candidate reviewed and verified | Outcome owner reviews its work, refreshes live gates and performs normal protected merge under standing authority; no routine permission question |
 | Merged but acceptance remains | Verify the explicit release/observation criteria; merging alone is insufficient |
 | Full outcome accepted | Report receipts and remaining unrelated work; cleanup only within its separate grant |
 
@@ -21,8 +21,11 @@ Before dispatch, inspect the executor's current work and last instruction. Use o
 per owner, with checkout/branch/PR, applicable workflow, acceptance and permitted effects. Chain
 already-authorized dependent steps with exact continuation predicates, source restrictions, resource
 owner, retry bounds and stop conditions. After interruption resume only unfinished applicable steps;
-unchanged grants require no repeated acknowledgement. Changed scope, uncertain ownership, new failure
-class or product/security decision returns to Lead. A current ownership transfer supersedes old grants.
+unchanged grants require no repeated acknowledgement. Necessary bounded prerequisites inherit the
+outcome's standing merge scope. Changed scope, uncertain ownership or a new failure class returns to
+Lead for judgment, not automatically to the user. Choose reasonable defaults from settled intent;
+ask only for indispensable missing information or explicit platform approval. A current ownership
+transfer supersedes old owner assignments without erasing the recorded outcome authority.
 
 Distinguish branch ancestry, stable source contracts, merge safety, release order and observation.
 Reviewed stable source can satisfy a source-inclusion prerequisite on an authorized integration base;

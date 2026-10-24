@@ -238,7 +238,11 @@ Only the assigned orchestrator merges the assigned PR after verifying:
    review summaries are addressed with evidence. Resolve only handled or demonstrably inapplicable
    findings. An unresolved disagreement goes back to the reviewer or head; do not dismiss it merely
    to clear a gate. Required approvals are satisfied and current.
-6. The user has authorized this network's merge scope and the actor has normal merge permission.
+6. Cooper's standing oversight grant in `AGENTS.md` covers the assigned outcome and necessary bounded
+   prerequisites, unless a narrower instruction or revocation applies. Record that source and scope;
+   do not request per-PR or prerequisite permission again. The outcome orchestrator self-reviews and
+   reviews delegated implementation; this is distinct from the independent review in gate 4.
+   The actor has normal merge permission.
    The network never changes protections, uses administrator bypass, or leaves deferred auto-merge
    enabled. A queue-only merge path without equivalent final gate enforcement is a blocker.
 

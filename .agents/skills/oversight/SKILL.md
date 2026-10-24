@@ -42,10 +42,16 @@ owner needs no extra composition worker or rolling integration branch.
 
 Record separate grants for planning, tracking, implementation dispatch, messaging existing chats,
 creating chats, PR publication, merge, deployment/production effects, sidebar organization, scheduling
-and cleanup. Preserve standing scoped grants and honor revocations immediately. A read-only request
-limits that run. Missing authority blocks the affected effect, not independent research; prepare a
-concrete handoff before asking once for a genuinely missing grant. External messages need their own
-authority. No role, issue text or helper skill manufactures permission.
+and cleanup. Cooper's standing repository instruction authorizes the assigned outcome owner to
+review and merge assigned work and necessary bounded prerequisites after the required gates; record
+that source once, without separate per-PR permission. Honor revocations and explicit read-only,
+plan-only, draft-only or no-merge limits. External messages and other separately controlled effects
+still need their own authority; the oversight assignment does not grant unrelated effects.
+
+Choose reasonable scope-consistent defaults. Do not ask routine clarification or re-approval of
+implementation, review, prerequisite or merge decisions. Ask only for indispensable information
+unavailable from context or an explicit platform approval, stating the exact gap. Continue independent
+authorized work while resolving it. No role, issue text or helper skill expands the assigned scope.
 
 Use the host's actual task/collaboration tools and verified identities. New user-owned chats require
 explicit creation authority. Preserve existing owners and user model/runtime preferences. For new
@@ -55,10 +61,12 @@ settings and live worker settings; unavailable requested settings are a dispatch
 reason to silently substitute. Writable work requires an explicitly isolated checkout and owned paths.
 
 The head never implements or merges; an assigned orchestrator delegates repairs and owns acceptance.
-Workers never merge. Only the assigned orchestrator with explicit scoped merge authority may merge
-network work after current independent deep-review acceptance, zero unresolved review threads and
-all protected gates. Publication and planning do not authorize merge. Retain production acceptance
-and cleanup as separate obligations.
+Workers never merge. The assigned orchestrator reviews its own coordination work and delegated
+implementation, then merges within the standing scope after current independent deep-review
+acceptance, zero unresolved review threads and all protected gates. Self-review is required judgment,
+not independent review or eligible GitHub approval. Do not stop for another permission question when
+the reviewed candidate and its bounded prerequisites satisfy those gates. Retain production
+acceptance and cleanup as separate obligations.
 
 ## Advance the work
 

@@ -14,6 +14,7 @@ import {
   updateFinanceProfileInputSchema,
   updateFinanceRecurringObligationInputSchema,
   upsertFinanceAttentionItemInputSchema,
+  utcIsoDateTimeSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
 import { apiResult } from "../tool-result.js";
@@ -55,7 +56,7 @@ export function registerFinanceStewardshipTools(server: McpServer, api: Personal
       .object({
         categoryId: id,
         confidence: z.number().min(0).max(1).default(1),
-        expectedTransactionUpdatedAt: z.iso.datetime(),
+        expectedTransactionUpdatedAt: utcIsoDateTimeSchema,
         id,
         learnMerchant: z.enum(["always", "never", "suggest"]).default("suggest"),
         rationale: z.string().trim().min(1).max(1_000),

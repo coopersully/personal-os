@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { utcIsoDateTimeSchema } from "./common.js";
 import {
   accountSetupStateSchema,
   actorTypeSchema,
@@ -1134,6 +1135,36 @@ describe("domain schemas", () => {
     );
   });
 
+  it("preserves qualified minute timestamps without accepting invalid dates or local times", () => {
+    for (const value of [
+      "2026-10-24T12:34Z",
+      "2026-10-24T12:34+02:00",
+      "2026-10-24T12:34:56Z",
+      "2026-10-24T12:34:56.123-04:00",
+    ]) {
+      expect(isoDateTimeSchema.parse(value)).toBe(value);
+      expect(createReminderInputSchema.parse({ title: "Reminder", dueAt: value }).dueAt).toBe(
+        value,
+      );
+      expect(createTaskInputSchema.parse({ title: "Task", dueAt: value }).dueAt).toBe(value);
+    }
+    for (const value of [
+      "2026-02-30T12:34Z",
+      "2026-10-24T25:34Z",
+      "2026-10-24T12:34+24:00",
+      "2026-10-24T12:34",
+    ]) {
+      expect(isoDateTimeSchema.safeParse(value).success).toBe(false);
+    }
+  });
+
+  it("preserves minute UTC timestamps without admitting offsets into UTC-only fields", () => {
+    expect(utcIsoDateTimeSchema.parse("2026-10-24T12:34Z")).toBe("2026-10-24T12:34Z");
+    expect(utcIsoDateTimeSchema.parse("2026-10-24T12:34:56.123Z")).toBe("2026-10-24T12:34:56.123Z");
+    expect(utcIsoDateTimeSchema.safeParse("2026-10-24T12:34+02:00").success).toBe(false);
+    expect(utcIsoDateTimeSchema.safeParse("2026-10-24T12:34").success).toBe(false);
+  });
+
   it("parses common, auth, and reminder values", () => {
     expect(idSchema.parse(id)).toBe(id);
     expect(isoDateTimeSchema.parse(start)).toBe(start);
@@ -1165,6 +1196,16 @@ describe("domain schemas", () => {
     expect(invitationCodeSchema.parse("abcd2345")).toBe("ABCD2345");
     expect(invitationCodeSchema.safeParse("too-short").success).toBe(false);
     expect(invitationCodeSchema.safeParse("ABCD-234").success).toBe(false);
+    for (const password of [`Aa1${"😀".repeat(5)}`, `Aa1!${"😀".repeat(62)}`]) {
+      expect(passwordRequirementState(password).length).toBe(true);
+      expect(passwordSchema.safeParse(password).success).toBe(true);
+    }
+    const overlongPassword = `Aa1!${"😀".repeat(63)}`;
+    expect(passwordRequirementState(overlongPassword).length).toBe(false);
+    expect(passwordSchema.safeParse(overlongPassword).success).toBe(false);
+    expect(
+      loginInputSchema.safeParse({ email: "a@example.com", password: overlongPassword }).success,
+    ).toBe(false);
     expect(passwordSchema.safeParse("alllowercase123!").success).toBe(false);
     expect(passwordSchema.safeParse("ALLUPPERCASE123!").success).toBe(false);
     expect(passwordSchema.safeParse("NoNumbersHere!").success).toBe(false);

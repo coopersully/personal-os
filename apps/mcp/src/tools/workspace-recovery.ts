@@ -7,6 +7,7 @@ import {
   automationHostScheduleRevokeInputSchema,
   automationHostScheduleUpdateInputSchema,
   idSchema,
+  utcIsoDateTimeSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
 import { apiResult } from "../tool-result.js";
@@ -131,7 +132,7 @@ export function registerWorkspaceRecoveryTools(server: McpServer, api: PersonalO
         scheduleId: idSchema,
         expectedScheduleId: idSchema,
         expectedConnectionId: idSchema,
-        expectedUpdatedAt: z.iso.datetime(),
+        expectedUpdatedAt: utcIsoDateTimeSchema,
         hostChecked: z.literal(true),
       },
     },
@@ -145,7 +146,7 @@ export function registerWorkspaceRecoveryTools(server: McpServer, api: PersonalO
         "Mark an uncertain external delivery unavailable only after checking the host. Requires the original connection, exact updatedAt, finances:read, finances:maintain, finances:write, finances:execute and review bypass. This does not dispatch another delivery.",
       inputSchema: {
         continuationId: idSchema,
-        expectedUpdatedAt: z.iso.datetime(),
+        expectedUpdatedAt: utcIsoDateTimeSchema,
         hostChecked: z.literal(true),
       },
     },

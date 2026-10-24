@@ -155,7 +155,7 @@ export function registerMailTools(server: McpServer, api: PersonalOsApiClient) {
       },
       description:
         "Temporarily hide a cached conversation until a specified time. This changes nohmi's local snooze state, not provider mail.",
-      inputSchema: z.object({ id, until: z.string().datetime({ offset: true }) }),
+      inputSchema: z.object({ id, until: isoDateTimeSchema }),
       title: "Snooze mail",
     },
     async ({ id: threadId, until }) =>

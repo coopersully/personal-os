@@ -2,9 +2,11 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { createDatabaseClient, migrateDatabase } from "@personal-os/database";
+import { localDateAt, localDateToIso } from "@personal-os/domain";
 import { createApp, type PersonalOsApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import { financeReconciliationDiagnostic } from "./finance-reconciliation-errors.js";
+import { qaFixtureClockEnabled, refreshQaFinanceFixtures } from "./qa-fixture-clock.js";
 import {
   closeNodeHttpServer,
   createRuntimeLifecycle,
@@ -20,6 +22,27 @@ const migrationsFolder =
 
 await migrateDatabase(database.db, migrationsFolder);
 
+let lastFixtureDay: string | undefined;
+async function refreshLocalDemo(): Promise<void> {
+  if (!qaFixtureClockEnabled(process.env, config.databaseUrl)) return;
+  const now = new Date();
+  const day = localDateToIso(localDateAt(now, "America/New_York"));
+  if (lastFixtureDay === day) return;
+  try {
+    const result = await refreshQaFinanceFixtures(database.db, now);
+    if (result?.caughtUp) lastFixtureDay = day;
+    if (result?.days)
+      process.stdout.write(
+        `[personal-os] Added ${result.days} days of local demo Finance activity.\n`,
+      );
+  } catch (error) {
+    process.stderr.write(
+      `[personal-os] Local demo refresh failed; retrying next minute: ${String(error)}\n`,
+    );
+  }
+}
+await refreshLocalDemo();
+
 const app = createApp({
   config,
   db: database.db,
@@ -28,6 +51,7 @@ const app = createApp({
 });
 const server = serve({ fetch: app.fetch, port: config.port });
 const scheduler = setInterval(() => {
+  runtimeLifecycle.startBackgroundTask("local-demo-fixtures", refreshLocalDemo);
   runtimeLifecycle.startBackgroundTask("scheduled-connector-sync", async () => {
     await app.syncDueConnectors().catch(() => {
       process.stderr.write("[personal-os] scheduled connector sync failed\n");

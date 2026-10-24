@@ -1,4 +1,6 @@
-import type { ComponentProps } from "react";
+import { AnimatePresence, type HTMLMotionProps, useIsPresent, usePresenceData } from "motion/react";
+import * as m from "motion/react-m";
+import { type ComponentProps, forwardRef, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -41,3 +43,64 @@ export function FloatingActionButton({
     </TooltipProvider>
   );
 }
+
+/** Shared anchored expansion for mobile action menus and Calendar workflows. */
+export function FloatingActionSurface({
+  state,
+  contentKey = state,
+  contentClassName,
+  children,
+  ...props
+}: HTMLMotionProps<"div"> & {
+  state: string;
+  contentKey?: string;
+  contentClassName?: string;
+  children: ReactNode;
+}) {
+  return (
+    <m.div
+      {...props}
+      initial={false}
+      layout
+      layoutDependency={contentKey}
+      style={{ ...props.style, overflow: "hidden", position: "relative" }}
+      transition={{ layout: { bounce: 0.12, duration: 0.38, type: "spring" } }}
+    >
+      <AnimatePresence custom={state} initial={false} mode="popLayout">
+        <FloatingSurfaceContent key={contentKey} className={contentClassName}>
+          {children}
+        </FloatingSurfaceContent>
+      </AnimatePresence>
+    </m.div>
+  );
+}
+const FloatingSurfaceContent = forwardRef<
+  HTMLDivElement,
+  { children: ReactNode; className?: string | undefined }
+>(function FloatingSurfaceContent({ children, className }, ref) {
+  const present = useIsPresent();
+  const collapsing = usePresenceData() === "closed";
+  return (
+    <m.div
+      ref={ref}
+      className={className}
+      aria-hidden={present ? undefined : true}
+      inert={present ? undefined : true}
+      initial={{ opacity: 0 }}
+      animate={{
+        opacity: 1,
+        transition: {
+          delay: collapsing && present ? 0.16 : 0,
+          duration: 0.14,
+          ease: [0.22, 1, 0.36, 1],
+        },
+      }}
+      exit={{
+        opacity: 0,
+        transition: { duration: collapsing ? 0.24 : 0.12, ease: [0.4, 0, 1, 1] },
+      }}
+    >
+      {children}
+    </m.div>
+  );
+});

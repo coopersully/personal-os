@@ -8,6 +8,7 @@ import {
   ResponsiveDialog,
   ResponsiveDialogBody,
   ResponsiveDialogContent,
+  ResponsiveDialogDescription,
   ResponsiveDialogFooter,
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
@@ -94,11 +95,14 @@ export function TransactionContextEditor({
   });
   return (
     <ResponsiveDialog open onOpenChange={(open) => !open && onClose()}>
-      <ResponsiveDialogContent>
+      <ResponsiveDialogContent data-finance-dialog data-finance-size="default">
         <ResponsiveDialogHeader>
           <ResponsiveDialogTitle>
             {transaction.notes ? "Edit context" : "Add context"}
           </ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
+            Save a note to explain this transaction.
+          </ResponsiveDialogDescription>
         </ResponsiveDialogHeader>
         <FeedbackForm
           feedback={save.feedback}

@@ -36,7 +36,35 @@ months. Missing budgets and multi-month selections omit fill with an explanation
 bucket/category grouping. Never silently substitute today's budget. The [spending contract](../../engineering/finance-spending.md) defines revision selection and coverage;
 design §§4 and 13 retain the accepted direction.
 
+## Dialogs and detail views
+
+Finance uses the shared responsive shadcn dialog composition: centered dialogs on desktop
+and drawers below 768px. Use a 32rem default width and 48rem for dense editors and evidence;
+constrain height to the viewport, retain the heading and close control, and scroll one body.
+Use consistent inset spacing, readable secondary surfaces, labeled fields and aligned actions.
+Mobile controls retain comfortable touch targets and safe-area padding. Keep Cancel separate
+from the primary action and preserve pending-state guards and financial approval behavior.
+
+Lead detail views with the amount or decision, then supporting facts and related records.
+Put raw source evidence and technical qualifications behind named disclosures. Spending's
+breakdown shows recorded spending, a daily graph, posted/pending amounts and category rows;
+exact contribution details preserve matching-transaction navigation. Budget editing explains
+that saving creates a proposal, with the current version rendered quietly in the body.
+
 ## Overview user job
+
+### Shared section and metric layout
+
+Overview and Wealth use one horizontal metric rail, composed from the shared shadcn Carousel.
+Keep cards compact with small icons, a prominent value and a short description below. Swipe or
+use keyboard/chevrons to reach every metric; loop existing items when the rail overflows. Hide
+chevrons and their navigation row when all cards fit. Keep controls below the cards so they never
+cover values. On desktop reveal navigation on hover/focus; keep it visible on touch screens when needed. Respect reduced motion and keep scrolling inside the rail.
+
+Finance section headings and descriptions sit above their content surfaces. Accounts and Financial
+goals use open headings above individual rows; Monthly budget, Resources and Allocations use the
+same heading treatment above their summary/table cards. Preserve section labels for navigation and
+assistive technology. Do not add an enclosing card solely to hold a section title.
 
 ### Daily summary
 
@@ -58,6 +86,10 @@ Unavailable recurring records appear in the Coming next header description as it
 total. Complete plan is a single status/allocation/unassigned summary linking to Budget; rationale and allocation details stay on Budget. Remove the duplicate forecast, wealth-priority and generic next-step/navigation prompts. Show a reimbursement summary only for a positive outstanding amount. What changed shows only the latest recorded period review and maintenance status with Activity navigation; use one empty-state line when neither exists.
 
 ### Spending dashboard
+
+The fresh Spending selection defaults to **this week** with **automatic grouping**
+in every view, including Rhythm. Saved explicit choices and URL/recovery scopes
+take precedence; switching visualization never silently changes the selected range.
 
 Spending is a new sidebar destination; retain Overview and existing destinations in this scope.
 Automations and Activity each have their own sidebar page. Reassess redundancy after the redesign
@@ -783,3 +815,23 @@ Manual Hourly mode across multiple dates summarizes the local time-of-day patter
 selected days (24 hour-of-day blocks). Its tooltips say across selected days; the untimed block opens
 the full selected period, preserving exact day/period reference scope. Bucket List rows omit nested
 category-breakdown disclosures; the bucket itself still opens its existing detail view.
+
+Spending’s primary header reads as a concise sentence: the title, a date selector
+(“this month”, “in September 2026”, “on Oct 24, 2026”, or “from … to …”), and
+a grouping selector (“by category”, “by bucket”, “grouped automatically”).
+Compose the shared `WorkspaceTitleSentence`: only Spending is bold/title case;
+selectors are both normal muted gray sentence text, with single-space optical
+spacing, no inline chevrons, and full-height shadcn hover/focus targets. On mobile, the one-line title sentence occupies the bottom header row.
+The top row contains the switcher, an expanding real search field (only its icon
+when empty, with an accessible name), and the view,
+filter, and attention buttons at the end. Long scopes scroll only within the
+sentence row; grouping stays accessible.
+
+All Finance routes adopt the same primary header contract, including Overview,
+Transactions, Accounts, Budget, Cash flow, Wealth, Activity, and utility pages.
+On mobile the workspace switcher, elastic icon-only idle search, and compact
+action controls share the top row; the static page title and any scope phrases
+occupy the single bottom row. Keep action groups intact and let search shrink
+first. Cash flow’s section and date scope sit beside its title; timeline and
+transaction presentation use icon selectors, and Budget configuration uses a
+labelled icon action. On desktop, title/scope and search/actions share one header.

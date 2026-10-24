@@ -16,6 +16,15 @@ import {
   YAxis,
 } from "recharts";
 import { InfoIcon } from "@/components/icons";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogTrigger as DialogTrigger,
+  ResponsiveDialogBody,
+} from "@/components/responsive-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -25,14 +34,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -230,7 +231,7 @@ export function FinanceSpendingTrends({
                   <InfoIcon />
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
+              <DialogContent data-finance-dialog data-finance-size="wide">
                 <DialogHeader>
                   <DialogTitle>Trend details</DialogTitle>
                   <DialogDescription>
@@ -238,90 +239,93 @@ export function FinanceSpendingTrends({
                     {qualified ? " · Incomplete coverage; comparison may change" : ""}
                   </DialogDescription>
                 </DialogHeader>
-                {dashboard.currency.unsupported.length > 0 && (
-                  <p className="text-sm text-muted-foreground">
-                    Unsupported currencies excluded:{" "}
-                    {dashboard.currency.unsupported
-                      .map((entry) => entry.code ?? "Unknown currency")
-                      .join(", ")}
-                  </p>
-                )}
-                <Table>
-                  <caption className="sr-only">Spending trends data</caption>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Period</TableHead>
-                      <TableHead className="text-right">Net spending</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {bins.map((bin) => (
-                      <TableRow key={bin.date}>
-                        <TableCell>
-                          <Button
-                            variant="link"
-                            onClick={() => onSelect(bin.drillDown)}
-                            aria-label={bin.label}
-                          >
-                            {formatCalendarDate(bin.date)}
-                          </Button>
-                          {bin.label !== bin.date && (
-                            <span className="block text-xs text-muted-foreground">
-                              through {formatCalendarDate(bin.drillDown.scope.through)}
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {formatMoney(bin.netCents / 100)}
-                          {bin.negativeAdjustmentCents > 0 && (
-                            <span className="block text-xs text-muted-foreground">
-                              Refunds/adjustments −{formatMoney(bin.negativeAdjustmentCents / 100)}
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          {spendingBinStatus(bin)}
-                          {bin.partial ? " · Partial bin" : ""}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-                {comparison && (
+                <ResponsiveDialogBody>
+                  {dashboard.currency.unsupported.length > 0 && (
+                    <p className="text-sm text-muted-foreground">
+                      Unsupported currencies excluded:{" "}
+                      {dashboard.currency.unsupported
+                        .map((entry) => entry.code ?? "Unknown currency")
+                        .join(", ")}
+                    </p>
+                  )}
                   <Table>
-                    <caption className="sr-only">
-                      Contribution to the change by category or bucket
-                    </caption>
+                    <caption className="sr-only">Spending trends data</caption>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Group</TableHead>
-                        <TableHead className="text-right">Change</TableHead>
+                        <TableHead>Period</TableHead>
+                        <TableHead className="text-right">Net spending</TableHead>
+                        <TableHead>Status</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {[
-                        ...new Set([
-                          ...dashboard.groups.map((group) => group.id),
-                          ...comparison.groups.map((group) => group.id),
-                        ]),
-                      ].map((id) => {
-                        const current = dashboard.groups.find((group) => group.id === id);
-                        const previous = comparison.groups.find((group) => group.id === id);
-                        return (
-                          <TableRow key={id}>
-                            <TableCell>{current?.label ?? previous?.label}</TableCell>
-                            <TableCell className="text-right tabular-nums">
-                              {formatMoney(
-                                ((current?.netCents ?? 0) - (previous?.netCents ?? 0)) / 100,
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
+                      {bins.map((bin) => (
+                        <TableRow key={bin.date}>
+                          <TableCell>
+                            <Button
+                              variant="link"
+                              onClick={() => onSelect(bin.drillDown)}
+                              aria-label={bin.label}
+                            >
+                              {formatCalendarDate(bin.date)}
+                            </Button>
+                            {bin.label !== bin.date && (
+                              <span className="block text-xs text-muted-foreground">
+                                through {formatCalendarDate(bin.drillDown.scope.through)}
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {formatMoney(bin.netCents / 100)}
+                            {bin.negativeAdjustmentCents > 0 && (
+                              <span className="block text-xs text-muted-foreground">
+                                Refunds/adjustments −
+                                {formatMoney(bin.negativeAdjustmentCents / 100)}
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground">
+                            {spendingBinStatus(bin)}
+                            {bin.partial ? " · Partial bin" : ""}
+                          </TableCell>
+                        </TableRow>
+                      ))}
                     </TableBody>
                   </Table>
-                )}
+                  {comparison && (
+                    <Table>
+                      <caption className="sr-only">
+                        Contribution to the change by category or bucket
+                      </caption>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Group</TableHead>
+                          <TableHead className="text-right">Change</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {[
+                          ...new Set([
+                            ...dashboard.groups.map((group) => group.id),
+                            ...comparison.groups.map((group) => group.id),
+                          ]),
+                        ].map((id) => {
+                          const current = dashboard.groups.find((group) => group.id === id);
+                          const previous = comparison.groups.find((group) => group.id === id);
+                          return (
+                            <TableRow key={id}>
+                              <TableCell>{current?.label ?? previous?.label}</TableCell>
+                              <TableCell className="text-right tabular-nums">
+                                {formatMoney(
+                                  ((current?.netCents ?? 0) - (previous?.netCents ?? 0)) / 100,
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  )}
+                </ResponsiveDialogBody>
               </DialogContent>
             </Dialog>
           </CardAction>

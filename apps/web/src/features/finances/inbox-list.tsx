@@ -1,15 +1,16 @@
 import type { FinanceInboxCase, FinanceToolResult } from "@personal-os/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogBody,
+} from "@/components/responsive-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   Item,
   ItemActions,
@@ -87,29 +88,31 @@ export function FinanceInboxList({ result }: { result: FinanceToolResult<Finance
           if (!open) setSelectedId(null);
         }}
       >
-        <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent data-finance-dialog data-finance-size="wide">
           <DialogHeader>
             <DialogTitle>Review financial activity</DialogTitle>
             <DialogDescription>Add context or apply a correction now.</DialogDescription>
           </DialogHeader>
-          {selected ? (
-            <ReviewQuestion
-              key={selected.id}
-              review={selected}
-              prompt={selected.prompt ?? "What should we know about this item?"}
-              headline=""
-              onResponse={(response) => {
-                client.setQueryData(["finance-inbox"], response);
-                void client.invalidateQueries({
-                  predicate: (query) =>
-                    typeof query.queryKey[0] === "string" &&
-                    query.queryKey[0].startsWith("finance-") &&
-                    query.queryKey[0] !== "finance-inbox",
-                });
-                setSelectedId(null);
-              }}
-            />
-          ) : null}
+          <ResponsiveDialogBody>
+            {selected ? (
+              <ReviewQuestion
+                key={selected.id}
+                review={selected}
+                prompt={selected.prompt ?? "What should we know about this item?"}
+                headline=""
+                onResponse={(response) => {
+                  client.setQueryData(["finance-inbox"], response);
+                  void client.invalidateQueries({
+                    predicate: (query) =>
+                      typeof query.queryKey[0] === "string" &&
+                      query.queryKey[0].startsWith("finance-") &&
+                      query.queryKey[0] !== "finance-inbox",
+                  });
+                  setSelectedId(null);
+                }}
+              />
+            ) : null}
+          </ResponsiveDialogBody>
         </DialogContent>
       </Dialog>
     </section>

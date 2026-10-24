@@ -236,3 +236,11 @@ session is unobserved or its case run remains open. A new answer for the same or
 case can wake its bound routine; it cannot adopt an unrelated open run. Human movement of an
 existing run is offered only for a polling Codex schedule, since an event-only Claude routine
 would otherwise receive no wakeup. Ending a schedule clears its stored encrypted trigger token.
+
+## Shared agent identity
+
+Automation presentation uses the account-level identity defined in [Shared agent accounts](agent-accounts.md).
+Several surfaces or connections may share that identity after owner-confirmed linking. The schedule's
+original authorization connection remains its execution and continuation boundary; profile grouping
+never transfers that authority. Finance registration ensures an identity on the authorized connection,
+then shares its name and avatar with settings and activity across the account.

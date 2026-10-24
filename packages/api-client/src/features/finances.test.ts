@@ -1,3 +1,6 @@
+import type { FinanceBudgetReadResult } from "@personal-os/domain";
+import { expectTypeOf } from "vitest";
+import { createApiClient } from "../client.js";
 import { createFinanceApi, type FinanceRequest } from "./finances.js";
 
 describe("Finance position client", () => {
@@ -224,4 +227,41 @@ it("posts bounded exact Spending filters without granting tenant authority", asy
   await expect(
     createFinanceApi(request as FinanceRequest).listFinanceSpendingTransactions(filter),
   ).rejects.toThrow();
+});
+
+describe("Finance budget approval readiness client", () => {
+  it("exposes the additive readiness contract through the composed HTTP client", async () => {
+    const value: FinanceBudgetReadResult = {
+      schemaVersion: 1,
+      data: null,
+      changes: [],
+      outcome: "completed",
+      communication: {
+        headline: "Create a proposal",
+        optionalDetails: [],
+        requiredDisclosures: [],
+      },
+      remainingWork: { categories: [], count: 0 },
+      approvalReadiness: {
+        ready: false,
+        code: "no_budget",
+        recovery: "create_proposal",
+        message: "Create a proposal",
+        budgetVersionId: null,
+        latestBudgetVersionId: null,
+        currentProfileVersionId: null,
+      },
+    };
+    const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json(value));
+    const api = createApiClient({ baseUrl: "https://example.test", token: "test-token", fetch });
+    expectTypeOf<
+      Awaited<ReturnType<typeof api.getFinanceBudget>>
+    >().toEqualTypeOf<FinanceBudgetReadResult>();
+    expect(await api.getFinanceBudget()).toEqual(value);
+    expect(await api.getFinanceBudget("plan/id &")).toEqual(value);
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      "https://example.test/v1/finances/budget-plans",
+      "https://example.test/v1/finances/budget-plans?planId=plan%2Fid%20%26",
+    ]);
+  });
 });

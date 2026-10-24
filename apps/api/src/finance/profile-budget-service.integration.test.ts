@@ -54,6 +54,139 @@ describe.sequential("Finance profile and budget lifecycle", () => {
     await container.stop();
   });
 
+  it("inspects a synthetic v7 savings/buffer proposal without writes, then recovers a changed profile and approves", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Readiness",
+        email: "budget-readiness@example.com",
+        passwordHash: "unused",
+      })
+      .returning();
+    if (!owner) throw new Error("Missing owner");
+    const context = await loadFinanceAuthorization({
+      db: database.db,
+      principal: {
+        actorId: owner.id,
+        actorType: "user",
+        userId: owner.id,
+        scopes: new Set(["finances:write"]),
+      },
+      requestId: "readiness-test",
+    });
+    const service = createProfileBudgetService({ db: database.db, now: () => now });
+    expect((await service.getFinanceBudget(owner.id)).approvalReadiness.code).toBe("no_budget");
+    const profile = await service.updateFinancialProfile(
+      {
+        changes: { expectedMonthlyTakeHome: 3000, householdSize: 1 },
+        expectedVersion: 0,
+        idempotencyKey: "readiness-profile",
+      },
+      context,
+    );
+    const input = {
+      name: "Synthetic monthly plan",
+      effectiveFrom: "2026-10",
+      assumptions: ["Income confirmed for this example."],
+      rationale: "Keep savings and a cash buffer.",
+      resources: [{ key: "Income", kind: "income" as const, amount: 3000 }],
+      allocations: [
+        { key: "Savings", kind: "savings" as const, amount: 2500 },
+        { key: "Buffer", kind: "buffer" as const, amount: 500 },
+      ],
+      idempotencyKey: "readiness-create",
+    };
+    let proposal = (await service.createFinanceBudget(input, context)).data;
+    for (let version = 2; version <= 7; version++) {
+      proposal = (
+        await service.reviseFinanceBudget(
+          {
+            ...input,
+            planId: proposal.planId,
+            expectedVersion: proposal.version,
+            idempotencyKey: `readiness-v${version}`,
+          },
+          context,
+        )
+      ).data;
+    }
+    const before = await database.db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.userId, owner.id));
+    expect(await service.getFinanceBudget(owner.id, proposal.planId)).toMatchObject({
+      data: { version: 7, profileVersionId: profile.data.id },
+      approvalReadiness: { ready: true, code: "ready", currentProfileVersionId: profile.data.id },
+    });
+    expect(
+      await database.db.select().from(auditEvents).where(eq(auditEvents.userId, owner.id)),
+    ).toEqual(before);
+    expect((await service.getFinanceBudget(userId, proposal.planId)).approvalReadiness.code).toBe(
+      "no_budget",
+    );
+    const decision = {
+      budgetVersionId: proposal.id,
+      expectedVersion: 7,
+      expectedProfileVersionId: profile.data.id,
+      approvalSource: "user_instruction" as const,
+      idempotencyKey: "readiness-approve",
+    };
+    const v7Active = await service.approveFinanceBudget(decision, context);
+    expect(v7Active.data).toMatchObject({
+      version: 7,
+      status: "active",
+      profileVersionId: profile.data.id,
+    });
+    expect(await service.approveFinanceBudget(decision, context)).toEqual(v7Active);
+    proposal = (
+      await service.reviseFinanceBudget(
+        { ...input, planId: proposal.planId, expectedVersion: 7, idempotencyKey: "readiness-v8" },
+        context,
+      )
+    ).data;
+    const staleDecision = {
+      ...decision,
+      budgetVersionId: proposal.id,
+      expectedVersion: 8,
+      idempotencyKey: "readiness-stale",
+    };
+    const changed = await service.updateFinancialProfile(
+      {
+        changes: { householdSize: 2 },
+        expectedVersion: 1,
+        idempotencyKey: "readiness-profile-next",
+      },
+      context,
+    );
+    expect(
+      (await service.getFinanceBudget(owner.id, proposal.planId)).approvalReadiness,
+    ).toMatchObject({ ready: false, code: "profile_changed", recovery: "revise_proposal" });
+    await expect(service.approveFinanceBudget(staleDecision, context)).rejects.toMatchObject({
+      code: "conflict",
+      details: { approvalReadiness: { code: "profile_changed" } },
+    });
+    const revised = (
+      await service.reviseFinanceBudget(
+        { ...input, planId: proposal.planId, expectedVersion: 8, idempotencyKey: "readiness-v9" },
+        context,
+      )
+    ).data;
+    expect(revised.allocations).toEqual(proposal.allocations);
+    const approval = {
+      ...decision,
+      budgetVersionId: revised.id,
+      expectedVersion: 9,
+      expectedProfileVersionId: changed.data.id,
+      idempotencyKey: "readiness-current",
+    };
+    const active = await service.approveFinanceBudget(approval, context);
+    expect(active.data.status).toBe("active");
+    expect(await service.approveFinanceBudget(approval, context)).toEqual(active);
+    expect(
+      (await service.getFinanceBudget(owner.id, proposal.planId)).approvalReadiness,
+    ).toMatchObject({ ready: false, code: "not_proposed", recovery: "none" });
+  });
+
   it("serializes concurrent profile version allocation per user", async () => {
     const [profileUser] = await database.db
       .insert(users)

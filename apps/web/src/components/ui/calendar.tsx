@@ -31,13 +31,13 @@ function Calendar({
     <DayPicker
       captionLayout={captionLayout}
       className={cn(
-        "group/calendar w-full p-0 [--cell-radius:var(--radius)] [--cell-size:--spacing(7)]",
+        "group/calendar w-full p-0 [--cell-radius:var(--radius)] [--cell-size:--spacing(8)]",
         className,
       )}
       classNames={{
         root: cn("w-full", defaultClassNames.root),
         months: cn("relative flex flex-col gap-4", defaultClassNames.months),
-        month: cn("flex w-full flex-col gap-4", defaultClassNames.month),
+        month: cn("flex w-full flex-col gap-2", defaultClassNames.month),
         nav: cn(
           "absolute inset-x-0 top-0 flex w-full items-center justify-between gap-1",
           defaultClassNames.nav,
@@ -76,17 +76,20 @@ function Calendar({
           "flex-1 rounded-(--cell-radius) text-[0.8rem] font-normal text-muted-foreground select-none",
           defaultClassNames.weekday,
         ),
-        week: cn("mt-2 flex w-full", defaultClassNames.week),
+        week: cn("mt-1 flex w-full", defaultClassNames.week),
         week_number_header: cn("w-(--cell-size) select-none", defaultClassNames.week_number_header),
         week_number: cn(
           "text-[0.8rem] text-muted-foreground select-none",
           defaultClassNames.week_number,
         ),
         day: cn(
-          "group/day relative aspect-square h-full w-full rounded-(--cell-radius) p-0 text-center select-none",
+          "group/day relative h-(--cell-size) w-full rounded-(--cell-radius) p-0 text-center select-none",
           defaultClassNames.day,
         ),
         today: cn("text-primary", defaultClassNames.today),
+        range_start: cn("rounded-none bg-[linear-gradient(to_right,transparent_50%,var(--accent)_50%)]", defaultClassNames.range_start),
+        range_middle: cn("rounded-none bg-accent", defaultClassNames.range_middle),
+        range_end: cn("rounded-none bg-[linear-gradient(to_left,transparent_50%,var(--accent)_50%)]", defaultClassNames.range_end),
         outside: cn("text-muted-foreground opacity-50", defaultClassNames.outside),
         disabled: cn("text-muted-foreground opacity-50", defaultClassNames.disabled),
         hidden: cn("invisible", defaultClassNames.hidden),
@@ -151,12 +154,15 @@ function CalendarDayButton({
   return (
     <Button
       className={cn(
-        "relative isolate z-10 flex aspect-square size-auto w-full min-w-(--cell-size) flex-col gap-1 border-0 leading-none font-normal group-data-[focused=true]/day:relative group-data-[focused=true]/day:z-10 group-data-[focused=true]/day:bg-selection data-[selected-single=true]:bg-primary data-[selected-single=true]:text-primary-foreground [&>span]:text-xs [&>span]:opacity-70",
+        "relative isolate z-10 flex h-(--cell-size) w-full min-w-(--cell-size) flex-col gap-1 border-0 leading-none font-normal group-data-[focused=true]/day:relative group-data-[focused=true]/day:z-10 group-data-[focused=true]/day:bg-selection data-[selected-single=true]:bg-primary data-[selected-single=true]:text-primary-foreground data-[range-start=true]:bg-primary data-[range-start=true]:text-primary-foreground data-[range-end=true]:bg-primary data-[range-end=true]:text-primary-foreground data-[range-middle=true]:rounded-none data-[range-middle=true]:bg-accent data-[range-middle=true]:text-accent-foreground [&>span]:text-xs [&>span]:opacity-70",
         defaultClassNames.day,
         className,
       )}
       data-day={day.date.toLocaleDateString(locale?.code)}
-      data-selected-single={modifiers.selected}
+      data-selected-single={modifiers.selected && !modifiers.range_start && !modifiers.range_middle && !modifiers.range_end}
+      data-range-start={modifiers.range_start}
+      data-range-middle={modifiers.range_middle}
+      data-range-end={modifiers.range_end}
       ref={ref}
       size="icon"
       variant="ghost"

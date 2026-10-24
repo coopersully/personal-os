@@ -17,6 +17,32 @@ Loading into a non-loopback database is refused unless
 `QA_FIXTURES_ALLOW_REMOTE=true` is explicitly set for an intentional disposable
 QA environment.
 
+### Automatic local Finance activity
+
+The worktree Compose API opts into `QA_FIXTURE_CLOCK=true`. On startup and every
+minute it catches the full demo's Finance ledger up to the current date in
+America/New_York. It appends deterministic fictional daily purchases, fills missed
+days in batches of 31, extends complete coverage only through yesterday, and carries
+the latest active budget/limits into a new month with a canonical monthly baseline
+confirmation. Spending rechecks its clock and data every minute and on focus, so an
+open relative range can cross midnight without a reload.
+
+This is local fixture infrastructure, not a production maintenance capability.
+It refuses production mode and non-local databases, requires the exact full-demo
+ID/email plus an original seeded transaction, and leaves all other personas alone.
+It never reloads fixtures or replaces users, sessions, existing transactions or edits;
+account balances remain the manually recorded fixture snapshots. Calendar, Mail and
+Task story dates still refresh through the explicit fixture loader.
+
+The API owns the local database handoff. Stable IDs, insert-on-conflict behavior and
+a transaction-scoped advisory lock make retries/concurrent starts idempotent. Successful
+days are cached only in process; PostgreSQL records recover the clock after restart.
+Failures are logged and retried next minute. Month qualification uses the normal
+prepare/confirm writer after the transaction; an interrupted confirmation is retried.
+No external providers, network permissions, migrations, or credentials are involved.
+The integration test covers a missed day, DST/month rollover, replay, preserved edits
+and sessions, untouched empty personas, coverage and the qualified monthly budget.
+
 These credentials are test material, not secrets. Never reuse their passwords
 for a real account.
 

@@ -5673,7 +5673,7 @@ export const financesWorkspaceSettings = pgTable(
     financeSpendingSubtractRefunds: boolean("finance_spending_subtract_refunds")
       .notNull()
       .default(true),
-    financeSpendingPeriod: text("finance_spending_period").notNull().default("month"),
+    financeSpendingPeriod: text("finance_spending_period").notNull().default("week"),
   },
   (table) => [
     check("finances_workspace_settings_revision_check", sql`${table.revision} > 0`),
@@ -6331,6 +6331,101 @@ export const financeTransactionCoverage = pgTable(
     check(
       "finance_transaction_coverage_evidence_check",
       sql`length(trim(${table.evidenceRef})) > 0 AND length(trim(${table.timezone})) > 0`,
+    ),
+  ],
+);
+
+/** Shared display identity; connection grouping never grants execution authority. */
+export const agentAccounts = pgTable(
+  "agent_accounts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    platform: text("platform")
+      .$type<import("@personal-os/domain").AgentPlatform>()
+      .notNull()
+      .default("unknown"),
+    displayName: text("display_name").notNull(),
+    accountLabel: text("account_label"),
+    avatarSeed: uuid("avatar_seed").notNull().defaultRandom(),
+    avatarVersion: integer("avatar_version").$type<1>().notNull().default(1),
+    identitySource: text("identity_source")
+      .$type<"connection" | "user_confirmed">()
+      .notNull()
+      .default("connection"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("agent_accounts_owner_unique").on(table.userId, table.id),
+    check(
+      "agent_accounts_platform_check",
+      sql`${table.platform} IN ('claude', 'codex', 'other', 'unknown')`,
+    ),
+    check(
+      "agent_accounts_source_check",
+      sql`${table.identitySource} IN ('connection', 'user_confirmed')`,
+    ),
+    check("agent_accounts_avatar_version_check", sql`${table.avatarVersion} = 1`),
+  ],
+);
+export const agentAccountConnections = pgTable(
+  "agent_account_connections",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    authorizationConnectionId: uuid("authorization_connection_id").notNull(),
+    agentAccountId: uuid("agent_account_id").notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.authorizationConnectionId] }),
+    foreignKey({
+      columns: [table.userId, table.agentAccountId],
+      foreignColumns: [agentAccounts.userId, agentAccounts.id],
+      name: "agent_account_connections_owner_fk",
+    }).onDelete("cascade"),
+    index("agent_account_connections_account_idx").on(table.userId, table.agentAccountId),
+  ],
+);
+
+/** Exact accepted manifests and atomic per-item receipts for bounded Finance review work. */
+export const financeReviewBatchRuns = pgTable(
+  "finance_review_batch_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    actorType: text("actor_type").$type<"user" | "agent">().notNull(),
+    actorId: text("actor_id").notNull(),
+    authorizationConnectionId: uuid("authorization_connection_id"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    manifest: jsonb("manifest").$type<unknown[]>().notNull(),
+    outcomes: jsonb("outcomes").$type<unknown[]>().notNull().default([]),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("finance_review_batch_runs_owner_key_unique").on(
+      table.userId,
+      table.idempotencyKey,
+    ),
+    index("finance_review_batch_runs_owner_created_idx").on(
+      table.userId,
+      table.createdAt,
+      table.id,
+    ),
+    check("finance_review_batch_runs_actor_check", sql`${table.actorType} IN ('user', 'agent')`),
+    check(
+      "finance_review_batch_runs_manifest_check",
+      sql`jsonb_typeof(${table.manifest}) = 'array' AND jsonb_array_length(${table.manifest}) BETWEEN 1 AND 100`,
+    ),
+    check(
+      "finance_review_batch_runs_outcomes_check",
+      sql`jsonb_typeof(${table.outcomes}) = 'array' AND jsonb_array_length(${table.outcomes}) <= jsonb_array_length(${table.manifest})`,
     ),
   ],
 );

@@ -43,6 +43,7 @@ import type {
   FinanceBudgetPolicyListInput,
   FinanceBudgetPolicyPreviewRecord,
   FinanceBudgetPolicyRecord,
+  FinanceBudgetReadResult,
   FinanceBudgetRevisionProposalRecord,
   FinanceBudgetStatus,
   FinanceBudgetVersion,
@@ -708,9 +709,7 @@ export function createFinanceApi(request: FinanceRequest) {
         method: "PATCH",
       });
     },
-    async getFinanceBudget(
-      planId?: string,
-    ): Promise<FinanceToolResult<FinanceBudgetVersion | null>> {
+    async getFinanceBudget(planId?: string): Promise<FinanceBudgetReadResult> {
       return request(
         `/v1/finances/budget-plans${planId ? `?planId=${encodeURIComponent(planId)}` : ""}`,
       );

@@ -7,7 +7,7 @@ import {
   resolveWorkspaceSettings,
 } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api } from "@/api";
@@ -293,22 +293,17 @@ it("queries comparable elapsed Trends periods with identical accounting filters 
   expect(await screen.findByRole("dialog")).toHaveTextContent("Market");
   expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
 });
-it("defaults Rhythm to three calendar months using saved Monday week start and respects explicit ranges", async () => {
+it("defaults Rhythm to this week using saved Monday week start and respects explicit ranges", async () => {
   mount("?view=rhythm");
   await screen.findByRole("region", { name: "Spending rhythm" });
-  expect(screen.getByRole("group", { name: "Spending range" })).toHaveTextContent(
-    "last three months",
-  );
+  expect(screen.getByRole("group", { name: "Spending range" })).toHaveTextContent("this week");
   const query = vi.mocked(api.getFinanceSpending).mock.calls[0]?.[0];
   if (!query) throw new Error("No Rhythm query");
   const start = new Date(`${query.scope.from}T12:00:00Z`),
     end = new Date(`${query.scope.through}T12:00:00Z`);
-  expect(
-    (end.getUTCFullYear() - start.getUTCFullYear()) * 12 + end.getUTCMonth() - start.getUTCMonth(),
-  ).toBe(2);
-  expect(
-    screen.getByRole("button", { name: "Rhythm interval: Auto · weekly" }),
-  ).toBeInTheDocument();
+  expect(start.getUTCDay()).toBe(1);
+  expect((end.getTime() - start.getTime()) / 86_400_000).toBe(6);
+  expect(screen.getByRole("button", { name: "Rhythm interval: Auto · daily" })).toBeInTheDocument();
   expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
   cleanup();
   vi.mocked(api.getFinanceSpending).mockClear();
@@ -418,7 +413,7 @@ it("recovers the original full query and changed timezone, then opens a freshly 
   expect(api.getFinanceSpending).toHaveBeenCalledTimes(1);
   expect(api.getFinanceSpending).toHaveBeenLastCalledWith(filter.query);
   expect(dialog).toHaveTextContent("Groceries");
-  expect(dialog).toHaveTextContent("2026-09-08 – 2026-09-09");
+  expect(dialog).toHaveTextContent("Sep 8, 2026 – Sep 9, 2026");
   expect(dialog).toHaveTextContent("Market");
   expect(dialog).toHaveTextContent("$9.00");
   expect(api.getFinanceSpending).toHaveBeenLastCalledWith(
@@ -450,7 +445,7 @@ it("recovers a date-bin subset with null group and all accounts without using ol
   const dialog = await screen.findByRole("dialog");
   expect(dialog).toHaveTextContent("Spending detail");
   expect(dialog).toHaveTextContent("Market");
-  expect(dialog).toHaveTextContent("2026-09-08 – 2026-09-09");
+  expect(dialog).toHaveTextContent("Sep 8, 2026 – Sep 9, 2026");
   expect(api.getFinanceSpending).toHaveBeenLastCalledWith(filter.query);
   expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
 });
@@ -472,7 +467,7 @@ it("never replaces a missing recovered group with a broader selection", async ()
   await screen.findByText(/recovered group is no longer available/);
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
-  fireEvent.keyDown(screen.getByRole("button", { name: /^Group by:/ }), { key: "ArrowDown" });
+  fireEvent.keyDown(screen.getByRole("button", { name: /^Grouping:/ }), { key: "ArrowDown" });
   fireEvent.click(await screen.findByRole("menuitemradio", { name: "Categories" }));
   await waitFor(() =>
     expect(screen.getByTestId("location")).not.toHaveTextContent("recoverSpending"),
@@ -516,6 +511,60 @@ it("explains empty selected data and unsupported source money without showing un
       scope: expect.objectContaining({ accountIds: [], categoryIds: [], includePending: false }),
     }),
   );
+});
+it("defaults a fresh Rhythm selection to this week and automatic grouping like the other views", async () => {
+  vi.mocked(api.getWorkspaceSettings).mockImplementation(async (workspace) =>
+    resolveWorkspaceSettings(workspace, workspace === "calendar" ? { weekStartsOn: "monday" } : {}),
+  );
+  mount("?view=rhythm");
+  expect(await screen.findByRole("button", { name: "Date range: this week" })).toBeVisible();
+  expect(api.getFinanceSpending).toHaveBeenCalledWith(
+    expect.objectContaining({
+      grouping: "auto",
+      scope: expect.objectContaining({ from: expect.any(String), through: expect.any(String) }),
+    }),
+  );
+  const scope = vi.mocked(api.getFinanceSpending).mock.calls[0]?.[0].scope;
+  expect((Date.parse(scope?.through ?? "") - Date.parse(scope?.from ?? "")) / 86_400_000).toBe(6);
+});
+it("advances an open relative Today range at midnight without a page reload", async () => {
+  vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+  try {
+    vi.setSystemTime(new Date("2026-10-31T23:59:30-04:00"));
+    mount("?period=today");
+    await waitFor(() =>
+      expect(api.getFinanceSpending).toHaveBeenCalledWith(
+        expect.objectContaining({ scope: expect.objectContaining({ from: "2026-10-31" }) }),
+      ),
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    await waitFor(() =>
+      expect(api.getFinanceSpending).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scope: expect.objectContaining({ from: "2026-11-01", through: "2026-11-01" }),
+        }),
+      ),
+    );
+  } finally {
+    cleanup();
+    vi.useRealTimers();
+  }
+});
+it("explains a bubble selection with only zero-spend groups instead of showing a blank chart", async () => {
+  vi.mocked(api.getFinanceSpending).mockImplementation(async (query) => {
+    const value = dashboard(query);
+    value.groups = value.groups.map((group) => ({ ...group, netCents: 0, positiveAreaCents: 0 }));
+    value.snapshot.contributions = [];
+    value.snapshot.netCents = 0;
+    value.snapshot.positiveAreaCents = 0;
+    value.transactions = [];
+    return value;
+  });
+  mount("?view=bubbles&period=today");
+  expect(await screen.findByText("No purchases to show")).toBeVisible();
+  expect(screen.queryByRole("button", { name: /^Groceries:/ })).not.toBeInTheDocument();
 });
 it("rejects an invalid timezone before reading money and resets to the owner's timezone", async () => {
   mount("?timezone=Not/AZone");
@@ -594,11 +643,13 @@ it("clears missing recovery explicitly while retaining its full accounting filte
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
 });
-it("saves explicit grouping and period choices, navigates periods, and retains edited custom dates", async () => {
+it("saves explicit grouping and period choices and retains edited custom dates", async () => {
   mount("?period=month&from=2026-09-01");
   await screen.findByRole("button", { name: "Groceries" });
-  fireEvent.keyDown(screen.getByRole("button", { name: /^Group by:/ }), { key: "ArrowDown" });
+  expect(screen.getByRole("button", { name: "Date range: in September 2026" })).toBeVisible();
+  fireEvent.keyDown(screen.getByRole("button", { name: /^Grouping:/ }), { key: "ArrowDown" });
   fireEvent.click(await screen.findByRole("menuitemradio", { name: "Buckets" }));
+  expect(await screen.findByRole("button", { name: "Grouping: by bucket" })).toBeVisible();
   await waitFor(() =>
     expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
       "finances",
@@ -606,11 +657,7 @@ it("saves explicit grouping and period choices, navigates periods, and retains e
     ),
   );
   fireEvent.click(screen.getByRole("button", { name: /^Date range:/ }));
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Previous period" })).toBeEnabled(),
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Previous period" }));
-  await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("from=2026-08-01"));
+  expect(screen.queryByRole("button", { name: "Previous period" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("radio", { name: "Custom" }));
   await waitFor(() =>
     expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
@@ -660,7 +707,7 @@ it("retains the mounted summary during a same-owner range refresh and marks it b
       }),
   );
   fireEvent.click(screen.getByRole("button", { name: /^Date range:/ }));
-  fireEvent.click(screen.getByRole("button", { name: "Previous period" }));
+  fireEvent.click(screen.getByRole("radio", { name: "This week" }));
   await waitFor(() => expect(total.closest("[aria-busy]")).toHaveAttribute("aria-busy", "true"));
   expect(screen.getByRole("button", { name: "Spending breakdown" })).toBe(total);
   await waitFor(() => expect(complete).toBeDefined());

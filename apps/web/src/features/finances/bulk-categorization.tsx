@@ -274,6 +274,8 @@ export function FinanceBulkCategorization({
       </fieldset>
       <ResponsiveDialog open={open} onOpenChange={(value) => !value && setConfirmation(null)}>
         <ResponsiveDialogContent
+          data-finance-dialog
+          data-finance-size="default"
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             const target =

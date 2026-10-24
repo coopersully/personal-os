@@ -7,18 +7,19 @@ import {
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { DateInput } from "@/components/date-input";
-import { FilterIcon } from "@/components/icons";
+import { CalendarIcon, FilterIcon, ReceiptIcon } from "@/components/icons";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogTrigger as DialogTrigger,
+  ResponsiveDialogBody,
+} from "@/components/responsive-dialog";
 import { SettingsControlsContext } from "@/components/settings-controls-context";
 import { Field, FieldGroup, FieldLabel } from "@/components/settings-field";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -166,6 +167,8 @@ export function CashflowPlanningControls({
       <div className="flex flex-wrap items-center gap-2">
         <FinanceChoice
           label="View"
+          icon={presentation === "calendar" ? <CalendarIcon /> : <ReceiptIcon />}
+          optionIcons={{ agenda: <ReceiptIcon />, calendar: <CalendarIcon /> }}
           value={presentation}
           options={[
             ["agenda", "Agenda"],
@@ -174,24 +177,29 @@ export function CashflowPlanningControls({
           onChange={(value) => onParamChange("timeline", value)}
         />
         <div className="flex flex-wrap items-center gap-2">
-          <p className="text-sm text-muted-foreground">
-            {/^\d{4}-\d{2}-\d{2}$/.test(from)
-              ? formatDateOnly(from, { month: "short", day: "numeric" })
-              : "Choose dates"}{" "}
-            –{" "}
-            {/^\d{4}-\d{2}-\d{2}$/.test(to)
-              ? formatDateOnly(to, { month: "short", day: "numeric" })
-              : "Choose dates"}
-          </p>
+          <WorkspaceHeaderControls label="Cash flow range" placement="title">
+            <p className="ml-1 whitespace-nowrap text-xs font-normal text-muted-foreground sm:text-sm">
+              {/^\d{4}-\d{2}-\d{2}$/.test(from)
+                ? formatDateOnly(from, { month: "short", day: "numeric" })
+                : "Choose dates"}{" "}
+              –{" "}
+              {/^\d{4}-\d{2}-\d{2}$/.test(to)
+                ? formatDateOnly(to, { month: "short", day: "numeric" })
+                : "Choose dates"}
+            </p>
+          </WorkspaceHeaderControls>
           <WorkspaceHeaderControls label="Timeline filters">
             <Dialog open={optionsOpen} onOpenChange={setOptionsOpen}>
               <DialogTrigger asChild>
-                <Button size="sm" variant="ghost">
+                <Button size="icon-sm" variant="ghost" aria-label="Timeline options">
                   <FilterIcon />
-                  Timeline options
                 </Button>
               </DialogTrigger>
-              <DialogContent className="settings-panel max-h-[85dvh] overflow-y-auto sm:max-w-lg">
+              <DialogContent
+                data-finance-dialog
+                data-finance-size="default"
+                className="settings-panel"
+              >
                 <SettingsControlsContext.Provider value={true}>
                   <DialogHeader>
                     <DialogTitle>Timeline options</DialogTitle>
@@ -200,80 +208,84 @@ export function CashflowPlanningControls({
                       schedules.
                     </DialogDescription>
                   </DialogHeader>
-                  <FieldGroup>
-                    <Field>
-                      <FieldLabel htmlFor="planning-from">From</FieldLabel>
-                      <DateInput
-                        id="planning-from"
-                        value={from}
-                        onValueChange={(value) => onParamChange("cashflowFrom", value)}
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel htmlFor="planning-to">Through</FieldLabel>
-                      <DateInput
-                        id="planning-to"
-                        value={to}
-                        onValueChange={(value) => onParamChange("cashflowTo", value)}
-                      />
-                    </Field>
-                    <Field>
-                      <FieldLabel>Accounts</FieldLabel>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm">
-                            {accountIds === undefined
-                              ? "All source accounts"
-                              : accountIds.length
-                                ? `${accountIds.length} selected accounts`
-                                : "No accounts selected"}
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start">
-                          <DropdownMenuItem
-                            onSelect={() => onParamChange("cashflowAccounts", null)}
-                          >
-                            All source accounts
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={() => onParamChange("cashflowAccounts", "none")}
-                          >
-                            Select no accounts
-                          </DropdownMenuItem>
-                          {accounts.map((account) => (
-                            <DropdownMenuCheckboxItem
-                              key={account.id}
-                              checked={accountIds === undefined || accountIds.includes(account.id)}
-                              onSelect={(event) => event.preventDefault()}
-                              onCheckedChange={(checked) => {
-                                const selected = new Set(
-                                  accountIds ?? accounts.map((item) => item.id),
-                                );
-                                if (checked) selected.add(account.id);
-                                else selected.delete(account.id);
-                                onParamChange(
-                                  "cashflowAccounts",
-                                  selected.size ? [...selected].sort().join(",") : "none",
-                                );
-                              }}
+                  <ResponsiveDialogBody>
+                    <FieldGroup>
+                      <Field>
+                        <FieldLabel htmlFor="planning-from">From</FieldLabel>
+                        <DateInput
+                          id="planning-from"
+                          value={from}
+                          onValueChange={(value) => onParamChange("cashflowFrom", value)}
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel htmlFor="planning-to">Through</FieldLabel>
+                        <DateInput
+                          id="planning-to"
+                          value={to}
+                          onValueChange={(value) => onParamChange("cashflowTo", value)}
+                        />
+                      </Field>
+                      <Field>
+                        <FieldLabel>Accounts</FieldLabel>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm">
+                              {accountIds === undefined
+                                ? "All source accounts"
+                                : accountIds.length
+                                  ? `${accountIds.length} selected accounts`
+                                  : "No accounts selected"}
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start">
+                            <DropdownMenuItem
+                              onSelect={() => onParamChange("cashflowAccounts", null)}
                             >
-                              {account.name}
-                            </DropdownMenuCheckboxItem>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </Field>
-                  </FieldGroup>
-                  <Button
-                    variant="ghost"
-                    className="self-end"
-                    onClick={() => {
-                      onReset();
-                      setOptionsOpen(false);
-                    }}
-                  >
-                    Reset timeline filters
-                  </Button>
+                              All source accounts
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={() => onParamChange("cashflowAccounts", "none")}
+                            >
+                              Select no accounts
+                            </DropdownMenuItem>
+                            {accounts.map((account) => (
+                              <DropdownMenuCheckboxItem
+                                key={account.id}
+                                checked={
+                                  accountIds === undefined || accountIds.includes(account.id)
+                                }
+                                onSelect={(event) => event.preventDefault()}
+                                onCheckedChange={(checked) => {
+                                  const selected = new Set(
+                                    accountIds ?? accounts.map((item) => item.id),
+                                  );
+                                  if (checked) selected.add(account.id);
+                                  else selected.delete(account.id);
+                                  onParamChange(
+                                    "cashflowAccounts",
+                                    selected.size ? [...selected].sort().join(",") : "none",
+                                  );
+                                }}
+                              >
+                                {account.name}
+                              </DropdownMenuCheckboxItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </Field>
+                    </FieldGroup>
+                    <Button
+                      variant="ghost"
+                      className="self-end"
+                      onClick={() => {
+                        onReset();
+                        setOptionsOpen(false);
+                      }}
+                    >
+                      Reset timeline filters
+                    </Button>
+                  </ResponsiveDialogBody>
                 </SettingsControlsContext.Provider>
               </DialogContent>
             </Dialog>

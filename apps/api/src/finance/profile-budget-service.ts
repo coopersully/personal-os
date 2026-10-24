@@ -13,6 +13,7 @@ import type {
   ApproveFinanceBudgetInput,
   CreateFinanceBudgetVersionInput,
   FinanceBudgetAllocation,
+  FinanceBudgetReadResult,
   FinanceBudgetResource,
   FinanceBudgetVersion,
   FinanceChange,
@@ -23,6 +24,7 @@ import type {
   ReviseFinanceBudgetInput,
   UpdateFinancialProfileInput,
 } from "@personal-os/domain";
+import { getFinanceBudgetApprovalReadiness } from "@personal-os/domain";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { auditValues } from "../audit.js";
 import { AppError } from "../errors.js";
@@ -384,7 +386,7 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
       );
     },
 
-    async getFinanceBudget(userId: string, planId?: string) {
+    async getFinanceBudget(userId: string, planId?: string): Promise<FinanceBudgetReadResult> {
       const row = await db.query.financeBudgetVersions.findFirst({
         orderBy: planId
           ? [desc(financeBudgetVersions.version)]
@@ -394,15 +396,23 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
           : eq(financeBudgetVersions.userId, userId),
       });
       const data = row ? await budgetValue(row) : null;
-      return withFinanceBudgetPresentation(
-        result({
-          data,
-          disclosures: data ? budgetDisclosures(data) : [],
-          headline: data
-            ? `Budget version ${data.version} is ${data.status}.`
-            : "No budget exists yet.",
+      const profile = await latestProfile(userId);
+      return {
+        ...withFinanceBudgetPresentation(
+          result({
+            data,
+            disclosures: data ? budgetDisclosures(data) : [],
+            headline: data
+              ? `Budget version ${data.version} is ${data.status}.`
+              : "No budget exists yet.",
+          }),
+        ),
+        approvalReadiness: getFinanceBudgetApprovalReadiness({
+          budget: data,
+          currentProfileVersionId: profile?.id ?? null,
+          latestBudgetVersionId: row?.id ?? null,
         }),
-      );
+      };
     },
 
     async createFinanceBudget(
@@ -544,27 +554,32 @@ export function createProfileBudgetService({ db, now, executor: transaction }: O
               ),
             });
             if (!version) throw new AppError("not_found", "That budget version was not found.");
-            if (
-              version.profileVersionId !== (currentProfile?.id ?? null) ||
-              version.profileVersionId !== (input.expectedProfileVersionId ?? null)
-            )
-              throw new AppError(
-                "conflict",
-                "The proposal's profile revision changed. Review a new proposal before approving.",
-              );
             const latest = await tx.query.financeBudgetVersions.findFirst({
               orderBy: [desc(financeBudgetVersions.version)],
               where: eq(financeBudgetVersions.planId, version.planId),
             });
-            if (latest?.id !== version.id)
-              throw new AppError("conflict", "Review the latest budget revision before approving.");
-            if (version.version !== input.expectedVersion) {
-              throw new AppError("conflict", "The budget version changed before approval.");
-            }
-            if (version.status !== "proposed" || version.balanceDelta !== 0) {
+            const readiness = getFinanceBudgetApprovalReadiness({
+              budget: await budgetValue(version, tx),
+              currentProfileVersionId: currentProfile?.id ?? null,
+              latestBudgetVersionId: latest?.id ?? null,
+            });
+            if (!readiness.ready) {
               throw new AppError(
-                "invalid_request",
-                "Only a complete balanced proposal can be approved.",
+                readiness.code === "profile_changed" || readiness.code === "superseded"
+                  ? "conflict"
+                  : "invalid_request",
+                readiness.message,
+                { approvalReadiness: readiness },
+              );
+            }
+            if (
+              version.version !== input.expectedVersion ||
+              version.profileVersionId !== (input.expectedProfileVersionId ?? null)
+            ) {
+              throw new AppError(
+                "conflict",
+                "The displayed budget or profile revision changed. Refresh and review before approving.",
+                { code: "approval_input_changed", recovery: "refresh_plan" },
               );
             }
             await tx

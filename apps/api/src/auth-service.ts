@@ -20,6 +20,7 @@ import type {
   User,
 } from "@personal-os/domain";
 import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { ensureAgentAccount } from "./agent-account-service.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError, isUniqueViolation } from "./errors.js";
 import {
@@ -219,6 +220,15 @@ export function createAuthService(options: AuthServiceOptions) {
         .update(accessTokens)
         .set({ lastUsedAt: currentTime })
         .where(eq(accessTokens.id, record.id));
+      await db.transaction((tx) =>
+        ensureAgentAccount(
+          tx,
+          record.userId,
+          record.authorizationConnectionId,
+          "unknown",
+          currentTime,
+        ),
+      );
       return {
         actorId: record.id,
         authorizationConnectionId: record.authorizationConnectionId,

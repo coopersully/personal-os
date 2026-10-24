@@ -62,26 +62,21 @@ test("each workspace discovers records and Calendar settings without changing li
       const switcher = await header.getByRole("button", { name: "Switch workspace" }).boundingBox();
       expect(switcher).not.toBeNull();
       expect(Math.abs((switcher?.width ?? 0) - (switcher?.height ?? 1))).toBeLessThan(1);
-      expect((await header.boundingBox())?.height).toBeLessThanOrEqual(64);
+      expect((await header.boundingBox())?.height).toBeLessThanOrEqual(96);
     }
-    await header.getByRole("button", { name: `Search ${workspace}`, exact: true }).click();
+    await header.getByRole("combobox", { name: `Search ${workspace}`, exact: true }).click();
     const before = page.url();
     const input = page.getByRole("combobox", { name: `Search ${workspace}`, exact: true });
     await input.fill(query ?? "");
     await expect(page.getByRole("option", { name: new RegExp(`^${title}`) })).toBeVisible();
     expect(page.url()).toBe(before);
-    if (isMobile) {
-      await expect(
-        page.getByRole("dialog", { name: `Search ${workspace}` }).getByRole("listbox"),
-      ).toBeVisible();
-      await page.getByRole("button", { name: "Close", exact: true }).click();
-    } else {
-      await input.press("Escape");
-    }
+    await expect(input).toHaveAttribute("placeholder", "");
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await input.press("Escape");
   }
 
   await page.goto("/calendar");
-  await page.getByRole("button", { name: "Search Calendar", exact: true }).click();
+  await page.getByRole("combobox", { name: "Search Calendar", exact: true }).click();
   await page.getByRole("combobox", { name: "Search Calendar", exact: true }).fill("weekends");
   await page.getByRole("option", { name: "Show weekends Calendar settings Settings" }).click();
   await expect(page).toHaveURL(/page=calendar.*field=calendar%3Ashow-weekends/);
@@ -188,7 +183,8 @@ test("Tasks keeps view switching and utilities in one responsive header", async 
       await page.getByRole("menuitemradio", { name: label, exact: true }).click();
       await expect(header.getByRole("button", { name: `Tasks view: ${label}` })).toBeVisible();
     }
-    for (const name of ["Search Tasks", "Filters", "Sort", "Display"]) {
+    await expect(header.getByRole("combobox", { name: "Search Tasks", exact: true })).toBeVisible();
+    for (const name of ["Filters", "Sort", "Display"]) {
       await expect(header.getByRole("button", { name, exact: true })).toBeVisible();
     }
     await expect(page.getByRole("navigation", { name: "Tasks page controls" })).toHaveCount(0);

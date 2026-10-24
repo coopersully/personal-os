@@ -25,7 +25,7 @@ describe("workspace settings contracts", () => {
       financeSpendingIncludeUncategorized: true,
       financeSpendingBasis: "personal_cost",
       financeSpendingSubtractRefunds: true,
-      financeSpendingPeriod: "month",
+      financeSpendingPeriod: "week",
       financeTransactionGroup: "none",
       spendAccountIds: null,
       cashAccountIds: null,

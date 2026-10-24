@@ -551,3 +551,15 @@ it("uses the actual registration control when no host is registered", async () =
   expect(screen.getByRole("dialog", { name: "Register Finance automation" })).toBeInTheDocument();
   expect(api.createAutomationHostSchedule).not.toHaveBeenCalled();
 });
+
+it("shows the shared agent identity without replacing automation or host state", async () => {
+  const { agentAccountFixture } = await import("../../test-fixtures/agent-account");
+  api.listAutomationHostSchedules.mockResolvedValue([
+    { ...status(), agentAccount: agentAccountFixture },
+  ]);
+  open();
+  expect(await screen.findByText("Cedar Fox")).toBeVisible();
+  expect(screen.getByText("Codex · Personal")).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Finance host" })).toBeVisible();
+  expect(screen.getByText(/This host missed its expected check-in/)).toBeVisible();
+});

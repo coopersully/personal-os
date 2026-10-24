@@ -4,9 +4,11 @@ import { type AccessScope, accessScopeSchema, localDayRange } from "@personal-os
 import { registerIloContextTool, registerIloDiscovery } from "./discovery.js";
 import { createIloToolSurface } from "./tool-surface.js";
 import { registerActivityTools } from "./tools/activity.js";
+import { registerAgentAccountTools } from "./tools/agent-account.js";
 import { registerAssistantTools } from "./tools/assistant.js";
 import { registerCalendarEventTools, registerCalendarListTools } from "./tools/calendar.js";
 import { registerCalendarManagementTools } from "./tools/calendar-management.js";
+import { registerFinanceReviewBacklogTools } from "./tools/finance-review-backlog.js";
 import { registerFinanceTools } from "./tools/finances.js";
 import { registerFinanceManagementTools } from "./tools/finances-management.js";
 import { registerFinancePolicyManagementTools } from "./tools/finances-policy-management.js";
@@ -70,6 +72,7 @@ export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
   };
 
   registerIloContextTool(tools, discovery);
+  registerAgentAccountTools(tools, options.api);
   registerAssistantTools(tools, options.api);
   registerPlanningTools(tools, options.api);
   registerCalendarListTools(tools, options.api);
@@ -80,6 +83,7 @@ export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
   registerMailTools(tools, options.api);
   registerMailStewardshipTools(tools, options.api);
   registerFinanceTools(tools, options.api);
+  registerFinanceReviewBacklogTools(tools, options.api);
   registerFinanceManagementTools(tools, options.api);
   registerWorkspaceRecoveryTools(tools, options.api);
   registerWorkspaceNotificationTools(tools, options.api);

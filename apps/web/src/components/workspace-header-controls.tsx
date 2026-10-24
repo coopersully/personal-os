@@ -54,3 +54,8 @@ export function WorkspaceHeaderControlsSlot({
     />
   );
 }
+
+/** A page title completed by selectable phrases; action controls belong outside it. */
+export function WorkspaceTitleSentence({ children }: { children: ReactNode }) {
+  return <div data-slot="workspace-title-sentence">{children}</div>;
+}

@@ -8,6 +8,7 @@ import {
   type TodayTimelineDensity,
 } from "./features/calendar/day-timeline.js";
 import { calendarEventColorStyle } from "./features/calendar/event-color.js";
+import { LoginDestination } from "./features/public-site/login-destination";
 import { GoalProgressEditor } from "./features/settings/goal-progress-editor.js";
 import { RecordDateEditor } from "./features/settings/record-date-editor";
 import { settingsParents, settingsRoute } from "./features/settings/settings-routes";
@@ -321,7 +322,10 @@ import { MobileWorkspaceDock } from "./components/mobile-workspace-dock.js";
 import { MutationFeedback } from "./components/mutation-feedback.js";
 import { SettingsRecord, SettingsRecordAction } from "./components/settings-record.js";
 import { WorkspaceAppBar } from "./components/workspace-app-bar.js";
-import { WorkspaceHeaderControlsSlot } from "./components/workspace-header-controls.js";
+import {
+  WorkspaceHeaderControlsSlot,
+  WorkspaceTitleSentence,
+} from "./components/workspace-header-controls.js";
 import { WorkspaceIcon, workspaceIdForPath } from "./components/workspace-identity.js";
 import {
   WorkspaceSecondaryAppBar,
@@ -863,6 +867,7 @@ function CredentialsScreen() {
             </p>
           ) : null}
         </div>
+        {mode === "login" ? <LoginDestination /> : null}
         {mode === "register" && (
           <>
             <InviteCodeField
@@ -1991,13 +1996,14 @@ function WorkspaceAppBarForRoute({
     />
   ) : workspace === "mail" ? (
     <MailAppBarControls
+      accounts={<MailAccountsControl />}
       sync={<MailSyncButton />}
       search={<WorkspaceFinder workspace="mail" onAction={handleSearchAction} />}
     />
   ) : workspace === "finances" ? (
     <>
-      <WorkspaceHeaderControlsSlot placement="leading" />
       <WorkspaceFinder workspace="finances" onAction={handleSearchAction} />
+      <WorkspaceHeaderControlsSlot placement="leading" />
       <WorkspaceHeaderControlsSlot />
     </>
   ) : null;
@@ -2022,7 +2028,6 @@ function WorkspaceAppBarForRoute({
               <TooltipContent side="bottom">Keep window on top</TooltipContent>
             </Tooltip>
           )}
-          {workspace === "mail" && !isReviewQueue ? <MailAccountsControl /> : null}
         </>
       }
       primaryActions={
@@ -2053,10 +2058,14 @@ function WorkspaceAppBarForRoute({
           {workspaceSwitcher && !isSpatialCalendar && pathname !== "/today"
             ? workspaceSwitcher
             : null}
-          {identity}
-          {pathname === "/finances/spending" ? (
-            <WorkspaceHeaderControlsSlot placement="title" />
-          ) : null}
+          {workspace === "finances" ? (
+            <WorkspaceTitleSentence>
+              {identity}
+              <WorkspaceHeaderControlsSlot placement="title" />
+            </WorkspaceTitleSentence>
+          ) : (
+            identity
+          )}
         </>
       }
       workspace={workspace}
@@ -3447,11 +3456,6 @@ function CalendarAccountsControl() {
           ariaLabel={triggerLabel}
           className="calendar-accounts-trigger"
           disabled={accounts.isPending || calendars.isPending}
-          identities={enabledAccounts.map((account) => ({
-            avatarUrl: account.avatarUrl,
-            fallback: initials(account.label ?? account.email ?? account.provider),
-            id: account.id,
-          }))}
           needsAttention={needsAttention}
           allSynced={
             enabledAccounts.length > 0 &&
@@ -5843,11 +5847,6 @@ function MailAccountsControl() {
           ariaLabel={triggerLabel}
           className="mail-accounts-trigger"
           disabled={accounts.isPending}
-          identities={enabledAccounts.map((account) => ({
-            avatarUrl: account.avatarUrl,
-            fallback: initials(account.label || account.email || account.provider),
-            id: account.id,
-          }))}
           needsAttention={needsAttention}
           allSynced={
             enabledAccounts.length > 0 &&

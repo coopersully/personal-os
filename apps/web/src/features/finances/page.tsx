@@ -42,9 +42,16 @@ import {
   ResponsiveDialogHeader as ImportHeader,
   ResponsiveDialogTitle as ImportTitle,
   ResponsiveDialog,
+  ResponsiveDialogBody,
   ResponsiveDialogContent,
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
+  ResponsiveDialog as ShadcnDialog,
+  ResponsiveDialogContent as ShadcnDialogContent,
+  ResponsiveDialogDescription as ShadcnDialogDescription,
+  ResponsiveDialogFooter as ShadcnDialogFooter,
+  ResponsiveDialogHeader as ShadcnDialogHeader,
+  ResponsiveDialogTitle as ShadcnDialogTitle,
 } from "@/components/responsive-dialog";
 import {
   Field as ShadcnField,
@@ -67,14 +74,6 @@ import {
   CollapsibleContent as ShadcnCollapsibleContent,
   CollapsibleTrigger as ShadcnCollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import {
-  Dialog as ShadcnDialog,
-  DialogContent as ShadcnDialogContent,
-  DialogDescription as ShadcnDialogDescription,
-  DialogFooter as ShadcnDialogFooter,
-  DialogHeader as ShadcnDialogHeader,
-  DialogTitle as ShadcnDialogTitle,
-} from "@/components/ui/dialog";
 import {
   DropdownMenu as ShadcnDropdownMenu,
   DropdownMenuContent as ShadcnDropdownMenuContent,
@@ -1419,72 +1418,80 @@ export function FinancesPage() {
               if (!open) closeTransactionForm();
             }}
           >
-            <ResponsiveDialogContent aria-describedby={undefined} className="overflow-y-auto">
+            <ResponsiveDialogContent
+              data-finance-dialog
+              data-finance-size="wide"
+              aria-describedby={undefined}
+            >
               <ResponsiveDialogHeader>
                 <ResponsiveDialogTitle>Add a transaction</ResponsiveDialogTitle>
               </ResponsiveDialogHeader>
-              <div className="px-4 pb-4 sm:px-0 sm:pb-0">
-                <FeedbackForm
-                  feedback={addTransaction.feedback}
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    addTransaction.mutate();
-                  }}
-                >
-                  <ShadcnFieldGroup>
-                    <ShadcnField>
-                      <ShadcnFieldLabel htmlFor="finance-account-select">Account</ShadcnFieldLabel>
-                      <ShadcnNativeSelect
-                        id="finance-account-select"
-                        name="accountId"
-                        required
-                        onChange={(event) => setAccountId(event.target.value)}
-                        value={accountId}
-                      >
-                        <NativeSelectOption value="">Select account</NativeSelectOption>
-                        {finance.accounts.map((item) => (
-                          <NativeSelectOption key={item.id} value={item.id}>
-                            {item.name}
-                          </NativeSelectOption>
-                        ))}
-                      </ShadcnNativeSelect>
-                    </ShadcnField>
-                    <ShadcnField>
-                      <ShadcnFieldLabel htmlFor="finance-merchant">Merchant</ShadcnFieldLabel>
-                      <FinanceEntitySelector
-                        id="finance-merchant"
-                        label="Merchant"
-                        value={merchant}
-                        onValueChange={setMerchant}
-                        options={(merchants.data ?? []).map((item) => item.displayName)}
-                        required
+              <ResponsiveDialogBody>
+                <div className="min-w-0">
+                  <FeedbackForm
+                    feedback={addTransaction.feedback}
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      addTransaction.mutate();
+                    }}
+                  >
+                    <ShadcnFieldGroup>
+                      <ShadcnField>
+                        <ShadcnFieldLabel htmlFor="finance-account-select">
+                          Account
+                        </ShadcnFieldLabel>
+                        <ShadcnNativeSelect
+                          id="finance-account-select"
+                          name="accountId"
+                          required
+                          onChange={(event) => setAccountId(event.target.value)}
+                          value={accountId}
+                        >
+                          <NativeSelectOption value="">Select account</NativeSelectOption>
+                          {finance.accounts.map((item) => (
+                            <NativeSelectOption key={item.id} value={item.id}>
+                              {item.name}
+                            </NativeSelectOption>
+                          ))}
+                        </ShadcnNativeSelect>
+                      </ShadcnField>
+                      <ShadcnField>
+                        <ShadcnFieldLabel htmlFor="finance-merchant">Merchant</ShadcnFieldLabel>
+                        <FinanceEntitySelector
+                          id="finance-merchant"
+                          label="Merchant"
+                          value={merchant}
+                          onValueChange={setMerchant}
+                          options={(merchants.data ?? []).map((item) => item.displayName)}
+                          required
+                        />
+                      </ShadcnField>
+                      <FinanceTextField
+                        id="finance-amount"
+                        inputMode="decimal"
+                        label="Amount"
+                        onChange={setAmount}
+                        value={amount}
                       />
-                    </ShadcnField>
-                    <FinanceTextField
-                      id="finance-amount"
-                      inputMode="decimal"
-                      label="Amount"
-                      onChange={setAmount}
-                      value={amount}
-                    />
-                    <ShadcnField>
-                      <ShadcnFieldLabel htmlFor="finance-category">
-                        Category (optional)
-                      </ShadcnFieldLabel>
-                      <FinanceEntitySelector
-                        id="finance-category"
-                        label="Category (optional)"
-                        value={category}
-                        onValueChange={setCategory}
-                        options={(categories.data ?? []).map((item) => item.name)}
-                      />
-                    </ShadcnField>
-                    <ShadcnButton disabled={addTransaction.isPending} type="submit">
-                      Add transaction
-                    </ShadcnButton>
-                  </ShadcnFieldGroup>
-                </FeedbackForm>
-              </div>
+                      <ShadcnField>
+                        <ShadcnFieldLabel htmlFor="finance-category">
+                          Category (optional)
+                        </ShadcnFieldLabel>
+                        <FinanceEntitySelector
+                          id="finance-category"
+                          label="Category (optional)"
+                          value={category}
+                          onValueChange={setCategory}
+                          options={(categories.data ?? []).map((item) => item.name)}
+                        />
+                      </ShadcnField>
+                      <ShadcnButton disabled={addTransaction.isPending} type="submit">
+                        Add transaction
+                      </ShadcnButton>
+                    </ShadcnFieldGroup>
+                  </FeedbackForm>
+                </div>
+              </ResponsiveDialogBody>
             </ResponsiveDialogContent>
           </ResponsiveDialog>
           <ShadcnCard hidden={section !== "budgets" || !showBudgetForm}>
@@ -1531,7 +1538,7 @@ export function FinancesPage() {
           }
         }}
       >
-        <ShadcnDialogContent>
+        <ShadcnDialogContent data-finance-dialog data-finance-size="wide">
           <ShadcnDialogHeader>
             <ShadcnDialogTitle>
               Categorize {categorizing?.merchant ?? "transaction"}
@@ -1541,58 +1548,60 @@ export function FinancesPage() {
               choose to make this a reusable merchant rule.
             </ShadcnDialogDescription>
           </ShadcnDialogHeader>
-          {categorizing ? (
-            <ShadcnFieldGroup>
-              <FinanceTextField
-                id="finance-review-category"
-                label="Category"
-                onChange={(value) => setCategorizing({ ...categorizing, category: value })}
-                value={categorizing.category}
-              />
-              {categorizing.reviewId ? (
-                <ShadcnField orientation="horizontal">
-                  <ShadcnFieldLabel htmlFor="finance-review-merchant-rule">
-                    Always use this category for {categorizing.merchant}
-                  </ShadcnFieldLabel>
-                  <ShadcnSwitch
-                    checked={learnMerchant}
-                    id="finance-review-merchant-rule"
-                    onCheckedChange={setLearnMerchant}
-                  />
-                </ShadcnField>
-              ) : null}
-              {categorizing.possibleTransfer ? (
-                <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="finance-non-transfer-direction">
-                    Treat this transaction as
-                  </ShadcnFieldLabel>
-                  <ShadcnNativeSelect
-                    id="finance-non-transfer-direction"
-                    onChange={(event) =>
-                      setCategorizing({
-                        ...categorizing,
-                        nonTransferDirection: event.target.value as "expense" | "income",
-                      })
-                    }
-                    value={categorizing.nonTransferDirection ?? ""}
-                  >
-                    <NativeSelectOption value="">Choose income or expense</NativeSelectOption>
-                    <NativeSelectOption value="expense">Expense</NativeSelectOption>
-                    <NativeSelectOption value="income">Income</NativeSelectOption>
-                  </ShadcnNativeSelect>
-                </ShadcnField>
-              ) : null}
-              {categorizing.reviewId ? (
-                <ShadcnFieldDescription>
-                  Leave this off for a one-time charge. Turn it on only when this merchant should
-                  reliably use the same category in the future.
-                </ShadcnFieldDescription>
-              ) : null}
-            </ShadcnFieldGroup>
-          ) : null}
-          <MutationFeedback
-            feedback={categorizing?.reviewId ? resolveReview.feedback : categorize.feedback}
-          />
+          <ResponsiveDialogBody>
+            {categorizing ? (
+              <ShadcnFieldGroup>
+                <FinanceTextField
+                  id="finance-review-category"
+                  label="Category"
+                  onChange={(value) => setCategorizing({ ...categorizing, category: value })}
+                  value={categorizing.category}
+                />
+                {categorizing.reviewId ? (
+                  <ShadcnField orientation="horizontal">
+                    <ShadcnFieldLabel htmlFor="finance-review-merchant-rule">
+                      Always use this category for {categorizing.merchant}
+                    </ShadcnFieldLabel>
+                    <ShadcnSwitch
+                      checked={learnMerchant}
+                      id="finance-review-merchant-rule"
+                      onCheckedChange={setLearnMerchant}
+                    />
+                  </ShadcnField>
+                ) : null}
+                {categorizing.possibleTransfer ? (
+                  <ShadcnField>
+                    <ShadcnFieldLabel htmlFor="finance-non-transfer-direction">
+                      Treat this transaction as
+                    </ShadcnFieldLabel>
+                    <ShadcnNativeSelect
+                      id="finance-non-transfer-direction"
+                      onChange={(event) =>
+                        setCategorizing({
+                          ...categorizing,
+                          nonTransferDirection: event.target.value as "expense" | "income",
+                        })
+                      }
+                      value={categorizing.nonTransferDirection ?? ""}
+                    >
+                      <NativeSelectOption value="">Choose income or expense</NativeSelectOption>
+                      <NativeSelectOption value="expense">Expense</NativeSelectOption>
+                      <NativeSelectOption value="income">Income</NativeSelectOption>
+                    </ShadcnNativeSelect>
+                  </ShadcnField>
+                ) : null}
+                {categorizing.reviewId ? (
+                  <ShadcnFieldDescription>
+                    Leave this off for a one-time charge. Turn it on only when this merchant should
+                    reliably use the same category in the future.
+                  </ShadcnFieldDescription>
+                ) : null}
+              </ShadcnFieldGroup>
+            ) : null}
+            <MutationFeedback
+              feedback={categorizing?.reviewId ? resolveReview.feedback : categorize.feedback}
+            />
+          </ResponsiveDialogBody>
           <ShadcnDialogFooter>
             {categorizing ? (
               <ShadcnButton
@@ -2344,136 +2353,144 @@ export function FinanceBudgetDetailDialog({
 
   return (
     <ShadcnDialog onOpenChange={onOpenChange} open>
-      <ShadcnDialogContent className="max-h-[85vh] overflow-hidden p-0 sm:max-w-3xl">
+      <ShadcnDialogContent data-finance-dialog data-finance-size="wide" className="p-0">
         <ShadcnDialogHeader>
           <div className="p-4 pr-12">
             <ShadcnDialogTitle>{title}</ShadcnDialogTitle>
             <ShadcnDialogDescription className="mt-2">{description}</ShadcnDialogDescription>
           </div>
         </ShadcnDialogHeader>
-        <div className="app-scrollbar min-h-0 overflow-y-auto px-4 pb-4">
-          {detail.kind === "planned" ? (
-            <FinanceBudgetAllocationChart budgets={monthlyBudgets} />
-          ) : null}
-          {detail.kind === "overages" ? (
-            <details aria-label="Over-plan categories" className="rounded-md border" open>
-              <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
-                Over-plan categories ({overBudgetCategories.length})
-              </summary>
-              <div className="space-y-2 border-t p-3">
-                {overBudgetCategories.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No categories are over plan.</p>
-                ) : (
-                  overBudgetCategories.map((category) => {
-                    const budget = budgetsByCategory.get(category);
-                    const overage =
-                      (authoritativeSpent.get(category) ?? spentByCategory.get(category) ?? 0) -
-                      (budget?.limit ?? 0);
-                    return (
-                      <div
-                        className="flex items-center justify-between gap-4 rounded-md border p-3"
-                        key={category}
-                      >
-                        <span className="font-medium">{transactionCategoryLabel(category)}</span>
-                        <span className="shrink-0 text-sm text-destructive">
-                          {formatMoney(overage)} over
-                        </span>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </details>
-          ) : null}
-          {detail.kind !== "planned" ? (
-            <details aria-label="Contributing transactions" className="mt-4 rounded-md border" open>
-              <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
-                Contributing transactions ({detailTransactions.length})
-              </summary>
-              <div className="border-t">
-                {detailTransactions.length === 0 ? (
-                  <p className="p-3 text-sm text-muted-foreground">
-                    No expense transactions match this view yet.
-                  </p>
-                ) : (
-                  <ShadcnTable aria-label="Contributing transactions" className="min-w-[34rem]">
-                    <ShadcnTableHeader>
-                      <ShadcnTableRow>
-                        <ShadcnTableHead>Merchant</ShadcnTableHead>
-                        <ShadcnTableHead>Date</ShadcnTableHead>
-                        <ShadcnTableHead>Category</ShadcnTableHead>
-                        <ShadcnTableHead className="text-right">Amount</ShadcnTableHead>
-                      </ShadcnTableRow>
-                    </ShadcnTableHeader>
-                    <ShadcnTableBody>
-                      {detailTransactions.map((item) => (
-                        <ShadcnTableRow key={item.id}>
-                          <ShadcnTableCell className="font-medium">{item.merchant}</ShadcnTableCell>
-                          <ShadcnTableCell>
-                            {formatDateOnly(item.date, {
-                              day: "numeric",
-                              month: "short",
-                              year: "numeric",
-                            })}
-                          </ShadcnTableCell>
-                          <ShadcnTableCell>
-                            {transactionCategoryLabel(item.category)}
-                          </ShadcnTableCell>
-                          <ShadcnTableCell
-                            className={
-                              item.direction === "income"
-                                ? "text-right font-medium text-success"
-                                : "text-right font-medium text-destructive"
-                            }
-                          >
-                            {item.direction === "income" ? "+" : "−"}
-                            {formatMoney(item.amount)}
-                          </ShadcnTableCell>
+        <ResponsiveDialogBody>
+          <div className="app-scrollbar min-h-0 overflow-y-auto px-4 pb-4">
+            {detail.kind === "planned" ? (
+              <FinanceBudgetAllocationChart budgets={monthlyBudgets} />
+            ) : null}
+            {detail.kind === "overages" ? (
+              <details aria-label="Over-plan categories" className="rounded-md border" open>
+                <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
+                  Over-plan categories ({overBudgetCategories.length})
+                </summary>
+                <div className="space-y-2 border-t p-3">
+                  {overBudgetCategories.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No categories are over plan.</p>
+                  ) : (
+                    overBudgetCategories.map((category) => {
+                      const budget = budgetsByCategory.get(category);
+                      const overage =
+                        (authoritativeSpent.get(category) ?? spentByCategory.get(category) ?? 0) -
+                        (budget?.limit ?? 0);
+                      return (
+                        <div
+                          className="flex items-center justify-between gap-4 rounded-md border p-3"
+                          key={category}
+                        >
+                          <span className="font-medium">{transactionCategoryLabel(category)}</span>
+                          <span className="shrink-0 text-sm text-destructive">
+                            {formatMoney(overage)} over
+                          </span>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </details>
+            ) : null}
+            {detail.kind !== "planned" ? (
+              <details
+                aria-label="Contributing transactions"
+                className="mt-4 rounded-md border"
+                open
+              >
+                <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
+                  Contributing transactions ({detailTransactions.length})
+                </summary>
+                <div className="border-t">
+                  {detailTransactions.length === 0 ? (
+                    <p className="p-3 text-sm text-muted-foreground">
+                      No expense transactions match this view yet.
+                    </p>
+                  ) : (
+                    <ShadcnTable aria-label="Contributing transactions" className="min-w-[34rem]">
+                      <ShadcnTableHeader>
+                        <ShadcnTableRow>
+                          <ShadcnTableHead>Merchant</ShadcnTableHead>
+                          <ShadcnTableHead>Date</ShadcnTableHead>
+                          <ShadcnTableHead>Category</ShadcnTableHead>
+                          <ShadcnTableHead className="text-right">Amount</ShadcnTableHead>
                         </ShadcnTableRow>
+                      </ShadcnTableHeader>
+                      <ShadcnTableBody>
+                        {detailTransactions.map((item) => (
+                          <ShadcnTableRow key={item.id}>
+                            <ShadcnTableCell className="font-medium">
+                              {item.merchant}
+                            </ShadcnTableCell>
+                            <ShadcnTableCell>
+                              {formatDateOnly(item.date, {
+                                day: "numeric",
+                                month: "short",
+                                year: "numeric",
+                              })}
+                            </ShadcnTableCell>
+                            <ShadcnTableCell>
+                              {transactionCategoryLabel(item.category)}
+                            </ShadcnTableCell>
+                            <ShadcnTableCell
+                              className={
+                                item.direction === "income"
+                                  ? "text-right font-medium text-success"
+                                  : "text-right font-medium text-destructive"
+                              }
+                            >
+                              {item.direction === "income" ? "+" : "−"}
+                              {formatMoney(item.amount)}
+                            </ShadcnTableCell>
+                          </ShadcnTableRow>
+                        ))}
+                      </ShadcnTableBody>
+                    </ShadcnTable>
+                  )}
+                </div>
+              </details>
+            ) : null}
+            {detail.kind !== "planned" ? (
+              <details aria-label="Potential allocation issues" className="mt-4 rounded-md border">
+                <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
+                  <span>Potential allocation issues</span>
+                  <span className="ml-1 text-muted-foreground">({allocationSignals.length})</span>
+                </summary>
+                <div className="border-t p-3">
+                  <p className="text-sm text-muted-foreground">
+                    These are signals to review, not automatic corrections: uncategorized
+                    transactions, transactions awaiting review, or spending without a matching
+                    monthly budget.
+                  </p>
+                  {allocationSignals.length === 0 ? (
+                    <p className="mt-2 text-sm text-success">Nothing needs allocation review.</p>
+                  ) : (
+                    <ShadcnItemGroup className="mt-3">
+                      {allocationSignals.map((item) => (
+                        <ShadcnItem key={item.id} variant="outline">
+                          <ShadcnItemContent>
+                            <ShadcnItemTitle>{item.merchant}</ShadcnItemTitle>
+                            <ShadcnItemDescription>
+                              {item.needsReview
+                                ? "Needs category review"
+                                : item.category
+                                  ? "No monthly limit"
+                                  : "Uncategorized"}
+                            </ShadcnItemDescription>
+                          </ShadcnItemContent>
+                          <ShadcnItemActions>{formatMoney(item.amount)}</ShadcnItemActions>
+                        </ShadcnItem>
                       ))}
-                    </ShadcnTableBody>
-                  </ShadcnTable>
-                )}
-              </div>
-            </details>
-          ) : null}
-          {detail.kind !== "planned" ? (
-            <details aria-label="Potential allocation issues" className="mt-4 rounded-md border">
-              <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
-                <span>Potential allocation issues</span>
-                <span className="ml-1 text-muted-foreground">({allocationSignals.length})</span>
-              </summary>
-              <div className="border-t p-3">
-                <p className="text-sm text-muted-foreground">
-                  These are signals to review, not automatic corrections: uncategorized
-                  transactions, transactions awaiting review, or spending without a matching monthly
-                  budget.
-                </p>
-                {allocationSignals.length === 0 ? (
-                  <p className="mt-2 text-sm text-success">Nothing needs allocation review.</p>
-                ) : (
-                  <ShadcnItemGroup className="mt-3">
-                    {allocationSignals.map((item) => (
-                      <ShadcnItem key={item.id} variant="outline">
-                        <ShadcnItemContent>
-                          <ShadcnItemTitle>{item.merchant}</ShadcnItemTitle>
-                          <ShadcnItemDescription>
-                            {item.needsReview
-                              ? "Needs category review"
-                              : item.category
-                                ? "No monthly limit"
-                                : "Uncategorized"}
-                          </ShadcnItemDescription>
-                        </ShadcnItemContent>
-                        <ShadcnItemActions>{formatMoney(item.amount)}</ShadcnItemActions>
-                      </ShadcnItem>
-                    ))}
-                  </ShadcnItemGroup>
-                )}
-              </div>
-            </details>
-          ) : null}
-        </div>
+                    </ShadcnItemGroup>
+                  )}
+                </div>
+              </details>
+            ) : null}
+          </div>
+        </ResponsiveDialogBody>
       </ShadcnDialogContent>
     </ShadcnDialog>
   );
@@ -3108,64 +3125,69 @@ function FinanceTransactionsTable({
       )}
       {selectedTransaction ? (
         <ResponsiveDialog open onOpenChange={(open) => !open && setSelectedTransaction(null)}>
-          <ResponsiveDialogContent>
+          <ResponsiveDialogContent data-finance-dialog data-finance-size="wide">
             <ResponsiveDialogHeader>
               <ResponsiveDialogTitle>{selectedTransaction.merchant}</ResponsiveDialogTitle>
             </ResponsiveDialogHeader>
-            <ImportBody>
-              <p
-                className={`text-2xl font-semibold tabular-nums ${transactionAmountTone(selectedTransaction.direction)}`}
-              >
-                {formatTransactionAmount(selectedTransaction.amount, selectedTransaction.direction)}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                <DateDisplay value={selectedTransaction.date} /> ·{" "}
-                {financeTransactionCategoryLabel(
-                  selectedTransaction,
-                  categories,
-                  categoryReadState,
-                )}{" "}
-                · {selectedTransaction.pending ? "Pending" : "Posted"}
-              </p>
-              <TransactionDetails
-                transaction={selectedTransaction}
-                isCategorizing={isCategorizing}
-                onBreakdown={onBreakdown}
-                onCategorize={onCategorize}
-                hideActions
-              />
-              <div className="flex flex-wrap gap-2">
-                <ShadcnButton
-                  variant="outline"
-                  onClick={() => {
-                    onBreakdown(selectedTransaction);
-                    setSelectedTransaction(null);
-                  }}
+            <ResponsiveDialogBody>
+              <ImportBody>
+                <p
+                  className={`text-2xl font-semibold tabular-nums ${transactionAmountTone(selectedTransaction.direction)}`}
                 >
-                  Split purchase
-                </ShadcnButton>
-                <ShadcnButton
-                  variant="outline"
-                  onClick={() => {
-                    setContextTransaction(selectedTransaction);
-                    setSelectedTransaction(null);
-                  }}
-                >
-                  {selectedTransaction.notes ? "Edit context" : "Add context"}
-                </ShadcnButton>
-                <ShadcnButton
-                  variant="outline"
-                  onClick={() => {
-                    onCategorize(selectedTransaction);
-                    setSelectedTransaction(null);
-                  }}
-                >
-                  {selectedTransaction.category || selectedTransaction.categoryId
-                    ? "Recategorize"
-                    : "Categorize"}
-                </ShadcnButton>
-              </div>
-            </ImportBody>
+                  {formatTransactionAmount(
+                    selectedTransaction.amount,
+                    selectedTransaction.direction,
+                  )}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  <DateDisplay value={selectedTransaction.date} /> ·{" "}
+                  {financeTransactionCategoryLabel(
+                    selectedTransaction,
+                    categories,
+                    categoryReadState,
+                  )}{" "}
+                  · {selectedTransaction.pending ? "Pending" : "Posted"}
+                </p>
+                <TransactionDetails
+                  transaction={selectedTransaction}
+                  isCategorizing={isCategorizing}
+                  onBreakdown={onBreakdown}
+                  onCategorize={onCategorize}
+                  hideActions
+                />
+                <div className="flex flex-wrap gap-2">
+                  <ShadcnButton
+                    variant="outline"
+                    onClick={() => {
+                      onBreakdown(selectedTransaction);
+                      setSelectedTransaction(null);
+                    }}
+                  >
+                    Split purchase
+                  </ShadcnButton>
+                  <ShadcnButton
+                    variant="outline"
+                    onClick={() => {
+                      setContextTransaction(selectedTransaction);
+                      setSelectedTransaction(null);
+                    }}
+                  >
+                    {selectedTransaction.notes ? "Edit context" : "Add context"}
+                  </ShadcnButton>
+                  <ShadcnButton
+                    variant="outline"
+                    onClick={() => {
+                      onCategorize(selectedTransaction);
+                      setSelectedTransaction(null);
+                    }}
+                  >
+                    {selectedTransaction.category || selectedTransaction.categoryId
+                      ? "Recategorize"
+                      : "Categorize"}
+                  </ShadcnButton>
+                </div>
+              </ImportBody>
+            </ResponsiveDialogBody>
           </ResponsiveDialogContent>
         </ResponsiveDialog>
       ) : null}

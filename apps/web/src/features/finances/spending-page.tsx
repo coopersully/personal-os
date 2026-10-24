@@ -7,7 +7,7 @@ import {
   getDefaultWorkspacePreferences,
 } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "@/api";
 import { QueryFeedback } from "@/components/async-state";
@@ -19,19 +19,20 @@ import {
   SpendingListIcon,
   TrendChartIcon,
 } from "@/components/icons";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogTrigger as DialogTrigger,
+  ResponsiveDialogBody,
+} from "@/components/responsive-dialog";
 import { SettingsControlsContext } from "@/components/settings-controls-context";
 import { Field, FieldGroup, FieldLabel } from "@/components/settings-field";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -50,12 +51,7 @@ import {
 import { SpendingChoice, SpendingPeriodControls } from "./spending-controls";
 import { SpendingDetail } from "./spending-detail";
 import { SpendingList } from "./spending-list";
-import {
-  moveSpendingPeriod,
-  type SpendingPeriod,
-  spendingPeriod,
-  spendingToday,
-} from "./spending-period";
+import { type SpendingPeriod, spendingPeriod, spendingToday } from "./spending-period";
 import { parseSpendingRecovery, spendingRecoveryControls } from "./spending-reference";
 import { FinanceSpendingRhythm } from "./spending-rhythm";
 import { SpendingSummary, SpendingSummaryBreakdown } from "./spending-summary";
@@ -105,9 +101,17 @@ export function FinanceSpendingPage() {
   const view = ["bubbles", "list", "trends", "rhythm"].includes(requestedView)
     ? requestedView
     : "list";
-  const rhythmDefault =
-    view === "rhythm" && !["period", "from", "through"].some((key) => params.has(key));
   const [openedAt] = useState(() => new Date().toISOString());
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const update = () => setNow(new Date());
+    const timer = window.setInterval(update, 60_000);
+    window.addEventListener("focus", update);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", update);
+    };
+  }, []);
   const requestedPeriod = choice("period", defaults.financeSpendingPeriod);
   const period = (
     ["today", "week", "month", "custom"].includes(requestedPeriod)
@@ -124,7 +128,7 @@ export function FinanceSpendingPage() {
       return false;
     }
   })();
-  const today = timezone && timezoneValid ? spendingToday(timezone) : "2000-01-01";
+  const today = timezone && timezoneValid ? spendingToday(timezone, now) : "2000-01-01";
   const requestedAnchor = params.get("from") ?? today;
   const validAnchor =
     /^\d{4}-\d{2}-\d{2}$/.test(requestedAnchor) &&
@@ -144,9 +148,7 @@ export function FinanceSpendingPage() {
     calendar.data?.preferences.weekStartsOn ??
       getDefaultWorkspacePreferences("calendar").weekStartsOn,
   );
-  const range = rhythmDefault
-    ? { from: moveSpendingPeriod("month", monthRange.from, -2), through: monthRange.through }
-    : selectedRange;
+  const range = selectedRange;
   const accountIds = params.has("accounts")
     ? params.get("accounts") === "all"
       ? null
@@ -197,6 +199,7 @@ export function FinanceSpendingPage() {
     !!activeQuery &&
     validAnchor;
   const data = useQuery({
+    refetchInterval: 60_000,
     queryKey: [
       "finance-spending",
       user.data?.id,
@@ -354,12 +357,11 @@ export function FinanceSpendingPage() {
     setSelectedDrillDown(drillDown);
   }
 
-  const rangeLabel = rhythmDefault
-    ? "last three months"
-    : period === "month" && range.from === monthRange.from
+  const rangeLabel =
+    period === "month" && range.from === monthRange.from
       ? "this month"
       : period === "month"
-        ? formatDateOnly(range.from, { month: "long", year: "numeric" })
+        ? `in ${formatDateOnly(range.from, { month: "long", year: "numeric" })}`
         : period === "today" && range.from === today
           ? "today"
           : period === "week" &&
@@ -368,12 +370,12 @@ export function FinanceSpendingPage() {
                   .from
             ? "this week"
             : range.from === range.through
-              ? formatDateOnly(range.from, { month: "short", day: "numeric", year: "numeric" })
-              : `${formatDateOnly(range.from, { month: "short", day: "numeric" })} – ${formatDateOnly(range.through, { month: "short", day: "numeric", year: "numeric" })}`;
+              ? `on ${formatDateOnly(range.from, { month: "short", day: "numeric", year: "numeric" })}`
+              : `from ${formatDateOnly(range.from, { month: "short", day: "numeric" })} to ${formatDateOnly(range.through, { month: "short", day: "numeric", year: "numeric" })}`;
   const dateControls = (
     <fieldset disabled={disabled} className="min-w-0 w-full">
       <SpendingPeriodControls
-        period={rhythmDefault ? "custom" : period}
+        period={period}
         {...range}
         onPeriod={(value) => {
           const next = new URLSearchParams(params);
@@ -395,7 +397,6 @@ export function FinanceSpendingPage() {
           setSelected(null);
           setSelectedDrillDown(null);
         }}
-        onMove={(direction) => update("from", moveSpendingPeriod(period, range.from, direction))}
       />
     </fieldset>
   );
@@ -443,8 +444,14 @@ export function FinanceSpendingPage() {
     ) : null;
   const scopeControls = (
     <SpendingChoice
-      label="Group by"
+      label="Grouping"
       showLabel={false}
+      subtle
+      displayValue={
+        { auto: "grouped automatically", buckets: "by bucket", categories: "by category" }[
+          choice("grouping", defaults.financeSpendingGrouping)
+        ] ?? "grouped automatically"
+      }
       value={choice("grouping", defaults.financeSpendingGrouping)}
       options={[
         ["auto", "Auto"],
@@ -500,7 +507,7 @@ export function FinanceSpendingPage() {
               size="sm"
               disabled={disabled}
               aria-label={`Date range: ${rangeLabel}`}
-              className="min-w-0 max-w-full shrink max-sm:px-1"
+              className="min-w-0 max-w-full shrink"
             >
               <span className="truncate text-xs font-normal text-muted-foreground sm:text-sm">
                 {rangeLabel}
@@ -511,11 +518,12 @@ export function FinanceSpendingPage() {
           <PopoverContent
             align="start"
             aria-label="Spending date range"
-            className="w-80 max-w-[calc(100vw-2rem)]"
+            className="w-72 max-w-[calc(100vw-2rem)] p-3"
           >
             {dateControls}
           </PopoverContent>
         </Popover>
+        {scopeControls}
       </WorkspaceHeaderControls>
       <WorkspaceHeaderControls label="Spending controls" placement="leading">
         <div className="flex items-center gap-1 whitespace-nowrap">
@@ -549,8 +557,6 @@ export function FinanceSpendingPage() {
             onChange={(value) => update("view", value, "financeSpendingView")}
           />
           <div className="flex items-center gap-1">
-            <div className="spending-scope-controls flex items-center gap-1">{scopeControls}</div>
-
             <WorkspaceHeaderControls label="Spending filters">
               <Dialog>
                 <DialogTrigger asChild>
@@ -562,7 +568,11 @@ export function FinanceSpendingPage() {
                     ) : null}
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="settings-panel max-h-[85dvh] overflow-y-auto sm:max-w-lg">
+                <DialogContent
+                  data-finance-dialog
+                  data-finance-size="default"
+                  className="settings-panel"
+                >
                   <SettingsControlsContext.Provider value={true}>
                     <DialogHeader>
                       <DialogTitle>Spending options</DialogTitle>
@@ -570,99 +580,100 @@ export function FinanceSpendingPage() {
                         Choose what contributes to this view. Changes are saved as your defaults.
                       </DialogDescription>
                     </DialogHeader>
-                    <fieldset
-                      className="spending-compact-scope flex flex-col gap-3"
-                      aria-label="Grouping"
-                    >
-                      {scopeControls}
-                    </fieldset>
-                    <FieldGroup>
-                      <Field>
-                        <FieldLabel>Accounting basis</FieldLabel>
-                        <SpendingChoice
-                          label="Basis"
-                          showLabel={false}
-                          value={choice("basis", defaults.financeSpendingBasis)}
-                          options={[
-                            ["personal_cost", "Personal cost"],
-                            ["full_outflow", "Full outflow"],
-                          ]}
-                          disabled={disabled}
-                          onChange={(value) => update("basis", value, "financeSpendingBasis")}
-                        />
-                      </Field>
-                      {(
-                        [
-                          ["pending", "Include pending", "financeSpendingIncludePending"],
-                          ["refunds", "Subtract matched refunds", "financeSpendingSubtractRefunds"],
-                          [
-                            "uncategorized",
-                            "Include uncategorized",
-                            "financeSpendingIncludeUncategorized",
-                          ],
-                        ] as const
-                      ).map(([key, label, pref]) => (
-                        <Field key={key}>
-                          <FieldLabel htmlFor={`spending-${key}`}>{label}</FieldLabel>
-                          <Checkbox
-                            id={`spending-${key}`}
+                    <ResponsiveDialogBody>
+                      <FieldGroup>
+                        <Field>
+                          <FieldLabel>Accounting basis</FieldLabel>
+                          <SpendingChoice
+                            label="Basis"
+                            showLabel={false}
+                            value={choice("basis", defaults.financeSpendingBasis)}
+                            options={[
+                              ["personal_cost", "Personal cost"],
+                              ["full_outflow", "Full outflow"],
+                            ]}
                             disabled={disabled}
-                            checked={bool(key, defaults[pref])}
-                            onCheckedChange={(checked) =>
-                              update(key, checked === true ? "1" : "0", pref, checked === true)
-                            }
+                            onChange={(value) => update("basis", value, "financeSpendingBasis")}
                           />
                         </Field>
-                      ))}
-                    </FieldGroup>
-                    {result ? (
-                      <fieldset className="flex flex-col gap-2">
-                        <legend className="mb-2 text-xs font-medium text-muted-foreground">
-                          Accounts
-                        </legend>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            variant="ghost"
-                            disabled={disabled}
-                            onClick={() => update("accounts", "all", "spendAccountIds", null)}
-                          >
-                            Use all eligible accounts
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            disabled={disabled}
-                            onClick={() => update("accounts", "", "spendAccountIds", [])}
-                          >
-                            Select none
-                          </Button>
-                        </div>
-                        <FieldGroup>
-                          {result.accounts.map((account) => (
-                            <Field key={account.id}>
-                              <FieldLabel htmlFor={`spending-account-${account.id}`}>
-                                {account.label}
-                              </FieldLabel>
-                              <Checkbox
-                                id={`spending-account-${account.id}`}
-                                disabled={disabled}
-                                checked={accountIds === null || accountIds.includes(account.id)}
-                                onCheckedChange={(checked) => {
-                                  const ids = accountIds ?? result.accounts.map((item) => item.id);
-                                  const next =
-                                    checked === true
-                                      ? [...ids, account.id]
-                                      : ids.filter((id) => id !== account.id);
-                                  update("accounts", next.join(","), "spendAccountIds", next);
-                                }}
-                              />
-                            </Field>
-                          ))}
-                        </FieldGroup>
-                      </fieldset>
-                    ) : null}
-                    {timezone ? (
-                      <p className="text-xs text-muted-foreground">Dates use {timezone}.</p>
-                    ) : null}
+                        {(
+                          [
+                            ["pending", "Include pending", "financeSpendingIncludePending"],
+                            [
+                              "refunds",
+                              "Subtract matched refunds",
+                              "financeSpendingSubtractRefunds",
+                            ],
+                            [
+                              "uncategorized",
+                              "Include uncategorized",
+                              "financeSpendingIncludeUncategorized",
+                            ],
+                          ] as const
+                        ).map(([key, label, pref]) => (
+                          <Field key={key}>
+                            <FieldLabel htmlFor={`spending-${key}`}>{label}</FieldLabel>
+                            <Checkbox
+                              id={`spending-${key}`}
+                              disabled={disabled}
+                              checked={bool(key, defaults[pref])}
+                              onCheckedChange={(checked) =>
+                                update(key, checked === true ? "1" : "0", pref, checked === true)
+                              }
+                            />
+                          </Field>
+                        ))}
+                      </FieldGroup>
+                      {result ? (
+                        <fieldset className="flex flex-col gap-2">
+                          <legend className="mb-2 text-xs font-medium text-muted-foreground">
+                            Accounts
+                          </legend>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              variant="ghost"
+                              disabled={disabled}
+                              onClick={() => update("accounts", "all", "spendAccountIds", null)}
+                            >
+                              Use all eligible accounts
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              disabled={disabled}
+                              onClick={() => update("accounts", "", "spendAccountIds", [])}
+                            >
+                              Select none
+                            </Button>
+                          </div>
+                          <FieldGroup>
+                            {result.accounts.map((account) => (
+                              <Field key={account.id}>
+                                <FieldLabel htmlFor={`spending-account-${account.id}`}>
+                                  {account.label}
+                                </FieldLabel>
+                                <Checkbox
+                                  id={`spending-account-${account.id}`}
+                                  disabled={disabled}
+                                  checked={accountIds === null || accountIds.includes(account.id)}
+                                  onCheckedChange={(checked) => {
+                                    const ids =
+                                      accountIds ?? result.accounts.map((item) => item.id);
+                                    const next =
+                                      checked === true
+                                        ? [...ids, account.id]
+                                        : ids.filter((id) => id !== account.id);
+                                    update("accounts", next.join(","), "spendAccountIds", next);
+                                  }}
+                                />
+                              </Field>
+                            ))}
+                          </FieldGroup>
+                        </fieldset>
+                      ) : null}
+                      {timezone ? (
+                        <p className="text-xs text-muted-foreground">Dates use {timezone}.</p>
+                      ) : null}
+                    </ResponsiveDialogBody>
                   </SettingsControlsContext.Provider>
                 </DialogContent>
               </Dialog>
@@ -706,97 +717,113 @@ export function FinanceSpendingPage() {
                 largestGroup={largestGroup}
                 onSelect={selectGroup}
               />
-              <DialogContent className="max-h-[85dvh] overflow-y-auto">
+              <DialogContent data-finance-dialog data-finance-size="default">
                 <DialogHeader>
                   <DialogTitle>Spending breakdown</DialogTitle>
                   <DialogDescription>
-                    Recorded spending, pending purchases, and budget context.
+                    {formatDateOnly(result.snapshot.scope.from, {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}{" "}
+                    –{" "}
+                    {formatDateOnly(result.snapshot.scope.through, {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
                   </DialogDescription>
                 </DialogHeader>
-                <SpendingSummaryBreakdown result={result} />
-                <details>
-                  <summary className="cursor-pointer text-sm font-medium">
-                    Coverage and accounting details
-                  </summary>
-                  <p className="text-sm text-muted-foreground">
-                    Coverage: {result.snapshot.coverage} · Source: {result.source.freshness}
-                    {result.source.lastSyncedAt
-                      ? ` · Last synced ${result.source.lastSyncedAt}`
-                      : " · Last sync unknown"}
-                  </p>
-                  <SpendingMonthlyBudgetContext budget={result.monthlyBudget} />
-                  {result.monthlyBudget?.state === "unavailable" &&
-                  result.monthlyBudget.qualificationRequired &&
-                  result.snapshot.scope.from.slice(0, 7) ===
-                    result.snapshot.scope.through.slice(0, 7) &&
-                  timezone &&
-                  user.data ? (
-                    <SpendingBudgetQualification
-                      key={`${user.data.id}:${result.snapshot.scope.from.slice(0, 7)}:${timezone}:${result.referenceRevision ?? result.snapshot.asOf}`}
-                      ownerId={user.data.id}
-                      month={result.snapshot.scope.from.slice(0, 7)}
-                      timezone={timezone}
-                      sourceRevision={result.referenceRevision ?? result.snapshot.asOf}
-                    />
-                  ) : null}
-                  {result.groupingFallback ? (
-                    <p>
-                      Buckets unavailable; showing categories. Your grouping preference is retained.
+                <ResponsiveDialogBody>
+                  <SpendingSummaryBreakdown result={result} />
+                  <details>
+                    <summary className="cursor-pointer text-sm font-medium">
+                      Coverage and accounting details
+                    </summary>
+                    <p className="text-sm text-muted-foreground">
+                      Coverage: {result.snapshot.coverage} · Source: {result.source.freshness}
+                      {result.source.lastSyncedAt
+                        ? ` · Last synced ${result.source.lastSyncedAt}`
+                        : " · Last sync unknown"}
                     </p>
-                  ) : null}
-                  {result.excludedUncategorizedCents !== 0 ? (
-                    <p>
-                      Excluded uncategorized: {formatMoney(result.excludedUncategorizedCents / 100)}
-                    </p>
-                  ) : null}
-                  {result.negativeAdjustmentCents > 0 ? (
-                    <p>Negative adjustments: {formatMoney(result.negativeAdjustmentCents / 100)}</p>
-                  ) : null}
-                  {result.currency.unsupported.length ? (
-                    <p>
-                      Unsupported currencies in source history:{" "}
-                      {result.currency.unsupported
-                        .map(
-                          (item) =>
-                            `${item.code ?? "Unspecified currency"} (${item.transactionIds.length} transactions)`,
-                        )
-                        .join(", ")}
-                      . No exchange rates applied.
-                    </p>
-                  ) : null}
-                  {result.source.reasons.length || result.snapshot.qualifications.length ? (
-                    <section aria-label="Evidence and limitations">
-                      <h3 className="text-sm font-medium">Evidence and limitations</h3>
-                      <ul className="flex flex-col gap-2 py-2">
-                        {[
-                          ...result.source.reasons.map((code) => ({
-                            code,
-                            sourceIds: [] as string[],
-                          })),
-                          ...result.snapshot.qualifications,
-                        ].map((item) => (
-                          <li key={`${item.code}:${item.sourceIds.join(",")}`}>
-                            <p>
-                              {qualificationCopy[item.code] ??
-                                "Some spending evidence needs review before these totals can be treated as complete."}
-                            </p>
-                            {item.sourceIds.length || !qualificationCopy[item.code] ? (
-                              <details>
-                                <summary className="cursor-pointer text-xs text-muted-foreground">
-                                  Technical evidence references
-                                </summary>
-                                <p className="break-all text-xs text-muted-foreground">
-                                  {item.code}
-                                  {item.sourceIds.length ? ` · ${item.sourceIds.join(", ")}` : ""}
-                                </p>
-                              </details>
-                            ) : null}
-                          </li>
-                        ))}
-                      </ul>
-                    </section>
-                  ) : null}
-                </details>
+                    <SpendingMonthlyBudgetContext budget={result.monthlyBudget} />
+                    {result.monthlyBudget?.state === "unavailable" &&
+                    result.monthlyBudget.qualificationRequired &&
+                    result.snapshot.scope.from.slice(0, 7) ===
+                      result.snapshot.scope.through.slice(0, 7) &&
+                    timezone &&
+                    user.data ? (
+                      <SpendingBudgetQualification
+                        key={`${user.data.id}:${result.snapshot.scope.from.slice(0, 7)}:${timezone}:${result.referenceRevision ?? result.snapshot.asOf}`}
+                        ownerId={user.data.id}
+                        month={result.snapshot.scope.from.slice(0, 7)}
+                        timezone={timezone}
+                        sourceRevision={result.referenceRevision ?? result.snapshot.asOf}
+                      />
+                    ) : null}
+                    {result.groupingFallback ? (
+                      <p>
+                        Buckets unavailable; showing categories. Your grouping preference is
+                        retained.
+                      </p>
+                    ) : null}
+                    {result.excludedUncategorizedCents !== 0 ? (
+                      <p>
+                        Excluded uncategorized:{" "}
+                        {formatMoney(result.excludedUncategorizedCents / 100)}
+                      </p>
+                    ) : null}
+                    {result.negativeAdjustmentCents > 0 ? (
+                      <p>
+                        Negative adjustments: {formatMoney(result.negativeAdjustmentCents / 100)}
+                      </p>
+                    ) : null}
+                    {result.currency.unsupported.length ? (
+                      <p>
+                        Unsupported currencies in source history:{" "}
+                        {result.currency.unsupported
+                          .map(
+                            (item) =>
+                              `${item.code ?? "Unspecified currency"} (${item.transactionIds.length} transactions)`,
+                          )
+                          .join(", ")}
+                        . No exchange rates applied.
+                      </p>
+                    ) : null}
+                    {result.source.reasons.length || result.snapshot.qualifications.length ? (
+                      <section aria-label="Evidence and limitations">
+                        <h3 className="text-sm font-medium">Evidence and limitations</h3>
+                        <ul className="flex flex-col gap-2 py-2">
+                          {[
+                            ...result.source.reasons.map((code) => ({
+                              code,
+                              sourceIds: [] as string[],
+                            })),
+                            ...result.snapshot.qualifications,
+                          ].map((item) => (
+                            <li key={`${item.code}:${item.sourceIds.join(",")}`}>
+                              <p>
+                                {qualificationCopy[item.code] ??
+                                  "Some spending evidence needs review before these totals can be treated as complete."}
+                              </p>
+                              {item.sourceIds.length || !qualificationCopy[item.code] ? (
+                                <details>
+                                  <summary className="cursor-pointer text-xs text-muted-foreground">
+                                    Technical evidence references
+                                  </summary>
+                                  <p className="break-all text-xs text-muted-foreground">
+                                    {item.code}
+                                    {item.sourceIds.length ? ` · ${item.sourceIds.join(", ")}` : ""}
+                                  </p>
+                                </details>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+                    ) : null}
+                  </details>
+                </ResponsiveDialogBody>
               </DialogContent>
             </Dialog>
           </div>

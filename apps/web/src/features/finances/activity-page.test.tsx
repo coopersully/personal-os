@@ -68,8 +68,27 @@ function openActivity() {
   if (!button) throw new Error("Activity record missing");
   fireEvent.click(button);
 }
-afterEach(cleanup);
-beforeEach(() => vi.clearAllMocks());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+beforeEach(() => {
+  vi.clearAllMocks();
+  // Node's server-side storage may shadow JSDOM storage. Isolate table preferences per test.
+  const values = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    get length() {
+      return values.size;
+    },
+    clear: () => values.clear(),
+    getItem: (key: string) => values.get(key) ?? null,
+    key: (index: number) => [...values.keys()][index] ?? null,
+    removeItem: (key: string) => values.delete(key),
+    setItem: (key: string, value: string) => {
+      values.set(key, value);
+    },
+  } satisfies Storage);
+});
 it("shows honest coverage and immutable supporting evidence without rounding message sequences", async () => {
   const read = vi.fn().mockResolvedValue(page());
   render(view(read));
@@ -601,4 +620,63 @@ it("keeps cursor navigation available when a subsequent page has no projected en
   fireEvent.click(screen.getByRole("button", { name: "Previous page" }));
   expect(await screen.findByText(entry.action)).toBeVisible();
   expect(screen.getByText("Page 1")).toBeVisible();
+});
+
+it("attributes activity to the supplied account and keeps evidence attribution", async () => {
+  const { agentAccountFixture } = await import("../../test-fixtures/agent-account");
+  render(
+    view(
+      vi.fn().mockResolvedValue(
+        page([
+          {
+            ...entry,
+            actor: { type: "agent", id: "connection-actor" },
+            agentAccount: agentAccountFixture,
+          },
+        ]),
+      ),
+    ),
+  );
+  expect((await screen.findAllByText("Cedar Fox")).length).toBeGreaterThan(0);
+  openActivity();
+  expect(screen.getByRole("dialog")).toHaveTextContent("Cedar Fox");
+  expect(screen.getByRole("dialog")).toHaveTextContent("connection-actor");
+});
+
+it("fetches fresh profile attribution when returning from account settings for the same owner", async () => {
+  const { agentAccountFixture } = await import("../../test-fixtures/agent-account");
+  const read = vi.fn().mockResolvedValue(
+    page([
+      {
+        ...entry,
+        actor: { type: "agent", id: "recorded-actor" },
+        agentAccount: agentAccountFixture,
+      },
+    ]),
+  );
+  const activity = render(view(read));
+  expect((await screen.findAllByText("Cedar Fox")).length).toBeGreaterThan(0);
+  activity.unmount();
+
+  // A profile edit or relink in Settings changes the server projection, not the recorded actor.
+  read.mockResolvedValue(
+    page([
+      {
+        ...entry,
+        actor: { type: "agent", id: "recorded-actor" },
+        agentAccount: {
+          ...agentAccountFixture,
+          id: "relinked-account",
+          displayName: "Updated Maple",
+        },
+      },
+    ]),
+  );
+  render(view(read));
+  expect((await screen.findAllByText("Updated Maple")).length).toBeGreaterThan(0);
+  expect(read).toHaveBeenCalledTimes(2);
+  expect(screen.queryByText("Cedar Fox")).not.toBeInTheDocument();
+  openActivity();
+  expect(screen.getByRole("dialog")).toHaveTextContent("Updated Maple");
+  expect(screen.getByRole("dialog")).toHaveTextContent("recorded-actor");
 });

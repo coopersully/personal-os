@@ -1,6 +1,6 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
-import { ApiClientError, type PersonalOsApiClient } from "@personal-os/api-client";
+import { ApiClientError, createApiClient, type PersonalOsApiClient } from "@personal-os/api-client";
 import { financeCapabilityManifest } from "@personal-os/domain";
 import { registerFinanceTools } from "./finances.js";
 
@@ -1111,4 +1111,101 @@ it("keeps category and bucket icon choices automatic in agent discovery", async 
     await client.close();
     await server.close();
   }
+});
+
+describe("Finance budget HTTP-to-MCP approval readiness", () => {
+  it("preserves additive readiness in text and structured results, including null budgets", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    const api = createApiClient({ baseUrl: "https://example.test", token: "budget-token", fetch });
+    const server = new McpServer({ name: "budget-readiness", version: "1" });
+    registerFinanceTools(server, api);
+    const client = new Client({ name: "budget-reader", version: "1" });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(st), client.connect(ct)]);
+    try {
+      for (const [code, recovery] of [
+        ["ready", "approve"],
+        ["no_budget", "create_proposal"],
+        ["profile_changed", "revise_proposal"],
+        ["superseded", "refresh_plan"],
+      ] as const) {
+        const payload = {
+          ...base,
+          data: code === "no_budget" ? null : { id, status: "proposed" },
+          approvalReadiness: {
+            ready: code === "ready",
+            code,
+            recovery,
+            message: "Review current prerequisites",
+            budgetVersionId: code === "no_budget" ? null : id,
+            latestBudgetVersionId: id,
+            currentProfileVersionId: id,
+          },
+        };
+        fetch.mockResolvedValueOnce(Response.json(payload));
+        const output = await client.callTool({
+          name: "get_finance_budget",
+          arguments: { planId: id },
+        });
+        expect(output.isError).not.toBe(true);
+        expect(output.structuredContent).toEqual(payload);
+        expect(output.content).toEqual([{ type: "text", text: JSON.stringify(payload, null, 2) }]);
+      }
+      for (const [url, init] of fetch.mock.calls) {
+        expect(url).toBe(`https://example.test/v1/finances/budget-plans?planId=${id}`);
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer budget-token");
+      }
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  it("preserves HTTP permission errors and approval conflict recovery through MCP", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    const api = createApiClient({ baseUrl: "https://example.test", token: "budget-token", fetch });
+    const server = new McpServer({ name: "budget-errors", version: "1" });
+    registerFinanceTools(server, api);
+    const client = new Client({ name: "budget-reader", version: "1" });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(st), client.connect(ct)]);
+    try {
+      for (const status of [403, 409]) {
+        const error = {
+          code: status === 403 ? "forbidden" : "conflict",
+          message: "Budget requires a fresh decision",
+          details: {
+            approvalReadiness: {
+              ready: false,
+              code: "profile_changed",
+              recovery: "revise_proposal",
+            },
+          },
+          requestId: "budget-error",
+        };
+        fetch.mockResolvedValueOnce(Response.json({ error }, { status }));
+        const output = await client.callTool({
+          name: "approve_finance_budget",
+          arguments: {
+            approvalSource: "user_instruction",
+            budgetVersionId: id,
+            expectedProfileVersionId: id,
+            expectedVersion: 3,
+            idempotencyKey: "approval-request",
+          },
+        });
+        expect(output.isError).toBe(true);
+        expect(output.structuredContent).toMatchObject({ error: { ...error, status } });
+        const text = output.content
+          .filter((item) => item.type === "text")
+          .map((item) => item.text)
+          .join("\n");
+        expect(JSON.parse(text)).toEqual(output.structuredContent);
+      }
+      expect(fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
 });

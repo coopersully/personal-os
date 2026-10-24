@@ -14,7 +14,6 @@ it("shows the calendar and presets directly and applies a complete range in eith
       through="2020-01-03"
       onPeriod={vi.fn()}
       onDates={onDates}
-      onMove={vi.fn()}
     />,
   );
   expect(screen.getByRole("grid")).toBeVisible();

@@ -7,6 +7,7 @@ import { type HTMLMotionProps, motion, useDragControls, useReducedMotion } from 
 import { useLayoutEffect, useRef, useState } from "react";
 import { RefreshIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { formatMoney } from "./format";
 import { spendingGroupVisual } from "./spending-visual";
 
@@ -169,9 +170,24 @@ export function SpendingBubbles({
           <RefreshIcon />
         </Button>
       </div>
+      {!visible.length ? (
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>No purchases to show</EmptyTitle>
+            <EmptyDescription>
+              Try another date range, or choose List to see zero-spend groups and refund
+              adjustments.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : null}
       <div
         ref={container}
-        className="relative mx-auto aspect-square w-full max-w-lg overflow-hidden"
+        className={
+          visible.length
+            ? "relative mx-auto aspect-square w-full max-w-lg overflow-hidden"
+            : "hidden"
+        }
       >
         {visible.map((group, index) => {
           const node = nodes[index];

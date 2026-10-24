@@ -14,6 +14,7 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, sql } from "drizzle-orm";
+import { createAgentAccountService } from "./agent-account-service.js";
 import { createAutomationHostService } from "./automation-host-service.js";
 import { reconcileFinanceContinuations } from "./finance/continuation-reconciliation.js";
 import { requireHostRunAuthority } from "./finance/host-run-authority.js";
@@ -102,10 +103,20 @@ describe.sequential("tenant-bound host schedules", () => {
       }),
     ).rejects.toMatchObject({ code: "forbidden" });
     expect(await f.service.connections(f.human)).toEqual([
-      { id: f.connectionId, label: "Original host", scopes: ["finances:maintain"] },
+      {
+        id: f.connectionId,
+        label: "Original host",
+        scopes: ["finances:maintain"],
+        agentAccount: null,
+      },
     ]);
     expect(await f.service.connections(f.agent)).toEqual([
-      { id: f.connectionId, label: "Original host", scopes: ["finances:maintain"] },
+      {
+        id: f.connectionId,
+        label: "Original host",
+        scopes: ["finances:maintain"],
+        agentAccount: null,
+      },
     ]);
     const created = await f.service.create(f.human, input(f.connectionId));
     expect(created.schedule.state).toBe("setup_pending");
@@ -348,6 +359,89 @@ describe.sequential("tenant-bound host schedules", () => {
     if (!answer) throw new Error("answer");
     return { ...f, scheduleId: setup.schedule.id, answer };
   }
+  it.each([
+    "finances:maintain",
+    "mail:read",
+  ] as const)("grouping a %s connection preserves schedule, continuation, and run authority", async (scope) => {
+    const f = await fireFixture();
+    const run = await waitingRun(f);
+    const accounts = createAgentAccountService({ db: database.db, now });
+    const account = await accounts.current(f.agent);
+    if (!account) throw new Error("schedule identity");
+    const connectionId = randomUUID();
+    const [token] = await database.db
+      .insert(accessTokens)
+      .values({
+        userId: f.userId,
+        authorizationConnectionId: connectionId,
+        tokenHash: randomUUID(),
+        name: "Another surface of the same account",
+        scopes: [scope],
+      })
+      .returning();
+    if (!token) throw new Error("token");
+    const other: Principal = {
+      ...f.agent,
+      actorId: token.id,
+      authorizationConnectionId: connectionId,
+      scopes: new Set([scope]),
+    };
+    const schedulesBefore = await database.db.select().from(automationHostSchedules);
+    const answersBefore = await database.db.select().from(financeAnswerContinuations);
+    const runsBefore = await database.db.select().from(workspaceMaintenanceRuns);
+    await accounts.link(f.human, connectionId, { agentAccountId: account.id });
+    expect(await accounts.current(other)).toMatchObject({ id: account.id });
+    expect(await database.db.select().from(automationHostSchedules)).toEqual(schedulesBefore);
+    expect(await database.db.select().from(financeAnswerContinuations)).toEqual(answersBefore);
+    expect(await database.db.select().from(workspaceMaintenanceRuns)).toEqual(runsBefore);
+    expect(
+      (await accounts.list(f.human)).connections.find((c) => c.id === connectionId)?.scopes,
+    ).toEqual([scope]);
+
+    if (scope === "finances:maintain") {
+      expect(await f.service.list(other)).toEqual([]);
+      expect((await f.service.pendingAnswers(other)).continuations).toEqual([]);
+    } else {
+      await expect(f.service.list(other)).rejects.toMatchObject({ code: "forbidden" });
+      await expect(f.service.pendingAnswers(other)).rejects.toMatchObject({ code: "forbidden" });
+      // Even the owner cannot borrow the grouped connection's maintenance grant.
+      await expect(f.service.create(f.human, input(connectionId))).rejects.toMatchObject({
+        code: "forbidden",
+      });
+    }
+    await expect(f.service.continuations(other, f.scheduleId)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    await expect(
+      f.service.observe(other, f.scheduleId, {
+        expectedVersion: 3,
+        expectedState: "active",
+        hostSurface: "claude_code_routine",
+        observedState: "active",
+        observedAt: now().toISOString(),
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      database.db.transaction((tx) => requireHostRunAuthority(tx, run, other, now())),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await database.db.transaction((tx) => requireHostRunAuthority(tx, run, f.agent, now()));
+    expect(
+      (await f.service.continuations(f.agent, f.scheduleId)).continuations.map((c) => c.id),
+    ).toContain(f.answer.id);
+
+    // A live grouped sibling must not rescue the original connection after revocation.
+    await database.db
+      .update(accessTokens)
+      .set({ revokedAt: now() })
+      .where(eq(accessTokens.id, f.token.id));
+    await expect(
+      database.db.transaction((tx) => requireHostRunAuthority(tx, run, f.agent, now())),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(f.service.continuations(f.agent, f.scheduleId)).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    expect(await f.service.list(f.human)).toMatchObject([{ connectionAvailable: false }]);
+  });
   async function expiringOAuthGrant(f: Awaited<ReturnType<typeof fireFixture>>) {
     const clientId = randomUUID(),
       refreshToken = randomUUID(),
@@ -378,6 +472,42 @@ describe.sequential("tenant-bound host schedules", () => {
       oauth: createOAuthService({ db: database.db, now, resource }),
     };
   }
+  it.each([
+    "revoked",
+    "replaced",
+    "expired",
+  ] as const)("keeps the directory active after bearer expiry until the refresh grant is %s", async (state) => {
+    const f = await fireFixture();
+    const grant = await expiringOAuthGrant(f);
+    const accounts = createAgentAccountService({ db: database.db, now });
+    const account = await accounts.current(f.agent);
+    expect(account).not.toBeNull();
+    expect((await accounts.list(f.human)).connections).toMatchObject([
+      {
+        id: f.connectionId,
+        agentAccountId: account?.id,
+        active: true,
+        scopes: ["finances:maintain"],
+      },
+    ]);
+    if (state === "revoked") {
+      await grant.oauth.revokeAuthorizedClient(f.userId, grant.clientId);
+    } else {
+      await database.db
+        .update(oauthRefreshTokens)
+        .set(state === "replaced" ? { replacedAt: now() } : { expiresAt: now() })
+        .where(eq(oauthRefreshTokens.id, grant.refresh.id));
+    }
+    expect((await accounts.list(f.human)).connections).toMatchObject([
+      {
+        id: f.connectionId,
+        agentAccountId: account?.id,
+        active: false,
+        scopes: [],
+      },
+    ]);
+    expect(await accounts.current(f.agent)).toMatchObject({ id: account?.id });
+  });
   it("serializes in-flight refresh with revocation and leaves no renewed host grant", async () => {
     const f = await fireFixture();
     const g = await expiringOAuthGrant(f);

@@ -105,6 +105,8 @@ function write(
  * Feature modules own behavior; this catalog owns how that behavior is exposed.
  */
 export const iloToolCatalog = {
+  get_agent_account: read("assistant", []),
+  register_agent_account: write("assistant", [], { idempotent: true, openWorld: false }),
   get_finance_profile: read("finances", ["finances:read"]),
   disconnect_texting: write("texting", ["texting:write", "texting:execute"], {
     policy: "approved_rule",
@@ -222,6 +224,23 @@ export const iloToolCatalog = {
     policy: "approved_rule",
   }),
   search_finance: read("finances", ["finances:read"]),
+  get_finance_review_backlog: read("finances", ["finances:read"]),
+  list_finance_review_backlog_items: read("finances", ["finances:read"]),
+  get_finance_review_batch: read("finances", ["finances:read"], "verify"),
+  list_finance_review_batches: read("finances", ["finances:read"], "recover"),
+  preview_finance_review_batch: write("finances", ["finances:read", "finances:write"], {
+    policy: "preview",
+    stage: "prepare",
+    idempotent: true,
+  }),
+  execute_finance_review_batch: write(
+    "finances",
+    ["finances:read", "finances:write", "finances:execute"],
+    {
+      policy: "approved_rule",
+      idempotent: false,
+    },
+  ),
   get_finance_budget_policy: read("finances", ["finances:read"]),
   create_finance_budget_policy: write("finances", ["finances:write", "finances:execute"], {
     policy: "approved_rule",

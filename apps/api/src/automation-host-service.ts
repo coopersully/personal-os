@@ -28,6 +28,7 @@ import {
 } from "@personal-os/domain";
 import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
+import { ensureAgentAccount, findAgentAccount } from "./agent-account-service.js";
 import { activeHostConnectionGrant } from "./automation-host-grant.js";
 import { AppError } from "./errors.js";
 import {
@@ -138,6 +139,7 @@ export function createAutomationHostService(options: {
           )[0];
     return {
       schedule,
+      agentAccount: await findAgentAccount(tx, userId, schedule.tenantAuthorizationConnectionId),
       health: observeAutomationHostScheduleHealth(schedule, now()),
       prompt: {
         externalAdoption: "unknown" as const,
@@ -827,7 +829,7 @@ export function createAutomationHostService(options: {
               : undefined,
           ),
         );
-      return [
+      const connections = [
         ...new Map(
           tokens
             .filter((token) => token.scopes.includes("finances:maintain"))
@@ -837,6 +839,12 @@ export function createAutomationHostService(options: {
             ]),
         ).values(),
       ];
+      return Promise.all(
+        connections.map(async (connection) => ({
+          ...connection,
+          agentAccount: await findAgentAccount(db, principal.userId, connection.id),
+        })),
+      );
     },
     async list(principal: Principal) {
       await authorizeHost(principal);
@@ -929,6 +937,17 @@ export function createAutomationHostService(options: {
           )
         )
           throw new AppError("forbidden", "The host connection does not grant these scopes.");
+        await ensureAgentAccount(
+          tx,
+          principal.userId,
+          input.tenantAuthorizationConnectionId,
+          input.hostSurface.startsWith("claude")
+            ? "claude"
+            : input.hostSurface.startsWith("codex")
+              ? "codex"
+              : "other",
+          now(),
+        );
         const schedule = automationHostScheduleSchema.parse({
           id: randomUUID(),
           tenantAuthorizationConnectionId: input.tenantAuthorizationConnectionId,

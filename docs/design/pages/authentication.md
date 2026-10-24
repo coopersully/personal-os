@@ -29,6 +29,11 @@ Product context
 
 ## Field contracts
 
+- When login has a validated local `next` destination, show a quiet dismissible
+  “After login” tag below the heading with the destination’s readable page name.
+  Clearing it removes only `next` from the URL and restores the normal Today
+  landing page; retain other query parameters and reject external/auth-loop targets.
+
 - A small static logo and wordmark sit above the form column: top-left on
   desktop, centered on mobile, sharing the desktop card's 1.5rem outer inset.
   The lockup is 0.875rem tall, with the logo matching the wordmark's line height.

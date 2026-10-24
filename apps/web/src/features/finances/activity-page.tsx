@@ -7,12 +7,16 @@ import {
 } from "@personal-os/domain";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { AgentIdentity } from "@/components/agent-identity";
 import { DataTable } from "@/components/data-table";
 import { DateDisplay } from "@/components/date-display";
 import { FilterIcon, RefreshIcon } from "@/components/icons";
 import {
   ResponsiveDialog,
+  ResponsiveDialogBody,
   ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
   ResponsiveDialogTrigger,
@@ -52,6 +56,13 @@ export function groupFinanceActivity(entries: ActivityEntry[]) {
     else result.push({ key, entries: [entry], family, runId: entry.runId });
   }
   return result;
+}
+
+function sharedActivityAccount(entries: ActivityEntry[]) {
+  const account = entries[0]?.agentAccount;
+  return account && entries.every((entry) => entry.agentAccount?.id === account.id)
+    ? account
+    : null;
 }
 
 // Remount on ownership changes so neither old results nor in-flight reads cross owners.
@@ -207,89 +218,101 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
             <RefreshIcon aria-hidden="true" />
           </Button>
         </WorkspaceHeaderControls>
-        <ResponsiveDialogContent>
+        <ResponsiveDialogContent data-finance-dialog data-finance-size="default">
           <ResponsiveDialogHeader>
             <ResponsiveDialogTitle>Filter activity</ResponsiveDialogTitle>
+            <ResponsiveDialogDescription>
+              Narrow recorded activity by type, actor, record, or date.
+            </ResponsiveDialogDescription>
           </ResponsiveDialogHeader>
-          <form
-            className="grid gap-4 sm:grid-cols-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const form = new FormData(event.currentTarget);
-              const value = (name: string) => String(form.get(name) ?? "");
-              const result = financeActivityQuerySchema.safeParse({
-                limit: pageSize,
-                ...(value("type") ? { type: value("type") } : {}),
-                ...(value("actor") ? { actor: value("actor") } : {}),
-                ...(value("record") ? { recordId: value("record").trim() } : {}),
-                ...(value("from") ? { from: `${value("from")}T00:00:00.000Z` } : {}),
-                ...(value("through") ? { through: `${value("through")}T23:59:59.999Z` } : {}),
-              });
-              if (!result.success) {
-                toast.error("Check the filters and date range.");
-                return;
-              }
-              void load(result.data, false, true).then((loaded) => {
-                if (loaded) {
-                  setFiltersOpen(false);
-                  setCursorHistory([]);
-                  setPageIndex(0);
+          <ResponsiveDialogBody>
+            <form
+              className="grid gap-4 sm:grid-cols-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const form = new FormData(event.currentTarget);
+                const value = (name: string) => String(form.get(name) ?? "");
+                const result = financeActivityQuerySchema.safeParse({
+                  limit: pageSize,
+                  ...(value("type") ? { type: value("type") } : {}),
+                  ...(value("actor") ? { actor: value("actor") } : {}),
+                  ...(value("record") ? { recordId: value("record").trim() } : {}),
+                  ...(value("from") ? { from: `${value("from")}T00:00:00.000Z` } : {}),
+                  ...(value("through") ? { through: `${value("through")}T23:59:59.999Z` } : {}),
+                });
+                if (!result.success) {
+                  toast.error("Check the filters and date range.");
+                  return;
                 }
-              });
-            }}
-          >
-            <label className="grid gap-1 text-sm" htmlFor="activity-type">
-              Event type
-              <NativeSelect id="activity-type" name="type" defaultValue={query.type ?? ""}>
-                <NativeSelectOption value="">All types</NativeSelectOption>
-                <NativeSelectOption value="human_answer_decision">
-                  Human decisions
-                </NativeSelectOption>
-                <NativeSelectOption value="financial_action">Financial actions</NativeSelectOption>
-              </NativeSelect>
-            </label>
-            <label className="grid gap-1 text-sm" htmlFor="activity-actor">
-              Actor
-              <NativeSelect id="activity-actor" name="actor" defaultValue={query.actor ?? ""}>
-                <NativeSelectOption value="">All actors</NativeSelectOption>
-                {["user", "agent", "connector", "system"].map((actor) => (
-                  <NativeSelectOption key={actor} value={actor}>
-                    {actor}
+                void load(result.data, false, true).then((loaded) => {
+                  if (loaded) {
+                    setFiltersOpen(false);
+                    setCursorHistory([]);
+                    setPageIndex(0);
+                  }
+                });
+              }}
+            >
+              <label className="grid gap-1 text-sm" htmlFor="activity-type">
+                Event type
+                <NativeSelect id="activity-type" name="type" defaultValue={query.type ?? ""}>
+                  <NativeSelectOption value="">All types</NativeSelectOption>
+                  <NativeSelectOption value="human_answer_decision">
+                    Human decisions
                   </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </label>
-            <label className="grid min-w-0 gap-1 text-sm" htmlFor="activity-record">
-              Record ID
-              <Input
-                id="activity-record"
-                name="record"
-                maxLength={240}
-                defaultValue={query.recordId ?? ""}
-              />
-            </label>
-            <label className="grid gap-1 text-sm" htmlFor="activity-from">
-              From (UTC)
-              <Input
-                id="activity-from"
-                name="from"
-                type="date"
-                defaultValue={query.from?.slice(0, 10) ?? ""}
-              />
-            </label>
-            <label className="grid gap-1 text-sm" htmlFor="activity-through">
-              Through (UTC)
-              <Input
-                id="activity-through"
-                name="through"
-                type="date"
-                defaultValue={query.through?.slice(0, 10) ?? ""}
-              />
-            </label>
-            <Button type="submit" disabled={pending}>
-              Apply filters
-            </Button>
-          </form>
+                  <NativeSelectOption value="financial_action">
+                    Financial actions
+                  </NativeSelectOption>
+                </NativeSelect>
+              </label>
+              <label className="grid gap-1 text-sm" htmlFor="activity-actor">
+                Actor
+                <NativeSelect id="activity-actor" name="actor" defaultValue={query.actor ?? ""}>
+                  <NativeSelectOption value="">All actors</NativeSelectOption>
+                  {["user", "agent", "connector", "system"].map((actor) => (
+                    <NativeSelectOption key={actor} value={actor}>
+                      {actor}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </label>
+              <label className="grid min-w-0 gap-1 text-sm sm:col-span-2" htmlFor="activity-record">
+                Record ID
+                <Input
+                  id="activity-record"
+                  name="record"
+                  maxLength={240}
+                  defaultValue={query.recordId ?? ""}
+                />
+              </label>
+              <label className="grid gap-1 text-sm" htmlFor="activity-from">
+                From (UTC)
+                <Input
+                  id="activity-from"
+                  name="from"
+                  type="date"
+                  defaultValue={query.from?.slice(0, 10) ?? ""}
+                />
+              </label>
+              <label className="grid gap-1 text-sm" htmlFor="activity-through">
+                Through (UTC)
+                <Input
+                  id="activity-through"
+                  name="through"
+                  type="date"
+                  defaultValue={query.through?.slice(0, 10) ?? ""}
+                />
+              </label>
+              <ResponsiveDialogFooter className="sm:col-span-2">
+                <Button type="button" variant="outline" onClick={() => setFiltersOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={pending}>
+                  Apply filters
+                </Button>
+              </ResponsiveDialogFooter>
+            </form>
+          </ResponsiveDialogBody>
         </ResponsiveDialogContent>
       </ResponsiveDialog>
       {passiveLoading && !page ? <p>Loading activity…</p> : null}
@@ -334,7 +357,18 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
                 id: "actor",
                 label: "Actor",
                 width: 100,
-                value: (group) => group.entries[0]?.actor.type ?? "",
+                value: (group) =>
+                  sharedActivityAccount(group.entries)?.displayName ??
+                  group.entries[0]?.actor.type ??
+                  "",
+                cell: (group) => {
+                  const account = sharedActivityAccount(group.entries);
+                  return account ? (
+                    <AgentIdentity account={account} />
+                  ) : (
+                    group.entries[0]?.actor.type
+                  );
+                },
               },
               {
                 id: "status",
@@ -390,20 +424,25 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
             if (!open) setSelected(null);
           }}
         >
-          <ResponsiveDialogContent>
+          <ResponsiveDialogContent data-finance-dialog data-finance-size="default">
             <ResponsiveDialogHeader>
               <ResponsiveDialogTitle>Activity details</ResponsiveDialogTitle>
+              <ResponsiveDialogDescription>
+                Review the recorded changes and their supporting evidence.
+              </ResponsiveDialogDescription>
             </ResponsiveDialogHeader>
-            <ItemGroup className="gap-3">
-              {selected.entries.map((entry) => (
-                <FinanceActivityEntry
-                  key={entry.id}
-                  entry={entry}
-                  readEvidence={readEvidence}
-                  onAccessDenied={clearAccess}
-                />
-              ))}
-            </ItemGroup>
+            <ResponsiveDialogBody>
+              <ItemGroup className="gap-3">
+                {selected.entries.map((entry) => (
+                  <FinanceActivityEntry
+                    key={entry.id}
+                    entry={entry}
+                    readEvidence={readEvidence}
+                    onAccessDenied={clearAccess}
+                  />
+                ))}
+              </ItemGroup>
+            </ResponsiveDialogBody>
           </ResponsiveDialogContent>
         </ResponsiveDialog>
       ) : null}

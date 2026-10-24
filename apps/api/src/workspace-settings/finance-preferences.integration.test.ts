@@ -131,6 +131,8 @@ describe.sequential("Finance preferences and migration-time access", () => {
       .values({ userId: owner.id })
       .returning();
     expect(row?.financeSpendingView).toBe("list");
+    expect(row?.financeSpendingPeriod).toBe("week");
+    expect(row?.financeSpendingGrouping).toBe("auto");
     expect((await settings.get(owner.id, "finances")).preferences.financeSpendingView).toBe("list");
     expect((await settings.get(legacyId, "finances")).preferences.financeSpendingView).toBe(
       "bubbles",

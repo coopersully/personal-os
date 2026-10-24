@@ -12,14 +12,10 @@ import {
 } from "./account-selection-trigger";
 
 describe("AccountSelectionTrigger", () => {
-  it("renders selected identities with optional artwork and attention state", async () => {
+  it("shows a standard visibility count without avatar or status ornamentation", async () => {
     const view = render(
       <AccountSelectionTrigger
         ariaLabel="2 of 2 accounts, attention required"
-        identities={[
-          { avatarUrl: "https://example.com/account.png", fallback: "EX", id: "example" },
-          { fallback: "IC", id: "icloud" },
-        ]}
         needsAttention
         selectedCount={2}
         totalCount={2}
@@ -29,20 +25,19 @@ describe("AccountSelectionTrigger", () => {
     const trigger = screen.getByRole("button", {
       name: "2 of 2 accounts, attention required",
     });
-    expect(trigger).toHaveTextContent("2/2");
-    expect(trigger.querySelectorAll('[data-slot="avatar"]')).toHaveLength(1);
-    expect(trigger.querySelector(".account-selection-trigger__warning")).not.toBeNull();
+    expect(trigger).toHaveTextContent("2");
+    expect(trigger.querySelectorAll('[data-slot="avatar"]')).toHaveLength(0);
+    expect(trigger.querySelector(".account-selection-trigger__warning")).toBeNull();
 
     view.rerender(
       <AccountSelectionTrigger
         allSynced
         ariaLabel="1 of 1 account"
-        identities={[{ fallback: "IC", id: "icloud" }]}
         selectedCount={1}
         totalCount={1}
       />,
     );
-    expect(screen.getByRole("button", { name: "1 of 1 account" })).toHaveTextContent("1/1");
+    expect(screen.getByRole("button", { name: "1 of 1 account" })).toHaveTextContent("1");
     expect(document.querySelector(".account-selection-trigger__warning")).toBeNull();
     await userEvent.hover(screen.getByRole("button", { name: "1 of 1 account" }));
     expect(await screen.findByRole("tooltip")).toHaveTextContent(

@@ -32,10 +32,10 @@ beforeEach(() => {
   ]);
 });
 function registration(pending = false) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(["me"], { id: "owner-a" });
   render(
-    <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
-    >
+    <QueryClientProvider client={client}>
       <AutomationRegistration pending={pending} perform={perform} />
     </QueryClientProvider>,
   );
@@ -163,4 +163,37 @@ it.each([
 it("offers no binding mutation for a paused recurring host", () => {
   binding("paused", "codex_desktop");
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
+});
+
+it("shows the supplied profile while registering against the authorized connection", async () => {
+  const { agentAccountFixture } = await import("../../test-fixtures/agent-account");
+  api.listAutomationHostConnections.mockResolvedValue([
+    {
+      id: "allowed",
+      label: "Authorized host",
+      scopes: ["finances:maintain"],
+      agentAccount: agentAccountFixture,
+    },
+    {
+      id: "read-only",
+      label: "Read only",
+      scopes: ["finances:read"],
+      agentAccount: agentAccountFixture,
+    },
+  ]);
+  const user = registration();
+  await user.click(screen.getByRole("button", { name: "Register automation" }));
+  expect(await screen.findByRole("option", { name: "Cedar Fox · Authorized host" })).toBeVisible();
+  await user.selectOptions(screen.getByLabelText("Authorized connection"), "allowed");
+  expect(screen.getByText("Codex · Personal")).toBeVisible();
+  expect(screen.queryByRole("option", { name: /Read only/ })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Register expected schedule" }));
+  await waitFor(() =>
+    expect(api.createAutomationHostSchedule).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantAuthorizationConnectionId: "allowed",
+        requestedScopes: ["finances:maintain"],
+      }),
+    ),
+  );
 });

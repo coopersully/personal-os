@@ -98,6 +98,7 @@ import {
 import { mailAgentAccessCapability, mailAgentAccessReadiness } from "../mail/agent-access.js";
 import { taskAgentAccessCapability, taskAgentAccessReadiness } from "../tasks/agent-access.js";
 import { scopeLabels, selectableScopes } from "./access-scopes.js";
+import { AgentAccountsSettings } from "./agent-accounts";
 import { ExecutionPolicySettingsCard } from "./execution-policy.js";
 import { MailConfiguration } from "./mail-configuration.js";
 import { RelatedSettings } from "./related-settings.js";
@@ -158,7 +159,12 @@ const tokenPresets: Array<{ description: string; name: string; scopes: AccessSco
 ];
 
 export function ConnectedAgentsSettings() {
-  return <AgentAccessSettings view="connections" />;
+  return (
+    <div className="settings-stack">
+      <AgentAccountsSettings />
+      <AgentAccessSettings view="connections" />
+    </div>
+  );
 }
 
 export function WorkspaceAccessSettings() {
@@ -588,7 +594,7 @@ function AgentAccessSettings({
                       ? "Checking connections"
                       : connectionCountUnavailable
                         ? "Connections unavailable"
-                        : `${connectedAgentCount} connected`}
+                        : `${connectedAgentCount} connections`}
                   </Badge>
                 </CardAction>
               ) : null}

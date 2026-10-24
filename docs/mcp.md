@@ -702,3 +702,37 @@ An empty Inbox or a completed maintenance run does not establish budget balance 
 Finance category and planning-bucket icons are presentation metadata inferred automatically by
 the domain from record meaning. Creating a category or bucket requires no icon decision. Agents
 should not ask users about or narrate cosmetic icon choices unless users explicitly request them.
+
+### Shared agent identity
+
+`get_agent_account` reads the authenticated connection's account-level profile.
+`register_agent_account` idempotently registers/reuses that identity and accepts only an optional
+unverified platform label. The orientation context also includes `agentAccount` for authenticated
+agents. These tools do not require Finance access and never expand credential scopes.
+
+One account identity may span several surfaces after its owner links their connections in shared
+Connected agents settings. Agents cannot enumerate other profiles or supply an account ID to select
+or impersonate one. Platform account IDs and email addresses are not inferred or requested from the
+model. See [Shared agent accounts](product/agent-accounts.md) for ownership, attribution and recovery.
+
+### Historical Finance backlog and bounded batches
+
+`get_finance_review_backlog` assesses all owned flagged transactions and open/deferred cases,
+including prior years. It reports these counting units separately; overlapping flags and cases
+are not a count of independent user decisions. `list_finance_review_backlog_items` pages exact
+records with evidence, saved answers, revisions and a snapshot-bound cursor. Restart pagination
+when the snapshot changes. A group such as possible roundups is an investigation hint, not a
+verified transfer classification.
+
+After investigating, `preview_finance_review_batch` durably stores up to 100 explicit decisions
+with an idempotency key, exact revisions, rationale and evidence. It applies no financial changes.
+`execute_finance_review_batch` processes at most ten items per call. Each financial write and its
+outcome commit together. Retrieve or list saved batches to recover after interruption, then resume
+pending items. Completed exceptions require corrected evidence and a new preview; never silently
+retry an applied item or treat an unresolved exception as a resolution. Merchant learning is not
+part of these batches.
+
+The owner can inspect and explicitly apply prepared batches in Finance review. An agent can only
+resume its own originating authorization and needs current read/write/execute grants and the
+owner's execution policy. Revocation and current evidence are checked during execution. Saved
+answers remain available for agent follow-through; ask only for missing facts, not repeated answers.

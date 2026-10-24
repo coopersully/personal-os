@@ -80,7 +80,7 @@ export const workspacePreferenceSchemas = {
       financeSpendingIncludeUncategorized: z.boolean().default(true),
       financeSpendingBasis: z.enum(["personal_cost", "full_outflow"]).default("personal_cost"),
       financeSpendingSubtractRefunds: z.boolean().default(true),
-      financeSpendingPeriod: z.enum(["today", "week", "month", "custom"]).default("month"),
+      financeSpendingPeriod: z.enum(["today", "week", "month", "custom"]).default("week"),
       financeTransactionGroup: financeTransactionGroupPreferenceSchema.default("none"),
       // null follows all eligible accounts; [] is an explicit empty selection.
       spendAccountIds: ids.nullable().default(null),

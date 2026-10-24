@@ -1,9 +1,18 @@
 import type { FinanceSpendingDashboard, FinanceSpendingGroup } from "@personal-os/domain";
 import { formatDateOnly } from "@personal-os/domain";
+import { ResponsiveDialogTrigger as DialogTrigger } from "@/components/responsive-dialog";
 import { RollingNumber } from "@/components/rolling-number";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { DialogTrigger } from "@/components/ui/dialog";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
 import { formatMoney } from "./format";
+import { spendingGroupVisual } from "./spending-visual";
 
 export function spendingSummaryBudget(result: FinanceSpendingDashboard) {
   const budget = result.monthlyBudget;
@@ -149,10 +158,13 @@ export function SpendingSummaryBreakdown({ result }: { result: FinanceSpendingDa
     .reduce((sum, row) => sum + row.netCents, 0);
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-3xl font-semibold tabular-nums">
-        {formatMoney(result.snapshot.netCents / 100)}
-      </p>
-      <figure className="flex flex-col gap-2">
+      <div>
+        <p className="text-xs text-muted-foreground">Recorded spending</p>
+        <p className="mt-1 text-3xl font-semibold tracking-tight tabular-nums">
+          {formatMoney(result.snapshot.netCents / 100)}
+        </p>
+      </div>
+      <figure className="flex flex-col gap-3 rounded-lg bg-secondary p-4">
         <figcaption className="text-sm font-medium">Daily spending</figcaption>
         <div
           className="relative flex h-28 gap-px"
@@ -201,22 +213,41 @@ export function SpendingSummaryBreakdown({ result }: { result: FinanceSpendingDa
           </span>
         </div>
       </figure>
-      <dl className="grid grid-cols-2 gap-2 text-sm">
-        <dt>Posted</dt>
-        <dd className="text-right tabular-nums">
-          {formatMoney((result.snapshot.netCents - pending) / 100)}
-        </dd>
-        <dt>Pending</dt>
-        <dd className="text-right tabular-nums">{formatMoney(pending / 100)}</dd>
+      <dl className="grid grid-cols-2 gap-3 text-sm">
+        <div className="flex flex-col gap-1 rounded-lg bg-secondary p-3">
+          <dt>Posted</dt>
+          <dd>{formatMoney((result.snapshot.netCents - pending) / 100)}</dd>
+        </div>
+        <div className="flex flex-col gap-1 rounded-lg bg-secondary p-3">
+          <dt>Pending</dt>
+          <dd>{formatMoney(pending / 100)}</dd>
+        </div>
       </dl>
       <div className="flex flex-col gap-2">
         <h3 className="text-sm font-medium">Breakdown</h3>
-        {result.groups.map((group) => (
-          <div key={group.id} className="flex justify-between gap-3 text-sm">
-            <span>{group.label}</span>
-            <span className="tabular-nums">{formatMoney(group.netCents / 100)}</span>
-          </div>
-        ))}
+        <ItemGroup className="gap-2">
+          {result.groups.map((group) => {
+            const visual = spendingGroupVisual(group);
+            const Icon = visual.Icon;
+            return (
+              <Item key={group.id} size="xs" variant="secondary">
+                <ItemMedia
+                  variant="icon"
+                  className="rounded-md p-2"
+                  style={{ color: visual.color }}
+                >
+                  <Icon />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>{group.label}</ItemTitle>
+                </ItemContent>
+                <ItemActions className="font-medium tabular-nums">
+                  {formatMoney(group.netCents / 100)}
+                </ItemActions>
+              </Item>
+            );
+          })}
+        </ItemGroup>
       </div>
       <p className="text-sm text-muted-foreground">
         Fills show the displayed groups’ monthly budget usage across budget accounts, including

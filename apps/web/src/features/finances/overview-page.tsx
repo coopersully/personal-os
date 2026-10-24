@@ -1,7 +1,6 @@
 import { ApiClientError } from "@personal-os/api-client";
 import { cashflowScheduleRange } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
-import type { ReactNode } from "react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { DateDisplay } from "@/components/date-display";
@@ -32,6 +31,7 @@ import {
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api } from "../../api.js";
+import { FinanceSection as OverviewSection } from "./finance-section";
 import { formatCompactMoney } from "./format";
 import { FinanceOverviewSettings } from "./overview-settings";
 import {
@@ -252,32 +252,6 @@ export function FinanceOverviewPage() {
   );
 }
 
-// Overview is an open daily sequence; supporting material must not become a grid of raised cards.
-function OverviewSection({
-  title,
-  children,
-  action,
-  description,
-}: {
-  title: string;
-  children: ReactNode;
-  action?: ReactNode;
-  description?: ReactNode;
-}) {
-  return (
-    <section aria-label={title} className="flex min-w-0 flex-col gap-3 px-1">
-      <div className="flex flex-col gap-1">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
-          {action}
-        </div>
-        {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
-      </div>
-      {children}
-    </section>
-  );
-}
-
 function accessDenied(error: unknown) {
   return error instanceof ApiClientError && [401, 403].includes(error.status);
 }
@@ -372,7 +346,7 @@ function OwnerUpcomingMoney({
                   <TableRow>
                     <TableHead className="w-28 px-4 sm:w-36">Expected date</TableHead>
                     <TableHead className="px-4">Item</TableHead>
-                    <TableHead className="w-32 px-4 text-right whitespace-normal leading-tight sm:w-40">
+                    <TableHead className="w-28 px-4 text-right whitespace-normal leading-tight sm:w-40">
                       Expected amount
                     </TableHead>
                   </TableRow>

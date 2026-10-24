@@ -1,7 +1,15 @@
+import { useReducedMotion } from "motion/react";
 import { Children, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { Icon } from "@/components/icons";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPrevious,
+} from "@/components/ui/carousel";
 
 export function KeyMetric({
   label,
@@ -57,7 +65,7 @@ export function KeyMetric({
   );
 }
 
-/** Fit metrics side by side when space permits; wrap without hiding any metric. */
+/** A single metric rail; loop when overflowing and hide navigation when everything fits. */
 export function KeyMetrics({
   children,
   label = "Key metrics",
@@ -65,17 +73,20 @@ export function KeyMetrics({
   children: ReactNode;
   label?: string;
 }) {
+  const reducedMotion = useReducedMotion();
   return (
-    <section aria-label={label} className="@container min-w-0">
-      <div
-        className={
-          Children.count(children) === 4
-            ? "grid min-w-0 grid-cols-2 gap-4 @min-[56rem]:grid-cols-4"
-            : "grid min-w-0 gap-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr))]"
-        }
-      >
-        {children}
-      </div>
-    </section>
+    <Carousel
+      aria-label={label}
+      className="group min-w-0 has-[[data-slot=carousel-next]:enabled]:pb-9"
+      opts={{ align: "start", loop: true, duration: reducedMotion ? 0 : 25 }}
+    >
+      <CarouselContent>
+        {Children.map(children, (child) => (
+          <CarouselItem className="basis-[85%] sm:basis-1/2 xl:basis-1/3">{child}</CarouselItem>
+        ))}
+      </CarouselContent>
+      <CarouselPrevious className="inset-y-auto bottom-0 left-auto right-10 my-0 opacity-100 transition-opacity sm:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 disabled:hidden [@media(hover:none)]:opacity-100" />
+      <CarouselNext className="inset-y-auto bottom-0 right-0 my-0 opacity-100 transition-opacity sm:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 disabled:hidden [@media(hover:none)]:opacity-100" />
+    </Carousel>
   );
 }

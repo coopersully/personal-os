@@ -11,7 +11,6 @@ import { ActionButton as Button } from "@/components/action-button";
 import { FilterTrigger, SortOptionIcon, SortTrigger } from "@/components/data-view-controls";
 import { DateInput } from "@/components/date-input";
 import {
-  ChevronDownIcon,
   EyeIcon,
   GridIcon,
   LayersIcon,
@@ -24,6 +23,7 @@ import {
   ResponsiveDialog,
   ResponsiveDialogBody,
   ResponsiveDialogContent,
+  ResponsiveDialogDescription,
   ResponsiveDialogFooter,
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
@@ -103,12 +103,10 @@ export function FinanceTransactionControls({
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
-              size="sm"
+              size="icon-sm"
               aria-label={`Transaction view: ${view === "cards" ? "Cards" : "Table"}`}
             >
               <ViewIcon />
-              <span>{view === "cards" ? "Cards" : "Table"}</span>
-              <ChevronDownIcon />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
@@ -149,9 +147,12 @@ export function FinanceTransactionControls({
               aria-label={activeFilters ? `Filters (${activeFilters} active)` : "Filters"}
             />
           </ResponsiveDialogTrigger>
-          <ResponsiveDialogContent>
+          <ResponsiveDialogContent data-finance-dialog data-finance-size="default">
             <ResponsiveDialogHeader>
               <ResponsiveDialogTitle>Filter transactions</ResponsiveDialogTitle>
+              <ResponsiveDialogDescription>
+                Choose which transactions appear in this view.
+              </ResponsiveDialogDescription>
             </ResponsiveDialogHeader>
             <form
               className="flex min-h-0 flex-col overflow-hidden"

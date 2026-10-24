@@ -7,6 +7,7 @@ import type {
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
+import { AgentIdentity } from "@/components/agent-identity";
 import { DateDisplay } from "@/components/date-display";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -94,6 +95,7 @@ export function FinanceActivityEntry({
           <span className="font-medium break-words">{entry.action}</span>
           <span className="text-sm capitalize">{entry.status}</span>
         </div>
+        {entry.agentAccount ? <AgentIdentity account={entry.agentAccount} /> : null}
         <p className="text-sm text-muted-foreground">
           {entry.actor.type}
           {entry.actor.id ? ` · ${entry.actor.id}` : ""} · <DateDisplay value={entry.occurredAt} />

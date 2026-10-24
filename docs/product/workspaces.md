@@ -348,3 +348,8 @@ proposals awaiting approval; optional profile blanks and ordinary pending activi
 Finance refinements: Accounts navigation counts all tracked accounts, including manual ones, and reflects unresolved ownership, missing balances, duplicate concerns, and connection freshness. Wealth shows current KPI cards without duplicating account records. Historical wealth views remain deferred pending reliable recorded balance history. Transaction pending/review shortcuts are omitted; only nonzero diagnostics not guaranteed to enter Reviews remain available on Transactions.
 
 Finance collection creation is contextual: transaction, account, budget bucket, and goal Add controls live in their collection card headers. Account attention is expressed on its record instead of a separate warning card. Posting state and decision-review state remain independent concepts and URL controls.
+
+Finance backlog assessment, canonical profile precedence, grouped evidence and bounded execution
+follow [Finance review backlog](finance-review-backlog.md). Historical outstanding work and
+selected-period spending are separate scopes; an agent must never report a bounded page as a
+complete backlog or clear review records solely to reduce a count.

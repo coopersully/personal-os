@@ -63,6 +63,15 @@ function mount() {
 }
 beforeEach(() => {
   vi.resetAllMocks();
+  // JSDOM does not measure carousel intersection; verify its geometry in browser QA.
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-10-20T01:00:00Z"));
   api.getMe.mockResolvedValue({ id: "owner-a", planningTimezone: "America/New_York" });
@@ -96,6 +105,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 it("omits the duplicate decision summary while keeping supporting navigation", async () => {

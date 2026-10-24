@@ -1,3 +1,4 @@
+export * from "./agent-account.js";
 export * from "./assistant.js";
 export * from "./auth.js";
 export * from "./automation.js";
@@ -12,9 +13,12 @@ export * from "./execution-policy.js";
 export * from "./feature-contracts.js";
 export * from "./finance/appearance.js";
 export * from "./finance/baseline-qualification.js";
+export * from "./finance/budget-approval.js";
 export * from "./finance/cashflow-timeline.js";
 export * from "./finance/goal-scenario-projection.js";
 export * from "./finance/recurring-cost-projection.js";
+export * from "./finance/review-backlog.js";
+export * from "./finance/review-batch.js";
 export * from "./finance/spending.js";
 export * from "./finance.js";
 export * from "./finance-maintenance.js";

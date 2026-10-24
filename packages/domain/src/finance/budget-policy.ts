@@ -4,7 +4,13 @@ import { financePositionEvidenceSchema, financeRevisionRefSchema } from "./workf
 
 /** Explicit terms for hypothetical evaluation only; this contract confers no authority. */
 export const financeBudgetPolicyCentsSchema = z.number().int().min(0).max(2_147_483_647);
-const keySchema = z.string().trim().min(1).max(120);
+// Match the immutable budget-policy SQL UTF-16 identity bounds.
+const keySchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(120)
+  .refine((value) => value.length <= 120, "Use at most 120 characters.");
 const revisionRef = financeRevisionRefSchema.readonly();
 
 export const financeBudgetPolicyPeriodSchema = z
@@ -88,8 +94,18 @@ export const financeBudgetPolicyRevisionTupleSchema = z
     baseline: revisionRef,
     activeBudget: revisionRef.nullable(),
     latestBudget: revisionRef.nullable(),
-    positionRevision: z.string().min(1).max(200).nullable(),
-    usageRevision: z.string().min(1).max(200).nullable(),
+    positionRevision: z
+      .string()
+      .min(1)
+      .max(200)
+      .refine((value) => value.length <= 200, "Use at most 200 characters.")
+      .nullable(),
+    usageRevision: z
+      .string()
+      .min(1)
+      .max(200)
+      .refine((value) => value.length <= 200, "Use at most 200 characters.")
+      .nullable(),
   })
   .strict()
   .readonly();
@@ -202,7 +218,11 @@ export const financeBudgetPolicyEvaluationInputSchema = z
           state: z.literal("available"),
           userId: idSchema,
           period: financeBudgetPolicyPeriodSchema,
-          revision: z.string().min(1).max(200),
+          revision: z
+            .string()
+            .min(1)
+            .max(200)
+            .refine((value) => value.length <= 200, "Use at most 200 characters."),
           accounting: z.literal("gross_positive_allocation_deltas"),
           scope: z.literal("user_month_all_policy_versions"),
           consumedCents: financeBudgetPolicyCentsSchema,

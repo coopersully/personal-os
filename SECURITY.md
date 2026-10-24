@@ -19,7 +19,10 @@ body-parser 2.4.0 and Nodemailer 10.1.4 updates address the October 23, 2026 adv
 
 - [Zod collection-validation resource exhaustion](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5):
   direct validation consumers and MCP transitive Zod 4 dependencies use the patched release.
-  Existing HTTP body and MCP collection limits remain defense in depth.
+  Existing HTTP body and MCP collection limits remain defense in depth. Compatibility refinements
+  preserve existing UTF-16 bounds shared by password forms, Finance service guards and immutable
+  budget-policy storage contracts; generated MCP schema documentation reflects the patched Zod
+  serializer. Migrations and their validation assertions remain unchanged.
 - [body-parser compressed-body trailing-byte failure](https://github.com/advisories/GHSA-27r3-jxmh-p828):
   the bounded 2.x override covers Express JSON parsing before MCP routing. The regression uses an
   isolated loopback server and checks delayed trailing bytes after successful decoding, late decoder

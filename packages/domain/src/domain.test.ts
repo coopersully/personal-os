@@ -1165,6 +1165,16 @@ describe("domain schemas", () => {
     expect(invitationCodeSchema.parse("abcd2345")).toBe("ABCD2345");
     expect(invitationCodeSchema.safeParse("too-short").success).toBe(false);
     expect(invitationCodeSchema.safeParse("ABCD-234").success).toBe(false);
+    for (const password of [`Aa1${"😀".repeat(5)}`, `Aa1!${"😀".repeat(62)}`]) {
+      expect(passwordRequirementState(password).length).toBe(true);
+      expect(passwordSchema.safeParse(password).success).toBe(true);
+    }
+    const overlongPassword = `Aa1!${"😀".repeat(63)}`;
+    expect(passwordRequirementState(overlongPassword).length).toBe(false);
+    expect(passwordSchema.safeParse(overlongPassword).success).toBe(false);
+    expect(
+      loginInputSchema.safeParse({ email: "a@example.com", password: overlongPassword }).success,
+    ).toBe(false);
     expect(passwordSchema.safeParse("alllowercase123!").success).toBe(false);
     expect(passwordSchema.safeParse("ALLUPPERCASE123!").success).toBe(false);
     expect(passwordSchema.safeParse("NoNumbersHere!").success).toBe(false);

@@ -62,3 +62,33 @@ are not introduced globally by this policy. Do not weaken strictness or skip req
 Fix a demonstrated bottleneck. Never parallelize expensive full verifiers on this shared host;
 use the existing runner lock. Do not trade complete pagination, policy authentication, fsync/atomic
 checkpoints or final protected merge enforcement for speed. Report latency and source gaps honestly.
+
+## Coordination and trustworthy reuse
+
+The normal repair loop is inspect the owner/contract/consumers, edit, run the smallest behavioral
+check, batch coherent repairs, then assemble complete frozen-candidate evidence once. Retry failed
+or invalidated checks within the existing recovery rules. Independent reviewers consume receipts;
+they do not each run broad verification. One owner holds heavy shared-host capacity, while cheap
+independent checks and isolated hosted runners can proceed. Use checked-in lifecycle commands;
+never reset another owner’s database or kill their server to repair a test resource collision.
+
+The current planner binds whole-step receipts conservatively. It does not implement automatic
+per-check result reuse, a semantic test selector or narrower final readiness. Any future per-check
+reuse must bind command/arguments, working directory, policy/config/tool/runtime, relevant environment
+without exposing values, source/tests/fixtures and transitive consumers. Include dirty, untracked,
+renamed, deleted and symlinked inputs; check input stability during execution. Base-sensitive checks
+also bind the comparison. Unknown dependencies broaden scope; malformed/missing/stale receipts do
+not pass, and newer failure supersedes an older pass for the same inputs. A selected execution success
+must be reported separately from complete readiness with every required check accounted for.
+
+Preparation reuse is distinct from test-result reuse. Healthy prepared resources require matching
+application/build, runtime/configuration, schema/fixture identity and proven ownership. Mutable
+external state that cannot be fingerprinted needs fresh test execution even if preparation is reused.
+Record discovery, pass/skip counts and actual environment; required skipped or undiscovered tests
+are evidence gaps. Do not implement these capabilities by writing optimistic planner receipts.
+
+The [acceleration plan](../superpowers/plans/2026-08-26-ci-hardening-and-acceleration.md#current-follow-up-plan-october-23-2026)
+records staged owners, measured evidence and acceptance for future work. Complete final verification,
+including docs-only shipping candidates, remains mandatory under the delivery contract until a
+separately reviewed policy/classifier/enforcement change proves a safe exemption. This documentation
+introduces no such exemption and no runtime, CI or verifier feature.

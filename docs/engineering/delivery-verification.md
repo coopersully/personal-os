@@ -9,7 +9,10 @@ and private evidence outside the source tree.
 
 Draft publication and early review require focused evidence, not a separate full run. This sequencing
 applies to ordinary contributions as well as handoff/network callers; see the
-[development handbook](development-handbook.md). Final acceptance still requires every stage below.
+[development handbook](development-handbook.md). Final acceptance still requires every stage below, including for docs-only shipping candidates.
+A successful scoped CI run or selected local execution does not establish complete readiness.
+Proposed finer receipt reuse or final-scope classification in the acceleration plan is not an
+implemented exemption; changing this boundary requires separate reviewed enforcement and evidence.
 
 ## Verification equivalence
 

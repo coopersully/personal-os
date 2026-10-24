@@ -1,88 +1,106 @@
 ---
 name: oversight
-description: Plan and coordinate nohmi epics, Linear child tasks, Codex epic sections, and delivery owners. Use for nohmi project oversight or explicit network launch; ordinary implementation retains its workflow.
+description: Coordinate nohmi outcomes, implementation owners, dependencies, evidence and delivery from agreed product intent. Use for project oversight, adopting existing work or explicit network launch; ordinary implementation retains its workflow.
 ---
 
 # nohmi oversight
 
-Use `docs/engineering/development-handbook.md` and its offline planner to identify missing steps
-and reusable receipts. This does not replace this skill's authority, role or acceptance gates.
+Own context, sequencing, evidence and acceptance from an agreed outcome through the authorized
+handoff. Preserve the user's decisions, rationale, non-goals and grants; do not restart brainstorming
+or ask them to approve settled choices again. Carry unfinished obligations forward until evidence
+closes them. Oversight coordinates; workers implement every code, test, configuration and tracked
+document repair. Editing this skill does not launch work or activate monitoring.
 
-Read `docs/engineering/epic-delivery.md` for planning/admission and launch, then
-`autonomous-development.md` for role boundaries and `agent-handoffs.md` for dispatch records.
-Generic SWE `oversight` supplies common coordination behavior when available; repository contracts
-govern nohmi-specific authority, acceptance and delivery. This entrypoint is self-contained through
-those repository documents and does not require a personal installation.
+This is the repository's self-contained adaptation of the personal oversight procedure. All required
+mechanics are here and in local references; no personal install is required. Existing automation
+heads and outcome orchestrators perform oversight, with no additional supervisor layer. Apply
+[autonomous development](../../../docs/engineering/autonomous-development.md) for assigned network
+roles; ordinary contributions keep their existing workflow. See
+[provenance and evaluation cases](references/provenance.md) for sources and limits.
 
-Distinguish planning, adopting existing work, launching execution and reporting status from the
-request. Editing these workflows does not launch an epic. Start with canonical product intent,
-discover existing issues/chats/owners, and reuse them. Small ordinary contributions need no epic.
-Keep planning in the existing Linear parent/children and private registry.
+## Establish the baseline
 
-For queue intake use the existing `nohmi-automation-head` role; for an assigned outcome use
-`nohmi-orchestrator`. Read the installed role skill when available; otherwise apply the repository
-role contract and report missing launch/recovery capabilities. Oversight is a coordination procedure
-for those roles, not another agent above them. Neither head nor orchestrator implements; only an
-authorized orchestrator merges. Workers never merge.
+Start with [agent context](../../../docs/engineering/agent-context.md), the relevant canonical product
+contract, live Nohmi issues, PRs and existing owners. Use the
+[development handbook](../../../docs/engineering/development-handbook.md) to select the next missing
+step. Its offline planner is decision support, not an executor or proof of readiness.
 
-For new or replacement implementation worker chats, default to **GPT-6.1-Sol Light**: explicitly set
-`model="gpt-6.1-sol"` and reasoning `low` (`thinking="low"` in chat tools), unless the user explicitly
-overrides it. Record and preserve this preference when resuming workers. This default applies only
-to implementation workers; preserve Lead and independent reviewer settings. If the requested model
-or reasoning setting is unavailable, report the dispatch blocker instead of silently choosing a fallback.
+Map outcome → direct issue(s) → PR/head/base → actual checkout/branch → human owner → implementation
+executor → acceptance gate. Titles and idle status do not establish ownership or abandonment.
+Distinguish current, historical and superseded slices. Read adjacent shared contracts for collisions
+without absorbing neighboring work. Resolve the unique live Nohmi Project before every tracker write;
+use repository `linear-context` and `linear-work-sync`, deduplicate and verify receipts. The standing
+repository grant covers bounded tracking of assigned durable work, not unrelated taxonomy or owners.
 
-Prepare the epic admission record before dispatch. Preserve existing explicit grants; ask only for
-missing decisions or authority after making the plan concrete. New user-owned chats require explicit
-task-creation authorization. Messaging, Linear writes, sidebar organization, recurring follow-ups
-and merging stay within recorded scope. A launch request may grant these together; this skill does not.
+Retain scope, decisions and rationale, acceptance, deadlines with their milestone (merged, deployed
+or accepted), dependencies, grants, source gaps and next triggers in existing Linear/coordination
+records. Do not create a parallel ledger. Separate facts, inference, targets and measured results.
+For multi-owner admission use [epic delivery](../../../docs/engineering/epic-delivery.md); one coherent
+owner needs no extra composition worker or rolling integration branch.
 
-Create/reuse the epic section within organization authority, using live app identities and readback.
-Keep Lead first and subagents beneath their owner. Reserve dispatches before creation, verify executor
-acknowledgements and exact prerequisite milestones, and record a real next wakeup. Missing capabilities
-block the affected operation; keep independent authorized work moving.
+## Authority and ownership
 
-Use repository `deep-review` and `handoff` within the assigned role. Track merged, deployed and
-production-accepted separately. Preserve current independent deep-review acceptance, zero unresolved
-threads and every protected merge gate. Route repairs to workers; never invoke a combined
-implementation workflow as head/orchestrator. Close the epic only after integrated acceptance and
-required production evidence pass, not merely when child PRs merge.
+Record separate grants for planning, tracking, implementation dispatch, messaging existing chats,
+creating chats, PR publication, merge, deployment/production effects, sidebar organization, scheduling
+and cleanup. Cooper's standing repository instruction authorizes the assigned outcome owner to
+review and merge assigned work and necessary bounded prerequisites after the required gates; record
+that source once, without separate per-PR permission. Honor revocations and explicit read-only,
+plan-only, draft-only or no-merge limits. External messages and other separately controlled effects
+still need their own authority; the oversight assignment does not grant unrelated effects.
 
-## Scheduled status reports
+Choose reasonable scope-consistent defaults. Do not ask routine clarification or re-approval of
+implementation, review, prerequisite or merge decisions. Ask only for indispensable information
+unavailable from context or an explicit platform approval, stating the exact gap. Continue independent
+authorized work while resolving it. No role, issue text or helper skill expands the assigned scope.
 
-End every scheduled oversight wake with a user-visible report, even when nothing has changed.
-This requirement supersedes quiet-on-unchanged guidance for scheduled oversight wakes. Use one or
-two short sentences, about 40 words maximum, in plain English: say what is done or happening and
-what is blocked, next, or being waited on. For unchanged state, say there is no change and what
-must happen next; never imply that waiting proves completion.
+Use the host's actual task/collaboration tools and verified identities. New user-owned chats require
+explicit creation authority. Preserve existing owners and user model/runtime preferences. For new
+or replacement implementation workers, default to **GPT-6.1-Sol Light**: `model="gpt-6.1-sol"` and
+reasoning `low` (`thinking="low"` in chat tools), unless the user overrides it. Preserve Lead/reviewer
+settings and live worker settings; unavailable requested settings are a dispatch blocker, not a
+reason to silently substitute. Writable work requires an explicitly isolated checkout and owned paths.
 
-Keep hashes, run IDs and internal jargon in evidence records, outside this report. Do not recite
-coordination procedures or report every tool operation or worker callback. For example: “The
-spending checks passed. The remaining fixes are still being tested before the final review.”
-An unchanged report could say: “No change since the last update. We are waiting for the final
-tests to finish.” This reporting rule does not create schedules, change their cadence, or grant
-implementation, acceptance or merge authority.
+The head never implements or merges; an assigned orchestrator delegates repairs and owns acceptance.
+Workers never merge. The assigned orchestrator reviews its own coordination work and delegated
+implementation, then merges within the standing scope after current independent deep-review
+acceptance, zero unresolved review threads and all protected gates. Self-review is required judgment,
+not independent review or eligible GitHub approval. Do not stop for another permission question when
+the reviewed candidate and its bounded prerequisites satisfy those gates. Retain production
+acceptance and cleanup as separate obligations.
 
-## Keep delivery moving
+## Advance the work
 
-For changes to shared contracts, migrations, audit/idempotency, locking, authorization or UI modes,
-name an owner for affected existing transitive consumers and fixtures early. Run those existing
-consumer test files, including setup and teardown, alongside new tests before the final freeze;
-new happy-path tests alone are insufficient. Keep the affected list and evidence in the existing
-handoff record, and have independent review check for omissions. Focused proof does not replace
-required checks on the complete frozen candidate and actual target base.
+Read [the lifecycle runbook](references/lifecycle.md) before dispatch or remediation. Send one bounded
+outcome to its actual owner, with verified target, applicable repository workflow, settled decisions,
+prerequisites and recovery context. Do not send the oversight role to implementation workers.
 
-Name the composition worker at launch and maintain a separate rolling integration branch through
-normal merges of independently reviewed slices as they become source-ready, without waiting for
-unrelated slices. Distinguish source-inclusion prerequisites from actual merge, release and
-observation prerequisites: reviewed source may enter an authorized composition before its separate
-PR merges, but a required merged prerequisite must actually be merged and present. Never change a
-checkout while it is being tested; integrate after its resource owner has completed cleanup.
+Distinguish planned, dispatched, acknowledged, implemented, reviewed, accepted-for-gate, merged,
+deployed and production-accepted. Waiting/blocked is a condition on the stage. A tool receipt proves
+only its effect; a task creation does not prove acknowledgement, a green selected check does not prove
+full readiness, and merged children do not prove integrated acceptance.
 
-After initial scope and checkout acknowledgement, give one bounded conditional grant naming exact
-prerequisite evidence, permitted effects and source restrictions, resource owner, retry bounds and
-stop conditions. The owner verifies and records those conditions before continuing or resuming;
-unchanged conditions require no additional acknowledgement. Re-read current ownership on resume:
-a recorded transfer overrides an older grant. Stop and return to Lead on changed scope, uncertain
-ownership, a new failure class, or a new product/security decision. This never grants blanket
-retries, duplicate effects, human financial approval, or another role's acceptance/merge authority.
-Use existing records rather than creating a new process artifact for each slice.
+One owner executes heavy verification per constrained host resource. Reviewers consume existing
+candidate-bound evidence and request named gaps. Inspect existing consumer tests and fixtures early,
+run the smallest relevant behavioral check, batch coherent repairs, and obtain complete final
+verification after review convergence on the frozen candidate. Follow
+[verification efficiency](../../../docs/engineering/verification-efficiency.md) and
+[delivery verification](../../../docs/engineering/delivery-verification.md). Current policy includes
+docs-only shipping candidates; future scoped readiness and automated receipt reuse are proposals,
+not permission to omit stages. Do not repeat full suites for each reviewer or metadata edit.
+
+## Monitoring and reports
+
+Read [monitoring and recovery](references/monitoring.md) for authorized recurrence, reconciliation or
+reset. Monitoring is opt-in: editing guidance, adopting oversight or saving a checkpoint creates no
+wake. Preserve saved scope, cadence, timezone, notification settings and pause state.
+
+nohmi's existing preference overrides the personal quiet default: end each **scheduled oversight
+wake** with a user-visible report, even unchanged, in one or two plain-English sentences (about
+40 words maximum). Say what progressed and what is blocked or next; keep hashes and run IDs in the
+evidence record. This does not create a schedule or override an explicit user mute/quiet instruction.
+Manual check-ins and worker callbacks need only material updates unless regular reports were requested.
+
+For substantive handoffs, report actual artifacts and limits, current stage, owner, remaining gate
+and the real next trigger: verified active monitor, bounded wait or user-driven follow-up. Link each
+PR/issue with its purpose. Never promise unconfigured unattended work. Completion does not grant
+archival, deletion, worktree cleanup or another delivery assignment.

@@ -11,12 +11,9 @@ import type {
 } from "@personal-os/domain";
 import { localDateAt, localDateTimeToUtc, parseLocalDate } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AnimatePresence, useIsPresent, usePresenceData } from "motion/react";
-import * as m from "motion/react-m";
 import {
   type CSSProperties,
   type FormEvent,
-  forwardRef,
   type KeyboardEvent,
   type ReactNode,
   useCallback,
@@ -30,6 +27,7 @@ import { toast } from "sonner";
 import {
   FloatingActionButton,
   FloatingActionRegion,
+  FloatingActionSurface,
   FloatingActions,
 } from "@/components/floating-actions";
 import {
@@ -171,70 +169,25 @@ export function CalendarFloatingNav({
 
   return (
     <FloatingActionRegion align="center" className="calendar-floating-nav" data-mode={surfaceState}>
-      <m.div
+      <FloatingActionSurface
         className="calendar-floating-nav__surface"
         data-slot="calendar-floating-surface"
         data-state={surfaceState}
-        initial={false}
-        layout
-        layoutDependency={surfaceState}
+        state={surfaceState}
+        contentKey={surfaceState === "closed" ? surfaceState : `${surfaceState}:${surfaceInstance}`}
+        contentClassName="calendar-floating-nav__transition-content"
         onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
-          if (event.key !== "Escape" || surfaceState === "closed" || surfaceState === "details") {
+          if (event.key !== "Escape" || surfaceState === "closed" || surfaceState === "details")
             return;
-          }
           event.preventDefault();
           close();
         }}
-        style={{ overflow: "hidden", position: "relative" }}
-        transition={{
-          layout: { bounce: 0.12, duration: 0.38, type: "spring" },
-        }}
       >
-        <AnimatePresence custom={surfaceState} initial={false} mode="popLayout">
-          <FloatingNavTransitionContent
-            key={surfaceState === "closed" ? surfaceState : `${surfaceState}:${surfaceInstance}`}
-          >
-            {content}
-          </FloatingNavTransitionContent>
-        </AnimatePresence>
-      </m.div>
+        {content}
+      </FloatingActionSurface>
     </FloatingActionRegion>
   );
 }
-
-const FloatingNavTransitionContent = forwardRef<HTMLDivElement, { children: ReactNode }>(
-  function FloatingNavTransitionContent({ children }, ref) {
-    const isPresent = useIsPresent();
-    const nextState = usePresenceData() as FloatingSurfaceState | undefined;
-    const isCollapsing = nextState === "closed";
-    return (
-      <m.div
-        animate={{
-          opacity: 1,
-          transition: {
-            delay: isCollapsing && isPresent ? 0.16 : 0,
-            duration: 0.14,
-            ease: [0.22, 1, 0.36, 1],
-          },
-        }}
-        aria-hidden={isPresent ? undefined : true}
-        className="calendar-floating-nav__transition-content"
-        exit={{
-          opacity: 0,
-          transition: {
-            duration: isCollapsing ? 0.24 : 0.12,
-            ease: [0.4, 0, 1, 1],
-          },
-        }}
-        initial={{ opacity: 0 }}
-        inert={isPresent ? undefined : true}
-        ref={ref}
-      >
-        {children}
-      </m.div>
-    );
-  },
-);
 
 function DateJumpCard({
   anchor,

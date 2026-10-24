@@ -51,6 +51,9 @@ unrelated cards, or an AI chat surface.
   use a flat inset repaint to mask the browser's forced color—never elevation
   or a focus shadow. Clip autofill to text only inside a filled InputGroup.
 
+Navigation lock indicators occupy the inline end of the row, after counts or attention markers.
+The shared sidebar metadata slots reserve space so labels, counts, and locks cannot collide.
+
 ## Working principles
 
 1. **Start with the material.** Design against the actual records, states,
@@ -185,6 +188,22 @@ not only `innerWidth`, which mobile browsers may expand with overflowing content
 
 ### Stable choices and controls
 
+Control selection, hover, focus, expansion and highlighting never underline text,
+including buttons styled as links and navigation links. Use the shared semantic
+foreground/background and focus treatments. Underlines are reserved for actual links
+inside paragraphs or prose descriptions.
+
+Date-range popovers use `DateRangeControls`: one compact preset row, a single shared
+shadcn Calendar, and direct date fields only for Custom. Keep the popover 18rem wide
+(bounded by the viewport), with 12px padding and 8px group gaps. Calendar rows have
+32px day targets and 4px row gaps rather than stretching into a tall square grid.
+Keep only the calendar's labelled month navigation; do not add a second date-summary
+or previous/next-period row. Range bands extend from the center of the first rounded
+endpoint to the center of the last, continuing underneath their inner rounded edges.
+Page-title sentences share one font size, line height and baseline, with one normal
+word space between each selectable phrase. Only the static page title is semibold;
+scope phrases remain normal weight and muted.
+
 Use this contract whenever a setting presents a small, mutually exclusive set
 of visual options:
 
@@ -296,6 +315,27 @@ Copy earns its space by changing a decision. Apply these rules mechanically:
 
 - A page title names the area; it does not need a subtitle unless the subtitle
   establishes scope, live state, or a consequence the title cannot carry.
+- When selectors complete a page title, treat the whole line as one short title,
+  not a title plus a toolbar. Compose `WorkspaceTitleSentence` with existing
+  shadcn ghost Button, Popover, and DropdownMenu primitives; preserve native
+  keyboard behavior, visible focus, accessible names, and padded hit areas.
+  Only the static page name is bold and title case. Selected phrases use normal
+  muted sentence text on the same baseline, with natural word spacing and the
+  standard shadcn hover/focus behavior. Title phrase triggers have sentence-sized
+  inline padding, normal word spacing, and no chevrons; retain their full vertical
+  hit area and accessible dropdown names. Put view, search, filter, and other action
+  buttons together at the end.
+- Copy review must read every date/grouping combination as a complete title.
+  Choose the shortest grammatical phrase that retains meaning: “Spending this
+  month by category”, “Spending in September 2026 by bucket”, or “Spending today
+  grouped automatically”. Do not expose raw enum labels or add “view”, “group
+  by”, or repeated nouns to the sentence. Keep years where omission is ambiguous.
+  Menus may retain explicit option names; accessible names identify each selector.
+  On mobile, keep this sentence on one bottom row and utilities on the top row;
+  let the real workspace search field grow and shrink between identity and the
+  end-aligned action buttons. An unusually long scope may scroll within its row,
+  never the page. Never hide a selector or spread words across available width.
+  Apply this opt-in pattern only when scope naturally completes a title.
 - A control label names the option. Do not restate its obvious behavior in a
   helper sentence (for example, “Light” does not need “Use light at all times”).
 - Helper copy must answer exactly one useful question: what changes, what is
@@ -313,15 +353,14 @@ Copy earns its space by changing a decision. Apply these rules mechanically:
   in the desktop rail, inactive destinations use neutral outline glyphs and only
   the selected destination uses a filled glyph on its colored control surface, without an icon frame. Preserve the same glyph
   across states; color is reserved for the selected rail destination.
-- Desktop account-management actions live in Settings, reached from the bottom of the workspace rail. A
-  workspace may use compact account avatars in its app bar only as a source-visibility filter; that
-  filter must surface health and link to Settings for repair rather than duplicating management.
-- App-bar source filters use the shared `AccountSelectionTrigger`: show compact provider identities,
-  expose the full scope in its accessible name, and use plain inherited typography for the concise
-  visible label (`selected/total accounts`). When a source needs attention, place the shared
-  disconnected glyph immediately before the avatar stack without a badge, border, or shadow; do not
-  recolor or outline the complete trigger. Popovers use `AccountSelectionPopoverContent` action
-  slots, with reconnection rendered as the primary action and labeled with the affected source count.
+- Desktop account-management actions live in Settings, reached from the bottom of the workspace rail.
+  Calendar and Mail source visibility uses shared `AccountSelectionTrigger` with the normal
+  `FilterTrigger` pattern: filter glyph and visible-source count, without avatars or sync badges.
+  Accessible names retain selected/total scope and attention state; show connection health and
+  repair actions inside the existing `AccountSelectionPopoverContent`. Reconnection remains the
+  primary action, labeled with the affected source count. Place Mail’s source filter immediately
+  after its search field and before sync. Calendar’s count represents visible calendars, while
+  Mail’s count represents visible mail accounts. Preserve normal control padding and touch targets.
 - Unified workspaces keep destination navigation separate from source filters: destinations belong
   in the sidebar, while the less-prominent source filter defaults to all connected sources.
 - Connection management uses the shared `ConnectionCard` slots for identity, status, health
@@ -624,10 +663,11 @@ Use `SearchableSelect` for choosing one existing value from a long list, includi
 
 Every primary workspace header uses `WorkspaceFinder`: `Search Calendar`, `Search Tasks`,
 `Search Mail`, or `Search Finances`. Search spans the workspace, independently of the current
-view's filters, selected mailbox/list, visible calendars, and displayed date range. Desktop
-uses an icon button that opens an anchored popover with an autofocus search field; mobile uses
-the same icon button and the shared responsive drawer
-with inline results. Do not nest a second floating search popup above the mobile drawer.
+view's filters, selected mailbox/list, visible calendars, and displayed date range.
+At every viewport, use the same persistent, rounded filled search field in the
+elastic middle of the header utility row. Empty search shows only the glyph;
+retain its workspace-specific accessible name and show entered text normally.
+Results open in the standard shadcn Combobox popup, with no intermediate dialog.
 
 Group content, dates, settings, navigation, actions, and reviews. Show a useful preview and explicit
 archived/completed/hidden context. Support keyboard selection, result-type filtering, bounded
@@ -783,12 +823,14 @@ Top-navigation filters use the shared data-view filter treatment below. Applied-
 
 ### Key metrics and monetary entry
 
-Use the shared `KeyMetrics` layout with `KeyMetric` cards for a set of scalar summaries. Prefer
-fitting or wrapping cards so all values remain visible over forcing a carousel. Compose the shared
-shadcn Card anatomy and retain honest unavailable states. Dollar amount entry uses `CurrencyInput`
+Use shared `KeyMetric` cards for scalar summaries. Choose fitting or wrapping cards when all
+values need simultaneous comparison. Finance's `KeyMetrics` uses a compact horizontal shadcn
+Carousel rail as specified in [Finances](pages/finances.md), with conditional chevrons and looping
+navigation when cards overflow. Compose the shared Card anatomy and retain honest unavailable states. Dollar amount entry uses `CurrencyInput`
 with a canonical decimal value; percentages, counts, and durations remain ordinary numeric inputs.
 
-Four-item KeyMetrics sets use a balanced two- or four-column grid based on container width; they must not leave one metric alone beneath a three-column row. Compact financial KPI values retain the full amount for hover and assistive technology.
+Compact financial KPI values retain the full amount for hover and assistive technology. The Finance
+metric rail never wraps into an orphaned second row; all cards remain reachable by touch and keyboard.
 
 ### Workspace preference ownership
 
@@ -913,6 +955,13 @@ Use icon-only triggers with full accessible names/tooltips, an applied-filter co
 and a secondary selected treatment for a non-default sort. Avoid separate floating
 pills, repeated borders, or another toolbar row. Filter dialogs keep readable labels.
 This follows the app’s existing Calendar and Settings input-addon action pattern.
+
+Read-only calendar dates use the shared `DateDisplay` and `dateDisplayLabels` helpers.
+Use `Oct 25, 2026` for the calendar form. Default to Today, Yesterday, or Tomorrow
+within one calendar day in the relevant time zone; farther dates default to the calendar
+form. Clicking or keyboard-activating a date toggles to its relative day count and back.
+Date-only values preserve their written day, and toggles never open their containing record.
+Keep editable dates in the shared date input instead.
 
 Tables default to Compact density. Desktop cells use small consistent vertical
 padding and grow for actual wrapped content; never stretch rows to fill the page.
@@ -1049,3 +1098,29 @@ compact table/mobile records, options, and bounded pagination. When only a bound
 recent API window is available, label that limit honestly; local filtering and
 pagination do not imply access to older records. A shared error component alone
 does not make a legacy feed conform to the complete table pattern.
+
+### Anchored mobile navigation menus
+
+Mobile workspace navigation uses the shared `FloatingActionSurface` with the
+hamburger glyph. Calendar and the navigation menu share the persistent layout
+surface, spring transition, entering/exiting content, and reduced-motion policy.
+The shadcn Card menu expands from the floating anchor and contracts back into it;
+keep navigation within a bounded scrolling panel. The panel retains the floating
+button’s primary surface/foreground palette, including contrasting selection and
+hover tones. Use the same compact density on every workspace/page: a menu up to 18rem wide
+(and at most viewport width minus 2rem), 8px content padding, 20px section labels,
+zero gaps between rows, 44px navigation rows and close targets, a sticky header, and
+contained overscroll. Cap height at the smaller of 72dvh and 36rem; scroll longer
+menus internally. Keep meaningful section names, icons, selected states, and
+counts, but omit redundant headings such as “Pages” under the workspace title.
+Do not shrink text or touch targets to achieve density; remove excess space.
+Workspace search fields use a pill radius and a secondary
+surface close to the page color, preserving distinct hover/focus states. Across
+Calendar, Tasks, Mail, and Finances, search is the elastic filled middle of the
+header utility row. Its empty state shows only the search glyph, with no visible
+placeholder; retain a workspace-specific accessible name and show typed text
+normally. Keep the same combobox mounted across viewport changes.
+Escape, outside interaction,
+the close control, and destination selection dismiss it; restore trigger focus.
+This non-modal navigation surface leaves the page available. Transaction and
+editing dialogs retain their own confirmation and modal semantics.

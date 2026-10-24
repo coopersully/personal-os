@@ -21,6 +21,7 @@ export type FinanceMutationContext = {
   bypassEnabled: boolean;
   canMutate: boolean;
   canSelfApprove: boolean;
+  requiresApprovalBypass?: boolean;
   executionPrincipal?: Principal;
   requestId: string;
   userId: string;
@@ -42,7 +43,7 @@ export async function loadFinanceAuthorization(input: {
     actorType: input.principal.actorType,
     bypassEnabled,
     canMutate,
-    // General Finance execution authority never authorizes active budget changes.
+    // Persisted bypass supplies standing approval for every Finance operation.
     canSelfApprove: canMutate && bypassEnabled && input.principal.scopes.has("finances:execute"),
     requestId: input.requestId,
     userId: input.principal.userId,
@@ -270,6 +271,8 @@ export async function executeFinanceIdempotently<T extends Record<string, unknow
   );
 
   const execute = async (tx: FinanceTransaction, markClaimed: () => void) => {
+    if (context.actorType === "agent" && context.requiresApprovalBypass)
+      await requireFinanceExecution(tx, context, new Date());
     if (operation.requireUserAdmission && !(await admitFinanceUser(tx, context.userId))) {
       throw new AppError("not_found", "Account not found.");
     }
@@ -330,6 +333,9 @@ export async function executeFinanceIdempotently<T extends Record<string, unknow
       /* v8 ignore stop */
       record = inserted;
     }
+    // Admission and idempotency locks may outlive the token. Recheck at the write boundary.
+    if (context.actorType === "agent" && context.requiresApprovalBypass)
+      await requireFinanceExecution(tx, context, new Date());
     markClaimed();
     const response = await mutate(tx);
     await tx

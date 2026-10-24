@@ -122,7 +122,7 @@ export type ReviseFinanceBudgetInput = z.infer<typeof reviseFinanceBudgetInputSc
 
 export const approveFinanceBudgetInputSchema = financeMutationMetaSchema.and(
   z.object({
-    approvalSource: z.literal("user_instruction"),
+    approvalSource: z.enum(["user_instruction", "agent_self_approval"]),
     budgetVersionId: idSchema,
     expectedProfileVersionId: idSchema.nullable().optional(),
     expectedVersion: z.number().int().positive(),

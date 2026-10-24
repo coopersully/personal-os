@@ -5,7 +5,9 @@ import { readFileSync } from "node:fs";
 import { ApiClientError } from "@personal-os/api-client";
 import {
   type CalendarStatus,
+  type FinanceBudgetVersion,
   getDefaultWorkspacePreferences,
+  getFinanceBudgetApprovalReadiness,
   type UpdateAccountSetupInput,
   type User,
 } from "@personal-os/domain";
@@ -525,6 +527,11 @@ const mocks = vi.hoisted(() => ({
   listMailThreads: vi.fn(),
   listInvitations: vi.fn(),
   listOAuthClients: vi.fn(),
+  listAgentAccounts: vi.fn(),
+  listAutomationHostSchedules: vi.fn(),
+  listAutomationHostConnections: vi.fn(),
+  listFinanceAnswerContinuations: vi.fn(),
+  listFinanceHostRuns: vi.fn(),
   snoozeMailThread: vi.fn(),
   listGoals: vi.fn(),
   listMotives: vi.fn(),
@@ -1270,6 +1277,11 @@ function defaults() {
   ]);
   mocks.listInvitations.mockResolvedValue([]);
   mocks.listOAuthClients.mockResolvedValue([]);
+  mocks.listAgentAccounts.mockResolvedValue({ accounts: [], connections: [] });
+  mocks.listAutomationHostSchedules.mockResolvedValue([]);
+  mocks.listAutomationHostConnections.mockResolvedValue([]);
+  mocks.listFinanceAnswerContinuations.mockResolvedValue([]);
+  mocks.listFinanceHostRuns.mockResolvedValue([]);
   mocks.listSessions.mockResolvedValue([
     {
       id,
@@ -1504,7 +1516,7 @@ function financeEnvelope(data: unknown, headline = "Finance evidence loaded.") {
   };
 }
 
-function completeFinancePlan() {
+function completeFinancePlan(): FinanceBudgetVersion {
   return {
     id: thirdId,
     planId: secondId,
@@ -1618,7 +1630,15 @@ function configureFinanceWorkspace() {
       ledger: { trustworthy: true, reconciledThrough: "2026-07-12" },
     }),
   );
-  mocks.getFinanceBudget.mockResolvedValue(financeEnvelope(completeFinancePlan()));
+  const proposedBudget = completeFinancePlan();
+  mocks.getFinanceBudget.mockResolvedValue({
+    ...financeEnvelope(proposedBudget),
+    approvalReadiness: getFinanceBudgetApprovalReadiness({
+      budget: proposedBudget,
+      currentProfileVersionId: proposedBudget.profileVersionId ?? null,
+      latestBudgetVersionId: proposedBudget.id,
+    }),
+  });
   mocks.getFinanceCategories.mockResolvedValue([
     { id, name: "Living expenses", slug: "living", group: "Spending", isSystem: true, color: null },
   ]);
@@ -1758,6 +1778,19 @@ beforeEach(() => {
     }
   }
   vi.stubGlobal("Date", TestDate);
+  // JSDOM has no layout visibility observer; keep real KeyMetrics/Embla composition mounted.
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      observe = vi.fn();
+      unobserve = vi.fn();
+      disconnect = vi.fn();
+      takeRecords = () => [];
+      root = null;
+      rootMargin = "0px";
+      thresholds = [0];
+    },
+  );
   vi.stubGlobal("localStorage", memoryStorage());
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
@@ -3068,7 +3101,7 @@ describe("ilo web app", () => {
     );
     await browser.click(within(rail).getByRole("link", { name: "Finances" }));
     expect(
-      await screen.findByRole("region", { name: "Financial position" }, { timeout: 5_000 }),
+      await screen.findByRole("region", { name: "Finance key metrics" }, { timeout: 5_000 }),
     ).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "Finances Sidebar" })).toBeInTheDocument();
     expect(within(rail).getByRole("link", { name: "Finances" })).toHaveAttribute(
@@ -3117,7 +3150,7 @@ describe("ilo web app", () => {
     }
   });
 
-  it("uses a mobile workspace dock and contextual action sheet", async () => {
+  it("uses a mobile workspace dock and anchored navigation menu", async () => {
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
       value: vi.fn().mockReturnValue({
@@ -3167,7 +3200,11 @@ describe("ilo web app", () => {
     expect(screen.getByRole("link", { name: "All" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "History" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Trash" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Create in Tasks" })).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole("dialog", { name: "Tasks" })).queryByRole("button", {
+        name: "Create in Tasks",
+      }),
+    ).not.toBeInTheDocument();
     await browser.click(screen.getByRole("link", { name: "All" }));
     await browser.click(screen.getByRole("button", { name: "Filters" }));
     expect(screen.getByRole("dialog", { name: "Task filters" })).toBeInTheDocument();
@@ -5147,7 +5184,7 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     const view = setup("/tasks?view=today");
     await screen.findByText("Draft brief");
-    await browser.click(screen.getByRole("button", { name: "Search Tasks" }));
+    await browser.click(screen.getByRole("combobox", { name: "Search Tasks" }));
     await browser.type(screen.getByRole("combobox", { name: "Search Tasks" }), "missing");
     expect(await screen.findByText("No matches found.")).toBeInTheDocument();
     expect(mocks.searchWorkspace).toHaveBeenCalledWith(
@@ -5161,7 +5198,7 @@ describe("ilo web app", () => {
     view.unmount();
     const remindersView = setup("/reminders");
     await screen.findByText("Test reminder");
-    await browser.click(screen.getByRole("button", { name: "Search Tasks" }));
+    await browser.click(screen.getByRole("combobox", { name: "Search Tasks" }));
     await browser.type(screen.getByRole("combobox", { name: "Search Tasks" }), "reviews");
     await browser.click(screen.getByRole("option", { name: /Items needing review/ }));
     expect(remindersView.location.value).toContain("review=open");
@@ -5395,7 +5432,7 @@ describe("ilo web app", () => {
     expect(within(position).getByText("$250.00")).toBeInTheDocument();
     expect(within(position).getByText("$42.50")).toBeInTheDocument();
     expect(within(position).getByText("$300.00")).toBeInTheDocument();
-    expect(await screen.findByText("Proposed · Version 4")).toBeInTheDocument();
+    expect(await screen.findByText("proposed", { exact: true })).toBeInTheDocument();
     expect(
       screen.queryByRole("region", { name: "Outstanding finance items" }),
     ).not.toBeInTheDocument();
@@ -5411,7 +5448,7 @@ describe("ilo web app", () => {
     const view = setup("/finances");
     const position = await screen.findByRole("region", { name: "Finance key metrics" });
     expect(within(position).getAllByText("Unavailable")).toHaveLength(3);
-    expect(await screen.findByText("No complete plan yet")).toBeInTheDocument();
+    expect(await screen.findByText("No plan yet.")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Create plan" })).toHaveAttribute(
       "href",
       "/finances/plan",
@@ -5547,7 +5584,7 @@ describe("ilo web app", () => {
         expect.objectContaining({ sortBy: "amount" }),
       ),
     );
-    await browser.click(screen.getByRole("button", { name: "Next" }));
+    await browser.click(screen.getByRole("button", { name: "Next page" }));
     await waitFor(() =>
       expect(mocks.listFinanceTransactions).toHaveBeenLastCalledWith(
         expect.objectContaining({ cursor: "finance-page-2" }),
@@ -5643,7 +5680,7 @@ describe("ilo web app", () => {
     });
     const browser = userEvent.setup();
     const view = setup("/finances/budgets");
-    await waitFor(() => expect(view.location.value).toBe("/finances/plan"));
+    await waitFor(() => expect(view.location.value).toBe("/finances/plan"), { timeout: 5_000 });
     expect(await screen.findByText("Monthly pay")).toBeInTheDocument();
     expect(screen.getByText("Emergency reserve")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: /assumptions · Show details/ }));
@@ -5667,6 +5704,27 @@ describe("ilo web app", () => {
     expect(mocks.setupFinances).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Start or resume setup" })).not.toBeInTheDocument();
     view.unmount();
+  });
+
+  it("shows each Finance page name at the start of the top navigation", async () => {
+    configureFinanceWorkspace();
+    for (const [path, title] of [
+      ["/finances", "Overview"],
+      ["/finances/spending", "Spending"],
+      ["/finances/plan", "Budget"],
+      ["/finances/accounts", "Accounts"],
+      ["/finances/cashflow", "Cash flow"],
+      ["/finances/wealth", "Wealth"],
+    ] as const) {
+      const view = setup(path);
+      const header = await screen.findByRole("navigation", { name: "Top navigation" });
+      const titleElement = within(header).getByText(title, { exact: true });
+      expect(titleElement).toBeVisible();
+      expect(
+        header.querySelector(".workspace-app-bar__identity")?.firstElementChild,
+      ).toContainElement(titleElement);
+      view.unmount();
+    }
   });
 
   it("renders Finance destinations and subscriptions through their owning workspace views", async () => {
@@ -5832,7 +5890,7 @@ describe("ilo web app", () => {
     mocks.getFinanceSnapshot.mockRejectedValue(new Error("Finance service unavailable"));
     const failed = setup("/finances");
     expect(await screen.findByText("Financial position unavailable")).toBeInTheDocument();
-    expect(await screen.findByText("No complete plan yet")).toBeInTheDocument();
+    expect(await screen.findByText("No plan yet.")).toBeInTheDocument();
     failed.unmount();
   });
 
@@ -6049,6 +6107,12 @@ describe("ilo web app", () => {
       ["/tasks", "tasks"],
       ["/mail", "mail"],
       ["/finances", "finances"],
+      ["/finances/transactions", "finances"],
+      ["/finances/accounts", "finances"],
+      ["/finances/plan", "finances"],
+      ["/finances/cashflow", "finances"],
+      ["/finances/wealth", "finances"],
+      ["/finances/activity", "finances"],
     ] as const;
 
     for (const [route, workspace] of routes) {
@@ -6060,6 +6124,12 @@ describe("ilo web app", () => {
       expect(appBar.querySelector('[data-slot="workspace-app-bar-identity"]')).not.toBeNull();
       expect(appBar.querySelector('[data-slot="workspace-app-bar-context"]')).not.toBeNull();
       expect(appBar.querySelector('[data-slot="workspace-app-bar-actions"]')).not.toBeNull();
+      if (workspace === "finances") {
+        expect(appBar.querySelector('[data-slot="workspace-title-sentence"]')).not.toBeNull();
+        expect(
+          within(appBar).getByRole("combobox", { name: "Search Finances" }),
+        ).toBeInTheDocument();
+      }
 
       view.unmount();
     }
@@ -6071,11 +6141,11 @@ describe("ilo web app", () => {
       const currentAppBar = screen.getByRole("navigation", { name: "Top navigation" });
       expect(currentAppBar).toHaveAttribute("data-workspace", "mail");
       expect(
-        within(currentAppBar).getByRole("button", { name: "Search Mail" }),
+        within(currentAppBar).getByRole("combobox", { name: "Search Mail" }),
       ).toBeInTheDocument();
     });
     const mailAppBar = screen.getByRole("navigation", { name: "Top navigation" });
-    expect(within(mailAppBar).getByRole("button", { name: "Search Mail" })).toBeInTheDocument();
+    expect(within(mailAppBar).getByRole("combobox", { name: "Search Mail" })).toBeInTheDocument();
     expect(
       within(mailAppBar).getByRole("button", { name: "Sync all mail accounts" }),
     ).toBeInTheDocument();
@@ -6086,6 +6156,13 @@ describe("ilo web app", () => {
         }),
       ).toBeInTheDocument(),
     );
+    const mailSearch = within(mailAppBar).getByRole("combobox", { name: "Search Mail" });
+    const sourceFilter = within(mailAppBar).getByRole("button", {
+      name: /^\d+ of \d+ mail accounts/,
+    });
+    expect(
+      mailSearch.compareDocumentPosition(sourceFilter) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(
       within(mailAppBar).queryByRole("button", { name: /compose|send/i }),
     ).not.toBeInTheDocument();
@@ -6843,7 +6920,8 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     await screen.findByText("Focus block");
     const accountToggle = screen.getByRole("button", { name: /2 of 3 calendars/ });
-    expect(accountToggle.querySelectorAll('[data-slot="avatar"]')).not.toHaveLength(0);
+    expect(accountToggle.querySelectorAll('[data-slot="avatar"]')).toHaveLength(0);
+    expect(accountToggle).toHaveAttribute("aria-haspopup", "dialog");
     await browser.click(accountToggle);
     const googleToggle = screen.getByRole("switch", { name: /Readonly Google/ });
     const cancelQueries = vi
@@ -8735,7 +8813,7 @@ describe("ilo web app", () => {
     );
   });
 
-  it("filters the unified inbox from the account avatar control", async () => {
+  it("filters the unified inbox from the standard account filter", async () => {
     const iCloudAccountId = "88888888-8888-4888-8888-888888888880";
     const unnamedAccountId = "88888888-8888-4888-8888-888888888890";
     mocks.listConnectors.mockResolvedValue([
@@ -8879,9 +8957,9 @@ describe("ilo web app", () => {
     const accountControl = await screen.findByRole("button", {
       name: "3 of 3 mail accounts, attention required",
     });
-    expect(accountControl.querySelectorAll('[data-slot="avatar"]')).toHaveLength(1);
+    expect(accountControl.querySelectorAll('[data-slot="avatar"]')).toHaveLength(0);
     expect(accountControl).not.toHaveTextContent("Needs attention");
-    expect(accountControl.querySelector(".account-selection-trigger__warning")).not.toBeNull();
+    expect(accountControl.querySelector(".account-selection-trigger__warning")).toBeNull();
     await browser.click(accountControl);
     expect(await screen.findByText("Mail accounts")).toBeInTheDocument();
     expect(screen.getByLabelText("iCloud account needs attention")).toBeInTheDocument();
@@ -9664,6 +9742,8 @@ describe("ilo web app", () => {
     await screen.findByText("No active outcomes");
     expect(screen.getAllByRole("button", { name: "Add goal" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Add motive" })).toHaveLength(1);
+    // Keep the remount: queued Sonner dismissals from the first root can overlap
+    // the next root's initial query error and make its toast host resubscribe.
     view.unmount();
     mocks.listSessions.mockRejectedValue(new Error("private diagnostic"));
     setup("/settings?page=security&subpage=sessions");
@@ -9673,6 +9753,17 @@ describe("ilo web app", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Devices unavailable" })).not.toHaveTextContent(
       "Couldn’t load devices.",
+    );
+    expect(screen.queryByText("private diagnostic")).not.toBeInTheDocument();
+    mocks.listSessions.mockResolvedValue([]);
+    const notification = screen.getByText("Couldn’t load devices.").closest("[data-sonner-toast]");
+    if (!(notification instanceof HTMLElement)) throw new Error("Missing devices error toast");
+    fireEvent.click(within(notification).getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("No signed-in devices")).toBeInTheDocument();
+    expect(mocks.listSessions).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("region", { name: "Devices unavailable" })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText("Couldn’t load devices.")).not.toBeInTheDocument(),
     );
   });
 

@@ -14,6 +14,7 @@ import {
 } from "@personal-os/database";
 import {
   type AutomationHostSchedule,
+  type AutomationHostScheduleObservationInput,
   automationHostPromptIssueInputSchema,
   automationHostPromptIssueSchema,
   automationHostPromptPageInputSchema,
@@ -24,11 +25,13 @@ import {
   automationHostScheduleRevokeInputSchema,
   automationHostScheduleSchema,
   automationHostScheduleUpdateInputSchema,
+  nextScheduledAutomationHostSlot,
   observeAutomationHostScheduleHealth,
   utcIsoDateTimeSchema,
 } from "@personal-os/domain";
 import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
+import { ensureAgentAccount, findAgentAccount } from "./agent-account-service.js";
 import { activeHostConnectionGrant } from "./automation-host-grant.js";
 import { AppError } from "./errors.js";
 import {
@@ -139,6 +142,7 @@ export function createAutomationHostService(options: {
           )[0];
     return {
       schedule,
+      agentAccount: await findAgentAccount(tx, userId, schedule.tenantAuthorizationConnectionId),
       health: observeAutomationHostScheduleHealth(schedule, now()),
       prompt: {
         externalAdoption: "unknown" as const,
@@ -194,6 +198,7 @@ export function createAutomationHostService(options: {
     principal: Principal,
     after: AutomationHostSchedule,
     before: AutomationHostSchedule | null,
+    observation?: AutomationHostScheduleObservationInput,
   ) {
     await tx.insert(auditEvents).values({
       userId: principal.userId,
@@ -204,7 +209,10 @@ export function createAutomationHostService(options: {
       entityId: after.id,
       entityType: "automation_host_schedule",
       before: before ? scheduleAudit(before) : null,
-      after: scheduleAudit(after),
+      after: {
+        ...scheduleAudit(after),
+        ...(observation ? { observation, nextExpectedAt: after.nextExpectedAt } : {}),
+      },
     });
   }
   async function change(
@@ -213,6 +221,7 @@ export function createAutomationHostService(options: {
     expectedVersion: number,
     apply: (schedule: AutomationHostSchedule, tx: Tx) => Promise<AutomationHostSchedule>,
     requiresExecution = true,
+    observation?: AutomationHostScheduleObservationInput,
   ) {
     return db.transaction(async (tx) => {
       await guardFinanceExecutionTransaction(tx, principal.userId, {
@@ -237,7 +246,7 @@ export function createAutomationHostService(options: {
             : {}),
         })
         .where(eq(automationHostSchedules.id, row.id));
-      await recordScheduleChange(tx, principal, updated, row.schedule);
+      await recordScheduleChange(tx, principal, updated, row.schedule, observation);
       return result(updated, principal.userId, tx);
     });
   }
@@ -828,7 +837,7 @@ export function createAutomationHostService(options: {
               : undefined,
           ),
         );
-      return [
+      const connections = [
         ...new Map(
           tokens
             .filter((token) => token.scopes.includes("finances:maintain"))
@@ -838,6 +847,12 @@ export function createAutomationHostService(options: {
             ]),
         ).values(),
       ];
+      return Promise.all(
+        connections.map(async (connection) => ({
+          ...connection,
+          agentAccount: await findAgentAccount(db, principal.userId, connection.id),
+        })),
+      );
     },
     async list(principal: Principal) {
       await authorizeHost(principal);
@@ -905,7 +920,7 @@ export function createAutomationHostService(options: {
         })),
       );
     },
-    async create(principal: Principal, raw: unknown) {
+    async create(principal: Principal, raw: unknown, requestId: string = randomUUID()) {
       await authorizeHost(principal, true);
       const input = automationHostScheduleCreateInputSchema.parse(raw);
       requireConnection(principal, input.tenantAuthorizationConnectionId);
@@ -930,6 +945,17 @@ export function createAutomationHostService(options: {
           )
         )
           throw new AppError("forbidden", "The host connection does not grant these scopes.");
+        await ensureAgentAccount(
+          tx,
+          { principal, requestId },
+          input.tenantAuthorizationConnectionId,
+          input.hostSurface.startsWith("claude")
+            ? "claude"
+            : input.hostSurface.startsWith("codex")
+              ? "codex"
+              : "other",
+          now(),
+        );
         const schedule = automationHostScheduleSchema.parse({
           id: randomUUID(),
           tenantAuthorizationConnectionId: input.tenantAuthorizationConnectionId,
@@ -965,6 +991,7 @@ export function createAutomationHostService(options: {
           throw new AppError("conflict", "This host schedule cannot be bound.");
         if (
           input.hostSurface === "claude_code_routine" &&
+          schedule.trigger.type === "event" &&
           !/^trig_[A-Za-z0-9]{10,100}$/.test(input.hostAutomationId)
         )
           throw new AppError("invalid_request", "Use the Claude routine's API trigger ID.");
@@ -976,7 +1003,12 @@ export function createAutomationHostService(options: {
           ...schedule,
           state: "active",
           hostAutomationId: input.hostAutomationId,
-          nextExpectedAt: input.hostSurface === "codex_desktop" ? input.nextExpectedAt : null,
+          nextExpectedAt:
+            input.hostSurface === "codex_desktop"
+              ? input.nextExpectedAt
+              : schedule.trigger.type === "scheduled"
+                ? nextScheduledAutomationHostSlot(schedule.trigger, now())
+                : null,
           version: schedule.version + 1,
           updatedAt: now().toISOString(),
         });
@@ -1000,16 +1032,44 @@ export function createAutomationHostService(options: {
           await liveGrant(tx, principal.userId, schedule.tenantAuthorizationConnectionId);
           if (Math.abs(new Date(input.observedAt).getTime() - now().getTime()) > 5 * 60_000)
             throw new AppError("invalid_request", "The host observation must be current.");
+          if (
+            schedule.trigger.type === "scheduled" &&
+            schedule.lastObservedAt !== null &&
+            new Date(input.observedAt) < new Date(schedule.lastObservedAt)
+          )
+            throw new AppError("invalid_request", "Host observations must not move backward.");
+          if (
+            input.hostSurface === "claude_code_routine" &&
+            input.observedState === "active" &&
+            input.invocationObserved &&
+            schedule.trigger.type !== "scheduled"
+          )
+            throw new AppError(
+              "invalid_request",
+              "Invocation evidence applies only to scheduled routines.",
+            );
+          const scheduledNext =
+            schedule.trigger.type === "scheduled" && input.observedState === "active"
+              ? schedule.state === "paused" ||
+                (input.hostSurface === "claude_code_routine" &&
+                  input.invocationObserved &&
+                  schedule.nextExpectedAt !== null &&
+                  new Date(input.observedAt) >= new Date(schedule.nextExpectedAt))
+                ? nextScheduledAutomationHostSlot(schedule.trigger, new Date(input.observedAt))
+                : schedule.nextExpectedAt
+              : null;
           return automationHostScheduleSchema.parse({
             ...schedule,
             state: input.observedState,
             lastObservedAt: input.observedAt,
-            nextExpectedAt: input.hostSurface === "codex_desktop" ? input.nextExpectedAt : null,
+            nextExpectedAt:
+              input.hostSurface === "codex_desktop" ? input.nextExpectedAt : scheduledNext,
             version: schedule.version + 1,
             updatedAt: now().toISOString(),
           });
         },
         false,
+        input,
       );
     },
     async update(principal: Principal, id: string, raw: unknown) {
@@ -1071,6 +1131,7 @@ export function createAutomationHostService(options: {
         if (
           row.schedule.version !== expectedVersion ||
           row.schedule.hostSurface !== "claude_code_routine" ||
+          row.schedule.trigger.type !== "event" ||
           row.schedule.state !== "active" ||
           !/^trig_[A-Za-z0-9]{10,100}$/.test(row.schedule.hostAutomationId)
         )

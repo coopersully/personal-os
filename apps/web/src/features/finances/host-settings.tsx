@@ -32,6 +32,9 @@ export function FinanceHostSettings() {
   const runs = useQuery({ queryKey: ["finance-host-runs"], queryFn: api.listFinanceHostRuns });
   const [connection, setConnection] = useState("");
   const [surface, setSurface] = useState<AutomationHostSurface>("codex_desktop");
+  const [scheduled, setScheduled] = useState(false);
+  const [localTimes, setLocalTimes] = useState("08:00,20:00");
+  const [zone, setZone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
   const [label, setLabel] = useState("Finance maintenance");
   const [pending, setPending] = useState(false);
   async function perform(action: () => Promise<unknown>) {
@@ -100,7 +103,13 @@ export function FinanceHostSettings() {
                       }
                     : {
                         hostSurface: "claude_code_routine",
-                        trigger: { type: "event", expectedMaximumLatencyMinutes: 5 },
+                        trigger: scheduled
+                          ? {
+                              type: "scheduled",
+                              localTimes: localTimes.split(",").map((time) => time.trim()),
+                              timeZone: zone,
+                            }
+                          : { type: "event", expectedMaximumLatencyMinutes: 5 },
                       }),
                 }),
               );
@@ -129,6 +138,39 @@ export function FinanceHostSettings() {
               <NativeSelectOption value="codex_desktop">Codex desktop</NativeSelectOption>
               <NativeSelectOption value="claude_code_routine">Claude routine</NativeSelectOption>
             </NativeSelect>
+            {surface === "claude_code_routine" ? (
+              <>
+                <Label htmlFor="finance-host-trigger">Trigger</Label>
+                <NativeSelect
+                  id="finance-host-trigger"
+                  value={scheduled ? "scheduled" : "event"}
+                  onChange={(event) => setScheduled(event.target.value === "scheduled")}
+                >
+                  <NativeSelectOption value="event">API event</NativeSelectOption>
+                  <NativeSelectOption value="scheduled">Daily local times</NativeSelectOption>
+                </NativeSelect>
+                {scheduled ? (
+                  <>
+                    <Label htmlFor="finance-host-times">
+                      Daily local times (HH:mm, comma-separated)
+                    </Label>
+                    <Input
+                      id="finance-host-times"
+                      required
+                      value={localTimes}
+                      onChange={(event) => setLocalTimes(event.target.value)}
+                    />
+                    <Label htmlFor="finance-host-zone">Timezone</Label>
+                    <Input
+                      id="finance-host-zone"
+                      required
+                      value={zone}
+                      onChange={(event) => setZone(event.target.value)}
+                    />
+                  </>
+                ) : null}
+              </>
+            ) : null}
             <Label htmlFor="finance-host-label">Name</Label>
             <Input
               id="finance-host-label"
@@ -263,7 +305,9 @@ function HostSchedule({
           <p>
             {schedule.hostSurface === "codex_desktop"
               ? "Create a recurring Codex automation every 5 minutes using the selected nohmi connection. Paste this prompt, then bind its automation identifier and next scheduled time below."
-              : "Create a Claude routine using the selected nohmi connection and this prompt. Add an API trigger, then bind its routine identifier below."}
+              : schedule.trigger.type === "scheduled"
+                ? `Create a Claude schedule at ${schedule.trigger.localTimes.join(" and ")} in ${schedule.trigger.timeZone} using this connection and prompt. Bind the routine identifier below. No API trigger token is needed; answers wait for the next scheduled invocation.`
+                : "Create a Claude routine using the selected nohmi connection and this prompt. Add an API trigger, then bind its routine identifier below."}
           </p>
           <form
             className="grid gap-2"
@@ -329,7 +373,9 @@ function HostSchedule({
           </Button>
         </>
       ) : null}
-      {schedule.state === "active" && schedule.hostSurface === "claude_code_routine" ? (
+      {schedule.state === "active" &&
+      schedule.hostSurface === "claude_code_routine" &&
+      schedule.trigger.type === "event" ? (
         <form
           className="grid gap-2"
           onSubmit={(event) => {

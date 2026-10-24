@@ -11,6 +11,7 @@ import {
   financeReimbursementMatches,
   financeReimbursements,
   financeTransactionAllocations,
+  financeTransactionCoverage,
   financeTransactionRelationships,
   financeTransactions,
 } from "@personal-os/database";
@@ -21,6 +22,7 @@ import {
   type FinanceSpendingGroup,
   type FinanceSpendingQuery,
   type FinanceSpendingReferenceFilter,
+  financeGroupIcon,
   financeProvenanceSchema,
   financeSpendingDashboardSchema,
   financeSpendingQuerySchema,
@@ -95,7 +97,7 @@ export function buildFinanceSpendingDashboard(
                 return color && /^#[0-9a-fA-F]{6}$/.test(color) ? color : null;
               })()
             : null,
-        icon: id === "uncategorized" ? "uncategorized" : kind,
+        icon: financeGroupIcon(label, id === "uncategorized" ? "uncategorized" : kind),
       },
       categoryIds,
       netCents,
@@ -269,6 +271,10 @@ export function createFinanceSpendingService(input: {
             .select()
             .from(financeProviderItems)
             .where(eq(financeProviderItems.userId, userId));
+          const coverageIntervals = await tx
+            .select()
+            .from(financeTransactionCoverage)
+            .where(eq(financeTransactionCoverage.userId, userId));
           const rawTransactions = await tx
             .select()
             .from(financeTransactions)
@@ -354,7 +360,7 @@ export function createFinanceSpendingService(input: {
             row.lastSyncedAt ? [row.lastSyncedAt.getTime()] : [],
           );
           const activeTaxonomy = taxonomies.find((row) => row.isActive);
-          return buildFinanceSpendingDashboard(
+          const dashboard = buildFinanceSpendingDashboard(
             {
               userId,
               asOf,
@@ -363,8 +369,8 @@ export function createFinanceSpendingService(input: {
               allocations,
               reimbursements,
               matches,
-              // Current source sync does not certify historical coverage. Manual imports likewise
-              // have no certified interval contract, so even a fully loaded DB remains unknown.
+              // Sync freshness cannot prove history; explicit statement intervals can.
+              coverageIntervals,
               coverage: unavailable || stale ? "partial" : "unknown",
               relationships: relationships.flatMap((row) => {
                 const event = eventById.get(row.economicEventId);
@@ -437,6 +443,11 @@ export function createFinanceSpendingService(input: {
             },
             qualification,
           );
+          if (dashboard.snapshot.coverage === "complete")
+            dashboard.source.reasons = dashboard.source.reasons.filter(
+              (reason) => reason !== "historical_coverage_not_certified",
+            );
+          return dashboard;
         },
         { isolationLevel: "repeatable read", accessMode: "read only" },
       );

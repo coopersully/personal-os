@@ -406,9 +406,10 @@ uncertain income, exceptional resources, and liquid reserves do not silently fun
 Bookkeeping remains available during setup. When setup requests budget approval, the host reads
 `get_finance_budget` and presents the exact proposal, including all resources, allocations,
 rationale, and assumptions. `approve_finance_budget` binds the displayed budget version and
-`expectedProfileVersionId`. Every activation requires authenticated human `user_instruction`
-approval in nohmi. Agents may create and revise proposals but cannot activate them with execution
-scope, review bypass, a prior policy, or conversation text. Setup approval additionally binds
+`expectedProfileVersionId`. With review bypass disabled, activation requires authenticated owner `user_instruction`
+approval in nohmi. With persisted review bypass enabled, an agent with `finances:write` and
+`finances:execute` may activate the exact proposal using `agent_self_approval`. The same standing
+approval applies to every Finance application approval gate; agent provenance is never relabeled as a human decision. Setup approval additionally binds
 the setup session version. Changed profiles and superseding proposals require fresh inspection.
 
 `get_finance_snapshot` provides the ownership-qualified position; `get_finance_budget` returns
@@ -480,17 +481,18 @@ create/match an internal reimbursement case; they never initiate a payment or
 any other external financial activity. The deprecated `resolve_finance_review`
 compatibility alias only translates legacy categorization answers. Legacy action-review
 approval/dismissal is available to the signed-in owner or explicitly authorized Finance execution
-agents with enabled review bypass and exact current work references, except active budget changes:
-those always require the authenticated owner. Legacy category allocations and complete plan writes
-have the same human boundary. Legacy `PUT /v1/finances/budget-plan` and `POST /v1/finances/budgets` submissions from humans
-also return a pending review; only approval of that durable review applies the plan. Approval
+agents with enabled review bypass and exact current work references, including active budget changes.
+Legacy category allocations and complete plan writes follow the same policy: with bypass disabled,
+`PUT /v1/finances/budget-plan` and `POST /v1/finances/budgets` submissions queue a durable review;
+with bypass enabled the exact prepared change applies directly. Approval
 revalidates the monthly plan and full allocation revision, including proposals for absent categories,
 and replaying an applied review returns its recorded result
 without replacing newer allocations. Bucket organization remains ordinary bookkeeping. Answering a budget
-evidence question queues the completed proposal; it does not approve it. Maintenance retains the
+evidence question follows the same persisted review policy for the completed proposal. Reimbursement expectation corrections and credit unmatching also follow that policy, retaining bounded evidence, current revisions and actual actor attribution. Maintenance retains the
 exact reviewed candidate and human approval identity separately from its executing agent, and
-revalidates all item fingerprints and source revisions before writing. New monthly baselines accept
-only human-approved versions; existing historical actor provenance remains readable. Canonical connection,
+revalidates all item fingerprints and source revisions before writing. Monthly baseline and planning confirmations accept the owner or an execution agent under persisted
+bypass. Confirmation records preserve the actual agent identity separately from the owner; existing
+human and historical approval provenance remains readable. Canonical connection,
 import, account correction, and typed transaction-relationship tools have their own scoped API
 contracts and are available to authorized MCP callers; no relationship operation moves money.
 
@@ -695,3 +697,42 @@ Users can instead choose a category or link an exact related transaction immedia
 use the same authenticated, idempotent API and conditional case mutation. Failed saves retain the
 user's input and retry key. A saved note remains visibly outstanding until actually resolved, but is excluded from the next unanswered question. An Inbox containing only saved notes reports work remaining, not completion.
 An empty Inbox or a completed maintenance run does not establish budget balance or source completeness.
+
+
+Finance category and planning-bucket icons are presentation metadata inferred automatically by
+the domain from record meaning. Creating a category or bucket requires no icon decision. Agents
+should not ask users about or narrate cosmetic icon choices unless users explicitly request them.
+
+### Shared agent identity
+
+`get_agent_account` reads the authenticated connection's account-level profile.
+`register_agent_account` idempotently registers/reuses that identity and accepts only an optional
+unverified platform label. The orientation context also includes `agentAccount` for authenticated
+agents. These tools do not require Finance access and never expand credential scopes.
+
+One account identity may span several surfaces after its owner links their connections in shared
+Connected agents settings. Agents cannot enumerate other profiles or supply an account ID to select
+or impersonate one. Platform account IDs and email addresses are not inferred or requested from the
+model. See [Shared agent accounts](product/agent-accounts.md) for ownership, attribution and recovery.
+
+### Historical Finance backlog and bounded batches
+
+`get_finance_review_backlog` assesses all owned flagged transactions and open/deferred cases,
+including prior years. It reports these counting units separately; overlapping flags and cases
+are not a count of independent user decisions. `list_finance_review_backlog_items` pages exact
+records with evidence, saved answers, revisions and a snapshot-bound cursor. Restart pagination
+when the snapshot changes. A group such as possible roundups is an investigation hint, not a
+verified transfer classification.
+
+After investigating, `preview_finance_review_batch` durably stores up to 100 explicit decisions
+with an idempotency key, exact revisions, rationale and evidence. It applies no financial changes.
+`execute_finance_review_batch` processes at most ten items per call. Each financial write and its
+outcome commit together. Retrieve or list saved batches to recover after interruption, then resume
+pending items. Completed exceptions require corrected evidence and a new preview; never silently
+retry an applied item or treat an unresolved exception as a resolution. Merchant learning is not
+part of these batches.
+
+The owner can inspect and explicitly apply prepared batches in Finance review. An agent can only
+resume its own originating authorization and needs current read/write/execute grants and the
+owner's execution policy. Revocation and current evidence are checked during execution. Saved
+answers remain available for agent follow-through; ask only for missing facts, not repeated answers.

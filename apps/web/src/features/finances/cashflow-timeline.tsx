@@ -39,7 +39,7 @@ function ScheduleItem({ item }: { item: FinanceCashflowScheduleItem }) {
         maximumFractionDigits: 2,
       });
   return (
-    <Item role="listitem" className="min-w-0">
+    <Item variant="outline" role="listitem" className="min-w-0">
       <ItemContent className="min-w-0 gap-2">
         <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
           <ItemTitle className="min-w-0 max-w-full line-clamp-none break-words">

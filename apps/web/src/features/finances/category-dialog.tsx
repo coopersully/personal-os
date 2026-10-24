@@ -7,6 +7,7 @@ import {
   ResponsiveDialog,
   ResponsiveDialogBody,
   ResponsiveDialogContent,
+  ResponsiveDialogDescription,
   ResponsiveDialogFooter,
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
@@ -28,9 +29,12 @@ export function FinanceCategoryDialog({ onClose }: { onClose: () => void }) {
   });
   return (
     <ResponsiveDialog open onOpenChange={(open) => !open && onClose()}>
-      <ResponsiveDialogContent>
+      <ResponsiveDialogContent data-finance-dialog data-finance-size="default">
         <ResponsiveDialogHeader>
           <ResponsiveDialogTitle>Add category</ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
+            Create a category to organize your transactions.
+          </ResponsiveDialogDescription>
         </ResponsiveDialogHeader>
         <FeedbackForm
           feedback={save.feedback}

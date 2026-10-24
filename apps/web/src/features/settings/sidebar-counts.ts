@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../api.js";
 
+import { boundAgentAccountIds, useAgentAccountDirectory } from "./agent-account-query";
+
 type Tokens = Awaited<ReturnType<typeof api.listAccessTokens>>;
 type Clients = Awaited<ReturnType<typeof api.listOAuthClients>>;
 
-/** Match Connected agents: connected OAuth hosts plus used, unexpired local credentials. */
+/** Credential connection count; never use this as the shared agent-account count. */
 export function connectedAgentCount(
   tokens: ReadonlyArray<Pick<Tokens[number], "lastUsedAt" | "revokedAt" | "expiresAt">>,
   clients: ReadonlyArray<Pick<Clients[number], "id">>,
@@ -30,8 +32,7 @@ export function useSettingsSidebarCounts(enabled: boolean) {
     queryKey: ["x-bookmarks", "account"],
     queryFn: api.getXBookmarkAccount,
   });
-  const tokens = useQuery({ enabled, queryKey: ["tokens"], queryFn: api.listAccessTokens });
-  const clients = useQuery({ enabled, queryKey: ["oauth-clients"], queryFn: api.listOAuthClients });
+  const agents = useAgentAccountDirectory(enabled);
   return {
     goals:
       enabled && goals.isSuccess && motives.isSuccess
@@ -43,8 +44,6 @@ export function useSettingsSidebarCounts(enabled: boolean) {
         ? connectors.data.length + (bookmarks.data ? 1 : 0)
         : undefined,
     "agent-connections":
-      enabled && tokens.isSuccess && clients.isSuccess
-        ? connectedAgentCount(tokens.data, clients.data, Date.now())
-        : undefined,
+      enabled && agents.isSuccess ? boundAgentAccountIds(agents.data).size : undefined,
   };
 }

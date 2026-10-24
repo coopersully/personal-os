@@ -7,6 +7,8 @@ import type {
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
+import { AgentIdentity } from "@/components/agent-identity";
+import { DateDisplay } from "@/components/date-display";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Item, ItemContent } from "@/components/ui/item";
@@ -36,8 +38,10 @@ export function FinanceActivityEntry({
   entry,
   readEvidence,
   onAccessDenied,
+  nested = false,
 }: {
   entry: Entry;
+  nested?: boolean;
   readEvidence?: ReadFinanceActivityEvidence | undefined;
   onAccessDenied?: () => void;
 }) {
@@ -85,16 +89,16 @@ export function FinanceActivityEntry({
     }
   }
   return (
-    <Item role="listitem">
+    <Item variant={nested ? "secondary" : "outline"} role="listitem">
       <ItemContent>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <span className="font-medium break-words">{entry.action}</span>
           <span className="text-sm capitalize">{entry.status}</span>
         </div>
+        {entry.agentAccount ? <AgentIdentity account={entry.agentAccount} /> : null}
         <p className="text-sm text-muted-foreground">
           {entry.actor.type}
-          {entry.actor.id ? ` · ${entry.actor.id}` : ""} ·{" "}
-          <time dateTime={entry.occurredAt}>{new Date(entry.occurredAt).toLocaleString()}</time>
+          {entry.actor.id ? ` · ${entry.actor.id}` : ""} · <DateDisplay value={entry.occurredAt} />
         </p>
         <p className="whitespace-pre-wrap break-words">{entry.explanation}</p>
         {entry.kind === "human_answer_decision" && entry.status === "accepted" ? (

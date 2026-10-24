@@ -38,7 +38,7 @@ const event: FinanceOccurrenceMatchEvent = {
   recordedAt: "2026-10-18T12:00:00Z",
   rationale: "Original match",
 };
-function mount(kind: "income" | "obligation" = "obligation") {
+function mount(kind: "income" | "obligation" = "obligation", matchEvents = [event]) {
   const occurrence: FinanceRecurringOccurrence = {
     key: "schedule/date/0",
     occurrenceId,
@@ -105,7 +105,7 @@ function mount(kind: "income" | "obligation" = "obligation") {
             pending: true,
           },
         ]}
-        matchEvents={[event]}
+        matchEvents={matchEvents}
         onClose={close}
       />
     </QueryClientProvider>,
@@ -231,4 +231,27 @@ it("sends canonical income matching through the real client without an allocatio
     amountCents: 250,
   });
   expect(body).not.toHaveProperty("allocationId");
+});
+
+it("attributes agent matches and reversals to their actual agent with a historical user fallback", () => {
+  const agentId = "99999999-9999-4999-8999-999999999999";
+  mount("obligation", [
+    event,
+    { ...event, id: "agent-match", approvalActor: { type: "agent", id: agentId } },
+    {
+      ...event,
+      id: "agent-reversal",
+      kind: "reverse",
+      reversesMatchId: matchId,
+      approvalActor: { type: "agent", id: agentId },
+    },
+  ]);
+  expect(screen.getByText(new RegExp(`Event ${matchId} · User ${accountId}`))).toBeInTheDocument();
+  expect(screen.getByText(new RegExp(`Event agent-match · Agent ${agentId}`))).toBeInTheDocument();
+  expect(
+    screen.getByText(new RegExp(`Event agent-reversal · Agent ${agentId}`)),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByText(new RegExp(`Event agent-match · User ${accountId}`)),
+  ).not.toBeInTheDocument();
 });

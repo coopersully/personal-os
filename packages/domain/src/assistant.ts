@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { agentAccountSchema } from "./agent-account.js";
 import { accessScopeSchema } from "./auth.js";
 import { idSchema, isoDateTimeSchema, semanticVersionSchema } from "./common.js";
 import { agentMutationPolicies, materialSourceReferenceSchema } from "./feature-contracts.js";
@@ -268,6 +269,7 @@ export const assistantSetupStatusSchema = z.object({
 export type AssistantSetupStatus = z.infer<typeof assistantSetupStatusSchema>;
 
 export const iloAgentContextSchema = z.object({
+  agentAccount: agentAccountSchema.nullable().optional(),
   access: z.object({
     grantedScopes: z.array(accessScopeSchema),
   }),

@@ -517,6 +517,12 @@ describe("database schema contracts", () => {
       "0121_oauth_access_token_rotations",
       "0122_finance_reimbursement_relationship_generation",
       "0123_finance_maintenance_execution_binding",
+      "0124_finance_transaction_coverage",
+      "0125_finance_bypass_confirmation_provenance",
+      "0126_finance_spending_list_default",
+      "0127_finance_spending_week_default",
+      "0128_shared_agent_accounts",
+      "0129_finance_review_batches",
     ]);
   });
 

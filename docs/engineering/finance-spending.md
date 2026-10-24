@@ -48,7 +48,7 @@ negative adjustment. Consumers that regroup categories into buckets must recompu
 nets while preserving the same contributions. No negative bubble area is implied.
 
 The v1 snapshot budget comparison remains explicitly unavailable (`historical_budget_not_resolved`).
-The separate dashboard `monthlyBudget` field reads immutable human-qualified monthly baselines. It
+The separate dashboard `monthlyBudget` field reads immutable explicitly qualified monthly baselines. It
 never guesses historical approval or account scope. Production observation remains separate work.
 The dashboard loader, route, typed client and views are described below.
 
@@ -68,10 +68,16 @@ adjustments. Categories outside configured buckets appear in Other spending. Hid
 spending discloses its excluded net amount. Unsupported currencies are disclosed by source-history
 IDs for selected accounts and never converted or summed into USD.
 
-Sync freshness and historical coverage are separate. Current sync is not proof of complete history;
-the current source schema has no certified coverage interval. The dashboard therefore reports unknown
-history, or partial history with unavailable/stale source evidence, even though it loads the complete
-stored snapshot. It does not claim an empty stored day is confirmed zero.
+Sync freshness and historical coverage are separate. Current sync is not proof of complete history.
+`finance_transaction_coverage` stores explicit complete account/date intervals with owner, time zone,
+USD currency, evidence reference, and recording time. Every selected account must have matching
+interval evidence for a day to be complete, including accounts with no transactions. Partial account
+coverage stays partial; absent, future-recorded, foreign-owner, currency/time-zone-mismatched evidence
+stays unknown. Future days remain unknown and unresolved recognition downgrades complete days.
+The snapshot aggregates these daily statuses, so selecting dates outside a certified interval never
+inherits completeness from neighboring days. A zero-spend day is confirmed zero only with coverage.
+The full demo supplies synthetic interval evidence through yesterday; normal sync/import paths that
+have not explicitly recorded this evidence remain unknown. No provider certification is implied.
 
 Spending display contracts extend the existing revisioned workspace preference API, preserving
 omitted fields and conflicts. URL overrides do not silently rewrite defaults. View/grouping, pending,
@@ -88,7 +94,7 @@ Full transaction-view integration and production/UI acceptance remain separate o
 Trends and Rhythm consume the same dated snapshots. Current named-period comparisons cap the
 current period to elapsed local dates and compare the equivalent elapsed previous period, labeling
 shorter-month caps. Complete named months compare complete prior months; custom ranges use the
-preceding equal-length local-date interval. Daily/weekly/monthly bars and the accessible table
+preceding equal-length local-date interval. Signed daily/weekly/monthly net area-chart points and the accessible table in Trend details
 share exact contribution references. Rhythm distinguishes observed positive and net-refund amounts,
 unknown/partial coverage, future dates and confirmed zero; it uses the person's saved week start.
 
@@ -119,11 +125,12 @@ Bubble area continues to represent selected-period spending. Translucent fill us
 circular-segment area for monthly utilization; negative use clamps to zero and overspend fills the
 circle with explicit overspend text. List rows expose precise monthly target/use and utilization.
 
-When the authority reports that qualification is required, a contextual human review flow requires
+When the authority reports that qualification is required, a contextual review flow requires
 explicit budget version, accounts, and USD selection. Prepare returns the exact review and fingerprint;
 confirmation sends only that evidence and a stable idempotency key. Changing scope or account session
 invalidates the preview. This action qualifies historical comparison; it does not infer an original
-approval or complete onboarding.
+approval or complete onboarding. The owner can confirm directly; an execution agent can confirm
+under persisted review bypass, with the actual confirming actor retained.
 
 
 ## Group visual identity
@@ -136,17 +143,13 @@ assignment or persisted bucket color support. Visual metadata does not change co
 exact transaction references.
 
 Positive circles retain true selected-period area rather than growing to a minimum target size.
-Circles smaller than 44 px are excluded from the Tab order. A collapsed **All spending groups**
-disclosure supplies native buttons with full wrapping names, exact selected-period amounts, and
-at least 44 px controls for those positive groups. The same qualified monthly-budget description
-is available to each circle and disclosure action, including exact overage and incomplete-history
-caveats; labelled circles retain a visible Over budget indicator. Zero and negative adjustments
-remain available in List rather than gaining invented positive area.
-
-The visible legend distinguishes selected-period circle size from whole-month budget fill.
-Reduced motion disables effective Arrange mode, including when the preference changes while
-Arrange is active, and restores vertical touch scrolling. It does not inflate circle area or
-change source totals, filters, or drill-down identities.
+Every positive circle remains keyboard focusable, including circles smaller than 44 px. Full names,
+exact selected-period amounts and qualified monthly usage are included in the circle's accessible
+name and native tooltip; activation opens the existing group details. Labelled circles retain a
+visible Over budget indicator. Zero and negative adjustments remain available in List rather than
+gaining invented positive area. Do not repeat the group list or a legend below the bubble canvas.
+Reduced motion disables automatic spring animation while preserving manual arrangement.
+Source totals, filters, and drill-down identities are unchanged.
 
 Qualified budget categories remain in List when the selected period has no activity, with exact
 zero selected-period amounts and empty source references. Monthly usage still covers the qualified
@@ -171,3 +174,25 @@ uncertainty remains fail-closed. The complete recognition ledger, contributions,
 original snapshot disclosures and honest coverage are preserved; genuine in-scope unknown money
 still withholds comparison. Live QA first exposed this at failed integration `bdfc951e`; its fixture
 and screenshot are retained separately from the repaired candidate's future verification.
+
+Single-day Rhythm groups hourly evidence only when transaction metadata has an actual offset-bearing
+purchase timestamp matching the contribution's local calendar date. Date-only source records and
+unmatched/invalid timestamps stay in an explicit untimed subtotal; updatedAt never supplies purchase
+time. Current canonical transactions store date-only evidence, so hourly amounts are unavailable for
+those records. Hour cells inspect amounts, while the untimed block retains the existing exact day
+reference; do not create a date-only link that claims to select an hour.
+
+Rhythm display grain derives from inclusive scope length rather than the named period preset:
+1 day hourly, up to 62 days daily, up to 366 weekly, up to 1096 monthly, then yearly. Aggregate net,
+positive spending, refunds and pending in exact cents; union source contribution/transaction IDs.
+Weekly intervals follow the saved week start; calendar months/years and all intervals clip to scope.
+A combined block can be complete only when every expected day has complete evidence. Partial
+calendar intervals and uncertain evidence remain disclosed in hover/focus details. The open block
+grid has no containing Card or duplicate date/timezone context; the untimed subtotal is a distinct
+labelled block, not an extra paragraph or action row.
+
+Rhythm supports explicit display-only grain overrides with Auto as the initial mode. Manual hourly
+mode on multi-day selections aggregates matching local purchase hours across selected dates;
+source records without purchase times remain untimed. This display choice changes neither the
+ledger query nor stored budget/settings. Untimed selection uses the full selected scope and source
+membership, not only the first day.

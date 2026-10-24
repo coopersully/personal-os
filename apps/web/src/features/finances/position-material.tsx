@@ -8,6 +8,7 @@ import {
   BankIcon,
   CircleAlertIcon,
   EditIcon,
+  MoreHorizontalIcon,
   ReceiptIcon,
   TargetIcon,
   WalletIcon,
@@ -22,6 +23,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from "@/components/ui/item";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { financeAccountNeedsAttention } from "./attention";
@@ -209,56 +211,17 @@ export function FinanceAccountRecord({
               Needs attention
             </Badge>
           ) : null}
-          <Badge
-            variant={
-              account.status === "needs_reauth" || account.synchronization.state === "blocked"
-                ? "destructive"
-                : "secondary"
-            }
-          >
-            {account.provider === "manual"
-              ? "Manually tracked"
-              : account.status === "needs_reauth"
-                ? "Reconnect required"
-                : account.synchronization.state === "current"
-                  ? "Current"
-                  : account.synchronization.state === "stale"
-                    ? "Stale"
-                    : account.synchronization.state === "retrying"
-                      ? "Retrying"
-                      : "Blocked"}
-          </Badge>
         </div>
-        <ItemDescription>{account.institution}</ItemDescription>
-        <div className="flex flex-wrap items-center gap-3">
-          <Badge variant="outline">
-            {account.kind === "investment"
-              ? "Investments"
-              : account.kind === "cash"
-                ? "Cash"
-                : account.kind === "debt"
-                  ? "Debt"
-                  : "Other assets"}
-          </Badge>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="text-xl font-semibold tabular-nums">{balance}</span>
-            </TooltipTrigger>
-            <TooltipContent>
-              {account.currencyCode ?? "The source has not provided a currency code."}
-            </TooltipContent>
-          </Tooltip>
-        </div>
-        <p className="text-muted-foreground text-sm">
-          {accountOwnership(account)} ·{" "}
-          {account.includeInPlanning ? "Included in planning" : "Excluded from planning"}
-        </p>
-        <p className="text-muted-foreground text-xs">
-          {account.provider === "manual" ? "Manually tracked" : "Connected source"} ·{" "}
-          {account.lastSyncedAt
-            ? `Last synced ${financeObservedAt(account.lastSyncedAt)}`
-            : "No recorded sync"}
-        </p>
+        <ItemDescription>
+          {account.institution} ·{" "}
+          {account.kind === "investment"
+            ? "Investments"
+            : account.kind === "cash"
+              ? "Cash"
+              : account.kind === "debt"
+                ? "Debt"
+                : "Other assets"}
+        </ItemDescription>
         {account.synchronization.message ? (
           <p className="text-sm">{account.synchronization.message}</p>
         ) : null}
@@ -275,21 +238,82 @@ export function FinanceAccountRecord({
         ) : null}
         {attentionAction}
       </ItemContent>
-      <ItemActions className="flex-wrap">
-        {onEdit ? (
-          <Button aria-label={`Edit ${account.name}`} onClick={onEdit} size="icon" variant="ghost">
-            <EditIcon />
-          </Button>
-        ) : (
-          <Button asChild size="sm" variant="outline">
-            <Link to={`/finances/accounts#account-${account.id}`}>Inspect account</Link>
-          </Button>
-        )}
-        <Button asChild size="icon" variant="ghost" aria-label={`Transactions for ${account.name}`}>
-          <Link to={`/finances/transactions?accountId=${encodeURIComponent(account.id)}`}>
-            <ReceiptIcon />
-          </Link>
-        </Button>
+      <div className="finance-account-balance">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              className={
+                account.kind === "debt"
+                  ? "font-semibold tabular-nums text-destructive"
+                  : "font-semibold tabular-nums"
+              }
+            >
+              {balance}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>
+            {account.currencyCode ?? "The source has not provided a currency code."}
+          </TooltipContent>
+        </Tooltip>
+        <span
+          className={
+            account.kind === "debt" ? "text-xs text-destructive" : "text-xs text-muted-foreground"
+          }
+        >
+          {account.kind === "debt" ? "Amount owed" : "Current balance"}
+        </span>
+      </div>
+      <ItemActions>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label={`Account options for ${account.name}`}
+            >
+              <MoreHorizontalIcon />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" aria-label={`Details for ${account.name}`}>
+            <p className="font-medium">{account.name}</p>
+            <p className="text-sm text-muted-foreground">
+              {accountOwnership(account)} ·{" "}
+              {account.includeInPlanning ? "Included in planning" : "Excluded from planning"}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {account.provider === "manual" ? "Manually tracked" : "Connected source"} ·{" "}
+              {account.lastSyncedAt
+                ? `Last synced ${financeObservedAt(account.lastSyncedAt)}`
+                : "No recorded sync"}
+            </p>
+            <div className="flex items-center gap-2">
+              {onEdit ? (
+                <Button
+                  aria-label={`Edit ${account.name}`}
+                  onClick={onEdit}
+                  size="sm"
+                  variant="ghost"
+                >
+                  <EditIcon /> Edit account
+                </Button>
+              ) : (
+                <Button asChild size="sm" variant="outline">
+                  <Link to={`/finances/accounts#account-${account.id}`}>Inspect account</Link>
+                </Button>
+              )}
+              <Button
+                asChild
+                size="sm"
+                variant="ghost"
+                aria-label={`Transactions for ${account.name}`}
+              >
+                <Link to={`/finances/transactions?accountId=${encodeURIComponent(account.id)}`}>
+                  <ReceiptIcon /> Transactions
+                </Link>
+              </Button>
+            </div>
+          </PopoverContent>
+        </Popover>
       </ItemActions>
     </Item>
   );

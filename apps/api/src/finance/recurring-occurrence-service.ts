@@ -32,15 +32,17 @@ import {
 } from "../finance-reimbursement-locks.js";
 import { readCashflowActuals } from "./balance-basis-service.js";
 import { executeFinanceIdempotently, type FinanceMutationContext } from "./context.js";
-import { requireExplicitUser } from "./planning-evidence-service.js";
+import { requirePlanningConfirmation } from "./planning-evidence-service.js";
 import { type CashflowTransaction, cashflowResult } from "./recurring-schedule-service.js";
 
 type Executor = Database | CashflowTransaction;
 export function matchEventValue(
   row: typeof financeOccurrenceMatchEvents.$inferSelect,
 ): FinanceOccurrenceMatchEvent {
+  const { approvalActor, ...record } = row;
   return financeOccurrenceMatchEventSchema.parse({
-    ...row,
+    ...record,
+    ...(approvalActor ? { approvalActor } : {}),
     transactionRevision: row.transactionRevision.toString(),
     reimbursementRelationshipRevision:
       typeof row.sourceEvidence.reimbursementRelationshipRevision === "string"
@@ -367,7 +369,7 @@ export function createFinanceRecurringOccurrenceService({
       raw: ManageFinanceOccurrenceMatchInput,
       context: FinanceMutationContext,
     ) {
-      requireExplicitUser(context);
+      requirePlanningConfirmation(context);
       const input = manageFinanceOccurrenceMatchInputSchema.parse(raw);
       return executeFinanceIdempotently(
         db,
@@ -527,6 +529,8 @@ export function createFinanceRecurringOccurrenceService({
               .values({
                 userId: context.userId,
                 actorUserId: context.userId,
+                approvalActor:
+                  context.actorType === "agent" ? { type: "agent", id: context.actorId } : null,
                 recordedAt: now(),
                 occurrenceId: locked.occurrenceId,
                 kind: "reverse",
@@ -720,6 +724,8 @@ export function createFinanceRecurringOccurrenceService({
             .values({
               userId: context.userId,
               actorUserId: context.userId,
+              approvalActor:
+                context.actorType === "agent" ? { type: "agent", id: context.actorId } : null,
               recordedAt: now(),
               occurrenceId: existing.id,
               kind: "match",
@@ -757,7 +763,7 @@ export function createFinanceRecurringOccurrenceService({
               requestId: context.requestId,
             }),
           );
-          return cashflowResult(matchEventValue(saved), "Your explicit actual match was recorded.");
+          return cashflowResult(matchEventValue(saved), "Actual match was recorded.");
         },
       );
     },

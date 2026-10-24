@@ -736,7 +736,7 @@ describe("Finance section states", () => {
       fireEvent.click(selectBistro);
       expect(selectBistro).toBeChecked();
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-      expect(screen.getByText("1 selected · this page only")).toBeVisible();
+      expect(screen.getByText("1 selected on this page")).toBeVisible();
       const [detailsButton] = screen.getAllByRole("row", { name: /Open .* transaction/ });
       if (!detailsButton) throw new Error("Transaction details button was not rendered.");
       fireEvent.click(detailsButton);
@@ -754,21 +754,25 @@ describe("Finance section states", () => {
         }),
       );
       fireEvent.click(screen.getByRole("button", { name: "Sort by amount" }));
-      expect(await screen.findByText("0 selected · this page only")).toBeVisible();
+      await waitFor(() =>
+        expect(screen.queryByText(/selected on this page/)).not.toBeInTheDocument(),
+      );
       fireEvent.click(await screen.findByRole("button", { name: "Sort by amount" }));
       await waitFor(() =>
         expect(screen.getByRole("checkbox", { name: "Select this page" })).toBeEnabled(),
       );
       fireEvent.click(screen.getByRole("checkbox", { name: "Select this page" }));
-      fireEvent.click(await screen.findByRole("button", { name: "Next" }));
-      expect(await screen.findByText("0 selected · this page only")).toBeVisible();
+      fireEvent.click(await screen.findByRole("button", { name: "Next page" }));
+      await waitFor(() =>
+        expect(screen.queryByText(/selected on this page/)).not.toBeInTheDocument(),
+      );
       await waitFor(() =>
         expect(api.listFinanceTransactions).toHaveBeenCalledWith(
           expect.objectContaining({ cursor: "next-page" }),
         ),
       );
-      fireEvent.click(await screen.findByRole("button", { name: "Previous" }));
-      fireEvent.click(await screen.findByRole("button", { name: "Next" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Previous page" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Next page" }));
       await waitFor(() =>
         expect(screen.getByRole("checkbox", { name: "Select this page" })).toBeEnabled(),
       );
@@ -786,8 +790,10 @@ describe("Finance section states", () => {
         ),
       );
       expect(api.listFinanceTransactions.mock.calls.every(([query]) => !query.cursor)).toBe(true);
-      expect(await screen.findByRole("button", { name: "Previous" })).toBeDisabled();
-      expect(await screen.findByText("0 selected · this page only")).toBeVisible();
+      expect(await screen.findByRole("button", { name: "Previous page" })).toBeDisabled();
+      await waitFor(() =>
+        expect(screen.queryByText(/selected on this page/)).not.toBeInTheDocument(),
+      );
       return;
     }
   }, 10_000);
@@ -1135,7 +1141,7 @@ describe("Finance section states", () => {
         fireEvent.click(await screen.findByRole("button", { name: `Sort by ${label}` }));
         await screen.findByRole("table", { name: "Transactions" });
       }
-      expect(screen.getByRole("columnheader", { name: "Status" })).toBeVisible();
+      expect(screen.getByRole("columnheader", { name: /^Status/ })).toBeVisible();
       expect(screen.getByRole("button", { name: "Posted" })).toBeVisible();
       fireEvent.keyDown(screen.getByRole("row", { name: "Open Cafe transaction" }), {
         key: "Enter",
@@ -1149,7 +1155,7 @@ describe("Finance section states", () => {
       expect(await screen.findByRole("dialog", { name: /Split Cafe/ })).toBeVisible();
       fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      fireEvent.click(screen.getByRole("button", { name: "Next page" }));
       await waitFor(() =>
         expect(api.listFinanceTransactions).toHaveBeenCalledWith(
           expect.objectContaining({ cursor: "next-ledger-page" }),
@@ -1158,7 +1164,11 @@ describe("Finance section states", () => {
       return;
     }
     for (const item of ["Transactions", "Accounts", "Budget plan", "Categories"]) {
-      await browser.click(screen.getByRole("button", { name: "Export" }));
+      await browser.click(
+        screen.getByRole("button", {
+          name: "Table actions",
+        }),
+      );
       await browser.click(await screen.findByRole("menuitem", { name: item }));
     }
     await waitFor(() => expect(api.exportFinanceData).toHaveBeenCalledTimes(4));
@@ -2121,7 +2131,7 @@ it("loads exact Spending references and keeps contribution totals separate from 
   expect(screen.getByText(/\$10.00 Spending contribution · 2 source transactions/)).toBeVisible();
   expect(screen.queryByRole("button", { name: /^Filters/ })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /Sort by date/ })).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  fireEvent.click(screen.getByRole("button", { name: "Next page" }));
   await waitFor(() =>
     expect(api.listFinanceSpendingTransactions).toHaveBeenCalledWith(
       exactSpendingFilter,
@@ -2296,7 +2306,7 @@ it.each([
       ),
     ).toEqual(exactSpendingFilter);
   }
-  fireEvent.click(screen.getByLabelText("Open Canonical cafe transaction"));
+  fireEvent.click(screen.getByRole("button", { name: "Open Canonical cafe transaction" }));
   const detail = await screen.findByRole("dialog", { name: "Canonical cafe" });
   expect(within(detail).getByText(/Meals & groceries/)).toBeVisible();
   expect(within(detail).getByText("−$18.50")).toBeVisible();
@@ -2327,7 +2337,7 @@ it.each([
     await screen.findByText(state === "loading" ? "Loading category…" : "Category unavailable"),
   ).toBeVisible();
   expect(screen.queryByText("Shopping")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByLabelText("Open Canonical cafe transaction"));
+  fireEvent.click(screen.getByRole("button", { name: "Open Canonical cafe transaction" }));
   const detail = await screen.findByRole("dialog", { name: "Canonical cafe" });
   expect(
     within(detail).getByText(state === "loading" ? /Loading category…/ : /Category unavailable/),

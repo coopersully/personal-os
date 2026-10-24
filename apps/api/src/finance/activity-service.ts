@@ -1,5 +1,8 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import {
+  accessTokens,
+  agentAccountConnections,
+  agentAccounts,
   auditEvents,
   type Database,
   financeContextualAnswers,
@@ -17,7 +20,7 @@ import {
   idSchema,
   isoDateTimeSchema,
 } from "@personal-os/domain";
-import { and, desc, eq, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { AppError } from "../errors.js";
 import {
@@ -335,6 +338,50 @@ export function createFinanceActivityService({
       const entries = selected
         .map((source) => source.entry)
         .filter((entry): entry is FinanceActivityEntry => entry !== null);
+      const actorIds = entries
+        .filter(
+          (entry) =>
+            entry.actor.type === "agent" &&
+            entry.actor.id &&
+            idSchema.safeParse(entry.actor.id).success,
+        )
+        .map((entry) => entry.actor.id as string);
+      if (actorIds.length) {
+        const actors = await db
+          .select({ actorId: accessTokens.id, account: agentAccounts })
+          .from(accessTokens)
+          .innerJoin(
+            agentAccountConnections,
+            and(
+              eq(agentAccountConnections.userId, accessTokens.userId),
+              eq(
+                agentAccountConnections.authorizationConnectionId,
+                accessTokens.authorizationConnectionId,
+              ),
+            ),
+          )
+          .innerJoin(
+            agentAccounts,
+            and(
+              eq(agentAccounts.userId, agentAccountConnections.userId),
+              eq(agentAccounts.id, agentAccountConnections.agentAccountId),
+            ),
+          )
+          .where(and(eq(accessTokens.userId, userId), inArray(accessTokens.id, actorIds)));
+        const profiles = new Map(
+          actors.map((actor) => [
+            actor.actorId,
+            {
+              ...actor.account,
+              createdAt: actor.account.createdAt.toISOString(),
+              updatedAt: actor.account.updatedAt.toISOString(),
+            },
+          ]),
+        );
+        for (const entry of entries)
+          if (entry.actor.type === "agent" && entry.actor.id)
+            entry.agentAccount = profiles.get(entry.actor.id) ?? null;
+      }
       const last = selected.at(-1);
       return page(
         entries,

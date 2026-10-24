@@ -63,7 +63,7 @@ import {
 import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
-import { isActiveBudgetAction, requireHumanBudgetApproval } from "./finance/budget-authority.js";
+import { isActiveBudgetAction } from "./finance/budget-authority.js";
 import { commitFinanceCandidateEffects } from "./finance/candidate-effect-receipt.js";
 import { lockFinanceEffectOwner } from "./finance/conversation-causality.js";
 import {
@@ -1928,17 +1928,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         if (!input.success)
           return missing("Provide a valid reimbursement operation and its current revision.", [
             expectedAnswer("operation", "string", {
-              choices: ["create", "match_credit", "cancel"],
+              choices: ["create", "match_credit", "cancel", "correct_expected", "unmatch_credit"],
             }),
           ]);
-        if (
-          input.data.operation === "correct_expected" ||
-          input.data.operation === "unmatch_credit"
-        )
-          return missing(
-            "Reimbursement corrections require the person's explicit confirmation in Cash flow.",
-            [],
-          );
         if (
           input.data.operation === "create" &&
           actorType === "agent" &&
@@ -2190,7 +2182,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           matches: matches.map((match) => [match.id, match.amount, match.updatedAt.toISOString()]),
         });
         // Evidence references are capability-bearing provenance, never caller
-        // assertions. Retain the bounded human summary but replace every
+        // assertions. Retain the bounded summary but replace every
         // supplied reference with the owned records just locked above.
         const canonicalInput = {
           ...input.data,
@@ -2209,7 +2201,11 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
                   ? "Cancel the reimbursement and restore its unmatched share to personal spending."
                   : input.data.operation === "match_credit"
                     ? "Match an observed credit to a reimbursement."
-                    : "Track an expected reimbursement against a reimbursable allocation.",
+                    : input.data.operation === "correct_expected"
+                      ? "Correct the expected reimbursement amount and payer."
+                      : input.data.operation === "unmatch_credit"
+                        ? "Remove the incorrect reimbursement credit match."
+                        : "Track an expected reimbursement against a reimbursable allocation.",
             },
           ],
           [
@@ -3013,16 +3009,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       return { candidateId, status: "superseded" as const };
     };
     if (!hasExpectedItems) return supersedeAndRebuild();
-    const needsBudgetApproval = preparedItems.some((item) => {
-      const payload = item.privatePayload as {
-        actionKind?: string;
-        input?: Record<string, unknown>;
-      };
-      return payload.input && isActiveBudgetAction(payload.actionKind ?? "", payload.input);
-    });
-    if (needsBudgetApproval && input.reviewId)
-      requireHumanBudgetApproval(input.humanApproval?.principal ?? context.principal);
-    if (input.mode === "queue" || (needsBudgetApproval && !input.humanApproval)) {
+    if (input.mode === "queue") {
       const fingerprint = `sha256:${createHash("sha256")
         .update(
           JSON.stringify({
@@ -3592,7 +3579,8 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       // source revision; authentication alone cannot make a delayed PUT fresh.
       if (
         context.principal.actorType === "user" &&
-        isActiveBudgetAction(prepared.actionKind, prepared.input)
+        isActiveBudgetAction(prepared.actionKind, prepared.input) &&
+        !(await readBypass(db, context.principal.userId))
       ) {
         return db.transaction(async (tx) => {
           const current = await revalidate(prepared, context.principal.userId, tx, "user");
@@ -3606,17 +3594,17 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       // Lock and re-read immediately before the semantic writer. This closes
       // the setting TOCTOU window for agent actions without accepting token or
       // request-body bypass authority.
-      if (context.principal.actorType === "agent") {
+      if (
+        context.principal.actorType === "agent" ||
+        isActiveBudgetAction(prepared.actionKind, prepared.input)
+      ) {
         return db.transaction(async (tx) => {
           // Reimbursement terminal paths hold topology before every semantic
           // lock, including the bypass-setting row. A new proposal must take
           // the same order while it revalidates or queues beside them.
           if (prepared.actionKind === "reimbursement")
             await lockReimbursementTopology(tx, context.principal.userId);
-          if (
-            isActiveBudgetAction(prepared.actionKind, prepared.input) ||
-            !(await readBypass(tx, context.principal.userId, true))
-          ) {
+          if (!(await readBypass(tx, context.principal.userId, true))) {
             const current = await revalidate(prepared, context.principal.userId, tx, "agent");
             if ("status" in current) return current;
             return {
@@ -3705,13 +3693,6 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           review.updatedAt.getTime() !== preview.updatedAt.getTime()
         )
           throw new AppError("conflict", "The Finance action review changed before approval.");
-        if (
-          isActiveBudgetAction(
-            review.actionKind,
-            (review.privatePayload as StoredPayload).input ?? {},
-          )
-        )
-          requireHumanBudgetApproval(context.principal);
         const payload = review.privatePayload as StoredPayload;
         if (review.status === "applied") {
           return { result: payload.result as T, status: "applied" };
@@ -4088,10 +4069,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             }),
           );
           return { question: nextQuestion, status: "needs_input" };
-        } else if (
-          isActiveBudgetAction(prepared.actionKind, prepared.input) ||
-          !(await readBypass(tx, context.principal.userId, true))
-        ) {
+        } else if (!(await readBypass(tx, context.principal.userId, true))) {
           outcome = {
             review: (await queue(prepared, actionContext, tx)) as FinancePendingActionReview,
             status: "pending_review",

@@ -230,3 +230,16 @@ it("discards a failed evidence read after unmount without replaying an error toa
   await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
   expect(toast.error).not.toHaveBeenCalled();
 });
+
+it("shows the supplied profile alongside the recorded actor without relabeling change actors", async () => {
+  const { agentAccountFixture } = await import("../../test-fixtures/agent-account");
+  mount({
+    ...entry(),
+    actor: { type: "agent", id: "recorded-actor" },
+    agentAccount: agentAccountFixture,
+  });
+  expect(screen.getByText("Cedar Fox")).toBeVisible();
+  expect(screen.getByText(/recorded-actor/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Inspect evidence" }));
+  expect(screen.getByText(/Budget activated · user/)).toBeVisible();
+});

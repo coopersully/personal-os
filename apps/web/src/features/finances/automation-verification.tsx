@@ -3,15 +3,16 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogTrigger as DialogTrigger,
+  ResponsiveDialogBody,
+} from "@/components/responsive-dialog";
+import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "../../api.js";
@@ -171,7 +172,7 @@ export function AutomationVerification({
           Verify message access
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto">
+      <DialogContent data-finance-dialog data-finance-size="default">
         <DialogHeader>
           <DialogTitle>Verify message access</DialogTitle>
           <DialogDescription>
@@ -179,30 +180,32 @@ export function AutomationVerification({
             Registration alone does not unlock Chat.
           </DialogDescription>
         </DialogHeader>
-        <Button disabled={pending || disabled} onClick={() => void act("issue")}>
-          {challenge ? "Prepare a new challenge" : "Prepare verification challenge"}
-        </Button>
-        {challenge ? (
-          <>
-            <Field>
-              <FieldLabel htmlFor={`verification-${scheduleId}`}>
-                Instructions for your original host
-              </FieldLabel>
-              <Textarea
-                id={`verification-${scheduleId}`}
-                readOnly
-                value={instructions}
-                className="min-h-64"
-              />
-            </Field>
-            <Button disabled={pending} onClick={() => void act("copy")}>
-              Copy verification instructions
-            </Button>
-          </>
-        ) : null}
-        <Button variant="outline" disabled={pending} onClick={() => void act("check")}>
-          Check Chat readiness
-        </Button>
+        <ResponsiveDialogBody>
+          <Button disabled={pending || disabled} onClick={() => void act("issue")}>
+            {challenge ? "Prepare a new challenge" : "Prepare verification challenge"}
+          </Button>
+          {challenge ? (
+            <>
+              <Field>
+                <FieldLabel htmlFor={`verification-${scheduleId}`}>
+                  Instructions for your original host
+                </FieldLabel>
+                <Textarea
+                  id={`verification-${scheduleId}`}
+                  readOnly
+                  value={instructions}
+                  className="min-h-64"
+                />
+              </Field>
+              <Button disabled={pending} onClick={() => void act("copy")}>
+                Copy verification instructions
+              </Button>
+            </>
+          ) : null}
+          <Button variant="outline" disabled={pending} onClick={() => void act("check")}>
+            Check Chat readiness
+          </Button>
+        </ResponsiveDialogBody>
       </DialogContent>
     </Dialog>
   );

@@ -2,8 +2,8 @@ import { expect, test } from "@playwright/test";
 import { qaFixtureAccounts } from "../apps/api/src/qa-fixtures.js";
 import type { FinanceConfiguration } from "../packages/domain/src/index.js";
 
-const demoAccount = qaFixtureAccounts.find((account) => account.key === "demo-full");
-if (!demoAccount) throw new Error("The demo-full QA fixture is required.");
+const demoAccount = qaFixtureAccounts.find((account) => account.key === "qa-loaded");
+if (!demoAccount) throw new Error("The qa-loaded QA fixture is required.");
 
 test("an incomplete first plan survives reload and leaves bookkeeping available", async ({
   page,
@@ -75,6 +75,9 @@ test("an incomplete first plan survives reload and leaves bookkeeping available"
   await page.goto("/finances/transactions?view=table");
   await expect(page).toHaveURL(/\/finances\/transactions\?view=table$/);
   await expect(
-    page.getByRole("row", { name: "Open Sq Unknown Popup transaction", exact: true }),
+    page.getByRole(testInfo.project.use.isMobile ? "button" : "row", {
+      name: "Open SQ *UNKNOWN POPUP 8821 transaction",
+      exact: true,
+    }),
   ).toBeVisible();
 });

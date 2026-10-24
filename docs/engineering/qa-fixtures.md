@@ -94,3 +94,26 @@ projects, reminders, calendar, mail, financial records, rituals and past respons
 should preview a concrete decision grounded in those records. Include completed and cancelled
 work, quiet days, interruptions, realistic overdue items, and long or missing optional fields.
 Use fictional people/providers and relative dates; do not equate more records with better coverage.
+
+## Optional homepage premiere story
+
+For marketing captures, `QA_PREMIERE_STORY=true` opts the fixture loader into
+`apps/api/src/qa-premiere-story.ts`. It replaces only `demo-full` records after the standard
+fixture has been assembled. Normal fixture loads retain the planning story above.
+Use this only with the disposable worktree runtime; loading fixtures resets the named fixture users.
+The flag must reach the API container's `scripts/qa-fixtures.ts load` invocation.
+
+The fictional filmmaker Alex is preparing the first screening of *After the rain*. Eight tasks
+show four completed production steps and four final commitments. Five mail threads confirm the
+film, venue, posters, and guests; twelve calendar events cover the final week. Nine settled
+transactions record $6,800 income and $3,520 expenses, leaving $3,280 in the film fund. Dates
+roll relative to fixture load time in America/New_York. All accounts are manual, USD, and
+individually owned. This does not imply a live bank connection or an agent taking those actions.
+
+Capture the actual local UI in light mode: the Premiere night project with Open & completed
+status, the cinema confirmation in Mail, working hours in Calendar week view, and the Finances
+transaction table. The finance capture was taken after completing the real manual setup flow
+(country US/NY, household one, variable monthly take-home $3,600, liquid reserves $9,280,
+$500 buffer, no declared debts/bills). Onboarding completion is a UI step, not synthesized by
+this fixture overlay. Keep unfinished budget/profile states honest; the campaign does not
+show an approved budget or automatic financial recommendations.

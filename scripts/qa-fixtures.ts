@@ -37,7 +37,9 @@ async function load(): Promise<void> {
       database.db,
       process.env.MIGRATIONS_DIR ?? resolve(process.cwd(), "packages/database/migrations"),
     );
-    const result = await loadQaFixtures(database.db);
+    const result = await loadQaFixtures(database.db, {
+      premiereStory: process.env.QA_PREMIERE_STORY === "true",
+    });
     process.stdout.write(`Loaded ${result.accountCount} QA fixture accounts.\n\n`);
     printAccounts();
   } finally {

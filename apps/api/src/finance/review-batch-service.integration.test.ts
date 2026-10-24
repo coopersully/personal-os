@@ -444,7 +444,10 @@ describe.sequential("durable Finance review batches", () => {
     const run = await f.service.preview({ ...f.input, decisions: [f.decision] }, f.agentContext);
     await f.service.execute(run.id, { fingerprint: run.fingerprint }, f.agentContext);
     const thirdId = randomUUID();
-    await database.db.insert(financeTransactions).values({ ...original, id: thirdId });
+    const [thirdTransaction] = await database.db
+      .insert(financeTransactions)
+      .values({ ...original, id: thirdId, contextualRevision: 1n })
+      .returning();
     const [thirdReview] = await database.db
       .insert(financeReviewCases)
       .values({
@@ -457,12 +460,17 @@ describe.sequential("durable Finance review batches", () => {
     const third = {
       ...f.decision,
       transactionId: thirdId,
+      expectedTransactionRevision: required(thirdTransaction).contextualRevision.toString(),
       reviewId: required(thirdReview).id,
       expectedReviewRevision: "1",
     };
     await expect(
       f.service.preview({ idempotencyKey: randomUUID(), decisions: [third] }, f.agentContext),
-    ).rejects.toMatchObject({ code: "invalid_request" });
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      message:
+        "Confirming this transfer requires a unique owned counterpart with current source evidence.",
+    });
     // The original second leg must also retain reciprocal uniqueness when a new
     // ambiguous candidate appears, even though its confirmed partner is bound.
     await expect(

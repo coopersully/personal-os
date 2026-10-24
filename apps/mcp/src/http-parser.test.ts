@@ -22,6 +22,11 @@ function post(server: Server, body: Buffer): Promise<number> {
         response.on("end", () => resolve(response.statusCode ?? 0));
       },
     );
+    const deadline = setTimeout(
+      () => req.destroy(new Error("Compressed JSON request exceeded its deadline")),
+      1000,
+    );
+    req.once("close", () => clearTimeout(deadline));
     req.on("error", reject);
     req.end(body);
   });
@@ -118,6 +123,7 @@ describe("MCP Express JSON dependency boundary", () => {
       await new Promise((resolve) => setTimeout(resolve, 200));
       expect(await post(server, compressed)).toBe(204);
     } finally {
+      server.closeAllConnections();
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),
       );

@@ -22,6 +22,25 @@ const terms = () => ({
 });
 
 describe("explicit hypothetical budget policy terms", () => {
+  it("keeps persisted policy timestamps at second precision", () => {
+    expect(
+      financeBudgetPolicyTermsSchema.safeParse({ ...terms(), expiresAt: "2026-10-01T04:00Z" })
+        .success,
+    ).toBe(false);
+    expect(
+      financeBudgetPolicyEvaluationInputSchema.safeParse({
+        ...availableEvaluation(),
+        evaluatedAt: "2026-09-20T12:00Z",
+      }).success,
+    ).toBe(false);
+    expect(
+      financeBudgetPolicyEvaluationSchema.safeParse({
+        ...preview(),
+        evaluatedAt: "2026-09-20T12:00Z",
+      }).success,
+    ).toBe(false);
+  });
+
   it("requires every term, without injecting authority or defaults", () => {
     const input = terms();
     expect(financeBudgetPolicyTermsSchema.parse(input)).toEqual(input);

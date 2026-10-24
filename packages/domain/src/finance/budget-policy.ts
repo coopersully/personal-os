@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { idSchema, isoDateTimeSchema } from "../common.js";
+import { idSchema } from "../common.js";
 import { financePositionEvidenceSchema, financeRevisionRefSchema } from "./workflow-contracts.js";
 
 /** Explicit terms for hypothetical evaluation only; this contract confers no authority. */
@@ -11,6 +11,8 @@ const keySchema = z
   .min(1)
   .max(120)
   .refine((value) => value.length <= 120, "Use at most 120 characters.");
+// Immutable budget-policy JSON packets require seconds (migration 0087).
+const policyInstantSchema = z.iso.datetime({ offset: true });
 const revisionRef = financeRevisionRefSchema.readonly();
 
 export const financeBudgetPolicyPeriodSchema = z
@@ -41,7 +43,7 @@ export const financeBudgetPolicyTermsSchema = z
     usageScope: z.literal("user_month_all_policy_versions"),
     perChangeCapCents: financeBudgetPolicyCentsSchema,
     monthlyCapCents: financeBudgetPolicyCentsSchema,
-    expiresAt: isoDateTimeSchema,
+    expiresAt: policyInstantSchema,
     baseline: revisionRef,
     directions: z
       .array(
@@ -192,7 +194,7 @@ function immutableEvidence<T>(value: T): ImmutableEvidence<T> {
 
 export const financeBudgetPolicyEvaluationInputSchema = z
   .object({
-    evaluatedAt: isoDateTimeSchema,
+    evaluatedAt: policyInstantSchema,
     terms: financeBudgetPolicyTermsSchema,
     policyState: z.enum(["draft", "disabled", "expired", "unknown"]),
     expected: financeBudgetPolicyRevisionTupleSchema,
@@ -267,7 +269,7 @@ export const financeBudgetPolicyEvaluationSchema = z
     executionUnavailableReasons: z
       .tuple([z.literal("authority_not_wired"), z.literal("position_commit_fence_not_wired")])
       .readonly(),
-    evaluatedAt: isoDateTimeSchema,
+    evaluatedAt: policyInstantSchema,
     input: financeBudgetPolicyEvaluationInputSchema,
     revisions: financeBudgetPolicyRevisionTupleSchema,
     reasons: z.array(financeBudgetPolicyDenialReasonSchema).readonly(),

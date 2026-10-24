@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { utcIsoDateTimeSchema } from "./common.js";
 import {
   accountSetupStateSchema,
   actorTypeSchema,
@@ -1132,6 +1133,36 @@ describe("domain schemas", () => {
     expect(formatDateOnly("2026-06-06", { day: "numeric", month: "short", year: "numeric" })).toBe(
       "Jun 6, 2026",
     );
+  });
+
+  it("preserves qualified minute timestamps without accepting invalid dates or local times", () => {
+    for (const value of [
+      "2026-10-24T12:34Z",
+      "2026-10-24T12:34+02:00",
+      "2026-10-24T12:34:56Z",
+      "2026-10-24T12:34:56.123-04:00",
+    ]) {
+      expect(isoDateTimeSchema.parse(value)).toBe(value);
+      expect(createReminderInputSchema.parse({ title: "Reminder", dueAt: value }).dueAt).toBe(
+        value,
+      );
+      expect(createTaskInputSchema.parse({ title: "Task", dueAt: value }).dueAt).toBe(value);
+    }
+    for (const value of [
+      "2026-02-30T12:34Z",
+      "2026-10-24T25:34Z",
+      "2026-10-24T12:34+24:00",
+      "2026-10-24T12:34",
+    ]) {
+      expect(isoDateTimeSchema.safeParse(value).success).toBe(false);
+    }
+  });
+
+  it("preserves minute UTC timestamps without admitting offsets into UTC-only fields", () => {
+    expect(utcIsoDateTimeSchema.parse("2026-10-24T12:34Z")).toBe("2026-10-24T12:34Z");
+    expect(utcIsoDateTimeSchema.parse("2026-10-24T12:34:56.123Z")).toBe("2026-10-24T12:34:56.123Z");
+    expect(utcIsoDateTimeSchema.safeParse("2026-10-24T12:34+02:00").success).toBe(false);
+    expect(utcIsoDateTimeSchema.safeParse("2026-10-24T12:34").success).toBe(false);
   });
 
   it("parses common, auth, and reminder values", () => {

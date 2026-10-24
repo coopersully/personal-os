@@ -75,6 +75,9 @@ test("an incomplete first plan survives reload and leaves bookkeeping available"
   await page.goto("/finances/transactions?view=table");
   await expect(page).toHaveURL(/\/finances\/transactions\?view=table$/);
   await expect(
-    page.getByRole("row", { name: "Open SQ *UNKNOWN POPUP 8821 transaction", exact: true }),
+    page.getByRole(testInfo.project.use.isMobile ? "button" : "row", {
+      name: "Open SQ *UNKNOWN POPUP 8821 transaction",
+      exact: true,
+    }),
   ).toBeVisible();
 });

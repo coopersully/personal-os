@@ -173,7 +173,7 @@ describe.sequential("Finance review backlog complete owner reads", () => {
 
   it("pages more than a scan chunk exactly and bounds payload without truncating totals", async () => {
     await database.db.insert(financeTransactions).values(
-      Array.from({ length: 507 }, (_, i) => ({
+      Array.from({ length: 2007 }, (_, i) => ({
         userId,
         accountId,
         merchant: i % 2 ? "Card payment" : "Roundup",
@@ -183,7 +183,7 @@ describe.sequential("Finance review backlog complete owner reads", () => {
       })),
     );
     const assessment = await service().assess(userId);
-    expect(assessment.counts.needsReviewTransactions).toBe(507);
+    expect(assessment.counts.needsReviewTransactions).toBe(2007);
     let cursor: string | undefined;
     const ids: string[] = [];
     do {
@@ -192,15 +192,15 @@ describe.sequential("Finance review backlog complete owner reads", () => {
         limit: 100,
         ...(cursor ? { cursor } : {}),
       });
-      expect(page.total).toBe(254);
+      expect(page.total).toBe(1004);
       expect(page.items.length).toBeLessThanOrEqual(100);
       expect(page.snapshot).toBe(assessment.snapshot);
       expect(page.complete).toBe(page.nextCursor === null);
       ids.push(...page.items.map((item) => item.id));
       cursor = page.nextCursor ?? undefined;
     } while (cursor);
-    expect(ids).toHaveLength(254);
-    expect(new Set(ids).size).toBe(254);
+    expect(ids).toHaveLength(1004);
+    expect(new Set(ids).size).toBe(1004);
     expect(ids).toEqual([...ids].sort());
   }, 20_000);
 

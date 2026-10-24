@@ -23,7 +23,12 @@ export function spendingSummaryBudget(result: FinanceSpendingDashboard) {
   );
   const limit = rows.reduce((sum, row) => sum + (row.budgetCents ?? 0), 0);
   const used = rows.reduce((sum, row) => sum + row.usedCents, 0);
-  return { limit, used, rows, month: formatDateOnly(budget.period.from, { month: "short" }) };
+  return {
+    limit,
+    used,
+    rows,
+    month: formatDateOnly(budget.period.from, { month: "short", year: "numeric" }),
+  };
 }
 function Fill({ used, limit }: { used: number; limit: number }) {
   return (
@@ -53,7 +58,7 @@ export function SpendingSummary({
   const groupBudget = budget?.rows.find((row) => row.groupId === largestGroup?.id);
   const progress =
     budget && budget.limit > 0
-      ? `${formatMoney(budget.limit / 100)} · ${Math.round((budget.used / budget.limit) * 100)}%`
+      ? `${budget.month} budget · ${formatMoney(budget.limit / 100)} · ${Math.round((budget.used / budget.limit) * 100)}% used`
       : "Budget unavailable";
   const throughToday =
     result.snapshot.scope.from <= today && result.snapshot.scope.through >= today;
@@ -65,7 +70,7 @@ export function SpendingSummary({
           <button
             type="button"
             aria-label="Spending breakdown"
-            className="relative w-full text-left"
+            className="relative w-full rounded-xl text-left border border-transparent focus-visible:border-foreground/50"
           >
             <CardHeader>
               <CardTitle>
@@ -81,14 +86,29 @@ export function SpendingSummary({
                   formatted={formatMoney(result.snapshot.netCents / 100)}
                 />
               </p>
-              <p className="truncate text-xs text-muted-foreground" title={progress}>
+              <p
+                className="truncate text-xs text-muted-foreground"
+                title={
+                  budget
+                    ? `${budget.month} observed spending ${formatMoney(budget.used / 100)} of ${formatMoney(budget.limit / 100)}`
+                    : progress
+                }
+              >
                 {progress}
               </p>
             </CardContent>
           </button>
         </DialogTrigger>
       </Card>
-      <Card size="sm" className="relative">
+      <Card
+        size="sm"
+        className="relative"
+        aria-description={
+          budget
+            ? `Fill shows ${budget.month} budget usage: ${formatMoney(budget.used / 100)} of ${formatMoney(budget.limit / 100)}.`
+            : "Monthly budget unavailable."
+        }
+      >
         <Fill used={budget?.used ?? 0} limit={budget?.limit ?? 0} />
         <CardHeader className="relative">
           <CardTitle>Daily average</CardTitle>
@@ -127,7 +147,7 @@ export function SpendingSummary({
           {largestGroup ? (
             <button
               type="button"
-              className="max-w-full truncate text-left text-xs text-muted-foreground hover:text-foreground"
+              className="max-w-full truncate rounded-sm text-left text-xs text-muted-foreground hover:text-foreground border border-transparent focus-visible:border-foreground/50"
               aria-label={`Inspect largest spending group: ${largestGroup.label}`}
               title={
                 groupBudget?.budgetCents
@@ -138,7 +158,7 @@ export function SpendingSummary({
             >
               {largestGroup.label}
               {groupBudget?.budgetCents
-                ? ` · ${Math.round((groupBudget.usedCents / groupBudget.budgetCents) * 100)}%`
+                ? ` · ${budget?.month} ${Math.round((groupBudget.usedCents / groupBudget.budgetCents) * 100)}%`
                 : ""}
             </button>
           ) : (

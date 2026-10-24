@@ -815,3 +815,12 @@ it("scopes setup approval entry to the actual proposal and excludes plan creatio
   );
   expect(api.createFinanceBudget).not.toHaveBeenCalled();
 });
+
+it("reports a failed bucket inventory through Sonner without claiming it is empty", async () => {
+  api.listFinanceBudgetBuckets.mockRejectedValue(new Error("Bucket inventory unavailable"));
+  mount();
+  await waitFor(() => expect(notifications.error).toHaveBeenCalled());
+  expect(screen.queryByText("No budget buckets yet.")).not.toBeInTheDocument();
+  expect(screen.queryByText("Bucket inventory unavailable")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Budget buckets" })).toBeVisible();
+});

@@ -288,7 +288,7 @@ export function SpendingBubbles({
                 touchAction: "none",
                 backgroundColor: visual.backgroundColor,
               }}
-              className="group absolute left-0 top-0 flex flex-col items-center justify-center gap-1 overflow-hidden rounded-full border-0 p-0 text-foreground"
+              className="group absolute left-0 top-0 flex flex-col items-center justify-center gap-1 overflow-hidden rounded-full border border-transparent p-0 text-foreground focus-visible:border-foreground/50"
               transition={
                 reduced
                   ? { duration: 0 }

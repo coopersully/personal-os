@@ -189,7 +189,9 @@ export function OccurrenceMatchDialog(props: OccurrenceMatchDialogProps) {
                       {event.amountCents / 100} {event.currencyCode} · {event.recordedAt} ·{" "}
                       {event.rationale}
                       <p className="break-all text-xs text-muted-foreground">
-                        Event {event.id} · Actor {event.actorUserId} · Transaction revision{" "}
+                        Event {event.id} ·{" "}
+                        {event.approvalActor?.type === "agent" ? "Agent" : "User"}{" "}
+                        {event.approvalActor?.id ?? event.actorUserId} · Transaction revision{" "}
                         {event.transactionRevision}
                         {event.allocationId
                           ? ` · Allocation ${event.allocationId} revision ${event.allocationRevision}`

@@ -63,7 +63,7 @@ export function registerFinanceReviewBacklogRoutes({
       await batches.execute(
         idSchema.parse(c.req.param("id")),
         await parseBody(c, executeFinanceReviewBatchInputSchema),
-        context(c),
+        { ...context(c), signal: c.req.raw.signal },
       ),
     ),
   );

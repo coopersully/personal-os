@@ -97,7 +97,7 @@ describe("connection-bound host controls", () => {
         entityType: "automation_host_schedule",
         entityId: created.schedule.id,
         before: null,
-        after: { templateVersion: 1, scheduleVersionAtIssue: 1 },
+        after: { templateVersion: 2, scheduleVersionAtIssue: 1 },
       }),
     ]);
     expect(scheduleAudit).toHaveLength(lifecycleAudit.length + promptAudit.length);
@@ -320,7 +320,7 @@ describe("connection-bound host controls", () => {
     expect(original).toBeDefined();
     const exact = await a.client.callTool({
       name: "get_finance_host_prompt",
-      arguments: { scheduleId, templateVersion: 1 },
+      arguments: { scheduleId, templateVersion: 2 },
     });
     expect(exact.isError, JSON.stringify(exact)).not.toBe(true);
     expect(exact.structuredContent).toMatchObject({ result: original });
@@ -329,11 +329,11 @@ describe("connection-bound host controls", () => {
       arguments: { scheduleId, limit: 1 },
     });
     expect(history.structuredContent).toMatchObject({
-      result: { issues: [original], nextCursor: null, currentTemplateVersion: 1 },
+      result: { issues: [original], nextCursor: null, currentTemplateVersion: 2 },
     });
     const empty = await a.client.callTool({
       name: "get_finance_host_prompt_history",
-      arguments: { scheduleId, beforeVersion: 1, limit: 1 },
+      arguments: { scheduleId, beforeVersion: 2, limit: 1 },
     });
     expect(empty.structuredContent).toMatchObject({ result: { issues: [], nextCursor: null } });
     for (const name of [
@@ -345,7 +345,7 @@ describe("connection-bound host controls", () => {
         name,
         arguments: {
           scheduleId,
-          ...(name === "get_finance_host_prompt_history" ? {} : { templateVersion: 1 }),
+          ...(name === "get_finance_host_prompt_history" ? {} : { templateVersion: 2 }),
           ...(name === "issue_finance_host_prompt" ? { expectedScheduleVersion: 1 } : {}),
         },
       });
@@ -359,22 +359,22 @@ describe("connection-bound host controls", () => {
     await f.setBypass(false);
     const denied = await a.client.callTool({
       name: "issue_finance_host_prompt",
-      arguments: { scheduleId, templateVersion: 1, expectedScheduleVersion: 1 },
+      arguments: { scheduleId, templateVersion: 2, expectedScheduleVersion: 1 },
     });
     expect(denied.isError).toBe(true);
     expect(denied.structuredContent).toMatchObject({ error: { code: "forbidden" } });
     await f.setBypass(true);
     const issued = await a.client.callTool({
       name: "issue_finance_host_prompt",
-      arguments: { scheduleId, templateVersion: 1, expectedScheduleVersion: 1 },
+      arguments: { scheduleId, templateVersion: 2, expectedScheduleVersion: 1 },
     });
     expect(issued.isError, JSON.stringify(issued)).not.toBe(true);
     expect(issued.structuredContent).toMatchObject({
-      result: { scheduleId, templateVersion: 1, scheduleVersionAtIssue: 1, text: original?.text },
+      result: { scheduleId, templateVersion: 2, scheduleVersionAtIssue: 1, text: original?.text },
     });
     const replay = await a.client.callTool({
       name: "issue_finance_host_prompt",
-      arguments: { scheduleId, templateVersion: 1, expectedScheduleVersion: 1 },
+      arguments: { scheduleId, templateVersion: 2, expectedScheduleVersion: 1 },
     });
     expect((replay.structuredContent as { result: unknown }).result).toEqual(
       (issued.structuredContent as { result: unknown }).result,

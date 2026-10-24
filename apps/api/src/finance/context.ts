@@ -272,7 +272,7 @@ export async function executeFinanceIdempotently<T extends Record<string, unknow
 
   const execute = async (tx: FinanceTransaction, markClaimed: () => void) => {
     if (context.actorType === "agent" && context.requiresApprovalBypass)
-      await requireFinanceExecution(tx, context);
+      await requireFinanceExecution(tx, context, new Date());
     if (operation.requireUserAdmission && !(await admitFinanceUser(tx, context.userId))) {
       throw new AppError("not_found", "Account not found.");
     }
@@ -333,6 +333,9 @@ export async function executeFinanceIdempotently<T extends Record<string, unknow
       /* v8 ignore stop */
       record = inserted;
     }
+    // Admission and idempotency locks may outlive the token. Recheck at the write boundary.
+    if (context.actorType === "agent" && context.requiresApprovalBypass)
+      await requireFinanceExecution(tx, context, new Date());
     markClaimed();
     const response = await mutate(tx);
     await tx

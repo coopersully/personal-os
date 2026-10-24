@@ -102,12 +102,15 @@ test("the repository QA fixture login exposes representative workspace data", as
   await page.goto("/mail");
   await expect(page.getByText("Board packet for Friday", { exact: true })).toBeVisible();
   await page.goto("/finances/transactions?view=table");
-  const unknownTransaction = page.getByRole("row", {
+  const unknownTransaction = page.getByRole(test.info().project.use.isMobile ? "button" : "row", {
     name: "Open SQ *UNKNOWN POPUP 8821 transaction",
     exact: true,
   });
   await expect(unknownTransaction).toBeVisible();
-  await expect(unknownTransaction.getByText("Uncategorized", { exact: true })).toBeVisible();
+  const transactionDetails = test.info().project.use.isMobile
+    ? page.locator("dl").filter({ has: unknownTransaction })
+    : unknownTransaction;
+  await expect(transactionDetails.getByText("Uncategorized", { exact: true })).toBeVisible();
 });
 
 test("desktop navigation fills the viewport while long content scrolls independently", async ({

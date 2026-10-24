@@ -94,6 +94,41 @@ it("catches up through DST/month rollover without duplicates, lost edits, sessio
         where: (row, { eq }) => eq(row.throughDate, "2026-11-02"),
       }),
     ).toHaveLength(4);
+    // Simulate a dormant local runtime and concurrent startup/timer recovery across a year.
+    const restartAt = new Date("2027-01-10T17:00:00Z");
+    expect(await refreshQaFinanceFixtures(database.db, restartAt)).toMatchObject({
+      days: 31,
+      caughtUp: false,
+    });
+    const firstCoverage = await database.db.query.financeTransactionCoverage.findMany();
+    expect(firstCoverage.every((row) => row.throughDate <= "2026-12-04")).toBe(true);
+    const resumed = await Promise.all([
+      refreshQaFinanceFixtures(database.db, restartAt),
+      refreshQaFinanceFixtures(database.db, restartAt),
+    ]);
+    expect(resumed.map((row) => row?.days).sort((a, b) => (a ?? 0) - (b ?? 0))).toEqual([6, 31]);
+    expect(resumed.some((row) => row?.caughtUp)).toBe(true);
+    const recovered = await database.db.query.financeTransactions.findMany({
+      where: (row, { like }) => like(row.providerTransactionId, "fixture-live-%"),
+    });
+    const dates = [...new Set(recovered.map((row) => row.transactionDate))].sort();
+    expect(dates).toHaveLength(71);
+    expect(dates[0]).toBe("2026-11-01");
+    expect(dates.at(-1)).toBe("2027-01-10");
+    expect(new Set(recovered.map((row) => row.providerTransactionId)).size).toBe(recovered.length);
+    expect(await refreshQaFinanceFixtures(database.db, restartAt)).toMatchObject({
+      days: 0,
+      caughtUp: true,
+    });
+    const currentVersions = await database.db.query.financeBudgetVersions.findMany({
+      where: (row, { and, eq }) => and(eq(row.userId, owner), eq(row.effectiveFrom, "2027-01")),
+    });
+    expect(currentVersions).toHaveLength(1);
+    expect(
+      (await database.db.query.financeTransactionCoverage.findMany()).every(
+        (row) => row.throughDate <= "2027-01-09",
+      ),
+    ).toBe(true);
   } finally {
     await database.close();
     await container.stop();

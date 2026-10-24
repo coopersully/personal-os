@@ -3483,7 +3483,7 @@ Persist a bounded proposal with its policy, baseline, and position references. R
 
 ## create_finance_category
 
-Create a named financial category; inspect get_finance_categories first to avoid duplicates. Requires finances:write, finances:execute and enabled review bypass for agents.
+Create a named financial category; inspect get_finance_categories first to avoid duplicates. Category icons are assigned automatically from meaning; do not ask about or narrate cosmetic icon choices unless the user requests them. Requires finances:write, finances:execute and enabled review bypass for agents.
 
 - Domain: finances; stage: commit; policy: approved_rule.
 - Grants (all): finances:write, finances:execute.
@@ -5284,6 +5284,44 @@ Complete a human-issued Finance message-protocol challenge with the original aut
 }
 ```
 
+## execute_finance_review_batch
+
+Resume at most 10 pending decisions from the exact persisted preview fingerprint. Inspect returned outcomes and pendingCount before continuing. Requires finances:read, finances:write, and finances:execute; the API rechecks current authorization, policy, and record revisions for each decision.
+
+- Domain: finances; stage: commit; policy: approved_rule.
+- Grants (all): finances:read, finances:write, finances:execute.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finance-review-backlog.ts); typed API methods: `executeFinanceReviewBatch`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "fingerprint": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "limit": {
+      "default": 10,
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10
+    },
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    }
+  },
+  "required": [
+    "fingerprint",
+    "id"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
 ## export_finance_data
 
 Export the user's nohmi-owned Finance ledger, accounts, categories, and projections.
@@ -5297,6 +5335,24 @@ Export the user's nohmi-owned Finance ledger, accounts, categories, and projecti
   "type": "object",
   "properties": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
+```
+
+## get_agent_account
+
+Read the shared agent account identity for your own authenticated connection, or null if none is registered. Register once with register_agent_account and reuse that identity across workspaces. The API returns its immutable nohmi UUID, generated display name, avatar seed, and identitySource (connection or user_confirmed). Never guess provider account IDs or send credentials. The user handles account grouping across client surfaces in shared settings.
+
+- Domain: assistant; stage: inspect; policy: read_only.
+- Grants (any): orientation only.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/agent-account.ts); typed API methods: `getCurrentAgentAccount`.
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
 }
 ```
 
@@ -6437,6 +6493,51 @@ Read current income, employment, household and reserve assumptions, including up
   "type": "object",
   "properties": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
+```
+
+## get_finance_review_backlog
+
+Read complete historical backlog counts, separating transaction flags from open and deferred review cases. Grouping is a routing hint, not permission to resolve items. Requires finances:read.
+
+- Domain: finances; stage: inspect; policy: read_only.
+- Grants (all): finances:read.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finance-review-backlog.ts); typed API methods: `getFinanceReviewBacklog`.
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
+## get_finance_review_batch
+
+Read one durable review batch and its applied, deferred, review-required, or failed outcomes. Requires finances:read.
+
+- Domain: finances; stage: verify; policy: read_only.
+- Grants (all): finances:read.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finance-review-backlog.ts); typed API methods: `getFinanceReviewBatch`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
 }
 ```
 
@@ -7779,6 +7880,71 @@ List expected, received, overdue, cancelled, and unmatched reimbursement credits
 }
 ```
 
+## list_finance_review_backlog_items
+
+Inspect a bounded page of backlog evidence. Preserve the snapshot cursor; restart on a snapshot conflict. Requires finances:read.
+
+- Domain: finances; stage: inspect; policy: read_only.
+- Grants (all): finances:read.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finance-review-backlog.ts); typed API methods: `listFinanceReviewBacklogItems`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "group": {
+      "type": "string",
+      "enum": [
+        "roundups",
+        "internal_movements",
+        "card_payments",
+        "ambiguous_payments",
+        "other_categorization"
+      ]
+    },
+    "cursor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "limit": {
+      "default": 50,
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
+## list_finance_review_batches
+
+Read recent durable review batches available to this authenticated authorization, including progress and recovery outcomes. Requires finances:read.
+
+- Domain: finances; stage: recover; policy: read_only.
+- Grants (all): finances:read.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finance-review-backlog.ts); typed API methods: `listFinanceReviewBatches`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "limit": {
+      "default": 20,
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
 ## list_finance_review_history
 
 Read a bounded cursor page of resolved Finance reviews and retained evidence. Keep the same filters when following nextCursor. Requires finances:read.
@@ -8937,7 +9103,7 @@ Request one durable Mail maintenance turn. The API owns scope, authority, retrie
 
 ## manage_finance_budget_bucket
 
-Create or update a planning bucket and its category membership. Categories remain granular ledger labels; membership is exclusive within the active taxonomy.
+Create or update a planning bucket and its category membership. Icons are assigned automatically from meaning; do not ask about or narrate cosmetic icon choices unless the user requests them. Categories remain granular ledger labels; membership is exclusive within the active taxonomy.
 
 - Domain: finances; stage: commit; policy: approved_rule.
 - Grants (all): finances:write.
@@ -10604,6 +10770,227 @@ Evaluate a policy against qualified position evidence. This computes a read-only
 }
 ```
 
+## preview_finance_review_batch
+
+Persist up to 100 explicit evidence-backed decisions with required timestamps and authoritative decimal-string revisions from backlog provenance: expectedTransactionRevision for every decision, plus expectedReviewRevision and expectedActionRevision for review decisions. Include an idempotency key. This creates durable preview state; it does not execute decisions or learn merchant rules. Requires finances:read and finances:write.
+
+- Domain: finances; stage: prepare; policy: preview.
+- Grants (all): finances:read, finances:write.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/finance-review-backlog.ts); typed API methods: `previewFinanceReviewBatch`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "decisions": {
+      "minItems": 1,
+      "maxItems": 100,
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "transactionId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "expectedTransactionUpdatedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  }
+                ]
+              },
+              "expectedTransactionRevision": {
+                "type": "string",
+                "maxLength": 19,
+                "pattern": "^[1-9][0-9]*$"
+              },
+              "rationale": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "evidence": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "learnMerchant": {
+                "default": "never",
+                "type": "string",
+                "const": "never"
+              },
+              "kind": {
+                "type": "string",
+                "const": "categorization"
+              },
+              "categoryId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              }
+            },
+            "required": [
+              "transactionId",
+              "expectedTransactionUpdatedAt",
+              "expectedTransactionRevision",
+              "rationale",
+              "evidence",
+              "confidence",
+              "kind",
+              "categoryId"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "transactionId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "expectedTransactionUpdatedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  }
+                ]
+              },
+              "expectedTransactionRevision": {
+                "type": "string",
+                "maxLength": 19,
+                "pattern": "^[1-9][0-9]*$"
+              },
+              "rationale": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "evidence": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "learnMerchant": {
+                "default": "never",
+                "type": "string",
+                "const": "never"
+              },
+              "kind": {
+                "type": "string",
+                "const": "review"
+              },
+              "reviewId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "expectedReviewUpdatedAt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                  }
+                ]
+              },
+              "expectedReviewRevision": {
+                "type": "string",
+                "maxLength": 19,
+                "pattern": "^[1-9][0-9]*$"
+              },
+              "expectedActionRevision": {
+                "type": "string",
+                "maxLength": 19,
+                "pattern": "^(0|[1-9][0-9]*)$"
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "approve",
+                  "confirm_transfer",
+                  "defer",
+                  "recategorize"
+                ]
+              },
+              "categoryId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+              },
+              "nonTransferDirection": {
+                "type": "string",
+                "enum": [
+                  "expense",
+                  "income"
+                ]
+              }
+            },
+            "required": [
+              "transactionId",
+              "expectedTransactionUpdatedAt",
+              "expectedTransactionRevision",
+              "rationale",
+              "evidence",
+              "confidence",
+              "kind",
+              "reviewId",
+              "expectedReviewUpdatedAt",
+              "expectedReviewRevision",
+              "expectedActionRevision",
+              "action"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "idempotencyKey",
+    "decisions"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
 ## preview_mail_response_brief
 
 Prepare an evidence-backed response brief for a conversation. Does not send mail. Requires mail:write.
@@ -12006,6 +12393,34 @@ Explicitly refresh an existing submitted candidate's execution binding through p
     "expectedRunUpdatedAt",
     "runId"
   ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false
+}
+```
+
+## register_agent_account
+
+Register once on your own authenticated connection, then reuse the returned shared identity across workspaces. Repeated calls return the existing identity without merging accounts or widening scopes. Optional platform is an unverified label, not proof of provider account ownership. The API owns the immutable nohmi UUID, generated display name, avatar seed, and identitySource (connection or user_confirmed). Never guess provider account IDs or send credentials. The user handles account grouping across client surfaces in shared settings.
+
+- Domain: assistant; stage: commit; policy: approve_each.
+- Grants (any): orientation only.
+- Compatibility: normal discovery; annotations: `{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
+- [Adapter source](../../apps/mcp/src/tools/agent-account.ts); typed API methods: `registerCurrentAgentAccount`.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "platform": {
+      "type": "string",
+      "enum": [
+        "claude",
+        "codex",
+        "other",
+        "unknown"
+      ]
+    }
+  },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false
 }

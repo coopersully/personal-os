@@ -8,17 +8,20 @@ import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { AgentIdentity, agentPlatformLabels } from "@/components/agent-identity";
 import { DataViewLoading, DataViewRecovery } from "@/components/data-view-state";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogActions,
+  ResponsiveDialogBody,
+  ResponsiveDialogFooter,
+} from "@/components/responsive-dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/settings-field";
 import { SettingsSelect } from "@/components/settings-select";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { api } from "../../api.js";
 import { SettingsFeedbackContext } from "../../lib/settings-feedback.js";
@@ -235,53 +238,68 @@ function AccountForm({
     (label.trim() || null) !== account.accountLabel ||
     platform !== account.platform;
   return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (dirty && name.trim())
-          void save({ displayName: name.trim(), accountLabel: label.trim() || null, platform });
-      }}
-    >
-      <FieldGroup>
-        <Field>
-          <FieldLabel htmlFor="agent-account-name">Display name</FieldLabel>
-          <Input
-            id="agent-account-name"
-            maxLength={80}
-            disabled={pending}
-            required
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="agent-account-label">Account label</FieldLabel>
-          <Input
-            id="agent-account-label"
-            maxLength={80}
-            disabled={pending}
-            value={label}
-            onChange={(event) => setLabel(event.target.value)}
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="agent-account-platform">Platform</FieldLabel>
-          <SettingsSelect
-            id="agent-account-platform"
-            disabled={pending}
-            value={platform}
-            onChange={(event) => setPlatform(event.target.value as AgentAccount["platform"])}
+    <>
+      <ResponsiveDialogBody>
+        <form
+          id={"agent-account-form"}
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (dirty && name.trim())
+              void save({ displayName: name.trim(), accountLabel: label.trim() || null, platform });
+          }}
+        >
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="agent-account-name">Display name</FieldLabel>
+              <Input
+                id="agent-account-name"
+                maxLength={80}
+                disabled={pending}
+                required
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="agent-account-label">Account label</FieldLabel>
+              <Input
+                id="agent-account-label"
+                maxLength={80}
+                disabled={pending}
+                value={label}
+                onChange={(event) => setLabel(event.target.value)}
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="agent-account-platform">Platform</FieldLabel>
+              <SettingsSelect
+                id="agent-account-platform"
+                disabled={pending}
+                value={platform}
+                onChange={(event) => setPlatform(event.target.value as AgentAccount["platform"])}
+              >
+                {Object.entries(agentPlatformLabels).map(([value, text]) => (
+                  <option key={value} value={value}>
+                    {text}
+                  </option>
+                ))}
+              </SettingsSelect>
+            </Field>
+          </FieldGroup>
+        </form>
+      </ResponsiveDialogBody>
+      <ResponsiveDialogFooter>
+        <ResponsiveDialogActions>
+          <Button
+            type="submit"
+            form="agent-account-form"
+            disabled={pending || !dirty || !name.trim()}
           >
-            {Object.entries(agentPlatformLabels).map(([value, text]) => (
-              <option key={value} value={value}>
-                {text}
-              </option>
-            ))}
-          </SettingsSelect>
-        </Field>
-        <Button disabled={pending || !dirty || !name.trim()}>Save account</Button>
-      </FieldGroup>
-    </form>
+            Save account
+          </Button>
+        </ResponsiveDialogActions>
+      </ResponsiveDialogFooter>
+    </>
   );
 }
 
@@ -307,37 +325,50 @@ function ConnectionForm({
       account.platform === currentPlatform,
   );
   return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (selected) void save(selected === "new" ? null : selected);
-      }}
-    >
-      <FieldGroup>
-        <Field>
-          <FieldLabel htmlFor="connection-agent-account">Agent account</FieldLabel>
-          <SettingsSelect
-            id="connection-agent-account"
-            disabled={pending}
-            value={selected}
-            onChange={(event) => setSelected(event.target.value)}
+    <>
+      <ResponsiveDialogBody>
+        <form
+          id="agent-connection-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (selected) void save(selected === "new" ? null : selected);
+          }}
+        >
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="connection-agent-account">Agent account</FieldLabel>
+              <SettingsSelect
+                id="connection-agent-account"
+                disabled={pending}
+                value={selected}
+                onChange={(event) => setSelected(event.target.value)}
+              >
+                <option value="" disabled>
+                  Choose an account
+                </option>
+                {compatibleAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.displayName} · {agentPlatformLabels[account.platform]}
+                    {account.accountLabel ? ` · ${account.accountLabel}` : ""}
+                  </option>
+                ))}
+                <option value="new">Create a new agent account</option>
+              </SettingsSelect>
+            </Field>
+          </FieldGroup>
+        </form>
+      </ResponsiveDialogBody>
+      <ResponsiveDialogFooter>
+        <ResponsiveDialogActions>
+          <Button
+            type="submit"
+            form="agent-connection-form"
+            disabled={pending || !selected || selected === connection.agentAccountId}
           >
-            <option value="" disabled>
-              Choose an account
-            </option>
-            {compatibleAccounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {account.displayName} · {agentPlatformLabels[account.platform]}
-                {account.accountLabel ? ` · ${account.accountLabel}` : ""}
-              </option>
-            ))}
-            <option value="new">Create a new agent account</option>
-          </SettingsSelect>
-        </Field>
-        <Button disabled={pending || !selected || selected === connection.agentAccountId}>
-          Save connection account
-        </Button>
-      </FieldGroup>
-    </form>
+            Save connection account
+          </Button>
+        </ResponsiveDialogActions>
+      </ResponsiveDialogFooter>
+    </>
   );
 }

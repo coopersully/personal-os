@@ -357,7 +357,7 @@ it("uses qualified whole-month usage alongside selected-day amounts without chan
   }));
   mount("?view=list&period=today&from=2026-09-08");
   await screen.findByTitle("Observed monthly $25.00 of $100.00 · 25.0%");
-  expect(screen.getByText("$100.00 · 25%")).toBeVisible();
+  expect(screen.getByText("Sep 2026 budget · $100.00 · 25% used")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Spending breakdown" }));
   fireEvent.click(screen.getByText("Coverage and accounting details"));
   expect(screen.getByText(/America\/Chicago/)).toBeVisible();

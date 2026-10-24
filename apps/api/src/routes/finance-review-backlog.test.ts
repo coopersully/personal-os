@@ -90,6 +90,7 @@ describe("Finance backlog routes", () => {
     });
     expect(response.status).toBe(200);
     expect(batches.execute).toHaveBeenCalledWith(id, execution, {
+      signal: expect.any(AbortSignal),
       principal,
       requestId: "request-1",
     });

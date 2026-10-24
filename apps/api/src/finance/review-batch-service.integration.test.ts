@@ -510,6 +510,107 @@ describe.sequential("durable Finance review batches", () => {
     ).toMatchObject({ status: "open" });
   });
   it.each([
+    null,
+    { confirmedTransferPair: "legacy confirmation" },
+    { confirmedTransferPair: {} },
+    { confirmedTransferPair: { transactionRevision: 1 } },
+    { confirmedTransferPair: { transactionRevision: "1" } },
+    { confirmedTransferPair: { transactionRevision: "1", counterpartTransactionId: 1 } },
+    { confirmedTransferPair: { transactionRevision: "1", counterpartTransactionId: "missing" } },
+    {
+      confirmedTransferPair: {
+        transactionRevision: "1",
+        counterpartTransactionId: "missing",
+        counterpartRevision: 1,
+      },
+    },
+  ])("does not use a legacy or incomplete confirmation receipt as exact-pair authority: %j", async (after) => {
+    const f = await twoLegTransferFixture();
+    await database.db
+      .update(financeTransactions)
+      .set({ reconciliationStatus: "confirmed" })
+      .where(eq(financeTransactions.id, f.decision.transactionId));
+    await database.db.insert(auditEvents).values({
+      userId: f.userId,
+      actorId: f.userId,
+      actorType: "user",
+      requestId: randomUUID(),
+      action: "finance.transfer_confirmed",
+      entityType: "finance_transaction",
+      entityId: f.decision.transactionId,
+      after,
+    });
+    await expect(
+      f.service.preview({ idempotencyKey: randomUUID(), decisions: [f.second] }, f.agentContext),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    expect(await transaction(f.counterpart.id)).toEqual(f.counterpart);
+    expect(
+      await database.db.query.financeReviewCases.findFirst({
+        where: eq(financeReviewCases.id, f.second.reviewId),
+      }),
+    ).toMatchObject({ status: "open" });
+  });
+  it.each([
+    "confirm ordinary",
+    "approve transfer",
+    "existing relationship",
+  ] as const)("rejects a decision outside its exact transfer authority: %s", async (scenario) => {
+    const f = await transferFixture();
+    if (scenario === "confirm ordinary") f.following.action = "confirm_transfer";
+    else if (scenario === "approve transfer") f.decision.action = "approve";
+    else {
+      await database.db
+        .update(financeTransactions)
+        .set({ transferGroupId: randomUUID() })
+        .where(eq(financeTransactions.id, f.decision.transactionId));
+      f.decision.expectedTransactionRevision = required(
+        await transaction(f.decision.transactionId),
+      ).contextualRevision.toString();
+    }
+    await expect(
+      f.service.preview(
+        { ...f.input, decisions: [scenario === "confirm ordinary" ? f.following : f.decision] },
+        f.agentContext,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    expect(await f.service.list(f.agentContext)).toEqual([]);
+    expect(
+      await database.db.query.financeReviewCases.findFirst({
+        where: eq(financeReviewCases.id, f.decision.reviewId),
+      }),
+    ).toMatchObject({ status: "open" });
+  });
+  it("records a deleted review as a failed item and still processes the next exact case", async () => {
+    const f = await fixture(2, true);
+    const first = required(f.decisions[0]);
+    const second = required(f.decisions[1]);
+    if (first.kind !== "review" || second.kind !== "review") throw new Error("fixture");
+    second.action = "defer";
+    const run = await f.service.preview(f.input, f.context);
+    await database.db.delete(financeReviewCases).where(eq(financeReviewCases.id, first.reviewId));
+    const result = await f.service.execute(run.id, { fingerprint: run.fingerprint }, f.context);
+    expect(result.outcomes.map((item) => item.status)).toEqual(["failed", "deferred"]);
+    expect(result.outcomes[0]).toMatchObject({
+      error: { code: "not_found" },
+      recovery: "new_preview",
+    });
+    expect((await transaction(first.transactionId))?.needsReview).toBe(true);
+  });
+  it.each([
+    "finances:read",
+    "finances:write",
+  ] as const)("requires the caller's %s scope even when its persisted grant is broader", async (missing) => {
+    const f = await fixture();
+    const context = await agent(f.userId);
+    const run = await f.service.preview(f.input, context);
+    context.principal.scopes.delete(missing);
+    await expect(
+      f.service.execute(run.id, { fingerprint: run.fingerprint }, context),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    expect((await f.service.get(run.id, f.context)).outcomes).toEqual([]);
+    expect((await transaction(required(f.decisions[0]).transactionId))?.needsReview).toBe(true);
+  });
+  it.each([
     "currency",
     "direction",
     "pending",
@@ -649,6 +750,171 @@ describe.sequential("durable Finance review batches", () => {
         .from(financeClassificationDecisions)
         .where(eq(financeClassificationDecisions.userId, f.userId)),
     ).toHaveLength(2);
+  });
+  // Faults wrap only the pg transport boundary; transactions and writers remain real.
+  function withSessionFault(
+    isolated: DatabaseClient,
+    intercept: (query: unknown, proceed: () => unknown) => unknown,
+  ) {
+    const wrapped = new WeakSet<PoolClient>();
+    const pool = new Proxy(isolated.pool, {
+      get(target, key, receiver) {
+        if (key !== "connect") return Reflect.get(target, key, receiver);
+        return async () => {
+          const client = await target.connect();
+          if (!wrapped.has(client)) {
+            wrapped.add(client);
+            client.query = new Proxy(client.query, {
+              apply(query, receiver, args) {
+                return intercept(args[0], () => Reflect.apply(query, receiver, args));
+              },
+            });
+          }
+          return client;
+        };
+      },
+    });
+    return new Proxy(isolated.db, {
+      get(target, key, receiver) {
+        return key === "$client" ? pool : Reflect.get(target, key, receiver);
+      },
+    });
+  }
+  function sessionQueryText(query: unknown) {
+    return typeof query === "string"
+      ? query
+      : query && typeof query === "object" && "text" in query
+        ? String(query.text)
+        : "";
+  }
+  it.each([
+    "read",
+    "missing",
+    "set",
+    "primitive",
+  ] as const)("fails closed and discards the checkout when session deadline setup fails: %s", async (failure) => {
+    const f = await fixture();
+    const run = await f.service.preview(f.input, f.context);
+    const isolated = createDatabaseClient({
+      connectionString: container.getConnectionUri(),
+      max: 1,
+    });
+    try {
+      const original = await isolated.pool.query("SELECT pg_backend_pid() AS pid");
+      const fault = new Error("Session configuration unavailable");
+      let intercepted = false;
+      const db = withSessionFault(isolated, (query, proceed) => {
+        const text = sessionQueryText(query);
+        const matches =
+          failure === "set" ? text.includes("set_config") : text.includes("current_setting");
+        if (!intercepted && matches) {
+          intercepted = true;
+          if (failure === "missing") return Promise.resolve({ rows: [] });
+          return Promise.reject(failure === "primitive" ? "connection lost" : fault);
+        }
+        return proceed();
+      });
+      const service = createFinanceReviewBatchService({ db, now, finance: f.finance });
+      const execution = service.execute(run.id, { fingerprint: run.fingerprint }, f.context);
+      if (failure === "missing")
+        await expect(execution).rejects.toMatchObject({ code: "internal_error" });
+      else
+        await expect(execution).rejects.toBe(failure === "primitive" ? "connection lost" : fault);
+      expect(intercepted).toBe(true);
+      const recovered = await isolated.pool.query(
+        "SELECT pg_backend_pid() AS pid, current_setting('transaction_timeout') AS timeout",
+      );
+      expect(recovered.rows[0]?.pid).not.toBe(original.rows[0]?.pid);
+      expect(recovered.rows[0]?.timeout).toBe("0");
+      expect((await f.service.get(run.id, f.context)).outcomes).toEqual([]);
+      expect((await transaction(required(f.decisions[0]).transactionId))?.needsReview).toBe(true);
+      expect(
+        (await f.service.execute(run.id, { fingerprint: run.fingerprint }, f.context)).status,
+      ).toBe("completed");
+    } finally {
+      await isolated.close();
+    }
+  });
+  it("keeps committed receipts truthful when restoring the session deadline fails", async () => {
+    const f = await fixture();
+    const run = await f.service.preview(f.input, f.context);
+    const isolated = createDatabaseClient({
+      connectionString: container.getConnectionUri(),
+      max: 1,
+    });
+    try {
+      const original = await isolated.pool.query("SELECT pg_backend_pid() AS pid");
+      let written = false;
+      let resetFailed = false;
+      const db = withSessionFault(isolated, (query, proceed) => {
+        if (written && !resetFailed && sessionQueryText(query).includes("set_config")) {
+          resetFailed = true;
+          return Promise.reject(new Error("Connection lost during post-commit reset"));
+        }
+        return proceed();
+      });
+      const service = createFinanceReviewBatchService({
+        db,
+        now,
+        finance: {
+          ...f.finance,
+          async applyCategorizations(...args) {
+            const result = await f.finance.applyCategorizations(...args);
+            written = true;
+            return result;
+          },
+        },
+      });
+      const completed = await service.execute(run.id, { fingerprint: run.fingerprint }, f.context);
+      expect(resetFailed).toBe(true);
+      expect(completed).toMatchObject({ status: "completed", pendingCount: 0 });
+      expect(await f.service.get(run.id, f.context)).toEqual(completed);
+      const recovered = await isolated.pool.query(
+        "SELECT pg_backend_pid() AS pid, current_setting('transaction_timeout') AS timeout",
+      );
+      expect(recovered.rows[0]?.pid).not.toBe(original.rows[0]?.pid);
+      expect(recovered.rows[0]?.timeout).toBe("0");
+      expect(await f.service.execute(run.id, { fingerprint: run.fingerprint }, f.context)).toEqual(
+        completed,
+      );
+      expect(
+        await database.db
+          .select()
+          .from(financeClassificationDecisions)
+          .where(eq(financeClassificationDecisions.userId, f.userId)),
+      ).toHaveLength(1);
+    } finally {
+      await isolated.close();
+    }
+  });
+  it("rolls back real writer effects when the writer omits its required outcome", async () => {
+    const f = await fixture();
+    const run = await f.service.preview(f.input, f.context);
+    const service = createFinanceReviewBatchService({
+      db: database.db,
+      now,
+      finance: {
+        ...f.finance,
+        async applyCategorizations(...args) {
+          await f.finance.applyCategorizations(...args);
+          return [];
+        },
+      },
+    });
+    await expect(
+      service.execute(run.id, { fingerprint: run.fingerprint }, f.context),
+    ).rejects.toMatchObject({
+      code: "internal_error",
+      message: "The categorization outcome is missing.",
+    });
+    expect((await f.service.get(run.id, f.context)).outcomes).toEqual([]);
+    expect((await transaction(required(f.decisions[0]).transactionId))?.needsReview).toBe(true);
+    expect(
+      await database.db.select().from(auditEvents).where(eq(auditEvents.userId, f.userId)),
+    ).toHaveLength(0);
+    expect(
+      (await f.service.execute(run.id, { fingerprint: run.fingerprint }, f.context)).status,
+    ).toBe("completed");
   });
   it("restores the checked-out session's timeout without changing unrelated pool settings", async () => {
     const f = await fixture();

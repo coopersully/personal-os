@@ -9742,6 +9742,8 @@ describe("ilo web app", () => {
     await screen.findByText("No active outcomes");
     expect(screen.getAllByRole("button", { name: "Add goal" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Add motive" })).toHaveLength(1);
+    // Keep the remount: queued Sonner dismissals from the first root can overlap
+    // the next root's initial query error and make its toast host resubscribe.
     view.unmount();
     mocks.listSessions.mockRejectedValue(new Error("private diagnostic"));
     setup("/settings?page=security&subpage=sessions");
@@ -9751,6 +9753,17 @@ describe("ilo web app", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Devices unavailable" })).not.toHaveTextContent(
       "Couldn’t load devices.",
+    );
+    expect(screen.queryByText("private diagnostic")).not.toBeInTheDocument();
+    mocks.listSessions.mockResolvedValue([]);
+    const notification = screen.getByText("Couldn’t load devices.").closest("[data-sonner-toast]");
+    if (!(notification instanceof HTMLElement)) throw new Error("Missing devices error toast");
+    fireEvent.click(within(notification).getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("No signed-in devices")).toBeInTheDocument();
+    expect(mocks.listSessions).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("region", { name: "Devices unavailable" })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByText("Couldn’t load devices.")).not.toBeInTheDocument(),
     );
   });
 

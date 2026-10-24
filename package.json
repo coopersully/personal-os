@@ -46,7 +46,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.1.2",
-    "@modelcontextprotocol/client": "^2.0.0",
+    "@modelcontextprotocol/client": "^2.3.0",
     "@personal-os/api-client": "workspace:*",
     "@personal-os/database": "workspace:*",
     "@personal-os/domain": "workspace:*",

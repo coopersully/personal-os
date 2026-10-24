@@ -8121,14 +8121,16 @@ html.pet-window #root {
 .workspace-app-bar:has([aria-label="Spending controls"]) .workspace-app-bar__context { display: contents; }
 .workspace-app-bar:has([aria-label="Spending controls"]) .workspace-app-bar__title { flex: none; }
 .workspace-header-title-context { flex: 0 1 auto; min-width: 0; overflow: hidden; }
-.workspace-header-title-context .workspace-header-controls { justify-content: flex-start; flex-wrap: nowrap; }
-.workspace-app-bar:has([aria-label="Spending controls"]) .workspace-header-controls-slot--leading { flex: 1; overflow-x: auto; flex-wrap: nowrap; margin-inline-start: auto; }
+.workspace-header-title-context .workspace-header-controls { justify-content: flex-start; flex-wrap: nowrap; max-width: 100%; }
+.workspace-app-bar:has([aria-label="Spending controls"]) .workspace-header-controls-slot--leading { flex: 1; justify-content: flex-end; overflow-x: auto; flex-wrap: nowrap; margin-inline-start: auto; }
 .workspace-app-bar:has([aria-label="Spending controls"]) [aria-label="Spending controls"] { flex-wrap: nowrap; }
 .workspace-app-bar:has([aria-label="Spending controls"]) .review-navigation { order: 10; margin: 0; flex: none; }
 .spending-compact-scope { display: none; }
 @media (max-width: 600px) {
+  .workspace-app-bar:has([aria-label="Spending controls"]) { gap: .25rem; }
   .workspace-app-bar .spending-scope-controls { display: none; }
   .spending-compact-scope { display: flex; }
   .workspace-app-bar:has([aria-label="Spending controls"]) .workspace-header-controls-slot--leading { flex: none; overflow: visible; }
-  .workspace-app-bar:has([aria-label="Spending controls"]) .workspace-header-title-context { flex: 1; }
+  .workspace-app-bar:has([aria-label="Spending controls"]) .workspace-header-title-context { flex: 0 1 auto; }
+  .workspace-app-bar:has([aria-label="Spending controls"]) .workspace-header-controls-slot--leading { margin-inline-start: auto; }
 }

@@ -13,6 +13,7 @@ import { api } from "@/api";
 import { QueryFeedback } from "@/components/async-state";
 import {
   BubblesIcon,
+  ChevronDownIcon,
   FilterIcon,
   RhythmCalendarIcon,
   SpendingListIcon,
@@ -32,6 +33,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import {
@@ -333,35 +335,53 @@ export function FinanceSpendingPage() {
     setSelectedDrillDown(drillDown);
   }
 
+  const rangeLabel = rhythmDefault
+    ? "last three months"
+    : period === "month" && range.from === monthRange.from
+      ? "this month"
+      : period === "month"
+        ? formatDateOnly(range.from, { month: "long", year: "numeric" })
+        : period === "today" && range.from === today
+          ? "today"
+          : period === "week" &&
+              range.from ===
+                spendingPeriod("week", today, calendar.data?.preferences.weekStartsOn ?? "monday")
+                  .from
+            ? "this week"
+            : range.from === range.through
+              ? formatDateOnly(range.from, { month: "short", day: "numeric", year: "numeric" })
+              : `${formatDateOnly(range.from, { month: "short", day: "numeric" })} – ${formatDateOnly(range.through, { month: "short", day: "numeric", year: "numeric" })}`;
+  const dateControls = (
+    <fieldset disabled={disabled}>
+      <SpendingPeriodControls
+        period={rhythmDefault ? "custom" : period}
+        {...range}
+        onPeriod={(value) => {
+          const next = new URLSearchParams(params);
+          next.set("period", value);
+          next.delete("from");
+          next.delete("through");
+          changeParams(next);
+          save.mutate({ financeSpendingPeriod: value as SpendingPeriod });
+          setSelected(null);
+          setSelectedDrillDown(null);
+        }}
+        onDates={(from, through) => {
+          const next = new URLSearchParams(params);
+          next.set("period", "custom");
+          next.set("from", from);
+          next.set("through", through);
+          changeParams(next);
+          save.mutate({ financeSpendingPeriod: "custom" });
+          setSelected(null);
+          setSelectedDrillDown(null);
+        }}
+        onMove={(direction) => update("from", moveSpendingPeriod(period, range.from, direction))}
+      />
+    </fieldset>
+  );
   const scopeControls = (
     <>
-      <fieldset disabled={disabled}>
-        <SpendingPeriodControls
-          period={rhythmDefault ? "custom" : period}
-          {...range}
-          onPeriod={(value) => {
-            const next = new URLSearchParams(params);
-            next.set("period", value);
-            next.delete("from");
-            next.delete("through");
-            changeParams(next);
-            save.mutate({ financeSpendingPeriod: value as SpendingPeriod });
-            setSelected(null);
-            setSelectedDrillDown(null);
-          }}
-          onDates={(from, through) => {
-            const next = new URLSearchParams(params);
-            next.set("period", "custom");
-            next.set("from", from);
-            next.set("through", through);
-            changeParams(next);
-            save.mutate({ financeSpendingPeriod: "custom" });
-            setSelected(null);
-            setSelectedDrillDown(null);
-          }}
-          onMove={(direction) => update("from", moveSpendingPeriod(period, range.from, direction))}
-        />
-      </fieldset>
       <SpendingChoice
         label="Group by"
         showLabel={false}
@@ -414,25 +434,25 @@ export function FinanceSpendingPage() {
         </p>
       ) : null}
       <WorkspaceHeaderControls label="Spending range" placement="title">
-        <span className="text-sm font-normal text-muted-foreground whitespace-nowrap">
-          {rhythmDefault
-            ? "last three months"
-            : period === "month" && range.from === monthRange.from
-              ? "this month"
-              : period === "month"
-                ? formatDateOnly(range.from, { month: "long", year: "numeric" })
-                : period === "today" && range.from === today
-                  ? "today"
-                  : period === "week" &&
-                      range.from ===
-                        spendingPeriod(
-                          "week",
-                          today,
-                          calendar.data?.preferences.weekStartsOn ?? "monday",
-                        ).from
-                    ? "this week"
-                    : `${formatDateOnly(range.from, { month: "short", day: "numeric" })} – ${formatDateOnly(range.through, { month: "short", day: "numeric", year: "numeric" })}`}
-        </span>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={disabled}
+              aria-label={`Date range: ${rangeLabel}`}
+              className="min-w-0 max-w-full shrink max-sm:px-1"
+            >
+              <span className="truncate text-xs font-normal text-muted-foreground sm:text-sm">
+                {rangeLabel}
+              </span>
+              <ChevronDownIcon />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" aria-label="Spending date range">
+            {dateControls}
+          </PopoverContent>
+        </Popover>
       </WorkspaceHeaderControls>
       <WorkspaceHeaderControls label="Spending controls" placement="leading">
         <div className="flex items-center gap-1 whitespace-nowrap">
@@ -489,7 +509,7 @@ export function FinanceSpendingPage() {
                     </DialogHeader>
                     <fieldset
                       className="spending-compact-scope flex flex-col gap-3"
-                      aria-label="Period and grouping"
+                      aria-label="Grouping"
                     >
                       {scopeControls}
                     </fieldset>

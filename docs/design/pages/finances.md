@@ -692,7 +692,7 @@ Account rows align institution and account identity at the start, with type and 
 
 The shared top navigation starts with the current Finance page name on desktop and mobile. The root Finance route is labelled Overview; page controls follow this identity.
 
-Spending keeps its route utilities on the primary navigation baseline. A small muted range label sits directly beside the page title (for example, “this month” or a formatted historical range); the view picker is an accessible icon button. At phone widths, period and grouping controls move into Spending options while the view, search, filter and review actions remain on the primary row.
+Spending keeps its route utilities on the primary navigation baseline. The small muted range label directly beside the page title is the date picker (for example, “this month”, a historical month, single date, or formatted range). Its popover contains period navigation and custom date fields at every viewport size. Other controls align at the end of the primary row; the view picker is an accessible icon button. At phone widths, grouping moves into Spending options while date selection remains beside the title.
 
 
 Spending summary uses compact Cards for selected-scope spending, recorded daily average,

@@ -594,6 +594,7 @@ it("saves explicit grouping and period choices, navigates periods, and retains e
       expect.objectContaining({ preferences: { financeSpendingGrouping: "buckets" } }),
     ),
   );
+  fireEvent.click(screen.getByRole("button", { name: /^Date range:/ }));
   await waitFor(() =>
     expect(screen.getByRole("button", { name: "Previous period" })).toBeEnabled(),
   );

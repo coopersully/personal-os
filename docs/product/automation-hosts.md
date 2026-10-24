@@ -287,7 +287,8 @@ immutable and are not silently installed or replaced in the external host.
 
 ### Boundary evidence and remaining launch proof
 
-On 2026-10-24 the user confirmed that Claude's native **New routine → Schedule → Custom** UI accepts
+On 2026-10-24 an agent directly inspected Claude's native **New routine → Schedule → Custom** UI
+and confirmed that it accepts
 `CRON_TZ=America/New_York 0 8,20 * * *` and warns that :00 starts can be several minutes late. This
 was an unsaved provider configuration; no production nohmi registration or routine was created.
 [Official Claude routine documentation](https://code.claude.com/docs/en/routines) describes schedule
@@ -298,8 +299,18 @@ The boundary uses the existing authenticated HTTPS MCP/API connection; no new ou
 port, secret or worker is introduced. A revoked/expired grant denies observations and maintenance;
 a paused, missed or unavailable provider invocation leaves durable answers waiting. The person
 repairs the owning routine and reauthorizes its original connection as needed. The existing run
-and continuation guards handle repeated invocations. Production-equivalent proof still requires
-creating the actual routine, observing both daily slots (including realistic lateness), verifying
-connector scopes and an answer continuation, and inspecting recovery after a missed invocation.
-Local DST, lifecycle, authenticated-adapter and no-dispatch tests do not certify those provider
-capabilities. The parent outcome owner owns that setup and launch evidence.
+and continuation guards handle repeated invocations.
+
+The current authorized individual-routine outcome is to configure the user's actual twice-daily
+routine, register it in nohmi under its authorized connection, complete a real run, and verify its
+next run in the provider. The parent outcome owner owns that setup and its evidence. The unsaved UI
+inspection above does not establish completion of those steps.
+
+Broader platform launch certification remains pending separately: observing both daily slots
+(including realistic lateness), verifying unattended connector scopes and an answer continuation,
+and inspecting recovery after a missed invocation. These are pending platform launch probes, not
+additional acceptance requirements for the individual routine setup. Do not invent personal
+questions to manufacture answer-continuation QA evidence. Local DST, lifecycle,
+authenticated-adapter and no-dispatch tests do not certify those provider capabilities, and neither
+individual routine setup nor a successful real run establishes broad Claude or SMS launch
+certification.

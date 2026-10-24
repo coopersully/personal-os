@@ -1775,7 +1775,7 @@ afterEach(() => {
 describe("ilo web app", () => {
   it("renders the product landing page without requesting a session", async () => {
     setup("/");
-    expect(await screen.findByRole("heading", { name: "a personal harness." })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "your digital exoskeleton." })).toBeInTheDocument();
     expect(mocks.getMe).not.toHaveBeenCalled();
     expect(
       within(screen.getByRole("navigation", { name: "product navigation" })).getByRole("link", {
@@ -2851,7 +2851,7 @@ describe("ilo web app", () => {
 
   it.each(["verifyEmail", "resetPassword"])("ignores an empty %s token", async (parameter) => {
     const landing = setup(`/?${parameter}=`);
-    expect(await screen.findByRole("heading", { name: "a personal harness." })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "your digital exoskeleton." })).toBeInTheDocument();
     landing.unmount();
     const login = setup(`/login?${parameter}=`);
     expect(await screen.findByRole("heading", { name: "To take care of" })).toBeInTheDocument();

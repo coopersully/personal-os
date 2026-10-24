@@ -208,6 +208,7 @@ type MutationContext = {
     transactionId: string;
     reviewId: string | null;
     transferReview?: boolean;
+    transferCounterpart?: { transactionId: string; revision: string };
   };
   financeExecution?: FinanceExecutionFence;
   financeBudgetApproval?: FinanceBudgetApproval;
@@ -3224,6 +3225,15 @@ export function createFinanceService({
           action: options.auditAction ?? "finance.transaction_categorized",
           after: {
             ...transactionAuditSnapshot(after),
+            ...(exactTransferReviewExecution && batchScope?.transferCounterpart
+              ? {
+                  confirmedTransferPair: {
+                    transactionRevision: updated.contextualRevision.toString(),
+                    counterpartTransactionId: batchScope.transferCounterpart.transactionId,
+                    counterpartRevision: batchScope.transferCounterpart.revision,
+                  },
+                }
+              : {}),
             ...(maintenanceSource ? maintenanceAuditAttribution(context, maintenanceSource) : {}),
           },
           before: transactionAuditSnapshot(beforeValue),

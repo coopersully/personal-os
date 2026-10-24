@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   accessTokens,
+  auditEvents,
   type Database,
   financeAccounts,
   financeCategories,
@@ -19,7 +20,7 @@ import {
   listFinanceReviewBatchesInputSchema,
   previewFinanceReviewBatchInputSchema,
 } from "@personal-os/domain";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { lockReimbursementTopology } from "../finance-reimbursement-locks.js";
 import { type createFinanceService, isProviderTransfer } from "../finance-service.js";
@@ -242,6 +243,56 @@ export function createFinanceReviewBatchService({
           const rows = await (lock
             ? evidenceQuery.for("share", { of: financeTransactions })
             : evidenceQuery);
+          const evidenceIds = rows.map((row) => row.transaction.id);
+          const confirmations = evidenceIds.length
+            ? await tx
+                .select({ transactionId: auditEvents.entityId, after: auditEvents.after })
+                .from(auditEvents)
+                .where(
+                  and(
+                    eq(auditEvents.userId, userId),
+                    eq(auditEvents.action, "finance.transfer_confirmed"),
+                    eq(auditEvents.entityType, "finance_transaction"),
+                    or(
+                      inArray(auditEvents.entityId, evidenceIds),
+                      inArray(
+                        sql<string>`${auditEvents.after}->'confirmedTransferPair'->>'counterpartTransactionId'`,
+                        evidenceIds,
+                      ),
+                    ),
+                  ),
+                )
+            : [];
+          // Immutable writer receipts bind both legs. A confirmed leg remains evidence
+          // for its exact partner, never a spare counterpart for another transaction.
+          const pairs = confirmations.flatMap((confirmation) => {
+            const pair = confirmation.after?.confirmedTransferPair;
+            if (
+              !pair ||
+              typeof pair !== "object" ||
+              !("transactionRevision" in pair) ||
+              typeof pair.transactionRevision !== "string" ||
+              !("counterpartTransactionId" in pair) ||
+              typeof pair.counterpartTransactionId !== "string" ||
+              !("counterpartRevision" in pair) ||
+              typeof pair.counterpartRevision !== "string"
+            )
+              return [];
+            return [
+              {
+                transactionId: confirmation.transactionId,
+                transactionRevision: pair.transactionRevision,
+                counterpartTransactionId: pair.counterpartTransactionId,
+                counterpartRevision: pair.counterpartRevision,
+              },
+            ];
+          });
+          const belongsToPair = (id: string, counterpartId: string) =>
+            pairs.every(
+              (pair) =>
+                (pair.transactionId !== id || pair.counterpartTransactionId === counterpartId) &&
+                (pair.counterpartTransactionId !== id || pair.transactionId === counterpartId),
+            );
           const candidates = rows
             .map((row) => row.transaction)
             .filter(
@@ -250,7 +301,14 @@ export function createFinanceReviewBatchService({
                 !row.transferGroupId &&
                 row.providerDirection !== null &&
                 row.reconciliationStatus !== "matched" &&
-                row.reconciliationStatus !== "confirmed" &&
+                (row.reconciliationStatus !== "confirmed" ||
+                  pairs.some(
+                    (pair) =>
+                      pair.transactionId === row.id &&
+                      pair.transactionRevision === row.contextualRevision.toString() &&
+                      pair.counterpartTransactionId === transaction.id &&
+                      pair.counterpartRevision === transaction.contextualRevision.toString(),
+                  )) &&
                 row.currencyCode !== null &&
                 (row.direction === "transfer" ||
                   isProviderTransfer(row.providerCategory) ||
@@ -271,14 +329,23 @@ export function createFinanceReviewBatchService({
           if (
             !candidates.some((row) => row.id === transaction.id) ||
             !match ||
-            counterparts(match).length !== 1
+            counterparts(match).length !== 1 ||
+            !belongsToPair(transaction.id, match.id) ||
+            !belongsToPair(match.id, transaction.id)
           )
             throw new AppError(
               "invalid_request",
               "Confirming this transfer requires a unique owned counterpart with current source evidence.",
             );
+          return {
+            transferReview: true,
+            transferCounterpart: {
+              transactionId: match.id,
+              revision: match.contextualRevision.toString(),
+            },
+          };
         }
-        return true;
+        return { transferReview: true };
       }
     } else {
       const [transferReview] = await tx
@@ -480,7 +547,8 @@ export function createFinanceReviewBatchService({
                   requestId: context.requestId,
                   financeReviewBatchScope: {
                     transactionId: decision.transactionId,
-                    transferReview: transferReview === true,
+                    transferReview: transferReview?.transferReview === true,
+                    transferCounterpart: transferReview?.transferCounterpart,
                     reviewId: decision.kind === "review" ? decision.reviewId : null,
                   },
                 };

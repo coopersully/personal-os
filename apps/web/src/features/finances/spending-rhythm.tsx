@@ -94,7 +94,7 @@ export function FinanceSpendingRhythm({
       <TooltipProvider delayDuration={150}>
         <fieldset
           aria-label={`${result.grain} spending blocks`}
-          className="grid min-w-0 grid-cols-[repeat(auto-fill,1.5rem)] gap-1.5"
+          className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,3rem),1fr))] gap-2"
         >
           {blocks.map((block, index) => (
             <Tooltip
@@ -113,7 +113,7 @@ export function FinanceSpendingRhythm({
                   tabIndex={index === focusedIndex ? 0 : -1}
                   aria-label={`${block.label}: ${formatMoney(block.netCents / 100)}; ${block.status}`}
                   className={cn(
-                    "relative size-6 min-h-0 rounded-sm p-0 text-xs tabular-nums",
+                    "relative aspect-square h-auto min-h-0 w-full rounded-sm p-0 text-xs tabular-nums",
                     block.future && "opacity-35",
                     block.incomplete &&
                       !block.future &&

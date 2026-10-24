@@ -103,8 +103,9 @@ Trends uses the shared Card composition and a responsive net-spending line chart
 quiet grid/axes and formatted dates. Focus lives in the primary navigation. The comparison stays in
 the chart header; detailed period rows, source/coverage and group changes live in its info dialog.
 Signed points preserve net refunds; exact selections remain available by pointer and keyboard.
-Rhythm is an open contribution-style heatmap: only a grain-aware heading and small rounded square
-blocks, without containing Cards, duplicate date/timezone context, a legend, or a footer. Select grain
+Rhythm is an open contribution-style heatmap: only a grain-aware heading and fluid rounded square
+blocks, without containing Cards, duplicate date/timezone context, a legend, or a footer. Blocks fill the
+available width with a 3rem minimum, wrap responsively, and let content height grow with their count. Select grain
 by inclusive range length: 1 day → hourly; 2–62 → daily; 63–366 → weekly; 367–1096 → monthly;
 longer → yearly. Weekly blocks follow the saved week start; monthly/yearly blocks follow calendar
 boundaries. Clip boundary blocks to the selected range and identify partial periods in tooltips.

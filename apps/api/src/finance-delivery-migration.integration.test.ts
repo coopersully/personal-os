@@ -2,6 +2,7 @@ import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createDatabaseClient, migrateDatabase } from "@personal-os/database";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
+import { prepareBaselineEvidence } from "./finance/baseline-qualification-evidence.js";
 import { migrationsWithout } from "./test-migrations.js";
 
 it("upgrades existing Finance evidence and preferences without rewriting owner choices", async () => {
@@ -36,8 +37,91 @@ it("upgrades existing Finance evidence and preferences without rewriting owner c
       "INSERT INTO finance_planning_evidence (user_id,goal_id,source_revision,amount_cents,currency_code,as_of,actor_user_id) VALUES ($1,$2,1,2500,'USD','2026-10-01',$1)",
       [one, goals.rows[0]?.id],
     );
-    await migrateDatabase(database.db, folder);
-    await migrateDatabase(database.db, folder);
+    // Seed the 0123-era contract: qualifications have an owner ID but no actor-type column.
+    // Use the historical defaults for optional fields and derive evidence from persisted sources.
+    const plan = await database.pool.query<{ id: string }>(
+      "INSERT INTO finance_budget_plans (user_id) VALUES ($1) RETURNING id",
+      [one],
+    );
+    const cash = await database.pool.query<{ id: string }>(
+      "INSERT INTO finance_accounts (user_id,provider,institution,name,currency_code) VALUES ($1,'manual','Fixture','Baseline cash','USD') RETURNING id",
+      [one],
+    );
+    const planId = plan.rows[0]?.id;
+    const accountId = cash.rows[0]?.id;
+    if (!planId || !accountId) throw new Error("Missing baseline sources");
+    const budget = await database.pool.query<{ id: string }>(
+      `INSERT INTO finance_budget_versions
+        (user_id,plan_id,version,status,effective_from,expected_resources_cents,allocated_total_cents,
+         balance_delta_cents,resources,rationale,approved_by_actor_type,approved_by_actor_id,approved_at)
+       VALUES ($1,$2,1,'active','2026-10',10000,10000,0,$3,'Existing human budget','user',$1::uuid::text,'2026-10-01T12:00:00Z')
+       RETURNING *`,
+      [one, planId, JSON.stringify([{ key: "income", kind: "income", amount: 10000 }])],
+    );
+    const budgetVersionId = budget.rows[0]?.id;
+    if (!budgetVersionId) throw new Error("Missing baseline budget");
+    await database.pool.query(
+      `INSERT INTO finance_budget_allocations
+        (user_id,budget_version_id,allocation_key,kind,amount_cents,legacy_category)
+       VALUES ($1,$2,'food','spending',10000,'Food')`,
+      [one, budgetVersionId],
+    );
+    const evidence = await database.db.transaction((tx) =>
+      prepareBaselineEvidence(tx, one, {
+        budgetVersionId,
+        accountIds: [accountId],
+        currency: "USD",
+        month: "2026-10",
+        timezone: "UTC",
+      }),
+    );
+    const review = await database.pool.query<{ id: string }>(
+      `INSERT INTO finance_budget_baseline_reviews
+        (user_id,period_month,plan_id,budget_version_id,snapshot,fingerprint,source_fingerprint,created_at)
+       VALUES ($1,'2026-10',$2,$3,$4,$5,$6,'2026-10-02T12:00:00Z') RETURNING *`,
+      [
+        one,
+        planId,
+        budgetVersionId,
+        evidence.snapshot,
+        evidence.fingerprint,
+        evidence.sourceFingerprint,
+      ],
+    );
+    const reviewId = review.rows[0]?.id;
+    if (!reviewId) throw new Error("Missing baseline review");
+    const qualification = await database.pool.query(
+      `INSERT INTO finance_budget_baseline_qualifications
+        (user_id,period_month,review_id,snapshot,fingerprint,confirmed_by_actor_id,confirmed_at,qualification_kind)
+       VALUES ($1,'2026-10',$2,$3,$4,$1::uuid::text,'2026-10-02T12:01:00Z','current') RETURNING *`,
+      [one, reviewId, evidence.snapshot, evidence.fingerprint],
+    );
+    expect(qualification.rows).toHaveLength(1);
+    expect(qualification.rows[0]).not.toHaveProperty("confirmed_by_actor_type");
+    for (const pass of ["upgrade", "idempotent rerun"]) {
+      await migrateDatabase(database.db, folder);
+      expect(
+        (
+          await database.pool.query(
+            "SELECT * FROM finance_budget_baseline_qualifications WHERE user_id=$1",
+            [one],
+          )
+        ).rows,
+        pass,
+      ).toEqual([{ ...qualification.rows[0], confirmed_by_actor_type: "user" }]);
+      expect(
+        (
+          await database.pool.query(
+            "SELECT * FROM finance_budget_baseline_reviews WHERE user_id=$1",
+            [one],
+          )
+        ).rows,
+      ).toEqual(review.rows);
+      expect(
+        (await database.pool.query("SELECT * FROM finance_budget_versions WHERE user_id=$1", [one]))
+          .rows,
+      ).toEqual(budget.rows);
+    }
     expect(
       (
         await database.pool.query(

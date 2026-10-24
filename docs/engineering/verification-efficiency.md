@@ -62,3 +62,73 @@ are not introduced globally by this policy. Do not weaken strictness or skip req
 Fix a demonstrated bottleneck. Never parallelize expensive full verifiers on this shared host;
 use the existing runner lock. Do not trade complete pagination, policy authentication, fsync/atomic
 checkpoints or final protected merge enforcement for speed. Report latency and source gaps honestly.
+
+## Hosted browser shards
+
+Browser acceptance uses four file shards per browser project, each with its own Ubuntu runner,
+application processes and PostgreSQL container. `fullyParallel: false` and one worker preserve
+ordering within a test file; no shared local worker increase is introduced. Every matrix member
+remains required. Failure artifacts include project and shard to avoid concurrent name collisions.
+Local `pnpm test:e2e` and complete `pnpm verify` retain their unsharded behavior.
+
+The boundary owner is the CI workflow. GitHub-hosted capacity and normal test dependency downloads
+remain required; repository permissions remain read-only. Jobs retain their existing timeouts,
+cancellation and retry policy. Missing, failed or canceled selected jobs block acceptance. Local
+discovery proves the test partition, not hosted scheduling, installation reliability or elapsed time.
+
+Measure the slowest shard, setup time, queueing and total runner minutes separately. Four shards
+trade more runner capacity for lower elapsed time; a large single file or slow browser dependency
+installation can limit gains. Five-minute ordinary PR CI remains a target, not a coverage exception.
+
+Node quality deliberately retains the original unsharded `pnpm check:node`. Vitest 3.2.7 blob
+aggregation merges post-conversion Istanbul maps, which can infer hits for an uncovered nested
+branch from an enclosing covered range in another shard. A measured trial changed unchanged-source
+branch coverage from 94.00% to 96.61%; it is not equivalent evidence. Future coverage distribution
+must demonstrate branch-hit equivalence against the single-run raw-V8 aggregation, including nested
+uncovered branches, before replacing the existing coverage gate. Unchanged threshold numbers alone
+do not prove equivalent enforcement.
+
+## Early production audit
+
+Node quality runs the unchanged `pnpm audit --prod` immediately after frozen dependency
+installation and before `pnpm check:node`. An audit failure stops that job before expensive
+type, coverage and build work; successful candidates still run every existing check. The same
+Node job and required aggregate gate enforce failure. Other parallel jobs are not canceled by
+this reorder, so earlier detection does not imply lower whole-workflow elapsed time or runner cost.
+
+Measure time to the audit result separately from complete elapsed time and aggregate runner
+minutes. In historical run 40040586614, installation finished 17 seconds after Node job start,
+then `check:node` took 22m45s before a one-second audit failure. Moving that audit earlier would
+have detected that failure roughly 22m45s sooner; this is a counterfactual from recorded timings,
+not a measured candidate speedup. Preserve the single-run sharding comparison separately and
+record actual current-candidate setup, audit and execution timings before making further claims.
+
+## Coordination and trustworthy reuse
+
+The normal repair loop is inspect the owner/contract/consumers, edit, run the smallest behavioral
+check, batch coherent repairs, then assemble complete frozen-candidate evidence once. Retry failed
+or invalidated checks within the existing recovery rules. Independent reviewers consume receipts;
+they do not each run broad verification. One owner holds heavy shared-host capacity, while cheap
+independent checks and isolated hosted runners can proceed. Use checked-in lifecycle commands;
+never reset another owner’s database or kill their server to repair a test resource collision.
+
+The current planner binds whole-step receipts conservatively. It does not implement automatic
+per-check result reuse, a semantic test selector or narrower final readiness. Any future per-check
+reuse must bind command/arguments, working directory, policy/config/tool/runtime, relevant environment
+without exposing values, source/tests/fixtures and transitive consumers. Include dirty, untracked,
+renamed, deleted and symlinked inputs; check input stability during execution. Base-sensitive checks
+also bind the comparison. Unknown dependencies broaden scope; malformed/missing/stale receipts do
+not pass, and newer failure supersedes an older pass for the same inputs. A selected execution success
+must be reported separately from complete readiness with every required check accounted for.
+
+Preparation reuse is distinct from test-result reuse. Healthy prepared resources require matching
+application/build, runtime/configuration, schema/fixture identity and proven ownership. Mutable
+external state that cannot be fingerprinted needs fresh test execution even if preparation is reused.
+Record discovery, pass/skip counts and actual environment; required skipped or undiscovered tests
+are evidence gaps. Do not implement these capabilities by writing optimistic planner receipts.
+
+The [acceleration plan](../superpowers/plans/2026-08-26-ci-hardening-and-acceleration.md#current-follow-up-plan-october-23-2026)
+records staged owners, measured evidence and acceptance for future work. Complete final verification,
+including docs-only shipping candidates, remains mandatory under the delivery contract until a
+separately reviewed policy/classifier/enforcement change proves a safe exemption. This documentation
+introduces no such exemption and no runtime, CI or verifier feature.

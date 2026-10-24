@@ -27,13 +27,22 @@ personal agent skills and routine definitions. Keep changes small, explicit, and
 
 ## Merge authority
 
-Merge only when Cooper explicitly authorizes merging the identified work, for example “get this
-merged,” “merge it when safe,” or “ship it.” Record that scope and continue through the gates without
-asking again later. Implementing, tracking, publishing a PR, or handing off context alone does not
-authorize merge. Without merge authority, stop at the requested reviewed/published state and report
-readiness. A later pause/revocation or changed scope supersedes the grant. Assigned workers still
-never merge; their authorized orchestrator owns it. Ordinary contribution owners may merge their
-own scoped work only with this explicit grant and independent review. No bypass or deferred auto-merge.
+Cooper grants standing authority to the assigned nohmi oversight outcome owner to carry assigned
+work and its necessary bounded prerequisites through review, verification and normal protected
+merge. Record that source and scope once; do not request separate per-PR or prerequisite merge
+permission. Review your own work and delegated implementation before accepting it. Self-review
+never substitutes for applicable independent review, eligible approvals or live branch protections.
+
+Honor a read-only, plan-only, draft-only or no-merge instruction, later pause/revocation, and genuine
+scope limits. Ordinary contribution owners outside an oversight assignment still need explicit merge
+intent such as “get this merged” or “ship it”; preserve an existing grant without asking again.
+Assigned workers never merge; their outcome orchestrator owns acceptance and merge. The automation
+head never merges. No bypass or deferred auto-merge.
+
+Choose reasonable scope-consistent defaults and continue authorized work without routine
+clarification. Ask only when indispensable information cannot be obtained from context or an
+explicit platform approval is required; identify the specific missing fact or approval. A necessary
+bounded prerequisite is part of the assigned outcome, not a reason to ask for merge permission again.
 
 ## Linear Routing
 

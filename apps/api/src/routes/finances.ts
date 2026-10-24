@@ -987,7 +987,16 @@ export function registerFinanceRoutes({
   app.post("/v1/finances/questions/:id/answer", async (context) => {
     const { answer } = await parseBody(
       context,
-      z.object({ answer: z.string().trim().min(1).max(4_000) }).strict(),
+      z
+        .object({
+          answer: z
+            .string()
+            .trim()
+            .min(1)
+            .max(4_000)
+            .refine((value) => value.length <= 4_000, "Answer exceeds the length limit."),
+        })
+        .strict(),
     );
     return context.json({
       outcome: await requireActions().answerQuestion(

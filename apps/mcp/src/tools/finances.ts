@@ -27,6 +27,7 @@ import {
   prepareFinanceBudgetBaselineQualificationInputSchema,
   refreshFinanceMaintenanceExecutionInputSchema,
   updateFinanceTransactionInputSchema,
+  utcIsoDateTimeSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
 import { apiResult, result } from "../tool-result.js";
@@ -1012,7 +1013,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: {
         accountId: id,
         balance: z.number().finite().nullable().optional(),
-        expectedUpdatedAt: z.iso.datetime().optional(),
+        expectedUpdatedAt: utcIsoDateTimeSchema.optional(),
         expectedVersion: z.number().int().nonnegative().optional(),
         idempotencyKey,
         includeInPlanning: z.boolean().optional(),

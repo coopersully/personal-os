@@ -25,6 +25,7 @@ import {
   automationHostScheduleSchema,
   automationHostScheduleUpdateInputSchema,
   observeAutomationHostScheduleHealth,
+  utcIsoDateTimeSchema,
 } from "@personal-os/domain";
 import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -435,7 +436,7 @@ export function createAutomationHostService(options: {
           scheduleId: z.uuid(),
           expectedScheduleId: z.uuid(),
           expectedConnectionId: z.uuid(),
-          expectedUpdatedAt: z.iso.datetime(),
+          expectedUpdatedAt: utcIsoDateTimeSchema,
           hostChecked: z.literal(true),
         })
         .strict()
@@ -564,7 +565,7 @@ export function createAutomationHostService(options: {
     async reconcileDelivery(principal: Principal, id: string, raw: unknown) {
       await authorizeHost(principal, true);
       const input = z
-        .object({ expectedUpdatedAt: z.iso.datetime(), hostChecked: z.literal(true) })
+        .object({ expectedUpdatedAt: utcIsoDateTimeSchema, hostChecked: z.literal(true) })
         .strict()
         .parse(raw);
       return db.transaction(async (tx) => {

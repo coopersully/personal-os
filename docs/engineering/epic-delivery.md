@@ -1,7 +1,7 @@
 # Epic planning and launch
 
 This is the nohmi procedure for repository `oversight` and the personal head/orchestrator skills.
-Generic SWE oversight supplies reusable coordination behavior; the
+The self-contained repository oversight skill supplies lifecycle and monitoring runbooks; the
 [autonomous development contract](autonomous-development.md) governs roles and merge authority.
 This documents a workflow, not a running coordinator or automated admission validator.
 
@@ -50,6 +50,9 @@ Keep feature behavior and tests together. Do not split by file or create foundat
 named consumer and observable acceptance. Every parent criterion has a child or explicit integration
 owner; every child serves the parent outcome. Open product decisions block only affected slices.
 Admission is per ready slice; future implementation details need not all be settled upfront.
+For a single-owner outcome, that worker owns integration on its existing branch. Name a separate
+composition worker and rolling integration branch only for genuine cross-owner integration needs;
+never add either as launch ceremony. Preserve one owner for shared paths and consumer verification.
 
 ## Launch the admitted scope
 
@@ -62,24 +65,31 @@ Admission is per ready slice; future implementation details need not all be sett
    personal head's launch/recovery reference when installed. Missing capabilities block the affected
    operation. Never test access with a merge or production mutation. Contracts must exist on the
    actual dispatch base; uncommitted guidance elsewhere is not inherited.
-3. Reserve each dispatch and claim before creation. Persistent head/outcome chats use app task tools;
+3. Complete the [mandatory oversight kickoff/adoption gate](../../.agents/skills/oversight/SKILL.md#mandatory-kickoff-and-adoption-gate)
+   before implementation dispatch. Inspect context/current owners; reuse or create the outcome
+   section, resolve/link direct Nohmi issues and dependencies, name/place dedicated existing chats,
+   and retain verified receipts/IDs in the outcome entry of the existing private network registry;
+   direct issues reference it as defined by the gate. Preserve explicit user titles
+   and unrelated/shared chats; subagents do not get sidebar rows. Resumes repair only missing setup.
+   UI/tracker failure leaves setup incomplete and blocks new implementation dispatch and an
+   established-oversight claim. Continue read-only context gathering; do not interrupt already-running
+   authorized owners or duplicate them. Reconcile partial effects before retrying.
+4. Reserve each dispatch and claim before creation. Persistent head/outcome chats use app task tools;
    implementation/review subagents use collaboration tools. Follow [agent handoffs](agent-handoffs.md)
-   for typed IDs, packet revisions and acknowledgements. Queued tasks are not ready. Unknown creation
-   or owner liveness requires reconciliation, not retry that could create another writer. Establish
-   stopped ownership and transfer before replacement.
-4. Within sidebar authority, discover sections with `list_threads`, reuse the recorded epic section
-   or confirm a match from members, and create one only if absent. Record intent and reconcile
-   uncertain results. Use short common-prefix outcome titles, Lead first, then dependency order.
-   Preserve explicit existing titles unless renaming is authorized. Use `move_thread_to_sidebar_section`
-   and `reorder_section` with complete current membership, preserving unrelated members. Read back
-   results. Subagents do not get sidebar rows. UI failure is an organization gap, not a reason to
-   duplicate owners or stop independent execution.
+   for typed IDs, packet revisions and acknowledgements. Separately authorized new chats begin with
+   setup/context only; verify their names, membership and issue links before implementation dispatch.
+   Queued tasks are not ready. Unknown creation or owner liveness requires reconciliation, not retry
+   that could create another writer. Establish stopped ownership and transfer before replacement.
 5. Require executor acknowledgement of scope, checkout/base, tools and runtime before marking it
-   active. Release dependent writes only when the exact prerequisite is merged and present in its
-   base. Budget slots for workers and reviewers; reserve scarce verification resources separately.
+   active. Release dependent writes when the exact prerequisite milestone is evidenced on the
+   integration base: stable reviewed source may suffice for source inclusion; an explicitly required
+   merged prerequisite must be merged and present. Preserve migration/publication constraints. Budget
+   slots for workers and reviewers; reserve scarce verification resources separately.
 6. Establish the real next trigger: bounded waits while active, a saved scoped heartbeat for
-   authorized recurring work. Reuse matching monitors and remain quiet on unchanged/non-actionable
-   runs. A checkpoint is not a scheduler. Without a wakeup, report waiting and the responsible owner
+   authorized recurring work. Reuse matching monitors and preserve cadence/timezone. Apply the
+   oversight skill’s scheduled-report preference (short visible report even unchanged), unless the
+   user explicitly requests quiet/muted reporting. A checkpoint is not a scheduler. Without a wakeup,
+   report waiting and the responsible owner
    rather than claim unattended execution is running.
 
 Report planned, admitted, dispatched, acknowledged/running and waiting separately with actual owner

@@ -204,7 +204,11 @@ type MaintenanceMutationAttribution = {
 };
 type MutationContext = {
   /** Internal exact-case scope, constructed only by the validated batch service. */
-  financeReviewBatchScope?: { transactionId: string; reviewId: string | null };
+  financeReviewBatchScope?: {
+    transactionId: string;
+    reviewId: string | null;
+    transferReview?: boolean;
+  };
   financeExecution?: FinanceExecutionFence;
   financeBudgetApproval?: FinanceBudgetApproval;
   /** Internal action-service capability; never derived from a token or MCP input. */
@@ -2755,7 +2759,12 @@ export function createFinanceService({
     const readExecutor = executor ?? db;
     // Direct ledger editing has its own prepared-action contract. Resolving a
     // categorization review must still match current server-owned evidence.
+    const exactTransferReviewExecution =
+      options.reviewedExecution === true &&
+      batchScope?.transferReview === true &&
+      !!options.requiredReviewId;
     const directLedgerExecution = options.reviewedExecution === true && !options.requiredReviewId;
+    const explicitExecution = directLedgerExecution || exactTransferReviewExecution;
     if (options.reviewedExecution)
       await requireWorkspaceExecution(readExecutor, context.principal, "finances", now());
     const before = await ownedTransaction(
@@ -2786,7 +2795,7 @@ export function createFinanceService({
     );
     let confidence = decision.confidence;
     let agentProposal: FinanceCategorizationProposal | null = null;
-    if (!directLedgerExecution && (source === "agent" || source === "rule")) {
+    if (!explicitExecution && (source === "agent" || source === "rule")) {
       const proposal = await categorizationProposal(
         context.principal.userId,
         beforeValue,
@@ -2809,7 +2818,7 @@ export function createFinanceService({
       if (source === "agent") agentProposal = proposal;
     }
     const canApply =
-      directLedgerExecution || source !== "agent" || agentProposal?.meetsPolicyThreshold === true;
+      explicitExecution || source !== "agent" || agentProposal?.meetsPolicyThreshold === true;
     // A batch cannot rewrite an unrelated question into a categorization question.
     // Its durable item receipt carries the policy-required follow-up instead.
     if (!canApply && batchScope)
@@ -3050,7 +3059,7 @@ export function createFinanceService({
         .where(eq(financeCategories.userId, context.principal.userId))
         .orderBy(financeCategories.id)
         .for("update");
-      if (!directLedgerExecution && (source === "agent" || source === "rule")) {
+      if (!explicitExecution && (source === "agent" || source === "rule")) {
         const currentProposal = await categorizationProposal(
           context.principal.userId,
           transaction(current),
@@ -3073,7 +3082,7 @@ export function createFinanceService({
         threshold = currentProposal.threshold;
       }
       const mustProtectAmbiguousTransfer =
-        !directLedgerExecution && (source === "rule" || source === "agent");
+        !explicitExecution && (source === "rule" || source === "agent");
       const [protectedReview] = mustProtectAmbiguousTransfer
         ? await tx
             .select({ id: financeReviewCases.id })

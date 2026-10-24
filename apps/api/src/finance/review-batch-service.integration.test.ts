@@ -166,6 +166,349 @@ describe.sequential("durable Finance review batches", () => {
       where: eq(financeTransactions.id, id),
     });
   }
+  async function transferFixture(action: "confirm_transfer" | "recategorize" = "confirm_transfer") {
+    const f = await fixture(2, true);
+    const decision = required(f.decisions[0]);
+    const following = required(f.decisions[1]);
+    if (decision.kind !== "review" || following.kind !== "review") throw new Error("fixture");
+    decision.action = action;
+    decision.evidence = "Signed source records show opposite USD movements between owned accounts.";
+    following.action = "defer";
+    await database.db
+      .update(financeReviewCases)
+      .set({ reason: "possible_transfer" })
+      .where(eq(financeReviewCases.id, decision.reviewId));
+    await database.db
+      .update(financeTransactions)
+      .set({
+        direction: "transfer",
+        providerDirection: "expense",
+        providerCategory: "TRANSFER_OUT",
+        currencyCode: "USD",
+        reconciliationStatus: "candidate",
+      })
+      .where(eq(financeTransactions.id, decision.transactionId));
+    const counterpartAccountId = randomUUID();
+    await database.db.insert(financeAccounts).values({
+      id: counterpartAccountId,
+      userId: f.userId,
+      institution: "Fixture",
+      name: "Savings",
+      provider: "manual",
+      status: "connected",
+    });
+    const [counterpart] = await database.db
+      .insert(financeTransactions)
+      .values({
+        userId: f.userId,
+        accountId: counterpartAccountId,
+        merchant: "Internal movement",
+        amount: 1500,
+        direction: "transfer",
+        providerDirection: "income",
+        providerCategory: "TRANSFER_IN",
+        currencyCode: "USD",
+        transactionDate: "2026-10-24",
+        updatedAt: stamp,
+      })
+      .returning();
+    const current = required(await transaction(decision.transactionId));
+    const review = required(
+      await database.db.query.financeReviewCases.findFirst({
+        where: eq(financeReviewCases.id, decision.reviewId),
+      }),
+    );
+    decision.expectedTransactionRevision = current.contextualRevision.toString();
+    decision.expectedReviewRevision = review.contextualRevision.toString();
+    return {
+      ...f,
+      decision,
+      following,
+      counterpart: required(counterpart),
+      agentContext: await agent(f.userId),
+    };
+  }
+  it.each([
+    "confirm_transfer",
+    "recategorize",
+  ] as const)("executes an exact agent %s with the real writer and continues the batch", async (action) => {
+    const f = await transferFixture(action);
+    const siblingId = randomUUID();
+    await database.db.insert(financeReviewCases).values({
+      id: siblingId,
+      userId: f.userId,
+      transactionId: f.decision.transactionId,
+      reason: "possible_reimbursement",
+      updatedAt: stamp,
+    });
+    const siblingBefore = await database.db.query.financeReviewCases.findFirst({
+      where: eq(financeReviewCases.id, siblingId),
+    });
+    const run = await f.service.preview(f.input, f.agentContext);
+    const result = await f.service.execute(
+      run.id,
+      { fingerprint: run.fingerprint },
+      f.agentContext,
+    );
+    expect(result.outcomes.map((outcome) => outcome.status)).toEqual(["applied", "deferred"]);
+    expect(result.pendingCount).toBe(0);
+    expect(await transaction(f.decision.transactionId)).toMatchObject({
+      direction: action === "confirm_transfer" ? "transfer" : "expense",
+      reconciliationStatus: action === "confirm_transfer" ? "confirmed" : "not_applicable",
+      category: action === "confirm_transfer" ? "Transfers" : "Food",
+      needsReview: true,
+    });
+    expect(await transaction(f.counterpart.id)).toEqual(f.counterpart);
+    expect(
+      await database.db.query.financeReviewCases.findFirst({
+        where: eq(financeReviewCases.id, siblingId),
+      }),
+    ).toEqual(siblingBefore);
+    expect(
+      await database.db.query.financeReviewCases.findFirst({
+        where: eq(financeReviewCases.id, f.decision.reviewId),
+      }),
+    ).toMatchObject({ status: "resolved" });
+    const audits = await database.db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.userId, f.userId));
+    expect(audits).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action:
+            action === "confirm_transfer"
+              ? "finance.transfer_confirmed"
+              : "finance.transaction_categorized",
+          actorType: "agent",
+          actorId: f.agentContext.principal.actorId,
+          entityId: f.decision.transactionId,
+        }),
+      ]),
+    );
+    expect(
+      await f.service.execute(run.id, { fingerprint: run.fingerprint }, f.agentContext),
+    ).toEqual(result);
+    expect(
+      await database.db
+        .select()
+        .from(financeClassificationDecisions)
+        .where(eq(financeClassificationDecisions.userId, f.userId)),
+    ).toHaveLength(1);
+  });
+  it.each([
+    "currency",
+    "direction",
+    "pending",
+    "amount",
+    "date",
+    "account",
+    "owner",
+    "provenance",
+    "ambiguous",
+  ] as const)("rejects unsupported transfer counterpart evidence: %s", async (change) => {
+    const f = await transferFixture();
+    const target = required(await transaction(f.decision.transactionId));
+    if (change === "ambiguous") {
+      await database.db.insert(financeTransactions).values({ ...f.counterpart, id: randomUUID() });
+    } else {
+      const other = change === "owner" ? await fixture() : null;
+      await database.db
+        .update(financeTransactions)
+        .set({
+          ...(change === "currency" ? { currencyCode: "EUR" } : {}),
+          ...(change === "direction" ? { providerDirection: "expense" as const } : {}),
+          ...(change === "pending" ? { pending: true } : {}),
+          ...(change === "amount" ? { amount: 1400 } : {}),
+          ...(change === "date" ? { transactionDate: "2026-09-01" } : {}),
+          ...(change === "account" ? { accountId: target.accountId } : {}),
+          ...(other ? { userId: other.userId } : {}),
+          ...(change === "provenance"
+            ? { direction: "income" as const, providerCategory: null }
+            : {}),
+        })
+        .where(eq(financeTransactions.id, f.counterpart.id));
+    }
+    await expect(f.service.preview(f.input, f.agentContext)).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+    expect((await transaction(target.id))?.reconciliationStatus).toBe("candidate");
+  });
+  it("records changed counterpart evidence as an item failure and continues without closing cases", async () => {
+    const f = await transferFixture();
+    const run = await f.service.preview(f.input, f.agentContext);
+    await database.db
+      .update(financeTransactions)
+      .set({ currencyCode: "EUR" })
+      .where(eq(financeTransactions.id, f.counterpart.id));
+    const result = await f.service.execute(
+      run.id,
+      { fingerprint: run.fingerprint },
+      f.agentContext,
+    );
+    expect(result.outcomes.map((outcome) => outcome.status)).toEqual(["failed", "deferred"]);
+    expect(result.outcomes[0]).toMatchObject({
+      error: { code: "invalid_request" },
+      recovery: "new_preview",
+    });
+    expect((await transaction(f.decision.transactionId))?.reconciliationStatus).toBe("candidate");
+    expect(
+      await database.db.query.financeReviewCases.findFirst({
+        where: eq(financeReviewCases.id, f.decision.reviewId),
+      }),
+    ).toMatchObject({ status: "open" });
+  });
+  it("stops admitting slow items before the request deadline and resumes committed receipts once", async () => {
+    const f = await fixture(3);
+    const run = await f.service.preview(f.input, f.context);
+    let elapsed = 0;
+    let calls = 0;
+    const slow = createFinanceReviewBatchService({
+      db: database.db,
+      now,
+      elapsedNow: () => elapsed,
+      finance: {
+        ...f.finance,
+        async applyCategorizations(...args) {
+          calls++;
+          const result = await f.finance.applyCategorizations(...args);
+          elapsed += 21_000;
+          return result;
+        },
+      },
+    });
+    const partial = await slow.execute(run.id, { fingerprint: run.fingerprint }, f.context);
+    expect(calls).toBe(2);
+    expect(partial).toMatchObject({ status: "in_progress", pendingCount: 1 });
+    expect(partial.outcomes.map((outcome) => outcome.status)).toEqual(["applied", "applied"]);
+    const completed = await f.service.execute(run.id, { fingerprint: run.fingerprint }, f.context);
+    expect(completed).toMatchObject({ status: "completed", pendingCount: 0 });
+    expect(
+      await database.db
+        .select()
+        .from(financeClassificationDecisions)
+        .where(eq(financeClassificationDecisions.userId, f.userId)),
+    ).toHaveLength(3);
+  });
+  it.each([
+    "deadline",
+    "disconnect",
+  ] as const)("rolls back the current item on %s and resumes pending work", async (reason) => {
+    const f = await fixture(2);
+    const run = await f.service.preview(f.input, f.context);
+    const abort = new AbortController();
+    let elapsed = 0;
+    let calls = 0;
+    let writerFinished!: () => void;
+    const finished = new Promise<void>((resolve) => {
+      writerFinished = resolve;
+    });
+    const slow = createFinanceReviewBatchService({
+      db: database.db,
+      now,
+      elapsedNow: () => elapsed,
+      finance: {
+        ...f.finance,
+        async applyCategorizations(...args) {
+          calls++;
+          const result = await f.finance.applyCategorizations(...args);
+          if (reason === "deadline") elapsed = 45_001;
+          else abort.abort();
+          writerFinished();
+          return result;
+        },
+      },
+    });
+    const partial = await slow.execute(
+      run.id,
+      { fingerprint: run.fingerprint },
+      { ...f.context, signal: abort.signal },
+    );
+    await finished;
+    expect(calls).toBe(1);
+    expect(partial).toMatchObject({ status: "previewed", pendingCount: 2, outcomes: [] });
+    // The owner lock makes resume wait for the interrupted transaction's rollback.
+    const completed = await f.service.execute(run.id, { fingerprint: run.fingerprint }, f.context);
+    expect(completed.status).toBe("completed");
+    expect(
+      await database.db
+        .select()
+        .from(financeClassificationDecisions)
+        .where(eq(financeClassificationDecisions.userId, f.userId)),
+    ).toHaveLength(2);
+  });
+  it("bounds pool acquisition and never starts work acquired after the deadline", async () => {
+    const f = await fixture();
+    const run = await f.service.preview(f.input, f.context);
+    let release!: () => void;
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let acquisition: Promise<unknown> | undefined;
+    const delayedDb = new Proxy(database.db, {
+      get(target, key, receiver) {
+        if (key !== "transaction") return Reflect.get(target, key, receiver);
+        return (...args: Parameters<typeof database.db.transaction>) => {
+          acquisition = hold.then(() => target.transaction(...args));
+          return acquisition;
+        };
+      },
+    });
+    const bounded = createFinanceReviewBatchService({
+      db: delayedDb,
+      now,
+      finance: f.finance,
+      executionBudgetMs: 20,
+    });
+    await expect(
+      bounded.execute(run.id, { fingerprint: run.fingerprint }, f.context),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+    release();
+    await expect(acquisition).rejects.toMatchObject({ code: "service_unavailable" });
+    expect((await f.service.get(run.id, f.context)).outcomes).toEqual([]);
+    expect((await transaction(required(f.decisions[0]).transactionId))?.needsReview).toBe(true);
+    expect(
+      (await f.service.execute(run.id, { fingerprint: run.fingerprint }, f.context)).status,
+    ).toBe("completed");
+  });
+  it("bounds lock contention and leaves the interrupted item pending", async () => {
+    const f = await fixture(2);
+    const run = await f.service.preview(f.input, f.context);
+    let release!: () => void;
+    let locked!: () => void;
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const ready = new Promise<void>((resolve) => {
+      locked = resolve;
+    });
+    const blocker = database.db.transaction(async (tx) => {
+      await tx
+        .select()
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, required(f.decisions[0]).transactionId))
+        .for("update");
+      locked();
+      await hold;
+    });
+    await ready;
+    try {
+      const bounded = createFinanceReviewBatchService({
+        db: database.db,
+        now,
+        finance: f.finance,
+        executionBudgetMs: 1_000,
+      });
+      const partial = await bounded.execute(run.id, { fingerprint: run.fingerprint }, f.context);
+      expect(partial).toMatchObject({ pendingCount: 2, outcomes: [] });
+    } finally {
+      release();
+      await blocker;
+    }
+    expect(
+      (await f.service.execute(run.id, { fingerprint: run.fingerprint }, f.context)).status,
+    ).toBe("completed");
+  });
   it("persists exact preview without ledger effects, resumes bounded work and replays once", async () => {
     const f = await fixture(12);
     const preview = await f.service.preview(f.input, f.context);

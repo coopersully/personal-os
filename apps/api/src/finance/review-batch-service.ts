@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   accessTokens,
   type Database,
+  financeAccounts,
   financeCategories,
   financeReviewBatchRuns,
   financeReviewCases,
@@ -21,12 +22,12 @@ import {
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { AppError } from "../errors.js";
 import { lockReimbursementTopology } from "../finance-reimbursement-locks.js";
-import type { createFinanceService } from "../finance-service.js";
+import { type createFinanceService, isProviderTransfer } from "../finance-service.js";
 import type { Principal } from "../types.js";
 import { requireWorkspaceExecution } from "../workspace-execution.js";
 import { guardFinanceExecutionTransaction } from "./execution-owner-guard.js";
 
-type Context = { principal: Principal; requestId: string };
+type Context = { principal: Principal; requestId: string; signal?: AbortSignal };
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type Row = typeof financeReviewBatchRuns.$inferSelect;
 type Finance = Pick<
@@ -83,10 +84,14 @@ export function createFinanceReviewBatchService({
   db,
   now,
   finance,
+  elapsedNow = () => performance.now(),
+  executionBudgetMs = 45_000,
 }: {
   db: Database;
   now: () => Date;
   finance: Finance;
+  elapsedNow?: () => number;
+  executionBudgetMs?: number;
 }) {
   async function authorize(tx: Transaction, context: Context, mode: "read" | "write" | "execute") {
     const principal = context.principal;
@@ -143,7 +148,16 @@ export function createFinanceReviewBatchService({
     decision: FinanceReviewBatchDecision,
     userId: string,
     lock: boolean,
+    agent = false,
   ) {
+    // Reconciliation/provider sync lock accounts before their transaction evidence.
+    if (lock && decision.kind === "review" && decision.action === "confirm_transfer")
+      await tx
+        .select({ id: financeAccounts.id })
+        .from(financeAccounts)
+        .where(eq(financeAccounts.userId, userId))
+        .orderBy(financeAccounts.id)
+        .for("update");
     // Match the existing categorization writer's topology -> transaction -> review lock order.
     if (lock) await lockReimbursementTopology(tx, userId);
     const query = tx
@@ -200,6 +214,72 @@ export function createFinanceReviewBatchService({
           "invalid_request",
           "Use an explicit transfer review decision supported by evidence.",
         );
+      if (agent && review.reason === "possible_transfer" && decision.action !== "defer") {
+        if (transaction.transferGroupId)
+          throw new AppError(
+            "invalid_request",
+            "Inspect the existing transfer relationship before changing this case.",
+          );
+        if (decision.action === "confirm_transfer") {
+          // Caller prose/confidence is not proof. Require a unique reciprocal pair
+          // with signed source directions and transfer provenance on both legs.
+          const evidenceQuery = tx
+            .select({ transaction: financeTransactions })
+            .from(financeTransactions)
+            .innerJoin(
+              financeAccounts,
+              and(
+                eq(financeAccounts.id, financeTransactions.accountId),
+                eq(financeAccounts.userId, userId),
+              ),
+            )
+            .where(
+              and(
+                eq(financeTransactions.userId, userId),
+                eq(financeTransactions.amount, transaction.amount),
+              ),
+            );
+          const rows = await (lock
+            ? evidenceQuery.for("share", { of: financeTransactions })
+            : evidenceQuery);
+          const candidates = rows
+            .map((row) => row.transaction)
+            .filter(
+              (row) =>
+                !row.pending &&
+                !row.transferGroupId &&
+                row.providerDirection !== null &&
+                row.reconciliationStatus !== "matched" &&
+                row.reconciliationStatus !== "confirmed" &&
+                row.currencyCode !== null &&
+                (row.direction === "transfer" ||
+                  isProviderTransfer(row.providerCategory) ||
+                  isProviderTransfer(row.providerCategoryDetailed)),
+            );
+          const counterparts = (row: typeof transaction) =>
+            candidates.filter(
+              (other) =>
+                other.id !== row.id &&
+                other.accountId !== row.accountId &&
+                other.providerDirection !== row.providerDirection &&
+                other.currencyCode === row.currencyCode &&
+                Math.abs(Date.parse(other.transactionDate) - Date.parse(row.transactionDate)) <=
+                  3 * 86_400_000,
+            );
+          const matches = counterparts(transaction);
+          const match = matches.length === 1 ? matches[0] : undefined;
+          if (
+            !candidates.some((row) => row.id === transaction.id) ||
+            !match ||
+            counterparts(match).length !== 1
+          )
+            throw new AppError(
+              "invalid_request",
+              "Confirming this transfer requires a unique owned counterpart with current source evidence.",
+            );
+        }
+        return true;
+      }
     } else {
       const [transferReview] = await tx
         .select({ id: financeReviewCases.id })
@@ -250,7 +330,13 @@ export function createFinanceReviewBatchService({
           return present(row);
         }
         for (const decision of input.decisions)
-          await validate(tx, decision, context.principal.userId, false);
+          await validate(
+            tx,
+            decision,
+            context.principal.userId,
+            false,
+            context.principal.actorType === "agent",
+          );
         const [row] = await tx
           .insert(financeReviewBatchRuns)
           .values({
@@ -290,93 +376,183 @@ export function createFinanceReviewBatchService({
     },
     async execute(id: string, raw: unknown, context: Context): Promise<FinanceReviewBatchRun> {
       const input = executeFinanceReviewBatchInputSchema.parse(raw);
+      // Leave >=15 seconds below the 60s gateway for rollback/serialization/transport.
+      // This clock is independent of the injectable domain timestamp.
+      const budget = Math.max(1, Math.min(executionBudgetMs, 45_000));
+      const deadline = elapsedNow() + budget;
+      const interrupted = new AppError(
+        "service_unavailable",
+        "Finance batch execution paused; retrieve the saved batch and resume pending items.",
+      );
+      const remaining = () => Math.max(0, Math.floor(deadline - elapsedNow()));
+      let stopped = false;
+      const check = () => {
+        if (stopped || context.signal?.aborted || remaining() <= 0) throw interrupted;
+      };
+      async function bounded<T>(run: (tx: Transaction) => Promise<T>): Promise<T> {
+        check();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        let abort = () => {};
+        const interruption = new Promise<never>((_, reject) => {
+          abort = () => {
+            stopped = true;
+            reject(interrupted);
+          };
+          timer = setTimeout(abort, remaining());
+          context.signal?.addEventListener("abort", abort, { once: true });
+        });
+        try {
+          return await Promise.race([
+            db.transaction(async (tx) => {
+              // Pool acquisition can finish after the response; never start queued work then.
+              check();
+              const timeout = Math.max(1, Math.min(10_000, remaining()));
+              // PostgreSQL 17 bounds the whole transaction, including many short statements.
+              await tx.execute(sql.raw(`SET LOCAL transaction_timeout = '${timeout}ms'`));
+              const statementTimeout = Math.max(1, Math.floor(timeout / 2));
+              await tx.execute(sql.raw(`SET LOCAL statement_timeout = '${statementTimeout}ms'`));
+              await tx.execute(
+                sql.raw(`SET LOCAL lock_timeout = '${Math.min(3_000, statementTimeout)}ms'`),
+              );
+              check();
+              const result = await run(tx);
+              check();
+              return result;
+            }),
+            interruption,
+          ]);
+        } finally {
+          clearTimeout(timer);
+          context.signal?.removeEventListener("abort", abort);
+        }
+      }
+      const isInterrupted = (error: unknown): boolean => {
+        if (error === interrupted) return true;
+        if (typeof error !== "object" || error === null) return false;
+        if ("code" in error && ["25P04", "57014", "55P03"].includes(String(error.code)))
+          return true;
+        return "cause" in error && error.cause !== error && isInterrupted(error.cause);
+      };
+      let latest = await bounded(async (tx) => {
+        await authorize(tx, context, "execute");
+        const row = await find(tx, id, context);
+        if (row.fingerprint !== input.fingerprint)
+          throw new AppError("conflict", "Execution must accept the exact preview fingerprint.");
+        return row;
+      }).catch((error: unknown) => {
+        if (isInterrupted(error)) throw interrupted;
+        throw error;
+      });
       for (let count = 0; count < input.limit; count++) {
-        const progressed = await db.transaction(async (tx) => {
-          // Bound contention and individual database statements; interrupted work stays pending.
-          await tx.execute(sql`SET LOCAL lock_timeout = '3s'`);
-          await tx.execute(sql`SET LOCAL statement_timeout = '10s'`);
-          await authorize(tx, context, "execute");
-          const row = await find(tx, id, context);
-          if (row.fingerprint !== input.fingerprint)
-            throw new AppError("conflict", "Execution must accept the exact preview fingerprint.");
-          const decisions = manifest(row);
-          const receipts = outcomes(row);
-          const completed = new Set(receipts.map((item) => item.index));
-          const index = decisions.findIndex((_, index) => !completed.has(index));
-          const decision = decisions[index];
-          if (!decision) return false;
-          let outcome: FinanceReviewBatchOutcome;
-          try {
-            // A savepoint rolls back all writer effects before a business failure receipt commits.
-            outcome = await tx.transaction(async (itemTx) => {
-              await validate(itemTx, decision, context.principal.userId, true);
-              // Deliberately reconstruct context: internal prepared-action/maintenance capabilities
-              // must never be inherited from a batch caller or persisted preview.
-              const writerContext = {
-                principal: context.principal,
-                requestId: context.requestId,
-                financeReviewBatchScope: {
-                  transactionId: decision.transactionId,
-                  reviewId: decision.kind === "review" ? decision.reviewId : null,
-                },
-              };
-              let status: FinanceReviewBatchOutcome["status"];
-              if (decision.kind === "review") {
-                const result = await finance.resolveReview(
-                  decision.reviewId,
+        if (context.signal?.aborted || remaining() < Math.min(10_000, budget / 10)) break;
+        try {
+          const progressed = await bounded(async (tx) => {
+            await authorize(tx, context, "execute");
+            const row = await find(tx, id, context);
+            if (row.fingerprint !== input.fingerprint)
+              throw new AppError(
+                "conflict",
+                "Execution must accept the exact preview fingerprint.",
+              );
+            const decisions = manifest(row);
+            const receipts = outcomes(row);
+            const completed = new Set(receipts.map((item) => item.index));
+            const index = decisions.findIndex((_, index) => !completed.has(index));
+            const decision = decisions[index];
+            if (!decision) return { row, progressed: false };
+            check();
+            let outcome: FinanceReviewBatchOutcome;
+            try {
+              // A savepoint rolls back all writer effects before a business failure receipt commits.
+              outcome = await tx.transaction(async (itemTx) => {
+                const transferReview = await validate(
+                  itemTx,
                   decision,
-                  writerContext,
-                  itemTx,
+                  context.principal.userId,
+                  true,
+                  context.principal.actorType === "agent",
                 );
-                status =
-                  "deferred" in result
-                    ? "deferred"
-                    : result.applied
-                      ? "applied"
-                      : "review_required";
-              } else {
-                const [result] = await finance.applyCategorizations(
-                  { decisions: [decision] },
-                  writerContext,
-                  itemTx,
-                );
-                if (!result)
-                  throw new AppError("internal_error", "The categorization outcome is missing.");
-                status = result.applied ? "applied" : "review_required";
-              }
-              return {
+                check();
+                // Deliberately reconstruct context: internal prepared-action/maintenance capabilities
+                // must never be inherited from a batch caller or persisted preview.
+                const writerContext = {
+                  principal: context.principal,
+                  requestId: context.requestId,
+                  financeReviewBatchScope: {
+                    transactionId: decision.transactionId,
+                    transferReview: transferReview === true,
+                    reviewId: decision.kind === "review" ? decision.reviewId : null,
+                  },
+                };
+                let status: FinanceReviewBatchOutcome["status"];
+                if (decision.kind === "review") {
+                  const result = await finance.resolveReview(
+                    decision.reviewId,
+                    decision,
+                    writerContext,
+                    itemTx,
+                  );
+                  status =
+                    "deferred" in result
+                      ? "deferred"
+                      : result.applied
+                        ? "applied"
+                        : "review_required";
+                } else {
+                  const [result] = await finance.applyCategorizations(
+                    { decisions: [decision] },
+                    writerContext,
+                    itemTx,
+                  );
+                  if (!result)
+                    throw new AppError("internal_error", "The categorization outcome is missing.");
+                  status = result.applied ? "applied" : "review_required";
+                }
+                check();
+                return {
+                  index,
+                  transactionId: decision.transactionId,
+                  status,
+                  error: null,
+                  recovery: status === "applied" ? ("none" as const) : ("new_preview" as const),
+                  completedAt: now().toISOString(),
+                };
+              });
+            } catch (error) {
+              if (
+                !(error instanceof AppError) ||
+                !["conflict", "invalid_request", "not_found"].includes(error.code)
+              )
+                throw error;
+              outcome = {
                 index,
                 transactionId: decision.transactionId,
-                status,
-                error: null,
-                recovery: status === "applied" ? ("none" as const) : ("new_preview" as const),
+                status: "failed",
+                error: { code: error.code, message: error.message },
+                recovery: "new_preview",
                 completedAt: now().toISOString(),
               };
-            });
-          } catch (error) {
-            if (
-              !(error instanceof AppError) ||
-              !["conflict", "invalid_request", "not_found"].includes(error.code)
-            )
-              throw error;
-            outcome = {
-              index,
-              transactionId: decision.transactionId,
-              status: "failed",
-              error: { code: error.code, message: error.message },
-              recovery: "new_preview",
-              completedAt: now().toISOString(),
-            };
-          }
-          await tx
-            .update(financeReviewBatchRuns)
-            .set({ outcomes: [...receipts, outcome], updatedAt: now() })
-            .where(eq(financeReviewBatchRuns.id, row.id));
-          return true;
-        });
-        if (!progressed) break;
+            }
+            check();
+            const [updated] = await tx
+              .update(financeReviewBatchRuns)
+              .set({ outcomes: [...receipts, outcome], updatedAt: now() })
+              .where(eq(financeReviewBatchRuns.id, row.id))
+              .returning();
+            if (!updated)
+              throw new AppError("internal_error", "The batch receipt could not be saved.");
+            return { row: updated, progressed: true };
+          });
+          latest = progressed.row;
+          if (!progressed.progressed) break;
+        } catch (error) {
+          if (!isInterrupted(error)) throw error;
+          break;
+        }
       }
-      return this.get(id, context);
+      // Only a successfully committed snapshot is returned. A response lost at commit
+      // remains recoverable via get/resume; no unbounded final database read is needed.
+      return present(latest);
     },
   };
 }

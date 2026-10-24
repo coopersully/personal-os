@@ -18,10 +18,10 @@
     "ical.js": "^2.2.1",
     "imapflow": "^1.7.0",
     "mailparser": "^3.9.23",
-    "nodemailer": "^10.0.9",
+    "nodemailer": "10.1.4",
     "tsdav": "^2.3.1",
     "twilio": "^6.1.0",
-    "zod": "^4.0.5"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@types/mailparser": "^3.4.6",

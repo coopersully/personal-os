@@ -141,8 +141,9 @@ use the production evaluator before completion.
 Set `equivalenceVerified: true` after comparing commands/configuration, with `equivalentChecks`
 mapping `repository`, `lint`, `types-tests-coverage-builds`, and `browser` to the successful
 distinct current-head CI stage jobs. Each value is a job-name string or a nonempty list for a
-matrix stage (for example, browser maps to both `Browser acceptance (desktop-chromium)` and
-`Browser acceptance (mobile-chromium)`). Require every matrix member and never reuse a job across
+matrix stage. The Node row remains `Node quality`; the browser row includes all four
+`Browser acceptance (<project>, <shard>/4)`
+jobs for each of `desktop-chromium` and `mobile-chromium`. Require every matrix member and never reuse a job across
 stages or fill multiple rows with a shared aggregate. These names must also appear in expected required/selected checks
 with their provider IDs. Set `localOnlyComplete` only after any additional native/platform or
 issue-specific requirements pass. Record each attempted local failure in `localFailures` with

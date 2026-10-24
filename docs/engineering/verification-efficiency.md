@@ -63,6 +63,46 @@ Fix a demonstrated bottleneck. Never parallelize expensive full verifiers on thi
 use the existing runner lock. Do not trade complete pagination, policy authentication, fsync/atomic
 checkpoints or final protected merge enforcement for speed. Report latency and source gaps honestly.
 
+## Hosted browser shards
+
+Browser acceptance uses four file shards per browser project, each with its own Ubuntu runner,
+application processes and PostgreSQL container. `fullyParallel: false` and one worker preserve
+ordering within a test file; no shared local worker increase is introduced. Every matrix member
+remains required. Failure artifacts include project and shard to avoid concurrent name collisions.
+Local `pnpm test:e2e` and complete `pnpm verify` retain their unsharded behavior.
+
+The boundary owner is the CI workflow. GitHub-hosted capacity and normal test dependency downloads
+remain required; repository permissions remain read-only. Jobs retain their existing timeouts,
+cancellation and retry policy. Missing, failed or canceled selected jobs block acceptance. Local
+discovery proves the test partition, not hosted scheduling, installation reliability or elapsed time.
+
+Measure the slowest shard, setup time, queueing and total runner minutes separately. Four shards
+trade more runner capacity for lower elapsed time; a large single file or slow browser dependency
+installation can limit gains. Five-minute ordinary PR CI remains a target, not a coverage exception.
+
+Node quality deliberately retains the original unsharded `pnpm check:node`. Vitest 3.2.7 blob
+aggregation merges post-conversion Istanbul maps, which can infer hits for an uncovered nested
+branch from an enclosing covered range in another shard. A measured trial changed unchanged-source
+branch coverage from 94.00% to 96.61%; it is not equivalent evidence. Future coverage distribution
+must demonstrate branch-hit equivalence against the single-run raw-V8 aggregation, including nested
+uncovered branches, before replacing the existing coverage gate. Unchanged threshold numbers alone
+do not prove equivalent enforcement.
+
+## Early production audit
+
+Node quality runs the unchanged `pnpm audit --prod` immediately after frozen dependency
+installation and before `pnpm check:node`. An audit failure stops that job before expensive
+type, coverage and build work; successful candidates still run every existing check. The same
+Node job and required aggregate gate enforce failure. Other parallel jobs are not canceled by
+this reorder, so earlier detection does not imply lower whole-workflow elapsed time or runner cost.
+
+Measure time to the audit result separately from complete elapsed time and aggregate runner
+minutes. In historical run 40040586614, installation finished 17 seconds after Node job start,
+then `check:node` took 22m45s before a one-second audit failure. Moving that audit earlier would
+have detected that failure roughly 22m45s sooner; this is a counterfactual from recorded timings,
+not a measured candidate speedup. Preserve the single-run sharding comparison separately and
+record actual current-candidate setup, audit and execution timings before making further claims.
+
 ## Coordination and trustworthy reuse
 
 The normal repair loop is inspect the owner/contract/consumers, edit, run the smallest behavioral

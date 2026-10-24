@@ -268,3 +268,42 @@ test("full opt-in rejects a missing gate even when later jobs retain theirs", ()
     );
   }
 });
+
+test("browser shards retain both complete matrices and the original coverage command", () => {
+  const workflow = readFileSync(resolve(scriptDirectory, "../workflows/ci.yml"), "utf8");
+  const blocks = workflowJobBlocks(workflow);
+  const quality = blocks.find((block) => block.startsWith("  quality:\n"));
+  const browser = blocks.find((block) => block.startsWith("  browser:\n"));
+  const required = blocks.find((block) => block.startsWith("  required:\n"));
+  assert.match(quality, /pnpm check:node/);
+  assert.match(quality, /pnpm audit --prod/);
+  assert.doesNotMatch(quality, /merge-reports|shard|thresholds|continue-on-error/);
+  assert.match(browser, /project: \[desktop-chromium, mobile-chromium\]/);
+  assert.match(browser, /shard: \[1, 2, 3, 4\]/);
+  assert.match(browser, /--project=\$\{\{ matrix.project \}\} --shard=\$\{\{ matrix.shard \}\}\/4/);
+  assert.match(
+    browser,
+    /name: playwright-report-\$\{\{ matrix.project \}\}-\$\{\{ matrix.shard \}\}/,
+  );
+  assert.match(browser, /fail-fast: false/);
+  assert.doesNotMatch(browser, /continue-on-error/);
+  assert.match(required, /- quality\n/);
+  assert.match(required, /- browser\n/);
+  assert.equal(requiredGate({ quality: "success", browser: "failure" }), false);
+  assert.equal(requiredGate({ quality: "success", browser: "cancelled" }), false);
+});
+
+test("production audit fails before expensive Node checks and still blocks readiness", () => {
+  const workflow = readFileSync(resolve(scriptDirectory, "../workflows/ci.yml"), "utf8");
+  const quality = workflowJobBlocks(workflow).find((block) => block.startsWith("  quality:\n"));
+  const commands = [...quality.matchAll(/^ {6}- run: (.+)$/gm)].map((match) => match[1]);
+  assert.deepEqual(commands, [
+    "pnpm install --frozen-lockfile",
+    "pnpm audit --prod",
+    "pnpm check:node",
+  ]);
+  // Default step success conditions must prevent later checks after an audit failure.
+  assert.doesNotMatch(quality, /continue-on-error|always\(\)|if: failure\(\)/);
+  assert.equal(requiredGate({ quality: "failure", browser: "success" }), false);
+  assert.equal(requiredGate({ quality: "cancelled", browser: "success" }), false);
+});

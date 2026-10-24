@@ -26,7 +26,7 @@ Compare the workflow against the candidate's verifier inputs; check names alone 
 | `pnpm check:repo` | Repository contracts |
 | `pnpm lint` | Lint and format |
 | `pnpm check:node` (types, coverage, builds) | Node quality |
-| `pnpm test:e2e` | Browser acceptance (desktop-chromium) **and** Browser acceptance (mobile-chromium) |
+| `pnpm test:e2e` | All four Browser acceptance shards for **each** of desktop-chromium and mobile-chromium |
 
 Every row must name distinct stage jobs, include every matrix member, and be successful for hosted full equivalence, even if scoped CI omitted
 an unaffected stage. Omission is not evidence: if any core hosted stage is missing, use the

@@ -747,3 +747,11 @@ Category/bucket glyphs are inferred by the shared domain appearance resolver fro
 List, Bubbles, legends, and detail headings use that vocabulary and the shared reicon registry.
 This applies automatically to existing records and every creation path, including MCP. Agents
 must not ask users to select cosmetic icons or narrate these automatic choices unless requested.
+
+
+Spending List is a sequence of standalone colored card rows, without a shared table surface or
+column headings. Show the group title and “z% ($used) of $budget used, $remaining left” beneath it;
+put the selected-period amount prominently at the end. Use “over” for negative remaining amounts;
+zero and missing budgets keep explicit bounded states. Omit row-level pending notices because
+pending inclusion is controlled in the filter. Preserve sorting in the Breakdown icon menu and
+progressive category disclosure. Background fills continue to represent monthly budget usage.

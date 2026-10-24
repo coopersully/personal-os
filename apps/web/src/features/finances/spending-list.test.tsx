@@ -6,6 +6,11 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { SpendingList } from "./spending-list";
 
+function chooseSort(name: RegExp) {
+  fireEvent.keyDown(screen.getByRole("button", { name: "Sort breakdown" }), { key: "ArrowDown" });
+  fireEvent.click(screen.getByRole("menuitem", { name }));
+}
+
 it("sorts exact amounts, exposes negative groups, and expands bucket categories", async () => {
   const groups = [
     {
@@ -22,7 +27,7 @@ it("sorts exact amounts, exposes negative groups, and expands bucket categories"
   expect(screen.getAllByText("$123.45").length).toBeGreaterThan(0);
   expect(screen.getByText("-$1.00")).toBeInTheDocument();
   const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: /Name/ }));
+  chooseSort(/Name/);
   const list = screen.getAllByRole("list")[0];
   if (!list) throw new Error("Missing spending list");
   expect(within(list).getAllByRole("button")[0]).toHaveTextContent("Food");
@@ -53,7 +58,10 @@ it("sorts qualified monthly utilization separately from selected-period spending
     screen.getByTitle(/Observed monthly \$110.00 of \$100.00 · 110.0% · Over budget \$10.00/),
   ).toBeVisible();
   expect(screen.getByText("No budget limit")).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: /Monthly budget used/ }));
+  expect(screen.getByText("110% ($110.00) of $100.00 used, $10.00 over")).toBeVisible();
+  expect(screen.queryByText(/pending/i)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Spent" })).not.toBeInTheDocument();
+  chooseSort(/Monthly budget used/);
   const list = screen.getByRole("list");
   expect(within(list).getAllByRole("button")[0]).toHaveTextContent("Travel");
 });
@@ -88,7 +96,7 @@ it("defensively distinguishes zero targets, sorts positive usage first, and neve
   expect(screen.getByText("Monthly -$1.00 of $0.00 · No utilization")).toBeVisible();
   expect(screen.getByText("No budget limit")).toBeVisible();
   expect(screen.queryByText(/Infinity|NaN/)).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: /Monthly budget used/ }));
+  chooseSort(/Monthly budget used/);
   const buttons = within(screen.getByRole("list")).getAllByRole("button");
   expect(buttons[0]).toHaveTextContent("Zero positive");
   expect(buttons[1]).toHaveTextContent("Ordinary");
@@ -180,15 +188,15 @@ it("reverses sorting and keeps unavailable budgets last with deterministic ties"
     within(screen.getByRole("list"))
       .getAllByRole("button")
       .map((button) => button.getAttribute("aria-label"));
-  fireEvent.click(screen.getByRole("button", { name: /Monthly budget used/ }));
+  chooseSort(/Monthly budget used/);
   expect(labels()).toEqual(["Alpha", "Zulu", "Beta", "Missing", "Uncapped"]);
-  fireEvent.click(screen.getByRole("button", { name: /Monthly budget used/ }));
+  chooseSort(/Monthly budget used/);
   expect(labels()).toEqual(["Beta", "Alpha", "Zulu", "Missing", "Uncapped"]);
-  fireEvent.click(screen.getByRole("button", { name: /Name/ }));
-  fireEvent.click(screen.getByRole("button", { name: /Name/ }));
+  chooseSort(/Name/);
+  chooseSort(/Name/);
   expect(labels()).toEqual(["Zulu", "Uncapped", "Missing", "Beta", "Alpha"]);
-  fireEvent.click(screen.getByRole("button", { name: /Spent/ }));
-  fireEvent.click(screen.getByRole("button", { name: /Spent/ }));
+  chooseSort(/Spent/);
+  chooseSort(/Spent/);
   expect(labels()).toEqual(["Zulu", "Alpha", "Beta", "Missing", "Uncapped"]);
   expect(screen.getByText("Budget unavailable")).toBeVisible();
 });

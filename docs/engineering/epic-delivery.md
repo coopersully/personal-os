@@ -68,7 +68,8 @@ never add either as launch ceremony. Preserve one owner for shared paths and con
 3. Complete the [mandatory oversight kickoff/adoption gate](../../.agents/skills/oversight/SKILL.md#mandatory-kickoff-and-adoption-gate)
    before implementation dispatch. Inspect context/current owners; reuse or create the outcome
    section, resolve/link direct Nohmi issues and dependencies, name/place dedicated existing chats,
-   and retain verified receipts/IDs in the existing continuity record. Preserve explicit user titles
+   and retain verified receipts/IDs in the outcome entry of the existing private network registry;
+   direct issues reference it as defined by the gate. Preserve explicit user titles
    and unrelated/shared chats; subagents do not get sidebar rows. Resumes repair only missing setup.
    UI/tracker failure leaves setup incomplete and blocks new implementation dispatch and an
    established-oversight claim. Continue read-only context gathering; do not interrupt already-running

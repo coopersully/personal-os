@@ -29,7 +29,14 @@ This grant does not authorize new chats, unrelated/shared-chat changes, scheduli
    Titles and placement never prove checkout ownership or transfer it.
 5. **Verify and retain receipts.** Read back tool results for section membership, chat names and
    issue links/ownership. Save their identifiers, source receipts, any protected-chat exclusions and
-   setup gaps in the existing continuity record (Linear/coordination record), not a new ledger.
+   setup gaps in one authoritative existing setup record, not a new ledger. For network/epic work,
+   this is the outcome entry in the existing private network registry. For ordinary oversight without
+   that registry, use the existing coordination checkpoint and record its locator before dispatch.
+   The direct issue retains scope/status, public work/chat links, ownership/dependencies and the setup
+   record's locator or owner-access reference; it does not duplicate raw host receipts or private state.
+   Update the authoritative setup record after each verified setup change, then reconcile the issue's
+   links/ownership/reference before dispatch. On resume, follow that reference and reconcile with live
+   tools; stale or unavailable records remain gaps rather than fallback authority for repeat writes.
    Only verified coverage of all applicable steps satisfies this gate; an intention or tool call
    alone does not. Report the direct issue link and setup result before implementation dispatch.
 

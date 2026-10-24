@@ -5,10 +5,10 @@ import type {
   FinanceSpendingScope,
 } from "@personal-os/domain";
 import {
-  Bar,
-  BarChart,
   CartesianGrid,
   Tooltip as ChartTooltip,
+  Line,
+  LineChart,
   ReferenceLine,
   ResponsiveContainer,
   XAxis,
@@ -326,10 +326,15 @@ export function FinanceSpendingTrends({
             aria-label={`${grain} net spending chart`}
           >
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart
+              <LineChart
                 data={chartData}
+                onClick={(state) => {
+                  const bin = state?.activePayload?.[0]?.payload as
+                    | (typeof chartData)[number]
+                    | undefined;
+                  if (bin) onSelect(bin.drillDown);
+                }}
                 margin={{ top: 12, right: 8, bottom: 0, left: 0 }}
-                barCategoryGap="24%"
               >
                 <CartesianGrid vertical={false} stroke="var(--border)" strokeDasharray="3 3" />
                 <XAxis
@@ -393,17 +398,18 @@ export function FinanceSpendingTrends({
                     );
                   }}
                 />
-                <Bar
+                <Line
+                  type="linear"
                   dataKey="spending"
                   name="Net spending"
-                  fill="var(--workspace-finances-accent)"
-                  radius={4}
-                  maxBarSize={48}
+                  stroke="var(--workspace-finances-accent)"
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={{ r: 5 }}
                   isAnimationActive={false}
-                  onClick={(entry) => onSelect(entry.drillDown)}
                   className="cursor-pointer"
                 />
-              </BarChart>
+              </LineChart>
             </ResponsiveContainer>
           </div>
           <fieldset

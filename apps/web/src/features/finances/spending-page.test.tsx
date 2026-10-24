@@ -266,8 +266,10 @@ it("queries comparable elapsed Trends periods with identical accounting filters 
     `?view=trends&period=month&from=${year}-${month}-01&pending=0&basis=full_outflow&refunds=0&accounts=&categories=food`,
   );
   await screen.findByRole("region", { name: "Spending trends" });
-  await waitFor(() => expect(api.getFinanceSpending).toHaveBeenCalledTimes(2));
-  const queries = vi.mocked(api.getFinanceSpending).mock.calls.map(([query]) => query);
+  await waitFor(() => expect(api.getFinanceSpending).toHaveBeenCalledTimes(3));
+  const calls = vi.mocked(api.getFinanceSpending).mock.calls.map(([query]) => query);
+  const queries = calls.filter((query) => query.scope.categoryIds !== null);
+  expect(calls.filter((query) => query.scope.categoryIds === null)).toHaveLength(1);
   expect(
     queries.every(
       (query) =>
@@ -666,4 +668,48 @@ it("retains the mounted summary during a same-owner range refresh and marks it b
   complete(dashboard(query));
   await waitFor(() => expect(total.closest("[aria-busy]")).toHaveAttribute("aria-busy", "false"));
   expect(screen.getByRole("button", { name: "Spending breakdown" })).toBe(total);
+});
+
+it("retains every bucket in the focus picker after narrowing and labels the all option correctly", async () => {
+  vi.mocked(api.getFinanceSpending).mockImplementation(async (query) => {
+    const value = dashboard(query);
+    value.effectiveGrouping = "buckets";
+    const base = value.groups[0];
+    if (!base) throw new Error("Missing fixture group");
+    const all = [
+      {
+        ...base,
+        id: "essentials",
+        label: "Essentials",
+        kind: "bucket" as const,
+        categoryIds: ["food", "housing"],
+      },
+      {
+        ...base,
+        id: "lifestyle",
+        label: "Lifestyle",
+        kind: "bucket" as const,
+        categoryIds: ["dining"],
+      },
+    ];
+    value.groups =
+      query.scope.categoryIds === null
+        ? all
+        : all.filter((group) =>
+            group.categoryIds.some((id) => query.scope.categoryIds?.includes(id)),
+          );
+    return value;
+  });
+  mount("?view=trends&grouping=buckets&period=month");
+  fireEvent.keyDown(await screen.findByRole("button", { name: "Focus: All buckets" }), {
+    key: "ArrowDown",
+  });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "Essentials" }));
+  await screen.findByRole("button", { name: "Focus: Essentials" });
+  fireEvent.keyDown(screen.getByRole("button", { name: "Focus: Essentials" }), {
+    key: "ArrowDown",
+  });
+  expect(await screen.findByRole("menuitemradio", { name: "Lifestyle" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("menuitemradio", { name: "All buckets" }));
+  await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("categories="));
 });

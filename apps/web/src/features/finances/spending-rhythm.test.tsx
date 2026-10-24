@@ -4,7 +4,7 @@ import type { FinanceSpendingDashboard } from "@personal-os/domain";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
-import { FinanceSpendingRhythm } from "./spending-rhythm";
+import { FinanceSpendingRhythm, spendingHourlyBins } from "./spending-rhythm";
 
 afterEach(() => cleanup());
 
@@ -182,3 +182,52 @@ function completeDashboard(value: {
     currency: { supported: "USD", unsupported: [] },
   };
 }
+
+it("keeps date-only spending out of hourly totals rather than assigning midnight", () => {
+  const value = observedDashboard();
+  value.snapshot.scope.through = value.snapshot.scope.from;
+  value.snapshot.contributions = [
+    { id: "c", transactionId: "t", date: value.snapshot.scope.from, netCents: 1250 },
+  ] as FinanceSpendingDashboard["snapshot"]["contributions"];
+  value.transactions = [
+    {
+      id: "t",
+      accountId: "a",
+      merchant: "Cafe",
+      date: value.snapshot.scope.from,
+      pending: false,
+      updatedAt: "2026-03-01T09:00:00Z",
+    },
+  ];
+  const result = spendingHourlyBins(value);
+  expect(result.hours).toHaveLength(24);
+  expect(result.hours.every((hour) => hour.count === 0)).toBe(true);
+  expect(result.untimedCents).toBe(1250);
+  render(<FinanceSpendingRhythm dashboard={value} hourly onSelect={vi.fn()} />);
+  expect(screen.getByText("Hourly spending")).toBeInTheDocument();
+  expect(screen.getByText("Time not provided · 1 item")).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: /12 AM: Hourly amount unavailable/ }),
+  ).toBeInTheDocument();
+});
+it("groups only timestamped evidence into its local purchase hour, preserving unassigned adjustments", () => {
+  const value = observedDashboard();
+  value.snapshot.scope = {
+    ...value.snapshot.scope,
+    from: "2026-02-28",
+    through: "2026-02-28",
+    timezone: "America/New_York",
+  };
+  value.snapshot.contributions = [
+    { id: "timed", transactionId: "t", date: "2026-02-28", netCents: 2000 },
+    { id: "unknown", transactionId: "u", date: "2026-02-28", netCents: -500 },
+  ] as FinanceSpendingDashboard["snapshot"]["contributions"];
+  value.transactions = [
+    { id: "t", accountId: "a", merchant: "Cafe", date: "2026-03-01T03:15:00Z", pending: false },
+    { id: "u", accountId: "a", merchant: "Refund", date: "2026-02-28", pending: false },
+  ];
+  const result = spendingHourlyBins(value);
+  expect(result.hours[22]).toMatchObject({ count: 1, netCents: 2000 });
+  expect(result.untimedCents).toBe(-500);
+  expect(result.hours.reduce((sum, hour) => sum + hour.netCents, result.untimedCents)).toBe(1500);
+});

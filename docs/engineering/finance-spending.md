@@ -94,7 +94,7 @@ Full transaction-view integration and production/UI acceptance remain separate o
 Trends and Rhythm consume the same dated snapshots. Current named-period comparisons cap the
 current period to elapsed local dates and compare the equivalent elapsed previous period, labeling
 shorter-month caps. Complete named months compare complete prior months; custom ranges use the
-preceding equal-length local-date interval. Signed daily/weekly/monthly net bars and the accessible table in Trend details
+preceding equal-length local-date interval. Signed daily/weekly/monthly net line points and the accessible table in Trend details
 share exact contribution references. Rhythm distinguishes observed positive and net-refund amounts,
 unknown/partial coverage, future dates and confirmed zero; it uses the person's saved week start.
 
@@ -148,7 +148,7 @@ exact selected-period amounts and qualified monthly usage are included in the ci
 name and native tooltip; activation opens the existing group details. Labelled circles retain a
 visible Over budget indicator. Zero and negative adjustments remain available in List rather than
 gaining invented positive area. Do not repeat the group list or a legend below the bubble canvas.
-Reduced motion disables automatic spring and dither animation while preserving manual arrangement.
+Reduced motion disables automatic spring animation while preserving manual arrangement.
 Source totals, filters, and drill-down identities are unchanged.
 
 Qualified budget categories remain in List when the selected period has no activity, with exact
@@ -174,3 +174,10 @@ uncertainty remains fail-closed. The complete recognition ledger, contributions,
 original snapshot disclosures and honest coverage are preserved; genuine in-scope unknown money
 still withholds comparison. Live QA first exposed this at failed integration `bdfc951e`; its fixture
 and screenshot are retained separately from the repaired candidate's future verification.
+
+Today Rhythm groups hourly evidence only when transaction metadata has an actual offset-bearing
+purchase timestamp matching the contribution's local calendar date. Date-only source records and
+unmatched/invalid timestamps stay in an explicit untimed subtotal; updatedAt never supplies purchase
+time. Current canonical transactions store date-only evidence, so hourly amounts are unavailable for
+those records. Hour cells inspect amounts, while the day action retains the existing exact day
+reference; do not create a date-only link that claims to select an hour.

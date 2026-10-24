@@ -8,12 +8,168 @@ import { cn } from "@/lib/utils";
 import { formatMoney } from "./format";
 import { spendingBinStatus } from "./spending-trends";
 
+/** Only source timestamps can establish an hour; date-only records stay unassigned. */
+export function spendingHourlyBins(dashboard: FinanceSpendingDashboard) {
+  const hours = Array.from({ length: 24 }, (_, hour) => ({ hour, netCents: 0, count: 0 }));
+  let untimedCents = 0,
+    untimedCount = 0;
+  const dates = new Map(dashboard.transactions.map((item) => [item.id, item.date]));
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: dashboard.snapshot.scope.timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hourCycle: "h23",
+  });
+  for (const contribution of dashboard.snapshot.contributions) {
+    const timestamp = dates.get(contribution.transactionId);
+    const instant =
+      timestamp && /T.*(?:Z|[+-]\d{2}:\d{2})$/.test(timestamp) ? new Date(timestamp) : null;
+    const parts =
+      instant && Number.isFinite(instant.getTime())
+        ? new Map(formatter.formatToParts(instant).map((part) => [part.type, part.value]))
+        : null;
+    const localDate = parts
+      ? `${parts.get("year")}-${parts.get("month")}-${parts.get("day")}`
+      : null;
+    const bin =
+      localDate === contribution.date && localDate === dashboard.snapshot.scope.from
+        ? hours[Number(parts?.get("hour"))]
+        : undefined;
+    if (bin) {
+      bin.netCents += contribution.netCents;
+      bin.count++;
+    } else {
+      untimedCents += contribution.netCents;
+      untimedCount++;
+    }
+  }
+  return { hours, untimedCents, untimedCount };
+}
+function HourlyRhythm({
+  dashboard,
+  onSelect,
+}: {
+  dashboard: FinanceSpendingDashboard;
+  onSelect: (drillDown: FinanceSpendingDrillDown) => void;
+}) {
+  const { hours, untimedCents, untimedCount } = spendingHourlyBins(dashboard);
+  const [shownHour, setShownHour] = useState<number | null>(null);
+  const maximum = Math.max(1, ...hours.map((bin) => Math.abs(bin.netCents)));
+  const asOf = new Intl.DateTimeFormat("en-CA", {
+    timeZone: dashboard.snapshot.scope.timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(dashboard.snapshot.asOf));
+  const parts = new Map(asOf.map((part) => [part.type, part.value]));
+  const today = `${parts.get("year")}-${parts.get("month")}-${parts.get("day")}`;
+  const selectedDay = dashboard.snapshot.scope.from;
+  const hourLabel = (hour: number) => `${hour % 12 || 12} ${hour < 12 ? "AM" : "PM"}`;
+  return (
+    <section aria-label="Spending rhythm" className="min-w-0">
+      <Card>
+        <CardHeader>
+          <CardTitle>Hourly spending</CardTitle>
+          <CardDescription>
+            {formatCalendarDate(selectedDay)} · {dashboard.snapshot.scope.timezone}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <TooltipProvider delayDuration={150}>
+            <fieldset
+              className="grid min-w-0 grid-cols-6 gap-2 sm:grid-cols-12"
+              aria-label="Spending by hour"
+            >
+              {hours.map((bin) => {
+                const future =
+                  selectedDay > today ||
+                  (selectedDay === today && bin.hour > Number(parts.get("hour")));
+                const complete =
+                  !future && dashboard.snapshot.coverage === "complete" && untimedCount === 0;
+                const status = bin.count
+                  ? `${formatMoney(bin.netCents / 100)} recorded`
+                  : future
+                    ? "Future hour"
+                    : complete
+                      ? "No spending"
+                      : "Hourly amount unavailable";
+                return (
+                  <Tooltip
+                    key={bin.hour}
+                    open={shownHour === bin.hour}
+                    onOpenChange={(open) => setShownHour(open ? bin.hour : null)}
+                  >
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        onClick={() => setShownHour(bin.hour)}
+                        aria-label={`${hourLabel(bin.hour)}: ${status}`}
+                        className={cn(
+                          "aspect-square h-auto min-h-0 min-w-0 rounded-md p-0 text-xs tabular-nums",
+                          future ? "text-muted-foreground opacity-50" : "text-foreground",
+                        )}
+                        style={{
+                          backgroundColor: bin.count
+                            ? `color-mix(in srgb, var(--workspace-finances-accent) ${25 + (Math.abs(bin.netCents) / maximum) * 40}%, var(--card))`
+                            : "var(--secondary)",
+                        }}
+                      >
+                        {hourLabel(bin.hour)}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {status}
+                      {!complete && !future && bin.count > 0 ? " · Incomplete hourly coverage" : ""}
+                    </TooltipContent>
+                  </Tooltip>
+                );
+              })}
+            </fieldset>
+          </TooltipProvider>
+          {untimedCount > 0 && (
+            <div className="flex items-center justify-between gap-3 text-sm">
+              <span className="text-muted-foreground">
+                Time not provided · {untimedCount} {untimedCount === 1 ? "item" : "items"}
+              </span>
+              <span className="font-medium tabular-nums">{formatMoney(untimedCents / 100)}</span>
+            </div>
+          )}
+          {untimedCount > 0 && (
+            <p className="text-xs text-muted-foreground">
+              These transactions have a date but no purchase time.
+            </p>
+          )}
+          {dashboard.snapshot.bins[0] && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="self-start"
+              onClick={() => {
+                const bin = dashboard.snapshot.bins[0];
+                if (bin) onSelect(bin.drillDown);
+              }}
+            >
+              View day’s transactions
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
+
 export function FinanceSpendingRhythm({
   dashboard,
   onSelect,
   weekStartsOn = "sunday",
+  hourly = false,
 }: {
   dashboard: FinanceSpendingDashboard;
+  hourly?: boolean;
   weekStartsOn?: "sunday" | "monday";
   onSelect: (drillDown: FinanceSpendingDrillDown) => void;
 }) {
@@ -28,6 +184,7 @@ export function FinanceSpendingRhythm({
     weekStartsOn === "monday"
       ? ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
       : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  if (hourly) return <HourlyRhythm dashboard={dashboard} onSelect={onSelect} />;
   return (
     <section aria-label="Spending rhythm" className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-3 px-1">

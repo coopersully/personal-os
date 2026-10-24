@@ -84,14 +84,9 @@ accessible reset icon button. Icons sit at each circle's center, with labels bel
 newly mounted circles start at their settled positions. Coincident circles separate in two dimensions,
 with a final collision-only cleanup after the centering attraction stops.
 
-Bubble materials reuse the editorial Design System & Branding workstream's three-phase 4×4 Bayer
-filter from `figure-grain.svg`. The Finance variant lives at `/effects/ordered-dither.svg`, lifts dark
-luminance for ordered thresholds and uses the quantized texture as a bounded multiplicative shade,
-preserving category hue and saturation. Apply it to an
-inner circular background/fill material clipped to its own bounds; icons and labels are unfiltered
-siblings above it. Never filter the hit target or alter its geometry.
-Reduced motion disables the material animation/filter and automatic spring animation, while manual
-dragging and keyboard-accessible detail/reset controls remain available.
+Bubble backgrounds and budget fills use clean category colors, without dithering or filter effects.
+Keep the circular background separate from crisp foreground labels/icons. Reduced motion disables
+spring/fill animation while manual dragging and keyboard detail/reset controls remain available.
 
 Use the assigned bucket/category color with a translucent tonal overlay filling upward inside the
 bubble; do not use a perimeter progress ring. Labels, icons, and controls remain legible above it.
@@ -104,10 +99,10 @@ exact amounts, monthly usage and coverage are available through accessible names
 existing detail dialog. Zero and negative groups remain in List. Reduced motion disables automatic
 animation while preserving manual arrangement. Do not repeat the List below Bubbles.
 
-Trends uses the shared Card composition and a responsive net-spending bar chart with Finance accent,
+Trends uses the shared Card composition and a responsive net-spending line chart with Finance accent,
 quiet grid/axes and formatted dates. Focus lives in the primary navigation. The comparison stays in
 the chart header; detailed period rows, source/coverage and group changes live in its info dialog.
-Signed bars preserve net refunds; exact selections remain available by pointer and keyboard.
+Signed points preserve net refunds; exact selections remain available by pointer and keyboard.
 Rhythm uses compact month Cards with square date cells, a shared green intensity scale, neutral
 confirmed-zero days and muted future days. Dashed cells indicate incomplete evidence; hover/focus
 opens the shared tooltip with exact amount and status. Keep keyboard date navigation and exact
@@ -753,8 +748,7 @@ The title range picker opens presets, the range calendar, and date inputs direct
 Period menu is needed. Calendar ranges accept either click direction and single-day selections.
 Spending List rows use the same category/bucket tint as Bubbles, with a KPI-style background fill
 for monthly usage instead of a separate thin bar. Remove decorative row dividers and bubble
-borders; over-budget copy remains explicit. Apply the animated Bayer filter once to the composed base and opaque budget fill, clipped inside
-the original circular silhouette.
+borders; over-budget copy remains explicit. Keep base and budget fill clean, clipped inside the original circular silhouette.
 
 Category/bucket glyphs are inferred by the shared domain appearance resolver from their meaning
 (home, groceries, dining, travel, and so on), with safe generic fallbacks. API Spending metadata,
@@ -771,3 +765,10 @@ pending inclusion is controlled in the filter. Preserve sorting in the Breakdown
 progressive category disclosure. Background fills continue to represent monthly budget usage.
 
 Spending list glyphs sit in padded square frames with a subtle contrasting surface.
+
+The Trends focus picker uses the same quiet muted value treatment as the date range. Its all-option
+follows the effective grouping (All buckets or All categories), and its catalog retains the full
+unfiltered group choices after selection. Today uses a 24-hour local-time Rhythm grid. Only source
+purchase timestamps establish an hour; date-only transactions remain in Time not provided, never
+midnight or the record-update hour. The current transaction source supplies dates only. Hourly zero
+requires complete evidence and no untimed contributions; future and unknown hours remain distinct.

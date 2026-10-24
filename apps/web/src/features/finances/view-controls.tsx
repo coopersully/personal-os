@@ -19,7 +19,9 @@ export function FinanceChoice({
   displayValue,
   icon,
   optionIcons,
+  subtle = false,
 }: {
+  subtle?: boolean;
   label: string;
   value: string;
   options: ReadonlyArray<readonly [string, string]>;
@@ -42,7 +44,15 @@ export function FinanceChoice({
           {icon ?? (
             <>
               {showLabel ? <span className="text-muted-foreground">{label}</span> : null}
-              {displayValue ?? options.find(([id]) => id === value)?.[1] ?? "Selected categories"}
+              <span
+                className={
+                  subtle
+                    ? "truncate text-xs font-normal text-muted-foreground sm:text-sm"
+                    : undefined
+                }
+              >
+                {displayValue ?? options.find(([id]) => id === value)?.[1] ?? "Custom selection"}
+              </span>
               <ChevronDownIcon />
             </>
           )}

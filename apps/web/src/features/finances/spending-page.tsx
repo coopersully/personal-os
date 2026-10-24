@@ -213,6 +213,21 @@ export function FinanceSpendingPage() {
       return api.getFinanceSpending(activeQuery);
     },
   });
+  const focusQuery = activeQuery
+    ? { ...activeQuery, scope: { ...activeQuery.scope, categoryIds: null } }
+    : null;
+  const focusData = useQuery({
+    queryKey: ["finance-spending-focus", user.data?.id, focusQuery],
+    enabled:
+      queryEnabled &&
+      view === "trends" &&
+      activeQuery?.scope.categoryIds !== null &&
+      recovery.state !== "valid",
+    queryFn: () => {
+      if (!focusQuery) throw new Error("Invalid focus scope");
+      return api.getFinanceSpending(focusQuery);
+    },
+  });
   const comparisonQuery =
     activeQuery && comparisonScopes ? { ...activeQuery, scope: comparisonScopes.previous } : null;
   const comparison = useQuery({
@@ -384,6 +399,27 @@ export function FinanceSpendingPage() {
       />
     </fieldset>
   );
+  const focusGroups =
+    (activeQuery?.scope.categoryIds !== null ? focusData.data : result)?.groups ??
+    result?.groups ??
+    [];
+  const buckets = result?.effectiveGrouping === "buckets";
+  const focusOptions = [
+    ["all", buckets ? "All buckets" : "All categories"],
+    ...focusGroups
+      .filter((group) => group.categoryIds.length > 0)
+      .map(
+        (group) =>
+          [
+            group.categoryIds
+              .map((id) => id ?? "uncategorized")
+              .sort()
+              .join(","),
+            group.label,
+          ] as const,
+      ),
+  ] as const;
+  const focusedCategories = params.get("categories")?.split(",").sort().join(",") ?? "all";
   const scopeControls = (
     <>
       <SpendingChoice
@@ -401,17 +437,13 @@ export function FinanceSpendingPage() {
       {view === "trends" && result ? (
         <SpendingChoice
           label="Focus"
-          value={params.get("categories") ?? "all"}
-          options={[
-            ["all", "All categories"],
-            ...result.groups.map(
-              (group) =>
-                [
-                  group.categoryIds.map((id) => id ?? "uncategorized").join(","),
-                  group.label,
-                ] as const,
-            ),
-          ]}
+          showLabel={false}
+          subtle
+          value={focusedCategories}
+          displayValue={
+            focusOptions.find(([id]) => id === focusedCategories)?.[1] ?? "Custom selection"
+          }
+          options={focusOptions}
           onChange={(value) => {
             if (value !== "all") return update("categories", value);
             const next = new URLSearchParams(params);
@@ -791,6 +823,7 @@ export function FinanceSpendingPage() {
               {view === "rhythm" ? (
                 <FinanceSpendingRhythm
                   dashboard={result}
+                  hourly={period === "today"}
                   weekStartsOn={
                     calendar.data?.preferences.weekStartsOn ??
                     getDefaultWorkspacePreferences("calendar").weekStartsOn

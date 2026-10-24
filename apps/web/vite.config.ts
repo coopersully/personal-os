@@ -5,6 +5,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
+import { guideSlugs } from "./src/features/public-site/guide-pages.js";
 
 const agentSkillRelease = JSON.parse(
   await readFile(
@@ -158,7 +159,15 @@ export default defineConfig(({ mode }) => {
           if (index?.type !== "asset") throw new Error("Missing web HTML for public styles.");
           const stylesheet = String(index.source).match(/<link[^>]+href="([^"]+\.css)"/);
           if (!stylesheet?.[1]) throw new Error("Missing compiled public stylesheet.");
-          for (const slug of ["about", "docs", "privacy", "terms", "data-use", "sms", "support"]) {
+          for (const slug of [
+            "about",
+            ...guideSlugs,
+            "privacy",
+            "terms",
+            "data-use",
+            "sms",
+            "support",
+          ]) {
             const document = await readFile(resolve("public", slug, "index.html"), "utf8");
             this.emitFile({
               type: "asset",
@@ -171,7 +180,11 @@ export default defineConfig(({ mode }) => {
           // nginx resolves directory indexes in production; Vite's public middleware does not.
           server.middlewares.use(async (request, response, next) => {
             const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
-            if (!/^\/(about|docs|privacy|terms|data-use|sms|support)\/?$/.test(pathname)) {
+            if (
+              !["about", ...guideSlugs, "privacy", "terms", "data-use", "sms", "support"].includes(
+                pathname.replace(/^\/|\/$/g, ""),
+              )
+            ) {
               next();
               return;
             }

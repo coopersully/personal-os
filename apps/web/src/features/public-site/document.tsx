@@ -1,4 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader } from "../../components/ui/card.js";
+import { guideSlugs } from "./guide-pages.js";
+import { GuideContent, GuideNavigation } from "./guide-visuals.js";
 import { PublicSiteLayout, publicContainer, publicDocuments } from "./layout.js";
 
 export function PublicDocument({
@@ -14,6 +16,77 @@ export function PublicDocument({
   eyebrow: string;
   content: string;
 }) {
+  const guide = guideSlugs.includes(slug as (typeof guideSlugs)[number]);
+  const editorial = guide || ["about", "support"].includes(slug);
+  if (editorial) {
+    return (
+      <PublicSiteLayout>
+        <main id="content" tabIndex={-1} className="public-editorial">
+          <header className="public-editorial-hero">
+            <div className={publicContainer}>
+              <div className="public-editorial-heading">
+                <p className="public-eyebrow">{eyebrow}</p>
+                <h1>{title}</h1>
+                <p>{intro}</p>
+              </div>
+              <div className="public-editorial-figure" aria-hidden="true">
+                <img
+                  src="/brand/nohmi-standing-icon.webp"
+                  width={1024}
+                  height={1536}
+                  alt=""
+                  className="public-editorial-person"
+                />
+                <img
+                  src="/icon.svg"
+                  width={512}
+                  height={512}
+                  alt=""
+                  className="public-editorial-tablet-mark"
+                />
+                <img
+                  src="/brand/nohmi-standing-icon.webp"
+                  width={1024}
+                  height={1536}
+                  alt=""
+                  className="public-editorial-hand public-editorial-hand--left"
+                />
+                <img
+                  src="/brand/nohmi-standing-icon.webp"
+                  width={1024}
+                  height={1536}
+                  alt=""
+                  className="public-editorial-hand public-editorial-hand--right"
+                />
+              </div>
+            </div>
+          </header>
+          <div className={`${publicContainer} public-editorial-body`}>
+            {guide ? (
+              <GuideNavigation slug={slug} />
+            ) : (
+              <nav aria-label="document navigation" className="public-editorial-nav">
+                {publicDocuments
+                  .filter(({ slug: path }) => ["about", "docs", "support"].includes(path))
+                  .map(({ slug: path, label }) => (
+                    <a
+                      key={path}
+                      href={`/${path}/`}
+                      aria-current={slug === path ? "page" : undefined}
+                    >
+                      {label}
+                    </a>
+                  ))}
+              </nav>
+            )}
+            <div className="min-w-0">
+              <GuideContent slug={slug} content={content} />
+            </div>
+          </div>
+        </main>
+      </PublicSiteLayout>
+    );
+  }
   return (
     <PublicSiteLayout>
       <div

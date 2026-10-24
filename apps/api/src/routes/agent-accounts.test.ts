@@ -65,7 +65,11 @@ describe("agent account routes", () => {
       });
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual(account);
-      expect(accounts.register).toHaveBeenLastCalledWith(principal, input);
+      expect(accounts.register).toHaveBeenLastCalledWith(
+        principal,
+        input,
+        "agent-accounts-route-test",
+      );
     }
     expect(await (await app.request("/v1/agent-accounts/current")).json()).toEqual(account);
     expect(accounts.list).not.toHaveBeenCalled();

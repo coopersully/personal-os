@@ -59,14 +59,38 @@ async function lockConnection(db: Executor, userId: string, connectionId: string
     sql`select pg_advisory_xact_lock(hashtextextended(${`agent-account:${userId}:${connectionId}`}, 0))`,
   );
 }
-/** Caller has already authenticated this connection; serialized against explicit owner linking. */
+async function audit(
+  tx: Executor,
+  p: Principal,
+  action: string,
+  id: string,
+  before: Record<string, unknown> | null,
+  after: Record<string, unknown> | null,
+  requestId: string = randomUUID(),
+) {
+  await tx.insert(auditEvents).values({
+    userId: p.userId,
+    actorId: p.actorId,
+    actorType: p.actorType,
+    requestId,
+    action,
+    entityType: "agent_account",
+    entityId: id,
+    before,
+    after,
+  });
+}
+
+/** Must run in the caller transaction so identity, binding, and audit commit together. */
 export async function ensureAgentAccount(
   db: Executor,
-  userId: string,
+  context: { principal: Principal; requestId: string },
   connectionId: string,
   platform: AgentPlatform = "unknown",
   now = new Date(),
 ): Promise<AgentAccount> {
+  const { principal, requestId } = context;
+  const { userId } = principal;
   await lockConnection(db, userId, connectionId);
   const existing = await findAgentAccount(db, userId, connectionId);
   if (existing) {
@@ -87,7 +111,18 @@ export async function ensureAgentAccount(
           ),
         )
         .returning();
-      if (updated) return serialize(updated);
+      if (updated) {
+        await audit(
+          db,
+          principal,
+          "agent_account.updated",
+          updated.id,
+          { connectionId, platform: existing.platform },
+          { connectionId, platform: updated.platform },
+          requestId,
+        );
+        return serialize(updated);
+      }
       return (await findAgentAccount(db, userId, connectionId)) ?? existing;
     }
     return existing;
@@ -112,6 +147,15 @@ export async function ensureAgentAccount(
     createdAt: now,
     updatedAt: now,
   });
+  await audit(
+    db,
+    principal,
+    "agent_account.registered",
+    id,
+    null,
+    { connectionId, agentAccountId: id, platform: account.platform },
+    requestId,
+  );
   return serialize(account);
 }
 export function createAgentAccountService({
@@ -121,45 +165,20 @@ export function createAgentAccountService({
   db: Database;
   now?: () => Date;
 }) {
-  async function audit(
-    tx: Executor,
-    p: Principal,
-    action: string,
-    id: string,
-    before: Record<string, unknown> | null,
-    after: Record<string, unknown> | null,
-  ) {
-    await tx.insert(auditEvents).values({
-      userId: p.userId,
-      actorId: p.actorId,
-      actorType: p.actorType,
-      requestId: randomUUID(),
-      action,
-      entityType: "agent_account",
-      entityId: id,
-      before,
-      after,
-    });
-  }
   return {
     async current(p: Principal) {
       if (p.actorType !== "agent" || !p.authorizationConnectionId)
         throw new AppError("forbidden", "Use an authenticated agent connection.");
       return findAgentAccount(db, p.userId, p.authorizationConnectionId);
     },
-    async register(p: Principal, raw: unknown) {
+    async register(p: Principal, raw: unknown, requestId: string = randomUUID()) {
       if (p.actorType !== "agent" || !p.authorizationConnectionId)
         throw new AppError("forbidden", "Use an authenticated agent connection.");
       const input = agentAccountRegistrationSchema.parse(raw);
       const connectionId = p.authorizationConnectionId;
-      return db.transaction(async (tx) => {
-        await lockConnection(tx, p.userId, connectionId);
-        const existing = await findAgentAccount(tx, p.userId, connectionId);
-        const account = await ensureAgentAccount(tx, p.userId, connectionId, input.platform, now());
-        if (!existing)
-          await audit(tx, p, "agent_account.registered", account.id, null, { connectionId });
-        return account;
-      });
+      return db.transaction((tx) =>
+        ensureAgentAccount(tx, { principal: p, requestId }, connectionId, input.platform, now()),
+      );
     },
     async list(p: Principal): Promise<AgentAccountDirectory> {
       human(p);

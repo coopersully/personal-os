@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   accessTokens,
   accountActionTokens,
@@ -197,7 +198,11 @@ export function createAuthService(options: AuthServiceOptions) {
   }
 
   return {
-    async authenticateAccessToken(token: string, audience?: string): Promise<Principal> {
+    async authenticateAccessToken(
+      token: string,
+      audience?: string,
+      requestId: string = randomUUID(),
+    ): Promise<Principal> {
       const currentTime = now();
       const [record] = await db
         .select()
@@ -220,22 +225,23 @@ export function createAuthService(options: AuthServiceOptions) {
         .update(accessTokens)
         .set({ lastUsedAt: currentTime })
         .where(eq(accessTokens.id, record.id));
-      await db.transaction((tx) =>
-        ensureAgentAccount(
-          tx,
-          record.userId,
-          record.authorizationConnectionId,
-          "unknown",
-          currentTime,
-        ),
-      );
-      return {
+      const principal: Principal = {
         actorId: record.id,
         authorizationConnectionId: record.authorizationConnectionId,
         actorType: "agent",
         scopes: new Set(record.scopes),
         userId: record.userId,
       };
+      await db.transaction((tx) =>
+        ensureAgentAccount(
+          tx,
+          { principal, requestId },
+          record.authorizationConnectionId,
+          "unknown",
+          currentTime,
+        ),
+      );
+      return principal;
     },
 
     async authenticateSession(token: string): Promise<Principal> {

@@ -13,6 +13,9 @@ import {
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq, sql } from "drizzle-orm";
 import { createAgentAccountService, ensureAgentAccount } from "./agent-account-service.js";
+import { createApp } from "./app.js";
+import { loadConfig } from "./config.js";
+import { hashToken } from "./security.js";
 import type { Principal } from "./types.js";
 
 describe.sequential("shared agent account identities", () => {
@@ -46,7 +49,7 @@ describe.sequential("shared agent account identities", () => {
       userId,
       authorizationConnectionId: connectionId,
       name: "Claude Code",
-      tokenHash: randomUUID(),
+      tokenHash: hashToken(actorId),
       scopes: ["finances:maintain"],
     });
     const human: Principal = { userId, actorId: userId, actorType: "user", scopes: new Set() };
@@ -64,6 +67,113 @@ describe.sequential("shared agent account identities", () => {
       service: createAgentAccountService({ db: database.db, now }),
     };
   }
+  function httpApp() {
+    return createApp({
+      db: database.db,
+      now,
+      config: loadConfig({
+        APP_BASE_URL: "https://app.example.com",
+        API_BASE_URL: "https://api.example.com",
+        APP_ENCRYPTION_KEY: "test-only-secret",
+        DATABASE_URL: container.getConnectionUri(),
+        GOOGLE_REDIRECT_URI: "https://api.example.com/v1/connectors/google/callback",
+        X_REDIRECT_URI: "https://api.example.com/v1/x-bookmarks/callback",
+      }),
+    });
+  }
+  it.each([
+    "GET",
+    "POST",
+  ])("audits authenticated first-use %s once and correlates later platform changes", async (method) => {
+    const f = await fixture();
+    const app = httpApp();
+    const request = (method: string, requestId: string, body?: object) =>
+      app.request("/v1/agent-accounts/current", {
+        method,
+        headers: { authorization: `Bearer ${f.agent.actorId}`, "x-request-id": requestId },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+    const first = await request(method, "identity-first-use", method === "POST" ? {} : undefined);
+    expect(first.status).toBe(200);
+    const account = await first.json();
+    expect(account).toMatchObject({ userId: f.agent.userId, platform: "unknown" });
+    const events = () =>
+      database.db.select().from(auditEvents).where(eq(auditEvents.entityId, account.id));
+    expect(await events()).toEqual([
+      expect.objectContaining({
+        action: "agent_account.registered",
+        actorId: f.agent.actorId,
+        actorType: "agent",
+        userId: f.agent.userId,
+        requestId: "identity-first-use",
+        before: null,
+        after: { connectionId: f.connectionId, agentAccountId: account.id, platform: "unknown" },
+      }),
+    ]);
+    expect(await database.db.select().from(agentAccountConnections)).toEqual([
+      expect.objectContaining({
+        userId: f.agent.userId,
+        authorizationConnectionId: f.connectionId,
+        agentAccountId: account.id,
+      }),
+    ]);
+    expect((await request("POST", "unchanged-registration", {})).status).toBe(200);
+    expect((await request("GET", "repeated-read")).status).toBe(200);
+    expect(await events()).toHaveLength(1);
+    expect((await request("POST", "platform-declaration", { platform: "codex" })).status).toBe(200);
+    expect(await events()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "agent_account.updated",
+          actorId: f.agent.actorId,
+          actorType: "agent",
+          requestId: "platform-declaration",
+          before: { connectionId: f.connectionId, platform: "unknown" },
+          after: { connectionId: f.connectionId, platform: "codex" },
+        }),
+      ]),
+    );
+    expect((await request("POST", "repeated-declaration", { platform: "codex" })).status).toBe(200);
+    expect((await request("GET", "final-read")).status).toBe(200);
+    expect(await events()).toHaveLength(2);
+  });
+  it("rolls back first-use identity and binding when their audit cannot persist", async () => {
+    const f = await fixture();
+    await database.db.execute(
+      sql`alter table audit_events add constraint reject_identity_audit check (action <> 'agent_account.registered') not valid`,
+    );
+    try {
+      const response = await httpApp().request("/v1/agent-accounts/current", {
+        headers: { authorization: `Bearer ${f.agent.actorId}`, "x-request-id": "failed-first-use" },
+      });
+      expect(response.status).toBe(500);
+      expect(await database.db.select().from(agentAccounts)).toHaveLength(0);
+      expect(await database.db.select().from(agentAccountConnections)).toHaveLength(0);
+      expect(await database.db.select().from(auditEvents)).toHaveLength(0);
+    } finally {
+      await database.db.execute(
+        sql`alter table audit_events drop constraint reject_identity_audit`,
+      );
+    }
+  });
+  it("rolls back a platform declaration when its audit cannot persist", async () => {
+    const f = await fixture();
+    const account = await f.service.register(f.agent, {});
+    await database.db.execute(
+      sql`alter table audit_events add constraint reject_identity_audit check (action <> 'agent_account.updated') not valid`,
+    );
+    try {
+      await expect(
+        f.service.register(f.agent, { platform: "codex" }, "failed-platform"),
+      ).rejects.toThrow();
+      expect(await f.service.current(f.agent)).toEqual(account);
+      expect(await database.db.select().from(auditEvents)).toHaveLength(1);
+    } finally {
+      await database.db.execute(
+        sql`alter table audit_events drop constraint reject_identity_audit`,
+      );
+    }
+  });
   it("registers once under concurrent calls and ignores account-id spoofing", async () => {
     const f = await fixture();
     expect(await f.service.current(f.agent)).toBeNull();
@@ -276,7 +386,13 @@ describe.sequential("shared agent account identities", () => {
       lastUsedAt: now(),
     });
     const current = await database.db.transaction((tx) =>
-      ensureAgentAccount(tx, f.human.userId, f.connectionId, "codex", now()),
+      ensureAgentAccount(
+        tx,
+        { principal: f.agent, requestId: randomUUID() },
+        f.connectionId,
+        "codex",
+        now(),
+      ),
     );
     expect(current).toMatchObject({
       id: account.id,

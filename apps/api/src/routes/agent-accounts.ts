@@ -15,7 +15,13 @@ export function registerAgentAccountRoutes({
     c.json(await accounts.current(c.get("principal"))),
   );
   app.post("/v1/agent-accounts/current", async (c) =>
-    c.json(await accounts.register(c.get("principal"), await parseBody(c, z.unknown()))),
+    c.json(
+      await accounts.register(
+        c.get("principal"),
+        await parseBody(c, z.unknown()),
+        c.get("requestId"),
+      ),
+    ),
   );
   app.get("/v1/agent-accounts", requireHuman, async (c) =>
     c.json(await accounts.list(c.get("principal"))),

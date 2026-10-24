@@ -913,7 +913,7 @@ export function createAutomationHostService(options: {
         })),
       );
     },
-    async create(principal: Principal, raw: unknown) {
+    async create(principal: Principal, raw: unknown, requestId: string = randomUUID()) {
       await authorizeHost(principal, true);
       const input = automationHostScheduleCreateInputSchema.parse(raw);
       requireConnection(principal, input.tenantAuthorizationConnectionId);
@@ -940,7 +940,7 @@ export function createAutomationHostService(options: {
           throw new AppError("forbidden", "The host connection does not grant these scopes.");
         await ensureAgentAccount(
           tx,
-          principal.userId,
+          { principal, requestId },
           input.tenantAuthorizationConnectionId,
           input.hostSurface.startsWith("claude")
             ? "claude"

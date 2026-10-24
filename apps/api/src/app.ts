@@ -1154,6 +1154,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       principal = await auth.authenticateAccessToken(
         authorization.slice(7),
         audience && internalKey === dependencies.config.mcpInternalSecret ? audience : undefined,
+        context.get("requestId"),
       );
     } else if (authorization?.startsWith("Session ")) {
       principal = await auth.authenticateSession(authorization.slice(8));

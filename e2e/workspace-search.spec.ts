@@ -258,7 +258,7 @@ test("Tasks keeps view switching and utilities in one responsive header", async 
       const utilities = [
         header.getByRole("button", { name: "Switch workspace", exact: true }),
         header.getByRole("combobox", { name: "Search Tasks", exact: true }),
-        ...["Filters", "Sort", "Display"].map((name) =>
+        ...["Filters", "Sort: Title A–Z", "Display"].map((name) =>
           header.getByRole("button", { name, exact: true }),
         ),
       ];
@@ -865,10 +865,13 @@ test("Finance consolidates contextual controls and preserves responsive creation
         await expect(revise).toBeEnabled();
         await revise.click();
         const revision = page.getByRole("dialog", {
-          name: `Revise version ${budget.data.version}`,
+          name: "Edit budget",
           exact: true,
         });
         await expect(revision).toBeVisible();
+        await expect(
+          revision.getByText(`Current version ${budget.data.version}`, { exact: true }),
+        ).toBeVisible();
         await revision.getByRole("button", { name: "Close", exact: true }).click();
         await expect(revision).not.toBeVisible();
       }

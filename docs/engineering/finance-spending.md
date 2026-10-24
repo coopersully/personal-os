@@ -94,7 +94,7 @@ Full transaction-view integration and production/UI acceptance remain separate o
 Trends and Rhythm consume the same dated snapshots. Current named-period comparisons cap the
 current period to elapsed local dates and compare the equivalent elapsed previous period, labeling
 shorter-month caps. Complete named months compare complete prior months; custom ranges use the
-preceding equal-length local-date interval. Daily/weekly/monthly bars and the accessible table
+preceding equal-length local-date interval. Signed daily/weekly/monthly net bars and the accessible table in Trend details
 share exact contribution references. Rhythm distinguishes observed positive and net-refund amounts,
 unknown/partial coverage, future dates and confirmed zero; it uses the person's saved week start.
 
@@ -143,17 +143,13 @@ assignment or persisted bucket color support. Visual metadata does not change co
 exact transaction references.
 
 Positive circles retain true selected-period area rather than growing to a minimum target size.
-Circles smaller than 44 px are excluded from the Tab order. A collapsed **All spending groups**
-disclosure supplies native buttons with full wrapping names, exact selected-period amounts, and
-at least 44 px controls for those positive groups. The same qualified monthly-budget description
-is available to each circle and disclosure action, including exact overage and incomplete-history
-caveats; labelled circles retain a visible Over budget indicator. Zero and negative adjustments
-remain available in List rather than gaining invented positive area.
-
-The visible legend distinguishes selected-period circle size from whole-month budget fill.
-Reduced motion disables effective Arrange mode, including when the preference changes while
-Arrange is active, and restores vertical touch scrolling. It does not inflate circle area or
-change source totals, filters, or drill-down identities.
+Every positive circle remains keyboard focusable, including circles smaller than 44 px. Full names,
+exact selected-period amounts and qualified monthly usage are included in the circle's accessible
+name and native tooltip; activation opens the existing group details. Labelled circles retain a
+visible Over budget indicator. Zero and negative adjustments remain available in List rather than
+gaining invented positive area. Do not repeat the group list or a legend below the bubble canvas.
+Reduced motion disables automatic spring and dither animation while preserving manual arrangement.
+Source totals, filters, and drill-down identities are unchanged.
 
 Qualified budget categories remain in List when the selected period has no activity, with exact
 zero selected-period amounts and empty source references. Monthly usage still covers the qualified

@@ -398,6 +398,30 @@ export function FinanceSpendingPage() {
         disabled={disabled}
         onChange={(value) => update("grouping", value, "financeSpendingGrouping")}
       />
+      {view === "trends" && result ? (
+        <SpendingChoice
+          label="Focus"
+          value={params.get("categories") ?? "all"}
+          options={[
+            ["all", "All categories"],
+            ...result.groups.map(
+              (group) =>
+                [
+                  group.categoryIds.map((id) => id ?? "uncategorized").join(","),
+                  group.label,
+                ] as const,
+            ),
+          ]}
+          onChange={(value) => {
+            if (value !== "all") return update("categories", value);
+            const next = new URLSearchParams(params);
+            next.delete("categories");
+            changeParams(next);
+            setSelected(null);
+            setSelectedDrillDown(null);
+          }}
+        />
+      ) : null}
     </>
   );
   return (
@@ -756,37 +780,13 @@ export function FinanceSpendingPage() {
                 />
               </div>
               {view === "trends" ? (
-                <>
-                  <SpendingChoice
-                    label="Focus"
-                    value={params.get("categories") ?? "all"}
-                    options={[
-                      ["all", "All categories"],
-                      ...result.groups.map(
-                        (group) =>
-                          [
-                            group.categoryIds.map((id) => id ?? "uncategorized").join(","),
-                            group.label,
-                          ] as const,
-                      ),
-                    ]}
-                    onChange={(value) => {
-                      if (value !== "all") return update("categories", value);
-                      const next = new URLSearchParams(params);
-                      next.delete("categories");
-                      changeParams(next);
-                      setSelected(null);
-                      setSelectedDrillDown(null);
-                    }}
-                  />
-                  <p className="text-sm text-muted-foreground">{comparisonScopes?.label}</p>
-                  <FinanceSpendingTrends
-                    dashboard={result}
-                    {...(comparison.data ? { comparison: comparison.data } : {})}
-                    comparisonLoading={comparison.isLoading}
-                    onSelect={selectDrillDown}
-                  />
-                </>
+                <FinanceSpendingTrends
+                  dashboard={result}
+                  comparisonLabel={comparisonScopes?.label ?? "Previous period"}
+                  {...(comparison.data ? { comparison: comparison.data } : {})}
+                  comparisonLoading={comparison.isLoading}
+                  onSelect={selectDrillDown}
+                />
               ) : null}
               {view === "rhythm" ? (
                 <FinanceSpendingRhythm

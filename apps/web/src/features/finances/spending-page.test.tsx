@@ -116,6 +116,14 @@ const saved = resolveWorkspaceSettings("finances", {
   revision: 3,
 });
 beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
   vi.spyOn(api, "getMe").mockResolvedValue({
     id: "owner",
     planningTimezone: "America/New_York",

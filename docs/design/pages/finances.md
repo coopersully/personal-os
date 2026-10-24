@@ -69,9 +69,9 @@ Spending options open a bounded dialog with the shared Settings row context: lab
 controls at the end, active-filter count on its trigger, and immediate revisioned preference saves.
 Keep the selected-period amount, basis, pending inclusion and coverage caveat visible. Detailed
 scope, monthly-budget confirmation, source qualifications and technical references live in
-**About these totals**. Bubble layout controls belong in a contextual **Layout** menu (Arrange
-and Reset), leaving the visualization and the circle-size/monthly-fill legend intact. These
-presentation changes must preserve exact contributions, recovery links and accounting queries.
+**About these totals**. Bubble arrangement is always available with a reset icon in its heading.
+Do not add a repeated list or explanatory footer beneath the canvas. Preserve exact contributions,
+recovery links and accounting queries.
 
 The spending bubble view defaults to configured budget buckets, or categories when no buckets are
 configured, and remembers the user's explicit grouping choice. Buckets support category drill-down.
@@ -96,14 +96,24 @@ dragging and keyboard-accessible detail/reset controls remain available.
 Use the assigned bucket/category color with a translucent tonal overlay filling upward inside the
 bubble; do not use a perimeter progress ring. Labels, icons, and controls remain legible above it.
 Bubble size represents spending for the selected period; fill represents monthly budget usage and
-must be explicitly labeled as monthly even on shorter views. Animate fill changes and distinguish
+is labeled as monthly in each circle's accessible name and tooltip even on shorter views. Animate fill changes and distinguish
 overspending from exactly using the budget. Missing limits never become invented percentages.
 Single-month selections resolve the applicable approved budget; multi-month selections omit fill.
-A visible legend separates selected-period circle size from monthly fill. Positive circles retain
-true area; those below 44 px leave the Tab order. A collapsed All spending groups disclosure offers
-full names, exact amounts, qualified monthly usage and overage through native 44 px controls.
-Zero and negative groups remain in List. Reduced motion disables Arrange and preserves vertical
-scrolling. See the [spending contract](../../engineering/finance-spending.md) for coverage and disclosure rules.
+Positive circles retain true area and remain keyboard focusable, including tiny circles. Full names,
+exact amounts, monthly usage and coverage are available through accessible names/tooltips and the
+existing detail dialog. Zero and negative groups remain in List. Reduced motion disables automatic
+animation while preserving manual arrangement. Do not repeat the List below Bubbles.
+
+Trends uses the shared Card composition and a responsive net-spending bar chart with Finance accent,
+quiet grid/axes and formatted dates. Focus lives in the primary navigation. The comparison stays in
+the chart header; detailed period rows, source/coverage and group changes live in its info dialog.
+Signed bars preserve net refunds; exact selections remain available by pointer and keyboard.
+Rhythm uses compact month Cards with square date cells, a shared green intensity scale, neutral
+confirmed-zero days and muted future days. Dashed cells indicate incomplete evidence; hover/focus
+opens the shared tooltip with exact amount and status. Keep keyboard date navigation and exact
+drilldown, without a duplicate daily list or prose block below the calendar.
+See the [spending contract](../../engineering/finance-spending.md) for coverage and disclosure rules.
+
 
 Include pending spending by default, with a configurable inclusion option in the view and Finance
 settings. Expose grouping defaults and granular display choices during setup using simple controls;

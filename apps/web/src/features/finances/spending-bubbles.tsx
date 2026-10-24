@@ -4,10 +4,9 @@ import type {
   FinanceSpendingMonthlyBudget,
 } from "@personal-os/domain";
 import { type HTMLMotionProps, motion, useDragControls, useReducedMotion } from "motion/react";
-import { useId, useLayoutEffect, useRef, useState } from "react";
-import { ChevronDownIcon, RefreshIcon } from "@/components/icons";
+import { useLayoutEffect, useRef, useState } from "react";
+import { RefreshIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { formatMoney } from "./format";
 import { spendingGroupVisual } from "./spending-visual";
 
@@ -114,7 +113,6 @@ export function SpendingBubbles({
   layoutKey?: string;
   monthlyBudget?: FinanceSpendingMonthlyBudget;
 }) {
-  const descriptionId = useId();
   const reduced = useReducedMotion();
   const dragOrigin = useRef<Position[]>([]);
   const positions = useRef(new Map<string, Position>());
@@ -198,7 +196,7 @@ export function SpendingBubbles({
             <SpendingBubble
               key={group.id}
               type="button"
-              tabIndex={diameter < 44 ? -1 : 0}
+              tabIndex={0}
               initial={false}
               drag
               dragMomentum={false}
@@ -325,65 +323,6 @@ export function SpendingBubbles({
           );
         })}
       </div>
-      <p className="text-sm text-muted-foreground">
-        Circle size: selected-period spending. Fill: monthly budget used, when available. Negative
-        adjustments and zero-spend groups remain in List.
-      </p>
-      <Collapsible>
-        <CollapsibleTrigger asChild>
-          <Button variant="ghost" className="min-h-11 w-full justify-between">
-            All spending groups ({visible.length})<ChevronDownIcon />
-          </Button>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <ul aria-label="Spending groups" className="grid gap-1 sm:grid-cols-2">
-            {visible.map((group, index) => {
-              const visual = spendingGroupVisual(group);
-              const VisualIcon = visual.Icon;
-              const budget =
-                monthlyBudget?.state === "qualified"
-                  ? monthlyBudget.groups.find((item) => item.groupId === group.id)
-                  : undefined;
-              const overage =
-                budget?.budgetCents !== null && budget?.budgetCents !== undefined
-                  ? Math.max(0, budget.usedCents - budget.budgetCents)
-                  : 0;
-              return (
-                <li key={group.id} className="min-w-0">
-                  <Button
-                    variant="ghost"
-                    className="h-auto min-h-11 w-full justify-start whitespace-normal text-left"
-                    aria-label={`Open ${group.label} details`}
-                    aria-describedby={`${descriptionId}-${index}`}
-                    onClick={() => onSelect(group)}
-                  >
-                    <span
-                      aria-hidden="true"
-                      className="flex size-7 shrink-0 items-center justify-center rounded-full"
-                      style={{ backgroundColor: visual.backgroundColor }}
-                    >
-                      <VisualIcon className="size-4" />
-                    </span>
-                    <span className="min-w-0 flex-1 break-words">{group.label}</span>
-                    <span className="shrink-0 text-right tabular-nums">
-                      {formatMoney(group.netCents / 100)}
-                      {overage > 0 ? (
-                        <span className="block text-xs text-muted-foreground">
-                          Over budget {formatMoney(overage / 100)}
-                        </span>
-                      ) : null}
-                    </span>
-                  </Button>
-                  <span id={`${descriptionId}-${index}`} className="sr-only">
-                    Selected-period spending {formatMoney(group.netCents / 100)}.{" "}
-                    {monthlyBudgetLabel(budget, monthlyBudget)}.
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        </CollapsibleContent>
-      </Collapsible>
     </section>
   );
 }

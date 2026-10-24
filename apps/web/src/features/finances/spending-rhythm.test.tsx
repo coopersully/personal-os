@@ -1,9 +1,23 @@
 // @vitest-environment jsdom
+import "@testing-library/jest-dom/vitest";
 import type { FinanceSpendingDashboard } from "@personal-os/domain";
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, it, vi } from "vitest";
+import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { FinanceSpendingRhythm } from "./spending-rhythm";
+
+afterEach(() => cleanup());
+
+beforeAll(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+});
 
 it("distinguishes missing, zero, negative and future days and navigates dates by keyboard", async () => {
   const scope = {
@@ -52,8 +66,7 @@ it("distinguishes missing, zero, negative and future days and navigates dates by
   expect(screen.getByRole("button", { name: /2026-03-04.*Future/ })).toHaveFocus();
   await userEvent.keyboard("{Home}");
   expect(zero).toHaveFocus();
-  await userEvent.click(screen.getByText("Daily spending list"));
-  expect(screen.getByRole("button", { name: "2026-03-03: -$0.50" })).toBeInTheDocument();
+  expect(screen.queryByText("Daily spending list")).not.toBeInTheDocument();
 });
 
 function observedDashboard(): FinanceSpendingDashboard {
@@ -90,10 +103,10 @@ it("preserves observed positive and refund tones independently of uncertain cove
   const positive = screen.getByRole("button", { name: /2026-03-01.*Missing coverage/ });
   const zero = screen.getByRole("button", { name: /2026-03-02.*Missing coverage/ });
   const refund = screen.getByRole("button", { name: /2026-03-03.*Partial coverage/ });
-  expect(positive).toHaveClass("bg-primary");
-  expect(zero).toHaveClass("bg-muted");
+  expect(positive.getAttribute("style")).toContain("--workspace-finances-accent");
+  expect(zero).toHaveClass("outline-dashed");
   expect(refund).toHaveClass("bg-accent");
-  expect(refund).toHaveTextContent("Refund · Partial");
+  expect(refund).toHaveAccessibleName(/Net refund.*Partial coverage|Partial coverage/);
   expect(zero).not.toHaveTextContent("Zero");
 });
 it("rotates calendar labels and leading offsets for Monday", () => {

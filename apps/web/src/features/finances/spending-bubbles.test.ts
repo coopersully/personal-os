@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { FinanceSpendingDashboard, FinanceSpendingMonthlyBudget } from "@personal-os/domain";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type CSSProperties, createElement } from "react";
 import { afterEach, expect, it, vi } from "vitest";
@@ -349,10 +349,6 @@ it("defensively renders a zero target separately from null without infinite util
   );
   expect(selected()).toHaveClass("border-0");
   expect(selected()).toHaveTextContent("Over budget");
-  fireEvent.click(screen.getByText("All spending groups (1)"));
-  expect(screen.getByRole("button", { name: "Open Food details" })).toHaveAccessibleDescription(
-    /Selected-period spending \$1.00.*Monthly budget used \$2.50 of \$0.00; Over budget \$2.50/,
-  );
   expect(fillAnimation.props.at(-1)).toMatchObject({ animate: { clipPath: "inset(0% 0 0 0)" } });
   for (const usedCents of [0, -100]) {
     rerender(
@@ -409,16 +405,7 @@ it("keeps tiny and long-named groups readable and selectable without inflating t
   ] as unknown as FinanceSpendingDashboard["groups"];
   const select = vi.fn();
   render(createElement(SpendingBubbles, { groups, onSelect: select }));
-  fireEvent.click(screen.getByText("All spending groups (2)"));
-  const key = screen.getByRole("list", { name: "Spending groups" });
-  const tiny = within(key).getByRole("button", {
-    name: "Open A very long category name for a single small transaction details",
-  });
-  expect(tiny).toHaveTextContent("A very long category name for a single small transaction");
-  expect(tiny).toHaveTextContent("$0.01");
-  expect(tiny).toHaveAccessibleDescription(
-    "Selected-period spending $0.01. Monthly budget comparison unavailable.",
-  );
+  const tiny = screen.getByRole("button", { name: /A very long category name.*: \$0.01/ });
   tiny.focus();
   await userEvent.keyboard("{Enter}");
   expect(select).toHaveBeenCalledWith(groups[1]);
@@ -428,8 +415,9 @@ it("keeps tiny and long-named groups readable and selectable without inflating t
     Number.parseFloat(smallCircle.style.width) ** 2 /
       Number.parseFloat(largeCircle.style.width) ** 2,
   ).toBeCloseTo(1 / 100000, 8);
-  expect(smallCircle).toHaveAttribute("tabindex", "-1");
-  expect(screen.getByText(/Circle size: selected-period spending/)).toBeVisible();
+  expect(smallCircle).toHaveAttribute("tabindex", "0");
+  expect(screen.queryByText(/Circle size:/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("list")).not.toBeInTheDocument();
 });
 it("keeps arrangement available with reduced motion and offers only reset", () => {
   const groups = [

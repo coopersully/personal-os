@@ -663,9 +663,16 @@ describe("desktop preferences", () => {
     mount({ connectionOnly: true });
     await screen.findByText("Recommended");
     const test = deferred<never>();
-    mocks.invoke.mockReturnValueOnce(test.promise);
+    const invoke = mocks.invoke.getMockImplementation();
+    mocks.invoke.mockImplementation((command, args) =>
+      command === "desktop_test_connection" ? test.promise : invoke?.(command, args),
+    );
     await userEvent.click(screen.getByRole("button", { name: "Test hosted connection" }));
-    expect(screen.getByRole("button", { name: "Testing hosted…" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Testing hosted…" })).toBeDisabled();
+    expect(mocks.invoke).toHaveBeenCalledWith("desktop_test_connection", {
+      serverUrl: hostedServer,
+    });
+    expect(toast.loading).toHaveBeenCalledWith("Testing connection…", expect.any(Object));
     await act(async () => test.reject(new Error("This is a website, not a nohmi API")));
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(
@@ -674,6 +681,11 @@ describe("desktop preferences", () => {
       ),
     );
     expect(screen.queryByText("Connection verified")).not.toBeInTheDocument();
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(screen.queryByText("Testing connection…")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Couldn’t test the desktop connection. Try again."),
+    ).not.toBeInTheDocument();
     expect(mocks.invoke).not.toHaveBeenCalledWith("desktop_save_settings", expect.anything());
   });
 

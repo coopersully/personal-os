@@ -526,7 +526,7 @@ export function ReviewQuestion({
     },
     onSuccess: (response) => {
       if (response.outcome === "failed") {
-        toast.error(response.communication.headline);
+        toast.error(response.communication.headline, { duration: Number.POSITIVE_INFINITY });
         requestKey.current = { signature: "", key: "" };
         return;
       }

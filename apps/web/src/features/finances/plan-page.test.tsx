@@ -499,6 +499,19 @@ describe("complete finance plan", () => {
     expect(screen.getByLabelText("Allocation 3 account")).toHaveValue(accountId);
   });
 
+  it("announces bucket read failures once while retaining the plan", async () => {
+    api.listFinanceBudgetBuckets.mockRejectedValue(new Error("Buckets unavailable"));
+    mount();
+    await waitFor(() =>
+      expect(notifications.error).toHaveBeenCalledWith(
+        "Couldn’t load buckets.",
+        expect.any(Object),
+      ),
+    );
+    expect(notifications.error).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Approve version 3" })).toBeEnabled();
+  });
+
   it("does not interpret a failed tool result as a saved or empty plan", async () => {
     api.getFinanceBudget.mockResolvedValue({
       ...result(null),

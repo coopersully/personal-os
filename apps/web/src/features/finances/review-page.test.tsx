@@ -12,6 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { toast } from "sonner";
 import { vi } from "vitest";
 import { FinanceReviewPage } from "./review-page.js";
 
@@ -398,6 +399,7 @@ it("links a selected transaction with the chosen relationship and excludes the r
 });
 
 it("preserves input for a failed result envelope and does not guess a missing transaction link", async () => {
+  const errorToast = vi.spyOn(toast, "error");
   const user = userEvent.setup();
   const item = { ...review(), evidence: { merchant: "Cafe Example" } };
   api.getFinanceInbox.mockResolvedValue(response([item]));
@@ -415,7 +417,12 @@ it("preserves input for a failed result envelope and does not guess a missing tr
   await user.selectOptions(screen.getByLabelText("Resolution"), "dismiss");
   await user.type(screen.getByLabelText("Your answer"), "The charge is legitimate");
   await user.click(screen.getByRole("button", { name: "Save answer" }));
-  expect(await screen.findByText("This resolution could not be applied.")).toBeInTheDocument();
+  const failure = await screen.findByText("This resolution could not be applied.");
+  expect(failure.closest("[data-sonner-toast]")).toBeInTheDocument();
+  expect(errorToast).toHaveBeenCalledWith("This resolution could not be applied.", {
+    duration: Number.POSITIVE_INFINITY,
+  });
+  errorToast.mockRestore();
   expect(screen.getByLabelText("Your answer")).toHaveValue("The charge is legitimate");
   expect(api.answerFinanceReview).toHaveBeenCalledWith(
     reviewId,

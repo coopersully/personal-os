@@ -426,14 +426,6 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
                   </DialogContent>
                 </Dialog>
               </div>
-              {bucketQuery.isError ? (
-                <InlineError
-                  error={bucketQuery.error}
-                  toastOnly
-                  retry={() => bucketQuery.refetch()}
-                  stale={Boolean(bucketQuery.data)}
-                />
-              ) : null}
               {bucketQuery.isPending ? (
                 <p role="status">Loading buckets…</p>
               ) : bucketQuery.isSuccess && !relations.buckets.length ? (

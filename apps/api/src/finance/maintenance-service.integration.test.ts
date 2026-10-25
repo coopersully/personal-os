@@ -9,11 +9,14 @@ import {
   financeAgentActionReviews,
   financeAnswerContinuations,
   financeConversationBatches,
+  financeEconomicEvents,
   financeLedgerChallenges,
   financeMaintenanceCandidates,
+  financeMaintenanceExecutionBindings,
   financeMaintenanceRuns,
   financePeriodReviews,
   financeSetupSessions,
+  financeTransactionRelationships,
   financeTransactionRevisions,
   financeTransactions,
   migrateDatabase,
@@ -1163,6 +1166,8 @@ describe.sequential("canonical Finance intent and historical adoption", () => {
   });
   it.each([
     "later_step",
+    "relationship",
+    "execution_binding",
     "candidate",
     "snapshot",
     "effect",
@@ -1170,8 +1175,46 @@ describe.sequential("canonical Finance intent and historical adoption", () => {
     "batch",
     "action",
   ])("does not reinterpret legacy %s evidence", async (kind) => {
-    const f = await fixture();
+    const scheduled = kind === "execution_binding" ? await scheduledFixture() : null;
+    const f = scheduled ?? (await fixture());
     const run = await preflightRun(f.userId);
+    if (kind === "relationship") {
+      const [event] = await database.db
+        .insert(financeEconomicEvents)
+        .values({ userId: f.userId, kind: "transfer", stableKey: randomUUID() })
+        .returning();
+      await database.db.insert(financeTransactionRelationships).values({
+        userId: f.userId,
+        economicEventId: required(event).id,
+        relationship: "transfer",
+        transactionIds: [],
+        rationale: "Historical relationship evidence",
+        provenance: { maintenanceRunId: run.id },
+      });
+    }
+    if (scheduled) {
+      const [candidate] = await database.db
+        .insert(financeMaintenanceCandidates)
+        .values({ userId: f.userId, runId: run.id, revision: "legacy-candidate" })
+        .returning();
+      // A binding cannot exist without its exact candidate; do not weaken foreign keys to
+      // manufacture an impossible binding-only state just to isolate the redundant guard.
+      await database.db.insert(financeMaintenanceExecutionBindings).values({
+        userId: f.userId,
+        runId: run.id,
+        candidateId: required(candidate).id,
+        candidateRevision: "legacy-candidate",
+        submittedFromRevision: "legacy-submission",
+        submissionFingerprint: "legacy-fingerprint",
+        originalActorId: scheduled.principal.actorId,
+        currentActorId: scheduled.principal.actorId,
+        authorizationConnectionId: scheduled.principal.authorizationConnectionId,
+        automationScheduleId: scheduled.scheduleId,
+        protocolVersion: "v1",
+        createdAt: now(),
+        updatedAt: now(),
+      });
+    }
     if (kind === "later_step")
       await database.db.insert(workspaceMaintenanceSteps).values({
         runId: run.id,

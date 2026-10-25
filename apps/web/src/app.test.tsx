@@ -627,6 +627,7 @@ const mocks = vi.hoisted(() => ({
   revokeOAuthClient: vi.fn(),
   setCalendarSelected: vi.fn(),
   setAlwaysOnTop: vi.fn(),
+  listen: vi.fn(),
   sendMailDraft: vi.fn(),
   syncConnector: vi.fn(),
   syncXBookmarks: vi.fn(),
@@ -648,6 +649,8 @@ const mocks = vi.hoisted(() => ({
   validateInvitation: vi.fn(),
   checkTextingVerification: vi.fn(),
 }));
+
+vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
 
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ setAlwaysOnTop: mocks.setAlwaysOnTop }),
@@ -1431,6 +1434,7 @@ function defaults() {
   );
   mocks.openUrl.mockResolvedValue(undefined);
   mocks.setAlwaysOnTop.mockResolvedValue(undefined);
+  mocks.listen.mockImplementation(async () => vi.fn());
   mocks.syncConnector.mockResolvedValue(1);
   mocks.selectXBookmarkFolder.mockResolvedValue(1);
   mocks.syncXBookmarks.mockResolvedValue(2);
@@ -9335,8 +9339,46 @@ describe("ilo web app", () => {
 
     Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
     const desktopView = setup("/unknown");
+    const readiness = () => ({
+      route: desktopView.location.value,
+      queries: [["me"], ["daily-brief", user.planningTimezone], ["reminders", "completed"]].map(
+        (queryKey) => {
+          const state = desktopView.queryClient.getQueryState(queryKey);
+          return {
+            queryKey,
+            status: state?.status ?? "missing",
+            fetchStatus: state?.fetchStatus ?? "missing",
+            hasData: state?.data !== undefined,
+            error: state?.error?.message ?? null,
+          };
+        },
+      ),
+    });
     try {
-      expect(await screen.findByRole("heading", { name: "To take care of" })).toBeInTheDocument();
+      // Redirect, query readiness, and rendering share one bounded desktop setup deadline.
+      await waitFor(
+        () => {
+          const current = readiness();
+          expect(current.route).toBe("/today");
+          for (const query of current.queries) {
+            expect(query).toMatchObject({ status: "success", fetchStatus: "idle", hasData: true });
+          }
+          expect(screen.getByRole("heading", { name: "To take care of" })).toBeInTheDocument();
+        },
+        {
+          timeout: 5_000,
+          onTimeout: (error) =>
+            new Error(`${error.message}\nDesktop setup readiness: ${JSON.stringify(readiness())}`),
+        },
+      );
+      for (const event of [
+        "desktop-action",
+        "desktop-session-invalidated",
+        "desktop-material-changed",
+        "desktop-settings-changed",
+      ]) {
+        expect(mocks.listen).toHaveBeenCalledWith(event, expect.any(Function));
+      }
       await browser.click(screen.getByRole("button", { name: "Keep window on top" }));
       await waitFor(() => expect(mocks.setAlwaysOnTop).toHaveBeenCalledWith(true));
       expect(screen.getByRole("button", { name: "Keep window on top" })).toHaveAttribute(

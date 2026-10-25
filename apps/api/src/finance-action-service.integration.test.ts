@@ -3091,9 +3091,12 @@ describe.sequential("finance action service", () => {
 
   it("keeps bypass out of categorization evidence while allowing prepared permanent rules", async () => {
     await database.db
-      .update(executionPolicySettings)
-      .set({ reviewBypassEnabled: true, updatedAt: now })
-      .where(eq(executionPolicySettings.userId, userId));
+      .insert(executionPolicySettings)
+      .values({ userId, reviewBypassEnabled: true })
+      .onConflictDoUpdate({
+        target: executionPolicySettings.userId,
+        set: { reviewBypassEnabled: true, updatedAt: now },
+      });
     const [account] = await database.db
       .insert(financeAccounts)
       .values({
@@ -3157,6 +3160,32 @@ describe.sequential("finance action service", () => {
     const lowConfidence = await service.performDirect("categorization", decision(0.5), context);
     if (lowConfidence.status !== "needs_input") throw new Error("Expected an evidence question.");
     expect(lowConfidence.question.expectedAnswer.map((field) => field.name)).toEqual(["decisions"]);
+    expect(lowConfidence.question.sourceRefs).toEqual([
+      expect.objectContaining({ remoteId: transaction.id }),
+    ]);
+    // Persist the original deployed shape: no references in either public or private question.
+    const [storedQuestion] = await database.db
+      .select()
+      .from(financeAgentActionReviews)
+      .where(eq(financeAgentActionReviews.id, lowConfidence.question.id));
+    if (!storedQuestion) throw new Error("Missing question");
+    await database.db
+      .update(financeAgentActionReviews)
+      .set({
+        sourceRefs: [],
+        privatePayload: {
+          ...storedQuestion.privatePayload,
+          question: { ...lowConfidence.question, sourceRefs: [] },
+        },
+      })
+      .where(eq(financeAgentActionReviews.id, storedQuestion.id));
+    expect(await service.listQuestions(userId, 50, storedQuestion.id)).toEqual([
+      expect.objectContaining({
+        sourceRefs: [expect.objectContaining({ remoteId: transaction.id })],
+      }),
+    ]);
+    expect(await service.listQuestions(crypto.randomUUID(), 50, storedQuestion.id)).toEqual([]);
+
     await expect(
       database.db
         .select({ categoryId: financeTransactions.categoryId })

@@ -1,9 +1,18 @@
 import {
+  agentAccountLinkSchema,
+  agentAccountRegistrationSchema,
+  agentAccountSchema,
+  agentAccountUpdateSchema,
+  executeFinanceReviewBatchInputSchema,
   financeMaintenanceInputSchema,
   financeMaintenancePayloadSchema,
+  financeReviewBacklogAssessmentSchema,
+  financeReviewBacklogPageSchema,
+  financeReviewBatchRunSchema,
   financeToolResultSchema,
   idSchema,
   maintenanceRunStatusSchema,
+  previewFinanceReviewBatchInputSchema,
   resetFinanceNotificationPreferencesSchema,
   ritualActionInputSchema,
   ritualDefinitionInputSchema,
@@ -53,6 +62,20 @@ export function createOpenApiDocument(apiBaseUrl: string) {
   return {
     components: {
       schemas: {
+        FinanceReviewBacklog: z.toJSONSchema(financeReviewBacklogAssessmentSchema, { io: "input" }),
+        FinanceReviewBacklogPage: z.toJSONSchema(financeReviewBacklogPageSchema, { io: "input" }),
+        FinanceReviewBatch: z.toJSONSchema(financeReviewBatchRunSchema, { io: "input" }),
+        PreviewFinanceReviewBatch: z.toJSONSchema(previewFinanceReviewBatchInputSchema, {
+          io: "input",
+        }),
+        ExecuteFinanceReviewBatch: z.toJSONSchema(executeFinanceReviewBatchInputSchema, {
+          io: "input",
+        }),
+
+        AgentAccount: z.toJSONSchema(agentAccountSchema),
+        AgentAccountRegistration: z.toJSONSchema(agentAccountRegistrationSchema),
+        AgentAccountUpdate: z.toJSONSchema(agentAccountUpdateSchema),
+        AgentAccountLink: z.toJSONSchema(agentAccountLinkSchema),
         RitualDefinitionInput: z.toJSONSchema(ritualDefinitionInputSchema, { io: "input" }),
         RitualResponseInput: z.toJSONSchema(ritualResponseInputSchema, { io: "input" }),
         RitualActionInput: z.toJSONSchema(ritualActionInputSchema, { io: "input" }),
@@ -266,6 +289,164 @@ export function createOpenApiDocument(apiBaseUrl: string) {
     },
     openapi: "3.1.0",
     paths: {
+      "/v1/finances/review-backlog": {
+        get: {
+          security,
+          "x-required-scopes": ["finances:read"],
+          responses: {
+            200: {
+              description: "Complete historical assessment; flags and cases counted separately",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/FinanceReviewBacklog" },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/v1/finances/review-backlog/items": {
+        get: {
+          security,
+          "x-required-scopes": ["finances:read"],
+          parameters: [
+            ...paginationParameters,
+            queryParameter("group", {
+              type: "string",
+              enum: [
+                "roundups",
+                "internal_movements",
+                "card_payments",
+                "ambiguous_payments",
+                "other_categorization",
+              ],
+            }),
+          ],
+          responses: {
+            200: {
+              description: "Snapshot-bound evidence page",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/FinanceReviewBacklogPage" },
+                },
+              },
+            },
+            409: { description: "Evidence changed; restart pagination" },
+          },
+        },
+      },
+      "/v1/finances/review-batches": {
+        get: {
+          security,
+          "x-required-scopes": ["finances:read"],
+          parameters: [queryParameter("limit", { type: "integer", minimum: 1, maximum: 50 })],
+          responses: {
+            200: {
+              description: "Recent batches visible to this owner or originating agent",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/FinanceReviewBatch" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        post: {
+          security,
+          "x-required-scopes": ["finances:read", "finances:write"],
+          requestBody: jsonRequest("PreviewFinanceReviewBatch"),
+          responses: {
+            201: {
+              description: "Durably saved exact manifest, without applying its decisions",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/FinanceReviewBatch" } },
+              },
+            },
+            409: { description: "Stale evidence or reused key with another manifest" },
+          },
+        },
+      },
+      "/v1/finances/review-batches/{id}": {
+        get: {
+          security,
+          "x-required-scopes": ["finances:read"],
+          parameters: [taskIdParameter],
+          responses: {
+            200: {
+              description: "Persisted decisions and per-item outcomes",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/FinanceReviewBatch" } },
+              },
+            },
+            404: { description: "Batch not visible to this authorization" },
+          },
+        },
+      },
+      "/v1/finances/review-batches/{id}/execute": {
+        post: {
+          security,
+          "x-required-scopes": ["finances:read", "finances:write"],
+          description:
+            "Owner confirmation or originating agent with finances:execute and current execution policy. Authority is rechecked for every item.",
+          parameters: [taskIdParameter],
+          requestBody: jsonRequest("ExecuteFinanceReviewBatch"),
+          responses: {
+            200: {
+              description:
+                "At most ten decisions processed; pending and exception outcomes remain explicit",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/FinanceReviewBatch" } },
+              },
+            },
+            403: { description: "Execution authority unavailable or revoked" },
+            409: { description: "Manifest fingerprint changed" },
+          },
+        },
+      },
+      "/v1/agent-accounts": {
+        get: {
+          security: [{ cookieAuth: [] }, { sessionAuth: [] }],
+          summary: "List the owner's shared agent profiles and connections",
+          responses: {
+            200: { description: "Owner-scoped directory" },
+            403: { description: "Human session required" },
+          },
+        },
+      },
+      "/v1/agent-accounts/current": {
+        get: {
+          security: [{ bearerAuth: [] }],
+          summary: "Read the authenticated connection's agent identity",
+          responses: { 200: { description: "Agent account or null" } },
+        },
+        post: {
+          security: [{ bearerAuth: [] }],
+          summary: "Register or reuse the authenticated connection's identity",
+          requestBody: jsonRequest("AgentAccountRegistration"),
+          responses: { 200: { description: "Idempotently registered agent account" } },
+        },
+      },
+      "/v1/agent-accounts/{id}": {
+        patch: {
+          security: [{ cookieAuth: [] }, { sessionAuth: [] }],
+          parameters: [taskIdParameter],
+          summary: "Update an owner-controlled agent profile",
+          requestBody: jsonRequest("AgentAccountUpdate"),
+          responses: { 200: { description: "Updated profile; connection authority unchanged" } },
+        },
+      },
+      "/v1/agent-accounts/connections/{id}": {
+        put: {
+          security: [{ cookieAuth: [] }, { sessionAuth: [] }],
+          parameters: [taskIdParameter],
+          summary: "Link a connection to an account or create a separate identity",
+          requestBody: jsonRequest("AgentAccountLink"),
+          responses: { 200: { description: "Linked account; connection authority unchanged" } },
+        },
+      },
       "/v1/workspaces/{workspace}/search": {
         get: {
           security,

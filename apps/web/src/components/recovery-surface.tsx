@@ -51,12 +51,14 @@ export function RecoverySurface({
   const content = mobile ? (
     <Drawer open={open} dismissible={false} shouldScaleBackground={false} autoFocus>
       <DrawerContent className="overflow-hidden" {...focus}>
-        <DrawerHeader className="shrink-0">
-          <DrawerTitle>{title}</DrawerTitle>
-          <DrawerDescription>{description}</DrawerDescription>
-        </DrawerHeader>
-        {children ? <div className="min-h-0 overflow-y-auto px-4">{children}</div> : null}
-        <DrawerFooter className="grid shrink-0 grid-cols-1 sm:grid-cols-2">{actions}</DrawerFooter>
+        <div className="min-h-0 overflow-y-auto">
+          <DrawerHeader>
+            <DrawerTitle>{title}</DrawerTitle>
+            <DrawerDescription>{description}</DrawerDescription>
+          </DrawerHeader>
+          {children ? <div className="px-4">{children}</div> : null}
+          <DrawerFooter className="grid grid-cols-1 sm:grid-cols-2">{actions}</DrawerFooter>
+        </div>
       </DrawerContent>
     </Drawer>
   ) : (

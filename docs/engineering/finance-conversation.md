@@ -109,7 +109,7 @@ Other historical financial actions without this evidence are explicitly outside 
 coverage; neither an agent reply nor a proposed or failed action is inferred to be applied.
 
 Routine actions may group by the exact run and single action family. Mixed-family actions and
-budget decisions remain individually inspectable, preserving explicit human-approval provenance.
+budget decisions remain individually inspectable, preserving actual approval provenance, including agent execution under review bypass.
 Unknown record kinds remain readable raw evidence and receive no invented routes. Per-action human
 `/v1/finances/activity/:id/evidence` reads at most 100 audit/change/reference items per page, with
 explicit completeness and an owner/receipt/revision-bound signed continuation. The list never

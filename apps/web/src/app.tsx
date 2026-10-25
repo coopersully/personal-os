@@ -8,6 +8,7 @@ import {
   type TodayTimelineDensity,
 } from "./features/calendar/day-timeline.js";
 import { calendarEventColorStyle } from "./features/calendar/event-color.js";
+import { LoginDestination } from "./features/public-site/login-destination";
 import { GoalProgressEditor } from "./features/settings/goal-progress-editor.js";
 import { RecordDateEditor } from "./features/settings/record-date-editor";
 import { settingsParents, settingsRoute } from "./features/settings/settings-routes";
@@ -322,7 +323,10 @@ import { MobileWorkspaceDock } from "./components/mobile-workspace-dock.js";
 import { MutationFeedback } from "./components/mutation-feedback.js";
 import { SettingsRecord, SettingsRecordAction } from "./components/settings-record.js";
 import { WorkspaceAppBar } from "./components/workspace-app-bar.js";
-import { WorkspaceHeaderControlsSlot } from "./components/workspace-header-controls.js";
+import {
+  WorkspaceHeaderControlsSlot,
+  WorkspaceTitleSentence,
+} from "./components/workspace-header-controls.js";
 import { WorkspaceIcon, workspaceIdForPath } from "./components/workspace-identity.js";
 import {
   WorkspaceSecondaryAppBar,
@@ -566,6 +570,9 @@ function SessionApp() {
   const me = useQuery({ queryFn: api.getMe, queryKey: ["me"] });
   return (
     <>
+      <Toaster
+        theme={typeof window.matchMedia === "function" ? (me.data?.theme ?? "system") : "light"}
+      />
       <AppRecovery
         owner={tokens.get("verifyEmail") || tokens.get("resetPassword") ? undefined : me.data?.id}
         accountBlocked={!me.isSuccess}
@@ -583,9 +590,6 @@ function SessionApp() {
       >
         {isTauri() ? <DesktopSettingsPanel connectionOnly /> : null}
       </AccountRecoveryDialog>
-      <Toaster
-        theme={typeof window.matchMedia === "function" ? (me.data?.theme ?? "system") : "light"}
-      />
     </>
   );
 }
@@ -867,6 +871,7 @@ function CredentialsScreen() {
             </p>
           ) : null}
         </div>
+        {mode === "login" ? <LoginDestination /> : null}
         {mode === "register" && (
           <>
             <InviteCodeField
@@ -1575,7 +1580,10 @@ function AuthenticatedApp({ user }: { user: User }) {
             ) : (
               <WorkspaceAppBarForRoute
                 sidebarOwnsTitle={
-                  !isMobileWorkspaceDock && !!sidebarMode && sidebarMode !== "settings"
+                  !isMobileWorkspaceDock &&
+                  !!sidebarMode &&
+                  sidebarMode !== "settings" &&
+                  sidebarMode !== "finances"
                 }
                 workspaceSwitcher={
                   isMobileWorkspaceDock ? (
@@ -1992,13 +2000,14 @@ function WorkspaceAppBarForRoute({
     />
   ) : workspace === "mail" ? (
     <MailAppBarControls
+      accounts={<MailAccountsControl />}
       sync={<MailSyncButton />}
       search={<WorkspaceFinder workspace="mail" onAction={handleSearchAction} />}
     />
   ) : workspace === "finances" ? (
     <>
-      <WorkspaceHeaderControlsSlot placement="leading" />
       <WorkspaceFinder workspace="finances" onAction={handleSearchAction} />
+      <WorkspaceHeaderControlsSlot placement="leading" />
       <WorkspaceHeaderControlsSlot />
     </>
   ) : null;
@@ -2023,7 +2032,6 @@ function WorkspaceAppBarForRoute({
               <TooltipContent side="bottom">Keep window on top</TooltipContent>
             </Tooltip>
           )}
-          {workspace === "mail" && !isReviewQueue ? <MailAccountsControl /> : null}
         </>
       }
       primaryActions={
@@ -2054,7 +2062,14 @@ function WorkspaceAppBarForRoute({
           {workspaceSwitcher && !isSpatialCalendar && pathname !== "/today"
             ? workspaceSwitcher
             : null}
-          {identity}
+          {workspace === "finances" ? (
+            <WorkspaceTitleSentence>
+              {identity}
+              <WorkspaceHeaderControlsSlot placement="title" />
+            </WorkspaceTitleSentence>
+          ) : (
+            identity
+          )}
         </>
       }
       workspace={workspace}
@@ -3020,7 +3035,7 @@ function workspaceTitleForLocation(pathname: string, search: string): string | n
   if (pathname === "/mail") return "Mail";
   if (pathname === "/goals") return "Goals";
   if (pathname === "/motives") return "Motives";
-  if (pathname === "/finances") return "Finances";
+  if (pathname === "/finances") return "Overview";
   if (pathname === "/finances/chat") return "Chat";
   if (pathname === "/finances/automations") return "Automations";
   if (pathname === "/finances/activity") return "Activity";
@@ -3445,11 +3460,6 @@ function CalendarAccountsControl() {
           ariaLabel={triggerLabel}
           className="calendar-accounts-trigger"
           disabled={accounts.isPending || calendars.isPending}
-          identities={enabledAccounts.map((account) => ({
-            avatarUrl: account.avatarUrl,
-            fallback: initials(account.label ?? account.email ?? account.provider),
-            id: account.id,
-          }))}
           needsAttention={needsAttention}
           allSynced={
             enabledAccounts.length > 0 &&
@@ -5841,11 +5851,6 @@ function MailAccountsControl() {
           ariaLabel={triggerLabel}
           className="mail-accounts-trigger"
           disabled={accounts.isPending}
-          identities={enabledAccounts.map((account) => ({
-            avatarUrl: account.avatarUrl,
-            fallback: initials(account.label || account.email || account.provider),
-            id: account.id,
-          }))}
           needsAttention={needsAttention}
           allSynced={
             enabledAccounts.length > 0 &&

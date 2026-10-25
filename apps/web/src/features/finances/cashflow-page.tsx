@@ -142,13 +142,13 @@ export function FinanceCashflowPage() {
   return (
     <div className="wide-page flex min-w-0 w-full max-w-6xl flex-col gap-6 pb-8">
       <div className="flex flex-col gap-4">
-        <WorkspaceHeaderControls label="Cash flow views" placement="leading">
+        <WorkspaceHeaderControls label="Cash flow views" placement="title">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm" aria-label="Cash flow view" className="max-w-48">
                 <DollarIcon data-icon="inline-start" />
-                <span className="truncate">
-                  {cashflowViews.find((item) => item.value === view)?.label}
+                <span className="truncate text-xs font-normal text-muted-foreground sm:text-sm">
+                  {cashflowViews.find((item) => item.value === view)?.label.toLowerCase()}
                 </span>
                 <ChevronDownIcon data-icon="inline-end" />
               </Button>

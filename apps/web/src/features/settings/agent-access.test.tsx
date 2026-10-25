@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   getFinanceGuidedSetup: vi.fn(),
   getMailSetupContext: vi.fn(),
   listAccessTokens: vi.fn(),
+  listAgentAccounts: vi.fn().mockResolvedValue({ accounts: [], connections: [] }),
   listAgentAccessWorkItems: vi.fn(),
   listAttentionItems: vi.fn(),
   listCalendars: vi.fn(),
@@ -796,7 +797,7 @@ describe("agent access settings", () => {
 
     await browser.click(screen.getByRole("link", { name: "Open Mail access" }));
     await browser.click(screen.getByRole("link", { name: /^(Open )?Connected Agents$/i }));
-    expect(await screen.findByText("2 connected")).toBeInTheDocument();
+    expect(await screen.findByText("2 connections")).toBeInTheDocument();
     expect(screen.getByText(/Legacy inactive permission/)).toBeInTheDocument();
     const claudeHost = (await screen.findByText("Claude")).closest('[data-slot="item"]');
     expect(claudeHost?.querySelector('[data-slot="item-media"] svg.reicon')).not.toBeNull();

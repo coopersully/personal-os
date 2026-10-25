@@ -1,11 +1,34 @@
 import { describe, expect, it } from "vitest";
 import {
+  financeConversationProofOperationSchema,
   financeConversationSendInputSchema,
   financeConversationSequenceSchema,
   projectFinanceConversationReadiness,
 } from "./conversation.js";
 
 describe("Finance conversation contracts", () => {
+  it("keeps challenge proof text within the service UTF-16 limits", () => {
+    const challengeId = "00000000-0000-4000-8000-000000000001";
+    for (const count of [500, 501]) {
+      expect(
+        financeConversationProofOperationSchema.safeParse({
+          kind: "respond",
+          challengeId,
+          response: "😀".repeat(count),
+        }).success,
+      ).toBe(count === 500);
+    }
+    for (const count of [128, 129]) {
+      expect(
+        financeConversationProofOperationSchema.safeParse({
+          kind: "acknowledge",
+          challengeId,
+          nonce: "😀".repeat(count),
+        }).success,
+      ).toBe(count === 128);
+    }
+  });
+
   it("preserves sequences above JavaScript's safe integer boundary", () => {
     expect(financeConversationSequenceSchema.parse("9007199254740993")).toBe("9007199254740993");
     for (const value of [1, "01", "-1", "1.5", "1e3"]) {

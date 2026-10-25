@@ -4,8 +4,10 @@ import type {
   FinanceSpendingMonthlyBudget,
 } from "@personal-os/domain";
 import { type HTMLMotionProps, motion, useDragControls, useReducedMotion } from "motion/react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
+import { RefreshIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { formatMoney } from "./format";
 import { spendingGroupVisual } from "./spending-visual";
 
@@ -54,10 +56,10 @@ function monthlyBudgetLabel(
 }
 type Position = { x: number; y: number; radius: number };
 /** Bounded deterministic relaxation; no idle simulation or offscreen animation loop. */
-export function settleSpendingBubbles(nodes: Position[]) {
+export function settleSpendingBubbles(nodes: Position[], pinned?: number) {
   const next = nodes.map((node) => ({ ...node }));
-  for (let iteration = 0; iteration < 160; iteration++) {
-    for (const node of next) {
+  for (let iteration = 0; iteration < (pinned === undefined ? 240 : 48); iteration++) {
+    for (const node of pinned === undefined && iteration < 160 ? next : []) {
       node.x += (0.5 - node.x) * 0.002;
       node.y += (0.5 - node.y) * 0.002;
     }
@@ -72,17 +74,31 @@ export function settleSpendingBubbles(nodes: Position[]) {
         const required = a.radius + b.radius + 0.008;
         if (distance < required) {
           const amount = (required - distance) / 2;
-          const ux = distance ? dx / distance : 1;
-          const uy = distance ? dy / distance : 0;
-          a.x -= ux * amount;
-          a.y -= uy * amount;
-          b.x += ux * amount;
-          b.y += uy * amount;
+          const ux = distance ? dx / distance : Math.cos((i + j + 1) * 2.399963229728653);
+          const uy = distance ? dy / distance : Math.sin((i + j + 1) * 2.399963229728653);
+          const aShare = i === pinned ? 0 : j === pinned ? 2 : 1;
+          const bShare = j === pinned ? 0 : i === pinned ? 2 : 1;
+          a.x -= ux * amount * aShare;
+          a.y -= uy * amount * aShare;
+          b.x += ux * amount * bShare;
+          b.y += uy * amount * bShare;
         }
       }
     for (const node of next) {
       node.x = Math.max(node.radius, Math.min(1 - node.radius, node.x));
       node.y = Math.max(node.radius, Math.min(1 - node.radius, node.y));
+    }
+  }
+  if (pinned === undefined && next.length) {
+    const minX = Math.min(...next.map((node) => node.x - node.radius));
+    const maxX = Math.max(...next.map((node) => node.x + node.radius));
+    const minY = Math.min(...next.map((node) => node.y - node.radius));
+    const maxY = Math.max(...next.map((node) => node.y + node.radius));
+    const dx = 0.5 - (minX + maxX) / 2;
+    const dy = 0.5 - (minY + maxY) / 2;
+    for (const node of next) {
+      node.x += dx;
+      node.y += dy;
     }
   }
   return next;
@@ -98,10 +114,8 @@ export function SpendingBubbles({
   layoutKey?: string;
   monthlyBudget?: FinanceSpendingMonthlyBudget;
 }) {
-  const descriptionId = useId();
   const reduced = useReducedMotion();
-  const [arrange, setArrange] = useState(false);
-  const arranging = arrange && !reduced;
+  const dragOrigin = useRef<Position[]>([]);
   const positions = useRef(new Map<string, Position>());
   const [nodes, setNodes] = useState<Position[]>([]);
   const [width, setWidth] = useState(300);
@@ -129,10 +143,10 @@ export function SpendingBubbles({
   }
   // Each new aggregate settles once; normalized positions survive period changes.
   // biome-ignore lint/correctness/useExhaustiveDependencies: signature captures the complete aggregate geometry.
-  useEffect(() => {
+  useLayoutEffect(() => {
     reset(true);
   }, [signature, layoutKey]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = container.current;
     if (!element) return;
     const measure = () => setWidth(element.clientWidth || 300);
@@ -143,23 +157,37 @@ export function SpendingBubbles({
     return () => observer.disconnect();
   }, []);
   return (
-    <section aria-label="Spending bubbles">
-      <div className="flex gap-2">
+    <section aria-label="Spending bubbles" className="flex min-w-0 flex-col gap-2">
+      <div className="flex items-center justify-between gap-3 px-1">
+        <p className="text-sm font-medium">Breakdown</p>
         <Button
           variant="ghost"
-          aria-pressed={arranging}
-          disabled={!!reduced}
-          onClick={() => setArrange(!arranging)}
+          size="icon-sm"
+          aria-label="Reset bubble layout"
+          title="Reset bubble layout"
+          onClick={() => reset(false)}
         >
-          Arrange
-        </Button>
-        <Button variant="ghost" onClick={() => reset(false)}>
-          Reset layout
+          <RefreshIcon />
         </Button>
       </div>
+      {!visible.length ? (
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>No purchases to show</EmptyTitle>
+            <EmptyDescription>
+              Try another date range, or choose List to see zero-spend groups and refund
+              adjustments.
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : null}
       <div
         ref={container}
-        className="relative mx-auto aspect-square w-full max-w-xl overflow-hidden"
+        className={
+          visible.length
+            ? "relative mx-auto aspect-square w-full max-w-lg overflow-hidden"
+            : "hidden"
+        }
       >
         {visible.map((group, index) => {
           const node = nodes[index];
@@ -184,10 +212,11 @@ export function SpendingBubbles({
             <SpendingBubble
               key={group.id}
               type="button"
-              tabIndex={diameter < 44 ? -1 : 0}
-              drag={arranging}
+              tabIndex={0}
+              initial={false}
+              drag
               dragMomentum={false}
-              dragElastic={0.12}
+              dragElastic={0}
               dragConstraints={container}
               animate={{ x: (node.x - node.radius) * width, y: (node.y - node.radius) * width }}
               onPointerDown={(event) => {
@@ -204,18 +233,42 @@ export function SpendingBubbles({
                 )
                   dragged.current = true;
               }}
+              onDragStart={() => {
+                dragOrigin.current = nodes.map((node) => ({ ...node }));
+              }}
+              onDrag={(_, info) => {
+                dragged.current = true;
+                const origin = dragOrigin.current[index];
+                if (!origin) return;
+                setNodes((current) =>
+                  settleSpendingBubbles(
+                    current.map((value, i) =>
+                      i === index
+                        ? {
+                            ...value,
+                            x: origin.x + info.offset.x / width,
+                            y: origin.y + info.offset.y / width,
+                          }
+                        : value,
+                    ),
+                    index,
+                  ),
+                );
+              }}
               onDragEnd={(_, info) => {
                 dragged.current = true;
-                const next = nodes.map((value, i) =>
-                  i === index
-                    ? {
-                        ...value,
-                        x: value.x + info.offset.x / width,
-                        y: value.y + info.offset.y / width,
-                      }
-                    : value,
+                const origin = dragOrigin.current[index] ?? node;
+                const settled = settleSpendingBubbles(
+                  nodes.map((value, i) =>
+                    i === index
+                      ? {
+                          ...value,
+                          x: origin.x + info.offset.x / width,
+                          y: origin.y + info.offset.y / width,
+                        }
+                      : value,
+                  ),
                 );
-                const settled = settleSpendingBubbles(next);
                 setNodes(settled);
                 settled.forEach((position, i) => {
                   positions.current.set(`${layoutKey}:${visible[i]?.id}`, position);
@@ -232,25 +285,36 @@ export function SpendingBubbles({
               style={{
                 width: diameter,
                 height: diameter,
-                touchAction: arranging ? "none" : "pan-y",
+                touchAction: "none",
                 backgroundColor: visual.backgroundColor,
               }}
-              className={`group absolute left-0 top-0 flex flex-col items-center justify-center gap-1 overflow-hidden rounded-full p-0 text-foreground ${overage > 0 ? "border-2 border-(--status-warning-foreground)" : "border border-transparent hover:border-foreground/30 focus-visible:border-foreground/60"}`}
+              className="group absolute left-0 top-0 flex flex-col items-center justify-center gap-1 overflow-hidden rounded-full border border-transparent p-0 text-foreground focus-visible:border-foreground/50"
               transition={
-                reduced ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0.15 }
+                reduced
+                  ? { duration: 0 }
+                  : { type: "spring", stiffness: 500, damping: 42, mass: 0.9 }
               }
             >
-              {fill !== null ? (
-                <motion.span
-                  aria-hidden="true"
-                  data-budget-fill="true"
-                  className="pointer-events-none absolute inset-0 rounded-full"
-                  initial={false}
-                  animate={{ clipPath: `inset(${(1 - fill) * 100}% 0 0 0)` }}
-                  transition={{ duration: reduced ? 0 : 0.3, ease: "easeOut" }}
-                  style={{ backgroundColor: visual.fillColor }}
-                />
-              ) : null}
+              <span
+                className="spending-bubble-material pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden rounded-full"
+                style={{
+                  backgroundColor: `color-mix(in srgb, ${visual.color} 30%, var(--background))`,
+                }}
+              >
+                {fill !== null ? (
+                  <motion.span
+                    aria-hidden="true"
+                    data-budget-fill="true"
+                    className="spending-bubble-fill pointer-events-none absolute inset-0 overflow-hidden rounded-full"
+                    initial={false}
+                    animate={{ clipPath: `inset(${(1 - fill) * 100}% 0 0 0)` }}
+                    transition={{ duration: reduced ? 0 : 0.3, ease: "easeOut" }}
+                    style={{
+                      backgroundColor: `color-mix(in srgb, ${visual.color} 65%, var(--background))`,
+                    }}
+                  />
+                ) : null}
+              </span>
               <span
                 aria-hidden="true"
                 className="pointer-events-none absolute inset-0 rounded-full bg-foreground/0 group-hover:bg-foreground/5 group-focus-visible:bg-foreground/5"
@@ -259,13 +323,13 @@ export function SpendingBubbles({
                 <span
                   aria-hidden="true"
                   data-spending-icon={visual.icon}
-                  className="relative size-4 shrink-0 [&>svg]:size-full"
+                  className="absolute left-1/2 top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 shrink-0 [&>svg]:size-full"
                 >
                   <VisualIcon />
                 </span>
               ) : null}
               {diameter >= 92 ? (
-                <span className="relative max-w-full px-2 text-center text-xs">
+                <span className="absolute top-[calc(50%+0.75rem)] max-w-full px-2 text-center text-xs">
                   <span className="block truncate">{group.label}</span>
                   {formatMoney(group.netCents / 100)}
                   {overage > 0 ? <span className="block">Over budget</span> : null}
@@ -275,61 +339,6 @@ export function SpendingBubbles({
           );
         })}
       </div>
-      <p className="text-sm text-muted-foreground">
-        Circle size: selected-period spending. Fill: monthly budget used, when available. Negative
-        adjustments and zero-spend groups remain in List.
-      </p>
-      <details>
-        <summary className="min-h-11 cursor-pointer py-3 text-sm">
-          All spending groups ({visible.length})
-        </summary>
-        <ul aria-label="Spending groups" className="grid gap-1 sm:grid-cols-2">
-          {visible.map((group, index) => {
-            const visual = spendingGroupVisual(group);
-            const VisualIcon = visual.Icon;
-            const budget =
-              monthlyBudget?.state === "qualified"
-                ? monthlyBudget.groups.find((item) => item.groupId === group.id)
-                : undefined;
-            const overage =
-              budget?.budgetCents !== null && budget?.budgetCents !== undefined
-                ? Math.max(0, budget.usedCents - budget.budgetCents)
-                : 0;
-            return (
-              <li key={group.id} className="min-w-0">
-                <Button
-                  variant="ghost"
-                  className="h-auto min-h-11 w-full justify-start whitespace-normal text-left"
-                  aria-label={`Open ${group.label} details`}
-                  aria-describedby={`${descriptionId}-${index}`}
-                  onClick={() => onSelect(group)}
-                >
-                  <span
-                    aria-hidden="true"
-                    className="flex size-7 shrink-0 items-center justify-center rounded-full"
-                    style={{ backgroundColor: visual.backgroundColor }}
-                  >
-                    <VisualIcon className="size-4" />
-                  </span>
-                  <span className="min-w-0 flex-1 break-words">{group.label}</span>
-                  <span className="shrink-0 text-right tabular-nums">
-                    {formatMoney(group.netCents / 100)}
-                    {overage > 0 ? (
-                      <span className="block text-xs text-muted-foreground">
-                        Over budget {formatMoney(overage / 100)}
-                      </span>
-                    ) : null}
-                  </span>
-                </Button>
-                <span id={`${descriptionId}-${index}`} className="sr-only">
-                  Selected-period spending {formatMoney(group.netCents / 100)}.{" "}
-                  {monthlyBudgetLabel(budget, monthlyBudget)}.
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      </details>
     </section>
   );
 }

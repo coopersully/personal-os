@@ -71,6 +71,8 @@ services:
       DATABASE_URL: postgres://personal_os:personal_os@postgres:5432/personal_os
       # Disposable local QA owner; explicit owner configuration always wins.
       OWNER_EMAILS: ${OWNER_EMAILS:-qa+loaded@nohmi.test}
+      # Append fictional demo activity on date rollover; never enabled by production Compose.
+      QA_FIXTURE_CLOCK: "true"
     healthcheck:
       test: [CMD, node, -e, "fetch('http://127.0.0.1:8787/health/ready').then(r=>{if(!r.ok)process.exit(1)})"]
       interval: 5s

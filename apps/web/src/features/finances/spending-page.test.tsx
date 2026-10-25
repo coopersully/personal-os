@@ -7,7 +7,7 @@ import {
   resolveWorkspaceSettings,
 } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api } from "@/api";
@@ -116,6 +116,14 @@ const saved = resolveWorkspaceSettings("finances", {
   revision: 3,
 });
 beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
   vi.spyOn(api, "getMe").mockResolvedValue({
     id: "owner",
     planningTimezone: "America/New_York",
@@ -172,13 +180,13 @@ it("restores saved defaults and honors explicit URL overrides without autosaving
       }),
     }),
   );
-  expect(screen.getByRole("button", { name: "Bubbles" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "View: Bubbles" })).toBeVisible();
   expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
 });
 it("restores saved List and persists only explicit account and view changes", async () => {
   mount();
   await screen.findByRole("button", { name: "Groceries" });
-  expect(screen.getByRole("button", { name: "List" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "View: List" })).toBeVisible();
   expect(api.getFinanceSpending).toHaveBeenLastCalledWith(
     expect.objectContaining({ scope: expect.objectContaining({ accountIds: null }) }),
   );
@@ -200,8 +208,10 @@ it("restores saved List and persists only explicit account and view changes", as
       expect.objectContaining({ preferences: { spendAccountIds: null } }),
     ),
   );
-  await waitFor(() => expect(screen.getByRole("button", { name: "Bubbles" })).toBeEnabled());
-  fireEvent.click(screen.getByRole("button", { name: "Bubbles" }));
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  await waitFor(() => expect(screen.getByRole("button", { name: "View: List" })).toBeEnabled());
+  fireEvent.keyDown(screen.getByRole("button", { name: "View: List" }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "Bubbles" }));
   await waitFor(() =>
     expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
       "finances",
@@ -219,7 +229,8 @@ it("opens exact contribution detail and explains qualifications without exposing
   expect(dialog).toHaveTextContent("$2.00");
   expect(screen.queryByText("ownership_unknown")).not.toBeInTheDocument();
   fireEvent.keyDown(dialog, { key: "Escape" });
-  fireEvent.click(screen.getByText("Why these totals are qualified"));
+  fireEvent.click(screen.getByRole("button", { name: "Spending breakdown" }));
+  fireEvent.click(screen.getByText("Coverage and accounting details"));
   expect(screen.getByText(/Some account ownership is unknown/)).toBeVisible();
   expect(screen.getByText("ownership_unknown · private-source-id")).not.toBeVisible();
 });
@@ -255,8 +266,10 @@ it("queries comparable elapsed Trends periods with identical accounting filters 
     `?view=trends&period=month&from=${year}-${month}-01&pending=0&basis=full_outflow&refunds=0&accounts=&categories=food`,
   );
   await screen.findByRole("region", { name: "Spending trends" });
-  await waitFor(() => expect(api.getFinanceSpending).toHaveBeenCalledTimes(2));
-  const queries = vi.mocked(api.getFinanceSpending).mock.calls.map(([query]) => query);
+  await waitFor(() => expect(api.getFinanceSpending).toHaveBeenCalledTimes(3));
+  const calls = vi.mocked(api.getFinanceSpending).mock.calls.map(([query]) => query);
+  const queries = calls.filter((query) => query.scope.categoryIds !== null);
+  expect(calls.filter((query) => query.scope.categoryIds === null)).toHaveLength(1);
   expect(
     queries.every(
       (query) =>
@@ -280,19 +293,17 @@ it("queries comparable elapsed Trends periods with identical accounting filters 
   expect(await screen.findByRole("dialog")).toHaveTextContent("Market");
   expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
 });
-it("defaults Rhythm to three calendar months using saved Monday week start and respects explicit ranges", async () => {
+it("defaults Rhythm to this week using saved Monday week start and respects explicit ranges", async () => {
   mount("?view=rhythm");
   await screen.findByRole("region", { name: "Spending rhythm" });
-  expect(screen.getByText(/Last three calendar months/)).toBeVisible();
+  expect(screen.getByRole("group", { name: "Spending range" })).toHaveTextContent("this week");
   const query = vi.mocked(api.getFinanceSpending).mock.calls[0]?.[0];
   if (!query) throw new Error("No Rhythm query");
   const start = new Date(`${query.scope.from}T12:00:00Z`),
     end = new Date(`${query.scope.through}T12:00:00Z`);
-  expect(
-    (end.getUTCFullYear() - start.getUTCFullYear()) * 12 + end.getUTCMonth() - start.getUTCMonth(),
-  ).toBe(2);
-  const weekdays = screen.getAllByText(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)$/);
-  expect(weekdays[0]).toHaveTextContent("Mon");
+  expect(start.getUTCDay()).toBe(1);
+  expect((end.getTime() - start.getTime()) / 86_400_000).toBe(6);
+  expect(screen.getByRole("button", { name: "Rhythm interval: Auto · daily" })).toBeInTheDocument();
   expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
   cleanup();
   vi.mocked(api.getFinanceSpending).mockClear();
@@ -314,6 +325,8 @@ it("offers scope confirmation only for an unavailable single-month comparison", 
     },
   }));
   mount("?period=custom&from=2026-09-01&through=2026-09-30");
+  fireEvent.click(await screen.findByRole("button", { name: "Spending breakdown" }));
+  fireEvent.click(screen.getByText("Coverage and accounting details"));
   await screen.findByText("Confirm this month's budget scope");
   cleanup();
   mount("?period=custom&from=2026-08-01&through=2026-09-30");
@@ -336,15 +349,23 @@ it("uses qualified whole-month usage alongside selected-day amounts without chan
       includesPending: true,
       basis: "personal_cost",
       subtractsRefunds: true,
-      groups: [{ groupId: "food", budgetCents: 10000, usedCents: 2500, overspent: false }],
+      groups: [
+        { groupId: "food", budgetCents: 10000, usedCents: 2500, overspent: false },
+        { groupId: "child-category", budgetCents: 10000, usedCents: 2500, overspent: false },
+      ],
     },
   }));
   mount("?view=list&period=today&from=2026-09-08");
-  await screen.findByText("Observed monthly $25.00 of $100.00 · 25.0%");
-  expect(screen.getByText(/2026-09-08 – 2026-09-08/)).toBeVisible();
+  await screen.findByTitle("Observed monthly $25.00 of $100.00 · 25.0%");
+  expect(screen.getByText("Sep 2026 budget · $100.00 · 25% used")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Spending breakdown" }));
+  fireEvent.click(screen.getByText("Coverage and accounting details"));
   expect(screen.getByText(/America\/Chicago/)).toBeVisible();
   expect(screen.getByText(/Confirmed later/)).toBeVisible();
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
   expect(screen.queryByText("Confirm this month's budget scope")).not.toBeInTheDocument();
+  if (screen.queryByRole("dialog", { name: "Spending breakdown" }))
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
   fireEvent.click(screen.getByRole("button", { name: "Groceries" }));
   const detail = await screen.findByRole("dialog");
   expect(detail).toHaveTextContent("Monthly usage: $25.00 of $100.00");
@@ -392,10 +413,12 @@ it("recovers the original full query and changed timezone, then opens a freshly 
   expect(api.getFinanceSpending).toHaveBeenCalledTimes(1);
   expect(api.getFinanceSpending).toHaveBeenLastCalledWith(filter.query);
   expect(dialog).toHaveTextContent("Groceries");
-  expect(dialog).toHaveTextContent("2026-09-08 – 2026-09-09");
+  expect(dialog).toHaveTextContent("Sep 8, 2026 – Sep 9, 2026");
   expect(dialog).toHaveTextContent("Market");
   expect(dialog).toHaveTextContent("$9.00");
-  expect(screen.getByText("Effective time zone: America/Chicago")).toBeInTheDocument();
+  expect(api.getFinanceSpending).toHaveBeenLastCalledWith(
+    expect.objectContaining({ scope: expect.objectContaining({ timezone: "America/Chicago" }) }),
+  );
   expect(screen.getByText(/Recovered selection · current Spending data/)).toBeInTheDocument();
   expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
   fireEvent.keyDown(dialog, { key: "Escape" });
@@ -422,7 +445,7 @@ it("recovers a date-bin subset with null group and all accounts without using ol
   const dialog = await screen.findByRole("dialog");
   expect(dialog).toHaveTextContent("Spending detail");
   expect(dialog).toHaveTextContent("Market");
-  expect(dialog).toHaveTextContent("2026-09-08 – 2026-09-09");
+  expect(dialog).toHaveTextContent("Sep 8, 2026 – Sep 9, 2026");
   expect(api.getFinanceSpending).toHaveBeenLastCalledWith(filter.query);
   expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
 });
@@ -444,7 +467,8 @@ it("never replaces a missing recovered group with a broader selection", async ()
   await screen.findByText(/recovered group is no longer available/);
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Categories" }));
+  fireEvent.keyDown(screen.getByRole("button", { name: /^Grouping:/ }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "Categories" }));
   await waitFor(() =>
     expect(screen.getByTestId("location")).not.toHaveTextContent("recoverSpending"),
   );
@@ -471,6 +495,8 @@ it("explains empty selected data and unsupported source money without showing un
   });
   mount("?accounts=&categories=&pending=0");
   await screen.findByText("No spending in this selection");
+  fireEvent.click(screen.getByRole("button", { name: "Spending breakdown" }));
+  fireEvent.click(screen.getByText("Coverage and accounting details"));
   expect(screen.getByText(/Buckets unavailable; showing categories/)).toBeVisible();
   expect(screen.getByText("Excluded uncategorized: $1.25")).toBeVisible();
   expect(screen.getByText("Negative adjustments: $0.75")).toBeVisible();
@@ -479,13 +505,66 @@ it("explains empty selected data and unsupported source money without showing un
     screen.getByText(/EUR \(1 transactions\).*Unspecified currency \(1 transactions\)/),
   ).toBeVisible();
   expect(screen.queryByText("Market")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByText("Why these totals are qualified"));
   expect(screen.getByText(/Some spending evidence needs review/)).toBeVisible();
   expect(api.getFinanceSpending).toHaveBeenLastCalledWith(
     expect.objectContaining({
       scope: expect.objectContaining({ accountIds: [], categoryIds: [], includePending: false }),
     }),
   );
+});
+it("defaults a fresh Rhythm selection to this week and automatic grouping like the other views", async () => {
+  vi.mocked(api.getWorkspaceSettings).mockImplementation(async (workspace) =>
+    resolveWorkspaceSettings(workspace, workspace === "calendar" ? { weekStartsOn: "monday" } : {}),
+  );
+  mount("?view=rhythm");
+  expect(await screen.findByRole("button", { name: "Date range: this week" })).toBeVisible();
+  expect(api.getFinanceSpending).toHaveBeenCalledWith(
+    expect.objectContaining({
+      grouping: "auto",
+      scope: expect.objectContaining({ from: expect.any(String), through: expect.any(String) }),
+    }),
+  );
+  const scope = vi.mocked(api.getFinanceSpending).mock.calls[0]?.[0].scope;
+  expect((Date.parse(scope?.through ?? "") - Date.parse(scope?.from ?? "")) / 86_400_000).toBe(6);
+});
+it("advances an open relative Today range at midnight without a page reload", async () => {
+  vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+  try {
+    vi.setSystemTime(new Date("2026-10-31T23:59:30-04:00"));
+    mount("?period=today");
+    await waitFor(() =>
+      expect(api.getFinanceSpending).toHaveBeenCalledWith(
+        expect.objectContaining({ scope: expect.objectContaining({ from: "2026-10-31" }) }),
+      ),
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(60_000);
+    });
+    await waitFor(() =>
+      expect(api.getFinanceSpending).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scope: expect.objectContaining({ from: "2026-11-01", through: "2026-11-01" }),
+        }),
+      ),
+    );
+  } finally {
+    cleanup();
+    vi.useRealTimers();
+  }
+});
+it("explains a bubble selection with only zero-spend groups instead of showing a blank chart", async () => {
+  vi.mocked(api.getFinanceSpending).mockImplementation(async (query) => {
+    const value = dashboard(query);
+    value.groups = value.groups.map((group) => ({ ...group, netCents: 0, positiveAreaCents: 0 }));
+    value.snapshot.contributions = [];
+    value.snapshot.netCents = 0;
+    value.snapshot.positiveAreaCents = 0;
+    value.transactions = [];
+    return value;
+  });
+  mount("?view=bubbles&period=today");
+  expect(await screen.findByText("No purchases to show")).toBeVisible();
+  expect(screen.queryByRole("button", { name: /^Groceries:/ })).not.toBeInTheDocument();
 });
 it("rejects an invalid timezone before reading money and resets to the owner's timezone", async () => {
   mount("?timezone=Not/AZone");
@@ -519,8 +598,8 @@ it("changes account membership and accounting options with explicit revisioned p
       expect.objectContaining({ preferences: { spendAccountIds: [accountId] } }),
     ),
   );
-  await waitFor(() => expect(screen.getByRole("button", { name: "Full outflow" })).toBeEnabled());
-  fireEvent.click(screen.getByRole("button", { name: "Full outflow" }));
+  fireEvent.keyDown(screen.getByRole("button", { name: /^Basis:/ }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "Full outflow" }));
   await waitFor(() =>
     expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
       "finances",
@@ -541,17 +620,15 @@ it("changes account membership and accounting options with explicit revisioned p
 it("focuses Trends on a group then restores all categories without saving a category preference", async () => {
   mount("?view=trends&period=custom&from=2026-09-01&through=2026-09-30");
   await screen.findByRole("region", { name: "Spending trends" });
-  fireEvent.click(screen.getByText("Focus on a group"));
-  fireEvent.click(screen.getByRole("button", { name: "Groceries" }));
+  fireEvent.keyDown(await screen.findByRole("button", { name: /^Focus:/ }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "Groceries" }));
   await waitFor(() =>
     expect(api.getFinanceSpending).toHaveBeenCalledWith(
       expect.objectContaining({ scope: expect.objectContaining({ categoryIds: ["food"] }) }),
     ),
   );
-  await screen.findByText("Focus on a group");
-  const focus = screen.getByText("Focus on a group").closest("details");
-  if (!focus?.open) fireEvent.click(screen.getByText("Focus on a group"));
-  fireEvent.click(await screen.findByRole("button", { name: "All categories" }));
+  fireEvent.keyDown(await screen.findByRole("button", { name: /^Focus:/ }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "All categories" }));
   await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("categories="));
   expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
 });
@@ -566,22 +643,22 @@ it("clears missing recovery explicitly while retaining its full accounting filte
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(api.updateWorkspaceSettings).not.toHaveBeenCalled();
 });
-it("saves explicit grouping and period choices, navigates periods, and retains edited custom dates", async () => {
+it("saves explicit grouping and period choices and retains edited custom dates", async () => {
   mount("?period=month&from=2026-09-01");
   await screen.findByRole("button", { name: "Groceries" });
-  fireEvent.click(screen.getByRole("button", { name: "Buckets" }));
+  expect(screen.getByRole("button", { name: "Date range: in September 2026" })).toBeVisible();
+  fireEvent.keyDown(screen.getByRole("button", { name: /^Grouping:/ }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "Buckets" }));
+  expect(await screen.findByRole("button", { name: "Grouping: by bucket" })).toBeVisible();
   await waitFor(() =>
     expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
       "finances",
       expect.objectContaining({ preferences: { financeSpendingGrouping: "buckets" } }),
     ),
   );
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Previous period" })).toBeEnabled(),
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Previous period" }));
-  await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("from=2026-08-01"));
-  fireEvent.click(screen.getByRole("button", { name: "Custom" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Date range:/ }));
+  expect(screen.queryByRole("button", { name: "Previous period" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("radio", { name: "Custom" }));
   await waitFor(() =>
     expect(api.updateWorkspaceSettings).toHaveBeenLastCalledWith(
       "finances",
@@ -595,4 +672,92 @@ it("saves explicit grouping and period choices, navigates periods, and retains e
     "finances",
     expect.objectContaining({ preferences: { financeSpendingPeriod: "custom" } }),
   );
+});
+
+it("opens the selected spending chart, breakdown, and qualifications from the total", async () => {
+  mount("?view=bubbles&period=custom&from=2020-01-01&through=2020-01-03&pending=1");
+  await screen.findByText("Daily average");
+  expect(screen.getByText("$3.00")).toBeVisible();
+  expect(screen.getByText("3 days elapsed")).toBeVisible();
+  expect(
+    screen.getByRole("button", { name: "Inspect largest spending group: Groceries" }),
+  ).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Spending breakdown" }));
+  expect(await screen.findByRole("dialog")).toHaveTextContent("Includes pending transactions");
+  expect(screen.getByRole("dialog")).toHaveTextContent("Partial or unverified coverage");
+  expect(screen.getByText("Daily spending")).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Breakdown" })).toBeVisible();
+});
+
+it("does not invent an average for an entirely future range", async () => {
+  mount("?view=bubbles&period=custom&from=2099-01-01&through=2099-01-03&pending=0");
+  expect(await screen.findByText("No elapsed days")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Spending breakdown" }));
+  expect(await screen.findByRole("dialog")).toHaveTextContent("Posted transactions only");
+});
+
+it("retains the mounted summary during a same-owner range refresh and marks it busy", async () => {
+  mount("?period=month&from=2026-09-01");
+  const total = await screen.findByRole("button", { name: "Spending breakdown" });
+  let complete: ((value: FinanceSpendingDashboard) => void) | undefined;
+  vi.mocked(api.getFinanceSpending).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: /^Date range:/ }));
+  fireEvent.click(screen.getByRole("radio", { name: "This week" }));
+  await waitFor(() => expect(total.closest("[aria-busy]")).toHaveAttribute("aria-busy", "true"));
+  expect(screen.getByRole("button", { name: "Spending breakdown" })).toBe(total);
+  await waitFor(() => expect(complete).toBeDefined());
+  const query = vi.mocked(api.getFinanceSpending).mock.calls.at(-1)?.[0];
+  if (!query || !complete) throw new Error("Missing range refresh");
+  complete(dashboard(query));
+  await waitFor(() => expect(total.closest("[aria-busy]")).toHaveAttribute("aria-busy", "false"));
+  expect(screen.getByRole("button", { name: "Spending breakdown" })).toBe(total);
+});
+
+it("retains every bucket in the focus picker after narrowing and labels the all option correctly", async () => {
+  vi.mocked(api.getFinanceSpending).mockImplementation(async (query) => {
+    const value = dashboard(query);
+    value.effectiveGrouping = "buckets";
+    const base = value.groups[0];
+    if (!base) throw new Error("Missing fixture group");
+    const all = [
+      {
+        ...base,
+        id: "essentials",
+        label: "Essentials",
+        kind: "bucket" as const,
+        categoryIds: ["food", "housing"],
+      },
+      {
+        ...base,
+        id: "lifestyle",
+        label: "Lifestyle",
+        kind: "bucket" as const,
+        categoryIds: ["dining"],
+      },
+    ];
+    value.groups =
+      query.scope.categoryIds === null
+        ? all
+        : all.filter((group) =>
+            group.categoryIds.some((id) => query.scope.categoryIds?.includes(id)),
+          );
+    return value;
+  });
+  mount("?view=trends&grouping=buckets&period=month");
+  fireEvent.keyDown(await screen.findByRole("button", { name: "Focus: All buckets" }), {
+    key: "ArrowDown",
+  });
+  fireEvent.click(await screen.findByRole("menuitemradio", { name: "Essentials" }));
+  await screen.findByRole("button", { name: "Focus: Essentials" });
+  fireEvent.keyDown(screen.getByRole("button", { name: "Focus: Essentials" }), {
+    key: "ArrowDown",
+  });
+  expect(await screen.findByRole("menuitemradio", { name: "Lifestyle" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("menuitemradio", { name: "All buckets" }));
+  await waitFor(() => expect(screen.getByTestId("location")).not.toHaveTextContent("categories="));
 });

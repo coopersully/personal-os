@@ -1,7 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
 import type { ActionButton as Button } from "@/components/action-button";
-import { CheckIcon, XIcon } from "@/components/icons";
-import { Avatar, AvatarFallback, AvatarGroup, AvatarImage } from "@/components/ui/avatar";
 import {
   PopoverContent,
   PopoverDescription,
@@ -11,18 +9,11 @@ import {
 import { cn } from "@/lib/utils";
 import { FilterTrigger } from "./data-view-controls";
 
-export interface AccountSelectionIdentity {
-  avatarUrl?: string | null | undefined;
-  fallback: string;
-  id: string;
-}
-
 type AccountSelectionTriggerProps = Omit<
   ComponentProps<typeof Button>,
   "aria-label" | "children"
 > & {
   ariaLabel: string;
-  identities: AccountSelectionIdentity[];
   needsAttention?: boolean;
   allSynced?: boolean;
   selectedCount: number;
@@ -33,7 +24,6 @@ export function AccountSelectionTrigger({
   ariaLabel,
   className,
   disabled,
-  identities,
   needsAttention = false,
   allSynced = false,
   selectedCount,
@@ -55,30 +45,8 @@ export function AccountSelectionTrigger({
       size="sm"
       active={selectedCount !== totalCount}
       label={
-        <span className="inline-flex items-center gap-2">
-          <span className="account-selection-trigger__identity">
-            <AvatarGroup className="account-selection-trigger__avatars">
-              {identities.slice(0, 1).map((identity) => (
-                <Avatar key={identity.id} size="sm">
-                  {identity.avatarUrl ? <AvatarImage alt="" src={identity.avatarUrl} /> : null}
-                  <AvatarFallback>{identity.fallback}</AvatarFallback>
-                </Avatar>
-              ))}
-            </AvatarGroup>
-            <span
-              className="account-selection-trigger__status"
-              data-healthy={allSynced && !needsAttention}
-            >
-              {allSynced && !needsAttention ? (
-                <CheckIcon aria-hidden="true" className="size-2" />
-              ) : (
-                <XIcon aria-hidden="true" className="account-selection-trigger__warning size-2" />
-              )}
-            </span>
-          </span>
-          <span aria-hidden="true" className="account-selection-trigger__count">
-            {selectedCount}/{totalCount}
-          </span>
+        <span aria-hidden="true" className="tabular-nums">
+          {selectedCount}
         </span>
       }
     />

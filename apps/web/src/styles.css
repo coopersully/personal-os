@@ -190,8 +190,6 @@ textarea {
 button:focus-visible,
 a:focus-visible {
   outline: none;
-  text-decoration: underline;
-  text-underline-offset: 4px;
 }
 input:focus-visible,
 select:focus-visible,
@@ -1457,10 +1455,6 @@ p {
 .calendar-app-bar__period-navigation {
   align-items: center;
   display: flex;
-}
-.account-selection-trigger {
-  gap: 0.375rem;
-  padding-inline: 0.375rem 0.5rem;
 }
 .account-selection-trigger__avatars:empty {
   display: none;
@@ -5773,10 +5767,6 @@ p {
   .calendar-accounts-trigger .account-selection-trigger__avatars > :not(:first-child) {
     display: none;
   }
-  .calendar-accounts-trigger {
-    padding-inline: 0.125rem;
-    width: auto;
-  }
   .calendar-event-composer__time {
     align-items: stretch;
     flex-direction: column;
@@ -7075,7 +7065,8 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   .ritual-card { min-height: 0; }
 }
 /* Approved ritual-only backdrop isolates the current page without capturing the screen. */
-.browser-ritual { border: 0; backdrop-filter: blur(24px); }
+.browser-ritual { border: 0; }
+.browser-ritual { backdrop-filter: blur(24px); }
 
 
 
@@ -7345,6 +7336,10 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 
 /* Shared sidebar metadata stays independent of the destination label. */
 .sidebar-item-with-meta { padding-inline-end: 4.5rem; }
+/* Locks occupy the last metadata slot even when counts or attention are present. */
+[data-sidebar="menu-item"][data-locked="true"] .sidebar-item-meta { inset-inline-end: 2rem; }
+[data-sidebar="menu-item"][data-locked="true"] .sidebar-item-with-meta { padding-inline-end: 6rem; }
+.sidebar-item-lock[data-sidebar="menu-badge"] { inset-inline-end: 0.5rem; }
 .sidebar-item-meta,
 .sidebar-item-meta[data-sidebar="menu-badge"] {
   display: flex;
@@ -7623,8 +7618,8 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 }
 
 .action-count-badge { position: absolute; right: -0.2rem; bottom: -0.2rem; min-width: 1rem; height: 1rem; padding: 0 .2rem; font-size: .625rem; line-height: 1; pointer-events: none; }
-.finance-account-grid .finance-account-record { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; }
-.finance-account-record [data-slot="item-actions"] { align-self: start; }
+.finance-account-grid .finance-account-record { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 1rem; }
+.finance-account-record [data-slot="item-actions"] { align-self: center; }
 .finance-account-record [data-slot="item-description"] { -webkit-line-clamp: unset; }
 
 .workspace-app-bar .action-count-trigger, .workspace-secondary-app-bar .action-count-trigger { overflow: visible; }
@@ -8121,3 +8116,244 @@ html.pet-window #root {
   outline-offset: -3px;
 }
 .search-data-controls .action-count-badge { z-index: 3; }
+
+.finance-account-record .finance-account-balance { display: flex; flex-direction: column; align-items: flex-end; gap: .375rem; }
+.finance-account-record > [data-slot="item-actions"] { grid-column: 3; grid-row: 1; }
+@media (max-width: 639px) {
+  .finance-account-grid .finance-account-record { gap: .5rem; }
+}
+
+/* Scope phrases complete the static title without becoming additional titles. */
+.workspace-header-title-context { flex: 0 1 auto; min-width: 0; }
+[data-slot="workspace-title-sentence"] {
+  display: flex; flex: 0 1 auto; flex-wrap: nowrap; align-items: baseline;
+  min-width: 0; gap: .25em;
+  font-size: clamp(1.0625rem, 1.5vw, 1.25rem); line-height: 1.5;
+}
+[data-slot="workspace-title-sentence"] .workspace-header-title-context,
+[data-slot="workspace-title-sentence"] .workspace-header-controls { display: contents; }
+.workspace-app-bar [data-slot="workspace-title-sentence"] .workspace-app-bar__title { flex: none; }
+[data-slot="workspace-title-sentence"] button { margin: 0; padding-inline: 0; gap: 0; flex-shrink: 0; align-items: baseline; font-size: inherit; line-height: inherit; letter-spacing: inherit; }
+[data-slot="workspace-title-sentence"] button > span { font-size: inherit; line-height: inherit; letter-spacing: inherit; }
+[data-slot="workspace-title-sentence"] button > svg { display: none; }
+[data-slot="workspace-title-sentence"] .workspace-app-bar__title { margin-inline-end: 0; font-size: inherit; line-height: inherit; letter-spacing: inherit; }
+
+/* A one-day range has no connecting band. */
+[data-slot="calendar"] .rdp-range_start.rdp-range_end { background: transparent; }
+.workspace-app-bar:has([data-slot="workspace-title-sentence"]) { display: flex; flex-wrap: wrap; gap: .5rem; }
+.workspace-app-bar:has([data-slot="workspace-title-sentence"]) .workspace-app-bar__identity { display: contents; }
+.workspace-app-bar:has([data-slot="workspace-title-sentence"]) .workspace-app-bar__context {
+  display: flex; flex: 0 0 auto; flex-wrap: nowrap; margin-inline-start: auto; padding-block: 0;
+}
+.workspace-app-bar:has([data-slot="workspace-title-sentence"]) .workspace-header-controls-slot--leading { flex: none; margin: 0; }
+.workspace-app-bar:has([data-slot="workspace-title-sentence"]) .review-navigation { order: 10; flex: none; margin: 0; }
+@media (max-width: 767px) {
+  .workspace-finder { flex: 1 1 8rem; width: auto; min-width: 0; }
+  .workspace-app-bar .workspace-app-bar__context:has(.workspace-finder) { flex: 1 1 auto; min-width: 0; }
+  .workspace-app-bar:has([data-slot="workspace-title-sentence"]) .workspace-app-bar__context { order: 1; flex: 1 1 0; }
+  .workspace-app-bar:has([data-slot="workspace-title-sentence"]) .workspace-app-bar__identity > [data-slot="sidebar-menu"] { order: 0; }
+  .workspace-app-bar:has([data-slot="workspace-title-sentence"]) .review-navigation { order: 2; }
+  .workspace-app-bar:has([data-slot="workspace-title-sentence"]) [data-slot="workspace-title-sentence"] {
+    order: 3; flex: 1 0 100%; overflow-x: auto; scrollbar-width: none; white-space: nowrap;
+  }
+  .workspace-app-bar:has([data-slot="workspace-title-sentence"]) { padding-block: .375rem; gap: .25rem; }
+  .workspace-app-bar:has([data-slot="workspace-title-sentence"]) .workspace-app-bar__title { font-size: 1.0625rem; }
+}
+
+/* Shared anchored mobile menus grow from, and contract into, their action pill. */
+.workspace-dock-surface { width: fit-content; max-width: calc(100vw - 2rem); transform-origin: bottom right; border-radius: var(--radius-xl); }
+.workspace-dock-surface[data-state="closed"] { border-radius: 999px; }
+.workspace-dock-menu { width: min(18rem, calc(100vw - 2rem)); max-height: min(72dvh, 36rem); overflow-y: auto; }
+.workspace-dock-menu .workspace-dock-sheet__navigation { padding-inline: 0; }
+.workspace-dock-menu [data-slot="sidebar-menu-button"],
+.workspace-dock-menu [data-slot="sidebar-menu-sub-button"] { min-height: 2.75rem; }
+@media (max-width: 767px) {
+  .workspace-app-bar:has([data-slot="workspace-title-sentence"]) .workspace-finder { order: 0; }
+  .workspace-app-bar:has([data-slot="workspace-title-sentence"]) .workspace-header-controls-slot { order: 1; }
+  .workspace-app-bar:has([data-slot="workspace-title-sentence"]) .workspace-header-title-context { order: 0; }
+}
+/* Shared mobile utility row: identity switcher, elastic search, actions, attention. */
+@media (max-width: 767px) {
+  .workspace-app-bar:has(.workspace-finder) { display: flex; flex-wrap: wrap; gap: .25rem; }
+  .workspace-app-bar:has(.workspace-finder) .workspace-app-bar__identity { display: contents; }
+  .workspace-app-bar:has(.workspace-finder) .workspace-app-bar__identity > [data-slot="sidebar-menu"],
+  .workspace-app-bar:has(.workspace-finder) .calendar-workspace-switcher { order: 0; flex: none; }
+  .workspace-app-bar:has(.workspace-finder) .workspace-app-bar__context { order: 1; flex: 1 1 0; min-width: 0; }
+  .workspace-app-bar:has(.workspace-finder) .review-navigation { order: 2; flex: none; margin: 0; }
+  .workspace-app-bar:has(.workspace-finder) .workspace-app-bar__identity > .workspace-app-bar__title,
+  .workspace-app-bar:has(.workspace-finder) .calendar-app-bar__orientation { order: 3; flex: 1 0 100%; }
+  .workspace-app-bar:has(.workspace-finder) .calendar-app-bar__identity-cluster { display: contents; }
+}
+@media (max-width: 767px) {
+  .workspace-app-bar[data-workspace="tasks"] .workspace-app-bar__context,
+  .workspace-app-bar[data-workspace="tasks"] .tasks-header-context { display: contents; }
+  .workspace-app-bar[data-workspace="tasks"] .tasks-header-tools { order: 1; flex: 1 1 0; min-width: 0; }
+  .workspace-app-bar[data-workspace="tasks"] .tasks-header-view { order: 3; flex: 1 0 100%; justify-content: flex-start; max-width: 100%; }
+  .workspace-app-bar[data-workspace="mail"] .mail-app-bar__controls { flex: 1 1 0; width: 100%; }
+}
+
+/* Navigation keeps the floating action’s inverse palette throughout expansion. */
+.workspace-dock-menu {
+  --card: var(--primary);
+  --card-foreground: var(--primary-foreground);
+  --foreground: var(--primary-foreground);
+  --secondary: color-mix(in oklab, var(--primary-foreground) 10%, var(--primary));
+  --secondary-foreground: var(--primary-foreground);
+  --sidebar-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--secondary);
+  --sidebar-accent-foreground: var(--primary-foreground);
+  --muted-foreground: color-mix(in oklab, var(--primary-foreground) 65%, var(--primary));
+  --control-hover-background: var(--secondary);
+  --selection: var(--secondary);
+  --card-spacing: .5rem;
+  scroll-padding-block: 3.5rem .5rem;
+  overscroll-behavior: contain;
+}
+.workspace-dock-menu > [data-slot="card-header"] { position: sticky; top: 0; z-index: 1; background: var(--primary); align-items: center; }
+.workspace-dock-menu [data-slot="sidebar-menu-button"],
+.workspace-dock-menu [data-slot="sidebar-menu-sub-button"],
+.workspace-dock-menu [data-slot="item"] { min-height: 2.75rem; }
+.workspace-dock-menu .workspace-dock-sheet__navigation > [data-slot="sidebar-group"] + [data-slot="sidebar-group"] { margin-block-start: .25rem; }
+.workspace-finder-input {
+  --input-surface: color-mix(in oklab, var(--input) 20%, var(--background));
+  --input-surface-hover: color-mix(in oklab, var(--input) 35%, var(--background));
+}
+
+/* Workspace discovery is the elastic filled center at every viewport size. */
+.workspace-finder { flex: 1 1 10rem; min-width: 0; width: auto; }
+.workspace-app-bar .workspace-app-bar__context:has(.workspace-finder) { flex: 1 1 14rem; min-width: 0; }
+.workspace-app-bar:has([data-slot="workspace-title-sentence"]) .workspace-app-bar__context { flex: 1 1 14rem; }
+.tasks-header-tools { flex: 1 1 10rem; min-width: 0; }
+.mail-app-bar__controls { flex: 1 1 10rem; width: 100%; }
+@media (max-width: 767px) {
+  .workspace-app-bar .workspace-app-bar__context:has(.workspace-finder),
+  .workspace-app-bar:has([data-slot="workspace-title-sentence"]) .workspace-app-bar__context { flex: 1 1 0; }
+  .workspace-app-bar[data-workspace="mail"] .mail-app-bar__identity-cluster { order: 3; flex: 1 0 100%; }
+}
+/* Finance action groups stay on one row; search yields space before controls wrap. */
+.workspace-app-bar:has([data-slot="workspace-title-sentence"]) .workspace-header-controls-slot,
+.workspace-app-bar:has([data-slot="workspace-title-sentence"]) .workspace-header-controls {
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+
+/* One compact mobile navigation density across every workspace/page. */
+.workspace-dock-menu > [data-slot="card-header"] { padding-block: .25rem; }
+.workspace-dock-menu [data-slot="sidebar-group"] { padding: 0; }
+.workspace-dock-menu [data-slot="sidebar-group-label"] { height: 1.25rem; padding-inline: .5rem; }
+.workspace-dock-menu [data-slot="sidebar-menu"],
+.workspace-dock-menu [data-slot="item-group"] { gap: 0; }
+.workspace-dock-menu .workspace-dock-sheet__section { gap: 0; padding: 0; }
+.workspace-dock-menu [data-slot="item"] { background: transparent; }
+.workspace-dock-menu [data-slot="item"]:hover,
+.workspace-dock-menu [data-slot="item"]:focus-visible { background: var(--secondary); }
+
+/* Underlines identify prose links, never control interaction states. */
+:is(p, .prose, [data-slot$="description"]) a[href]:not([data-slot="button"]):not([role="button"]) {
+  text-decoration: underline;
+  text-underline-offset: .2em;
+}
+:is(button, [role="button"], [role="tab"], [role="radio"], [role^="menuitem"], [role="option"]),
+:is(button, [role="button"], [role="tab"], [role="radio"], [role^="menuitem"], [role="option"]) *,
+a:not(p a):not(.prose a):not([data-slot$="description"] a),
+a:not(p a):not(.prose a):not([data-slot$="description"] a) * {
+  text-decoration: none !important;
+}
+[data-completed="true"] [data-slot="commitment-item-title"] {
+  text-decoration: line-through !important;
+}
+
+/* Finance composes the shared responsive dialog: stable heading, one scrolling body. */
+[data-finance-dialog] {
+  --input-surface: var(--secondary);
+  --input-surface-hover: color-mix(in oklab, var(--secondary) 85%, var(--popover-foreground));
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  /* Prevent focus scrolling the drawer itself; its body owns scrolling. */
+  overflow: clip;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  overscroll-behavior: contain;
+}
+[data-finance-dialog][data-presentation="dialog"] {
+  width: calc(100vw - 2rem);
+  max-width: 32rem;
+  max-height: calc(100dvh - 3rem);
+}
+[data-finance-dialog][data-presentation="dialog"][data-finance-size="wide"] { max-width: 48rem; }
+[data-finance-dialog][data-presentation="drawer"] { max-height: calc(100dvh - 1rem); }
+[data-finance-dialog] [data-responsive-slot="header"] {
+  flex: none;
+  gap: .5rem;
+  padding: 1.25rem 3.5rem 1rem 1.5rem;
+  text-align: start;
+}
+[data-finance-dialog] :is([data-slot="dialog-title"], [data-slot="drawer-title"]) {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+[data-finance-dialog] :is([data-slot="dialog-description"], [data-slot="drawer-description"]) {
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+[data-finance-dialog] [data-responsive-slot="body"] {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  gap: 1.25rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: .25rem 1.5rem 1.5rem;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+[data-finance-dialog] :is([data-slot="native-select"], [data-slot="select-trigger"]) { background: var(--input-surface); }
+[data-finance-dialog] :is([data-slot="native-select"], [data-slot="select-trigger"]):hover { background: var(--input-surface-hover); }
+[data-finance-dialog] [data-slot="native-select-wrapper"] { width: 100%; }
+[data-finance-dialog] > form {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+}
+[data-finance-dialog] [data-responsive-slot="footer"] {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: .5rem;
+  margin: 0;
+  padding: 1rem 1.5rem;
+  background: var(--popover);
+}
+[data-finance-dialog] [data-responsive-slot="body"] [data-responsive-slot="footer"] { padding-inline: 0; padding-block-end: 0; }
+[data-finance-dialog] :is(dl, fieldset, section, form) { min-width: 0; }
+[data-finance-dialog] dl { margin: 0; }
+[data-finance-dialog] dt { color: var(--muted-foreground); }
+[data-finance-dialog] dd { margin: 0; font-weight: 500; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+[data-finance-dialog] details {
+  border-radius: var(--radius);
+  background: var(--secondary);
+  padding: .75rem 1rem;
+}
+[data-finance-dialog] details > summary { cursor: pointer; font-size: .8125rem; font-weight: 500; }
+[data-finance-dialog] details[open] > summary { margin-block-end: .75rem; }
+[data-finance-dialog] details > :not(summary) + :not(summary) { margin-block-start: .75rem; }
+[data-finance-dialog] pre { max-width: 100%; font-size: .75rem; }
+[data-finance-dialog] :is([data-slot="field-legend"], h3) { font-size: .875rem; line-height: 1.5; font-weight: 600; }
+[data-finance-dialog] [data-slot="table-container"] { border-radius: var(--radius); background: var(--secondary); }
+[data-finance-dialog] [data-slot="table-cell"],
+[data-finance-dialog] [data-slot="table-head"] { padding: .75rem 1rem; }
+@media (max-width: 767px) {
+  [data-finance-dialog] [data-responsive-slot="header"] { padding-inline-start: 1rem; }
+  [data-finance-dialog] [data-responsive-slot="body"] { padding-inline: 1rem; padding-block-end: max(1rem, env(safe-area-inset-bottom)); }
+  [data-finance-dialog] [data-responsive-slot="footer"] { padding-inline: 1rem; padding-block-end: max(1rem, env(safe-area-inset-bottom)); }
+  [data-finance-dialog] [data-responsive-slot="footer"] > button { flex: 1 1 auto; min-height: 2.75rem; }
+}

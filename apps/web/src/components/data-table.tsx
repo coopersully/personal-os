@@ -53,8 +53,10 @@ export type DataColumn<T> = {
   mobileHidden?: boolean;
   mobileOrder?: number;
   primary?: boolean;
+  header?: ReactNode;
   defaultHidden?: boolean;
   width?: number;
+  align?: "left" | "right" | "center";
 };
 type View = {
   order: string[];
@@ -73,6 +75,17 @@ type Props<T> = {
   label: string;
   fileName: string;
   caption?: ReactNode;
+  menuItems?: ReactNode;
+  selectionControls?: {
+    header: ReactNode;
+    cell: (row: T) => ReactNode;
+    selected: T[];
+    clear: () => void;
+    selectPage: () => void;
+    locked: boolean;
+    actions?: ReactNode;
+  };
+  renderRow?: (row: T, children: React.ReactElement) => ReactNode;
 };
 export function csvCell(value: string | number) {
   const text =
@@ -133,6 +146,9 @@ function DataTableState<T>({
   label,
   fileName,
   caption,
+  menuItems,
+  selectionControls,
+  renderRow,
 }: Props<T>) {
   const mobile = useIsMobile();
   const [view, setView] = useState(() => readView(storageKey, columns));
@@ -156,7 +172,7 @@ function DataTableState<T>({
     () =>
       columns.map((column) => ({
         id: column.id,
-        header: column.label,
+        header: () => column.header ?? column.label,
         accessorFn: column.value,
         size: column.width ?? 160,
         minSize: 80,
@@ -202,7 +218,9 @@ function DataTableState<T>({
     onRowSelectionChange: (updater) =>
       setSelection({ page, ids: typeof updater === "function" ? updater(selectedIds) : updater }),
   });
-  const selected = table.getSelectedRowModel().rows.map((row) => row.original);
+  const selected =
+    selectionControls?.selected ?? table.getSelectedRowModel().rows.map((row) => row.original);
+  const wrapRow = renderRow ?? ((_row: T, children: ReactNode) => children);
   const ordered = view.order.flatMap((id) => {
     const c = columns.find((item) => item.id === id);
     return c ? [c] : [];
@@ -248,13 +266,20 @@ function DataTableState<T>({
           {selected.length ? (
             <>
               <span>{selected.length} selected on this page</span>
-              <Button variant="ghost" size="sm" onClick={() => table.resetRowSelection()}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  selectionControls ? selectionControls.clear() : table.resetRowSelection()
+                }
+              >
                 Clear selection
               </Button>
             </>
           ) : (
             caption
           )}
+          {selectionControls?.actions}
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -271,10 +296,15 @@ function DataTableState<T>({
               <DownloadIcon />
               {selected.length ? "Export Selected" : "Export Page"}
             </DropdownMenuItem>
+            {menuItems}
             {mobile ? (
               <DropdownMenuItem
-                disabled={!rows.length}
-                onSelect={() => table.toggleAllRowsSelected(true)}
+                disabled={!rows.length || !!selectionControls?.locked}
+                onSelect={() =>
+                  selectionControls
+                    ? selectionControls.selectPage()
+                    : table.toggleAllRowsSelected(true)
+                }
               >
                 Select page
               </DropdownMenuItem>
@@ -357,77 +387,85 @@ function DataTableState<T>({
       <Card className="settings-panel gap-0 overflow-hidden py-0">
         {mobile ? (
           <div className="flex flex-col">
-            {table.getRowModel().rows.map((row) => (
-              // biome-ignore lint/a11y/noStaticElementInteractions: Expands the primary button's pointer target; that button remains the keyboard entry point.
-              // biome-ignore lint/a11y/useKeyWithClickEvents: The nested primary button provides the same keyboard action without a duplicate tab stop.
-              <div
-                key={row.id}
-                onClick={(event) => {
-                  if (isRecordClick(event)) onOpen(row.original);
-                }}
-                className={cn(
-                  "settings-navigation-row flex min-w-0 cursor-pointer items-start gap-3",
-                  view.density === "compact" ? "px-3 py-2" : "p-3",
-                )}
-              >
-                <Checkbox
-                  className="mt-1"
-                  aria-label={`Select ${rowLabel(row.original)}`}
-                  checked={row.getIsSelected()}
-                  onCheckedChange={(value) => row.toggleSelected(value === true)}
-                />
-                <dl
+            {table.getRowModel().rows.map((row) =>
+              wrapRow(
+                row.original,
+                // biome-ignore lint/a11y/noStaticElementInteractions: Expands the primary button's pointer target; that button remains the keyboard entry point.
+                // biome-ignore lint/a11y/useKeyWithClickEvents: The nested primary button provides the same keyboard action without a duplicate tab stop.
+                <div
+                  key={row.id}
+                  onClick={(event) => {
+                    if (isRecordClick(event)) onOpen(row.original);
+                  }}
                   className={cn(
-                    "grid min-w-0 flex-1 grid-cols-2",
-                    view.density === "compact" ? "gap-x-3 gap-y-1.5" : "gap-3",
+                    "settings-navigation-row flex min-w-0 cursor-pointer items-start gap-3",
+                    view.density === "compact" ? "px-3 py-2" : "p-3",
                   )}
                 >
-                  {row
-                    .getVisibleCells()
-                    .filter(
-                      (cell) =>
-                        !columns.find((column) => column.id === cell.column.id)?.mobileHidden,
-                    )
-                    .sort((a, b) => {
-                      const left = columns.find((column) => column.id === a.column.id);
-                      const right = columns.find((column) => column.id === b.column.id);
-                      const rank = (column: DataColumn<T> | undefined) =>
-                        column?.primary ? -1 : (column?.mobileOrder ?? Number.MAX_SAFE_INTEGER);
-                      return rank(left) - rank(right);
-                    })
-                    .map((cell) => (
-                      <div
-                        className={cn(
-                          "min-w-0",
-                          columns.find((column) => column.id === cell.column.id)?.primary
-                            ? "col-span-2"
-                            : view.density === "compact" &&
-                                "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2",
-                        )}
-                        key={cell.id}
-                      >
-                        <dt
-                          className={
-                            columns.find((c) => c.id === cell.column.id)?.primary
-                              ? "sr-only"
-                              : "max-w-20 truncate text-sm leading-5 text-muted-foreground"
-                          }
-                        >
-                          {String(cell.column.columnDef.header)}
-                        </dt>
-                        <dd
+                  {selectionControls ? (
+                    selectionControls.cell(row.original)
+                  ) : (
+                    <Checkbox
+                      className="mt-1"
+                      aria-label={`Select ${rowLabel(row.original)}`}
+                      checked={row.getIsSelected()}
+                      onCheckedChange={(value) => row.toggleSelected(value === true)}
+                    />
+                  )}
+                  <dl
+                    className={cn(
+                      "grid min-w-0 flex-1 grid-cols-2",
+                      view.density === "compact" ? "gap-x-3 gap-y-1.5" : "gap-3",
+                    )}
+                  >
+                    {row
+                      .getVisibleCells()
+                      .filter(
+                        (cell) =>
+                          !columns.find((column) => column.id === cell.column.id)?.mobileHidden,
+                      )
+                      .sort((a, b) => {
+                        const left = columns.find((column) => column.id === a.column.id);
+                        const right = columns.find((column) => column.id === b.column.id);
+                        const rank = (column: DataColumn<T> | undefined) =>
+                          column?.primary ? -1 : (column?.mobileOrder ?? Number.MAX_SAFE_INTEGER);
+                        return rank(left) - rank(right);
+                      })
+                      .map((cell) => (
+                        <div
                           className={cn(
-                            "min-w-0 text-sm leading-5",
-                            view.wrap ? "whitespace-pre-wrap break-words" : "truncate",
+                            "min-w-0",
+                            columns.find((column) => column.id === cell.column.id)?.primary
+                              ? "col-span-2"
+                              : view.density === "compact" &&
+                                  "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2",
                           )}
+                          key={cell.id}
                         >
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                        </dd>
-                      </div>
-                    ))}
-                </dl>
-              </div>
-            ))}
+                          <dt
+                            className={
+                              columns.find((c) => c.id === cell.column.id)?.primary
+                                ? "sr-only"
+                                : "max-w-20 truncate text-sm leading-5 text-muted-foreground"
+                            }
+                          >
+                            {columns.find((column) => column.id === cell.column.id)?.label ??
+                              cell.column.id}
+                          </dt>
+                          <dd
+                            className={cn(
+                              "min-w-0 text-sm leading-5",
+                              view.wrap ? "whitespace-pre-wrap break-words" : "truncate",
+                            )}
+                          >
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </dd>
+                        </div>
+                      ))}
+                  </dl>
+                </div>,
+              ),
+            )}
           </div>
         ) : (
           <Table
@@ -437,30 +475,40 @@ function DataTableState<T>({
             <TableHeader>
               <TableRow>
                 <TableHead className="w-10">
-                  <Checkbox
-                    aria-label="Select all rows on this page"
-                    checked={
-                      table.getIsAllRowsSelected() && rows.length > 0
-                        ? true
-                        : table.getIsSomeRowsSelected()
-                          ? "indeterminate"
-                          : false
-                    }
-                    disabled={!rows.length}
-                    onCheckedChange={(value) => table.toggleAllRowsSelected(value === true)}
-                  />
+                  {selectionControls ? (
+                    selectionControls.header
+                  ) : (
+                    <Checkbox
+                      aria-label="Select all rows on this page"
+                      checked={
+                        table.getIsAllRowsSelected() && rows.length > 0
+                          ? true
+                          : table.getIsSomeRowsSelected()
+                            ? "indeterminate"
+                            : false
+                      }
+                      disabled={!rows.length}
+                      onCheckedChange={(value) => table.toggleAllRowsSelected(value === true)}
+                    />
+                  )}
                 </TableHead>
                 {table.getHeaderGroups()[0]?.headers.map((header) => (
                   <TableHead
                     key={header.id}
-                    className="relative"
+                    className={cn(
+                      "relative",
+                      columns.find((column) => column.id === header.id)?.align === "right" &&
+                        "text-right",
+                      columns.find((column) => column.id === header.id)?.align === "center" &&
+                        "text-center",
+                    )}
                     style={{ width: header.getSize() }}
                   >
                     {flexRender(header.column.columnDef.header, header.getContext())}
                     {/* biome-ignore lint/a11y/useSemanticElements: Focusable column-resize widget rather than a thematic break. */}
                     <div
                       role="separator"
-                      aria-label={`Resize ${String(header.column.columnDef.header)}`}
+                      aria-label={`Resize ${columns.find((column) => column.id === header.id)?.label ?? header.id}`}
                       aria-orientation="vertical"
                       tabIndex={0}
                       aria-valuenow={header.getSize()}
@@ -484,35 +532,65 @@ function DataTableState<T>({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {table.getRowModel().rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  className="cursor-pointer"
-                  onClick={(event) => {
-                    if (isRecordClick(event)) onOpen(row.original);
-                  }}
-                  data-state={row.getIsSelected() ? "selected" : undefined}
-                >
-                  <TableCell>
-                    <Checkbox
-                      aria-label={`Select ${rowLabel(row.original)}`}
-                      checked={row.getIsSelected()}
-                      onCheckedChange={(value) => row.toggleSelected(value === true)}
-                    />
-                  </TableCell>
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell
-                      key={cell.id}
-                      className={cn(
-                        view.density === "compact" ? "py-1" : "py-3",
-                        view.wrap ? "whitespace-pre-wrap break-words" : "truncate",
+              {table.getRowModel().rows.map((row) =>
+                wrapRow(
+                  row.original,
+                  <TableRow
+                    key={row.id}
+                    className="cursor-pointer"
+                    aria-label={rowLabel(row.original)}
+                    tabIndex={0}
+                    onKeyDown={(event) => {
+                      if (
+                        event.target === event.currentTarget &&
+                        (event.key === "Enter" || event.key === " ")
+                      ) {
+                        event.preventDefault();
+                        onOpen(row.original);
+                      }
+                    }}
+                    onClick={(event) => {
+                      if (isRecordClick(event)) onOpen(row.original);
+                    }}
+                    data-state={
+                      (
+                        selectionControls
+                          ? selectionControls.selected.some((item) => rowId(item) === row.id)
+                          : row.getIsSelected()
+                      )
+                        ? "selected"
+                        : undefined
+                    }
+                  >
+                    <TableCell>
+                      {selectionControls ? (
+                        selectionControls.cell(row.original)
+                      ) : (
+                        <Checkbox
+                          aria-label={`Select ${rowLabel(row.original)}`}
+                          checked={row.getIsSelected()}
+                          onCheckedChange={(value) => row.toggleSelected(value === true)}
+                        />
                       )}
-                    >
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </TableCell>
-                  ))}
-                </TableRow>
-              ))}
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell
+                        key={cell.id}
+                        className={cn(
+                          columns.find((column) => column.id === cell.column.id)?.align ===
+                            "right" && "text-right",
+                          columns.find((column) => column.id === cell.column.id)?.align ===
+                            "center" && "text-center",
+                          view.density === "compact" ? "py-1" : "py-3",
+                          view.wrap ? "whitespace-pre-wrap break-words" : "truncate",
+                        )}
+                      >
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </TableCell>
+                    ))}
+                  </TableRow>,
+                ),
+              )}
             </TableBody>
           </Table>
         )}

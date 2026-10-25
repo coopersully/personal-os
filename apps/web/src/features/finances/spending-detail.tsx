@@ -5,18 +5,30 @@ import {
   type FinanceSpendingReferenceFilter,
   financeSpendingReferenceFilterSchema,
   financeSpendingScopeSchema,
+  formatDateOnly,
 } from "@personal-os/domain";
 import { Link } from "react-router-dom";
+import { DateDisplay } from "@/components/date-display";
 import {
   ResponsiveDialog,
+  ResponsiveDialogBody,
   ResponsiveDialogContent,
   ResponsiveDialogDescription,
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
 } from "@/components/responsive-dialog";
 import { Button } from "@/components/ui/button";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@/components/ui/item";
 import { formatMoney } from "./format";
 import { SpendingMonthlyBudgetContext } from "./spending-budget-qualification";
+import { spendingGroupVisual } from "./spending-visual";
 /** Only bounded, reproducible selections can open the exact Transactions consumer. */
 export function spendingTransactionsDestination(
   data: FinanceSpendingDashboard,
@@ -85,6 +97,8 @@ export function SpendingDetail({
   onClose: () => void;
   onSelect: (group: FinanceSpendingGroup) => void;
 }) {
+  const visual = group ? spendingGroupVisual(group) : null;
+  const GroupIcon = visual?.Icon;
   const monthly =
     data.monthlyBudget?.state === "qualified" && group
       ? data.monthlyBudget.groups.find((item) => item.groupId === group.id)
@@ -121,95 +135,111 @@ export function SpendingDetail({
     );
   return (
     <ResponsiveDialog open={!!selectedScope} onOpenChange={(open) => !open && onClose()}>
-      <ResponsiveDialogContent>
+      <ResponsiveDialogContent data-finance-dialog data-finance-size="wide">
         <ResponsiveDialogHeader>
-          <ResponsiveDialogTitle>{group?.label ?? "Spending detail"}</ResponsiveDialogTitle>
+          <ResponsiveDialogTitle className="flex items-center gap-2">
+            {GroupIcon ? (
+              <GroupIcon aria-hidden="true" className="size-4" style={{ color: visual?.color }} />
+            ) : null}
+            {group?.label ?? "Spending detail"}
+          </ResponsiveDialogTitle>
           <ResponsiveDialogDescription>
-            {selectedScope?.scope.from} – {selectedScope?.scope.through} · Current category
-            membership · USD
+            {selectedScope
+              ? `${formatDateOnly(selectedScope.scope.from, { month: "short", day: "numeric", year: "numeric" })} – ${formatDateOnly(selectedScope.scope.through, { month: "short", day: "numeric", year: "numeric" })}`
+              : "Selected spending"}
           </ResponsiveDialogDescription>
         </ResponsiveDialogHeader>
-        {bucket?.kind === "bucket" ? (
-          <nav aria-label="Spending detail">
-            <Button variant="ghost" onClick={() => onSelect(bucket)}>
-              {bucket.label}
-            </Button>
-            {group?.id !== bucket.id ? <span> / {group?.label}</span> : null}
-            {group?.id === bucket.id ? (
-              <ul>
-                {bucket.categories.map((category) => (
-                  <li key={category.id}>
-                    <Button variant="ghost" onClick={() => onSelect(category)}>
-                      {category.label} · {formatMoney(category.netCents / 100)}
-                    </Button>
-                  </li>
-                ))}
-              </ul>
+        <ResponsiveDialogBody>
+          <dl>
+            <dt className="text-xs">Net spending</dt>
+            <dd className="mt-1 text-3xl tracking-tight">{formatMoney(totals.netCents / 100)}</dd>
+          </dl>
+          {bucket?.kind === "bucket" ? (
+            <nav aria-label="Spending detail">
+              <Button variant="ghost" onClick={() => onSelect(bucket)}>
+                {bucket.label}
+              </Button>
+              {group?.id !== bucket.id ? <span> / {group?.label}</span> : null}
+              {group?.id === bucket.id ? (
+                <ul>
+                  {bucket.categories.map((category) => (
+                    <li key={category.id}>
+                      <Button variant="ghost" onClick={() => onSelect(category)}>
+                        {category.label} · {formatMoney(category.netCents / 100)}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </nav>
+          ) : null}
+          <dl className="grid grid-cols-2 gap-3 rounded-lg bg-secondary p-4">
+            {[
+              ["Gross", totals.grossCents],
+              ["Reimbursable portion", totals.reimbursementAdjustmentCents],
+              ["Still owed", totals.reimbursementOutstandingCents],
+              ["Matched refunds", totals.refundAdjustmentCents],
+              ["Pending included", totals.pendingCents],
+            ].map(([label, cents]) => (
+              <div key={label}>
+                <dt className="text-sm text-muted-foreground">{label}</dt>
+                <dd>{formatMoney(Number(cents ?? 0) / 100)}</dd>
+              </div>
+            ))}
+          </dl>
+          <details>
+            <summary>Monthly budget comparison</summary>
+            <p className="text-sm text-muted-foreground">
+              Selected-period spending above uses the displayed transaction and account filters.
+              Monthly usage below covers the whole qualified month and all confirmed budget
+              accounts.
+            </p>
+            <SpendingMonthlyBudgetContext budget={data.monthlyBudget} />
+            {monthly ? (
+              <p>
+                Monthly usage: {formatMoney(monthly.usedCents / 100)}
+                {monthly.budgetCents !== null && monthly.budgetCents !== undefined
+                  ? ` of ${formatMoney(monthly.budgetCents / 100)}`
+                  : " · No budget limit"}
+                {monthly.budgetCents !== null &&
+                monthly.budgetCents !== undefined &&
+                monthly.usedCents > monthly.budgetCents
+                  ? ` · Over budget ${formatMoney((monthly.usedCents - monthly.budgetCents) / 100)}`
+                  : ""}
+              </p>
             ) : null}
-          </nav>
-        ) : null}
-        <dl className="grid grid-cols-2 gap-2">
-          {[
-            ["Gross", totals.grossCents],
-            ["Reimbursable portion", totals.reimbursementAdjustmentCents],
-            ["Still owed", totals.reimbursementOutstandingCents],
-            ["Matched refunds", totals.refundAdjustmentCents],
-            ["Net spending", totals.netCents],
-            ["Pending included", totals.pendingCents],
-          ].map(([label, cents]) => (
-            <div key={label}>
-              <dt className="text-sm text-muted-foreground">{label}</dt>
-              <dd>{formatMoney(Number(cents ?? 0) / 100)}</dd>
-            </div>
-          ))}
-        </dl>
-        <p className="text-sm text-muted-foreground">
-          Selected-period spending above uses the displayed transaction and account filters. Monthly
-          usage below covers the whole qualified month and all confirmed budget accounts.
-        </p>
-        <SpendingMonthlyBudgetContext budget={data.monthlyBudget} />
-        {monthly ? (
-          <p>
-            Monthly usage: {formatMoney(monthly.usedCents / 100)}
-            {monthly.budgetCents !== null && monthly.budgetCents !== undefined
-              ? ` of ${formatMoney(monthly.budgetCents / 100)}`
-              : " · No budget limit"}
-            {monthly.budgetCents !== null &&
-            monthly.budgetCents !== undefined &&
-            monthly.usedCents > monthly.budgetCents
-              ? ` · Over budget ${formatMoney((monthly.usedCents - monthly.budgetCents) / 100)}`
-              : ""}
-          </p>
-        ) : null}
-        {destination ? (
-          <Button asChild variant="secondary">
-            <Link to={destination}>Open matching transactions</Link>
-          </Button>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            Matching transactions are unavailable for this selection. Reload Spending to obtain a
-            current, exact reference.
-          </p>
-        )}
-        <ul
-          className="flex max-h-80 flex-col gap-3 overflow-auto"
-          aria-label="Exact spending contributions"
-        >
-          {contributions.map((item) => (
-            <li key={item.id} className="flex flex-wrap justify-between gap-2">
-              <span>
-                {data.transactions.find((transaction) => transaction.id === item.transactionId)
-                  ?.merchant || "Transaction"}
-                <span className="block text-sm text-muted-foreground">
-                  {item.date}
-                  {item.pending ? " · Pending" : ""}
-                  {item.allocationId ? " · Split allocation" : ""}
-                </span>
-              </span>
-              <span>{formatMoney(item.netCents / 100)}</span>
-            </li>
-          ))}
-        </ul>
+          </details>
+          {destination ? (
+            <Button asChild variant="secondary">
+              <Link to={destination}>Open matching transactions</Link>
+            </Button>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Matching transactions are unavailable for this selection. Reload Spending to obtain a
+              current, exact reference.
+            </p>
+          )}
+          <ItemGroup className="gap-2" aria-label="Exact spending contributions">
+            {contributions.map((item) => (
+              <Item key={item.id} size="sm" variant="secondary">
+                <ItemContent>
+                  <ItemTitle>
+                    {data.transactions.find((transaction) => transaction.id === item.transactionId)
+                      ?.merchant || "Transaction"}
+                  </ItemTitle>
+                  <ItemDescription>
+                    <DateDisplay value={item.date} timeZone={data.snapshot.scope.timezone} />
+                    {item.pending ? " · Pending" : ""}
+                    {item.allocationId ? " · Split allocation" : ""}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions className="font-medium tabular-nums">
+                  {formatMoney(item.netCents / 100)}
+                </ItemActions>
+              </Item>
+            ))}
+          </ItemGroup>
+        </ResponsiveDialogBody>
       </ResponsiveDialogContent>
     </ResponsiveDialog>
   );

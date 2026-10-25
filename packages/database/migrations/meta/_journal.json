@@ -918,6 +918,48 @@
       "when": 1792353610000,
       "tag": "0123_finance_maintenance_execution_binding",
       "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "7",
+      "when": 1792692000000,
+      "tag": "0124_finance_transaction_coverage",
+      "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1792805833756,
+      "tag": "0125_finance_bypass_confirmation_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1792812516989,
+      "tag": "0126_finance_spending_list_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 132,
+      "version": "7",
+      "when": 1792812516990,
+      "tag": "0127_finance_spending_week_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 133,
+      "version": "7",
+      "when": 1792812516991,
+      "tag": "0128_shared_agent_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 134,
+      "version": "7",
+      "when": 1792812516992,
+      "tag": "0129_finance_review_batches",
+      "breakpoints": true
     }
   ]
 }

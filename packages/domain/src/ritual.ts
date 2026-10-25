@@ -1,8 +1,9 @@
 import { z } from "zod";
+import { isoDateTimeSchema } from "./common.js";
 import { addLocalDays, localDateAt, localDateTimeToUtc, localDateToIso } from "./time.js";
 
 const key = z.string().min(1).max(100);
-const instant = z.iso.datetime({ offset: true });
+const instant = isoDateTimeSchema;
 const wallTime = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 export const ritualStepSchema = z
   .object({

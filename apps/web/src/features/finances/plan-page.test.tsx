@@ -1,14 +1,22 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
+import { ApiClientError } from "@personal-os/api-client";
 import type { FinanceBudgetVersion, FinanceToolResult } from "@personal-os/domain";
+import { getFinanceBudgetApprovalReadiness } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { Toaster } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FinancePlanPage } from "./plan-page.js";
 
+const notifications = vi.hoisted(() => ({
+  loading: vi.fn(() => "approval-toast"),
+  error: vi.fn<(message: string, options?: Record<string, unknown>) => void>(),
+  success: vi.fn(),
+  dismiss: vi.fn(),
+}));
+vi.mock("sonner", () => ({ toast: notifications }));
 const api = vi.hoisted(() => ({
   getFinanceBudget: vi.fn(),
   getCanonicalFinanceBudgetStatus: vi.fn(),
@@ -70,6 +78,16 @@ const plan: FinanceBudgetVersion = {
 function result<T>(data: T): FinanceToolResult<T> {
   return {
     data,
+    ...(data && typeof data === "object" && "planId" in data
+      ? {
+          approvalReadiness: getFinanceBudgetApprovalReadiness({
+            budget: data as unknown as FinanceBudgetVersion,
+            currentProfileVersionId:
+              (data as unknown as FinanceBudgetVersion).profileVersionId ?? null,
+            latestBudgetVersionId: (data as unknown as FinanceBudgetVersion).id,
+          }),
+        }
+      : {}),
     changes: [],
     communication: { headline: "Budget ready.", optionalDetails: [], requiredDisclosures: [] },
     outcome: "completed",
@@ -84,7 +102,6 @@ function mount(route = "/finances/plan", approvalTask = false) {
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[route]}>
-        <Toaster />
         <FinancePlanPage approvalTask={approvalTask} />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -188,7 +205,10 @@ describe("complete finance plan", () => {
         idempotencyKey: expect.any(String),
       }),
     );
-    expect(await screen.findByText("Version 3 approved.")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(notifications.success).toHaveBeenCalledWith("Budget approved.", expect.any(Object)),
+    );
+    expect(screen.queryByText("Version 3 approved.")).not.toBeInTheDocument();
     expect(invalidate).toHaveBeenCalled();
   });
 
@@ -216,12 +236,152 @@ describe("complete finance plan", () => {
     mount();
     await userEvent.click(await screen.findByRole("button", { name: "Approve version 3" }));
     expect(screen.getByRole("button", { name: "Approving…" })).toBeDisabled();
-    await act(async () => reject(Object.assign(new Error("Version changed"), { status: 409 })));
-    expect(await screen.findByText("Approval needs review")).toBeInTheDocument();
+    await act(async () =>
+      reject(
+        new ApiClientError({
+          message: "Version changed",
+          status: 409,
+          code: "conflict",
+          requestId: "budget-request-123",
+        }),
+      ),
+    );
+    await waitFor(() =>
+      expect(notifications.error).toHaveBeenCalledWith(
+        "Approval needs review",
+        expect.objectContaining({
+          description: expect.stringContaining("Request ID: budget-request-123"),
+        }),
+      ),
+    );
+    expect(screen.queryByText("The plan changed before approval")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve version 3", hidden: true })).toBeDisabled();
     api.getFinanceBudget.mockResolvedValue(result({ ...plan, version: 4 }));
-    await userEvent.click(screen.getByRole("button", { name: "Reload latest plan" }));
-    expect(await screen.findByRole("button", { name: "Approve version 4" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "Return to plan" }));
+    await userEvent.click(screen.getByRole("button", { name: "Refresh plan" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Approve version 4" })).toBeEnabled(),
+    );
+  });
+
+  it("blocks stale-profile approval and opens a revision with all decisions intact", async () => {
+    api.getFinanceBudget.mockResolvedValue({
+      ...result(plan),
+      approvalReadiness: getFinanceBudgetApprovalReadiness({
+        budget: plan,
+        currentProfileVersionId: "new-profile",
+        latestBudgetVersionId: plan.id,
+      }),
+    });
+    mount();
+    expect(await screen.findByRole("button", { name: "Approve version 3" })).toBeDisabled();
+    expect(api.approveFinanceBudget).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Review proposal" }));
+    expect(screen.getByLabelText("Rationale")).toHaveValue(plan.rationale);
+    await userEvent.click(screen.getByRole("button", { name: "Save proposal" }));
+    await waitFor(() =>
+      expect(api.reviseFinanceBudget).toHaveBeenCalledWith(
+        expect.objectContaining({
+          allocations: plan.allocations,
+          resources: plan.resources,
+          assumptions: plan.assumptions,
+        }),
+      ),
+    );
+  });
+
+  it("fails closed when readiness is unavailable", async () => {
+    const response = result(plan);
+    api.getFinanceBudget.mockResolvedValue({ ...response, approvalReadiness: undefined });
+    mount();
+    expect(await screen.findByRole("button", { name: "Approve version 3" })).toBeDisabled();
+    expect(screen.getByText(/Approval readiness is unavailable/)).toBeInTheDocument();
+  });
+
+  it("preserves editor decisions during an approval recovery refresh", async () => {
+    api.approveFinanceBudget.mockRejectedValueOnce(
+      new ApiClientError({ message: "stale", code: "conflict", status: 409 }),
+    );
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: "Approve version 3" }));
+    await waitFor(() => expect(notifications.error).toHaveBeenCalled());
+    await userEvent.click(screen.getByRole("button", { name: "Return to plan" }));
+    const options = notifications.error.mock.calls.at(-1)?.[1] as unknown as {
+      action: { onClick: () => void };
+    };
+    await userEvent.click(screen.getByRole("button", { name: "Revise plan" }));
+    fireEvent.change(screen.getByLabelText("Rationale"), {
+      target: { value: "Keep my local decision" },
+    });
+    await act(async () => options.action.onClick());
+    expect(screen.getByLabelText("Rationale")).toHaveValue("Keep my local decision");
+  });
+
+  it.each([
+    [401, "Sign in again"],
+    [403, "Check your Finance access"],
+    [400, "correct its resources or allocations"],
+    [500, "Approval could not be confirmed"],
+  ])("keeps actionable %s approval errors in Sonner with request identity", async (status, guidance) => {
+    api.approveFinanceBudget.mockRejectedValueOnce(
+      new ApiClientError({
+        status: Number(status),
+        message: "private raw failure",
+        code: "invalid_request",
+        requestId: "request-support",
+      }),
+    );
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: "Approve version 3" }));
+    await waitFor(() =>
+      expect(notifications.error).toHaveBeenCalledWith(
+        "Approval needs review",
+        expect.objectContaining({ description: expect.stringContaining(String(guidance)) }),
+      ),
+    );
+    expect(notifications.error).toHaveBeenCalledWith(
+      "Approval needs review",
+      expect.objectContaining({
+        description: expect.stringContaining("Request ID: request-support"),
+      }),
+    );
+    expect(screen.getByRole("dialog", { name: "Approval needs review" })).toBeInTheDocument();
+    expect(screen.queryByText("private raw failure")).not.toBeInTheDocument();
+  });
+
+  it("keeps conflict approval blocked when its refresh fails", async () => {
+    api.approveFinanceBudget.mockRejectedValueOnce(
+      new ApiClientError({ status: 409, message: "stale", code: "conflict" }),
+    );
+    mount();
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Approve version 3", hidden: true }),
+    );
+    await waitFor(() => expect(notifications.error).toHaveBeenCalled());
+    api.getFinanceBudget.mockRejectedValueOnce(new Error("offline"));
+    await userEvent.click(screen.getByRole("button", { name: "Refresh plan" }));
+    await waitFor(() =>
+      expect(notifications.error).toHaveBeenCalledWith(
+        expect.stringContaining("Could not refresh the plan"),
+        expect.any(Object),
+      ),
+    );
+    expect(screen.getByRole("button", { name: "Approve version 3", hidden: true })).toBeDisabled();
+    expect(screen.queryByText(/Could not refresh the plan/)).not.toBeInTheDocument();
+  });
+
+  it("requires refresh after a conflict even if the editor was opened and canceled", async () => {
+    api.approveFinanceBudget.mockRejectedValueOnce(
+      new ApiClientError({ status: 409, message: "stale", code: "conflict" }),
+    );
+    mount();
+    await userEvent.click(await screen.findByRole("button", { name: "Approve version 3" }));
+    await waitFor(() => expect(notifications.error).toHaveBeenCalled());
+    await userEvent.click(screen.getByRole("button", { name: "Return to plan" }));
+    await userEvent.click(screen.getByRole("button", { name: "Revise plan" }));
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("button", { name: "Approve version 3" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Refresh plan" })).toBeEnabled();
   });
 
   it("revises all kinds without dropping linked identities or multiline assumptions", async () => {
@@ -275,13 +435,13 @@ describe("complete finance plan", () => {
     mount();
     await userEvent.click(await screen.findByRole("button", { name: "Revise plan" }));
     fireEvent.change(
-      within(screen.getByRole("dialog", { name: "Revise version 3" })).getByLabelText("Rationale"),
+      within(screen.getByRole("dialog", { name: "Edit budget" })).getByLabelText("Rationale"),
       { target: { value: "A revised rationale" } },
     );
     await userEvent.click(screen.getByRole("button", { name: "Save proposal" }));
     expect(await screen.findByText("Proposal could not be saved")).toBeInTheDocument();
     expect(
-      within(screen.getByRole("dialog", { name: "Revise version 3" })).getByLabelText("Rationale"),
+      within(screen.getByRole("dialog", { name: "Edit budget" })).getByLabelText("Rationale"),
     ).toHaveValue("A revised rationale");
     await userEvent.click(screen.getByRole("button", { name: "Save proposal" }));
     await waitFor(() => expect(api.reviseFinanceBudget).toHaveBeenCalledTimes(2));
@@ -289,7 +449,7 @@ describe("complete finance plan", () => {
       api.reviseFinanceBudget.mock.calls[1]?.[0],
     );
     fireEvent.change(
-      within(screen.getByRole("dialog", { name: "Revise version 3" })).getByLabelText("Rationale"),
+      within(screen.getByRole("dialog", { name: "Edit budget" })).getByLabelText("Rationale"),
       { target: { value: "Another rationale" } },
     );
     await userEvent.click(screen.getByRole("button", { name: "Save proposal" }));
@@ -448,7 +608,7 @@ it("opens the specific plan requested by workspace search", async () => {
 it("edits linked proposal records and removes optional rows without losing descriptions", async () => {
   mount();
   fireEvent.click(await screen.findByRole("button", { name: "Revise plan" }));
-  const editor = within(screen.getByRole("dialog", { name: "Revise version 3" }));
+  const editor = within(screen.getByRole("dialog", { name: "Edit budget" }));
   // Resolve the editor's native label association without scanning every DOM node.
   const editorField = (name: string) => {
     const label = editor.getByText(name, { exact: true, selector: "label" });
@@ -595,7 +755,7 @@ it.each([
 it("requires a linked debt account after a kind change and removes cleared optional details", async () => {
   mount();
   fireEvent.click(await screen.findByRole("button", { name: "Revise plan" }));
-  const editor = within(screen.getByRole("dialog", { name: "Revise version 3" }));
+  const editor = within(screen.getByRole("dialog", { name: "Edit budget" }));
   // Resolve the editor's native label association without scanning every DOM node.
   const editorField = (name: string) => {
     const label = editor.getByText(name, { exact: true, selector: "label" });
@@ -659,4 +819,13 @@ it("scopes setup approval entry to the actual proposal and excludes plan creatio
     ),
   );
   expect(api.createFinanceBudget).not.toHaveBeenCalled();
+});
+
+it("reports a failed bucket inventory through Sonner without claiming it is empty", async () => {
+  api.listFinanceBudgetBuckets.mockRejectedValue(new Error("Bucket inventory unavailable"));
+  mount();
+  await waitFor(() => expect(notifications.error).toHaveBeenCalled());
+  expect(screen.queryByText("No budget buckets yet.")).not.toBeInTheDocument();
+  expect(screen.queryByText("Bucket inventory unavailable")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Budget buckets" })).toBeVisible();
 });

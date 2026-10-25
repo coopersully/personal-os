@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import {
+  accessTokens,
   auditEvents,
   createDatabaseClient,
   type DatabaseClient,
@@ -15,6 +16,7 @@ import {
 import type { FinanceConversationEffectReceipt } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, sql } from "drizzle-orm";
+import { createAgentAccountService } from "../agent-account-service.js";
 import { createFinanceActivityService } from "./activity-service.js";
 
 /** AUTHORED, NOT RUN: real PostgreSQL projection/source-binding gate, scheduled by the Lead.
@@ -140,6 +142,74 @@ describe.sequential("Finance Activity actual receipt and immutable-source projec
       service: createFinanceActivityService({ db: database.db, cursorSecret: "existing-test-key" }),
     };
   }
+  it("attributes agent actions through owner-bound connections after revocation and explicit relinking", async () => {
+    const f = await fixture(),
+      other = await fixture();
+    const actorId = randomUUID(),
+      connectionId = randomUUID();
+    await database.db.insert(accessTokens).values({
+      id: actorId,
+      userId: f.owner,
+      authorizationConnectionId: connectionId,
+      tokenHash: randomUUID(),
+      name: "Claude Code",
+      scopes: ["finances:maintain"],
+    });
+    const accounts = createAgentAccountService({ db: database.db });
+    const principal = {
+      actorType: "agent" as const,
+      actorId,
+      userId: f.owner,
+      authorizationConnectionId: connectionId,
+      scopes: new Set<"finances:maintain">(["finances:maintain"]),
+    };
+    const account = await accounts.register(principal, { platform: "claude" });
+    const receipt = {
+      ...f.receipt,
+      actor: { type: "agent" as const, id: actorId },
+      authorityBasis: "original_live_grant" as const,
+      authorizationConnectionId: connectionId,
+      automationScheduleId: randomUUID(),
+    };
+    await database.db
+      .update(financeMutationRecords)
+      .set({ actorType: "agent", actorId, response: { financeEffectReceipt: receipt } })
+      .where(eq(financeMutationRecords.id, receipt.id));
+    for (const audit of f.audits)
+      await database.db
+        .update(auditEvents)
+        .set({ actorType: "agent", actorId })
+        .where(eq(auditEvents.id, audit.id));
+    await database.db
+      .update(accessTokens)
+      .set({ revokedAt: new Date() })
+      .where(eq(accessTokens.id, actorId));
+    const page = await f.service.listActivity(f.owner, { limit: 10 });
+    expect(page.entries[0]).toMatchObject({
+      actor: { type: "agent", id: actorId },
+      agentAccount: { id: account.id },
+    });
+    expect(
+      (await other.service.listActivity(other.owner, { limit: 10 })).entries.every(
+        (entry) => !entry.agentAccount,
+      ),
+    ).toBe(true);
+    const separated = await accounts.link(
+      { actorType: "user", actorId: f.owner, userId: f.owner, scopes: new Set() },
+      connectionId,
+      { agentAccountId: null, platform: "claude" },
+    );
+    expect((await f.service.listActivity(f.owner, { limit: 10 })).entries[0]).toMatchObject({
+      actor: { type: "agent", id: actorId },
+      agentAccount: { id: separated.id },
+    });
+    await database.db.delete(accessTokens).where(eq(accessTokens.id, actorId));
+    expect((await f.service.listActivity(f.owner, { limit: 10 })).entries[0]).toMatchObject({
+      actor: { type: "agent", id: actorId },
+      agentAccount: null,
+    });
+  });
+
   it("keeps 101 changes reachable as one action with exact immutable source and decimal sequence", async () => {
     const f = await fixture(101);
     const page = await f.service.listActivity(f.owner, { type: "financial_action", limit: 1 });

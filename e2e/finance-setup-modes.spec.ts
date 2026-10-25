@@ -58,6 +58,9 @@ test.describe("durable Finance manual setup", () => {
     await page.reload();
     await expect(page).toHaveURL(/\/finances\/transactions\?view=table$/);
     await page.goto("/finances/accounts");
+    await page
+      .getByRole("button", { name: "Account options for Legacy checking", exact: true })
+      .click();
     await page.getByRole("button", { name: "Edit Legacy checking", exact: true }).click();
     await expect(page.getByRole("dialog", { name: "Edit account", exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
@@ -257,6 +260,9 @@ test.describe("durable Finance manual setup", () => {
       if (visibility === "hide") await expect(manual).toHaveCount(0);
       else await expect(manual).toBeVisible();
       await page.keyboard.press("Escape");
+      await page
+        .getByRole("button", { name: "Account options for Setup checking", exact: true })
+        .click();
       await page.getByRole("button", { name: "Edit Setup checking", exact: true }).click();
       await expect(page.getByRole("dialog", { name: "Edit account", exact: true })).toBeVisible();
       await page.keyboard.press("Escape");

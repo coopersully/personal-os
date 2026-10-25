@@ -12,6 +12,14 @@ import { useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { CircleCheckIcon } from "@/components/icons";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogBody,
+} from "@/components/responsive-dialog";
 import { SearchableSelect } from "@/components/searchable-select";
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/settings-field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -19,13 +27,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   Item,
   ItemActions,
@@ -43,6 +44,7 @@ import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { FinanceContextualQuestionPage } from "./contextual-question.js";
 import { formatMoney } from "./format.js";
 import { requireFinanceResult } from "./position-material.js";
+import { FinanceReviewBacklog } from "./review-backlog.js";
 import { savedClarification } from "./review-note.js";
 import { FinanceAgentReviewQueue } from "./review-queue.js";
 import { TransactionSummary } from "./transaction-summary.js";
@@ -177,6 +179,7 @@ function FinanceInboxReviewPage() {
   }
   return (
     <section aria-label="Finance review" className="grid gap-4">
+      <FinanceReviewBacklog />
       {inbox.error ? (
         <>
           <InlineError
@@ -334,88 +337,92 @@ export function FinanceReviewHistory() {
         </Button>
       ) : null}
       <Dialog open={selectedId !== null} onOpenChange={(open) => !open && setSelectedId(null)}>
-        <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent data-finance-dialog data-finance-size="wide">
           <DialogHeader>
             <DialogTitle>Finance review evidence</DialogTitle>
             <DialogDescription>
               Recorded context and the outcome for this exact review.
             </DialogDescription>
           </DialogHeader>
-          {detail.isPending ? <Spinner label="Loading review evidence" /> : null}
-          {detail.error ? (
-            <InlineError
-              error={detail.error}
-              retry={() => detail.refetch()}
-              stale={detail.data !== undefined}
-            />
-          ) : null}
-          {detail.data ? (
-            <div className="grid gap-3 text-sm">
-              <p>{detail.data.prompt ?? detail.data.reason.replaceAll("_", " ")}</p>
-              <p>Status: {detail.data.status}</p>
-              {detail.data.archived ? (
-                <p className="text-sm text-muted-foreground">
-                  Source removed. This review is retained as read-only history.
-                </p>
-              ) : null}
-              {detail.data.transactionId && !detail.data.archived ? (
-                <Link
-                  className="underline underline-offset-4"
-                  to={`/finances/transactions?transactionId=${encodeURIComponent(detail.data.transactionId)}`}
-                >
-                  Open transaction
-                </Link>
-              ) : null}
-              {detail.data.resolution ? (
-                <FinanceReviewHistoryResolution
-                  resolution={detail.data.resolution}
-                  relatedAvailable={detail.data.relatedTransactionAvailable === true}
-                />
-              ) : null}
-              {detail.data.resolutionProvenance?.actorType === "user" ? (
-                <p>Recorded by you</p>
-              ) : detail.data.resolutionProvenance?.actorType === "agent" ? (
-                <p>Recorded by an agent</p>
-              ) : null}
-              {detail.data.resolvedAt ? (
-                <p>Resolved {new Date(detail.data.resolvedAt).toLocaleString()}</p>
-              ) : null}
-              {detail.data.context ? (
-                <section aria-label="Source transaction context">
-                  <h3 className="font-medium">
-                    {detail.data.archived
-                      ? "Context when source was removed"
-                      : "Current source context"}
-                  </h3>
-                  <p>
-                    {detail.data.context.merchant} · {detail.data.context.date}
+          <ResponsiveDialogBody>
+            {detail.isPending ? <Spinner label="Loading review evidence" /> : null}
+            {detail.error ? (
+              <InlineError
+                error={detail.error}
+                retry={() => detail.refetch()}
+                stale={detail.data !== undefined}
+              />
+            ) : null}
+            {detail.data ? (
+              <div className="grid gap-3 text-sm">
+                <p>{detail.data.prompt ?? detail.data.reason.replaceAll("_", " ")}</p>
+                <p>Status: {detail.data.status}</p>
+                {detail.data.archived ? (
+                  <p className="text-sm text-muted-foreground">
+                    Source removed. This review is retained as read-only history.
                   </p>
-                  <p>
-                    {detail.data.context.accountName}
-                    {detail.data.context.institution ? ` · ${detail.data.context.institution}` : ""}
-                  </p>
-                  <p>
-                    {detail.data.context.amount}{" "}
-                    {detail.data.context.currencyCode ?? "Currency unavailable"} ·{" "}
-                    {detail.data.context.direction}
-                    {detail.data.context.pending ? " · Pending" : ""}
-                  </p>
-                </section>
-              ) : null}
-              {detail.data.retainedQuestions?.map((question) => (
-                <p key={question.id}>Question: {question.prompt}</p>
-              ))}
-              {detail.data.retainedAnswers?.map((answer) => (
-                <p key={answer.id}>Recorded answer: {answer.text}</p>
-              ))}
-              <div>
-                <h3 className="font-medium">Source evidence</h3>
-                <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-xs">
-                  {JSON.stringify(detail.data.evidence, null, 2)}
-                </pre>
+                ) : null}
+                {detail.data.transactionId && !detail.data.archived ? (
+                  <Link
+                    className="underline underline-offset-4"
+                    to={`/finances/transactions?transactionId=${encodeURIComponent(detail.data.transactionId)}`}
+                  >
+                    Open transaction
+                  </Link>
+                ) : null}
+                {detail.data.resolution ? (
+                  <FinanceReviewHistoryResolution
+                    resolution={detail.data.resolution}
+                    relatedAvailable={detail.data.relatedTransactionAvailable === true}
+                  />
+                ) : null}
+                {detail.data.resolutionProvenance?.actorType === "user" ? (
+                  <p>Recorded by you</p>
+                ) : detail.data.resolutionProvenance?.actorType === "agent" ? (
+                  <p>Recorded by an agent</p>
+                ) : null}
+                {detail.data.resolvedAt ? (
+                  <p>Resolved {new Date(detail.data.resolvedAt).toLocaleString()}</p>
+                ) : null}
+                {detail.data.context ? (
+                  <section aria-label="Source transaction context">
+                    <h3 className="font-medium">
+                      {detail.data.archived
+                        ? "Context when source was removed"
+                        : "Current source context"}
+                    </h3>
+                    <p>
+                      {detail.data.context.merchant} · {detail.data.context.date}
+                    </p>
+                    <p>
+                      {detail.data.context.accountName}
+                      {detail.data.context.institution
+                        ? ` · ${detail.data.context.institution}`
+                        : ""}
+                    </p>
+                    <p>
+                      {detail.data.context.amount}{" "}
+                      {detail.data.context.currencyCode ?? "Currency unavailable"} ·{" "}
+                      {detail.data.context.direction}
+                      {detail.data.context.pending ? " · Pending" : ""}
+                    </p>
+                  </section>
+                ) : null}
+                {detail.data.retainedQuestions?.map((question) => (
+                  <p key={question.id}>Question: {question.prompt}</p>
+                ))}
+                {detail.data.retainedAnswers?.map((answer) => (
+                  <p key={answer.id}>Recorded answer: {answer.text}</p>
+                ))}
+                <details>
+                  <summary>Source evidence</summary>
+                  <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-xs">
+                    {JSON.stringify(detail.data.evidence, null, 2)}
+                  </pre>
+                </details>
               </div>
-            </div>
-          ) : null}
+            ) : null}
+          </ResponsiveDialogBody>
         </DialogContent>
       </Dialog>
     </section>
@@ -463,12 +470,12 @@ function FinanceReviewHistoryResolution({
         <p>Related transaction reference: {relatedTransactionId} (source unavailable)</p>
       ) : null}
       {resolution.changes && typeof resolution.changes === "object" ? (
-        <div>
-          <p>Profile changes</p>
+        <details>
+          <summary>Profile changes</summary>
           <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-xs">
             {JSON.stringify(resolution.changes, null, 2)}
           </pre>
-        </div>
+        </details>
       ) : null}
     </section>
   );

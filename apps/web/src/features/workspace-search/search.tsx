@@ -1,21 +1,15 @@
 import { localDateToIso, type SearchableWorkspace } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/api";
 import { ActionButton as Button } from "@/components/action-button";
 import { DataChoice, FilterTrigger } from "@/components/data-view-controls";
 import { SearchIcon } from "@/components/icons";
-import {
-  ResponsiveDialog,
-  ResponsiveDialogBody,
-  ResponsiveDialogContent,
-  ResponsiveDialogHeader,
-  ResponsiveDialogTitle,
-} from "@/components/responsive-dialog";
 import { Badge } from "@/components/ui/badge";
 import {
   Combobox,
+  ComboboxContent,
   ComboboxGroup,
   ComboboxGroupLabel,
   ComboboxInput,
@@ -23,8 +17,6 @@ import {
   ComboboxList,
 } from "@/components/ui/combobox";
 import { InputGroupAddon } from "@/components/ui/input-group";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { useIsMobile } from "@/hooks/use-mobile";
 import { parseCalendarDateQuery } from "../calendar/search-date";
 import { useWorkspacePreferences } from "../workspace-settings/preferences";
 import { type SearchAction, type SearchOption, workspaceCatalog } from "./catalog";
@@ -39,63 +31,24 @@ export function WorkspaceFinder({
   onAction?: (action: SearchAction) => void;
   timeZone?: string;
 }) {
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const isMobile = useIsMobile();
+  const [activation, setActivation] = useState(0);
   useEffect(() => {
-    const focusSearch = () => setMobileOpen(true);
+    const focusSearch = () => {
+      setActivation((current) => current + 1);
+    };
     window.addEventListener("nohmi:workspace-search", focusSearch);
     return () => window.removeEventListener("nohmi:workspace-search", focusSearch);
   }, []);
   const label = `Search ${workspace[0]?.toUpperCase()}${workspace.slice(1)}`;
   return (
     <div className="workspace-finder" data-search-workspace={workspace}>
-      {isMobile ? (
-        <>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={label}
-            onClick={() => setMobileOpen(true)}
-          >
-            <SearchIcon />
-          </Button>
-          <ResponsiveDialog open={mobileOpen} onOpenChange={setMobileOpen}>
-            <ResponsiveDialogContent className="workspace-finder-dialog">
-              <ResponsiveDialogHeader>
-                <ResponsiveDialogTitle>{label}</ResponsiveDialogTitle>
-              </ResponsiveDialogHeader>
-              <ResponsiveDialogBody>
-                <FinderInput
-                  workspace={workspace}
-                  label={label}
-                  timeZone={timeZone}
-                  {...(onAction ? { onAction } : {})}
-                  onSelected={() => setMobileOpen(false)}
-                  mobile
-                />
-              </ResponsiveDialogBody>
-            </ResponsiveDialogContent>
-          </ResponsiveDialog>
-        </>
-      ) : (
-        <Popover open={mobileOpen} onOpenChange={setMobileOpen}>
-          <PopoverTrigger asChild>
-            <Button variant="ghost" size="icon" aria-label={label}>
-              <SearchIcon />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent align="start" className="workspace-finder-results" aria-label={label}>
-            <FinderInput
-              workspace={workspace}
-              label={label}
-              timeZone={timeZone}
-              {...(onAction ? { onAction } : {})}
-              onSelected={() => setMobileOpen(false)}
-              mobile
-            />
-          </PopoverContent>
-        </Popover>
-      )}
+      <FinderInput
+        workspace={workspace}
+        label={label}
+        timeZone={timeZone}
+        {...(onAction ? { onAction } : {})}
+        activation={activation}
+      />
     </div>
   );
 }
@@ -104,24 +57,29 @@ function FinderInput({
   label,
   timeZone,
   onAction,
-  onSelected,
-  mobile = false,
+  activation = 0,
 }: {
   workspace: SearchableWorkspace;
   label: string;
   timeZone: string;
   onAction?: (action: SearchAction) => void;
-  onSelected?: () => void;
-  mobile?: boolean;
+  activation?: number;
 }) {
   const navigate = useNavigate();
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (activation) {
+      inputRef.current?.focus();
+      setOpen(true);
+    }
+  }, [activation]);
   const [query, setQuery] = useState("");
   const [settled, setSettled] = useState("");
   const [offset, setOffset] = useState(0);
   const [filter, setFilter] = useState("all");
   const needsRecords = ["all", "content", "reviews"].includes(filter);
   const recordKind = filter === "content" ? "content" : filter === "reviews" ? "reviews" : "all";
-  const [open, setOpen] = useState(mobile);
+  const [open, setOpen] = useState(false);
   const preferences = useWorkspacePreferences(workspace);
   const [archiveOverride, setArchiveOverride] = useState<boolean | null>(null);
   const includeArchived =
@@ -179,7 +137,6 @@ function FinderInput({
   const select = (option: SearchOption) => {
     setOpen(false);
     setQuery("");
-    onSelected?.();
     if (option.action) onAction?.(option.action);
     else navigate(option.href);
   };
@@ -296,25 +253,26 @@ function FinderInput({
         onValueChange={(item) => {
           if (item) select(item);
         }}
-        inline={mobile}
-        open={mobile || open}
+        open={open}
         onOpenChange={setOpen}
         autoHighlight
       >
         <ComboboxInput
+          ref={inputRef}
           aria-label={label}
-          placeholder={label}
+          placeholder=""
           showTrigger={false}
-          className="w-full"
+          className="workspace-finder-input w-full rounded-full"
           onClick={() => setOpen(true)}
-          autoFocus={mobile}
           maxLength={200}
         >
           <InputGroupAddon align="inline-start">
             <SearchIcon />
           </InputGroupAddon>
         </ComboboxInput>
-        <div className="pt-3">{results}</div>
+        <ComboboxContent className="workspace-finder-results max-h-[65dvh] overflow-y-auto">
+          {results}
+        </ComboboxContent>
       </Combobox>
     </div>
   );

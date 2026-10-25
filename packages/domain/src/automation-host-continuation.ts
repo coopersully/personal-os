@@ -44,6 +44,18 @@ const recurringAutomationHostTriggerSchema = z
       .strict(),
   })
   .strict();
+export const scheduledAutomationHostTriggerSchema = z
+  .object({
+    type: z.literal("scheduled"),
+    localTimes: z
+      .array(z.string().regex(/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/))
+      .min(1)
+      .max(8)
+      .refine((times) => new Set(times).size === times.length, "Use distinct local times.")
+      .transform((times) => [...times].sort()),
+    timeZone: automationHostTimeZoneSchema,
+  })
+  .strict();
 const eventAutomationHostTriggerSchema = z
   .object({
     type: z.literal("event"),
@@ -54,6 +66,7 @@ const eventAutomationHostTriggerSchema = z
 export const automationHostTriggerSchema = z.discriminatedUnion("type", [
   recurringAutomationHostTriggerSchema,
   eventAutomationHostTriggerSchema,
+  scheduledAutomationHostTriggerSchema,
 ]);
 export type AutomationHostTrigger = z.infer<typeof automationHostTriggerSchema>;
 
@@ -76,7 +89,7 @@ export const automationHostScheduleCreateInputSchema = z
       .object({
         ...automationHostScheduleCreateCommonFields,
         hostSurface: z.literal("claude_code_routine"),
-        trigger: eventAutomationHostTriggerSchema,
+        trigger: z.union([eventAutomationHostTriggerSchema, scheduledAutomationHostTriggerSchema]),
       })
       .strict(),
   ])
@@ -132,6 +145,36 @@ export const automationHostScheduleSchema = z
     z
       .object({
         ...automationHostScheduleStoredCommonFields,
+        hostSurface: z.literal("claude_code_routine"),
+        hostAutomationId: hostAutomationIdSchema,
+        trigger: scheduledAutomationHostTriggerSchema,
+        state: z.literal("active"),
+        nextExpectedAt: isoDateTimeSchema,
+      })
+      .strict(),
+    z
+      .object({
+        ...automationHostScheduleStoredCommonFields,
+        hostSurface: z.literal("claude_code_routine"),
+        hostAutomationId: hostAutomationIdSchema,
+        trigger: scheduledAutomationHostTriggerSchema,
+        state: z.literal("paused"),
+        nextExpectedAt: z.null(),
+      })
+      .strict(),
+    z
+      .object({
+        ...automationHostScheduleStoredCommonFields,
+        hostSurface: z.literal("claude_code_routine"),
+        hostAutomationId: hostAutomationIdSchema,
+        trigger: scheduledAutomationHostTriggerSchema,
+        state: z.literal("revoked"),
+        nextExpectedAt: z.null(),
+      })
+      .strict(),
+    z
+      .object({
+        ...automationHostScheduleStoredCommonFields,
         hostSurface: z.literal("codex_desktop"),
         hostAutomationId: z.null(),
         trigger: recurringAutomationHostTriggerSchema,
@@ -175,7 +218,7 @@ export const automationHostScheduleSchema = z
         ...automationHostScheduleStoredCommonFields,
         hostSurface: z.literal("claude_code_routine"),
         hostAutomationId: z.null(),
-        trigger: eventAutomationHostTriggerSchema,
+        trigger: z.union([eventAutomationHostTriggerSchema, scheduledAutomationHostTriggerSchema]),
         state: z.literal("setup_pending"),
         nextExpectedAt: z.null(),
       })
@@ -185,7 +228,7 @@ export const automationHostScheduleSchema = z
         ...automationHostScheduleStoredCommonFields,
         hostSurface: z.literal("claude_code_routine"),
         hostAutomationId: z.null(),
-        trigger: eventAutomationHostTriggerSchema,
+        trigger: z.union([eventAutomationHostTriggerSchema, scheduledAutomationHostTriggerSchema]),
         state: z.literal("cancelled"),
         nextExpectedAt: z.null(),
       })
@@ -318,6 +361,7 @@ export const automationHostScheduleObservationInputSchema = z.union([
       ...automationHostScheduleObservationCommonFields,
       hostSurface: z.literal("claude_code_routine"),
       observedState: z.literal("active"),
+      invocationObserved: z.literal(true).optional(),
     })
     .strict(),
   z
@@ -347,6 +391,7 @@ export const automationHostScheduleHealthSchema = z.object({
   nextExpectedAt: isoDateTimeSchema.nullable(),
   observedAt: isoDateTimeSchema,
   repairOwner: z.enum(["host"]).nullable(),
+  expectationBasis: z.enum(["declared_cadence", "host_reported"]).optional(),
   graceMilliseconds: z.number().nonnegative().nullable().default(null),
   overdueAt: isoDateTimeSchema.nullable().default(null),
 });
@@ -389,16 +434,20 @@ export function observeAutomationHostScheduleHealth(
   if (schedule.nextExpectedAt === null) {
     throw new Error("A bound recurring schedule requires its next expected host slot.");
   }
-  const graceMilliseconds = Math.min(
-    3_600_000,
-    Math.max(300_000, schedule.trigger.recurrence.everyMinutes * 60_000 * 0.1),
-  );
+  const graceMilliseconds =
+    schedule.trigger.type === "scheduled"
+      ? 15 * 60_000
+      : Math.min(
+          3_600_000,
+          Math.max(300_000, schedule.trigger.recurrence.everyMinutes * 60_000 * 0.1),
+        );
   const overdueAt = new Date(
     new Date(schedule.nextExpectedAt).getTime() + graceMilliseconds,
   ).toISOString();
   const overdue = now.getTime() > new Date(overdueAt).getTime();
   return automationHostScheduleHealthSchema.parse({
     state: overdue ? "overdue" : "expected",
+    expectationBasis: schedule.trigger.type === "scheduled" ? "declared_cadence" : "host_reported",
     graceMilliseconds,
     overdueAt,
     lastObservedAt: schedule.lastObservedAt,
@@ -430,3 +479,38 @@ export const automationHostPromptPageInputSchema = z
     limit: z.coerce.number().int().min(1).max(100).default(20),
   })
   .strict();
+
+/** Observational daily slots only. Gaps skip that wall time; overlaps use its first occurrence.
+ * Scan at most four UTC days, including the preceding day to exclude a repeated wall minute.
+ * This never enqueues work or advances stored health on a read.
+ */
+export function nextScheduledAutomationHostSlot(
+  trigger: z.infer<typeof scheduledAutomationHostTriggerSchema>,
+  after: Date,
+): string {
+  const parsed = scheduledAutomationHostTriggerSchema.parse(trigger);
+  if (!Number.isFinite(after.getTime())) throw new Error("Invalid schedule observation time.");
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: parsed.timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  const seen = new Set<string>();
+  const start = Math.floor(after.getTime() / 60_000) * 60_000 - 26 * 60 * 60_000;
+  for (let instant = start; instant <= after.getTime() + 72 * 60 * 60_000; instant += 60_000) {
+    const parts = Object.fromEntries(
+      formatter.formatToParts(instant).map((part) => [part.type, part.value]),
+    );
+    const time = `${parts.hour}:${parts.minute}`;
+    if (!parsed.localTimes.includes(time)) continue;
+    const slot = `${parts.year}-${parts.month}-${parts.day}/${time}`;
+    if (seen.has(slot)) continue;
+    seen.add(slot);
+    if (instant > after.getTime()) return new Date(instant).toISOString();
+  }
+  throw new Error("No daily host slot within the bounded observation horizon.");
+}

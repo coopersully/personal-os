@@ -12,9 +12,22 @@ describe("issued Finance automation prompts", () => {
       expect(b).toContain(second);
       expect(b).not.toContain(first);
       expect(a).toContain("maintain_finances");
-      expect(a).toContain("Never self-approve");
+      expect(a).toContain("including budgets, without individual approval");
+      expect(a).toContain("Otherwise obtain the required owner approval");
       expect(a).toContain("not a credential");
       expect(a).not.toContain("send_finance_message");
     }
   });
+});
+
+it("makes scheduled-only continuation latency and server-owned slots explicit", () => {
+  const text = renderFinanceAutomationPrompt({
+    id: "schedule",
+    hostSurface: "claude_code_routine",
+    trigger: { type: "scheduled", localTimes: ["08:00", "20:00"], timeZone: "America/New_York" },
+  });
+  expect(text).toContain("08:00 and 20:00 in America/New_York");
+  expect(text).toContain("do not submit nextExpectedAt");
+  expect(text).toContain("No API trigger or trigger bearer is required");
+  expect(text).toContain("wait for the next scheduled invocation");
 });

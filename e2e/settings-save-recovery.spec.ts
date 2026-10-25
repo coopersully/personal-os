@@ -44,7 +44,12 @@ test("two editors retain attempted workspace values and explicitly recover repea
     secondContext = await browser.newContext({
       storageState: await page.context().storageState(),
       baseURL: origin,
-      ...(info.project.use.viewport ? { viewport: info.project.use.viewport } : {}),
+      // Short/narrow drawers must keep both the comparison/Refresh and decisions reachable.
+      ...(info.project.use.isMobile
+        ? { viewport: { width: 320, height: 568 } }
+        : info.project.use.viewport
+          ? { viewport: info.project.use.viewport }
+          : {}),
       isMobile: info.project.use.isMobile ?? false,
       hasTouch: info.project.use.hasTouch ?? false,
     });

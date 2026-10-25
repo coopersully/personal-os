@@ -1,8 +1,10 @@
 import type { FinanceCashflowProjectionView, FinanceIncomeStream } from "@personal-os/domain";
 import { useId, useState } from "react";
+import { SettingsControlsContext } from "@/components/settings-controls-context";
+import { Field, FieldLabel } from "@/components/settings-field";
+import { SettingsSelect } from "@/components/settings-select";
 import { Button } from "@/components/ui/button";
-import { Field, FieldLabel } from "@/components/ui/field";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { NativeSelectOption } from "@/components/ui/native-select";
 import {
   Table,
   TableBody,
@@ -11,6 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { FinanceDisclosure } from "./disclosure";
 
 export interface PaydayViewProps {
   view: FinanceCashflowProjectionView | null;
@@ -82,8 +85,7 @@ export function PaydayView({
               ? "Protected floor unknown. No zero floor or affordability is assumed; a floor is optional."
               : `User-confirmed floor ${money(qualified.protectedFloor.amountMinorUnits)}. Lowest stated/end-of-day margin ${money(qualified.protectedFloor.lowestEndOfDayMarginMinorUnits)}; this is not an intraday affordability guarantee.`}
           </p>
-          <details className="min-w-0">
-            <summary className="cursor-pointer">Daily movements</summary>
+          <FinanceDisclosure title="Daily movements">
             <Table aria-label="Estimated cycle movements">
               <TableHeader>
                 <TableRow>
@@ -125,9 +127,8 @@ export function PaydayView({
                 Next cycle movements
               </Button>
             </div>
-          </details>
-          <details className="min-w-0">
-            <summary className="cursor-pointer">How this estimate works</summary>
+          </FinanceDisclosure>
+          <FinanceDisclosure title="How this estimate works">
             <dl className="grid gap-3 sm:grid-cols-3">
               <div>
                 <dt>Opening stated balance</dt>
@@ -166,29 +167,38 @@ export function PaydayView({
               {qualified.evidence.occurrences.length} scheduled occurrence revisions;{" "}
               {qualified.evidence.actualMovements.length} actual movement revisions.
             </p>
-          </details>
+          </FinanceDisclosure>
         </>
       ) : null}
-      <Field>
-        <FieldLabel htmlFor={`${id}-selected-income`}>Income stream defining this cycle</FieldLabel>
-        <NativeSelect
-          id={`${id}-selected-income`}
-          value={selectedIncomeStreamId ?? ""}
-          onChange={(event) => {
-            setPage(0);
-            onIncomeStreamChange(event.target.value || null);
-          }}
-        >
-          <NativeSelectOption value="">Choose an income stream</NativeSelectOption>
-          {incomeStreams.map((stream) => (
-            <NativeSelectOption key={stream.id} value={stream.id}>
-              {stream.displayName}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-      </Field>
-      <details open={!qualified}>
-        <summary className="cursor-pointer">Review or update cycle evidence</summary>
+      <SettingsControlsContext.Provider value={true}>
+        <div className="settings-panel">
+          <Field>
+            <FieldLabel htmlFor={`${id}-selected-income`}>
+              Income stream defining this cycle
+            </FieldLabel>
+            <SettingsSelect
+              id={`${id}-selected-income`}
+              value={selectedIncomeStreamId ?? ""}
+              onChange={(event) => {
+                setPage(0);
+                onIncomeStreamChange(event.target.value || null);
+              }}
+            >
+              <NativeSelectOption value="">Choose an income stream</NativeSelectOption>
+              {incomeStreams.map((stream) => (
+                <NativeSelectOption key={stream.id} value={stream.id}>
+                  {stream.displayName}
+                </NativeSelectOption>
+              ))}
+            </SettingsSelect>
+          </Field>
+        </div>
+      </SettingsControlsContext.Provider>
+      <FinanceDisclosure
+        key={qualified ? "qualified" : "needs-evidence"}
+        title="Review or update cycle evidence"
+        defaultOpen={!qualified}
+      >
         <div className="flex flex-wrap gap-2 pt-2">
           <Button variant="secondary" onClick={onConfirmSchedule}>
             Confirm recurring schedule
@@ -203,7 +213,7 @@ export function PaydayView({
             Refresh cycle evidence
           </Button>
         </div>
-      </details>
+      </FinanceDisclosure>
       {!selectedIncomeStreamId ? (
         <p>
           Choose the income source explicitly. Multiple income streams never select a payday

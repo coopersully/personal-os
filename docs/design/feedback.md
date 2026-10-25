@@ -151,7 +151,7 @@ Apply these questions in order:
 | Recoverable action failure: save, refresh, copy, or delete fails with a known safe retry path | Sonner error; retain values, actual saved state, and the original action | “Couldn’t refresh the wallpaper. Try again.” |
 | Unsaved or uncertain result: work remains unsaved, or the operation may have succeeded despite a timeout | Persistent unsaved/checking state and recovery; optional single toast to announce failure | “Couldn’t confirm the change. Check the event before retrying.” |
 | Conflict: another change prevents safely applying this edit | Persistent form/section message with resolution | “This event changed. Reload it before saving.” Preserve the draft |
-| Load failure: initial data cannot be displayed | Error state in the affected region, with Retry | “Couldn’t load your calendar.” Never show an empty-success state |
+| Signed-in read failure: initial data cannot be displayed | Shared read recovery queue (desktop dialog/mobile drawer), with Retry | “Couldn’t load your calendar.” Never show an empty-success state |
 | Stale/background failure: refresh fails but previous data exists | Retain data for transport/server failures with freshness/status; never retain data denied by 401/403 | “Showing the last update. Reconnect Google Calendar.” Avoid polling toasts |
 | Capability/access/authentication: permissions, verification, or connection blocks work | Persistent contextual Alert or sign-in state | “Confirm your email to connect accounts.” |
 | Temporary service limit: a rate limit or outage blocks repeated attempts | Toast for an isolated failure; persistent status if blocking continues | State a retry time only when known; do not encourage immediate retry loops |

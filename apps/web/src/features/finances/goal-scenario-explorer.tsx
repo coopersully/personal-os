@@ -197,7 +197,7 @@ export function FinanceGoalScenarioExplorer({
         <div className="flex flex-col gap-2">
           <p className="text-sm">
             {evidence
-              ? `Saved progress confirmed by you as of ${evidence.asOf} · ${evidence.currencyCode}. This is your statement, not bank verification.`
+              ? `Saved progress confirmed ${evidence.actor.type === "agent" ? "by an agent under review bypass" : "by you"} as of ${evidence.asOf} · ${evidence.currencyCode}. This is a recorded statement, not bank verification.`
               : "Current progress and currency are unknown for this goal version. Confirm them before using saved goal progress."}
           </p>
           {evidence ? (
@@ -303,7 +303,7 @@ export function FinanceGoalScenarioExplorer({
                 confirmed: connectedGoal ? evidence !== null : confirmed,
                 provenance: connectedGoal
                   ? evidence
-                    ? "explicit_user"
+                    ? evidence.provenance
                     : null
                   : confirmed
                     ? "Explicit user confirmation for this hypothetical session"

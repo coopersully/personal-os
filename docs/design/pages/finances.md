@@ -3,7 +3,7 @@
 > October 18 Finance experience revision: the consolidated [design](../../superpowers/specs/2026-10-18-finance-experience-design.md)
 > and [implementation plan](../../superpowers/plans/2026-10-18-finance-experience.md) define the target for setup,
 > Spending, Chat, Automations, Activity, and manual workflow coverage. They supersede conflicting
-> earlier targets below, including ungated setup and agent budget self-approval. This is not a
+> earlier setup targets below. The review-bypass policy below supersedes their budget approval exception. This is not a
 > declaration that the redesigned experience has shipped.
 > The implementation merged in [PR #270 — Complete the Finance workspace and guarded agent workflows](https://github.com/coopersully/personal-os/pull/270).
 > The [implementation log](../../product/implementation-log.md) distinguishes this source checkpoint
@@ -36,48 +36,117 @@ months. Missing budgets and multi-month selections omit fill with an explanation
 bucket/category grouping. Never silently substitute today's budget. The [spending contract](../../engineering/finance-spending.md) defines revision selection and coverage;
 design §§4 and 13 retain the accepted direction.
 
+## Dialogs and detail views
+
+Finance uses the shared responsive shadcn dialog composition: centered dialogs on desktop
+and drawers below 768px. Use a 32rem default width and 48rem for dense editors and evidence;
+constrain height to the viewport, retain the heading and close control, and scroll one body.
+Use consistent inset spacing, readable secondary surfaces, labeled fields and aligned actions.
+Mobile controls retain comfortable touch targets and safe-area padding. Keep Cancel separate
+from the primary action and preserve pending-state guards and financial approval behavior.
+
+Lead detail views with the amount or decision, then supporting facts and related records.
+Put raw source evidence and technical qualifications behind named disclosures. Spending's
+breakdown shows recorded spending, a daily graph, posted/pending amounts and category rows;
+exact contribution details preserve matching-transaction navigation. Budget editing explains
+that saving creates a proposal, with the current version rendered quietly in the body.
+
 ## Overview user job
+
+### Shared section and metric layout
+
+Overview and Wealth use one horizontal metric rail, composed from the shared shadcn Carousel.
+Keep cards compact with small icons, a prominent value and a short description below. Swipe or
+use keyboard/chevrons to reach every metric; loop existing items when the rail overflows. Hide
+chevrons and their navigation row when all cards fit. Keep controls below the cards so they never
+cover values. On desktop reveal navigation on hover/focus; keep it visible on touch screens when needed. Respect reduced motion and keep scrolling inside the rail.
+
+Finance section headings and descriptions sit above their content surfaces. Accounts and Financial
+goals use open headings above individual rows; Monthly budget, Resources and Allocations use the
+same heading treatment above their summary/table cards. Preserve section labels for navigation and
+assistive technology. Do not add an enclosing card solely to hold a section title.
 
 ### Daily summary
 
-Overview leads with what needs the person, recorded changes, and upcoming money before secondary
-account-view settings. Its review count comes from the shared Finance decision summary, including
-questions, approvals and cases shown by the global Reviews dialog; it is not a transaction-only
-Inbox count. A review link opens that canonical destination without copying its first question or
-placing an approval action on Overview. Unavailable or denied decision reads suppress an all-clear.
+Overview leads with an At a glance heading and compact linked balance metrics. A small ghost info button opposite the heading opens the About these totals disclosure, then upcoming expected money and planning context. The disclosure replaces the Financial position card and retains freshness, reconciliation, required evidence gaps and Accounts navigation. Reviews remain available through the shared sidebar entry; Overview
+does not duplicate the decision summary or its action links. Overview makes no all-clear review claim and does not fetch a second decision summary.
 
 Recorded reviews and maintenance link to Activity evidence rather than implying a new completed
-action. Upcoming money shows at most three canonical expected occurrences across 30 owner-local
-dates, with remaining amounts for partial occurrences, explicit currencies and incomplete-source
-caveats. Its Cash flow link retains that exact agenda range. Expected movements are not booked
-money or a safe-to-spend total. Existing position, ownership, complete-plan review and manual
-correction controls remain available; no second queue or financial source is created.
+action. Upcoming money uses the shared table with expected date, linked item and signed expected amount. Income uses success color and +;
+outflows use destructive color and −, matching Transactions, without a trailing currency code.
+Rows open the corresponding income/bill source in Cash flow; item links also support keyboard navigation. Show ten canonical occurrences per page across 30 owner-local dates, with
+standard previous/next icon buttons, page count, visible range and a 10/25/50 rows-per-page selector below the table surface.
+The shared Card uses the same settings-panel treatment and subtle dividers as shared DataTable,
+with aligned 16px horizontal cell padding, compact 8px vertical padding and wrapping item names.
+Pagination sits outside the Card; it does not form an extra table row or padded panel. Six demo items fit
+on one page. Do not repeat the date-range/timezone explanatory line above it. Preserve remaining
+amounts for partial occurrences, explicit currencies and incomplete-source caveats. Its Cash flow
+link sits opposite the Coming next heading and retains the exact agenda range.
+Unavailable recurring records appear in the Coming next header description as items not included yet, with dates/amounts to confirm in Cash flow. Open upcoming money and Open Activity use small ghost arrow icon links opposite their section headings, with accessible names and tooltips. Expected movements are not booked money or a safe-to-spend
+total. Complete plan is a single status/allocation/unassigned summary linking to Budget; rationale and allocation details stay on Budget. Remove the duplicate forecast, wealth-priority and generic next-step/navigation prompts. Show a reimbursement summary only for a positive outstanding amount. What changed shows only the latest recorded period review and maintenance status with Activity navigation; use one empty-state line when neither exists.
 
 ### Spending dashboard
+
+The fresh Spending selection defaults to **this week** with **automatic grouping**
+in every view, including Rhythm. Saved explicit choices and URL/recovery scopes
+take precedence; switching visualization never silently changes the selected range.
 
 Spending is a new sidebar destination; retain Overview and existing destinations in this scope.
 Automations and Activity each have their own sidebar page. Reassess redundancy after the redesign
 is visible rather than replacing Overview now.
 
+The display toolbar groups the single selected view, period navigation, and grouping selector.
+Use shared checked menus for period/grouping and the shared single-select toggle for views.
+Spending options open a bounded dialog with the shared Settings row context: labels at the start,
+controls at the end, active-filter count on its trigger, and immediate revisioned preference saves.
+Keep the selected-period amount, basis, pending inclusion and coverage caveat visible. Detailed
+scope, monthly-budget confirmation, source qualifications and technical references live in
+**About these totals**. Bubble arrangement is always available with a reset icon in its heading.
+Do not add a repeated list or explanatory footer beneath the canvas. Preserve exact contributions,
+recovery links and accounting queries.
+
 The spending bubble view defaults to configured budget buckets, or categories when no buckets are
-configured, and remembers the user's explicit grouping choice. Buckets support category drill-down.
+configured, and remembers the user's explicit grouping choice. Buckets open their existing detail view; inspect individual categories with category grouping.
 Both bucket and category contexts offer Transactions links preserving the selected group and period.
-The visual direction is a draggable, elastic field attracted toward the center. Released bubbles
-remain roughly where placed, with a gentle center pull. Session-only position persistence, motion,
-and distinct drill-down/transaction interactions follow the accepted
-[design](../../superpowers/specs/2026-10-18-finance-experience-design.md#5-elastic-bubble-interaction).
+Bubbles are always draggable, including when reduced motion is enabled. Keep bodies rigid:
+no drag elasticity or inertial throw. Resolve collisions while dragging with the active body pinned;
+on release, use a damped spring and center the aggregate bounds in the canvas. Preserve relative
+session positions across data changes. The heading is Breakdown and the sole layout action is an
+accessible reset icon button. Icons sit at each circle's center, with labels below. Settle geometry and measure before first paint;
+newly mounted circles start at their settled positions. Coincident circles separate in two dimensions,
+with a final collision-only cleanup after the centering attraction stops.
+
+Bubble backgrounds and budget fills use clean category colors, without dithering or filter effects.
+Keep the circular background separate from crisp foreground labels/icons. Reduced motion disables
+spring/fill animation while manual dragging and keyboard detail/reset controls remain available.
 
 Use the assigned bucket/category color with a translucent tonal overlay filling upward inside the
 bubble; do not use a perimeter progress ring. Labels, icons, and controls remain legible above it.
 Bubble size represents spending for the selected period; fill represents monthly budget usage and
-must be explicitly labeled as monthly even on shorter views. Animate fill changes and distinguish
+is labeled as monthly in each circle's accessible name and tooltip even on shorter views. Animate fill changes and distinguish
 overspending from exactly using the budget. Missing limits never become invented percentages.
 Single-month selections resolve the applicable approved budget; multi-month selections omit fill.
-A visible legend separates selected-period circle size from monthly fill. Positive circles retain
-true area; those below 44 px leave the Tab order. A collapsed All spending groups disclosure offers
-full names, exact amounts, qualified monthly usage and overage through native 44 px controls.
-Zero and negative groups remain in List. Reduced motion disables Arrange and preserves vertical
-scrolling. See the [spending contract](../../engineering/finance-spending.md) for coverage and disclosure rules.
+Positive circles retain true area and remain keyboard focusable, including tiny circles. Full names,
+exact amounts, monthly usage and coverage are available through accessible names/tooltips and the
+existing detail dialog. Zero and negative groups remain in List. Reduced motion disables automatic
+animation while preserving manual arrangement. Do not repeat the List below Bubbles.
+
+Trends uses the shared Card composition and a responsive net-spending area chart with Finance accent,
+quiet grid/axes and formatted dates. The bucket/category focus picker sits opposite the Trends section heading, above Spending over time. The comparison stays in
+the chart header; detailed period rows, source/coverage and group changes live in its info dialog.
+A smooth monotone line and quiet branded fill preserve signed net refunds; exact selections remain available by pointer and keyboard.
+Rhythm is an open contribution-style heatmap: only a Rhythm heading with an interval selector and fluid rounded square
+blocks, without containing Cards, duplicate date/timezone context, a legend, or a footer. Blocks fill the
+available width with a 3rem minimum, wrap responsively, and let content height grow with their count. Auto is the initial selection; the user can explicitly select Hourly, Daily, Weekly, Monthly, or
+Yearly for any range. In Auto, select grain by inclusive range length: 1 day → hourly; 2–62 → daily; 63–366 → weekly; 367–1096 → monthly;
+longer → yearly. Weekly blocks follow the saved week start; monthly/yearly blocks follow calendar
+boundaries. Clip boundary blocks to the selected range and identify partial periods in tooltips.
+Color intensity represents net spending per block; confirmed zero, missing evidence, net refunds
+and future periods stay distinct. Hover/focus reveals exact dates, amount and qualifications; pointer
+or keyboard activation opens the exact daily/coarse-period selection. For hourly data, retain an
+explicit ? block for untimed purchases, with the amount and explanation in its tooltip.
+See the [spending contract](../../engineering/finance-spending.md) for coverage and disclosure rules.
+
 
 Include pending spending by default, with a configurable inclusion option in the view and Finance
 settings. Expose grouping defaults and granular display choices during setup using simple controls;
@@ -152,7 +221,7 @@ edited. Client arithmetic provides form feedback; persisted totals are the
 server's result. The complete plan must balance to the cent.
 
 Approval names the displayed budget version ID and its expected version, with
-`approvalSource: user_instruction` and an idempotency key. A changed version,
+`approvalSource: user_instruction` for the owner or `agent_self_approval` for an execution agent under enabled review bypass, and an idempotency key. A changed version,
 failed request, or pending request keeps an explicit recovery state. Proposals
 remain visible before approval; a category-only budget view is not a substitute
 for the complete plan shared with MCP.
@@ -302,15 +371,18 @@ defaults and action boundaries remain in the Finance experience discussion.
 
 ### Accepted direction: approvals and Finance activity
 
-Budget activation and changes to the active budget always require explicit human approval of the
-exact proposal. Agents may prepare proposals; no automatic adjustment allowance or self-approval
-replaces that decision. This target supersedes earlier budget self-approval guidance.
+Persisted review bypass supplies standing approval for all Finance application approval gates,
+including budget activation, category allocations, maintenance budgets, and planning confirmations.
+With bypass off, exact changes retain their owner review boundary. Agents require the applicable
+write/execute scopes and keep their actual approval identity; bypass never replaces evidence,
+ownership, source revisions, credential checks, or provider consent. This policy supersedes the
+October 18 budget-specific human approval exception.
 
 Finance Activity exposes canonical human decisions and validated committed candidate-effect
 receipts, with links to supporting messages, audit evidence, and affected records. Proposed,
 failed, or no-change actions are not presented as completed financial effects. Routine actions may
 group by one run and action family; budget decisions remain individually inspectable with their
-human-approval provenance. Coverage is partial: historical actions without the required receipt
+actual approval provenance, including bypassed agent execution. Coverage is partial: historical actions without the required receipt
 are not inferred from conversation text. The [conversation contract](../../engineering/finance-conversation.md#activity-financial-scope)
 defines the implemented evidence boundary; design §8 retains the broader target.
 
@@ -353,9 +425,8 @@ and authorization; Finance routes there without duplicating those controls.
 
 Finance settings provides the canonical financial profile and planning preferences, plus
 separate payroll details. The **Let agents apply confident Finance changes** switch
-is off by default and remains a signed-in-user control for eligible non-budget Finance actions.
-It does not authorize an active budget change: every such change still requires exact authenticated
-human approval. Enabling it does not turn uncertainty into permission; questions and ambiguous
+is off by default and remains a signed-in-user control. When enabled it supplies standing approval
+for all Finance application actions, including changes to the active budget. Enabling it does not turn uncertainty into permission; questions and ambiguous
 activity still come to Review.
 
 ## Content contract
@@ -541,9 +612,9 @@ from missing planning facts, proposed budgets awaiting approval, and disconnecte
 not successfully refreshed for more than 24 hours. Accounts displays the total account count, including manual accounts. Missing balances, unresolved ownership, and possible duplicate accounts also set sidebar attention.
 Account warnings name the affected account and provide sync, reconnect, or edit actions.
 
-Accounts use full-width records with type icons, source/status badges beside the title, and tooltip-equipped edit/transaction actions at the top end. Wealth presents current metrics in responsive shared KPI cards and links to Accounts rather than repeating its records. Historical charts are deferred until reliable balance history is available.
+Accounts use compact full-width records with type icons, institution/type below the title, end-aligned balances, and a shared Popover for source details and edit/transaction actions. Debt uses destructive text and an Amount owed label. Wealth presents current metrics in responsive shared KPI cards and links to Accounts rather than repeating its records. Historical charts are deferred until reliable balance history is available.
 
-Accounts, Budget buckets, and Financial goals each expose a tooltip-equipped Add action at their card header end. The transaction-only Add menu lives at the end of the header; other Finance pages have no
+Accounts, Budget buckets, and Financial goals expose their management actions in the shared workspace header. The transaction-only Add menu lives at the end of the header; other Finance pages have no
 workspace-wide Add menu. Cash flow view selection occupies the shared leading header slot; search
 and other utilities remain at the end. Account records are secondary Items within the Accounts
 card, with inline attention, source, kind, balance, and recovery actions rather than separate warning
@@ -569,9 +640,9 @@ persistent labels. Merchant and category entry search existing names and permit 
 records are created by the transaction save. Budget navigation needs attention when prerequisites
 are incomplete or no active approved plan exists.
 
-Split allocations use the card surface inside the background-toned dialog so each allocation is distinct. The Transactions Add menu can save a reusable category without creating a transaction; the authenticated human-only endpoint validates the name, scopes storage to the owner, and records an audit event.
+Split allocations use the card surface inside the background-toned dialog so each allocation is distinct. The Transactions Add menu can save a reusable category without creating a transaction; the authenticated endpoint enforces current execution policy, validates the name, scopes storage to the owner, and records an audit event.
 
-KPI amounts use compact currency notation (for example, $23.6k), with exact values available on hover and to assistive technology. Overview labels monthly spending **Spent this month**. Four-metric sets use four columns when space permits and otherwise a balanced 2×2 grid, never three plus one.
+KPI amounts use compact currency notation (for example, $23.6k), with exact values available on hover and to assistive technology. Overview labels monthly spending **Spent this month**, explicitly described as posted personal expenses with no pending transactions or transfers, and links to Spending for the current month with pending excluded. Compact Overview metrics link Cash to Accounts and Net worth to Wealth; smaller icons and values keep context close to each total. Their descriptions state recorded planning-account balances and ownership share, or posted personal expenses excluding pending/transfers. Adjacent context explains that Spending can differ through date/account filters, pending inclusion, and refund adjustments. Four-metric sets use four columns when space permits and otherwise a balanced 2×2 grid, never three plus one.
 
 Transaction cards place the large signed amount at the inline end, with matching status and category badges inline beside the small date below the merchant. A compact merchant icon spans the title and metadata rows. The Tasks-standard Display menu offers grouping by date, category, merchant, direction, or posting state in card view only; group/view choices preserve filters in the URL and save to Finance workspace settings using revision-checked writes, as in Tasks. Opening Transactions without explicit URL choices restores these defaults; explicit links override them without resaving. Table view retains the saved card grouping without applying it. Grouping applies to the loaded page and is explicitly labelled when pagination is present.
 
@@ -623,8 +694,7 @@ Goal comparisons appear before their input form and receive keyboard focus after
 comparison. Hypothetical, not-saved, and zero-growth limits stay visible; dates, anchors and horizon
 assumptions use a disclosure. Saved progress retains its exact goal version and evidence. Goal
 input errors use Sonner once, while static amount-format guidance stays beside the field. These
-presentation choices do not alter formulas, financial records, source qualification, or required
-human confirmation.
+presentation choices do not alter formulas, financial records, source qualification, or confirmation under the current review policy.
 
 ### Recurring cost comparison
 
@@ -656,3 +726,112 @@ at 1,200 periods and paginated. Achieved goals, nonpositive contributions, missi
 beyond-horizon estimates stay explicit. Exploring changes never saves a budget or actual progress.
 Confirmation writes retain their exact request/key on uncertain results, refresh canonical reads,
 and use Sonner for loading and outcomes; field correction guidance stays beside the relevant input.
+
+### Consistent planning controls
+
+Budget places category management in the shared workspace header and uses shared Cards for
+its monthly totals, resources and allocations. Assumptions and rationale use the shared Finance
+disclosure; revising and approving a version keep their existing explicit authority and recovery.
+Cash flow and Spending place view, period and scope controls in the shared workspace header. Timeline options
+open a bounded settings-row dialog for dates and account scope; account menus retain checked
+multi-selection and an explicit empty selection. Reset clears only timeline parameters. Schedule,
+date-scope and payday evidence use consistent labelled disclosures, and the payday income selector
+uses the shared checked/searchable Settings control. Selection never certifies a schedule or balance.
+Wealth leads with the shared metrics and goal rows before supporting position evidence. Show goal
+progress only when current applicable confirmation evidence and a positive target support it.
+Keep progress confirmation and exploration direct; place pause/resume, completion and removal in
+the goal's contextual menu. Completion/removal retain their confirmation dialogs. Goal editing uses
+shared Settings rows and checked priority choices without changing save, version or error behavior.
+
+Account rows align institution and account identity at the start, with type and recorded current balance at the end. Institution and type sit below the name. A shared Popover behind the account options button contains ownership, source observation details and edit/transaction actions. Debt uses destructive text and an Amount owed label; attention and recovery actions stay visible. Cash flow occurrences use distinct shared card surfaces, end-aligned expected amounts, and explicit money-in/money-out labels.
+
+The shared top navigation starts with the current Finance page name on desktop and mobile. The root Finance route is labelled Overview; page controls follow this identity.
+
+Spending keeps its route utilities on the primary navigation baseline. The small muted range label directly beside the page title is the date picker (for example, “this month”, a historical month, single date, or formatted range). Its popover contains period navigation and custom date fields at every viewport size. Other controls align at the end of the primary row; the view picker is an accessible icon button. At phone widths, grouping moves into Spending options while date selection remains beside the title.
+
+
+Spending summary uses compact Cards for selected-scope spending, recorded daily average,
+and the largest positive spending group. The average divides recorded spending through today
+by elapsed calendar days in the selection (including zero-spend days), never future days;
+future-only selections show no average. The largest group opens its existing drill-down.
+The Total spending card opens a standard dialog with a daily net-spending chart, posted/pending
+split, group breakdown, and progressively disclosed coverage/accounting details. No asterisk
+or separate About button is shown. Daily average says Through today for a range containing today;
+historical ranges retain elapsed-day context. Card fills show whole-month observed usage over
+qualified monthly budgets for the displayed groups and budget accounts, independent of the selected
+range. Total and average share total usage; Top group uses its own budget. Count parent groups
+only, include unbudgeted usage in the numerator, clamp visual fills at 100% while retaining the
+actual percentage, and omit fills when no positive qualified budget exists.
+Summary titles and footer rows stay compact and single-line.
+View selection pairs Bubbles, List, Trends, and Rhythm with bubble, list, line-chart,
+and calendar-grid glyphs consistently in the trigger and menu.
+
+
+Spending summary amounts roll their digits in the direction of value changes, and budget fills
+transition smoothly between widths. Preserve the prior same-owner query result during ordinary
+scope refreshes, with the page marked busy; recovered references continue to require a fresh read.
+Reduced-motion preferences suppress digit and fill animations. The total footer is budget amount
+· usage percentage; daily average includes its elapsed day count and Through today when applicable.
+
+
+List is the default Spending view for new or unset preferences; saved explicit view choices and
+URL overrides remain authoritative. List uses a single shared Card with compact Item rows, selected-
+range amounts, category-colored full-row monthly-budget fills and concise remaining/over amounts. Preserve
+exact monthly usage/coverage in accessible descriptions and hover details. Show pending amounts
+only when nonzero. Bucket categories remain progressively disclosed. Missing/zero limits, negative
+adjustments and budget sorting retain their distinct accounting meanings.
+
+
+The title range picker opens presets, the range calendar, and date inputs directly; no nested
+Period menu is needed. Calendar ranges accept either click direction and single-day selections.
+Spending List rows use the same category/bucket tint as Bubbles, with a KPI-style background fill
+for monthly usage instead of a separate thin bar. Remove decorative row dividers and bubble
+borders; over-budget copy remains explicit. Keep base and budget fill clean, clipped inside the original circular silhouette.
+
+Category/bucket glyphs are inferred by the shared domain appearance resolver from their meaning
+(home, groceries, dining, travel, and so on), with safe generic fallbacks. API Spending metadata,
+List, Bubbles, legends, and detail headings use that vocabulary and the shared reicon registry.
+This applies automatically to existing records and every creation path, including MCP. Agents
+must not ask users to select cosmetic icons or narrate these automatic choices unless requested.
+
+
+Spending List is a sequence of standalone colored card rows, without a shared table surface or
+column headings. Show the group title and “z% ($used) of $budget used, $remaining left” beneath it;
+put the selected-period amount prominently at the end. Use “over” for negative remaining amounts;
+zero and missing budgets keep explicit bounded states. Omit row-level pending notices because
+pending inclusion is controlled in the filter. Preserve sorting in the Breakdown icon menu and
+direct bucket inspection. Background fills continue to represent monthly budget usage.
+
+Spending list glyphs sit in padded square frames with a subtle contrasting surface.
+
+The Trends focus picker uses the same quiet muted value treatment as the date range. Its all-option
+follows the effective grouping (All buckets or All categories), and its catalog retains the full
+unfiltered group choices after selection. Auto uses 24 local-time hour blocks for single-day selections. Only source
+purchase timestamps establish an hour; date-only transactions remain in Time not provided, never
+midnight or the record-update hour. The current transaction source supplies dates only. Hourly zero
+requires complete evidence and no untimed contributions; future and unknown hours remain distinct.
+
+Manual Hourly mode across multiple dates summarizes the local time-of-day pattern across all
+selected days (24 hour-of-day blocks). Its tooltips say across selected days; the untimed block opens
+the full selected period, preserving exact day/period reference scope. Bucket List rows omit nested
+category-breakdown disclosures; the bucket itself still opens its existing detail view.
+
+Spending’s primary header reads as a concise sentence: the title, a date selector
+(“this month”, “in September 2026”, “on Oct 24, 2026”, or “from … to …”), and
+a grouping selector (“by category”, “by bucket”, “grouped automatically”).
+Compose the shared `WorkspaceTitleSentence`: only Spending is bold/title case;
+selectors are both normal muted gray sentence text, with single-space optical
+spacing, no inline chevrons, and full-height shadcn hover/focus targets. On mobile, the one-line title sentence occupies the bottom header row.
+The top row contains the switcher, an expanding real search field (only its icon
+when empty, with an accessible name), and the view,
+filter, and attention buttons at the end. Long scopes scroll only within the
+sentence row; grouping stays accessible.
+
+All Finance routes adopt the same primary header contract, including Overview,
+Transactions, Accounts, Budget, Cash flow, Wealth, Activity, and utility pages.
+On mobile the workspace switcher, elastic icon-only idle search, and compact
+action controls share the top row; the static page title and any scope phrases
+occupy the single bottom row. Keep action groups intact and let search shrink
+first. Cash flow’s section and date scope sit beside its title; timeline and
+transaction presentation use icon selectors, and Budget configuration uses a
+labelled icon action. On desktop, title/scope and search/actions share one header.

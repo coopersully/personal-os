@@ -177,6 +177,8 @@ it("loads bounded review history and exact evidence without changing the active 
   await user.click(secondButton);
   expect(api.getFinanceReviewHistoryItem).toHaveBeenCalledWith(nextId);
   expect(await screen.findByText("Recorded answer: Dinner with a friend")).toBeVisible();
+  expect(screen.getByText(/Receipt checked/)).not.toBeVisible();
+  await user.click(screen.getByText("Source evidence", { exact: true }));
   expect(screen.getByText(/Receipt checked/)).toBeVisible();
   expect(screen.getByRole("link", { name: "Open transaction" })).toHaveAttribute(
     "href",

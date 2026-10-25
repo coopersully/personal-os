@@ -3,7 +3,10 @@
 Use these compact records for network dispatch, progress, remediation, and acceptance. They extend
 the [role contract](autonomous-development.md). The private registry stores structured records;
 task messages carry a short summary and the record's accessible path. These are record contracts,
-not a new service or a schema validator already running in the app.
+not a new service or a schema validator already running in the app. Preserve settled decisions and
+rationale, unfinished obligations and granted permissions across each handoff. Record planned,
+dispatched, acknowledged, implemented, reviewed and accepted milestones separately from blocking
+conditions; tool success or a worker conclusion cannot skip an acceptance milestone.
 
 ## Dispatch packet
 

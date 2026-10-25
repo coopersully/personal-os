@@ -43,7 +43,7 @@ import {
 } from "@/components/ui/table";
 import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import { api } from "../../api.js";
-import { InlineError, PageLoading } from "../../components/async-state.js";
+import { PageLoading } from "../../components/async-state.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { FinanceBudgetBucketManager } from "./bucket-manager.js";
 import {
@@ -411,11 +411,9 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
                     </DialogHeader>
                     <ResponsiveDialogBody>
                       {categoryQuery.isError ? (
-                        <InlineError
-                          error={categoryQuery.error}
-                          retry={() => categoryQuery.refetch()}
-                          stale={categoryQuery.data !== undefined}
-                        />
+                        <Button variant="secondary" onClick={() => void categoryQuery.refetch()}>
+                          Retry categories
+                        </Button>
                       ) : (
                         <FinanceBudgetBucketManager
                           categories={relations.categories}
@@ -436,6 +434,10 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
         ) : null}
         {planQuery.isPending ? <PageLoading workspace="finances" /> : null}
         <QueryFeedback query={planQuery} title="Couldn’t load the plan." />
+        <QueryFeedback query={categoryQuery} title="Couldn’t load categories." />
+        <QueryFeedback query={accountQuery} title="Couldn’t load accounts." />
+        <QueryFeedback query={goalQuery} title="Couldn’t load goals." />
+        <QueryFeedback query={bucketQuery} title="Couldn’t load buckets." />
         {loaded && !plan && approvalTask ? (
           <p>No budget proposal is available to approve.</p>
         ) : null}
@@ -578,10 +580,6 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
             ) : !active ? (
               <p className="text-sm text-muted-foreground">No approved plan is active yet.</p>
             ) : null}
-            <QueryFeedback query={categoryQuery} title="Couldn’t load categories." />
-            <QueryFeedback query={accountQuery} title="Couldn’t load accounts." />
-            <QueryFeedback query={goalQuery} title="Couldn’t load goals." />
-            <QueryFeedback query={bucketQuery} title="Couldn’t load buckets." />
             <PlanDetails plan={plan} relations={relations} />
           </>
         ) : null}

@@ -512,6 +512,28 @@ describe("complete finance plan", () => {
     expect(screen.getByRole("button", { name: "Approve version 3" })).toBeEnabled();
   });
 
+  it("keeps one category failure owner and a usable retry when no plan exists", async () => {
+    api.getFinanceBudget.mockResolvedValue(result(null));
+    api.getFinanceCategories.mockRejectedValue(
+      new ApiClientError({ status: 403, code: "forbidden", message: "Not permitted" }),
+    );
+    mount();
+    await waitFor(() =>
+      expect(notifications.error).toHaveBeenCalledWith(
+        "Couldn’t load categories.",
+        expect.any(Object),
+      ),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Budget buckets" }));
+    expect(screen.getByRole("button", { name: "Retry categories" })).toBeEnabled();
+    expect(notifications.error).toHaveBeenCalledTimes(1);
+    api.getFinanceCategories.mockResolvedValue([]);
+    await userEvent.click(screen.getByRole("button", { name: "Retry categories" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Retry categories" })).not.toBeInTheDocument(),
+    );
+  });
+
   it("does not interpret a failed tool result as a saved or empty plan", async () => {
     api.getFinanceBudget.mockResolvedValue({
       ...result(null),

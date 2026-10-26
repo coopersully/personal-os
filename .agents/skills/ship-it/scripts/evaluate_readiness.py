@@ -5,7 +5,7 @@ import sys
 import subprocess
 from pathlib import Path
 
-from acceptance import review_problems
+from acceptance import review_problems, sha
 
 PENDING = {"IN_PROGRESS", "PENDING", "QUEUED", "WAITING"}
 GITHUB_MERGE_STATES = {
@@ -59,6 +59,32 @@ def equivalent_job_names(coverage):
     return list(FULL_SOURCE_JOBS)
 
 
+def source_integration_matches(observation, receipt):
+    source_sha, live_sha = receipt.get("mergeSha"), observation.get("mergeSha")
+    if (not sha(source_sha) or not sha(live_sha)
+            or receipt.get("workflowSha") != source_sha):
+        return False
+    if source_sha == live_sha:
+        return "mergeCommitEvidence" not in observation
+    evidence = observation.get("mergeCommitEvidence")
+    if (not isinstance(evidence, dict)
+            or set(evidence) != {"provider", "repository", "sourceCommit", "liveCommit"}
+            or evidence.get("provider") != "github-rest"
+            or evidence.get("repository") != observation.get("repository")):
+        return False
+    trees = []
+    for key, expected in (("sourceCommit", source_sha), ("liveCommit", live_sha)):
+        commit = evidence.get(key)
+        if (not isinstance(commit, dict)
+                or set(commit) != {"sha", "treeSha", "parentShas", "url"}
+                or commit.get("sha") != expected or not sha(commit.get("treeSha"))
+                or commit.get("parentShas") != [observation.get("baseSha"), observation.get("headSha")]
+                or commit.get("url") != f"https://api.github.com/repos/{observation.get('repository')}/git/commits/{expected}"):
+            return False
+        trees.append(commit["treeSha"])
+    return trees[0] == trees[1]
+
+
 def source_observation_matches(observation, pr, verification):
     """Consume the bounded shared observer; green commit contexts alone cannot bind a PR attempt."""
     if not isinstance(observation, dict):
@@ -95,12 +121,12 @@ def source_observation_matches(observation, pr, verification):
             or observation.get("event") != "pull_request"
             or receipt.get("event") != "pull_request"):
         return False
-    for field in ("headSha", "baseSha", "number", "bodySha256"):
+    for field in ("headSha", "baseSha", "number", "bodySha256", "mergeSha", "repository", "repositoryId", "baseRef"):
         if observation.get(field) != pr.get(field) or pr.get(field) is None:
             return False
     if not re.fullmatch(r"[a-f0-9]{64}", str(pr.get("bodySha256"))):
         return False
-    for field in ("headSha", "baseSha", "number", "repository", "repositoryId", "baseRef", "mergeSha",
+    for field in ("headSha", "baseSha", "number", "repository", "repositoryId", "baseRef",
                   "runId", "runAttempt", "forceFull"):
         if receipt.get(field) != observation.get(field) or receipt.get(field) is None:
             return False
@@ -110,7 +136,7 @@ def source_observation_matches(observation, pr, verification):
             or type(receipt.get("repositoryId")) is not int or receipt["repositoryId"] < 1
             or not re.fullmatch(r"[\w.-]+/[\w.-]+", str(receipt.get("repository")))
             or not re.fullmatch(r"[a-f0-9]{40}", str(receipt.get("mergeSha")))
-            or receipt.get("workflowSha") != receipt.get("mergeSha")
+            or not source_integration_matches(observation, receipt)
             or receipt.get("workflowRef") != f"{receipt['repository']}/.github/workflows/ci.yml@refs/pull/{receipt['number']}/merge"):
         return False
     if any(not re.fullmatch(r"[a-f0-9]{64}", str(receipt.get(field)))

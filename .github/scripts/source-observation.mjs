@@ -214,11 +214,42 @@ export function validateReceipt(receipt, identity, run, workflow, digests, scope
   };
   if (
     typeof receipt.forceFull !== "boolean" ||
+    !shaPattern.test(receipt.mergeSha ?? "") ||
     !isDeepStrictEqual(receipt, expected) ||
     !Number.isSafeInteger(workflow.id) ||
     !Object.values(digests).every((digest) => digestPattern.test(digest))
   )
     fail("Source receipt does not bind the live candidate; catch up and push a genuine candidate");
+}
+
+function mergeCommitEvidence(client, sourceSha, identity) {
+  if (sourceSha === identity.mergeSha) return undefined;
+  const read = (sha) => {
+    const url = `https://api.github.com/repos/${identity.repository}/git/commits/${sha}`;
+    const value = client.api(`git/commits/${sha}`);
+    if (
+      value?.sha !== sha ||
+      value.url !== url ||
+      !shaPattern.test(value.tree?.sha ?? "") ||
+      !Array.isArray(value.parents) ||
+      !isDeepStrictEqual(
+        value.parents.map((parent) => parent?.sha),
+        [identity.baseSha, identity.headSha],
+      )
+    )
+      fail("Synthetic merge commit identity/content unavailable");
+    return {
+      sha,
+      treeSha: value.tree.sha,
+      parentShas: value.parents.map((parent) => parent.sha),
+      url,
+    };
+  };
+  const sourceCommit = read(sourceSha);
+  const liveCommit = read(identity.mergeSha);
+  if (sourceCommit.treeSha !== liveCommit.treeSha)
+    fail("Synthetic merge commit content changed; obtain current source verification");
+  return { provider: "github-rest", repository: identity.repository, sourceCommit, liveCommit };
 }
 
 export function validateJobs(jobs, run, scope) {
@@ -295,7 +326,17 @@ export function observeSource(client, expected = {}) {
       const receipt = client.receipt(artifact);
       if (typeof receipt?.forceFull !== "boolean") fail("Source event forceFull invalid");
       const scope = client.scope(identity.baseSha, identity.headSha, receipt.forceFull);
-      validateReceipt(receipt, identity, run, workflow, client.digests(identity.headSha), scope);
+      // Keep the immutable source event identity; only separately verified Git objects may
+      // establish that a regenerated live synthetic commit contains the same integration.
+      validateReceipt(
+        receipt,
+        { ...identity, mergeSha: receipt.mergeSha },
+        run,
+        workflow,
+        client.digests(identity.headSha),
+        scope,
+      );
+      const integration = mergeCommitEvidence(client, receipt.mergeSha, identity);
       const jobs = validateJobs(
         client.pages(`actions/runs/${run.id}/attempts/${run.run_attempt}/jobs`, "jobs"),
         run,
@@ -306,6 +347,7 @@ export function observeSource(client, expected = {}) {
         state: "success",
         forceFull: receipt.forceFull,
         receipt,
+        ...(integration ? { mergeCommitEvidence: integration } : {}),
         artifact: { id: artifact.id, digest: artifact.digest },
         jobs,
       };

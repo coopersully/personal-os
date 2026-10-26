@@ -154,6 +154,20 @@ seven days. Missing, expired, malformed, foreign or stale receipts fail closed. 
 not prove hosted artifact access: actual unchanged-token upload/download and attempt binding remain
 explicit rollout evidence.
 
+GitHub can regenerate a synthetic merge commit after an original-base restoration even when
+its integrated content is unchanged. The immutable receipt retains its original merge/workflow SHA;
+the observation retains the current live synthetic SHA. A mismatch permits no boolean override:
+the observer performs two logical current-repository Git commit lookups (up to four requests with
+the existing bounded retry), verifies both response SHAs/provider URLs, requires exactly the ordered
+parents `[current base, current head]` in both objects and an identical valid tree SHA. Missing,
+malformed, denied, unreachable, different-parent or different-tree evidence fails closed. All other
+repository/PR/base/ref, original workflow/ref/digests, event/run/attempt, selected jobs and final
+PR/body/attempt fences remain mandatory. A trusted retarget event still rejects immediately.
+Normalized provider commit evidence accompanies the observation; readiness requires that complete
+structure, both original/live identities and current PR tuple, never an unsupported equivalence flag.
+It validates evidence bindings, not authenticity of caller-supplied JSON; inspect saved provider
+responses and the actual collector. No receipt is rewritten and no new permission is introduced.
+
 A failed-jobs-only retry that omits classification has no new-attempt receipt. Retry the complete
 source run under the bounded retry policy, then recover metadata; never reuse another attempt's
 artifact or start duplicate full suites automatically. The final evidence collector uses the same

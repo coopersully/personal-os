@@ -121,6 +121,173 @@ test("completed source binds receipt, current body and selected attempt jobs", (
   assert.equal(result.jobs.length, 3);
 });
 
+function regeneratedFixture() {
+  const client = fixture();
+  const liveMerge = "e".repeat(40);
+  const tree = "f".repeat(40);
+  client.live.merge_commit_sha = liveMerge;
+  client.commitReads = [];
+  client.commits = Object.fromEntries(
+    [merge, liveMerge].map((sha) => [
+      sha,
+      {
+        sha,
+        url: `https://api.github.com/repos/${repository}/git/commits/${sha}`,
+        tree: { sha: tree },
+        parents: [{ sha: base }, { sha: head }],
+      },
+    ]),
+  );
+  const api = client.api.bind(client);
+  client.api = (path) => {
+    if (!path.startsWith("git/commits/")) return api(path);
+    client.commitReads.push(path);
+    const result = client.commits[path.slice("git/commits/".length)];
+    if (!result) throw new Error("commit unavailable");
+    return structuredClone(result);
+  };
+  return client;
+}
+
+test("regenerated synthetic commits preserve original receipt with complete content identity evidence", () => {
+  const client = regeneratedFixture();
+  const result = observeSource(client);
+  assert.equal(result.state, "success");
+  assert.equal(result.mergeSha, client.live.merge_commit_sha);
+  assert.equal(result.receipt.mergeSha, merge);
+  assert.equal(result.receipt.workflowSha, merge);
+  assert.deepEqual(result.mergeCommitEvidence, {
+    provider: "github-rest",
+    repository,
+    sourceCommit: {
+      sha: merge,
+      treeSha: "f".repeat(40),
+      parentShas: [base, head],
+      url: `https://api.github.com/repos/${repository}/git/commits/${merge}`,
+    },
+    liveCommit: {
+      sha: client.live.merge_commit_sha,
+      treeSha: "f".repeat(40),
+      parentShas: [base, head],
+      url: `https://api.github.com/repos/${repository}/git/commits/${client.live.merge_commit_sha}`,
+    },
+  });
+  assert.equal(client.commitReads.length, 2);
+});
+
+test("structured observer equivalence is accepted by its readiness consumer", () => {
+  const observation = observeSource(regeneratedFixture());
+  const pr = Object.fromEntries(
+    [
+      "headSha",
+      "baseSha",
+      "number",
+      "bodySha256",
+      "mergeSha",
+      "repository",
+      "repositoryId",
+      "baseRef",
+    ].map((key) => [key, observation[key]]),
+  );
+  const verification = {
+    sourceRun: Object.fromEntries(
+      ["headSha", "baseSha", "workflowId", "runId", "runAttempt", "event"].map((key) => [
+        key,
+        observation[key],
+      ]),
+    ),
+  };
+  const accepted = () =>
+    JSON.parse(
+      execFileSync(
+        "python3",
+        [
+          "-c",
+          "import sys,json;sys.path.insert(0,'.agents/skills/ship-it/scripts');from evaluate_readiness import source_observation_matches;d=json.load(sys.stdin);print(json.dumps(source_observation_matches(d['observation'],d['pr'],d['verification'])))",
+        ],
+        { input: JSON.stringify({ observation, pr, verification }), encoding: "utf8" },
+      ),
+    );
+  assert.equal(accepted(), true);
+  observation.mergeCommitEvidence.liveCommit.parentShas.reverse();
+  assert.equal(accepted(), false);
+});
+
+test("synthetic equivalence rejects changed trees, nonexact ordered parents and invalid provider identity", () => {
+  const mutations = [
+    (c) => {
+      c.tree.sha = "9".repeat(40);
+    },
+    (c) => {
+      c.tree.sha = "invalid";
+    },
+    (c) => {
+      c.parents.reverse();
+    },
+    (c) => {
+      c.parents.pop();
+    },
+    (c) => {
+      c.parents.push({ sha: head });
+    },
+    (c) => {
+      c.parents[0].sha = "9".repeat(40);
+    },
+    (c) => {
+      c.sha = "9".repeat(40);
+    },
+    (c) => {
+      c.url = `https://api.github.com/repos/foreign/repo/git/commits/${c.sha}`;
+    },
+  ];
+  for (const side of [merge, "e".repeat(40)]) {
+    for (const mutate of mutations) {
+      const client = regeneratedFixture();
+      mutate(client.commits[side]);
+      assert.throws(() => observeSource(client));
+    }
+    const client = regeneratedFixture();
+    delete client.commits[side];
+    assert.throws(() => observeSource(client), /unavailable/);
+  }
+});
+
+test("receipt identity errors fail before synthetic commit lookup", () => {
+  for (const field of [
+    "number",
+    "repository",
+    "repositoryId",
+    "headSha",
+    "baseSha",
+    "baseRef",
+    "event",
+    "runId",
+    "runAttempt",
+    "workflowSha",
+    "workflowRef",
+    "workflowSha256",
+    "classifierSha256",
+    "forceFull",
+  ]) {
+    const client = regeneratedFixture();
+    client.data[field] = typeof client.data[field] === "number" ? 99 : "wrong";
+    assert.throws(() => observeSource(client));
+    assert.deepEqual(client.commitReads, []);
+  }
+});
+
+test("synthetic equivalence never bypasses final live integration stability", () => {
+  const client = regeneratedFixture();
+  let reads = 0;
+  const read = client.pr.bind(client);
+  client.pr = () => {
+    const value = read();
+    if (++reads > 1) value.merge_commit_sha = "9".repeat(40);
+    return value;
+  };
+  assert.throws(() => observeSource(client), ObservationChanged);
+});
+
 test("metadata-first pending/missing source remains pending and never downloads", () => {
   for (const rows of [[], [{ ...run, status: "in_progress", conclusion: null }]]) {
     const client = fixture();

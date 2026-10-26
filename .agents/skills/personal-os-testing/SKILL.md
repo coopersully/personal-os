@@ -5,8 +5,9 @@ description: Verify personal-os changes at the appropriate unit, API integration
 
 # personal-os testing
 
-Final acceptance requires complete local or equivalent hosted verification under
-`docs/engineering/delivery-verification.md`; iteration and early handoffs use focused evidence.
+Final acceptance requires policy-complete local or hosted verification under
+`docs/engineering/delivery-verification.md`, including its Git-verified prose-only exception;
+iteration and early handoffs use focused evidence.
 The local `pnpm verify` runs environment
 checks, linting, type checks, high-threshold coverage, production builds, and
 desktop/mobile Playwright acceptance tests.
@@ -40,8 +41,8 @@ receipts with reviewers; only one execution owner runs checks. The planner never
 readiness or replaces the final verification contract.
 
 
-Run the nearest focused test while iterating, then run `pnpm verify` for the
-complete change. Do not lower coverage thresholds or exclude product code to
+Run the nearest focused test while iterating, then obtain the final verification scope
+required by the delivery contract. Do not run application suites for proven prose-only scope. Do not lower coverage thresholds or exclude product code to
 make a change pass. Preserve deterministic fixtures and avoid real provider
 credentials or network calls in tests.
 

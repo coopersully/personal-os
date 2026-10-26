@@ -82,8 +82,8 @@ and verify matching computed backgrounds and column alignment in both themes.
   while the date grid scrolls. These are wayfinding anchors, not optional
   decoration.
 - The app-frame controls keep Day/Week/Month, Today, period back/forward, and
-  the synced-calendar disclosure in that order. The disclosure shows account
-  avatars with an `X of X calendars` label and uses switches for visibility.
+  the synced-calendar disclosure in that order. The disclosure uses the shared account icon/count trigger
+  with an accessible `X of X calendars` label and uses switches for visibility.
   At widths of 600 px or less, Today and Previous/Next period commands move
   into the Calendar view menu after the view choices, keeping the app bar compact.
 - Timeline columns carry 15-minute rules with an hour/half-hour/quarter-hour
@@ -280,3 +280,7 @@ shows Monday through Friday. New timed events, keyboard creation, and repair of 
 use the saved event duration (initially 60 minutes). Explicit selected intervals and existing event
 durations retain their meaning. Default destination, buffers, and busy-block privacy are
 edited through the existing versioned Calendar profile; action rules retain their approval gates.
+
+### Shared workspace header
+
+Calendar uses the shared title row for its date and selectable view phrase. The date remains visible at 320px. Search and account controls stay in the mobile utility row; spatial date axes remain with their grid. See [shared header rows](../system.md#shared-workspace-header-rows) for sizing and responsive placement.

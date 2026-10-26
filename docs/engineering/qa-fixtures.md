@@ -199,3 +199,8 @@ through yesterday in America/New_York. Rhythm shows populated historical days an
 today stays provisional and future days stay unknown. Reload recreates both records and coverage.
 
 The full demo also includes five recent fictional Finance Activity records: account ownership/planning confirmation, transaction categorization, and emergency-fund progress. Completed owner receipts and matching audits drive the real Activity projection and before/after disclosures. Dates are relative to fixture load; reloads replace the same stable records. Other personas keep empty Activity coverage. No live agent automation or financial action is executed by these history fixtures.
+
+The polished demo includes an evening reading/planning block, starting no earlier
+than 9 p.m. or 15 minutes after the fixture run, plus workshop, running and money
+check-in events in the coming week. These remain fictional local records with stable
+IDs and regenerate on reload; late-night runs may put the next block tomorrow.

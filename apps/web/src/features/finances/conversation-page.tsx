@@ -8,6 +8,7 @@ import { type QueryClient, skipToken, useQuery, useQueryClient } from "@tanstack
 import { useCallback, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { Button } from "@/components/ui/button";
 import { api } from "../../api.js";
 import {
@@ -395,7 +396,7 @@ function OwnerConversation({ ownerId, session }: { ownerId: string; session: Pre
           </p>
         </div>
       ) : null}
-      {initial.isPending ? <p>Loading conversation…</p> : null}
+      {initial.isPending ? <ContentSkeleton label="Loading conversation…" rows={3} /> : null}
       <Button
         variant="outline"
         disabled={initial.isFetching || loadingHistory}

@@ -1,4 +1,5 @@
 import { type FinanceProfileVersion, financeSetupPlanningSchema } from "@personal-os/domain";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { SettingsSection } from "../settings/settings-layout.js";
@@ -16,7 +17,8 @@ import { useFinanceConfiguration } from "./use-finance-configuration.js";
 const text = (value: number | string | null | undefined) => value?.toString() ?? "";
 export function FinanceConfigurationEditor() {
   const query = useFinanceConfiguration();
-  if (query.isPending) return <p role="status">Loading financial settings…</p>;
+  if (query.isPending)
+    return <ContentSkeleton label="Loading financial settings…" shape="settings" rows={3} />;
   if (query.isError || query.data?.profile.state !== "loaded")
     return (
       <>

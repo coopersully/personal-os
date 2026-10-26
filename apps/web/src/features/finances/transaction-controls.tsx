@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { FilterTrigger, SortOptionIcon, SortTrigger } from "@/components/data-view-controls";
 import { DateInput } from "@/components/date-input";
 import {
@@ -445,7 +446,8 @@ export function FinanceLinkedTransaction({
     queryKey: ["finance-transaction", id],
     queryFn: async () => requireFinanceResult(await api.getFinanceTransaction(id)),
   });
-  if (transaction.isPending) return <p role="status">Loading source transaction…</p>;
+  if (transaction.isPending)
+    return <ContentSkeleton label="Loading source transaction…" rows={3} />;
   if (transaction.isError && !transaction.data)
     return (
       <div>

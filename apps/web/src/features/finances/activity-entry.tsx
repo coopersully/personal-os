@@ -93,7 +93,7 @@ export function FinanceActivityEntry({
       <ItemContent>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <span className="font-medium break-words">{entry.action}</span>
-          <span className="text-sm capitalize">{entry.status}</span>
+          <span className="text-sm lowercase">{entry.status}</span>
         </div>
         {entry.agentAccount ? <AgentIdentity account={entry.agentAccount} /> : null}
         <p className="text-sm text-muted-foreground">
@@ -234,7 +234,7 @@ export function FinanceActivityEntry({
                   <div className="grid min-w-0 gap-3 md:grid-cols-2">
                     {(["before", "after"] as const).map((side) => (
                       <div key={side} className="min-w-0">
-                        <h4 className="text-sm capitalize">{side}</h4>
+                        <h4 className="text-sm lowercase">{side}</h4>
                         <pre className="overflow-auto whitespace-pre-wrap break-all text-xs">
                           {JSON.stringify(change[side], null, 2)}
                         </pre>

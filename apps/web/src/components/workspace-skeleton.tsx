@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ContentSkeleton } from "./content-skeleton";
 
 export type WorkspaceSkeletonKind =
   | "calendar"
@@ -68,16 +69,11 @@ function TodaySkeleton() {
     <div className="workspace-skeleton__today">
       <div className="workspace-skeleton__stack">
         <Skeleton className="workspace-skeleton__line workspace-skeleton__line--short" />
-        <Skeleton className="workspace-skeleton__moment" />
-        <Skeleton className="workspace-skeleton__line workspace-skeleton__line--medium" />
-        <Skeleton className="workspace-skeleton__row" />
-        <Skeleton className="workspace-skeleton__row" />
-        <Skeleton className="workspace-skeleton__row" />
+        <ContentSkeleton announce={false} label="Loading schedule" shape="summary" rows={1} />
       </div>
       <div className="workspace-skeleton__stack">
-        <Skeleton className="workspace-skeleton__line workspace-skeleton__line--short" />
-        <Skeleton className="workspace-skeleton__panel workspace-skeleton__panel--tall" />
-        <Skeleton className="workspace-skeleton__panel" />
+        <Skeleton className="workspace-skeleton__line workspace-skeleton__line--medium" />
+        <ContentSkeleton announce={false} label="Loading tasks and reminders" rows={3} />
       </div>
     </div>
   );

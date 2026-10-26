@@ -1,142 +1,122 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import {
-  FloatingActionButton,
-  FloatingActionSurface,
-  FloatingActions,
-} from "@/components/floating-actions";
-import { MenuIcon, XIcon } from "@/components/icons";
-import { SidebarItemMeta } from "@/components/sidebar-item-meta";
+import { type ReactNode, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
+import { MenuIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "@/components/ui/item";
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@/components/ui/drawer";
 import type { MobileWorkspacePage } from "../navigation/mobile-workspace-dock.js";
 
+/** Stable shortcuts stay visible; the drawer holds the complete workspace hierarchy. */
 export function MobileWorkspaceDock({
   pages,
+  activeSearch,
   renderWorkspaceNavigation,
   title,
 }: {
   pages: MobileWorkspacePage[];
+  activeSearch?: string;
   renderWorkspaceNavigation?: (onNavigate: () => void) => ReactNode;
   title: string;
 }) {
   const [open, setOpen] = useState(false);
-  const root = useRef<HTMLElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const panel = useRef<HTMLDivElement>(null);
-  const previouslyOpen = useRef(false);
-  useEffect(() => {
-    if (open) panel.current?.focus();
-    else if (previouslyOpen.current) trigger.current?.focus();
-    previouslyOpen.current = open;
-    if (!open) return;
-    const outside = (event: PointerEvent) => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", outside);
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("pointerdown", outside);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, [open]);
+  const location = useLocation();
+  const current = new URLSearchParams(activeSearch ?? location.search);
+  const isActive = (path: string) => {
+    const [pathname, search] = path.split("?");
+    if (location.pathname !== pathname) return false;
+    if (
+      pathname === "/tasks" &&
+      ((current.get("view") && current.get("view") !== "all") ||
+        current.has("list") ||
+        current.has("project"))
+    )
+      return false;
+    const params = new URLSearchParams(search);
+    return [...params].every(
+      ([key, value]) =>
+        (current.get(key) ?? (key === "scope" ? "inbox" : key === "page" ? "profile" : "")) ===
+        value,
+    );
+  };
+  const destination = (path: string) => {
+    if (location.pathname !== "/mail" || !path.startsWith("/mail?")) return path;
+    const [pathname, search] = path.split("?");
+    const params = new URLSearchParams(search);
+    for (const key of ["account", "q"])
+      for (const value of current.getAll(key)) params.append(key, value);
+    return `${pathname}?${params}`;
+  };
+  const primary = pages.slice(0, 3);
+  const moreActive = !primary.some((page) => isActive(page.path));
   return (
-    <nav ref={root} aria-label="Workspace dock" className="workspace-dock">
-      <FloatingActionSurface
-        state={open ? "open" : "closed"}
-        className="workspace-dock-surface"
-        data-state={open ? "open" : "closed"}
-      >
-        {!open ? (
-          <FloatingActions aria-label="Page navigation">
-            <FloatingActionButton
-              ref={trigger}
-              label="Workspace actions"
-              aria-haspopup="dialog"
-              aria-expanded={open}
-              onClick={() => setOpen(true)}
-            >
-              <MenuIcon aria-hidden="true" />
-            </FloatingActionButton>
-          </FloatingActions>
-        ) : (
-          <Card
-            ref={panel}
-            tabIndex={-1}
-            role="dialog"
-            aria-label={title}
-            className="workspace-dock-menu"
-            size="sm"
+    <>
+      <div aria-hidden="true" className="workspace-app-bar-backdrop" />
+      <nav aria-label="Workspace dock" className="workspace-dock workspace-app-tabs">
+        {primary.map((page) => (
+          <Link
+            key={page.path}
+            to={destination(page.path)}
+            aria-current={isActive(page.path) ? "page" : undefined}
           >
-            <CardHeader>
-              <CardTitle>{title}</CardTitle>
-              <CardAction>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="min-h-11 min-w-11"
-                  aria-label="Close navigation"
-                  onClick={() => setOpen(false)}
-                >
-                  <XIcon />
-                </Button>
-              </CardAction>
-            </CardHeader>
-            <CardContent>
-              {renderWorkspaceNavigation ? (
-                <div className="workspace-dock-sheet__navigation">
-                  {renderWorkspaceNavigation(() => setOpen(false))}
-                </div>
-              ) : (
-                <section className="workspace-dock-sheet__section" aria-label="Pages">
-                  <ItemGroup className="workspace-dock-sheet__items">
-                    {pages.map((page) => (
-                      <Item asChild key={page.path} size="xs" className="min-h-11 flex-nowrap">
+            <page.icon aria-hidden="true" />
+            <span>{page.label}</span>
+          </Link>
+        ))}
+        {renderWorkspaceNavigation || pages.length > primary.length ? (
+          <Drawer open={open} onOpenChange={setOpen}>
+            <DrawerTrigger asChild>
+              <Button
+                variant="ghost"
+                aria-label="Workspace actions"
+                data-active={moreActive || undefined}
+              >
+                <MenuIcon aria-hidden="true" />
+                <span>more</span>
+              </Button>
+            </DrawerTrigger>
+            <DrawerContent className="workspace-dock-sheet">
+              <DrawerHeader>
+                <DrawerTitle>{title}</DrawerTitle>
+                <DrawerDescription>all pages in this workspace</DrawerDescription>
+              </DrawerHeader>
+              <div
+                data-vaul-no-drag
+                className="workspace-dock-sheet__navigation overflow-y-auto pb-6"
+              >
+                {renderWorkspaceNavigation
+                  ? renderWorkspaceNavigation(() => setOpen(false))
+                  : pages.map((page) => (
+                      <Button
+                        asChild
+                        variant="ghost"
+                        key={page.path}
+                        className="flex min-h-11 w-full justify-start"
+                      >
                         <Link
                           aria-label={page.badge ? `${page.label}: ${page.badge}` : undefined}
+                          to={destination(page.path)}
                           onClick={() => setOpen(false)}
-                          to={page.path}
+                          aria-current={isActive(page.path) ? "page" : undefined}
                         >
-                          <ItemMedia variant="icon">
-                            <page.icon aria-hidden="true" />
-                          </ItemMedia>
-                          <ItemContent>
-                            <ItemTitle className="block truncate">{page.label}</ItemTitle>
-                          </ItemContent>
-                          {page.badge || page.count !== undefined ? (
-                            <ItemActions>
-                              <SidebarItemMeta
-                                inline
-                                attention={Boolean(page.badge)}
-                                count={page.count}
-                                label={page.label}
-                              />
-                            </ItemActions>
+                          <page.icon aria-hidden="true" />
+                          <span>{page.label}</span>
+                          {page.badge || page.count ? (
+                            <span className="ml-auto">{page.badge ?? page.count}</span>
                           ) : null}
                         </Link>
-                      </Item>
+                      </Button>
                     ))}
-                  </ItemGroup>
-                </section>
-              )}
-            </CardContent>
-          </Card>
-        )}
-      </FloatingActionSurface>
-    </nav>
+              </div>
+            </DrawerContent>
+          </Drawer>
+        ) : null}
+      </nav>
+    </>
   );
 }

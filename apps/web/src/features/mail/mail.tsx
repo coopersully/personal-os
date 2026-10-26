@@ -8,6 +8,7 @@ import type { MailAddress, MailDraft, MailMessage, MailThread, User } from "@per
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import {
   ArchiveIcon,
   ArrowLeftIcon,
@@ -18,7 +19,6 @@ import {
   EyeOffIcon,
   ForwardIcon,
   InboxIcon,
-  ListChecksIcon,
   MailIcon,
   MoreHorizontalIcon,
   ReplyIcon,
@@ -39,9 +39,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu.js";
@@ -63,7 +60,6 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "../../components/ui/sidebar.js";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import {
   WorkspaceSecondaryAppBar,
   WorkspaceSecondaryAppBarActions,
@@ -240,7 +236,7 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
           <QueryFeedback query={accounts} title="Couldn’t refresh mail accounts." staleOnly />
           <QueryFeedback query={mailboxes} title="Couldn’t refresh mailboxes." staleOnly />
           {accounts.isPending || mailboxes.isPending ? (
-            <p className="context-sidebar__empty">Loading mailboxes…</p>
+            <ContentSkeleton label="Loading mailboxes…" shape="settings" rows={2} />
           ) : (accounts.isError && !accounts.data) || (mailboxes.isError && !mailboxes.data) ? (
             <QueryFeedback
               query={accounts.isError && !accounts.data ? accounts : mailboxes}
@@ -424,12 +420,6 @@ export function MailPage({ user }: { user: User }) {
             ? `${(drafts.data ?? []).filter((draft) => draft.sendStatus !== "sent").length} drafts`
             : `${threads.data?.length ?? 0} conversations`
         }
-        layoutDisabled={!layoutSettings.isSuccess || saveLayout.isPending || !!saveLayout.recovery}
-        conversationLayout={conversationLayout}
-        setConversationLayout={(mailConversationLayout) =>
-          saveLayout.mutate({ mailConversationLayout })
-        }
-        density={density}
         forward={() => {
           if (!selected) return;
           setComposeIntent({
@@ -460,9 +450,6 @@ export function MailPage({ user }: { user: User }) {
           });
         }}
         selected={selected}
-        setDensity={(nextDensity) => {
-          saveLayout.mutate({ mailListDensity: nextDensity });
-        }}
         snooze={() => {
           if (selected) snoozeThread.mutate(selected.id);
         }}
@@ -516,7 +503,11 @@ export function MailPage({ user }: { user: User }) {
           orientation="horizontal"
         >
           <ResizablePanel defaultSize="34%" id="mail-list" minSize="280px">
-            <section aria-label="Conversations" className="mail-thread-list">
+            <section
+              aria-label="Conversations"
+              data-workspace-scroll=""
+              className="mail-thread-list"
+            >
               <ConnectionRecoveryAlert accounts={enabled} />
               {listScope === "drafts" ? (
                 drafts.isPending ? (
@@ -569,7 +560,7 @@ export function MailPage({ user }: { user: User }) {
             withHandle
           />
           <ResizablePanel defaultSize="66%" id="mail-reader" minSize="360px">
-            <section aria-label="Message reader" className="mail-reader">
+            <section aria-label="Message reader" data-workspace-scroll="" className="mail-reader">
               <QueryFeedback query={loaded} title="Couldn’t load the conversation." />
               <QueryFeedback query={messages} title="Couldn’t load conversation messages." />
               {selected ? (
@@ -675,16 +666,11 @@ function MailSecondaryNavigation({
   archive,
   back,
   countLabel,
-  conversationLayout,
-  setConversationLayout,
-  layoutDisabled,
-  density,
   pending,
   forward,
   listScope,
   reply,
   selected,
-  setDensity,
   snooze,
   toggleStar,
   toggleUnread,
@@ -693,23 +679,22 @@ function MailSecondaryNavigation({
   archive: () => void;
   back: () => void;
   countLabel: string;
-  conversationLayout: "split" | "single";
-  layoutDisabled: boolean;
-  setConversationLayout: (layout: "split" | "single") => void;
-  density: MailListDensity;
   pending: boolean;
   forward: () => void;
   listScope: MailListScope;
   reply: () => void;
   selected: MailThread | undefined;
-  setDensity: (density: MailListDensity) => void;
   snooze: () => void;
   toggleStar: () => void;
   toggleUnread: () => void;
   trash: () => void;
 }) {
   return (
-    <WorkspaceSecondaryAppBar aria-label="Mail controls" className="mail-secondary-nav">
+    <WorkspaceSecondaryAppBar
+      enabled={!!selected}
+      aria-label="Mail controls"
+      className="mail-secondary-nav"
+    >
       <WorkspaceSecondaryAppBarLeading className="mail-secondary-nav__leading">
         <span>{countLabel}</span>
         {listScope === "all" ? null : <Badge>{listScope}</Badge>}
@@ -832,46 +817,6 @@ function MailSecondaryNavigation({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        <DropdownMenu>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  disabled={layoutDisabled}
-                  aria-label="Message list layout"
-                  className="mail-secondary-nav__density"
-                  size="icon"
-                  variant="ghost"
-                >
-                  <ListChecksIcon aria-hidden="true" />
-                </Button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent>Message list layout</TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="end" className="mail-density-menu">
-            <DropdownMenuLabel>Conversation layout</DropdownMenuLabel>
-            <DropdownMenuRadioGroup
-              value={conversationLayout}
-              onValueChange={(value) => setConversationLayout(value as "split" | "single")}
-            >
-              <DropdownMenuRadioItem value="split">Split view</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="single">Full-width view</DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>Conversation density</DropdownMenuLabel>
-            <DropdownMenuRadioGroup
-              onValueChange={(value) => setDensity(value as MailListDensity)}
-              value={density}
-            >
-              {mailListDensities.map((option) => (
-                <DropdownMenuRadioItem key={option} value={option}>
-                  {option.charAt(0).toUpperCase() + option.slice(1)}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
       </WorkspaceSecondaryAppBarActions>
     </WorkspaceSecondaryAppBar>
   );

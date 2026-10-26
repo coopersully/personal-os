@@ -30,6 +30,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import {
   useSaveWorkspacePreferences,
@@ -169,7 +170,6 @@ export function CalendarAppBarControls({
     });
     onToday();
   };
-  const ViewIcon = calendarViews.find((option) => option.value === view)?.icon ?? CalendarIcon;
   return (
     <fieldset className="calendar-app-bar__controls">
       <legend className="sr-only">Calendar controls</legend>
@@ -178,11 +178,12 @@ export function CalendarAppBarControls({
       ) : null}
       <WorkspacePreferenceRecovery workspace="calendar" />
       <div className="calendar-app-bar__control-set">
-        <div className="calendar-app-bar__compact-view">
+        <WorkspaceHeaderControls label="Calendar title view" placement="title">
+          <span>in</span>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <ShadcnButton aria-label={`Calendar view: ${view}`} size="icon" variant="ghost">
-                <ViewIcon aria-hidden="true" />
+              <ShadcnButton aria-label={`Calendar view: ${view}`} size="sm" variant="ghost">
+                {view} view
               </ShadcnButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -219,7 +220,7 @@ export function CalendarAppBarControls({
               ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
-        </div>
+        </WorkspaceHeaderControls>
         {accounts}
         <div className="calendar-app-bar__period-navigation">
           <ShadcnButton

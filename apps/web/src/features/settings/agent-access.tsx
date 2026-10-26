@@ -3,6 +3,7 @@ import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { DataViewEmpty, DataViewRecovery } from "@/components/data-view-state";
 import {
   ApprovalHandIcon,
@@ -479,7 +480,9 @@ function AgentAccessSettings({
                 title="Couldn’t load Mail rules."
                 unavailableLabel="Mail rules unavailable"
               />
-              {mailSetup.isPending || rules.isPending ? <p>Loading Mail settings…</p> : null}
+              {mailSetup.isPending || rules.isPending ? (
+                <ContentSkeleton label="Loading Mail settings…" shape="settings" rows={3} />
+              ) : null}
               {mailSetup.data || rules.data ? (
                 <MailConfiguration
                   {...(mailSetup.data && (mailSetup.isSuccess || mailSources.length > 0)

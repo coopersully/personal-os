@@ -34,6 +34,23 @@ const forbiddenPatterns = [
 
 const stylesheet = await readFile(resolve(root, "styles.css"), "utf8");
 const stylesheetForDecorativeChecks = stylesheet
+  // The approved mobile edge fade extends blur around the floating pill.
+  // Only these exact declarations on its decorative sibling are exempt.
+  .replace(/\.workspace-app-bar-backdrop\s*\{[^}]*\}/g, (block) =>
+    block
+      .replace(/background: linear-gradient\(to bottom, transparent, var\(--background\)\);/g, "")
+      .replace(/(?:-webkit-)?backdrop-filter: blur\(20px\);/g, "")
+      .replace(
+        /(?:-webkit-)?mask-image: linear-gradient\(to bottom, transparent, black 70%\);/g,
+        "",
+      ),
+  )
+  // Cooper approved backdrop blur specifically for the floating mobile app bar.
+  // Keep the exception bound to this selector and these exact blur declarations.
+  .replace(
+    /(\.workspace-dock\.workspace-app-tabs\s*\{[^}]*?)-webkit-backdrop-filter: blur\(20px\);\s*backdrop-filter: blur\(20px\);/g,
+    "$1",
+  )
   // A flat autofill repaint masks the browser's forced background, not elevation.
   // Allow only this exact declaration within the autofill selector.
   .replace(

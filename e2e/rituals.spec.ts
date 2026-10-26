@@ -11,7 +11,7 @@ test("settings support field search, ritual history, and resumable setup replay"
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   await page.goto("/settings?page=rituals");
   await expect(page.getByRole("heading", { name: "Rituals", level: 1 })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Top navigation" })).toHaveCount(
@@ -224,7 +224,7 @@ test("settings support field search, ritual history, and resumable setup replay"
   await page.getByRole("button", { name: "Exit Setup" }).click();
   await expect(page.getByRole("heading", { name: "Setup", level: 1 })).toBeVisible();
   await page.goto("/today");
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
 });
 
 test("ritual skipping requires a continuous hold and shows streak impact", async ({ page }) => {
@@ -326,7 +326,7 @@ test("browser rituals preserve the current page and save real answers and option
   await page.request.delete("/v1/rituals/morning/data");
   await page.request.delete("/v1/rituals/night/data");
   await page.reload();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   await page.goto("/settings?page=rituals");
   await page.getByRole("button", { name: "Search settings", exact: true }).click();
   const search = page.getByRole("searchbox", { name: "Search all settings" });
@@ -419,7 +419,7 @@ test("browser snooze survives reload and another client can settle the same ritu
   await page.request.delete("/v1/rituals/morning/data");
   await page.request.delete("/v1/rituals/night/data");
   await page.reload();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   try {
     const saved = await page.request.put("/v1/rituals/night", {
       data: {
@@ -440,7 +440,7 @@ test("browser snooze survives reload and another client can settle the same ritu
     await ritual.getByRole("button", { name: "Snooze", exact: true }).click();
     await expect(ritual).toHaveCount(0);
     await page.reload();
-    await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
     await expect(ritual).toHaveCount(0);
     const current = await (await page.request.get("/v1/rituals/current")).json();
     expect(Date.parse(current.current.snoozedUntil)).toBeGreaterThan(Date.parse(current.serverNow));
@@ -459,7 +459,7 @@ test("browser snooze survives reload and another client can settle the same ritu
     expect(complete.ok()).toBe(true);
     expect((await complete.json()).state.current.status).toBe("completed");
     await page.reload();
-    await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
     await expect(ritual).toHaveCount(0);
   } finally {
     await page.request.delete("/v1/rituals/night/data");

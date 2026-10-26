@@ -8,6 +8,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AgentIdentity } from "@/components/agent-identity";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { DataTable } from "@/components/data-table";
 import { DateDisplay } from "@/components/date-display";
 import { FilterIcon, RefreshIcon } from "@/components/icons";
@@ -315,7 +316,7 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
           </ResponsiveDialogBody>
         </ResponsiveDialogContent>
       </ResponsiveDialog>
-      {passiveLoading && !page ? <p>Loading activity…</p> : null}
+      {passiveLoading && !page ? <ContentSkeleton label="Loading activity…" rows={3} /> : null}
       {page?.entries.length === 0 ? (
         <p>No recorded activity matches these filters. Coverage is partial.</p>
       ) : null}

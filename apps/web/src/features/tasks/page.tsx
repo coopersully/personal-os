@@ -716,7 +716,7 @@ export function TaskRow({
       ) : null}
       {task.lifecycle !== "open" || isTrashed ? (
         <TaskItemMetadata>
-          <span className="text-[0.625rem] font-medium tracking-[0.08em] text-muted-foreground uppercase">
+          <span className="text-[0.625rem] font-medium tracking-[0.08em] text-muted-foreground lowercase">
             {taskLifecycleLabel(task)}
           </span>
         </TaskItemMetadata>

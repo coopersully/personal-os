@@ -34,7 +34,7 @@ unrelated cards, or an AI chat surface.
 - **Full-page errors:** use the default canvas with a centered short,
   large title, description, and recovery actions, without a foreground logo. The shared fading tile
   pattern may fill the background at subdued opacity; omit navigation branding
-  and the dashed border used for in-page empty states. See
+  and enclosing empty-state surfaces. See
   [error pages](pages/errors.md).
 - **Password fields:** use the shared input-group control with an end-aligned,
   accessible visibility toggle. Recovery belongs in the label row as a concise
@@ -147,7 +147,7 @@ rectangle. Use one of these forms before creating a new container.
 | `queue` | A bounded list of choices or commitments | Always open when actionable | Quiet rail with separators |
 | `summary` | Capacity, count, freshness, or contextual fact | Inline with its owning block | Text or badge; never a dashboard tile by itself |
 | `attention` | A persistent blocker, capability, or safety condition | Open while relevant | Semantic `Alert` beside its affected work |
-| `empty` | The deliberate absence of expected material | Only while the owning collection or schedule has no material | Transparent container with one quiet, widely spaced dashed semantic border; never a tonal fill |
+| `empty` | The deliberate absence of expected material | Only while the owning collection or schedule has no material | Transparent, borderless composition with centered icon, concise title and optional recovery/navigation |
 | `detail` | Infrequent controls, provenance, scope, or raw metadata | Closed until requested | `Collapsible`, Popover, or inspector |
 | `history` | Completed, revoked, or past material | Closed by default | Labelled `Collapsible` with a count |
 | `choice` | A small set of mutually exclusive, previewable preferences | Always open | Shared `ChoiceCardGroup`; the entire card selects the option |
@@ -164,10 +164,8 @@ Rules:
 - A `summary` belongs inside the block that gives it meaning. Counts and badges
   do not become standalone metrics.
 - An `empty` block uses the shared shadcn `Empty` composition whenever its
-  content fits that structure. Its transparent, dashed container is the stable
-  visual signal for absence across the app. A reflective `QuoteCard` may carry
-  the same treatment when it replaces an empty schedule; populated cards never
-  inherit it.
+  content fits that structure. Center its icon and concise copy on a transparent,
+  borderless surface. Do not add a nested card or dashed box around absence.
 - `detail` is progressive disclosure, not a dumping ground. Its trigger names
   the content it reveals, and its closed state still exposes the resulting
   setting or count when that affects the person.
@@ -355,7 +353,9 @@ Copy earns its space by changing a decision. Apply these rules mechanically:
   across states; color is reserved for the selected rail destination.
 - Desktop account-management actions live in Settings, reached from the bottom of the workspace rail.
   Calendar and Mail source visibility uses shared `AccountSelectionTrigger` with the normal
-  `FilterTrigger` pattern: filter glyph and visible-source count, without avatars or sync badges.
+  icon-action pattern: a layers glyph when all sources are visible, or an accounts
+  glyph with the shared selected-count badge for a subset (including zero). No dashed
+  outline, plus, avatars or sync ornamentation belongs on this trigger.
   Accessible names retain selected/total scope and attention state; show connection health and
   repair actions inside the existing `AccountSelectionPopoverContent`. Reconnection remains the
   primary action, labeled with the affected source count. Place Mail’s source filter immediately
@@ -1037,7 +1037,7 @@ not evidence that every existing data page has been migrated.
 | No matches | Name the query scope; never imply the whole account is empty | Keep editable search/filters and an explicit clear/broaden action |
 | Empty period | Name the date-range scope; earlier records may exist | Keep period navigation and an all-time/broaden action |
 | Confirmed empty collection | Quiet Empty title plus at most one useful sentence | Offer create/connect/setup only when that is the actual next step and permitted; do not invent an action for read-only history |
-| Initial load unavailable | Distinct availability/retry region, never the empty dashed container or a success-zero count | Keep criteria/navigation; safe Retry with pending/disabled feedback; announce the error via Sonner in settings |
+| Initial load unavailable | Distinct availability/retry region, never an empty result or a success-zero count | Keep criteria/navigation; safe Retry with pending/disabled feedback; announce the error via Sonner in settings |
 | Refresh failed with cached data | Keep last available rows; announce failed refresh in Sonner without inserting layout | Keep inspection and scope controls, with Retry in the toast; withhold operations that require confirmed current state |
 | Access denied / expired session | Follow authoritative permission/session recovery; remove denied cached material | Sign in or request the correct access when supported; do not claim Retry alone repairs permissions |
 | Empty later cursor page | Do not infer a globally empty collection | Retain Previous Page or another bounded recovery path |
@@ -1124,3 +1124,62 @@ Escape, outside interaction,
 the close control, and destination selection dismiss it; restore trigger focus.
 This non-modal navigation surface leaves the page available. Transaction and
 editing dialogs retain their own confirmation and modal semantics.
+
+### Shared workspace header rows
+
+Adopted direction (October 25, 2026): the shared `WorkspaceAppBar` owns title,
+utility, and attention placement across Finance, Tasks, Calendar, Mail, and Today.
+Independent workspace overrides previously produced different title scales, hit areas,
+and extra toolbar rows. The common header makes scope and actions predictable.
+
+- Desktop places identity, title sentence, flexible search, and actions on one row.
+  Below 768px the utility row comes first and the title sentence spans the second row.
+- Header action targets are 32px on desktop and 44px on mobile, with 16px icons,
+  4px action gaps, shared pill geometry, and 12px labeled-action horizontal padding.
+  Controls in the mobile View options popover retain the same mobile geometry.
+- Mobile titles share 17px type, 600 weight, 1.5 line height, and start alignment.
+  Scope selectors inherit the title typography and use a quiet underline. Long
+  phrases wrap rather than requiring an undisclosed horizontal scroll.
+- Tasks places its view selector in the title; Calendar completes its date with
+  the selected view; Mail exposes its current mailbox view in the title. Finance
+  retains its selectable period and scope phrases. Today remains a plain date.
+- Search and frequent controls remain in the utility row. Tasks groups sort/display
+  and container options, and Mail groups sync/layout, under mobile View options.
+  Page-owned controls use the shared header portals and preserve their existing
+  URL, preference, recovery, and action semantics.
+- Mail's conversation actions appear only with a selected conversation. Spatial
+  calendar axes and record-specific actions remain beside the material they control.
+  The floating mobile create/navigation controls retain their existing ownership.
+
+Verify header geometry at 320px, 390px, and desktop widths, including title wrapping,
+keyboard-accessible selectors, and retained account/search filters. Automated geometry
+and interaction checks establish implementation behavior, not user comprehension.
+
+### Lowercase interface typography
+
+App-owned interface copy is presented in lowercase, including buttons, headings,
+menus, empty states, and placeholders. This is a presentation rule, not a data
+migration. Inputs, code, and marked user/provider content retain their casing;
+use `data-user-content` for content whose spelling must be preserved. Shared event
+and task titles and mail content retain their original presentation. Use lowercase
+source copy for new interface text as well.
+
+On mobile, header controls use a 44px square target. Account filters collapse their
+visible count/plus decoration while retaining the complete accessible label.
+Keep the bottom app bar to three primary destinations plus overflow; top-row
+workspace actions remain reachable without opening that navigation drawer.
+
+The floating mobile workspace app bar is an explicitly approved exception to the
+flat-surface blur restriction: its translucent pill uses a 20px backdrop blur to
+keep navigation legible above scrolling content. This exception applies only to
+`.workspace-dock.workspace-app-tabs` and its decorative
+`.workspace-app-bar-backdrop` sibling, not cards or other navigation surfaces.
+The pill has no border. A pointer-transparent, full-width bottom layer gradually
+fades and blurs scrolling content around it, with a masked top edge and safe-area
+coverage, so the glass does not end abruptly at the pill's outline.
+
+## Loading and material reveal
+
+[Loading and motion](loading-and-motion.md) owns region skeletons, cached refresh,
+progressive reveal, shared transition tokens and reduced-motion behavior. Shared
+absence surfaces use centered Empty media without a dashed enclosure.

@@ -16,6 +16,7 @@ import { useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ActionButton as Button } from "@/components/action-button";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { EditIcon, SettingsIcon } from "@/components/icons";
 import {
   ResponsiveDialog as Dialog,
@@ -432,7 +433,7 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
                 />
               ) : null}
               {bucketQuery.isPending ? (
-                <p role="status">Loading buckets…</p>
+                <ContentSkeleton label="Loading buckets…" rows={3} />
               ) : bucketQuery.isSuccess && !relations.buckets.length ? (
                 <p className="text-sm text-muted-foreground">No budget buckets yet.</p>
               ) : null}

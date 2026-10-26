@@ -1,4 +1,6 @@
 import { getDefaultWorkspacePreferences } from "@personal-os/domain";
+import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
+import { useMediaQuery } from "@/hooks/use-media-query";
 
 export { calendarSearchResults, parseCalendarDateQuery } from "./search-date";
 
@@ -167,6 +169,30 @@ export function CalendarFloatingNav({
     />
   );
 
+  const mobileHeader = useMediaQuery("(max-width: 900px)");
+  if (mobileHeader && surfaceState === "closed")
+    return (
+      <WorkspaceHeaderControls label="Calendar actions">
+        <Button
+          aria-label="Choose date"
+          size="icon"
+          variant="ghost"
+          onClick={() => open("date")}
+          ref={dateTrigger}
+        >
+          <CalendarIcon aria-hidden="true" />
+        </Button>
+        <Button
+          aria-label="Create event"
+          size="icon"
+          variant="ghost"
+          onClick={() => open("create")}
+          ref={createTrigger}
+        >
+          <PlusIcon aria-hidden="true" />
+        </Button>
+      </WorkspaceHeaderControls>
+    );
   return (
     <FloatingActionRegion align="center" className="calendar-floating-nav" data-mode={surfaceState}>
       <FloatingActionSurface

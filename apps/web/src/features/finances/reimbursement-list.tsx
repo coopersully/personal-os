@@ -1,8 +1,9 @@
 import { ApiClientError } from "@personal-os/api-client";
 import type { FinanceReimbursement } from "@personal-os/domain";
-import { EmptyState, Spinner } from "@personal-os/ui";
+import { EmptyState } from "@personal-os/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { CircleCheckIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,7 +34,7 @@ export function FinanceReimbursementList() {
         Reimbursement access unavailable. Check your permissions before viewing receipt evidence.
       </p>
     );
-  if (query.isPending) return <Spinner label="Loading reimbursements" />;
+  if (query.isPending) return <ContentSkeleton label="Loading reimbursements" rows={3} />;
   if (query.error && !query.data)
     return <InlineError error={query.error} retry={() => query.refetch()} />;
   const items = query.data?.reimbursements ?? [];

@@ -34,6 +34,8 @@ import {
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { api } from "../../api.js";
 import { useConfirmAction } from "../../components/confirm-action.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
@@ -362,25 +364,40 @@ export function FloatingMailComposer({
     }
   };
 
+  const mobileHeader = useMediaQuery("(max-width: 900px)");
   return (
     <>
-      <FloatingActionRegion
-        align="end"
-        className="mail-floating-compose"
-        data-state={open ? "open" : "closed"}
-      >
-        {!open ? (
-          <FloatingActions aria-label="Mail actions">
-            <FloatingActionButton
-              label="Compose a message"
-              onClick={() => openComposer()}
-              ref={triggerRef}
-            >
-              <PlusIcon aria-hidden="true" />
-            </FloatingActionButton>
-          </FloatingActions>
-        ) : null}
-      </FloatingActionRegion>
+      {mobileHeader ? (
+        <WorkspaceHeaderControls label="Mail compose">
+          <Button
+            aria-label="Compose a message"
+            size="icon"
+            variant="ghost"
+            onClick={() => openComposer()}
+            ref={triggerRef}
+          >
+            <PlusIcon aria-hidden="true" />
+          </Button>
+        </WorkspaceHeaderControls>
+      ) : (
+        <FloatingActionRegion
+          align="end"
+          className="mail-floating-compose"
+          data-state={open ? "open" : "closed"}
+        >
+          {!open ? (
+            <FloatingActions aria-label="Mail actions">
+              <FloatingActionButton
+                label="Compose a message"
+                onClick={() => openComposer()}
+                ref={triggerRef}
+              >
+                <PlusIcon aria-hidden="true" />
+              </FloatingActionButton>
+            </FloatingActions>
+          ) : null}
+        </FloatingActionRegion>
+      )}
       <ResponsiveDialog
         onOpenChange={(nextOpen) => {
           if (!nextOpen && !confirmation) void close();

@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 import { setSettingTime } from "./settings-controls.js";
+import { revealWorkspaceOptions } from "./workspace-header-controls.js";
 
 async function selectCalendarView(page: Page, view: string) {
   const picker = page.getByRole("button", { name: /^Calendar view:/ });
@@ -25,7 +26,7 @@ test("the repository QA fixture login exposes representative workspace data", as
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
 
   await page.goto(`/calendar?follow=0&view=${test.info().project.use.isMobile ? "day" : "week"}`);
   await expect(page.getByText("Product strategy review", { exact: true })).toBeVisible();
@@ -124,7 +125,7 @@ test("desktop navigation fills the viewport while long content scrolls independe
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   const settingsPath = "/v1/workspaces/calendar/settings";
   const originalResponse = await page.request.get(settingsPath);
   expect(originalResponse.ok()).toBeTruthy();
@@ -344,7 +345,7 @@ test("Reviews and agent controls separate decisions from configuration", async (
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   const rulesResponse = page.waitForResponse(
     (response) =>
       response.url().endsWith("/v1/mail/rules") && response.request().method() === "GET",
@@ -463,7 +464,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await expect(page).toHaveURL(/\/setup$/);
   await expect(page.getByRole("heading", { name: "Hi, E2E." })).toBeVisible();
   await page.getByRole("button", { name: "Exit setup" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   const applicationSidebar = page.getByRole("complementary", {
     name: "Today Sidebar",
   });
@@ -503,6 +504,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await page.getByLabel("Location").fill("Desktop overlay");
   await page.getByRole("button", { name: "Create event" }).click();
   await expect(page.getByText(eventTitle)).toBeVisible();
+  if (mobile) await page.getByRole("button", { name: "Expand schedule" }).click();
   const todayEvent = page.locator('[data-slot="event-card"]').filter({ hasText: eventTitle });
   const todayEventLayout = await todayEvent.evaluate((card) => {
     const action = card.querySelector<HTMLElement>("button");
@@ -883,7 +885,7 @@ test("feedback keeps corrections in context and action failures in toasts", asyn
   await page.getByRole("button", { name: "Create account" }).click();
   await expect(page).toHaveURL(/\/setup$/);
   await page.getByRole("button", { name: "Exit setup" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   await page.goto("/settings?page=profile");
   const end = page.getByLabel("Day end");
   await setSettingTime(page, "Day start", "9:00 AM");
@@ -950,7 +952,7 @@ test("Mail sync recovery remains reachable in constrained headers", async ({ pag
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   const failedId = "22222222-2222-4222-8222-222222222222";
   await page.route("**/v1/connectors", async (route) => {
     const response = await route.fetch();
@@ -976,6 +978,7 @@ test("Mail sync recovery remains reachable in constrained headers", async ({ pag
   const composeBounds = await composeAction.boundingBox();
   expect(composeBounds?.width).toBe(44);
   expect(composeBounds?.height).toBe(44);
+  await revealWorkspaceOptions(page);
   await page.getByRole("button", { name: "Sync all mail accounts" }).click();
   await expect(
     page.getByText("1 of 2 mail accounts synced. 1 account needs another attempt."),

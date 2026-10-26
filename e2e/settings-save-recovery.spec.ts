@@ -1,20 +1,17 @@
-import {
-  type APIRequestContext,
-  type BrowserContext,
-  expect,
-  request,
-  test,
-} from "@playwright/test";
+import { type APIRequestContext, type BrowserContext, expect, request } from "@playwright/test";
 import type {
   FinanceConfiguration,
   TaskList,
   TaskProject,
   WorkspaceSettings,
 } from "../packages/domain/src/index.js";
+import { test } from "./recovery-fixtures.js";
 import { selectSetting } from "./settings-controls.js";
+import { fixtureWeather } from "./weather-fixtures.js";
 
 test("two editors retain attempted workspace values and explicitly recover repeated conflicts", async ({
   page,
+  cleanup,
   browser,
 }, info) => {
   test.setTimeout(90_000);
@@ -31,7 +28,14 @@ test("two editors retain attempted workspace values and explicitly recover repea
   });
   let original: WorkspaceSettings<"calendar"> | undefined;
   let secondContext: BrowserContext | undefined;
-  try {
+  cleanup(async () => {
+    try {
+      await secondContext?.close();
+    } finally {
+      await restoreSettings(restoreContext, path, origin, original?.preferences);
+    }
+  });
+  {
     original = (await (await restoreContext.get(path)).json()) as WorkspaceSettings<"calendar">;
     const seed = await page.request.patch(path, {
       headers: { origin },
@@ -54,6 +58,7 @@ test("two editors retain attempted workspace values and explicitly recover repea
       hasTouch: info.project.use.hasTouch ?? false,
     });
     const second = await secondContext.newPage();
+    await fixtureWeather(second);
     let secondWrites = 0;
     second.on("request", (request) => {
       if (request.method() === "PATCH" && request.url().endsWith(path)) secondWrites++;
@@ -144,18 +149,13 @@ test("two editors retain attempted workspace values and explicitly recover repea
     expect(
       await second.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBeTruthy();
-  } finally {
-    try {
-      await secondContext?.close();
-    } finally {
-      await restoreSettings(restoreContext, path, origin, original?.preferences);
-    }
   }
 });
 
 for (const workspace of ["calendar", "mail"] as const) {
   test(`${workspace} contextual failure preserves workspace geometry and reviewed retry controls`, async ({
     page,
+    cleanup,
   }, info) => {
     await page.goto("/login");
     await page.getByLabel("Email").fill("demo+full@nohmi.test");
@@ -169,7 +169,8 @@ for (const workspace of ["calendar", "mail"] as const) {
       storageState: await page.context().storageState(),
     });
     let original: WorkspaceSettings<typeof workspace> | undefined;
-    try {
+    cleanup(() => restoreSettings(restoreContext, path, origin, original?.preferences));
+    {
       original = (await (await restoreContext.get(path)).json()) as WorkspaceSettings<
         typeof workspace
       >;
@@ -247,14 +248,13 @@ for (const workspace of ["calendar", "mail"] as const) {
       await page.getByRole("button", { name: "Use latest settings" }).click();
       await expect(page.getByText(attempted)).toHaveCount(0);
       expect(writes).toBe(1);
-    } finally {
-      await restoreSettings(restoreContext, path, origin, original?.preferences);
     }
   });
 }
 
 test("Finance account selection recovery stays readable after reopening and navigating to Settings", async ({
   page,
+  cleanup,
 }, info) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
@@ -268,7 +268,8 @@ test("Finance account selection recovery stays readable after reopening and navi
     storageState: await page.context().storageState(),
   });
   let original: WorkspaceSettings<"finances"> | undefined;
-  try {
+  cleanup(() => restoreSettings(restoreContext, path, origin, original?.preferences));
+  {
     original = (await (await restoreContext.get(path)).json()) as WorkspaceSettings<"finances">;
     const configurationResponse = await page.request.get("/v1/finances/configuration");
     expect(configurationResponse.ok()).toBeTruthy();
@@ -350,13 +351,12 @@ test("Finance account selection recovery stays readable after reopening and navi
     expect(writes).toBe(1);
     const latest = (await (await page.request.get(path)).json()) as WorkspaceSettings<"finances">;
     expect(latest.preferences).toEqual(seeded.preferences);
-  } finally {
-    await restoreSettings(restoreContext, path, origin, original?.preferences);
   }
 });
 
 test("Tasks failed project pin reaches Settings and reapplies only its reviewed revision without losing other pins", async ({
   page,
+  cleanup,
 }, info) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
@@ -370,7 +370,8 @@ test("Tasks failed project pin reaches Settings and reapplies only its reviewed 
     storageState: await page.context().storageState(),
   });
   let original: WorkspaceSettings<"tasks"> | undefined;
-  try {
+  cleanup(() => restoreSettings(restoreContext, path, origin, original?.preferences));
+  {
     original = (await (await restoreContext.get(path)).json()) as WorkspaceSettings<"tasks">;
     const listsResponse = await page.request.get("/v1/task-lists?limit=100");
     const projectsResponse = await page.request.get("/v1/task-projects?limit=100");
@@ -451,8 +452,6 @@ test("Tasks failed project pin reaches Settings and reapplies only its reviewed 
     ]);
     const saved = (await (await page.request.get(path)).json()) as WorkspaceSettings<"tasks">;
     expect(saved.preferences).toEqual({ ...seeded.preferences, pinnedProjectIds: [project.id] });
-  } finally {
-    await restoreSettings(restoreContext, path, origin, original?.preferences);
   }
 });
 

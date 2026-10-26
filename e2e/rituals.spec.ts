@@ -1,8 +1,10 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { cleanupRitual, test } from "./recovery-fixtures.js";
 import { selectSetting, setSettingTime } from "./settings-controls.js";
 
 test("settings support field search, ritual history, and resumable setup replay", async ({
   page,
+  cleanup,
 }) => {
   // This compound acceptance flow performs nine hard loads/reloads; CI traces
   // spend about31s on those alone. Keep individual assertions at10s.
@@ -12,6 +14,7 @@ test("settings support field search, ritual history, and resumable setup replay"
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await cleanupRitual(page, cleanup, "morning");
   await page.goto("/settings?page=rituals");
   await expect(page.getByRole("heading", { name: "Rituals", level: 1 })).toBeVisible();
   await expect(page.getByRole("navigation", { name: "Top navigation" })).toHaveCount(
@@ -317,12 +320,15 @@ test("ritual skipping requires a continuous hold and shows streak impact", async
 
 test("browser rituals preserve the current page and save real answers and optional reminders", async ({
   page,
+  cleanup,
 }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page).toHaveURL(/\/today/);
+  await cleanupRitual(page, cleanup, "morning");
+  await cleanupRitual(page, cleanup, "night");
   await page.request.delete("/v1/rituals/morning/data");
   await page.request.delete("/v1/rituals/night/data");
   await page.reload();
@@ -332,7 +338,7 @@ test("browser rituals preserve the current page and save real answers and option
   const search = page.getByRole("searchbox", { name: "Search all settings" });
   await search.fill("calendar");
   const before = page.url();
-  try {
+  {
     const saved = await page.request.put("/v1/rituals/morning", {
       data: {
         requestId: crypto.randomUUID(),
@@ -394,33 +400,25 @@ test("browser rituals preserve the current page and save real answers and option
     await page.reload();
     await expect(page.getByRole("heading", { name: "Rituals", exact: true })).toBeVisible();
     await expect(ritual).toHaveCount(0);
-  } finally {
-    const response = await page.request.get("/v1/rituals/current");
-    if (response.ok()) {
-      const current = (await response.json()).current;
-      if (current?.definition?.title === "Browser morning") {
-        for (const id of current.optionalFollowUp?.reminderIds ?? []) {
-          await page.request.delete(`/v1/reminders/${id}`);
-        }
-      }
-    }
-    await page.request.delete("/v1/rituals/morning/data");
   }
 });
 
 test("browser snooze survives reload and another client can settle the same ritual", async ({
   page,
+  cleanup,
 }) => {
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page).toHaveURL(/\/today/);
+  await cleanupRitual(page, cleanup, "morning");
+  await cleanupRitual(page, cleanup, "night");
   await page.request.delete("/v1/rituals/morning/data");
   await page.request.delete("/v1/rituals/night/data");
   await page.reload();
   await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
-  try {
+  {
     const saved = await page.request.put("/v1/rituals/night", {
       data: {
         requestId: crypto.randomUUID(),
@@ -438,6 +436,14 @@ test("browser snooze survives reload and another client can settle the same ritu
     const ritual = page.getByRole("dialog", { name: "Evening ritual", exact: true });
     await expect(ritual).toBeVisible({ timeout: 15000 });
     await ritual.getByRole("button", { name: "Snooze", exact: true }).click();
+    await expect
+      .poll(async () => {
+        const response = await page.request.get("/v1/rituals/current");
+        expect(response.ok()).toBe(true);
+        const state = await response.json();
+        return Date.parse(state.current?.snoozedUntil) > Date.parse(state.serverNow);
+      })
+      .toBe(true);
     await expect(ritual).toHaveCount(0);
     await page.reload();
     await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
@@ -461,7 +467,5 @@ test("browser snooze survives reload and another client can settle the same ritu
     await page.reload();
     await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
     await expect(ritual).toHaveCount(0);
-  } finally {
-    await page.request.delete("/v1/rituals/night/data");
   }
 });

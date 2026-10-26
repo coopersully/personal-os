@@ -116,8 +116,8 @@ notification intent. A configured monitor is not proof a scheduled pass has exec
 
 Every oversight heartbeat performs the repository oversight skill’s
 [tracking and presentation check](../../.agents/skills/oversight/SKILL.md#every-oversight-heartbeat-tracking-and-presentation):
-live section name/membership/order and durable subject chat titles, preserving accurate titles across
-phases and issue changes and retaining explicit user title choices,
+live section name/membership/order and `ISSUE-ID - Issue name` chat titles against verified Nohmi
+issue or parent mappings, preserving durable subjects across phases and later explicit exceptions,
 bounded drift repair and readback into the existing setup record. Do this even when source revisions
 are unchanged; broader reconciliation deadlines do not defer it. Preserve protected/shared chats and
 record missing-source or failed-write gaps before any dependent dispatch.

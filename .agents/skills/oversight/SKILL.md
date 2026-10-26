@@ -72,15 +72,17 @@ still complete the kickoff gate above before dispatch.
 - A dedicated epic section is named exactly for the current epic name. Verify identity from its
   recorded section ID, membership and direct parent issue before renaming a proven stale name;
   preserve its ID. Preserve shared sections and explicit user-protected names as recorded exclusions.
-- Use short durable subject titles, usually 2–4 words, for dedicated oversight and implementation
-  chats, such as `Development tooling` or `Mobile navigation`. The portfolio home is
-  `nohmi project manager`. Keep issue IDs, PR links, progress and blockers in messages and records.
-  Preserve an accurate title through implementation, debugging, review and delivery; a new direct
-  issue or task phase alone does not justify renaming. Rename only for initial naming, a misleading
-  title, an explicit naming request or a genuinely changed subject.
+- Cooper’s October 26 instruction supersedes subject-only names. Name managed chats
+  `ISSUE-ID - Issue name` from their verified direct Nohmi issue or epic parent, for example
+  `COO-159 - Development tooling`. Use the parent for multi-slice oversight; do not switch it for
+  each child. Prefer one or two words for the issue subject, generally at most five when clear.
+  Keep phases, progress, PR links and blockers in records. Reconcile changed issue mappings/names
+  through the current `nohmi-project-manager` checklist; never infer identity from similar wording.
+  Normalize an authorized issue title before its chat title and read back both. Preserve later
+  explicit exceptions; the portfolio manager maps to `COO-170 - Portfolio oversight`.
 - Reuse the recorded epic section, with Lead first and persistent owners in dependency/delivery
   order. Subagents have no sidebar rows. Preserve explicit user title choices as recorded
-  exclusions, including a chosen prefix; that exception does not become a universal default.
+  exclusions when they remain applicable after the October 26 naming instruction.
   Never rename, move or reorder unrelated/shared chats to make a section look consistent.
 - Check current direct issue coverage and owners under the
   [tracking lifecycle](../../../docs/engineering/work-context.md#mandatory-tracking-lifecycle).

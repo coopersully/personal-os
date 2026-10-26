@@ -84,7 +84,7 @@ Never merge separate shippable concerns into one issue merely because they touch
 | --- | --- |
 | Planned, future intent | `Backlog` or `Todo` |
 | Active implementation, branch, or open PR | `In Progress` |
-| Acceptance met and merged, shipped, or explicitly completed | `Done` |
+| Full issue acceptance evidenced, including any required PR merges and release/adoption criteria | `Done` |
 | Deliberately abandoned | `Canceled` |
 | Confirmed duplicate | `Duplicate` |
 

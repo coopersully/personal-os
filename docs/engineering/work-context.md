@@ -84,4 +84,6 @@ Every repository PR body contains:
    branch identity must agree. Append the sanitized Linear audit record before handoff.
 
 The current workspace has no review-specific status. An open or draft PR therefore leaves direct
-issues `In Progress`; only merged work with issue-specific acceptance evidence moves to `Done`.
+issues `In Progress`. PR-backed work moves to `Done` only after required PRs merge and the full
+issue acceptance is evidenced, including required release/adoption criteria. Work with no required
+PR may complete on its full issue-specific acceptance evidence; no artificial merge is required.

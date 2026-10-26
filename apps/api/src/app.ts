@@ -1570,6 +1570,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
 
   registerTextingRoutes({
     app,
+    apiBaseUrl: dependencies.config.apiBaseUrl,
     texting,
     ...(twilio ? { validateWebhook: twilio.validateWebhook } : {}),
   });

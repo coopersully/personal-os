@@ -42,6 +42,7 @@ export function FinanceCreateButton({
   return (
     <>
       <Button
+        className="floating-actions__button"
         aria-label={
           kind === "account"
             ? "Add account"

@@ -882,6 +882,61 @@ describe.sequential("mail service", () => {
     ).rejects.toMatchObject({ code: "not_found" });
   });
 
+  it("counts complete navigation scopes beyond the thread page limit and keeps owner isolation", async () => {
+    for (const [key, scope] of Object.entries({
+      all: { mailboxRole: "inbox" as const },
+      unread: { unread: true },
+      starred: { starred: true },
+      snoozed: { snoozed: true },
+      sent: { mailboxRole: "sent" as const },
+    })) {
+      const counts = await service.navigationCounts(userId);
+      expect(counts[key as keyof typeof counts]).toBe(
+        (await service.listThreads(userId, { ...scope, limit: 200 })).length,
+      );
+    }
+    const baseline = await service.navigationCounts(userId, [enabledAccountId]);
+    const inserted = await database.db
+      .insert(mailThreads)
+      .values(
+        Array.from({ length: 201 }, (_, i) => ({
+          accountId: enabledAccountId,
+          userId,
+          provider: "google" as const,
+          remoteThreadId: `count-${i}`,
+          remoteMailboxIds: ["INBOX"],
+          subject: "Count fixture",
+          snippet: "",
+          bodyText: "",
+          from: { address: "count@example.com", name: null },
+          to: [],
+          unread: false,
+          receivedAt: new Date("2026-07-13T12:00:00Z"),
+        })),
+      )
+      .returning({ id: mailThreads.id });
+    try {
+      expect((await service.navigationCounts(userId, [enabledAccountId])).all).toBe(
+        baseline.all + 201,
+      );
+      expect(await service.navigationCounts("00000000-0000-4000-8000-000000000099")).toEqual({
+        all: 0,
+        unread: 0,
+        starred: 0,
+        snoozed: 0,
+        sent: 0,
+        drafts: 0,
+      });
+    } finally {
+      await database.db.delete(mailThreads).where(
+        inArray(
+          mailThreads.id,
+          inserted.map((record) => record.id),
+        ),
+      );
+    }
+  });
+
   it("validates and persists only explicit thread organization changes", async () => {
     const observed = await service.getThread(userId, threadId);
     gateway.update.mockClear();

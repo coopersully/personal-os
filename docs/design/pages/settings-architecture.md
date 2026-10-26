@@ -80,3 +80,16 @@ flowchart TD
 ```
 
 This diagram describes the nohmi design boundary, not Apple's private implementation.
+
+## Shared header
+
+Every Settings page supplies its title to the shared workspace title slot and its
+search, back action, and review action to the top utility slot. Search appears
+once, at the top on both desktop and mobile. Page descriptions remain above the
+settings groups; decorative centered icon/title cards are removed. Mobile uses
+the shared two-row header and bounded bottom app bar with the full settings list
+in More. Field search and deep links retain their existing behavior.
+
+Settings publishes a wrapping breadcrumb in the shared top title slot: `settings /
+current page`, including a linked parent on nested pages. Ancestors are links; the
+current title remains the page heading and is never ellipsized on mobile.

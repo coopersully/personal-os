@@ -480,7 +480,7 @@ it("uses source references, proposal defaults, and paged related evidence conser
     });
   mount();
   expect(await screen.findByText("Proposed category: Dining")).toBeVisible();
-  expect((await screen.findAllByText("Couldn’t load this material."))[0]).toBeVisible();
+  expect(await screen.findByRole("region", { name: "Couldn’t load this material." })).toBeVisible();
   expect(screen.getByText(/currency unavailable.*Pending.*Other/)).toBeVisible();
   await user.selectOptions(screen.getByLabelText("Resolution"), "link_transactions");
   expect(

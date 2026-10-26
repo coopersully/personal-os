@@ -147,7 +147,7 @@ export function BalanceBasisForm(props: BalanceBasisFormProps) {
             movement's date or posting status.
           </DialogDescription>
         </DialogHeader>
-        <ResponsiveDialogBody>
+        <div data-responsive-slot="layout">
           {coverage.complete !== true || coverage.truncated ? (
             <p>
               Source transaction coverage is incomplete. Reload the complete account-history review
@@ -190,81 +190,83 @@ export function BalanceBasisForm(props: BalanceBasisFormProps) {
               save.mutate();
             }}
           >
-            <FieldSet disabled={save.isPending}>
-              <FieldGroup>
-                <Field>
-                  <FieldLabel htmlFor={`${id}-kind`}>Balance kind you confirm</FieldLabel>
-                  <NativeSelect
-                    id={`${id}-kind`}
-                    name="kind"
-                    required
-                    value={draft.kind}
-                    onChange={(event) =>
-                      setDraft((value) => ({ ...value, kind: event.target.value }))
-                    }
-                  >
-                    <NativeSelectOption value="">Choose current or available</NativeSelectOption>
-                    <NativeSelectOption value="current">Current</NativeSelectOption>
-                    <NativeSelectOption value="available">Available</NativeSelectOption>
-                  </NativeSelect>
-                </Field>
-                {(
-                  [
-                    ["amount", "Balance amount"],
-                    ["currencyCode", "Balance currency code"],
-                    ["asOf", "Balance as-of instant (ISO with offset)"],
-                    ["validUntil", "Valid-until instant (ISO with offset)"],
-                    ["floor", "Optional protected floor (blank means unknown)"],
-                  ] as const
-                ).map(([key, label]) => (
-                  <Field key={key}>
-                    <FieldLabel htmlFor={`${id}-${key}`}>{label}</FieldLabel>
-                    <Input
-                      id={`${id}-${key}`}
-                      name={key}
-                      required={key !== "floor"}
-                      value={draft[key]}
-                      onChange={(event) =>
-                        setDraft((value) => ({ ...value, [key]: event.target.value }))
-                      }
-                    />
-                  </Field>
-                ))}
-                {transactions.map((transaction) => (
-                  <Field key={transaction.id}>
-                    <FieldLabel htmlFor={`${id}-reflection-${transaction.id}`}>
-                      Balance reflection for {transaction.merchant} · {transaction.date} · revision{" "}
-                      {transaction.transactionRevision}
-                    </FieldLabel>
+            <ResponsiveDialogBody>
+              <FieldSet disabled={save.isPending}>
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel htmlFor={`${id}-kind`}>Balance kind you confirm</FieldLabel>
                     <NativeSelect
-                      id={`${id}-reflection-${transaction.id}`}
-                      name={`reflection-${transaction.id}`}
+                      id={`${id}-kind`}
+                      name="kind"
                       required
-                      value={reflections[transaction.id] ?? ""}
+                      value={draft.kind}
                       onChange={(event) =>
-                        setReflections((value) => ({
-                          ...value,
-                          [transaction.id]: event.target.value,
-                        }))
+                        setDraft((value) => ({ ...value, kind: event.target.value }))
                       }
                     >
-                      <NativeSelectOption value="">Choose explicitly</NativeSelectOption>
-                      <NativeSelectOption value="included">
-                        Already included in this balance
-                      </NativeSelectOption>
-                      <NativeSelectOption value="not_included">
-                        Not included in this balance
-                      </NativeSelectOption>
+                      <NativeSelectOption value="">Choose current or available</NativeSelectOption>
+                      <NativeSelectOption value="current">Current</NativeSelectOption>
+                      <NativeSelectOption value="available">Available</NativeSelectOption>
                     </NativeSelect>
                   </Field>
-                ))}
-              </FieldGroup>
-            </FieldSet>
-            <p className="text-sm text-muted-foreground">
-              Account revision {expectedAccountRevision}; previous basis revision{" "}
-              {previousBasis?.basisRevision ?? 0}. A zero protected floor is an explicit choice;
-              leaving it blank does not mean zero.
-            </p>
+                  {(
+                    [
+                      ["amount", "Balance amount"],
+                      ["currencyCode", "Balance currency code"],
+                      ["asOf", "Balance as-of instant (ISO with offset)"],
+                      ["validUntil", "Valid-until instant (ISO with offset)"],
+                      ["floor", "Optional protected floor (blank means unknown)"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <Field key={key}>
+                      <FieldLabel htmlFor={`${id}-${key}`}>{label}</FieldLabel>
+                      <Input
+                        id={`${id}-${key}`}
+                        name={key}
+                        required={key !== "floor"}
+                        value={draft[key]}
+                        onChange={(event) =>
+                          setDraft((value) => ({ ...value, [key]: event.target.value }))
+                        }
+                      />
+                    </Field>
+                  ))}
+                  {transactions.map((transaction) => (
+                    <Field key={transaction.id}>
+                      <FieldLabel htmlFor={`${id}-reflection-${transaction.id}`}>
+                        Balance reflection for {transaction.merchant} · {transaction.date} ·
+                        revision {transaction.transactionRevision}
+                      </FieldLabel>
+                      <NativeSelect
+                        id={`${id}-reflection-${transaction.id}`}
+                        name={`reflection-${transaction.id}`}
+                        required
+                        value={reflections[transaction.id] ?? ""}
+                        onChange={(event) =>
+                          setReflections((value) => ({
+                            ...value,
+                            [transaction.id]: event.target.value,
+                          }))
+                        }
+                      >
+                        <NativeSelectOption value="">Choose explicitly</NativeSelectOption>
+                        <NativeSelectOption value="included">
+                          Already included in this balance
+                        </NativeSelectOption>
+                        <NativeSelectOption value="not_included">
+                          Not included in this balance
+                        </NativeSelectOption>
+                      </NativeSelect>
+                    </Field>
+                  ))}
+                </FieldGroup>
+              </FieldSet>
+              <p className="text-sm text-muted-foreground">
+                Account revision {expectedAccountRevision}; previous basis revision{" "}
+                {previousBasis?.basisRevision ?? 0}. A zero protected floor is an explicit choice;
+                leaving it blank does not mean zero.
+              </p>
+            </ResponsiveDialogBody>
             <DialogFooter>
               <Button type="button" variant="outline" disabled={save.isPending} onClick={onClose}>
                 Cancel
@@ -274,7 +276,7 @@ export function BalanceBasisForm(props: BalanceBasisFormProps) {
               </Button>
             </DialogFooter>
           </FeedbackForm>
-        </ResponsiveDialogBody>
+        </div>
       </DialogContent>
     </Dialog>
   );

@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { WorkspaceSettings } from "../packages/domain/src/workspace-settings.js";
+import { revealWorkspaceOptions } from "./workspace-header-controls.js";
 
 for (const width of [320, 390, 1100]) {
   test(`shared Tasks workspace remains usable at ${width}px`, async ({ page }) => {
@@ -8,7 +9,7 @@ for (const width of [320, 390, 1100]) {
     await page.getByLabel("Email").fill("demo+full@nohmi.test");
     await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
     await page.getByRole("button", { name: "Log in" }).click();
-    await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
     const settingsPath = "/v1/workspaces/tasks/settings";
     const originalResponse = await page.request.get(settingsPath);
     expect(originalResponse.ok()).toBe(true);
@@ -85,12 +86,14 @@ for (const width of [320, 390, 1100]) {
       ).toHaveCount(0);
       await bar.getByRole("button", { name: /Filters/ }).click();
       await dialog.getByRole("button", { name: "Clear", exact: true }).click();
-      await bar.getByRole("button", { name: /^Sort(?:$|:)/ }).click();
+      await revealWorkspaceOptions(page);
+      await page.getByRole("button", { name: /^Sort(?:$|:)/ }).click();
       const sorted = savedPreference();
       await page.getByRole("menuitemradio", { name: "Priority", exact: true }).click();
       expect((await sorted).ok()).toBe(true);
       await expect(page).toHaveURL(/sort=priority/);
-      await bar.getByRole("button", { name: "Display", exact: true }).click();
+      await revealWorkspaceOptions(page);
+      await page.getByRole("button", { name: "Display", exact: true }).click();
       const grouped = savedPreference();
       await page.getByRole("menuitemradio", { name: "Date", exact: true }).click();
       expect((await grouped).ok()).toBe(true);

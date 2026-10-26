@@ -4,8 +4,17 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/api";
 import { ActionButton as Button } from "@/components/action-button";
-import { DataChoice, FilterTrigger } from "@/components/data-view-controls";
-import { SearchIcon } from "@/components/icons";
+import { FilterTrigger } from "@/components/data-view-controls";
+import {
+  ApprovalHandIcon,
+  ArrowRightIcon,
+  CalendarIcon,
+  FileTextIcon,
+  FilterIcon,
+  PlusIcon,
+  SearchIcon,
+  SettingsIcon,
+} from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import {
   Combobox,
@@ -67,6 +76,7 @@ function FinderInput({
 }) {
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
+  const anchorRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (activation) {
       inputRef.current?.focus();
@@ -77,6 +87,7 @@ function FinderInput({
   const [settled, setSettled] = useState("");
   const [offset, setOffset] = useState(0);
   const [filter, setFilter] = useState("all");
+  const [choosingType, setChoosingType] = useState(false);
   const needsRecords = ["all", "content", "reviews"].includes(filter);
   const recordKind = filter === "content" ? "content" : filter === "reviews" ? "reviews" : "all";
   const [open, setOpen] = useState(false);
@@ -142,13 +153,31 @@ function FinderInput({
   };
   const results = (
     <>
-      <div className="flex items-center justify-between gap-2 px-2 py-1">
-        <span className="text-xs text-muted-foreground">
-          Entire workspace · Available synced content
-        </span>
+      <div className="workspace-finder-toolbar">
+        <Button
+          size="sm"
+          variant="ghost"
+          aria-label="Search result type"
+          aria-expanded={choosingType}
+          onClick={() => setChoosingType(!choosingType)}
+        >
+          <FilterIcon aria-hidden="true" />
+          {
+            {
+              all: "All results",
+              content: "Content",
+              settings: "Settings",
+              actions: "Navigation and actions",
+              reviews: "Reviews",
+            }[filter as "all"]
+          }
+        </Button>
         <FilterTrigger
-          label={includeArchived ? "Including archive" : "Excluding archive"}
-          active={!includeArchived}
+          compact
+          label="Include archive"
+          aria-label="Include archive"
+          active={includeArchived}
+          count={includeArchived ? 1 : 0}
           aria-pressed={includeArchived}
           onClick={() => {
             setArchiveOverride(!includeArchived);
@@ -156,23 +185,32 @@ function FinderInput({
           }}
         />
       </div>
-      <DataChoice
-        label="Result type"
-        ariaLabel="Search result type"
-        value={filter}
-        active={filter !== "all"}
-        choices={[
-          ["all", "All results"],
-          ["content", "Content"],
-          ["settings", "Settings"],
-          ["actions", "Navigation and actions"],
-          ["reviews", "Reviews"],
-        ]}
-        onChange={(value) => {
-          setFilter(value);
-          setOffset(0);
-        }}
-      />
+      {choosingType ? (
+        <fieldset className="workspace-finder-types" aria-label="Result type">
+          {[
+            ["all", "All results"],
+            ["content", "Content"],
+            ["settings", "Settings"],
+            ["actions", "Navigation and actions"],
+            ["reviews", "Reviews"],
+          ].map(([value, title]) => (
+            <Button
+              key={value}
+              size="sm"
+              variant={filter === value ? "secondary" : "ghost"}
+              aria-pressed={filter === value}
+              onClick={() => {
+                if (!value) return;
+                setFilter(value);
+                setOffset(0);
+                setChoosingType(false);
+              }}
+            >
+              {title}
+            </Button>
+          ))}
+        </fieldset>
+      ) : null}
       <div role="status" className="px-2 text-xs text-muted-foreground">
         {query.trim() && needsRecords && (!current || records.isPending)
           ? "Searching…"
@@ -191,12 +229,27 @@ function FinderInput({
       ) : null}
       <ComboboxList aria-label={`${label} results`}>
         {groups.map((group) => (
-          <ComboboxGroup key={group.label}>
+          <ComboboxGroup key={group.label} className="workspace-finder-group">
             <ComboboxGroupLabel className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground">
               {group.label}
             </ComboboxGroupLabel>
             {group.items.map((option) => (
               <ComboboxItem value={option} key={`${option.kind}:${option.id}`}>
+                {(() => {
+                  const Icon =
+                    option.kind === "Settings"
+                      ? SettingsIcon
+                      : option.kind === "Review"
+                        ? ApprovalHandIcon
+                        : option.kind === "Action"
+                          ? PlusIcon
+                          : option.kind === "Navigation"
+                            ? ArrowRightIcon
+                            : option.kind === "Date"
+                              ? CalendarIcon
+                              : FileTextIcon;
+                  return <Icon aria-hidden="true" />;
+                })()}
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="truncate font-medium">{option.title}</span>
@@ -206,7 +259,6 @@ function FinderInput({
                     {option.preview}
                   </span>
                 </div>
-                <span className="shrink-0 text-xs text-muted-foreground">{option.kind}</span>
               </ComboboxItem>
             ))}
           </ComboboxGroup>
@@ -238,7 +290,7 @@ function FinderInput({
     </>
   );
   return (
-    <div className="min-w-0">
+    <div className="min-w-0" ref={anchorRef}>
       <Combobox<SearchOption>
         items={orderedOptions}
         filter={null}
@@ -270,7 +322,12 @@ function FinderInput({
             <SearchIcon />
           </InputGroupAddon>
         </ComboboxInput>
-        <ComboboxContent className="workspace-finder-results max-h-[65dvh] overflow-y-auto">
+        <ComboboxContent
+          anchor={anchorRef}
+          collisionPadding={16}
+          align="center"
+          className="workspace-finder-results max-h-[65dvh] overflow-y-auto"
+        >
           {results}
         </ComboboxContent>
       </Combobox>

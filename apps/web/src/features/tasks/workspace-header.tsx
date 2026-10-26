@@ -20,6 +20,8 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
+import { WorkspaceHeaderOptions } from "@/components/workspace-header-options";
 import { TaskContainerControls } from "./containers-page";
 import { listAllTaskLists, listAllTaskProjects } from "./page";
 import { useTaskPresentationParams } from "./presentation-preferences";
@@ -112,64 +114,70 @@ export function TasksAppBarControls({ search, timeZone }: { search: ReactNode; t
   };
   return (
     <div className="tasks-header-context">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="tasks-header-view"
-            aria-label={`Tasks view: ${label}`}
-            title={label}
-          >
-            <SelectedIcon aria-hidden="true" />
-            <span className="truncate">{label}</span>
-            <ChevronDownIcon aria-hidden="true" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-80 max-w-[calc(100vw-2rem)]">
-          <DropdownMenuRadioGroup value={selectedValue} onValueChange={selectScope}>
-            {views.map((view) => (
-              <DropdownMenuRadioItem key={view.value} value={view.value}>
-                <view.icon aria-hidden="true" />
-                {view.label}
-              </DropdownMenuRadioItem>
-            ))}
-            {historyViews.map((view) => (
-              <DropdownMenuRadioItem key={view.value} value={view.value}>
-                <view.icon aria-hidden="true" />
-                {view.label}
-              </DropdownMenuRadioItem>
-            ))}
-          </DropdownMenuRadioGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <WorkspaceHeaderControls label="Tasks title" placement="title">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="tasks-header-view workspace-app-bar__title"
+              aria-label={`Tasks view: ${label}`}
+              title={label}
+            >
+              <SelectedIcon aria-hidden="true" />
+              <span className="truncate">{label}</span>
+              <ChevronDownIcon aria-hidden="true" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-80 max-w-[calc(100vw-2rem)]">
+            <DropdownMenuRadioGroup value={selectedValue} onValueChange={selectScope}>
+              {views.map((view) => (
+                <DropdownMenuRadioItem key={view.value} value={view.value}>
+                  <view.icon aria-hidden="true" />
+                  {view.label}
+                </DropdownMenuRadioItem>
+              ))}
+              {historyViews.map((view) => (
+                <DropdownMenuRadioItem key={view.value} value={view.value}>
+                  <view.icon aria-hidden="true" />
+                  {view.label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </WorkspaceHeaderControls>
       <div className="tasks-header-tools">
         {search}
-        {params.get("archive") === "all" ? (
-          <TaskContainerControls kind="archive" />
-        ) : scope === "lists" || scope === "projects" ? (
-          <TaskContainerControls kind={scope} />
-        ) : !archive ? (
-          <>
-            <WorkspaceFilters
-              params={params}
-              routeParams={routeParams}
-              timeZone={timeZone}
-              lists={activeLists}
-              projects={activeProjects}
-            />
-            <WorkspaceSort params={params} routeParams={routeParams} />
-            <WorkspaceDisplay params={params} routeParams={routeParams} />
-            {!params.has("view") && list ? (
-              <TaskContainerActions
-                list={list}
-                {...(project ? { project } : {})}
+        <WorkspaceHeaderControls label="Task page controls">
+          {params.get("archive") === "all" ? (
+            <TaskContainerControls kind="archive" />
+          ) : scope === "lists" || scope === "projects" ? (
+            <TaskContainerControls kind={scope} />
+          ) : !archive ? (
+            <>
+              <WorkspaceFilters
+                params={params}
+                routeParams={routeParams}
+                timeZone={timeZone}
                 lists={activeLists}
-                projects={projects.data?.items ?? []}
+                projects={activeProjects}
               />
-            ) : null}
-          </>
-        ) : null}
+              <WorkspaceHeaderOptions>
+                <WorkspaceSort params={params} routeParams={routeParams} />
+                <WorkspaceDisplay params={params} routeParams={routeParams} />
+                {!params.has("view") && list ? (
+                  <TaskContainerActions
+                    list={list}
+                    {...(project ? { project } : {})}
+                    lists={activeLists}
+                    projects={projects.data?.items ?? []}
+                  />
+                ) : null}
+              </WorkspaceHeaderOptions>
+            </>
+          ) : null}
+        </WorkspaceHeaderControls>
       </div>
     </div>
   );

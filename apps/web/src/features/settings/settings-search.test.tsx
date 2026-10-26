@@ -34,8 +34,8 @@ function setup() {
 describe("Settings search", () => {
   it("finds preferences across sections by topic and navigates without retaining the search", async () => {
     const user = setup();
-    await user.click(screen.getByRole("button", { name: "Search settings" }));
-    const input = screen.getByRole("searchbox", { name: "Search all settings" });
+    await user.click(screen.getByRole("searchbox", { name: "Search settings" }));
+    const input = screen.getByRole("searchbox", { name: "Search settings" });
     expect(input).toHaveFocus();
     await user.type(input, "time zone");
     const results = screen.getByRole("navigation", { name: "Settings search results" });
@@ -47,12 +47,12 @@ describe("Settings search", () => {
     await user.click(within(results).getByRole("link", { name: /^Account Your/ }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Location")).toHaveTextContent("?page=profile");
-    await user.click(screen.getByRole("button", { name: "Search settings" }));
+    await user.click(screen.getByRole("searchbox", { name: "Search settings" }));
     expect(screen.getByRole("searchbox")).toHaveValue("");
   });
   it("returns individual fields with a canonical field destination", async () => {
     const user = setup();
-    await user.click(screen.getByRole("button", { name: "Search settings" }));
+    await user.click(screen.getByRole("searchbox", { name: "Search settings" }));
     await user.type(screen.getByRole("searchbox"), "working hours");
     const start = screen.getByRole("link", { name: "Day start Account" });
     expect(start).toHaveAttribute("href", "/settings?page=profile&field=profile%3Aday-start");
@@ -62,10 +62,14 @@ describe("Settings search", () => {
   });
   it("keeps unavailable sections out and supports no results and keyboard dismissal", async () => {
     const user = setup();
-    const trigger = screen.getByRole("button", { name: "Search settings" });
+    const trigger = screen.getByRole("searchbox", { name: "Search settings" });
     await user.click(trigger);
     await user.type(screen.getByRole("searchbox"), "invitations");
-    expect(screen.getByRole("status")).toHaveTextContent("No settings found");
+    expect(
+      within(screen.getByRole("navigation", { name: "Settings search results" })).getByRole(
+        "status",
+      ),
+    ).toHaveTextContent("No settings found");
     await user.clear(screen.getByRole("searchbox"));
     await user.type(screen.getByRole("searchbox"), "DARK");
     expect(screen.getByRole("link", { name: /^Appearance Choose/ })).toBeInTheDocument();

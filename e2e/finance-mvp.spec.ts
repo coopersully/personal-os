@@ -22,7 +22,7 @@ test("saved manual context survives reload without changing the ledger and stays
   );
   await page.getByRole("button", { name: "Log in" }).click();
   const { sessionToken } = await (await login).json();
-  await expect(page.getByRole("heading", { name: "To take care of" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "up next" })).toBeVisible();
   const headers = { authorization: `Session ${sessionToken}` };
   const accountResponse = await page.request.post("/v1/finances/accounts", {
     headers,

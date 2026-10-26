@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { QueryFeedback } from "@/components/async-state";
+import { ContentSkeleton } from "@/components/content-skeleton";
 import { DataViewEmpty, DataViewRecovery } from "@/components/data-view-state";
 import {
   ApprovalHandIcon,
@@ -18,6 +19,14 @@ import {
   TrashIcon,
   XIcon,
 } from "@/components/icons";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+} from "@/components/responsive-dialog";
 import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
 import { api } from "../../api.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
@@ -48,14 +57,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "../../components/ui/collapsible.js";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "../../components/ui/dialog.js";
 import { Input } from "../../components/ui/input.js";
 import {
   InputGroup,
@@ -468,7 +469,9 @@ function AgentAccessSettings({
                 title="Couldn’t load Mail rules."
                 unavailableLabel="Mail rules unavailable"
               />
-              {mailSetup.isPending || rules.isPending ? <p>Loading Mail settings…</p> : null}
+              {mailSetup.isPending || rules.isPending ? (
+                <ContentSkeleton label="Loading Mail settings…" shape="settings" rows={3} />
+              ) : null}
               {mailSetup.data || rules.data ? (
                 <MailConfiguration
                   {...(mailSetup.data && (mailSetup.isSuccess || mailSources.length > 0)

@@ -175,7 +175,7 @@ export function ReimbursementCorrectionDialog({
               : "Correct the existing claim. This does not create a new expense or bank transaction."}
           </DialogDescription>
         </DialogHeader>
-        <ResponsiveDialogBody>
+        <div data-responsive-slot="layout">
           <form
             className="flex flex-col gap-4"
             onSubmit={(event) => {
@@ -183,94 +183,96 @@ export function ReimbursementCorrectionDialog({
               mutation.mutate();
             }}
           >
-            <dl className="text-sm">
-              <div>
-                <dt>Claim</dt>
-                <dd className="break-all">{snapshot.id}</dd>
-              </div>
-              <div>
-                <dt>Current revision</dt>
-                <dd>{snapshot.revision}</dd>
-              </div>
-              {match ? (
+            <ResponsiveDialogBody>
+              <dl className="text-sm">
                 <div>
-                  <dt>Receipt being removed</dt>
-                  <dd>
-                    {match.amount} · Credit {match.creditTransactionId}
-                  </dd>
+                  <dt>Claim</dt>
+                  <dd className="break-all">{snapshot.id}</dd>
                 </div>
-              ) : null}
-            </dl>
-            <FieldGroup>
-              {sourceOperation === "correct_expected" ? (
-                <>
-                  <Field>
-                    <FieldLabel htmlFor={`${id}-amount`}>Expected amount</FieldLabel>
-                    <Input
-                      id={`${id}-amount`}
-                      inputMode="decimal"
-                      value={amount}
-                      disabled={locked}
-                      onChange={(event) => setAmount(event.target.value)}
-                    />
-                    <p className="text-sm text-muted-foreground">
-                      Currency: {snapshot.sourceExpense?.currency ?? "unknown"}. At least the
-                      already received amount: {snapshot.receivedAmount}.
-                    </p>
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor={`${id}-payer`}>Payer</FieldLabel>
-                    <Input
-                      id={`${id}-payer`}
-                      value={payer}
-                      disabled={locked}
-                      onChange={(event) => setPayer(event.target.value)}
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor={`${id}-due`}>Due date</FieldLabel>
-                    <Input
-                      id={`${id}-due`}
-                      type="date"
-                      value={dueDate}
-                      disabled={locked}
-                      onChange={(event) => setDueDate(event.target.value)}
-                    />
-                  </Field>
-                </>
-              ) : null}
-              <Field>
-                <FieldLabel htmlFor={`${id}-rationale`}>Reason for correction</FieldLabel>
-                <Textarea
-                  id={`${id}-rationale`}
-                  maxLength={1000}
-                  value={rationale}
-                  disabled={locked}
-                  onChange={(event) => setRationale(event.target.value)}
-                />
-              </Field>
-              <Field>
-                <FieldLabel htmlFor={`${id}-summary`}>Supporting evidence</FieldLabel>
-                <Textarea
-                  id={`${id}-summary`}
-                  maxLength={1000}
-                  value={summary}
-                  disabled={locked}
-                  onChange={(event) => setSummary(event.target.value)}
-                />
-              </Field>
-              <Field orientation="horizontal">
-                <Checkbox
-                  id={`${id}-confirm`}
-                  checked={confirmed}
-                  disabled={locked}
-                  onCheckedChange={(value) => setConfirmed(value === true)}
-                />
-                <FieldLabel htmlFor={`${id}-confirm`}>
-                  I confirm this correction to the existing reimbursement.
-                </FieldLabel>
-              </Field>
-            </FieldGroup>
+                <div>
+                  <dt>Current revision</dt>
+                  <dd>{snapshot.revision}</dd>
+                </div>
+                {match ? (
+                  <div>
+                    <dt>Receipt being removed</dt>
+                    <dd>
+                      {match.amount} · Credit {match.creditTransactionId}
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
+              <FieldGroup>
+                {sourceOperation === "correct_expected" ? (
+                  <>
+                    <Field>
+                      <FieldLabel htmlFor={`${id}-amount`}>Expected amount</FieldLabel>
+                      <Input
+                        id={`${id}-amount`}
+                        inputMode="decimal"
+                        value={amount}
+                        disabled={locked}
+                        onChange={(event) => setAmount(event.target.value)}
+                      />
+                      <p className="text-sm text-muted-foreground">
+                        Currency: {snapshot.sourceExpense?.currency ?? "unknown"}. At least the
+                        already received amount: {snapshot.receivedAmount}.
+                      </p>
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor={`${id}-payer`}>Payer</FieldLabel>
+                      <Input
+                        id={`${id}-payer`}
+                        value={payer}
+                        disabled={locked}
+                        onChange={(event) => setPayer(event.target.value)}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor={`${id}-due`}>Due date</FieldLabel>
+                      <Input
+                        id={`${id}-due`}
+                        type="date"
+                        value={dueDate}
+                        disabled={locked}
+                        onChange={(event) => setDueDate(event.target.value)}
+                      />
+                    </Field>
+                  </>
+                ) : null}
+                <Field>
+                  <FieldLabel htmlFor={`${id}-rationale`}>Reason for correction</FieldLabel>
+                  <Textarea
+                    id={`${id}-rationale`}
+                    maxLength={1000}
+                    value={rationale}
+                    disabled={locked}
+                    onChange={(event) => setRationale(event.target.value)}
+                  />
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor={`${id}-summary`}>Supporting evidence</FieldLabel>
+                  <Textarea
+                    id={`${id}-summary`}
+                    maxLength={1000}
+                    value={summary}
+                    disabled={locked}
+                    onChange={(event) => setSummary(event.target.value)}
+                  />
+                </Field>
+                <Field orientation="horizontal">
+                  <Checkbox
+                    id={`${id}-confirm`}
+                    checked={confirmed}
+                    disabled={locked}
+                    onCheckedChange={(value) => setConfirmed(value === true)}
+                  />
+                  <FieldLabel htmlFor={`${id}-confirm`}>
+                    I confirm this correction to the existing reimbursement.
+                  </FieldLabel>
+                </Field>
+              </FieldGroup>
+            </ResponsiveDialogBody>
             <DialogFooter>
               <Button type="button" variant="ghost" disabled={locked} onClick={onClose}>
                 Cancel
@@ -280,7 +282,7 @@ export function ReimbursementCorrectionDialog({
               </Button>
             </DialogFooter>
           </form>
-        </ResponsiveDialogBody>
+        </div>
       </DialogContent>
     </Dialog>
   );

@@ -51,7 +51,7 @@ export function WorkspaceRow({
   selectionMode: boolean;
   selected: boolean;
   disabled: boolean;
-  onSelect: () => void;
+  onSelect?: () => void;
   onOpen: () => void;
   onAction: (action: WorkspaceAction) => void;
 }) {
@@ -80,12 +80,12 @@ export function WorkspaceRow({
     .join(" · ");
   return (
     <Row
-      className="task-workspace-row min-h-0 items-center gap-x-2 py-2 data-[selected=true]:bg-accent"
+      className="task-workspace-row min-h-0 items-start gap-x-2 py-2 data-[selected=true]:bg-accent"
       data-completed={completed}
       data-priority={record.priority}
       data-selected={selected}
     >
-      <Completion className="self-center pt-0">
+      <Completion>
         <Checkbox
           aria-label={
             selectionMode
@@ -94,7 +94,7 @@ export function WorkspaceRow({
           }
           checked={selectionMode ? selected : completed}
           disabled={disabled || (selectionMode ? item.readOnly : !actions.includes(completeAction))}
-          onCheckedChange={() => (selectionMode ? onSelect() : onAction(completeAction))}
+          onCheckedChange={() => (selectionMode ? onSelect?.() : onAction(completeAction))}
         />
       </Completion>
       <TaskItemPrimaryAction aria-label={`Open ${record.title}`} onClick={onOpen}>
@@ -166,7 +166,7 @@ export function WorkspaceRow({
                 <EyeIcon />
                 Open {item.kind}
               </DropdownMenuItem>
-              {!item.readOnly ? (
+              {!item.readOnly && onSelect ? (
                 <DropdownMenuItem onSelect={onSelect}>
                   <CheckSquareIcon />
                   {selected ? "Deselect" : "Select"}

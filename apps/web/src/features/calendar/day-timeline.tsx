@@ -1,6 +1,7 @@
 import type { CalendarEvent, LocalDate } from "@personal-os/domain";
 import { localDateAt, sameLocalDate } from "@personal-os/domain";
 import type { CSSProperties, ReactNode } from "react";
+import { minuteToTimelinePixels } from "@/calendar-timeline";
 
 export type TimelinePositionable = {
   allDay: boolean;
@@ -17,19 +18,35 @@ export type TimelineEventLayout<T extends TimelinePositionable = CalendarEvent> 
   startMinute: number;
 };
 
+// A timeline formats many timestamps in one owner timezone. Keep one formatter
+// pair rather than rebuilding ICU formatters for every event on every render.
+let timelineFormatters:
+  | { timeZone: string; parts: Intl.DateTimeFormat; clock: Intl.DateTimeFormat }
+  | undefined;
+function formattersFor(timeZone: string) {
+  if (timelineFormatters?.timeZone !== timeZone) {
+    timelineFormatters = {
+      timeZone,
+      parts: new Intl.DateTimeFormat("en", {
+        day: "numeric",
+        hour: "numeric",
+        hourCycle: "h23",
+        minute: "numeric",
+        month: "numeric",
+        second: "numeric",
+        timeZone,
+        year: "numeric",
+      }),
+      clock: new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit", timeZone }),
+    };
+  }
+  return timelineFormatters;
+}
+
 export function localDateTimeAt(value: Date | string, timeZone: string) {
   const values = Object.fromEntries(
-    new Intl.DateTimeFormat("en", {
-      day: "numeric",
-      hour: "numeric",
-      hourCycle: "h23",
-      minute: "numeric",
-      month: "numeric",
-      second: "numeric",
-      timeZone,
-      year: "numeric",
-    })
-      .formatToParts(new Date(value))
+    formattersFor(timeZone)
+      .parts.formatToParts(new Date(value))
       .map((part) => [part.type, part.value]),
   );
   return {
@@ -74,19 +91,25 @@ export function positionTimelineEvents<T extends TimelinePositionable>(
         left.endMinute - right.endMinute ||
         left.event.id.localeCompare(right.event.id),
     );
-  // Only simultaneous starts share horizontal lanes. Later starts paint above
-  // earlier events while retaining their actual time and duration geometry.
-  const simultaneous = new Map<number, typeof intervals>();
+  const result: TimelineEventLayout<T>[] = [];
+  let cluster: Array<TimelineEventLayout<T>> = [];
+  let clusterEnd = -1;
+  let laneEnds: number[] = [];
+  const flush = () => {
+    for (const layout of cluster) result.push({ ...layout, columns: laneEnds.length });
+    cluster = [];
+    laneEnds = [];
+  };
   for (const interval of intervals) {
-    const start = new Date(interval.event.startsAt).getTime();
-    const group = simultaneous.get(start) ?? [];
-    group.push(interval);
-    simultaneous.set(start, group);
+    if (interval.startMinute >= clusterEnd) flush();
+    let column = laneEnds.findIndex((end) => end <= interval.startMinute);
+    if (column < 0) column = laneEnds.length;
+    laneEnds[column] = interval.endMinute;
+    cluster.push({ ...interval, column, columns: 0 });
+    clusterEnd = Math.max(cluster.length === 1 ? -1 : clusterEnd, interval.endMinute);
   }
-  return intervals.map((interval) => {
-    const group = simultaneous.get(new Date(interval.event.startsAt).getTime()) as typeof intervals;
-    return { ...interval, column: group.indexOf(interval), columns: group.length };
-  });
+  flush();
+  return result;
 }
 
 function formatHour(hour: number): string {
@@ -95,12 +118,9 @@ function formatHour(hour: number): string {
   return hour < 12 ? `${hour} AM` : `${hour - 12} PM`;
 }
 
-function formatTime(value: string, timeZone: string) {
-  return new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit", timeZone }).format(
-    new Date(value),
-  );
+export function formatTimelineClock(value: string, timeZone: string) {
+  return formattersFor(timeZone).clock.format(new Date(value));
 }
-const todayTimelinePixelsPerMinute = 1.5;
 export type TodayTimelineDensity = "compact" | "full" | "short";
 
 export function todayTimelineStartMinute(currentMinute: number): number {
@@ -119,109 +139,114 @@ export function todayTimelineDensity(durationMinutes: number): TodayTimelineDens
   return "full";
 }
 
+/** Shared Calendar/Today axis; marks and scale must change together. */
+export function TimelineAxis({
+  startMinute = 0,
+  endMinute = 1440,
+}: {
+  startMinute?: number;
+  endMinute?: number;
+}) {
+  const first = Math.ceil(startMinute / 30) * 30;
+  const marks = Array.from(
+    { length: Math.max(0, Math.ceil((endMinute - first) / 30)) },
+    (_, i) => first + i * 30,
+  );
+  return (
+    <ol
+      aria-hidden="true"
+      data-calendar-axis="left"
+      className="calendar-time-axis"
+      style={{ height: minuteToTimelinePixels(endMinute - startMinute) }}
+    >
+      {marks.map((minute) => (
+        <li
+          key={minute}
+          data-major={minute % 60 === 0}
+          style={{ top: minuteToTimelinePixels(minute - startMinute) }}
+        >
+          {minute % 60
+            ? `${formatHour(Math.floor(minute / 60)).split(" ")[0]}:30 ${minute < 720 ? "AM" : "PM"}`
+            : formatHour(Math.floor(minute / 60) % 24)}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+export function timelineLaneStyle(column: number, columns: number) {
+  return {
+    left: `calc(${(column / columns) * 100}% + 3px)`,
+    width: `calc(${100 / columns}% - 6px)`,
+  };
+}
+
+/** Today is a clipped Calendar day grid, using the same axis, scale and event layout. */
 export function DayTimeline<T extends TimelinePositionable>({
   currentTime,
   items,
   renderItem,
   timeZone,
+  preview = false,
 }: {
   currentTime: Date;
   items: T[];
-  renderItem: (item: T, style: CSSProperties, density: TodayTimelineDensity) => ReactNode;
+  renderItem: (
+    item: T,
+    style: CSSProperties,
+    density: TodayTimelineDensity,
+    layout: TimelineEventLayout<T>,
+    startMinute: number,
+  ) => ReactNode;
   timeZone: string;
+  preview?: boolean;
 }) {
-  const day = localDateAt(currentTime, timeZone);
   const currentMinute = localDateTimeAt(currentTime, timeZone).minute;
-  const startMinute = todayTimelineStartMinute(currentMinute);
-  const layouts = positionTimelineEvents(items, day, timeZone);
-  const endMinute = Math.max(
-    startMinute,
-    ...layouts.map((layout) => todayTimelineItemRange(layout.startMinute, layout.endMinute).end),
-  );
-  const height = Math.max(
-    15 * todayTimelinePixelsPerMinute,
-    (endMinute - startMinute) * todayTimelinePixelsPerMinute,
-  );
-  const firstHourMinute = Math.ceil(startMinute / 60) * 60;
-  const hourTicks =
-    firstHourMinute > endMinute
-      ? []
-      : Array.from(
-          { length: Math.floor((endMinute - firstHourMinute) / 60) + 1 },
-          (_, index) => firstHourMinute + index * 60,
-        );
-  const minorTicks = Array.from(
-    { length: Math.floor((endMinute - startMinute) / 15) + 1 },
-    (_, index) => startMinute + index * 15,
-  ).filter((minute) => minute % 60 !== 0);
-  const gridTicks = Array.from(
-    { length: Math.floor((endMinute - startMinute) / 15) + 1 },
-    (_, index) => startMinute + index * 15,
-  );
-
+  const startMinute = preview
+    ? Math.min(...items.map((item) => localDateTimeAt(item.startsAt, timeZone).minute))
+    : todayTimelineStartMinute(currentMinute);
+  const layouts = positionTimelineEvents(
+    items,
+    localDateAt(currentTime, timeZone),
+    timeZone,
+  ).filter((layout) => layout.endMinute > startMinute);
+  const endMinute = Math.max(startMinute + 60, ...layouts.map((layout) => layout.endMinute));
+  const height = minuteToTimelinePixels(endMinute - startMinute);
   return (
-    // biome-ignore lint/a11y/useSemanticElements: The timeline interleaves its decorative time axis with event list items.
-    <div className="today-timeline" role="list" style={{ height }}>
-      <div aria-hidden="true" className="today-timeline__axis">
-        <span className="today-timeline__line" />
-        {hourTicks.map((minute) => (
-          <span
-            className="today-timeline__tick"
-            key={minute}
-            style={{ top: (minute - startMinute) * todayTimelinePixelsPerMinute }}
-          >
-            <span>{formatHour(Math.floor(minute / 60) % 24)}</span>
-            <i />
-          </span>
-        ))}
-        {minorTicks.map((minute) => (
-          <i
-            className="today-timeline__minor-tick"
-            data-half-hour={minute % 60 === 30 ? "true" : "false"}
-            data-slot="today-timeline-minor-tick"
-            key={minute}
-            style={{ top: (minute - startMinute) * todayTimelinePixelsPerMinute }}
-          />
-        ))}
-        {endMinute % 15 === 0 ? null : <i className="today-timeline__end-cap" />}
-      </div>
+    // biome-ignore lint/a11y/useSemanticElements: Decorative axis and grid interleave event list items.
+    <div
+      className="calendar-time-grid calendar-time-grid--day today-calendar-grid"
+      role="list"
+      style={{ height }}
+    >
+      <TimelineAxis startMinute={startMinute} endMinute={endMinute} />
       <div
-        aria-label={`Current time ${formatTime(currentTime.toISOString(), timeZone)}`}
-        className="calendar-now-line today-timeline__now"
-        role="timer"
-        style={{ top: (currentMinute - startMinute) * todayTimelinePixelsPerMinute }}
+        className="calendar-timeline"
+        style={{ height, backgroundPositionY: `${-minuteToTimelinePixels(startMinute)}px` }}
       >
-        <span>{formatTime(currentTime.toISOString(), timeZone)}</span>
-        <i />
-      </div>
-      <div className="today-timeline__track">
-        <div aria-hidden="true" className="today-timeline__grid">
-          {gridTicks.map((minute) => (
-            <i
-              data-half-hour={minute % 60 === 30 ? "true" : "false"}
-              data-major={minute % 60 === 0 ? "true" : "false"}
-              data-slot="today-timeline-grid-line"
-              key={minute}
-              style={{ top: (minute - startMinute) * todayTimelinePixelsPerMinute }}
-            />
-          ))}
+        <div
+          role="timer"
+          aria-label={`Current time ${formatTimelineClock(currentTime.toISOString(), timeZone)}`}
+          className="calendar-now-line"
+          style={{ top: minuteToTimelinePixels(currentMinute - startMinute) }}
+        >
+          <span>{formatTimelineClock(currentTime.toISOString(), timeZone)}</span>
+          <i />
         </div>
         {layouts.map((layout) => {
-          const snappedRange = todayTimelineItemRange(layout.startMinute, layout.endMinute);
-          const visibleStartMinute = Math.max(startMinute, snappedRange.start);
-          const visibleEndMinute = Math.max(visibleStartMinute + 15, snappedRange.end);
-          const visibleDurationMinutes = visibleEndMinute - visibleStartMinute;
-          const columnGap = 8;
-          const layoutStyle = {
-            height: visibleDurationMinutes * todayTimelinePixelsPerMinute,
-            left: `calc(${(layout.column / layout.columns) * 100}% + ${layout.column === 0 ? 0 : columnGap / 2}px)`,
-            top: (visibleStartMinute - startMinute) * todayTimelinePixelsPerMinute,
-            width: `calc(${100 / layout.columns}% - ${layout.columns === 1 ? 0 : columnGap / 2}px)`,
+          const start = Math.max(startMinute, layout.startMinute);
+          const style = {
+            ...timelineLaneStyle(layout.column, layout.columns),
+            top: minuteToTimelinePixels(start - startMinute),
+            height: Math.max(18, minuteToTimelinePixels(layout.endMinute - start)),
+            position: "absolute",
           } satisfies CSSProperties;
           return renderItem(
             layout.event,
-            layoutStyle,
-            todayTimelineDensity(visibleDurationMinutes),
+            style,
+            todayTimelineDensity(layout.endMinute - start),
+            { ...layout, startMinute: start },
+            startMinute,
           );
         })}
       </div>

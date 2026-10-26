@@ -25,7 +25,7 @@ describe("AccountSelectionTrigger", () => {
     const trigger = screen.getByRole("button", {
       name: "2 of 2 accounts, attention required",
     });
-    expect(trigger).toHaveTextContent("2");
+    expect(trigger.querySelector(".action-count-badge")).toBeNull();
     expect(trigger.querySelectorAll('[data-slot="avatar"]')).toHaveLength(0);
     expect(trigger.querySelector(".account-selection-trigger__warning")).toBeNull();
 
@@ -37,12 +37,25 @@ describe("AccountSelectionTrigger", () => {
         totalCount={1}
       />,
     );
-    expect(screen.getByRole("button", { name: "1 of 1 account" })).toHaveTextContent("1");
+    expect(
+      screen.getByRole("button", { name: "1 of 1 account" }).querySelector(".action-count-badge"),
+    ).toBeNull();
     expect(document.querySelector(".account-selection-trigger__warning")).toBeNull();
     await userEvent.hover(screen.getByRole("button", { name: "1 of 1 account" }));
     expect(await screen.findByRole("tooltip")).toHaveTextContent(
       "1 of 1 account, all accounts connected and syncing",
     );
+  });
+
+  it("shows the selected subset, including zero, in the shared count badge", () => {
+    const view = render(
+      <AccountSelectionTrigger ariaLabel="1 of 3 accounts" selectedCount={1} totalCount={3} />,
+    );
+    expect(screen.getByRole("button").querySelector(".action-count-badge")).toHaveTextContent("1");
+    view.rerender(
+      <AccountSelectionTrigger ariaLabel="0 of 3 accounts" selectedCount={0} totalCount={3} />,
+    );
+    expect(screen.getByRole("button").querySelector(".action-count-badge")).toHaveTextContent("0");
   });
 
   it("renders optional popover action slots", () => {

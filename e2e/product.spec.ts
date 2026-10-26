@@ -435,14 +435,14 @@ test("a person and an agent share one reminder and calendar surface", async ({
   };
   const returnToApp = () => openWorkspace("Today at a Glance");
   // A workspace's own pages live in its sidebar on desktop and in the dock
-  // sheet when narrow.
+  // section pages when narrow.
   const openWorkspacePage = async (workspace: string, name: string) => {
     if (mobile) {
-      await page.getByRole("button", { name: "Workspace actions" }).click();
       await page
-        .getByRole("dialog", { name: workspace })
-        .getByRole("link", { name, exact: true })
+        .getByRole("navigation", { name: "Workspace sections" })
+        .getByRole("link", { name: workspace === "Tasks" ? "views" : "mailboxes", exact: true })
         .click();
+      await page.getByRole("main").getByRole("link", { name, exact: true }).click();
       return;
     }
     await page
@@ -481,8 +481,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
     await expect(page).toHaveURL(/\/today$/);
   }
 
-  await page.getByRole("button", { name: "Add", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Reminder" }).click();
+  await page.keyboard.press("ControlOrMeta+k");
   await page.getByLabel("What needs attention?").fill(reminderTitle);
   await page.getByLabel("Notes").fill("Created from the direct manipulation surface.");
   await page.getByRole("button", { name: "Create reminder" }).click();
@@ -496,13 +495,16 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await returnToApp();
   const planningDate = await page.locator("h1 time").getAttribute("datetime");
   if (!planningDate) throw new Error("Today heading did not expose its planning date.");
-  await page.getByRole("button", { name: "Add", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Event" }).click();
+  await openWorkspace("Calendar");
+  await page.getByRole("combobox", { name: "Search Calendar" }).fill("new event");
+  await page.getByRole("option", { name: /New event/ }).click();
   await page.getByLabel("Event", { exact: true }).fill(eventTitle);
   await page.getByLabel("Starts").fill(`${planningDate}T00:01`);
   await page.getByLabel("Ends").fill(`${planningDate}T23:59`);
   await page.getByLabel("Location").fill("Desktop overlay");
-  await page.getByRole("button", { name: "Create event" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Create event" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await returnToApp();
   await expect(page.getByText(eventTitle)).toBeVisible();
   if (mobile) await page.getByRole("button", { name: "Expand schedule" }).click();
   const todayEvent = page.locator('[data-slot="event-card"]').filter({ hasText: eventTitle });
@@ -528,13 +530,17 @@ test("a person and an agent share one reminder and calendar surface", async ({
   expect(todayEventLayout.alignItems).toBe("flex-start");
   expect(todayEventLayout.bodyJustifyContent).toBe("flex-start");
   expect(todayEventLayout.textAlign).toBe("left");
-  await page.getByRole("button", { name: "Add", exact: true }).click();
-  await page.getByRole("menuitem", { name: "Event" }).click();
+  await openWorkspace("Calendar");
+  await page.getByRole("combobox", { name: "Search Calendar" }).fill("new event");
+  await page.getByRole("option", { name: /New event/ }).click();
   await page.getByLabel("Event", { exact: true }).fill(allDayTitle);
   await page.getByLabel("Starts").fill(`${planningDate}T00:00`);
   await page.getByLabel("Ends").fill(`${planningDate}T23:59`);
   await page.getByLabel("All day").check();
-  await page.getByRole("button", { name: "Create event" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Create event" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await returnToApp();
+  if (mobile) await page.getByRole("button", { name: "Expand schedule" }).click();
   await expect(page.getByText(allDayTitle)).toBeVisible();
   await expect(page.getByRole("button", { name: `All day ${allDayTitle}.` })).toBeVisible();
   const todayLayout = await page.evaluate(() => ({
@@ -756,7 +762,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await returnToApp();
   await openWorkspace("Settings");
   // The account utility is a tenant of the shell: same app bar, its own
-  // navigation in the sidebar on desktop and in the dock sheet when narrow.
+  // navigation in the sidebar on desktop and in section pages when narrow.
   const settingsSidebar = page.getByRole("complementary", {
     name: "Account utility navigation",
   });
@@ -768,11 +774,13 @@ test("a person and an agent share one reminder and calendar surface", async ({
           ? "Security & Access"
           : name;
     if (mobile) {
-      await page.getByRole("button", { name: "Workspace actions" }).click();
+      const section =
+        parent === "Appearance" ? "app" : parent === "Mail" ? "workspaces" : "account";
       await page
-        .getByRole("dialog", { name: "Settings" })
-        .getByRole("link", { name: parent })
+        .getByRole("navigation", { name: "Workspace sections" })
+        .getByRole("link", { name: section, exact: true })
         .click();
+      await page.getByRole("main").getByRole("link", { name: parent }).click();
     } else {
       await settingsSidebar.getByRole("link", { name: parent }).click();
     }
@@ -786,7 +794,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await expect(page.getByRole("heading", { name: "Profile", level: 1 })).toBeVisible();
   if (mobile) {
     await expect(settingsSidebar).toBeHidden();
-    await expect(page.getByRole("button", { name: "Workspace actions" })).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Workspace sections" })).toBeVisible();
   } else {
     await expect(settingsSidebar).toBeVisible();
     await expect(

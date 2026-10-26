@@ -35,16 +35,17 @@ import {
   SunIcon,
   XIcon,
 } from "@/components/icons";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogBody,
+} from "@/components/responsive-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Pagination, PaginationContent, PaginationItem } from "@/components/ui/pagination";
@@ -541,7 +542,9 @@ export function RitualHistory() {
                 {statusLabel(selected.status)}
               </DialogDescription>
             </DialogHeader>
-            <HistoryDetails o={selected} />
+            <ResponsiveDialogBody>
+              <HistoryDetails o={selected} />
+            </ResponsiveDialogBody>
             <DialogFooter>
               <Button onClick={() => setSelected(null)}>Close</Button>
             </DialogFooter>

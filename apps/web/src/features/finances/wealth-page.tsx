@@ -500,7 +500,7 @@ function GoalEditor({ goal, onClose }: { goal: FinanceGoal | null; onClose: () =
                 : "Set a target and priority for your financial plan."}
             </DialogDescription>
           </DialogHeader>
-          <ResponsiveDialogBody>
+          <div data-responsive-slot="layout">
             <FeedbackForm
               feedback={save.feedback}
               fieldNames={{
@@ -516,59 +516,60 @@ function GoalEditor({ goal, onClose }: { goal: FinanceGoal | null; onClose: () =
                 if (validTarget) save.mutate();
               }}
             >
-              <FieldSet disabled={save.isPending}>
-                <FieldGroup>
-                  <Field>
-                    <FieldLabel htmlFor="goal-name">Goal name</FieldLabel>
-                    <Input
-                      name="name"
-                      id="goal-name"
-                      maxLength={240}
-                      required
-                      value={name}
-                      onChange={(event) => setName(event.target.value)}
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="goal-target">Target amount</FieldLabel>
-                    <CurrencyInput
-                      name="target"
-                      id="goal-target"
-                      min={0}
-                      max={100000000}
-                      required
-                      value={target}
-                      onValueChange={setTarget}
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="goal-deadline">Deadline</FieldLabel>
-                    <Input
-                      name="deadline"
-                      id="goal-deadline"
-                      type="date"
-                      value={deadline}
-                      onChange={(event) => setDeadline(event.target.value)}
-                    />
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="goal-priority">Priority</FieldLabel>
-                    <SettingsSelect
-                      name="priority"
-                      id="goal-priority"
-                      value={priority}
-                      onChange={(event) =>
-                        setPriority(event.target.value as FinanceGoal["priority"])
-                      }
-                    >
-                      <NativeSelectOption value="high">High</NativeSelectOption>
-                      <NativeSelectOption value="medium">Medium</NativeSelectOption>
-                      <NativeSelectOption value="low">Low</NativeSelectOption>
-                    </SettingsSelect>
-                  </Field>
-                </FieldGroup>
-              </FieldSet>
-
+              <ResponsiveDialogBody>
+                <FieldSet disabled={save.isPending}>
+                  <FieldGroup>
+                    <Field>
+                      <FieldLabel htmlFor="goal-name">Goal name</FieldLabel>
+                      <Input
+                        name="name"
+                        id="goal-name"
+                        maxLength={240}
+                        required
+                        value={name}
+                        onChange={(event) => setName(event.target.value)}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="goal-target">Target amount</FieldLabel>
+                      <CurrencyInput
+                        name="target"
+                        id="goal-target"
+                        min={0}
+                        max={100000000}
+                        required
+                        value={target}
+                        onValueChange={setTarget}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="goal-deadline">Deadline</FieldLabel>
+                      <Input
+                        name="deadline"
+                        id="goal-deadline"
+                        type="date"
+                        value={deadline}
+                        onChange={(event) => setDeadline(event.target.value)}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="goal-priority">Priority</FieldLabel>
+                      <SettingsSelect
+                        name="priority"
+                        id="goal-priority"
+                        value={priority}
+                        onChange={(event) =>
+                          setPriority(event.target.value as FinanceGoal["priority"])
+                        }
+                      >
+                        <NativeSelectOption value="high">High</NativeSelectOption>
+                        <NativeSelectOption value="medium">Medium</NativeSelectOption>
+                        <NativeSelectOption value="low">Low</NativeSelectOption>
+                      </SettingsSelect>
+                    </Field>
+                  </FieldGroup>
+                </FieldSet>
+              </ResponsiveDialogBody>
               <DialogFooter>
                 <Button disabled={save.isPending} onClick={onClose} type="button" variant="outline">
                   Cancel
@@ -578,7 +579,7 @@ function GoalEditor({ goal, onClose }: { goal: FinanceGoal | null; onClose: () =
                 </Button>
               </DialogFooter>
             </FeedbackForm>
-          </ResponsiveDialogBody>
+          </div>
         </SettingsControlsContext.Provider>
       </DialogContent>
     </Dialog>

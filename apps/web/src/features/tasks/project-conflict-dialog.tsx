@@ -6,16 +6,17 @@ import type {
   TaskProjectMovePreview,
 } from "@personal-os/domain";
 import { useMemo, useState } from "react";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogBody,
+} from "@/components/responsive-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { MutationFeedback } from "../../components/mutation-feedback.js";
@@ -60,13 +61,15 @@ export function ProjectConflictDialog(props: CompletionProps | MoveProps) {
               The Project and its Tasks will move together to the selected List.
             </DialogDescription>
           </DialogHeader>
-          <MutationFeedback feedback={props.feedback ?? null} />
-          <Alert>
-            <AlertTitle>{props.preview.affectedTaskCount} Tasks will move</AlertTitle>
-            <AlertDescription>
-              This preview is revision-bound. If the Project changes, request a new preview.
-            </AlertDescription>
-          </Alert>
+          <ResponsiveDialogBody>
+            <MutationFeedback feedback={props.feedback ?? null} />
+            <Alert>
+              <AlertTitle>{props.preview.affectedTaskCount} Tasks will move</AlertTitle>
+              <AlertDescription>
+                This preview is revision-bound. If the Project changes, request a new preview.
+              </AlertDescription>
+            </Alert>
+          </ResponsiveDialogBody>
           <DialogFooter>
             <Button onClick={props.close} variant="outline">
               Keep current List

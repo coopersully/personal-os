@@ -4,9 +4,11 @@ import {
   formatTimelineClock,
   localDateTimeAt,
   positionTimelineEvents,
+  TimelineAxis,
   type TimelineEventLayout,
   type TimelinePositionable,
   type TodayTimelineDensity,
+  timelineLaneStyle,
 } from "./features/calendar/day-timeline.js";
 import { calendarEventColorStyle } from "./features/calendar/event-color.js";
 import { LoginDestination } from "./features/public-site/login-destination";
@@ -59,6 +61,7 @@ import { Badge, Button, Input, Label, Spinner } from "@personal-os/ui";
 import { type UseQueryResult, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isTauri } from "@tauri-apps/api/core";
 import {
+  type ComponentProps,
   type CSSProperties,
   createContext,
   type FormEvent,
@@ -176,6 +179,13 @@ import { LogoMark } from "@/components/logo-mark";
 import { OccasionCard } from "@/components/occasion-card";
 import { OfflineState } from "@/components/offline-state";
 import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogTrigger as DialogTrigger,
   ResponsiveDialog,
   ResponsiveDialogBody,
   ResponsiveDialogContent,
@@ -193,6 +203,7 @@ import {
   FieldLegend as ShadcnFieldLegend,
   FieldSet as ShadcnFieldSet,
 } from "@/components/settings-field";
+import { NavigationHighlight } from "@/components/navigation-highlight";
 import { SidebarItemMeta } from "@/components/sidebar-item-meta";
 import { TodayWorkspaceIcon, todayWeatherIcon } from "@/components/today-workspace-icon";
 import {
@@ -234,15 +245,6 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -311,7 +313,7 @@ import { WorkspaceLayout } from "@/components/workspace-layout";
 import { ConnectionAuthorizationOutcome } from "@/features/connections/authorization-outcome";
 import { TaskCreationProgress } from "@/features/tasks/creation-progress";
 import { api, isUnauthorized } from "./api.js";
-import { scrollTimelineToMinute } from "./calendar-timeline.js";
+import { minuteToTimelinePixels, scrollTimelineToMinute } from "./calendar-timeline.js";
 import { AccountRecoveryDialog } from "./components/account-recovery-dialog.js";
 import { InlineError, PageLoading, QueryFeedback } from "./components/async-state.js";
 import { AuthFooter } from "./components/auth-footer.js";
@@ -327,12 +329,15 @@ import {
 } from "./components/workspace-header-controls.js";
 import { WorkspaceIcon, workspaceIdForPath } from "./components/workspace-identity.js";
 import {
+  useNavigationSection,
+  WorkspaceNavigationPage,
+} from "./components/workspace-navigation-page";
+import {
   WorkspaceSecondaryAppBar,
   WorkspaceSecondaryAppBarContent,
 } from "./components/workspace-secondary-app-bar.js";
 import { ActivityPage, ActivityTopbarControls } from "./features/activity/page.js";
 import { CalendarFloatingNav } from "./features/calendar/floating-nav.js";
-import { CalendarMobileNavigation } from "./features/calendar/mobile-navigation";
 import {
   type CalendarView,
   calendarPeriodDays,
@@ -372,7 +377,7 @@ import {
   isAuthenticationPath,
 } from "./features/public-site/auth-navigation.js";
 import { ProductLanding } from "./features/public-site/landing.js";
-import { ReminderRow, RemindersCreateButton } from "./features/reminders/page.js";
+import { RemindersCreateButton } from "./features/reminders/page.js";
 import { ReviewFlowHost } from "./features/reviews/flow.js";
 import { ReviewNavigation } from "./features/reviews/navigation.js";
 import { AccountIdentity, AccountOverview } from "./features/settings/account-overview.js";
@@ -393,8 +398,9 @@ import { SettingsSearch, settingsDescriptions } from "./features/settings/settin
 import { SetupSettings } from "./features/settings/setup-settings.js";
 import { useSettingsSidebarCounts } from "./features/settings/sidebar-counts.js";
 import { WorkspaceGuidance } from "./features/settings/workspace-guidance";
-import { TaskRow, TasksCreateButton, TasksSidebar } from "./features/tasks/page.js";
+import { TasksCreateButton, TasksSidebar } from "./features/tasks/page.js";
 import { TaskDialog } from "./features/tasks/task-dialog.js";
+import { TodayCommitmentRow } from "./features/tasks/today-row";
 import { TasksAppBarControls } from "./features/tasks/workspace-header.js";
 import { TasksWorkspacePage } from "./features/tasks/workspace-page.js";
 import { textingSettingsNavigationItem } from "./features/texting/manifest.js";
@@ -423,7 +429,6 @@ import { invalidateMaterial } from "./lib/material-queries.js";
 import { SettingsFeedbackContext } from "./lib/settings-feedback.js";
 import { formatRelativeTime } from "./lib/time-format.js";
 import { useFeedbackMutation } from "./lib/use-feedback-mutation.js";
-import { cn } from "./lib/utils.js";
 import {
   navigationOwnerForLocation,
   rendersApplicationShell,
@@ -431,7 +436,7 @@ import {
   workspaceDefinitions,
   workspaceForLocation,
 } from "./navigation/manifest.js";
-import type { MobileWorkspacePage } from "./navigation/mobile-workspace-dock.js";
+import { activeWorkspaceSection, workspaceSectionPages } from "./navigation/workspace-sections";
 import { timeToMinute } from "./time.js";
 
 type Editor =
@@ -479,10 +484,8 @@ const SetupPage = lazy(() =>
   import("./features/setup/page.js").then((module) => ({ default: module.SetupPage })),
 );
 
-const calendarHourHeight = 48;
 const calendarMinutesPerDay = 24 * 60;
-const calendarTimelineHeight = 24 * calendarHourHeight;
-const calendarTimeMarks = Array.from({ length: 48 }, (_, index) => index * 30);
+const calendarTimelineHeight = minuteToTimelinePixels(1440);
 const calendarDragType = "application/x-personal-os-calendar-event";
 const calendarDragOffsetType = "application/x-personal-os-calendar-grab-offset-y";
 const calendarDragOffsets = new Map<string, number>();
@@ -1239,6 +1242,7 @@ function SidebarCollapseHandle({
 function AuthenticatedApp({ user }: { user: User }) {
   const [financeUnreadSessionKey] = useState(() => crypto.randomUUID());
   const [editor, setEditor] = useState<Editor>(null);
+  const handleWorkspaceSearchAction = useWorkspaceSearchAction(setEditor);
   const desktopCapture = useCallback(
     (kind: "task" | "reminder" | "event") => setEditor({ kind }),
     [],
@@ -1293,6 +1297,24 @@ function AuthenticatedApp({ user }: { user: User }) {
   const shellPathname = normalizeShellPathname(location.pathname);
   const isMobileWorkspaceDock = useMediaQuery("(max-width: 900px)");
   const activeWorkspace = workspaceForPath(location.pathname);
+  const sectionOwner = activeWorkspace?.id ?? "settings";
+  const sectionPages = workspaceSectionPages(sectionOwner, location.search);
+  const navigationSection = sectionPages.find(
+    (page) =>
+      page.kind === "section" && page.id === new URLSearchParams(location.search).get("navigation"),
+  );
+  const hasMobileAppBar = isMobileWorkspaceDock && sectionPages.length > 0;
+  const activeSection =
+    navigationSection?.id ??
+    (sectionOwner === "settings"
+      ? (visibleSettingsNavigation(user.canManageInvitations === true)
+          .find((group) =>
+            group.items.some(
+              (item) => item.id === settingsParent(settingsSectionFromSearch(location.search)),
+            ),
+          )
+          ?.label.toLowerCase() ?? "account")
+      : activeWorkspaceSection(sectionOwner, location.pathname, location.search));
   const isCalendarWorkspace = activeWorkspace?.id === "calendar";
   const isSpatialCalendar = shellPathname === "/calendar";
   const navigationOwner = navigationOwnerForLocation(location.pathname);
@@ -1404,6 +1426,8 @@ function AuthenticatedApp({ user }: { user: User }) {
     >
       <div
         className={`app-shell${isCalendarWorkspace ? " app-shell--calendar" : sidebarMode === "mail" ? " app-shell--mail" : ""}${isTodayWorkspace && !isMobileWorkspaceDock ? " app-shell--full-width" : ""}`}
+        data-workspace={sectionOwner}
+        data-mobile-app-bar={hasMobileAppBar || undefined}
         data-rail-collapsed={!isMobileWorkspaceDock && railCollapsed ? "true" : undefined}
         data-sidebar-state={!isMobileWorkspaceDock && sidebarMode ? sidebarState : undefined}
         style={
@@ -1464,6 +1488,7 @@ function AuthenticatedApp({ user }: { user: User }) {
             }
             className={`sidebar${sidebarMode ? " sidebar--context" : ""}`}
             data-state={sidebarState}
+            data-workspace={sidebarMode}
             id="app-sidebar"
           >
             <ShadcnSidebarHeader className="workspace-sidebar__header">
@@ -1474,7 +1499,9 @@ function AuthenticatedApp({ user }: { user: User }) {
             <ShadcnSidebarContent
               className={`sidebar__content${sidebarMode ? " sidebar__content--context" : " sidebar__content--app"}`}
               key={sidebarMode ?? "application-navigation"}
+              data-direction={routeDirection}
             >
+              <NavigationHighlight selector='[data-sidebar="menu-button"][data-active="true"]' />
               {sidebarMode === "settings" ? (
                 <SettingsSidebarNavigation
                   canManageInvitations={user.canManageInvitations === true}
@@ -1497,75 +1524,16 @@ function AuthenticatedApp({ user }: { user: User }) {
                 <MailFeatureSidebar onNavigate={closeMobileMenu} />
               ) : null}
             </ShadcnSidebarContent>
-            {sidebarMode === "mail" || sidebarMode === "tasks" || sidebarMode === "finances" ? (
-              <ReviewNavigation workspace={sidebarMode} footer />
-            ) : null}
           </ShadcnSidebar>
         ) : null}
         {!isMobileWorkspaceDock && sidebarMode ? (
           <SidebarCollapseHandle onResize={updateSidebarWidth} width={sidebarWidth} />
         ) : null}
-        {isMobileWorkspaceDock && isCalendarWorkspace ? (
-          <CalendarMobileNavigation />
-        ) : isMobileWorkspaceDock ? (
+        {hasMobileAppBar ? (
           <MobileWorkspaceDock
-            title={
-              activeWorkspace?.id === "today" ? "Today" : (activeWorkspace?.label ?? "Settings")
-            }
-            pages={
-              activeWorkspace
-                ? activeWorkspace.id === "tasks"
-                  ? [
-                      { icon: ListTodoIcon, label: "tasks", path: "/tasks" },
-                      { icon: ClockIcon, label: "reminders", path: "/reminders" },
-                    ]
-                  : activeWorkspace.id === "mail"
-                    ? [
-                        { icon: MailIcon, label: "inbox", path: "/mail?scope=inbox" },
-                        { icon: ClockIcon, label: "snoozed", path: "/mail?scope=snoozed" },
-                        { icon: FileTextIcon, label: "drafts", path: "/mail?scope=drafts" },
-                      ]
-                    : activeWorkspace.id === "finances"
-                      ? [
-                          { icon: BankIcon, label: "overview", path: "/finances" },
-                          { icon: ActivityIcon, label: "spending", path: "/finances/spending" },
-                          { icon: ListChecksIcon, label: "budget", path: "/finances/plan" },
-                        ]
-                      : [
-                          { icon: HouseIcon, label: "today", path: "/today" },
-                          { icon: CheckSquareIcon, label: "goals", path: "/goals" },
-                        ]
-                : settingsSectionPages(
-                    user.canManageInvitations === true,
-                    workspaceSettingsActions,
-                    settingsCounts,
-                  )
-            }
-            {...(sidebarMode === "tasks"
-              ? {
-                  renderWorkspaceNavigation: (onNavigate: () => void) => (
-                    <TasksSidebar onNavigate={onNavigate} />
-                  ),
-                }
-              : sidebarMode === "mail"
-                ? {
-                    renderWorkspaceNavigation: (onNavigate: () => void) => (
-                      <MailFeatureSidebar onNavigate={onNavigate} />
-                    ),
-                  }
-                : sidebarMode === "finances"
-                  ? {
-                      renderWorkspaceNavigation: (onNavigate: () => void) => (
-                        <FinanceSidebarNavigation
-                          ownerId={user.id}
-                          sessionKey={financeUnreadSessionKey}
-                          onNavigate={onNavigate}
-                          reviewCount={financeInbox.data?.remainingWork.count ?? 0}
-                          section={activeFinanceSection}
-                        />
-                      ),
-                    }
-                  : {})}
+            pages={sectionPages}
+            activeSection={activeSection}
+            workspace={sectionOwner}
           />
         ) : null}
         <ReviewFlowHost
@@ -1580,7 +1548,9 @@ function AuthenticatedApp({ user }: { user: User }) {
           }
         />
         <WorkspaceLayout
-          contentMode={isCalendarWorkspace || sidebarMode === "mail" ? "panes" : "page"}
+          contentMode={
+            !navigationSection && (isCalendarWorkspace || sidebarMode === "mail") ? "panes" : "page"
+          }
           banner={
             !online && (
               <div className="offline-banner">
@@ -1590,7 +1560,45 @@ function AuthenticatedApp({ user }: { user: User }) {
             )
           }
           primaryNavigation={
-            shellPathname === "/settings" ? (
+            navigationSection ? (
+              <WorkspaceAppBar
+                workspace={activeWorkspace?.id ?? "account"}
+                identity={
+                  isMobileWorkspaceDock ? (
+                    <WorkspaceSwitcher
+                      compact
+                      onNavigate={closeMobileMenu}
+                      pathname={location.pathname}
+                      user={user}
+                      weather={weather.data}
+                    />
+                  ) : null
+                }
+                title={
+                  <WorkspaceTitleSentence>
+                    <h1>{navigationSection.label}</h1>
+                  </WorkspaceTitleSentence>
+                }
+                context={
+                  activeWorkspace && activeWorkspace.id !== "today" ? (
+                    <WorkspaceFinder
+                      workspace={activeWorkspace.id}
+                      timeZone={user.planningTimezone}
+                      onAction={handleWorkspaceSearchAction}
+                    />
+                  ) : (
+                    <SettingsSearch
+                      groups={searchableSettingsNavigation(user.canManageInvitations === true)}
+                    />
+                  )
+                }
+                attention={
+                  activeWorkspace && activeWorkspace.id !== "today" ? (
+                    <ReviewNavigation workspace={activeWorkspace.id} />
+                  ) : null
+                }
+              />
+            ) : shellPathname === "/settings" ? (
               <WorkspaceAppBar
                 workspace="account"
                 identity={
@@ -1609,7 +1617,6 @@ function AuthenticatedApp({ user }: { user: User }) {
                     <WorkspaceHeaderControlsSlot placement="title" />
                   </WorkspaceTitleSentence>
                 }
-                context={<WorkspaceHeaderControlsSlot />}
               />
             ) : (
               <WorkspaceAppBarForRoute
@@ -1638,7 +1645,7 @@ function AuthenticatedApp({ user }: { user: User }) {
           }
         >
           <main
-            className={`content${isSpatialCalendar ? " content--calendar" : shellPathname === "/mail" ? " content--mail" : ""}`}
+            className={`content${!navigationSection && isSpatialCalendar ? " content--calendar" : !navigationSection && shellPathname === "/mail" ? " content--mail" : ""}`}
             id="main-content"
           >
             <div className="workspace-stage">
@@ -1647,18 +1654,53 @@ function AuthenticatedApp({ user }: { user: User }) {
                 data-direction={routeDirection}
                 key={activeWorkspace?.path ?? location.pathname}
               >
-                {pageTitle && navigationOwner.kind !== "account-utility" ? (
+                {!navigationSection && pageTitle && navigationOwner.kind !== "account-utility" ? (
                   <h1 className="sr-only">{pageTitle}</h1>
                 ) : null}
-                <WorkspaceRoutes
-                  calendarTodaySnap={calendarTodaySnap}
-                  calendars={calendars.data ?? []}
-                  deviceWeatherLocation={deviceWeatherLocation}
-                  setEditor={setEditor}
-                  todayBrief={todayBrief}
-                  user={user}
-                  weather={weather}
-                />
+                {navigationSection ? (
+                  <WorkspaceNavigationPage
+                    section={navigationSection.id}
+                    shortcuts={
+                      hasMobileAppBar
+                        ? sectionPages
+                            .filter((page) => page.kind === "destination")
+                            .map((page) => page.id)
+                        : []
+                    }
+                  >
+                    {sectionOwner === "tasks" ? (
+                      <TasksSidebar onNavigate={closeMobileMenu} />
+                    ) : sectionOwner === "mail" ? (
+                      <MailFeatureSidebar onNavigate={closeMobileMenu} />
+                    ) : sectionOwner === "finances" ? (
+                      <FinanceSidebarNavigation
+                        ownerId={user.id}
+                        sessionKey={financeUnreadSessionKey}
+                        onNavigate={closeMobileMenu}
+                        reviewCount={financeInbox.data?.remainingWork.count ?? 0}
+                        section={activeFinanceSection}
+                      />
+                    ) : (
+                      <SettingsSidebarNavigation
+                        canManageInvitations={user.canManageInvitations === true}
+                        onNavigate={closeMobileMenu}
+                        section={activeSettingsSection}
+                        workspaceActions={workspaceSettingsActions}
+                        counts={settingsCounts}
+                      />
+                    )}
+                  </WorkspaceNavigationPage>
+                ) : (
+                  <WorkspaceRoutes
+                    calendarTodaySnap={calendarTodaySnap}
+                    calendars={calendars.data ?? []}
+                    deviceWeatherLocation={deviceWeatherLocation}
+                    setEditor={setEditor}
+                    todayBrief={todayBrief}
+                    user={user}
+                    weather={weather}
+                  />
+                )}
               </div>
             </div>
           </main>
@@ -1936,6 +1978,18 @@ function NavigationIcon({
   );
 }
 
+function useWorkspaceSearchAction(setEditor: (editor: Editor) => void) {
+  const navigateSearch = useNavigate();
+  return (action: SearchAction) => {
+    if (action === "new-task") setEditor({ kind: "task" });
+    if (action === "new-reminder") setEditor({ kind: "reminder" });
+    if (action === "new-event") setEditor({ kind: "event" });
+    if (action === "new-message") navigateSearch("/mail?compose=new");
+    if (action === "new-transaction")
+      navigateSearch("/finances/transactions#finance-add-transaction");
+  };
+}
+
 function WorkspaceAppBarForRoute({
   onCalendarToday,
   pageTitle,
@@ -1959,15 +2013,7 @@ function WorkspaceAppBarForRoute({
   weather: WeatherSnapshot | undefined;
   workspaceSwitcher: ReactNode;
 }) {
-  const navigateSearch = useNavigate();
-  const handleSearchAction = (action: SearchAction) => {
-    if (action === "new-task") setEditor({ kind: "task" });
-    if (action === "new-reminder") setEditor({ kind: "reminder" });
-    if (action === "new-event") setEditor({ kind: "event" });
-    if (action === "new-message") navigateSearch("/mail?compose=new");
-    if (action === "new-transaction")
-      navigateSearch("/finances/transactions#finance-add-transaction");
-  };
+  const handleSearchAction = useWorkspaceSearchAction(setEditor);
   const workspace = workspaceForLocation(pathname)?.id ?? "account";
   const isSpatialCalendar = pathname === "/calendar";
   const isReviewQueue = pathname.endsWith("/decisions");
@@ -1997,12 +2043,14 @@ function WorkspaceAppBarForRoute({
   );
   const context = isReviewQueue ? null : isSpatialCalendar ? (
     <div className="calendar-header-context">
-      <WorkspaceFinder
-        workspace="calendar"
-        timeZone={user.planningTimezone}
-        onAction={handleSearchAction}
-      />
       <CalendarAppBarControls
+        search={
+          <WorkspaceFinder
+            workspace="calendar"
+            timeZone={user.planningTimezone}
+            onAction={handleSearchAction}
+          />
+        }
         accounts={<CalendarAccountsControl />}
         onToday={onCalendarToday}
         user={user}
@@ -2028,67 +2076,59 @@ function WorkspaceAppBarForRoute({
   ) : workspace === "finances" ? (
     <>
       <WorkspaceFinder workspace="finances" onAction={handleSearchAction} />
-      <WorkspaceHeaderControlsSlot placement="leading" />
-      <WorkspaceHeaderControlsSlot />
     </>
   ) : null;
 
   return (
     <>
-    <WorkspaceAppBar
-      actions={
-        <>
-          {workspace === "calendar" || workspace === "mail" ? (
-            <WorkspaceHeaderControlsSlot />
-          ) : null}
-          {"__TAURI_INTERNALS__" in window && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <ShadcnButton
-                  aria-label="Keep window on top"
-                  aria-pressed={pinned}
-                  onClick={togglePin}
-                  size="icon"
-                  variant={pinned ? "secondary" : "ghost"}
-                >
-                  <PinIcon aria-hidden="true" weight={pinned ? "Filled" : "Outline"} />
-                </ShadcnButton>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Keep window on top</TooltipContent>
-            </Tooltip>
-          )}
-        </>
-      }
-      primaryActions={
-        isReviewQueue ? null : pathname === "/reminders" ? (
-          <RemindersCreateButton onCreate={() => setEditor({ kind: "reminder" })} />
-        ) : null
-      }
-      attention={
-        isSpatialCalendar ? (
-          <ReviewNavigation workspace="calendar" />
-        ) : workspaceSwitcher &&
-          (workspace === "mail" || workspace === "tasks" || workspace === "finances") ? (
-          <ReviewNavigation workspace={workspace} />
-        ) : null
-      }
-      context={context}
-      identity={workspaceSwitcher}
-      title={
-        <WorkspaceTitleSentence>
-          {identity}
-          <WorkspaceHeaderControlsSlot placement="title" />
-        </WorkspaceTitleSentence>
-      }
-      workspace={workspace}
-    />
-    {workspace === "tasks" && pathname !== "/reminders" && !isReviewQueue ? (
-      <TasksCreateButton
-        floating
-        onCreate={(placement) => setEditor({ kind: "task", ...(placement ? { placement } : {}) })}
-        onCreateReminder={() => setEditor({ kind: "reminder" })}
+      <WorkspaceAppBar
+        actions={
+          <>
+            {"__TAURI_INTERNALS__" in window && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <ShadcnButton
+                    aria-label="Keep window on top"
+                    aria-pressed={pinned}
+                    onClick={togglePin}
+                    size="icon"
+                    variant={pinned ? "secondary" : "ghost"}
+                  >
+                    <PinIcon aria-hidden="true" weight={pinned ? "Filled" : "Outline"} />
+                  </ShadcnButton>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Keep window on top</TooltipContent>
+              </Tooltip>
+            )}
+          </>
+        }
+        attention={
+          isSpatialCalendar ? (
+            <ReviewNavigation workspace="calendar" />
+          ) : workspace === "mail" || workspace === "tasks" || workspace === "finances" ? (
+            <ReviewNavigation workspace={workspace} />
+          ) : null
+        }
+        context={context}
+        identity={workspaceSwitcher}
+        title={
+          <WorkspaceTitleSentence>
+            {identity}
+            <WorkspaceHeaderControlsSlot placement="title" />
+          </WorkspaceTitleSentence>
+        }
+        workspace={workspace}
       />
-    ) : null}
+      {pathname === "/reminders" && !isReviewQueue ? (
+        <RemindersCreateButton onCreate={() => setEditor({ kind: "reminder" })} />
+      ) : null}
+      {workspace === "tasks" && pathname !== "/reminders" && !isReviewQueue ? (
+        <TasksCreateButton
+          floating
+          onCreate={(placement) => setEditor({ kind: "task", ...(placement ? { placement } : {}) })}
+          onCreateReminder={() => setEditor({ kind: "reminder" })}
+        />
+      ) : null}
     </>
   );
 }
@@ -2105,6 +2145,7 @@ function WorkspaceRail({
   const owner = navigationOwnerForLocation(pathname);
   return (
     <nav aria-label="Workspace navigation" className="workspace-rail" id="workspace-rail">
+      <NavigationHighlight selector='.workspace-rail__link[aria-current="page"]' />
       <div className="workspace-rail__destinations">
         {workspaceDefinitions.map((workspace) => {
           const active = owner.kind === "workspace" && owner.workspace === workspace.id;
@@ -2296,29 +2337,41 @@ function WorkspaceMenuItem({
   const Icon = item.id === "today" ? todayWeatherIcon(weather, timeZone) : item.icon;
   const isActive = workspaceForPath(pathname)?.path === path;
   return (
-    <DropdownMenuItem asChild>
-      <Link
-        aria-current={isActive ? "page" : undefined}
-        aria-label={label}
-        className="workspace-navigation-item"
-        data-workspace={item.id}
-        data-active={isActive ? "true" : undefined}
-        onClick={onNavigate}
-        to={path}
-      >
-        <Icon aria-hidden="true" weight={isActive ? "Filled" : "Outline"} />
-        <span className="workspace-navigation-item__label">
-          <span>{label}</span>
-          {isActive ? (
-            <span className="workspace-navigation-item__current">current workspace</span>
-          ) : null}
-        </span>
-        {isActive ? <CheckIcon aria-hidden="true" className="ml-auto" /> : null}
-      </Link>
-    </DropdownMenuItem>
+    <div className="workspace-picker-row" data-active={isActive || undefined}>
+      <DropdownMenuItem asChild>
+        <Link
+          aria-current={isActive ? "page" : undefined}
+          aria-label={label}
+          className="workspace-navigation-item"
+          data-workspace={item.id}
+          data-active={isActive ? "true" : undefined}
+          onClick={onNavigate}
+          to={path}
+        >
+          <Icon aria-hidden="true" weight={isActive ? "Filled" : "Outline"} />
+          <span className="workspace-navigation-item__label">
+            <span>{label}</span>
+            {isActive ? (
+              <span className="workspace-navigation-item__current">current workspace</span>
+            ) : null}
+          </span>
+        </Link>
+      </DropdownMenuItem>
+      {item.id !== "today" ? (
+        <DropdownMenuItem asChild>
+          <Link
+            className="workspace-picker-settings"
+            aria-label={`${label} settings`}
+            to={settingsPath(item.id)}
+            onClick={onNavigate}
+          >
+            <SettingsIcon aria-hidden="true" />
+          </Link>
+        </DropdownMenuItem>
+      ) : null}
+    </div>
   );
 }
-
 
 function TodayPage({
   brief,
@@ -2360,12 +2413,6 @@ function TodayPage({
     openTasks,
     currentTime,
     user.planningTimezone,
-  );
-  const recommendedTasks = new Map(
-    (agenda.recommendedTasks ?? []).map((recommendation) => [
-      recommendation.task.id,
-      recommendation,
-    ]),
   );
   const remainingTimedEvents = Array.from(
     new Map(
@@ -2410,7 +2457,7 @@ function TodayPage({
     timelineItems.length === 0
       ? "Nothing scheduled today"
       : `${timelineItems.length} total ${timelineItems.length === 1 ? "event" : "events"}, ${eventsLeftToday} left today${ongoingEventCount > 0 ? `, ${ongoingEventCount} ongoing` : ""}`;
-  const nextItem = timelineItems[0];
+  const nextItem = timelineItems.find((item) => item.material.kind === "event") ?? timelineItems[0];
   return (
     <div className="today-layout" data-page="today">
       <QueryFeedback query={brief} title="Couldn’t refresh today’s plan." staleOnly />
@@ -2440,34 +2487,34 @@ function TodayPage({
                 <p className="today-section-summary">{eventSummary}</p>
               ) : null}
               {!expanded ? (
-                <div className="today-schedule-preview" data-empty={!nextItem}>
+                <>
+                  {agenda.allDay.map((event) => (
+                    <TodayAllDayEventCard
+                      key={event.id}
+                      calendarColor={calendarColorsById.get(event.calendarId)}
+                      event={event}
+                      onEdit={() => setEditor({ event, kind: "event" })}
+                      timeZone={user.planningTimezone}
+                    />
+                  ))}
                   {nextItem ? (
-                    <>
-                      <time dateTime={nextItem.startsAt}>
-                        {new Date(nextItem.startsAt) <= currentTime
-                          ? "now"
-                          : formatTime(nextItem.startsAt, user.planningTimezone)}
-                      </time>
-                      <strong data-user-content>
-                        {nextItem.material.kind === "event"
-                          ? nextItem.material.event.title
-                          : nextItem.material.task.title}
-                      </strong>
-                    </>
-                  ) : (
+                    <TodayTimeline
+                      preview
+                      calendars={calendars}
+                      calendarColorsById={calendarColorsById}
+                      currentTime={currentTime}
+                      items={[nextItem]}
+                      onEditTask={(task) => setEditor({ kind: "task", task })}
+                      timeZone={user.planningTimezone}
+                    />
+                  ) : agenda.allDay.length ? null : (
                     <DataViewEmpty
                       icon={CalendarIcon}
                       title="nothing else scheduled today"
                       description="your schedule is clear"
                     />
                   )}
-                  {agenda.allDay.length > 0 ? (
-                    <p>
-                      {agenda.allDay.length} all-day{" "}
-                      {agenda.allDay.length === 1 ? "event" : "events"}
-                    </p>
-                  ) : null}
-                </div>
+                </>
               ) : null}
               <ShadcnCollapsibleContent>
                 <TodayConditions
@@ -2492,6 +2539,7 @@ function TodayPage({
                 ) : null}
                 {timelineItems.length > 0 ? (
                   <TodayTimeline
+                    calendars={calendars}
                     calendarColorsById={calendarColorsById}
                     currentTime={currentTime}
                     items={timelineItems}
@@ -2515,7 +2563,6 @@ function TodayPage({
           overdueReminders={overdueReminders}
           overdueTasks={overdueTasks}
           now={agenda.generatedAt}
-          recommendedTasks={recommendedTasks}
           setEditor={setEditor}
           timeZone={user.planningTimezone}
           todayReminders={todayReminders}
@@ -2537,7 +2584,6 @@ function TodayCommitmentList({
   now,
   overdueReminders,
   overdueTasks,
-  recommendedTasks,
   setEditor,
   timeZone,
   todayReminders,
@@ -2546,7 +2592,6 @@ function TodayCommitmentList({
   now: string;
   overdueReminders: Reminder[];
   overdueTasks: Task[];
-  recommendedTasks: Map<string, DailyBrief["recommendedTasks"][number]>;
   setEditor: (editor: Editor) => void;
   timeZone: string;
   todayReminders: Reminder[];
@@ -2665,30 +2710,25 @@ function TodayCommitmentList({
         ) : visibleCommitments.length > 0 ? (
           <ShadcnScrollArea aria-label="Commitments" className="today-commitments__scroll">
             <ShadcnItemGroup aria-label="Commitments" className="today-commitments__list">
-              {visibleCommitments.map((commitment) => {
-                if (commitment.kind === "task") {
-                  const recommendation = recommendedTasks.get(commitment.task.id);
-                  return (
-                    <TaskRow
-                      compact
-                      className={cn(commitment.overdue && "today-commitment-row--overdue")}
-                      key={`task:${commitment.task.id}`}
-                      onEdit={() => setEditor({ kind: "task", task: commitment.task })}
-                      {...(recommendation ? { recommendation } : {})}
-                      task={commitment.task}
-                      timeZone={timeZone}
-                    />
-                  );
-                }
-                return (
-                  <ReminderRow
-                    key={`reminder:${commitment.reminder.id}`}
-                    onEdit={() => setEditor({ kind: "reminder", reminder: commitment.reminder })}
-                    reminder={commitment.reminder}
+              {visibleCommitments.map((commitment) =>
+                commitment.kind === "task" ? (
+                  <TodayCommitmentRow
+                    key={`task:${commitment.task.id}`}
+                    kind="task"
+                    record={commitment.task}
+                    onOpen={() => setEditor({ kind: "task", task: commitment.task })}
                     timeZone={timeZone}
                   />
-                );
-              })}
+                ) : (
+                  <TodayCommitmentRow
+                    key={`reminder:${commitment.reminder.id}`}
+                    kind="reminder"
+                    record={commitment.reminder}
+                    onOpen={() => setEditor({ kind: "reminder", reminder: commitment.reminder })}
+                    timeZone={timeZone}
+                  />
+                ),
+              )}
             </ShadcnItemGroup>
           </ShadcnScrollArea>
         ) : (
@@ -4033,49 +4073,8 @@ function WeekCalendarView({
   );
 }
 
-type TimelineEventCluster = {
-  endMinute: number;
-  layouts: TimelineEventLayout[];
-  startMinute: number;
-};
-
-function groupTimelineEventLayouts(layouts: TimelineEventLayout[]): TimelineEventCluster[] {
-  const clusters: TimelineEventCluster[] = [];
-  for (const layout of layouts) {
-    const cluster = clusters.at(-1);
-    if (!cluster || layout.startMinute >= cluster.endMinute) {
-      clusters.push({
-        endMinute: layout.endMinute,
-        layouts: [layout],
-        startMinute: layout.startMinute,
-      });
-      continue;
-    }
-    cluster.layouts.push(layout);
-    cluster.endMinute = Math.max(cluster.endMinute, layout.endMinute);
-  }
-  return clusters;
-}
-
 function TimeAxis() {
-  return (
-    <ol
-      aria-hidden="true"
-      data-calendar-axis="left"
-      className="calendar-time-axis"
-      style={{ height: calendarTimelineHeight }}
-    >
-      {calendarTimeMarks.map((minute) => (
-        <li
-          data-major={minute % 60 === 0}
-          key={minute}
-          style={{ top: minuteToTimelinePixels(minute) }}
-        >
-          {formatMinuteOfDay(minute)}
-        </li>
-      ))}
-    </ol>
-  );
+  return <TimelineAxis />;
 }
 
 function rememberProgrammaticCalendarScroll(
@@ -4400,7 +4399,6 @@ function TimelineEventCollection({
   draggedEventId,
   layouts,
   onDragEnd,
-  orbitHorizontalInset,
   setDraggedEventId,
   setEditor,
   timeZone,
@@ -4415,29 +4413,19 @@ function TimelineEventCollection({
   setEditor: (editor: Editor) => void;
   timeZone: string;
 }) {
-  return groupTimelineEventLayouts(layouts).map((cluster) => {
-    const shared = {
-      calendarsById,
-      compact,
-      draggedEventId,
-      onDragEnd,
-      ...(orbitHorizontalInset ? { orbitHorizontalInset } : {}),
-      setDraggedEventId,
-      setEditor,
-      timeZone,
-    };
-    if (cluster.layouts.length === 1) {
-      const layout = cluster.layouts[0] as TimelineEventLayout;
-      return <TimelineEventItem {...shared} key={layout.event.id} layout={layout} />;
-    }
-    return (
-      <TimelineOverlapCluster
-        {...shared}
-        cluster={cluster}
-        key={cluster.layouts.map((layout) => layout.event.id).join(":")}
-      />
-    );
-  });
+  return layouts.map((layout) => (
+    <TimelineEventItem
+      calendarsById={calendarsById}
+      compact={compact}
+      draggedEventId={draggedEventId}
+      layout={layout}
+      onDragEnd={onDragEnd}
+      setDraggedEventId={setDraggedEventId}
+      setEditor={setEditor}
+      timeZone={timeZone}
+      key={layout.event.id}
+    />
+  ));
 }
 
 function TimelineEventItem({
@@ -4486,144 +4474,9 @@ function TimelineEventItem({
   );
 }
 
-function TimelineOverlapCluster({
-  calendarsById,
-  cluster,
-  compact,
-  draggedEventId,
-  onDragEnd,
-  orbitHorizontalInset,
-  setDraggedEventId,
-  setEditor,
-  timeZone,
-}: {
-  calendarsById: CalendarMap;
-  cluster: TimelineEventCluster;
-  compact: boolean;
-  draggedEventId: string | null;
-  onDragEnd: () => void;
-  orbitHorizontalInset?: "end" | "start";
-  setDraggedEventId: (id: string | null) => void;
-  setEditor: (editor: Editor) => void;
-  timeZone: string;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const [hovered, setHovered] = useState(false);
-  const hoverLeaveTimer = useRef<number | null>(null);
-  const toggle = useRef<HTMLButtonElement>(null);
-  const clusterId = useId();
-  const count = cluster.layouts.length;
-  // Keep the hover envelope fixed while cards animate between their resting and
-  // spread positions. Include rotated card bounds and the toggle, not just gaps.
-  const hoverBounds = cluster.layouts.map((layout, index) => {
-    const point = overlapOrbitPoint(index, count, compact, {
-      clusterEndMinute: cluster.endMinute,
-      clusterStartMinute: cluster.startMinute,
-      eventEndMinute: layout.endMinute,
-      eventStartMinute: layout.startMinute,
-      ...(orbitHorizontalInset ? { horizontalInset: orbitHorizontalInset } : {}),
-    });
-    const angle = (Math.abs(point.rotation) * Math.PI) / 180;
-    const height = Math.max(minuteToTimelinePixels(layout.endMinute - layout.startMinute), 18);
-    const width = compact ? 160 : 320;
-    const halfWidth = (width * Math.cos(angle) + height * Math.sin(angle)) / 2 + 12;
-    const halfHeight = (height * Math.cos(angle) + width * Math.sin(angle)) / 2 + 12;
-    return {
-      left: point.x - halfWidth,
-      right: point.x + halfWidth,
-      top: point.y - halfHeight,
-      bottom: point.y + halfHeight,
-    };
-  });
-  useEffect(
-    () => () => {
-      if (hoverLeaveTimer.current !== null) window.clearTimeout(hoverLeaveTimer.current);
-    },
-    [],
-  );
-  return (
-    <fieldset
-      aria-label={`${count} overlapping events`}
-      className={`calendar-overlap-cluster${expanded ? " is-expanded" : ""}${hovered ? " is-hovered" : ""}`}
-      id={clusterId}
-      onKeyDown={(event) => {
-        const focusedEvent = (event.target as Element).closest(".calendar-timeline-event");
-        if (event.key !== "Escape" || (!expanded && !hovered && !focusedEvent)) return;
-        event.stopPropagation();
-        setExpanded(false);
-        setHovered(false);
-        toggle.current?.focus();
-      }}
-      onPointerEnter={(event) => {
-        if (event.pointerType === "touch") return;
-        if (hoverLeaveTimer.current !== null) window.clearTimeout(hoverLeaveTimer.current);
-        hoverLeaveTimer.current = null;
-        setHovered(true);
-      }}
-      onPointerLeave={(event) => {
-        if (event.pointerType === "touch") return;
-        if (hoverLeaveTimer.current !== null) window.clearTimeout(hoverLeaveTimer.current);
-        hoverLeaveTimer.current = window.setTimeout(() => {
-          setHovered(false);
-          hoverLeaveTimer.current = null;
-        }, 160);
-      }}
-      style={
-        {
-          height: Math.max(minuteToTimelinePixels(cluster.endMinute - cluster.startMinute), 48),
-          top: minuteToTimelinePixels(cluster.startMinute),
-          "--overlap-hit-left": `${Math.min(...hoverBounds.map((bounds) => bounds.left))}px`,
-          "--overlap-hit-right": `${-Math.max(...hoverBounds.map((bounds) => bounds.right))}px`,
-          "--overlap-hit-top": `${Math.min(...hoverBounds.map((bounds) => bounds.top))}px`,
-          "--overlap-hit-bottom": `${-Math.max(...hoverBounds.map((bounds) => bounds.bottom))}px`,
-          "--overlap-pin-y": `${overlapPinOffset(cluster.startMinute, cluster.endMinute)}px`,
-          "--overlap-front-layer": count + 3,
-          "--overlap-control-layer": count + 4,
-        } as CSSProperties
-      }
-    >
-      <button
-        aria-controls={clusterId}
-        aria-expanded={expanded}
-        aria-label={`${expanded ? "Collapse" : "Spread"} ${count} overlapping events`}
-        className="calendar-overlap-cluster__toggle"
-        onClick={(event) => {
-          event.stopPropagation();
-          setExpanded((current) => !current);
-        }}
-        ref={toggle}
-        type="button"
-      >
-        <LayersIcon aria-hidden="true" />
-        <span>{count}</span>
-      </button>
-      {cluster.layouts.map((layout, index) => (
-        <TimelineEventItem
-          calendarsById={calendarsById}
-          compact={compact}
-          draggedEventId={draggedEventId}
-          key={layout.event.id}
-          layout={layout}
-          onDragEnd={onDragEnd}
-          orbit={{
-            clusterEndMinute: cluster.endMinute,
-            clusterStartMinute: cluster.startMinute,
-            index,
-            total: count,
-            ...(orbitHorizontalInset ? { horizontalInset: orbitHorizontalInset } : {}),
-          }}
-          setDraggedEventId={setDraggedEventId}
-          setEditor={setEditor}
-          timeZone={timeZone}
-          topOffsetMinute={cluster.startMinute}
-        />
-      ))}
-    </fieldset>
-  );
-}
-
 function TimelineEvent({
   blockColors,
+  allowDrag = true,
   calendar,
   compact = false,
   layout,
@@ -4634,8 +4487,10 @@ function TimelineEvent({
   isDragging = false,
   timeZone,
   topOffsetMinute = 0,
+  ...buttonProps
 }: {
   blockColors: EventBlockColor[];
+  allowDrag?: boolean;
   calendar: Calendar | undefined;
   compact?: boolean;
   layout: TimelineEventLayout;
@@ -4652,7 +4507,7 @@ function TimelineEvent({
   isDragging?: boolean;
   timeZone: string;
   topOffsetMinute?: number;
-}) {
+} & Omit<ComponentProps<"button">, "onDragEnd">) {
   const { column, endMinute, event, startMinute } = layout;
   const writable = calendar?.isWritable ?? false;
   const [moveBlocked, setMoveBlocked] = useState(false);
@@ -4711,8 +4566,8 @@ function TimelineEvent({
     >
       <button
         aria-label={`${formatTime(event.startsAt, timeZone)} ${event.title}`}
-        className={`calendar-timeline-event${compact ? " calendar-timeline-event--compact" : ""}${blockColors.length > 0 ? " has-blocks" : ""}${writable ? " is-draggable" : " is-readonly"}${isDragging ? " is-dragging" : ""}${moveBlocked ? " is-move-blocked" : ""}`}
-        draggable={writable}
+        className={`calendar-timeline-event${compact ? " calendar-timeline-event--compact" : ""}${blockColors.length > 0 ? " has-blocks" : ""}${writable && allowDrag ? " is-draggable" : " is-readonly"}${isDragging ? " is-dragging" : ""}${moveBlocked ? " is-move-blocked" : ""}`}
+        draggable={writable && allowDrag}
         onDragEnd={onDragEnd}
         onDragStart={(dragEvent) => startCalendarDrag(dragEvent, event, setDraggedEventId)}
         onClick={(clickEvent) => {
@@ -4740,11 +4595,11 @@ function TimelineEvent({
             "--calendar-event-height": `${Math.max(minuteToTimelinePixels(endMinute - startMinute), 18)}px`,
             "--calendar-event-left": orbit
               ? `calc(${(column / laneCount) * 100}% + ${2 + stackInset}px)`
-              : `${3 + column * 12}px`,
+              : timelineLaneStyle(column, layout.columns).left,
             "--calendar-event-top": `${minuteToTimelinePixels(startMinute - topOffsetMinute)}px`,
             "--calendar-event-width": orbit
               ? `calc(${100 / laneCount}% - ${4 + stackInset}px)`
-              : `calc(100% - ${6 + column * 12}px)`,
+              : timelineLaneStyle(column, layout.columns).width,
             "--overlap-orbit-rotation": `${orbitPoint?.rotation ?? 0}deg`,
             "--overlap-orbit-width": compact
               ? `clamp(88px, calc(100% - ${Math.abs(orbitPoint?.x ?? 0) * 2 + 6}px), 160px)`
@@ -4754,8 +4609,11 @@ function TimelineEvent({
             zIndex: 2 + (orbit?.index ?? column),
           } as CSSProperties
         }
-        title={writable ? "Drag to reschedule · Open for precise editing" : "Read-only calendar"}
+        title={
+          writable && allowDrag ? "Drag to reschedule · Open for precise editing" : "Open event"
+        }
         type="button"
+        {...buttonProps}
       >
         {blockColors.length > 0 ? (
           <span aria-hidden="true" className="calendar-timeline-event__block-rails">
@@ -6217,29 +6075,6 @@ function visibleSettingsNavigation(canManageInvitations: boolean) {
     .filter((group) => group.items.length > 0);
 }
 
-/** The narrow-layout dock lists the same sections as the sidebar, flattened. */
-function settingsSectionPages(
-  canManageInvitations: boolean,
-  workspaceActions: WorkspaceSettingsActions,
-  counts: ReturnType<typeof useSettingsSidebarCounts>,
-): MobileWorkspacePage[] {
-  return visibleSettingsNavigation(canManageInvitations).flatMap((group) =>
-    group.items.map(({ icon, id, label }) => {
-      const badge = workspaceActionBadge(id, workspaceActions);
-      return {
-        ...(badge ? { badge } : {}),
-        count:
-          id === "connections" || id === "agent-connections" || id === "goals" || id === "motives"
-            ? counts[id]
-            : undefined,
-        icon,
-        label,
-        path: settingsSectionPath(id),
-      };
-    }),
-  );
-}
-
 function workspaceActionBadge(
   id: SettingsSectionId,
   workspaceActions: WorkspaceSettingsActions,
@@ -6263,63 +6098,66 @@ function SettingsSidebarNavigation({
   workspaceActions: WorkspaceSettingsActions;
   counts: ReturnType<typeof useSettingsSidebarCounts>;
 }) {
+  const navigationSection = useNavigationSection();
   return (
     <>
-      {visibleSettingsNavigation(canManageInvitations).map((group) => (
-        <ShadcnSidebarGroup key={group.label}>
-          <ShadcnSidebarGroupLabel>{group.label}</ShadcnSidebarGroupLabel>
-          <ShadcnSidebarGroupContent>
-            <nav aria-label={group.label}>
-              <ShadcnSidebarMenu>
-                {group.items.map(({ icon, id, label }) => {
-                  const badge = workspaceActionBadge(id, workspaceActions);
-                  return (
-                    <SidebarNavigationItem
-                      {...(badge ? { badge } : {})}
-                      count={
-                        id === "connections" ||
-                        id === "agent-connections" ||
-                        id === "goals" ||
-                        id === "motives"
-                          ? counts[id]
-                          : undefined
-                      }
-                      contextMenu={
-                        secondarySettings.some(
-                          (child) =>
-                            child.parent === id &&
-                            (child.id !== "invitations" || canManageInvitations),
-                        )
-                          ? secondarySettings
-                              .filter(
-                                (child) =>
-                                  child.parent === id &&
-                                  (child.id !== "invitations" || canManageInvitations),
-                              )
-                              .map(({ id: childId, label: childLabel, icon: ChildIcon }) => (
-                                <ContextMenuItem key={childId} asChild>
-                                  <Link to={settingsSectionPath(childId)} onClick={onNavigate}>
-                                    <ChildIcon aria-hidden="true" />
-                                    {childLabel}
-                                  </Link>
-                                </ContextMenuItem>
-                              ))
-                          : undefined
-                      }
-                      icon={icon}
-                      isActive={settingsParent(section) === id}
-                      key={id}
-                      label={label}
-                      onNavigate={onNavigate}
-                      path={settingsSectionPath(id)}
-                    />
-                  );
-                })}
-              </ShadcnSidebarMenu>
-            </nav>
-          </ShadcnSidebarGroupContent>
-        </ShadcnSidebarGroup>
-      ))}
+      {visibleSettingsNavigation(canManageInvitations)
+        .filter((group) => !navigationSection || group.label.toLowerCase() === navigationSection)
+        .map((group) => (
+          <ShadcnSidebarGroup key={group.label}>
+            <ShadcnSidebarGroupLabel>{group.label}</ShadcnSidebarGroupLabel>
+            <ShadcnSidebarGroupContent>
+              <nav aria-label={group.label}>
+                <ShadcnSidebarMenu>
+                  {group.items.map(({ icon, id, label }) => {
+                    const badge = workspaceActionBadge(id, workspaceActions);
+                    return (
+                      <SidebarNavigationItem
+                        {...(badge ? { badge } : {})}
+                        count={
+                          id === "connections" ||
+                          id === "agent-connections" ||
+                          id === "goals" ||
+                          id === "motives"
+                            ? counts[id]
+                            : undefined
+                        }
+                        contextMenu={
+                          secondarySettings.some(
+                            (child) =>
+                              child.parent === id &&
+                              (child.id !== "invitations" || canManageInvitations),
+                          )
+                            ? secondarySettings
+                                .filter(
+                                  (child) =>
+                                    child.parent === id &&
+                                    (child.id !== "invitations" || canManageInvitations),
+                                )
+                                .map(({ id: childId, label: childLabel, icon: ChildIcon }) => (
+                                  <ContextMenuItem key={childId} asChild>
+                                    <Link to={settingsSectionPath(childId)} onClick={onNavigate}>
+                                      <ChildIcon aria-hidden="true" />
+                                      {childLabel}
+                                    </Link>
+                                  </ContextMenuItem>
+                                ))
+                            : undefined
+                        }
+                        icon={icon}
+                        isActive={settingsParent(section) === id}
+                        key={id}
+                        label={label}
+                        onNavigate={onNavigate}
+                        path={settingsSectionPath(id)}
+                      />
+                    );
+                  })}
+                </ShadcnSidebarMenu>
+              </nav>
+            </ShadcnSidebarGroupContent>
+          </ShadcnSidebarGroup>
+        ))}
     </>
   );
 }
@@ -8232,7 +8070,12 @@ function ProfileSecurity({ user }: { user: User }) {
     },
   });
   const logout = useFeedbackMutation({
-    feedback: { action: "log out", safeToRetry: true },
+    feedback: {
+      action: "log out",
+      safeToRetry: true,
+      pending: "Logging out…",
+      success: "Logged out.",
+    },
     mutationFn: api.logout,
     onSuccess: () => {
       if (isTauri()) {
@@ -8247,23 +8090,21 @@ function ProfileSecurity({ user }: { user: User }) {
     <div className="settings-stack">
       <ProfileSection title="Security">
         <ProfileRow label="Password" value="Change" onClick={() => setAction("password")} />
-        <div className="settings-command-row">
-          <ShadcnButton
-            variant="destructive"
-            disabled={logout.isPending}
-            onClick={() =>
-              confirm({
-                title: "Logout?",
-                description:
-                  "You’ll be logged out on this device. You can sign in again at any time.",
-                actionLabel: "Logout",
-                onConfirm: () => logout.mutate(),
-              })
-            }
-          >
-            {logout.isPending ? "Logging out…" : "Logout"}
-          </ShadcnButton>
-        </div>
+        <ProfileRow
+          label={logout.isPending ? "Logging out…" : "Log out"}
+          ariaLabel="Log out"
+          variant="danger"
+          disabled={logout.isPending}
+          onClick={() =>
+            confirm({
+              title: "Log out?",
+              description:
+                "You’ll be logged out on this device. You can sign in again at any time.",
+              actionLabel: "Log out",
+              onConfirm: () => logout.mutate(),
+            })
+          }
+        />
       </ProfileSection>
       <Dialog
         open={action !== null}
@@ -8511,18 +8352,19 @@ function InvitationsSettings() {
                   create.mutate(new FormData(event.currentTarget));
                 }}
               >
-                <ShadcnFieldGroup className="form-grid">
-                  <EmailField id="invite-email" label="Friend’s email (optional)" name="email" />
-                  <ShadcnField>
-                    <ShadcnFieldLabel htmlFor="invite-expiry">Expires after</ShadcnFieldLabel>
-                    <ShadcnNativeSelect defaultValue="14" id="invite-expiry" name="expiresInDays">
-                      <NativeSelectOption value="7">7 days</NativeSelectOption>
-                      <NativeSelectOption value="14">14 days</NativeSelectOption>
-                      <NativeSelectOption value="30">30 days</NativeSelectOption>
-                    </ShadcnNativeSelect>
-                  </ShadcnField>
-                </ShadcnFieldGroup>
-
+                <ResponsiveDialogBody>
+                  <ShadcnFieldGroup className="form-grid">
+                    <EmailField id="invite-email" label="Friend’s email (optional)" name="email" />
+                    <ShadcnField>
+                      <ShadcnFieldLabel htmlFor="invite-expiry">Expires after</ShadcnFieldLabel>
+                      <ShadcnNativeSelect defaultValue="14" id="invite-expiry" name="expiresInDays">
+                        <NativeSelectOption value="7">7 days</NativeSelectOption>
+                        <NativeSelectOption value="14">14 days</NativeSelectOption>
+                        <NativeSelectOption value="30">30 days</NativeSelectOption>
+                      </ShadcnNativeSelect>
+                    </ShadcnField>
+                  </ShadcnFieldGroup>
+                </ResponsiveDialogBody>
                 <DialogFooter>
                   <ShadcnButton
                     type="button"
@@ -8776,6 +8618,9 @@ export function TodayEventCard({
   event,
   layoutStyle,
   timeZone,
+  timelineLayout,
+  timelineStartMinute,
+  calendar,
 }: {
   calendarColor: string | null | undefined;
   currentTime?: Date;
@@ -8783,6 +8628,9 @@ export function TodayEventCard({
   event: CalendarEvent;
   layoutStyle?: CSSProperties;
   timeZone: string;
+  timelineLayout?: TimelineEventLayout;
+  timelineStartMinute?: number;
+  calendar?: Calendar | undefined;
 }) {
   const navigate = useNavigate();
   const eventLabel = `${event.allDay ? "All day" : formatTime(event.startsAt, timeZone)} ${event.title}`;
@@ -8813,44 +8661,61 @@ export function TodayEventCard({
   };
   return (
     <DropdownMenu>
-      <EventCard
-        className="today-timeline__event"
-        data-density={density}
-        role="listitem"
-        style={{ ...calendarEventColorStyle(calendarColor), ...layoutStyle }}
-        tone="calendar"
-      >
-        <EventCardContent>
-          <DropdownMenuTrigger asChild>
-            <EventCardPrimaryAction
-              aria-label={`${eventLabel}. Open quick actions`}
-              className="today-timeline__event-action"
-            >
-              <EventCardBody>
-                <EventCardTitle>
-                  <span className="min-w-0 truncate">{event.title}</span>
-                  {minutesUntilStart !== null || minutesRemaining !== null ? (
-                    <EventCardTitleMeta>
-                      {minutesUntilStart !== null
-                        ? `in ${formatMinutes(minutesUntilStart)}`
-                        : `${formatMinutes(minutesRemaining ?? 0)} left`}
-                    </EventCardTitleMeta>
+      {timelineLayout ? (
+        <DropdownMenuTrigger asChild>
+          <TimelineEvent
+            calendar={calendar}
+            layout={timelineLayout}
+            blockColors={[]}
+            allowDrag={false}
+            onEdit={() => {}}
+            onDragEnd={() => {}}
+            setDraggedEventId={() => {}}
+            timeZone={timeZone}
+            topOffsetMinute={timelineStartMinute ?? 0}
+            aria-label={`${eventLabel}. Open quick actions`}
+          />
+        </DropdownMenuTrigger>
+      ) : (
+        <EventCard
+          className="today-timeline__event"
+          data-density={density}
+          role="listitem"
+          style={{ ...calendarEventColorStyle(calendarColor), ...layoutStyle }}
+          tone="calendar"
+        >
+          <EventCardContent>
+            <DropdownMenuTrigger asChild>
+              <EventCardPrimaryAction
+                aria-label={`${eventLabel}. Open quick actions`}
+                className="today-timeline__event-action"
+              >
+                <EventCardBody>
+                  <EventCardTitle>
+                    <span className="min-w-0 truncate">{event.title}</span>
+                    {minutesUntilStart !== null || minutesRemaining !== null ? (
+                      <EventCardTitleMeta>
+                        {minutesUntilStart !== null
+                          ? `in ${formatMinutes(minutesUntilStart)}`
+                          : `${formatMinutes(minutesRemaining ?? 0)} left`}
+                      </EventCardTitleMeta>
+                    ) : null}
+                    {event.blocks.length > 0 ? (
+                      <LockIcon aria-label="Blocks another calendar" />
+                    ) : null}
+                  </EventCardTitle>
+                  <EventCardDescription>
+                    {formatTimelineTimeRange(event, timeZone)}
+                  </EventCardDescription>
+                  {event.location ? (
+                    <EventCardDescription>{event.location}</EventCardDescription>
                   ) : null}
-                  {event.blocks.length > 0 ? (
-                    <LockIcon aria-label="Blocks another calendar" />
-                  ) : null}
-                </EventCardTitle>
-                <EventCardDescription>
-                  {formatTimelineTimeRange(event, timeZone)}
-                </EventCardDescription>
-                {event.location ? (
-                  <EventCardDescription>{event.location}</EventCardDescription>
-                ) : null}
-              </EventCardBody>
-            </EventCardPrimaryAction>
-          </DropdownMenuTrigger>
-        </EventCardContent>
-      </EventCard>
+                </EventCardBody>
+              </EventCardPrimaryAction>
+            </DropdownMenuTrigger>
+          </EventCardContent>
+        </EventCard>
+      )}
       <DropdownMenuContent className="today-event-menu" align="start">
         <DropdownMenuGroup>
           <DropdownMenuItem onSelect={viewInCalendar}>
@@ -8962,33 +8827,46 @@ export function TodayTaskTimelineCard({
 }
 
 function TodayTimeline({
-  calendarColorsById,
+  calendars,
   currentTime,
   items,
   onEditTask,
   timeZone,
+  preview = false,
 }: {
+  calendars: Calendar[];
   calendarColorsById: Map<string, string | null>;
   currentTime: Date;
   items: TodayTimelineItem[];
   onEditTask: (task: Task) => void;
   timeZone: string;
+  preview?: boolean;
 }) {
   return (
     <DayTimeline
       currentTime={currentTime}
       items={items}
       timeZone={timeZone}
-      renderItem={(item, layoutStyle, density) =>
+      preview={preview}
+      renderItem={(item, layoutStyle, density, layout, startMinute) =>
         item.material.kind === "event" ? (
           <TodayEventCard
             key={item.id}
-            calendarColor={calendarColorsById.get(item.material.event.calendarId)}
-            currentTime={currentTime}
+            calendarColor={
+              calendars.find(
+                (calendar) =>
+                  item.material.kind === "event" && calendar.id === item.material.event.calendarId,
+              )?.color
+            }
+            calendar={calendars.find(
+              (calendar) =>
+                item.material.kind === "event" && calendar.id === item.material.event.calendarId,
+            )}
             density={density}
             event={item.material.event}
-            layoutStyle={layoutStyle}
             timeZone={timeZone}
+            timelineLayout={{ ...layout, event: item.material.event }}
+            timelineStartMinute={startMinute}
           />
         ) : (
           <TodayTaskTimelineCard
@@ -9089,59 +8967,63 @@ function ReminderDialog({
           </ResponsiveDialogTitle>
           {!reminder ? <TaskCreationProgress step={2} total={2} /> : null}
         </ResponsiveDialogHeader>
-        <ResponsiveDialogBody>
+        <div data-responsive-slot="layout">
           <FeedbackForm feedback={mutation.feedback} onSubmit={submit}>
-            <ShadcnFieldGroup>
-              <ShadcnField>
-                <ShadcnFieldLabel htmlFor="reminder-title">What needs attention?</ShadcnFieldLabel>
-                <ShadcnInput
-                  autoFocus
-                  id="reminder-title"
-                  defaultValue={reminder?.title}
-                  name="title"
-                  required
-                />
-              </ShadcnField>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <ResponsiveDialogBody>
+              <ShadcnFieldGroup>
                 <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="reminder-deadline">Deadline</ShadcnFieldLabel>
+                  <ShadcnFieldLabel htmlFor="reminder-title">
+                    What needs attention?
+                  </ShadcnFieldLabel>
                   <ShadcnInput
-                    id="reminder-deadline"
-                    defaultValue={toDateTimeLocal(reminder?.dueAt, user.planningTimezone)}
-                    name="dueAt"
-                    type="datetime-local"
+                    autoFocus
+                    id="reminder-title"
+                    defaultValue={reminder?.title}
+                    name="title"
+                    required
                   />
                 </ShadcnField>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <ShadcnField>
+                    <ShadcnFieldLabel htmlFor="reminder-deadline">Deadline</ShadcnFieldLabel>
+                    <ShadcnInput
+                      id="reminder-deadline"
+                      defaultValue={toDateTimeLocal(reminder?.dueAt, user.planningTimezone)}
+                      name="dueAt"
+                      type="datetime-local"
+                    />
+                  </ShadcnField>
+                  <ShadcnField>
+                    <ShadcnFieldLabel htmlFor="reminder-priority">Priority</ShadcnFieldLabel>
+                    <ShadcnNativeSelect
+                      id="reminder-priority"
+                      defaultValue={reminder?.priority ?? "medium"}
+                      name="priority"
+                    >
+                      <NativeSelectOption value="low">Low</NativeSelectOption>
+                      <NativeSelectOption value="medium">Medium</NativeSelectOption>
+                      <NativeSelectOption value="high">High</NativeSelectOption>
+                    </ShadcnNativeSelect>
+                  </ShadcnField>
+                </div>
                 <ShadcnField>
-                  <ShadcnFieldLabel htmlFor="reminder-priority">Priority</ShadcnFieldLabel>
-                  <ShadcnNativeSelect
-                    id="reminder-priority"
-                    defaultValue={reminder?.priority ?? "medium"}
-                    name="priority"
-                  >
-                    <NativeSelectOption value="low">Low</NativeSelectOption>
-                    <NativeSelectOption value="medium">Medium</NativeSelectOption>
-                    <NativeSelectOption value="high">High</NativeSelectOption>
-                  </ShadcnNativeSelect>
+                  <ShadcnFieldLabel htmlFor="reminder-notes">Notes</ShadcnFieldLabel>
+                  <ShadcnTextarea
+                    id="reminder-notes"
+                    defaultValue={reminder?.notes ?? ""}
+                    name="notes"
+                    rows={4}
+                  />
                 </ShadcnField>
-              </div>
-              <ShadcnField>
-                <ShadcnFieldLabel htmlFor="reminder-notes">Notes</ShadcnFieldLabel>
-                <ShadcnTextarea
-                  id="reminder-notes"
-                  defaultValue={reminder?.notes ?? ""}
-                  name="notes"
-                  rows={4}
-                />
-              </ShadcnField>
-            </ShadcnFieldGroup>
+              </ShadcnFieldGroup>
+            </ResponsiveDialogBody>
             <ResponsiveDialogFooter className="mt-5">
               <Button disabled={mutation.isPending} type="submit">
                 {mutation.isPending ? "Saving…" : reminder ? "Save changes" : "Create reminder"}
               </Button>
             </ResponsiveDialogFooter>
           </FeedbackForm>
-        </ResponsiveDialogBody>
+        </div>
       </ResponsiveDialogContent>
     </ResponsiveDialog>
   );
@@ -9163,7 +9045,6 @@ function EventInspector({
   user: User;
 }) {
   const queryClient = useQueryClient();
-  const sheetRef = useRef<HTMLDivElement>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [blocks, setBlocks] = useState(event.blocks);
   const [currentTime, setCurrentTime] = useState(() => new Date());
@@ -9249,17 +9130,9 @@ function EventInspector({
     onError: () => invalidateMaterial(queryClient),
   });
   useEffect(() => {
-    const handleEscape = (keyboardEvent: KeyboardEvent) => {
-      if (keyboardEvent.key === "Escape" && !keyboardEvent.defaultPrevented) close();
-    };
-    window.addEventListener("keydown", handleEscape);
-    return () => window.removeEventListener("keydown", handleEscape);
-  }, [close]);
-  useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(new Date()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
-  useDialogFocus(sheetRef);
   const content = (
     <>
       <header className="event-sheet__header">
@@ -9272,7 +9145,7 @@ function EventInspector({
           <XIcon aria-hidden="true" className="size-[19px]" />
         </Button>
       </header>
-      <div className="event-sheet__body">
+      <ResponsiveDialogBody className="event-sheet__body">
         <div className="event-sheet__title">
           <h2 data-user-content id="event-sheet-title">
             {event.title}
@@ -9421,8 +9294,8 @@ function EventInspector({
           </span>
         </div>
         <MutationFeedback feedback={remove.feedback} />
-      </div>
-      <footer className="event-sheet__actions">
+      </ResponsiveDialogBody>
+      <ResponsiveDialogFooter className="event-sheet__actions">
         {confirmDelete ? (
           <div className="event-sheet__confirm">
             <span>Delete this event everywhere?</span>
@@ -9445,42 +9318,21 @@ function EventInspector({
             </Button>
           </>
         )}
-      </footer>
+      </ResponsiveDialogFooter>
     </>
   );
-  if (presentation === "floating") {
-    return (
-      <ShadcnCard
-        aria-labelledby="event-sheet-title"
-        className="calendar-floating-nav__composer is-calendar-colored event-details-card"
-        ref={sheetRef}
-        role="dialog"
-        style={{ "--calendar-color": calendar?.color ?? "#777ce3" } as CSSProperties}
-        tabIndex={-1}
-      >
-        {content}
-      </ShadcnCard>
-    );
-  }
+
   return (
-    <div className="event-sheet-backdrop">
-      <button
-        aria-label="Close event details"
-        className="event-sheet-dismiss"
-        onClick={close}
-        type="button"
-      />
-      <div
-        aria-labelledby="event-sheet-title"
-        aria-modal="true"
-        className="event-sheet"
-        ref={sheetRef}
-        role="dialog"
-        tabIndex={-1}
+    <ResponsiveDialog open onOpenChange={(open) => !open && close()}>
+      <ResponsiveDialogContent
+        className="event-details-dialog sm:max-w-lg"
+        showCloseButton={false}
+        aria-describedby={undefined}
       >
+        <ResponsiveDialogTitle className="sr-only">Event details</ResponsiveDialogTitle>
         {content}
-      </div>
-    </div>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   );
 }
 
@@ -9678,68 +9530,70 @@ export function EventDialog({
         className="editor-form"
         onSubmit={submit}
       >
-        <Field autoFocus defaultValue={event?.title} label="Event" name="title" required />
-        <label className="field">
-          <span>Calendar</span>
-          <select
-            value={
-              event?.calendarId ??
-              selectedCalendarId ??
-              writable.find((calendar) => calendar.id === defaultCalendarId)?.id ??
-              writable[0]?.id ??
-              ""
-            }
-            onChange={(changeEvent) => setSelectedCalendarId(changeEvent.target.value)}
-            disabled={Boolean(event)}
-            name="calendarId"
-            required
-          >
-            {writable.map((calendar) => (
-              <option key={calendar.id} value={calendar.id}>
-                {calendar.name} · {calendar.provider}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="form-grid">
-          <Field
-            value={startValue}
-            onChange={(changeEvent) => setStartValue(changeEvent.target.value)}
-            label="Starts"
-            name="startsAt"
-            type="datetime-local"
-            required
-          />
-          <Field
-            value={endValue}
-            onChange={(changeEvent) => {
-              endEdited.current = true;
-              setEndValue(changeEvent.target.value);
-            }}
-            label="Ends"
-            name="endsAt"
-            type="datetime-local"
-            required
-          />
-        </div>
-        <div className="form-grid">
-          <Field defaultValue={event?.location ?? ""} label="Location" name="location" />
-          <label className="check-field">
-            <input defaultChecked={event?.allDay} name="allDay" type="checkbox" /> All day
+        <ResponsiveDialogBody>
+          <Field autoFocus defaultValue={event?.title} label="Event" name="title" required />
+          <label className="field">
+            <span>Calendar</span>
+            <select
+              value={
+                event?.calendarId ??
+                selectedCalendarId ??
+                writable.find((calendar) => calendar.id === defaultCalendarId)?.id ??
+                writable[0]?.id ??
+                ""
+              }
+              onChange={(changeEvent) => setSelectedCalendarId(changeEvent.target.value)}
+              disabled={Boolean(event)}
+              name="calendarId"
+              required
+            >
+              {writable.map((calendar) => (
+                <option key={calendar.id} value={calendar.id}>
+                  {calendar.name} · {calendar.provider}
+                </option>
+              ))}
+            </select>
           </label>
-        </div>
-        <label className="field">
-          <span>Notes</span>
-          <textarea
-            aria-describedby="event-notes-help"
-            defaultValue={event?.notes ?? ""}
-            name="notes"
-            rows={5}
-          />
-          <small className="field-help" id="event-notes-help">
-            Markdown and safe HTML render in event details and stay intact when synced.
-          </small>
-        </label>
+          <div className="form-grid">
+            <Field
+              value={startValue}
+              onChange={(changeEvent) => setStartValue(changeEvent.target.value)}
+              label="Starts"
+              name="startsAt"
+              type="datetime-local"
+              required
+            />
+            <Field
+              value={endValue}
+              onChange={(changeEvent) => {
+                endEdited.current = true;
+                setEndValue(changeEvent.target.value);
+              }}
+              label="Ends"
+              name="endsAt"
+              type="datetime-local"
+              required
+            />
+          </div>
+          <div className="form-grid">
+            <Field defaultValue={event?.location ?? ""} label="Location" name="location" />
+            <label className="check-field">
+              <input defaultChecked={event?.allDay} name="allDay" type="checkbox" /> All day
+            </label>
+          </div>
+          <label className="field">
+            <span>Notes</span>
+            <textarea
+              aria-describedby="event-notes-help"
+              defaultValue={event?.notes ?? ""}
+              name="notes"
+              rows={5}
+            />
+            <small className="field-help" id="event-notes-help">
+              Markdown and safe HTML render in event details and stay intact when synced.
+            </small>
+          </label>
+        </ResponsiveDialogBody>
         <FormActions
           close={close}
           pending={mutation.isPending}
@@ -9775,8 +9629,10 @@ function CalendarDialog({ close, user }: { close: () => void; user: User }) {
           mutation.mutate(new FormData(event.currentTarget));
         }}
       >
-        <Field autoFocus label="Calendar name" name="name" required />
-        <Field defaultValue="#7c8cff" label="Color" name="color" type="color" required />
+        <ResponsiveDialogBody>
+          <Field autoFocus label="Calendar name" name="name" required />
+          <Field defaultValue="#7c8cff" label="Color" name="color" type="color" required />
+        </ResponsiveDialogBody>
         <FormActions close={close} pending={mutation.isPending} submitLabel="Create calendar" />
       </FeedbackForm>
     </Modal>
@@ -9794,48 +9650,17 @@ function Modal({
   eyebrow: string;
   title: string;
 }) {
-  const modalRef = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented) close();
-    };
-    window.addEventListener("keydown", handleEscape);
-    return () => window.removeEventListener("keydown", handleEscape);
-  }, [close]);
-  useDialogFocus(modalRef);
   return (
-    <div className="modal-backdrop">
-      <button aria-label="Close dialog" className="modal-dismiss" onClick={close} type="button" />
-      <section
-        aria-labelledby="modal-title"
-        aria-modal="true"
-        className="modal"
-        ref={modalRef}
-        role="dialog"
-        tabIndex={-1}
-      >
-        <header>
-          <div>
-            <p className="eyebrow">{eyebrow}</p>
-            <h2 id="modal-title">{title}</h2>
-          </div>
-          <Button aria-label="Close" onClick={close} tone="ghost">
-            <XIcon className="size-[19px]" />
-          </Button>
-        </header>
+    <ResponsiveDialog open onOpenChange={(open) => !open && close()}>
+      <ResponsiveDialogContent className="sm:max-w-lg" aria-describedby={undefined}>
+        <ResponsiveDialogHeader>
+          <p className="eyebrow">{eyebrow}</p>
+          <ResponsiveDialogTitle>{title}</ResponsiveDialogTitle>
+        </ResponsiveDialogHeader>
         {children}
-      </section>
-    </div>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   );
-}
-
-function useDialogFocus(container: { current: HTMLElement | null }) {
-  useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement;
-    const dialog = container.current as HTMLElement;
-    dialog.focus();
-    return () => previouslyFocused.focus();
-  }, [container]);
 }
 
 function FormActions({
@@ -9848,12 +9673,14 @@ function FormActions({
   submitLabel: string;
 }) {
   return (
-    <div className="form-actions">
-      <Button onClick={close}>Cancel</Button>
+    <ResponsiveDialogFooter className="form-actions">
+      <Button onClick={close} type="button">
+        Cancel
+      </Button>
       <Button disabled={pending} tone="accent" type="submit">
         {pending ? <Spinner label="Saving" /> : submitLabel}
       </Button>
-    </div>
+    </ResponsiveDialogFooter>
   );
 }
 
@@ -10227,10 +10054,6 @@ function differenceInLocalDays(from: LocalDate, to: LocalDate): number {
     (Date.UTC(to.year, to.month - 1, to.day) - Date.UTC(from.year, from.month - 1, from.day)) /
       86_400_000,
   );
-}
-
-function minuteToTimelinePixels(minute: number): number {
-  return (minute / 60) * calendarHourHeight;
 }
 
 function formatHour(hour: number): string {

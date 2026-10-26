@@ -170,7 +170,7 @@ export function OccurrenceMatchDialog(props: OccurrenceMatchDialogProps) {
             creates a payment.
           </DialogDescription>
         </DialogHeader>
-        <ResponsiveDialogBody>
+        <div data-responsive-slot="layout">
           {!occurrence.inCurrentSchedule ? (
             <p>
               This is retained history outside the current schedule. Only an existing match can be
@@ -231,131 +231,137 @@ export function OccurrenceMatchDialog(props: OccurrenceMatchDialogProps) {
               save.mutate();
             }}
           >
-            <FieldSet disabled={save.isPending}>
-              <FieldGroup>
-                <Field>
-                  <FieldLabel htmlFor={`${id}-mode`}>Match operation</FieldLabel>
-                  <NativeSelect
-                    id={`${id}-mode`}
-                    value={mode}
-                    onChange={(event) => setMode(event.target.value)}
-                  >
-                    <NativeSelectOption value="match" disabled={!occurrence.inCurrentSchedule}>
-                      Match a partial or full amount
-                    </NativeSelectOption>
-                    <NativeSelectOption value="reverse">
-                      Reverse an entire existing match
-                    </NativeSelectOption>
-                  </NativeSelect>
-                </Field>
-                {mode === "match" ? (
-                  <>
-                    <Field>
-                      <FieldLabel htmlFor={`${id}-transaction`}>Posted actual movement</FieldLabel>
-                      <NativeSelect
-                        id={`${id}-transaction`}
-                        name="transactionId"
-                        required
-                        value={transactionId}
-                        onChange={(event) => {
-                          setTransactionId(event.target.value);
-                          setAllocationId("");
-                        }}
-                      >
-                        <NativeSelectOption value="">Choose a posted movement</NativeSelectOption>
-                        {eligible.map((transaction) => (
-                          <NativeSelectOption key={transaction.id} value={transaction.id}>
-                            {transaction.merchant} · {transaction.date} ·{" "}
-                            {transaction.amountCents / 100}
-                          </NativeSelectOption>
-                        ))}
-                      </NativeSelect>
-                    </Field>
-                    {occurrence.source.kind === "obligation" ? (
+            <ResponsiveDialogBody>
+              <FieldSet disabled={save.isPending}>
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel htmlFor={`${id}-mode`}>Match operation</FieldLabel>
+                    <NativeSelect
+                      id={`${id}-mode`}
+                      value={mode}
+                      onChange={(event) => setMode(event.target.value)}
+                    >
+                      <NativeSelectOption value="match" disabled={!occurrence.inCurrentSchedule}>
+                        Match a partial or full amount
+                      </NativeSelectOption>
+                      <NativeSelectOption value="reverse">
+                        Reverse an entire existing match
+                      </NativeSelectOption>
+                    </NativeSelect>
+                  </Field>
+                  {mode === "match" ? (
+                    <>
                       <Field>
-                        <FieldLabel htmlFor={`${id}-allocation`}>
-                          Canonical expense allocation
+                        <FieldLabel htmlFor={`${id}-transaction`}>
+                          Posted actual movement
                         </FieldLabel>
                         <NativeSelect
-                          id={`${id}-allocation`}
-                          name="allocationId"
+                          id={`${id}-transaction`}
+                          name="transactionId"
                           required
-                          value={allocationId}
-                          onChange={(event) => setAllocationId(event.target.value)}
+                          value={transactionId}
+                          onChange={(event) => {
+                            setTransactionId(event.target.value);
+                            setAllocationId("");
+                          }}
                         >
-                          <NativeSelectOption value="">
-                            Choose an active allocation
-                          </NativeSelectOption>
-                          {allocations.map((row) => (
-                            <NativeSelectOption key={row.id} value={row.id}>
-                              {row.amountCents / 100} · {row.treatment} · revision {row.revision}
+                          <NativeSelectOption value="">Choose a posted movement</NativeSelectOption>
+                          {eligible.map((transaction) => (
+                            <NativeSelectOption key={transaction.id} value={transaction.id}>
+                              {transaction.merchant} · {transaction.date} ·{" "}
+                              {transaction.amountCents / 100}
                             </NativeSelectOption>
                           ))}
                         </NativeSelect>
                       </Field>
-                    ) : null}
-                    <Field>
-                      <FieldLabel htmlFor={`${id}-amount`}>
-                        Amount of this occurrence matched
-                      </FieldLabel>
-                      <Input
-                        id={`${id}-amount`}
-                        name="amount"
-                        inputMode="decimal"
-                        required
-                        value={amount}
-                        onChange={(event) => setAmount(event.target.value)}
-                      />
-                    </Field>
-                  </>
-                ) : (
-                  <>
-                    <Field>
-                      <FieldLabel htmlFor={`${id}-match`}>
-                        Existing match to reverse in full
-                      </FieldLabel>
-                      <NativeSelect
-                        id={`${id}-match`}
-                        name="matchId"
-                        required
-                        value={matchId}
-                        onChange={(event) => setMatchId(event.target.value)}
-                      >
-                        <NativeSelectOption value="">Choose an unreversed match</NativeSelectOption>
-                        {activeMatches.map((event) => (
-                          <NativeSelectOption key={event.id} value={event.id}>
-                            {event.amountCents / 100} {event.currencyCode} · {event.recordedAt}
+                      {occurrence.source.kind === "obligation" ? (
+                        <Field>
+                          <FieldLabel htmlFor={`${id}-allocation`}>
+                            Canonical expense allocation
+                          </FieldLabel>
+                          <NativeSelect
+                            id={`${id}-allocation`}
+                            name="allocationId"
+                            required
+                            value={allocationId}
+                            onChange={(event) => setAllocationId(event.target.value)}
+                          >
+                            <NativeSelectOption value="">
+                              Choose an active allocation
+                            </NativeSelectOption>
+                            {allocations.map((row) => (
+                              <NativeSelectOption key={row.id} value={row.id}>
+                                {row.amountCents / 100} · {row.treatment} · revision {row.revision}
+                              </NativeSelectOption>
+                            ))}
+                          </NativeSelect>
+                        </Field>
+                      ) : null}
+                      <Field>
+                        <FieldLabel htmlFor={`${id}-amount`}>
+                          Amount of this occurrence matched
+                        </FieldLabel>
+                        <Input
+                          id={`${id}-amount`}
+                          name="amount"
+                          inputMode="decimal"
+                          required
+                          value={amount}
+                          onChange={(event) => setAmount(event.target.value)}
+                        />
+                      </Field>
+                    </>
+                  ) : (
+                    <>
+                      <Field>
+                        <FieldLabel htmlFor={`${id}-match`}>
+                          Existing match to reverse in full
+                        </FieldLabel>
+                        <NativeSelect
+                          id={`${id}-match`}
+                          name="matchId"
+                          required
+                          value={matchId}
+                          onChange={(event) => setMatchId(event.target.value)}
+                        >
+                          <NativeSelectOption value="">
+                            Choose an unreversed match
                           </NativeSelectOption>
-                        ))}
-                      </NativeSelect>
-                    </Field>
-                    <p className="text-sm text-muted-foreground">
-                      This reverses the whole selected match. Its original event and rationale
-                      remain in immutable history.
-                    </p>
-                  </>
-                )}
-                <Field>
-                  <FieldLabel htmlFor={`${id}-rationale`}>
-                    Reason for this match decision
-                  </FieldLabel>
-                  <Textarea
-                    id={`${id}-rationale`}
-                    name="rationale"
-                    required
-                    maxLength={2000}
-                    value={rationale}
-                    onChange={(event) => setRationale(event.target.value)}
-                  />
-                </Field>
-              </FieldGroup>
-            </FieldSet>
-            {mode === "match" && !eligible.length ? (
-              <p>
-                No eligible posted movement is available. Review or refresh the canonical
-                transaction history first.
-              </p>
-            ) : null}
+                          {activeMatches.map((event) => (
+                            <NativeSelectOption key={event.id} value={event.id}>
+                              {event.amountCents / 100} {event.currencyCode} · {event.recordedAt}
+                            </NativeSelectOption>
+                          ))}
+                        </NativeSelect>
+                      </Field>
+                      <p className="text-sm text-muted-foreground">
+                        This reverses the whole selected match. Its original event and rationale
+                        remain in immutable history.
+                      </p>
+                    </>
+                  )}
+                  <Field>
+                    <FieldLabel htmlFor={`${id}-rationale`}>
+                      Reason for this match decision
+                    </FieldLabel>
+                    <Textarea
+                      id={`${id}-rationale`}
+                      name="rationale"
+                      required
+                      maxLength={2000}
+                      value={rationale}
+                      onChange={(event) => setRationale(event.target.value)}
+                    />
+                  </Field>
+                </FieldGroup>
+              </FieldSet>
+              {mode === "match" && !eligible.length ? (
+                <p>
+                  No eligible posted movement is available. Review or refresh the canonical
+                  transaction history first.
+                </p>
+              ) : null}
+            </ResponsiveDialogBody>
             <DialogFooter>
               <Button type="button" variant="outline" disabled={save.isPending} onClick={onClose}>
                 Cancel
@@ -365,7 +371,7 @@ export function OccurrenceMatchDialog(props: OccurrenceMatchDialogProps) {
               </Button>
             </DialogFooter>
           </FeedbackForm>
-        </ResponsiveDialogBody>
+        </div>
       </DialogContent>
     </Dialog>
   );

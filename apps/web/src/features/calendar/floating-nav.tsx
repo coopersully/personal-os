@@ -1,6 +1,11 @@
 import { getDefaultWorkspacePreferences } from "@personal-os/domain";
-import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
-import { useMediaQuery } from "@/hooks/use-media-query";
+import {
+  ResponsiveDialog,
+  ResponsiveDialogBody,
+  ResponsiveDialogContent,
+  ResponsiveDialogFooter,
+  ResponsiveDialogTitle,
+} from "@/components/responsive-dialog";
 
 export { calendarSearchResults, parseCalendarDateQuery } from "./search-date";
 
@@ -16,7 +21,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type CSSProperties,
   type FormEvent,
-  type KeyboardEvent,
   type ReactNode,
   useCallback,
   useDeferredValue,
@@ -29,7 +33,6 @@ import { toast } from "sonner";
 import {
   FloatingActionButton,
   FloatingActionRegion,
-  FloatingActionSurface,
   FloatingActions,
 } from "@/components/floating-actions";
 import {
@@ -39,7 +42,6 @@ import {
   ExternalLinkIcon,
   MapPinIcon,
   PlusIcon,
-  SearchIcon,
   VideoAddIcon,
   XIcon,
 } from "@/components/icons";
@@ -82,7 +84,7 @@ import { useWorkspacePreferences } from "../workspace-settings/preferences.js";
 import { useDefaultCalendarId } from "./preferences.js";
 
 type FloatingMode = "closed" | "create" | "date";
-type FloatingSurfaceState = FloatingMode | "details";
+
 type ConferenceChoice = "google_meet" | "link" | "none";
 
 type CalendarFloatingNavProps = {
@@ -108,13 +110,10 @@ export function CalendarFloatingNav({
   user,
 }: CalendarFloatingNavProps) {
   const [mode, setMode] = useState<FloatingMode>("closed");
-  const [surfaceInstance, setSurfaceInstance] = useState(0);
   const dateTrigger = useRef<HTMLButtonElement>(null);
   const createTrigger = useRef<HTMLButtonElement>(null);
-  const searchTrigger = useRef<HTMLButtonElement>(null);
   const restoreFocusMode = useRef<Exclude<FloatingMode, "closed"> | null>(null);
   const open = (nextMode: Exclude<FloatingMode, "closed">) => {
-    setSurfaceInstance((instance) => instance + 1);
     setMode(nextMode);
   };
   const close = () => {
@@ -124,94 +123,65 @@ export function CalendarFloatingNav({
   };
   useEffect(() => {
     if (draft) {
-      setSurfaceInstance((instance) => instance + 1);
       setMode("create");
     }
   }, [draft]);
-  useEffect(() => {
-    if (mode !== "closed" || !restoreFocusMode.current) return;
-    const trigger = {
-      create: createTrigger,
-      date: dateTrigger,
-    }[restoreFocusMode.current];
-    restoreFocusMode.current = null;
-    window.requestAnimationFrame(() => trigger.current?.focus());
-  }, [mode]);
-  const surfaceState: FloatingSurfaceState = eventDetails ? "details" : mode;
-  const content = eventDetails ? (
-    eventDetails
-  ) : mode === "closed" ? (
-    <FloatingActions aria-label="Calendar actions" className="calendar-floating-nav__pill">
-      <FloatingActionButton label="Choose date" onClick={() => open("date")} ref={dateTrigger}>
-        <CalendarIcon aria-hidden="true" />
-      </FloatingActionButton>
-      <FloatingActionButton label="Create event" onClick={() => open("create")} ref={createTrigger}>
-        <PlusIcon aria-hidden="true" />
-      </FloatingActionButton>
-      <FloatingActionButton
-        label="Search calendar"
-        onClick={() => window.dispatchEvent(new Event("nohmi:workspace-search"))}
-        ref={searchTrigger}
-      >
-        <SearchIcon aria-hidden="true" />
-      </FloatingActionButton>
-    </FloatingActions>
-  ) : mode === "date" ? (
-    <DateJumpCard anchor={anchor} close={close} onNavigate={onNavigate} timeZone={timeZone} />
-  ) : (
-    <InlineEventComposer
-      calendars={calendars}
-      close={close}
-      {...(draft ? { draft } : {})}
-      key={draft ? `${draft.startsAt}-${draft.endsAt}` : "new-event"}
-      timeZone={timeZone}
-      user={user}
-    />
-  );
 
-  const mobileHeader = useMediaQuery("(max-width: 900px)");
-  if (mobileHeader && surfaceState === "closed")
-    return (
-      <WorkspaceHeaderControls label="Calendar actions">
-        <Button
-          aria-label="Choose date"
-          size="icon"
-          variant="ghost"
-          onClick={() => open("date")}
-          ref={dateTrigger}
-        >
-          <CalendarIcon aria-hidden="true" />
-        </Button>
-        <Button
-          aria-label="Create event"
-          size="icon"
-          variant="ghost"
-          onClick={() => open("create")}
-          ref={createTrigger}
-        >
-          <PlusIcon aria-hidden="true" />
-        </Button>
-      </WorkspaceHeaderControls>
-    );
   return (
-    <FloatingActionRegion align="center" className="calendar-floating-nav" data-mode={surfaceState}>
-      <FloatingActionSurface
-        className="calendar-floating-nav__surface"
-        data-slot="calendar-floating-surface"
-        data-state={surfaceState}
-        state={surfaceState}
-        contentKey={surfaceState === "closed" ? surfaceState : `${surfaceState}:${surfaceInstance}`}
-        contentClassName="calendar-floating-nav__transition-content"
-        onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
-          if (event.key !== "Escape" || surfaceState === "closed" || surfaceState === "details")
-            return;
-          event.preventDefault();
-          close();
-        }}
+    <>
+      <FloatingActionRegion align="end" className="calendar-floating-nav" data-mode="closed">
+        <FloatingActions aria-label="Calendar actions" className="calendar-floating-nav__pill">
+          <FloatingActionButton label="Choose date" onClick={() => open("date")} ref={dateTrigger}>
+            <CalendarIcon aria-hidden="true" />
+          </FloatingActionButton>
+          <FloatingActionButton
+            label="Create event"
+            onClick={() => open("create")}
+            ref={createTrigger}
+          >
+            <PlusIcon aria-hidden="true" />
+          </FloatingActionButton>
+        </FloatingActions>
+      </FloatingActionRegion>
+      {eventDetails}
+      <ResponsiveDialog
+        open={mode !== "closed" && !eventDetails}
+        onOpenChange={(next) => !next && close()}
       >
-        {content}
-      </FloatingActionSurface>
-    </FloatingActionRegion>
+        <ResponsiveDialogContent
+          className="calendar-editor-dialog sm:max-w-lg"
+          showCloseButton={false}
+          aria-describedby={undefined}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const previous = restoreFocusMode.current;
+            restoreFocusMode.current = null;
+            (previous === "date" ? dateTrigger : createTrigger).current?.focus();
+          }}
+        >
+          <ResponsiveDialogTitle className="sr-only">
+            {mode === "date" ? "Choose date" : "Create event"}
+          </ResponsiveDialogTitle>
+          {mode === "date" ? (
+            <DateJumpCard
+              anchor={anchor}
+              close={close}
+              onNavigate={onNavigate}
+              timeZone={timeZone}
+            />
+          ) : mode === "create" ? (
+            <InlineEventComposer
+              calendars={calendars}
+              close={close}
+              {...(draft ? { draft } : {})}
+              key={draft ? `${draft.startsAt}-${draft.endsAt}` : "new-event"}
+              timeZone={timeZone}
+              user={user}
+            />
+          ) : null}
+        </ResponsiveDialogContent>
+      </ResponsiveDialog>
+    </>
   );
 }
 
@@ -718,7 +688,7 @@ function InlineEventComposer({
       className="calendar-floating-nav__composer is-calendar-colored"
       style={{ "--calendar-color": selectedCalendar?.color ?? "#777ce3" } as CSSProperties}
     >
-      <CardHeader>
+      <CardHeader data-responsive-slot="header">
         <CardTitle>Create event</CardTitle>
         <CloseButton close={close} />
       </CardHeader>
@@ -732,261 +702,272 @@ function InlineEventComposer({
               : {}),
           })}
         >
-          <FieldGroup className="gap-3">
-            <Field>
-              <FieldLabel className="sr-only" htmlFor="floating-event-title">
-                Title
-              </FieldLabel>
-              <InputGroup>
-                <InputGroupInput
-                  autoFocus
-                  id="floating-event-title"
-                  name="title"
-                  placeholder="Event title"
-                  required
-                />
-                <InputGroupAddon align="inline-end">
-                  <Popover open={calendarPickerOpen} onOpenChange={setCalendarPickerOpen}>
-                    <PopoverTrigger asChild>
-                      <InputGroupButton
-                        aria-label={`Calendar: ${selectedCalendar?.name ?? "Choose calendar"}`}
-                        className="calendar-event-composer__calendar-trigger"
-                        type="button"
-                      >
-                        <i
-                          aria-hidden="true"
-                          style={{ background: selectedCalendar?.color ?? "#777ce3" }}
-                        />
-                        <span>{selectedCalendar?.name ?? "Calendar"}</span>
-                      </InputGroupButton>
-                    </PopoverTrigger>
-                    <PopoverContent
-                      align="end"
-                      className="calendar-event-composer__calendar-picker"
-                    >
-                      <p className="text-xs font-medium text-muted-foreground">
-                        Create on calendar
-                      </p>
-                      <div className="flex flex-col gap-1">
-                        {writable.map((calendar) => (
-                          <Button
-                            aria-pressed={calendar.id === selectedCalendar?.id}
-                            className="calendar-event-composer__calendar-option"
-                            key={calendar.id}
-                            onClick={() => {
-                              setCalendarId(calendar.id);
-                              setCalendarPickerOpen(false);
-                            }}
-                            type="button"
-                            variant="ghost"
-                          >
-                            <i
-                              aria-hidden="true"
-                              style={{ background: calendar.color ?? "#777ce3" }}
-                            />
-                            <span>{calendar.name}</span>
-                            {calendar.id === selectedCalendar?.id ? (
-                              <CheckIcon aria-hidden="true" data-icon="inline-end" />
-                            ) : null}
-                          </Button>
-                        ))}
-                      </div>
-                    </PopoverContent>
-                  </Popover>
-                </InputGroupAddon>
-              </InputGroup>
-            </Field>
-            <div className="calendar-event-composer__schedule">
-              <div className="calendar-event-composer__schedule-heading">
-                <span className="text-sm font-medium">When</span>
-                <label htmlFor="floating-event-all-day">
-                  <span>All day</span>
-                  <Switch
-                    checked={allDay}
-                    id="floating-event-all-day"
-                    onCheckedChange={setAllDay}
-                  />
-                </label>
-              </div>
-              <div className="calendar-event-composer__time">
-                <EventDateTimeControl
-                  allDay={allDay}
-                  date={startDate}
-                  label="Starts"
-                  onDateChange={(nextDate) => {
-                    setStartDate(nextDate);
-                    setScheduleError(null);
-                  }}
-                  onTimeChange={(nextTime) => {
-                    setStartTime(nextTime);
-                    setScheduleError(null);
-                  }}
-                  referenceYear={localDateAt(new Date(), timeZone).year}
-                  time={startTime}
-                  timeZone={timeZone}
-                />
-                <span
-                  aria-hidden="true"
-                  className="calendar-event-composer__duration-line"
-                  data-layout="duration-fill"
-                />
-                <EventDateTimeControl
-                  allDay={allDay}
-                  date={endDate}
-                  label="Ends"
-                  onDateChange={(nextDate) => {
-                    setValidatedEnd(nextDate, endTime);
-                    setScheduleError(null);
-                  }}
-                  onTimeChange={(nextTime) => {
-                    setValidatedEnd(endDate, nextTime);
-                    setScheduleError(null);
-                  }}
-                  referenceYear={localDateAt(new Date(), timeZone).year}
-                  time={endTime}
-                  timeZone={timeZone}
-                />
-              </div>
-            </div>
-            {showLocation ? <EventLocationPicker onDismiss={() => setShowLocation(false)} /> : null}
-            {showConferencing ? (
+          <ResponsiveDialogBody>
+            <FieldGroup className="gap-3">
               <Field>
-                <FieldLabel className="sr-only">Conferencing</FieldLabel>
-                <InputGroup>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <InputGroupButton className="flex-1 justify-start" type="button">
-                        <VideoAddIcon data-icon="inline-start" />
-                        {conferenceChoice === "google_meet"
-                          ? "Google Meet will be created"
-                          : conferenceChoice === "link"
-                            ? "Meeting link"
-                            : "Choose conferencing"}
-                        <ChevronDownIcon className="ml-auto" data-icon="inline-end" />
-                      </InputGroupButton>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start">
-                      <DropdownMenuGroup>
-                        <DropdownMenuRadioGroup
-                          onValueChange={(value) => setConferenceChoice(value as ConferenceChoice)}
-                          value={conferenceChoice}
-                        >
-                          <DropdownMenuRadioItem value="none">
-                            No conferencing
-                          </DropdownMenuRadioItem>
-                          {selectedCalendar?.provider === "google" ? (
-                            <DropdownMenuRadioItem value="google_meet">
-                              Generate Google Meet
-                            </DropdownMenuRadioItem>
-                          ) : null}
-                          <DropdownMenuRadioItem value="link">
-                            Paste meeting link
-                          </DropdownMenuRadioItem>
-                        </DropdownMenuRadioGroup>
-                      </DropdownMenuGroup>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                  <InputGroupAddon align="inline-end">
-                    <InputGroupButton
-                      aria-label="Remove conferencing"
-                      onClick={() => {
-                        setConferenceChoice("none");
-                        setShowConferencing(false);
-                      }}
-                      size="icon-xs"
-                      type="button"
-                    >
-                      <XIcon aria-hidden="true" />
-                    </InputGroupButton>
-                  </InputGroupAddon>
-                </InputGroup>
-                {conferenceChoice === "link" ? (
-                  <InputGroup>
-                    <InputGroupInput
-                      aria-label="Meeting link"
-                      id="floating-event-conference-url"
-                      name="conferenceUrl"
-                      placeholder="Zoom, Teams, Webex, or another meeting URL"
-                      required
-                      type="url"
-                    />
-                    <InputGroupAddon>
-                      <ExternalLinkIcon aria-hidden="true" />
-                    </InputGroupAddon>
-                  </InputGroup>
-                ) : null}
-              </Field>
-            ) : null}
-            {showLink ? (
-              <Field>
-                <FieldLabel className="sr-only" htmlFor="floating-event-url">
-                  Link
+                <FieldLabel className="sr-only" htmlFor="floating-event-title">
+                  Title
                 </FieldLabel>
                 <InputGroup>
                   <InputGroupInput
-                    aria-label="Link"
-                    id="floating-event-url"
-                    name="url"
-                    placeholder="Add a related URL"
-                    type="url"
+                    autoFocus
+                    id="floating-event-title"
+                    name="title"
+                    placeholder="Event title"
+                    required
                   />
                   <InputGroupAddon align="inline-end">
-                    <ExternalLinkIcon aria-hidden="true" />
-                    <InputGroupButton
-                      aria-label="Remove related link"
-                      onClick={() => setShowLink(false)}
-                      size="icon-xs"
-                      type="button"
-                    >
-                      <XIcon aria-hidden="true" />
-                    </InputGroupButton>
+                    <Popover open={calendarPickerOpen} onOpenChange={setCalendarPickerOpen}>
+                      <PopoverTrigger asChild>
+                        <InputGroupButton
+                          aria-label={`Calendar: ${selectedCalendar?.name ?? "Choose calendar"}`}
+                          className="calendar-event-composer__calendar-trigger"
+                          type="button"
+                        >
+                          <i
+                            aria-hidden="true"
+                            style={{ background: selectedCalendar?.color ?? "#777ce3" }}
+                          />
+                          <span>{selectedCalendar?.name ?? "Calendar"}</span>
+                        </InputGroupButton>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        align="end"
+                        className="calendar-event-composer__calendar-picker"
+                      >
+                        <p className="text-xs font-medium text-muted-foreground">
+                          Create on calendar
+                        </p>
+                        <div className="flex flex-col gap-1">
+                          {writable.map((calendar) => (
+                            <Button
+                              aria-pressed={calendar.id === selectedCalendar?.id}
+                              className="calendar-event-composer__calendar-option"
+                              key={calendar.id}
+                              onClick={() => {
+                                setCalendarId(calendar.id);
+                                setCalendarPickerOpen(false);
+                              }}
+                              type="button"
+                              variant="ghost"
+                            >
+                              <i
+                                aria-hidden="true"
+                                style={{ background: calendar.color ?? "#777ce3" }}
+                              />
+                              <span>{calendar.name}</span>
+                              {calendar.id === selectedCalendar?.id ? (
+                                <CheckIcon aria-hidden="true" data-icon="inline-end" />
+                              ) : null}
+                            </Button>
+                          ))}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                   </InputGroupAddon>
                 </InputGroup>
               </Field>
-            ) : null}
-            {scheduleError ? (
-              <p className="calendar-floating-nav__error" role="alert">
-                {scheduleError}
-              </p>
-            ) : null}
-            {!showLocation || !showConferencing || !showLink ? (
-              <div className="calendar-event-composer__optional-actions">
-                {!showLocation ? (
-                  <AddOptionalFieldButton onClick={() => setShowLocation(true)}>
-                    Add location
-                  </AddOptionalFieldButton>
-                ) : null}
-                {!showConferencing ? (
-                  <AddOptionalFieldButton onClick={() => setShowConferencing(true)}>
-                    Add conferencing
-                  </AddOptionalFieldButton>
-                ) : null}
-                {!showLink ? (
-                  <AddOptionalFieldButton onClick={() => setShowLink(true)}>
-                    Add link
-                  </AddOptionalFieldButton>
-                ) : null}
+              <div className="calendar-event-composer__schedule">
+                <div className="calendar-event-composer__schedule-heading">
+                  <span className="text-sm font-medium">When</span>
+                  <label htmlFor="floating-event-all-day">
+                    <span>All day</span>
+                    <Switch
+                      checked={allDay}
+                      id="floating-event-all-day"
+                      onCheckedChange={setAllDay}
+                    />
+                  </label>
+                </div>
+                <div className="calendar-event-composer__time">
+                  <EventDateTimeControl
+                    allDay={allDay}
+                    date={startDate}
+                    label="Starts"
+                    onDateChange={(nextDate) => {
+                      setStartDate(nextDate);
+                      setScheduleError(null);
+                    }}
+                    onTimeChange={(nextTime) => {
+                      setStartTime(nextTime);
+                      setScheduleError(null);
+                    }}
+                    referenceYear={localDateAt(new Date(), timeZone).year}
+                    time={startTime}
+                    timeZone={timeZone}
+                  />
+                  <span
+                    aria-hidden="true"
+                    className="calendar-event-composer__duration-line"
+                    data-layout="duration-fill"
+                  />
+                  <EventDateTimeControl
+                    allDay={allDay}
+                    date={endDate}
+                    label="Ends"
+                    onDateChange={(nextDate) => {
+                      setValidatedEnd(nextDate, endTime);
+                      setScheduleError(null);
+                    }}
+                    onTimeChange={(nextTime) => {
+                      setValidatedEnd(endDate, nextTime);
+                      setScheduleError(null);
+                    }}
+                    referenceYear={localDateAt(new Date(), timeZone).year}
+                    time={endTime}
+                    timeZone={timeZone}
+                  />
+                </div>
               </div>
-            ) : null}
-            <Field>
-              <FieldLabel className="sr-only" htmlFor="floating-event-notes">
-                Description
-              </FieldLabel>
-              <Textarea
-                id="floating-event-notes"
-                name="notes"
-                placeholder="Description, notes, or related links (optional)"
-                rows={2}
-              />
-            </Field>
-            {writable.length === 0 ? (
-              <p role="status">Connect a writable calendar before creating an event.</p>
-            ) : null}
+              {showLocation ? (
+                <EventLocationPicker onDismiss={() => setShowLocation(false)} />
+              ) : null}
+              {showConferencing ? (
+                <Field>
+                  <FieldLabel className="sr-only">Conferencing</FieldLabel>
+                  <InputGroup>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <InputGroupButton className="flex-1 justify-start" type="button">
+                          <VideoAddIcon data-icon="inline-start" />
+                          {conferenceChoice === "google_meet"
+                            ? "Google Meet will be created"
+                            : conferenceChoice === "link"
+                              ? "Meeting link"
+                              : "Choose conferencing"}
+                          <ChevronDownIcon className="ml-auto" data-icon="inline-end" />
+                        </InputGroupButton>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start">
+                        <DropdownMenuGroup>
+                          <DropdownMenuRadioGroup
+                            onValueChange={(value) =>
+                              setConferenceChoice(value as ConferenceChoice)
+                            }
+                            value={conferenceChoice}
+                          >
+                            <DropdownMenuRadioItem value="none">
+                              No conferencing
+                            </DropdownMenuRadioItem>
+                            {selectedCalendar?.provider === "google" ? (
+                              <DropdownMenuRadioItem value="google_meet">
+                                Generate Google Meet
+                              </DropdownMenuRadioItem>
+                            ) : null}
+                            <DropdownMenuRadioItem value="link">
+                              Paste meeting link
+                            </DropdownMenuRadioItem>
+                          </DropdownMenuRadioGroup>
+                        </DropdownMenuGroup>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <InputGroupAddon align="inline-end">
+                      <InputGroupButton
+                        aria-label="Remove conferencing"
+                        onClick={() => {
+                          setConferenceChoice("none");
+                          setShowConferencing(false);
+                        }}
+                        size="icon-xs"
+                        type="button"
+                      >
+                        <XIcon aria-hidden="true" />
+                      </InputGroupButton>
+                    </InputGroupAddon>
+                  </InputGroup>
+                  {conferenceChoice === "link" ? (
+                    <InputGroup>
+                      <InputGroupInput
+                        aria-label="Meeting link"
+                        id="floating-event-conference-url"
+                        name="conferenceUrl"
+                        placeholder="Zoom, Teams, Webex, or another meeting URL"
+                        required
+                        type="url"
+                      />
+                      <InputGroupAddon>
+                        <ExternalLinkIcon aria-hidden="true" />
+                      </InputGroupAddon>
+                    </InputGroup>
+                  ) : null}
+                </Field>
+              ) : null}
+              {showLink ? (
+                <Field>
+                  <FieldLabel className="sr-only" htmlFor="floating-event-url">
+                    Link
+                  </FieldLabel>
+                  <InputGroup>
+                    <InputGroupInput
+                      aria-label="Link"
+                      id="floating-event-url"
+                      name="url"
+                      placeholder="Add a related URL"
+                      type="url"
+                    />
+                    <InputGroupAddon align="inline-end">
+                      <ExternalLinkIcon aria-hidden="true" />
+                      <InputGroupButton
+                        aria-label="Remove related link"
+                        onClick={() => setShowLink(false)}
+                        size="icon-xs"
+                        type="button"
+                      >
+                        <XIcon aria-hidden="true" />
+                      </InputGroupButton>
+                    </InputGroupAddon>
+                  </InputGroup>
+                </Field>
+              ) : null}
+              {scheduleError ? (
+                <p className="calendar-floating-nav__error" role="alert">
+                  {scheduleError}
+                </p>
+              ) : null}
+              {!showLocation || !showConferencing || !showLink ? (
+                <div className="calendar-event-composer__optional-actions">
+                  {!showLocation ? (
+                    <AddOptionalFieldButton onClick={() => setShowLocation(true)}>
+                      Add location
+                    </AddOptionalFieldButton>
+                  ) : null}
+                  {!showConferencing ? (
+                    <AddOptionalFieldButton onClick={() => setShowConferencing(true)}>
+                      Add conferencing
+                    </AddOptionalFieldButton>
+                  ) : null}
+                  {!showLink ? (
+                    <AddOptionalFieldButton onClick={() => setShowLink(true)}>
+                      Add link
+                    </AddOptionalFieldButton>
+                  ) : null}
+                </div>
+              ) : null}
+              <Field>
+                <FieldLabel className="sr-only" htmlFor="floating-event-notes">
+                  Description
+                </FieldLabel>
+                <Textarea
+                  id="floating-event-notes"
+                  name="notes"
+                  placeholder="Description, notes, or related links (optional)"
+                  rows={2}
+                />
+              </Field>
+              {writable.length === 0 ? (
+                <p role="status">Connect a writable calendar before creating an event.</p>
+              ) : null}
+            </FieldGroup>
+          </ResponsiveDialogBody>
+          <ResponsiveDialogFooter>
+            <Button type="button" onClick={close} variant="outline">
+              Cancel
+            </Button>
             <Button disabled={mutation.isPending || writable.length === 0} type="submit">
               <PlusIcon data-icon="inline-start" />
               {mutation.isPending ? "Creating…" : "Create event"}
             </Button>
-          </FieldGroup>
+          </ResponsiveDialogFooter>
         </FeedbackForm>
       </CardContent>
     </Card>

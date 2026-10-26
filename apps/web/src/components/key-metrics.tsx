@@ -69,11 +69,19 @@ export function KeyMetric({
 export function KeyMetrics({
   children,
   label = "Key metrics",
+  layout = "carousel",
 }: {
   children: ReactNode;
   label?: string;
+  layout?: "carousel" | "grid";
 }) {
   const reducedMotion = useReducedMotion();
+  if (layout === "grid")
+    return (
+      <section aria-label={label} className="key-metrics-grid">
+        {children}
+      </section>
+    );
   return (
     <Carousel
       aria-label={label}

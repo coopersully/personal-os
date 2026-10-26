@@ -93,12 +93,10 @@ and verify matching computed backgrounds and column alignment in both themes.
   standard border token, with half- and quarter-hour marks progressively more
   subdued. Rules remain behind events, drag previews, and the current-time
   marker.
-- Overlapping timed events with different start instants stack at full column width,
-  with later starts above earlier ones and a 4px horizontal step capped at 16px. Only events sharing the same start instant
-  divide into equal side-by-side lanes. Time and duration geometry stays intact.
-  A quiet layers icon and count button identifies each overlap group and reveals the existing
-  spread interaction. Hover, keyboard focus, click/touch, and Escape remain available;
-  the control has no decorative push-pin anatomy.
+- Overlapping timed events divide their day column into equal side-by-side lanes,
+  including transitive overlap groups. Reuse a free lane when an event ends exactly
+  as another starts. Preserve event time/duration and accessible individual targets;
+  there is no stacked/spread interaction.
 - Vertical day separation remains visible. Horizontal rules communicate time,
   not card boundaries. Week timelines alternate between two subtle
   neutral row-style surfaces so adjacent days read as distinct tiles. Today
@@ -112,14 +110,12 @@ and verify matching computed backgrounds and column alignment in both themes.
   into the scrolling timeline so content recedes without a hard edge. The fade
   remains translucent and paints behind header and all-day material; navigation
   content itself stays fully opaque and sharp.
-- A bottom-centred floating pill owns date jump, search, and event creation.
-  Its complete resting surface uses the primary button treatment, with all
-  three actions inheriting its foreground. Each action transforms the pill in
-  place. Search moves to screen centre,
-  focuses immediately, searches a bounded event range plus dates, and supports
-  direct relative-date phrases such as `last Christmas`. Creation exposes the
+- A bottom-right floating pill owns date jump and event creation at every
+  viewport width. Search stays in the top navigation. Its resting surface uses
+  the shared translucent navigation treatment, with both actions inheriting its
+  foreground. Each action transforms the pill in place. Creation exposes the
   standard event fields without launching a second surface.
-- The pill and its date, search, create, and event-detail states share one
+- The pill and its date, create, and event-detail states share one
   persistent Motion layout surface. Bounds morph with a restrained spring while
   outgoing and incoming content only crossfade; they never run a competing
   positional transform. Exiting controls become inert, and the global
@@ -252,17 +248,6 @@ narrow layouts. Floating controls overlay the calendar rather than reserving mob
 dock padding. Month rows stretch equally to fill tall viewports, retain a minimum
 readable height, and scroll when that minimum exceeds the available height.
 
-Hovering any event brings it above every sibling, whether the overlap stack is pinned
-or transiently expanded. The hover and control layers derive from the group size,
-so large stacks cannot cover the hovered event or their toggle. The stack toggle has no tooltip and appears at the center only while the stack is
-open (hovered, pinned, or an event card is keyboard-focused). The toggle also stays
-visible when it has keyboard focus, without forcing cards open; Escape closes the
-stack and returns focus to that toggle. Its resting state is visually hidden on hover-capable devices. Touch/coarse-pointer
-devices keep the control visible so users can open and close the stack. Opening a stack changes card positions only; it
-does not apply hover styling to every card. A stationary padded hover envelope covers
-the resting and spread cards, including their gaps, to prevent hover flicker during
-movement. Opening a stack adds no background gradient.
-
 Calendar uses the default page background across Day, Week, and Month. Hour rules,
 cell dividers, and the alternating `--calendar-tile-background` provide spatial
 structure. The same tile token drives Week columns and their all-day fades;
@@ -284,3 +269,12 @@ edited through the existing versioned Calendar profile; action rules retain thei
 ### Shared workspace header
 
 Calendar uses the shared title row for its date and selectable view phrase. The date remains visible at 320px. Search and account controls stay in the mobile utility row; spatial date axes remain with their grid. See [shared header rows](../system.md#shared-workspace-header-rows) for sizing and responsive placement.
+
+Today and Calendar share `TimelineAxis`, the minute-to-pixel scale, lane geometry,
+time formatting, and spatial event rendering. Today clips the grid to its remaining
+day; collapsed mode shows one timed event and all-day cards with the same styling.
+Calendar previous/next precede search on desktop; the phone view menu retains them.
+
+The floating Calendar actions sit at the bottom right at every viewport width and contain Choose date
+and Create event. Search belongs to the top navigation and is not repeated in that pill.
+Phone controls stay in the same bottom-right floating surface. Do not relocate create/date actions into the header or show a duplicate day/week/month dock; the selectable title phrase owns view switching.

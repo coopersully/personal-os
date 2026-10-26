@@ -230,11 +230,33 @@ desktop modal content.
 
 Compose its named slots in document order: `Trigger`, `Content`, `Header`,
 `Title` and optional `Description`, `Body`, `Footer`, and `Actions`. `Close` may
-wrap a secondary action anywhere inside the content. The body owns overflow;
-the header, footer, actions, accessible title, focus behavior, dismissal, and
+wrap a secondary action anywhere inside the content. The body alone owns overflow.
+The header, footer, actions, accessible title, focus behavior, dismissal, and
 mobile safe-area spacing remain stable. A feature may adjust layout through
 slot `className` values, but must not replace the responsive presentation,
 overlay behavior, or semantic anatomy.
+
+All in-app modal tasks, editors, confirmations, and detail overlays use this shared
+composition: centered dialogs at desktop widths and bottom drawers below 768 px.
+Do not implement editor side sheets or floating Calendar editor cards. Floating
+action triggers remain anchored while their editor opens in the modal layer.
+The desktop pet quick-access window is a native window, not an in-app modal.
+
+Overlay height follows content up to the dynamic viewport limit. Long forms scroll
+without shrinking their fields; short forms do not reserve empty footer space.
+Keep Save/Create and Cancel in a separate, non-scrolling footer at the bottom of
+the overlay. Move, archive, lifecycle, and other record-management controls belong
+in the scrollable body before that footer. Forms may contain a body/footer pair,
+or associate an external submit button with the form through a unique form ID.
+Do not nest a footer inside a scroll body or allow a nested form to scroll it away.
+The shared overlay owns one horizontal gutter: 24 px on desktop and 16 px on
+mobile. Headers, fields, and footer actions start at that same gutter; nested
+forms and cards must not add another outer inset. Use 16 px below the header,
+16 px of body end padding, and 16 px above the fixed footer. Keep titles
+start-aligned, reserve room for Close, and include the mobile bottom safe area.
+Drawer overscroll background extensions must not add scrollable blank space.
+Nested combobox popups mount within the containing dialog focus scope; Escape
+dismisses an open picker before dismissing its editor.
 
 ### Mandatory settings action feedback
 
@@ -280,7 +302,7 @@ colors, raw color utilities, or a second spacing scale.
 | Spacing | Use the shared 4 px rhythm. Block gaps are 24–32 px; row gaps are 8–12 px; dense metadata gaps are 4–8 px. |
 | Shape | Shared `--radius` owns component roundness. Use cards and controls from `src/components/ui`; do not invent parallel primitives. |
 | Color | Primary actions, selection, and current context use the monochrome ink scale. Warning, destructive, info, and success use semantic status tokens only. |
-| Effects | No decorative gradients, borders, elevation shadows, blur, glass, or translucent product surfaces. Hierarchy comes from spacing, type, and opaque tonal fields. A surface-colored edge fade with bounded backdrop blur is allowed only when it separates fixed navigation from scrolling content, as in Setup and Calendar. The approved full-viewport browser ritual may use a 24 px backdrop blur only on `.browser-ritual` to isolate the retained page; shared cards and dialogs remain flat (see the ritual exception in governance). |
+| Effects | No decorative gradients, borders, elevation shadows, blur, glass, or translucent product surfaces. Hierarchy comes from spacing, type, and opaque tonal fields. A surface-colored edge fade with bounded backdrop blur is allowed only when it separates fixed navigation from scrolling content, as in Setup and Calendar. Browser rituals follow the shared responsive modal presentation; shared cards and dialogs remain flat. |
 | Icons | Icons clarify an existing label or stand in only when the action has a familiar, accessible name. Icon-only actions require an accessible label and tooltip. |
 | Navigation | Active navigation keeps the same geometry as inactive navigation and uses the solid form of its icon; inactive items use the outline form. |
 | Motion | Motion confirms a spatial change and stays brief. It never conveys the only signal of urgency, completion, or error. Respect reduced motion. |
@@ -1168,14 +1190,59 @@ source copy for new interface text as well.
 
 On mobile, header controls use a 44px square target. Account filters collapse their
 visible count/plus decoration while retaining the complete accessible label.
-Keep the bottom app bar to three primary destinations plus overflow; top-row
-workspace actions remain reachable without opening that navigation drawer.
+The mobile app bar pairs a frequent destination with sidebar sections, without a generic More menu.
+Section tabs open URL-addressable landing pages with the domain's existing
+navigation rows, live counts, permission rules, and child destinations. Child pages
+highlight their owning section. Browser Back returns through that navigation path;
+resizing or refreshing a section URL must keep it usable. Tasks uses Views, Pinned,
+and History, with a direct Today shortcut; Finances uses Money, Planning, and Manage,
+with a direct Overview shortcut; Settings uses Account,
+Personal, Workspaces, and App; Mail pairs Inbox with Mailboxes. Today and Calendar do not gain
+redundant section tabs. Calendar view selection remains in its sentence title.
 
-The floating mobile workspace app bar is an explicitly approved exception to the
-flat-surface blur restriction: its translucent pill uses a 20px backdrop blur to
-keep navigation legible above scrolling content. This exception applies only to
-`.workspace-dock.workspace-app-tabs` and its decorative
-`.workspace-app-bar-backdrop` sibling, not cards or other navigation surfaces.
+Floating create/date controls stay at the bottom at every width. When section tabs
+are present, the shared `--floating-action-bottom` places their surface 12px above
+the 72px app bar, including its safe-area inset. Without tabs they use the normal
+bottom inset. The app bar and content clearance share the same footprint; do not
+relocate primary creation into the top header or use workspace-specific offsets.
+When upper and lower navigation are both present, organize by scope by default:
+workspace identity, switching, search, and workspace-wide attention belong above;
+page titles and controls that affect the current page belong below. End-align page
+controls such as filters, sorting, table presentation, and view changes, alongside
+the page title rather than beside workspace search. Search remains in the upper
+navigation even when its results are scoped to a workspace.
+
+This hierarchy applies on mobile and desktop. It is a placement default, not a
+requirement to add another bar. Space constraints may collapse controls into a
+labelled menu or adjust their placement; preserve clear scope, accessible targets,
+and stable bar heights. Do not duplicate controls across navigation levels. Primary
+creation retains the bottom-right floating anchor described above.
+
+The lower navigation here means the lower header row, not the viewport-bottom
+section tabs. Shared header slots separate workspace controls from page controls;
+keep the page title start-aligned and its controls end-aligned in that lower row.
+Compact linked ancestor breadcrumbs sit above the page title within the existing
+44px lower header row. Show workspace and applicable section/parent destinations;
+the title identifies the current page without repeating it in the breadcrumb. Settings
+uses the same search-above-title arrangement. Breadcrumbs never increase bar height.
+Spatial calendar axes and mail message actions retain their domain context below
+the shared header. Today may retain its compact single-row orientation.
+
+Primary and secondary top app bars use `--background`, matching the page body
+in every theme. Collapsing the sidebar must not hide the header review count or
+change its hand icon; only the available header width controls its compact layout. Their control groups share a 4px gap and title scope
+phrases inherit the shared title typography. Table rows and internal card/settings
+separators use the page background color; input and focus borders keep their own tokens.
+Creation controls stay bottom-right at every viewport, including Transactions.
+
+Mobile app tabs and shared floating action pills use the same
+`--navigation-surface`: the theme's card tone at 84% opacity with a 20px backdrop
+blur and the normal semantic foreground. This explicitly approved navigation
+exception applies to `.floating-actions`,
+`.workspace-dock.workspace-app-tabs`, and the decorative
+`.workspace-app-bar-backdrop` sibling; ordinary cards and expanded editors retain
+their opaque surfaces. Keep the app bar's chrome wrapper transparent so it does
+not block the backdrop effect.
 The pill has no border. A pointer-transparent, full-width bottom layer gradually
 fades and blurs scrolling content around it, with a masked top edge and safe-area
 coverage, so the glass does not end abruptly at the pill's outline.
@@ -1185,3 +1252,110 @@ coverage, so the glass does not end abruptly at the pill's outline.
 [Loading and motion](loading-and-motion.md) owns region skeletons, cached refresh,
 progressive reveal, shared transition tokens and reduced-motion behavior. Shared
 absence surfaces use centered Empty media without a dashed enclosure.
+
+
+### Shared workspace chrome refinements
+
+Workspace app bars have equal start/end insets. Compact filter triggers use the
+shared `FilterTrigger`: a ghost icon action with no resting border or plus, and
+an applied-count badge only when constrained. Text choices inside filter forms
+retain their labels. Reviews live in the top-right frame for Calendar, Tasks,
+Mail and Finances, with one shared hand action that collapses to an icon and count
+badge when its available container is narrow. Do not duplicate it in sidebar footers.
+
+Contextual workspace sidebars use the body background. Selected destinations use
+the owning workspace's semantic accent and tint. In the workspace picker, selected
+identity has two lines with the glyph aligned to its title. Workspace settings are
+separate adjacent menu actions with a quiet separator, never nested in the destination
+link; the current marker is text rather than a checkmark. Today has no dedicated
+workspace settings destination.
+
+All workspace discovery menus share centered search anchoring, consistent item
+padding, leading semantic icons, and divided groups. Omit redundant scope prose.
+Result-type choices stay within that menu so choosing a type cannot dismiss discovery.
+
+
+Desktop app bars and contextual sidebar headers share `--chrome-height` and center
+content vertically. Phones retain the shared two-row header. All compact action
+counts, including Reviews, use the shared badge's bottom-right anchor.
+Tasks view counts represent each destination's unfiltered scope; collections count
+visible containers and history/trash count their actual records. Mail counts represent
+conversations in the chosen account scope, with drafts following the existing owner-wide
+draft view. Count complete datasets on the server, never the length of a capped page;
+unknown totals remain absent rather than becoming a fabricated zero.
+
+
+### Navigation jobs across screen sizes
+
+The following user stories guide the navigation trial; they are product hypotheses,
+not claims from user research. Shared shell navigation owns the mechanics, while
+each workspace owns its destinations and permission rules.
+
+| Surface | Mobile opening task | Desktop opening task | Navigation consequence |
+| --- | --- | --- | --- |
+| Today | See the next event and finish a task between commitments. | Orient before starting work and open the relevant record. | Start with current material; no extra section bar or duplicated create menu. |
+| Tasks | Capture something quickly or find what is due today. | Triage inbox, organize lists/projects, and plan upcoming work. | Direct Today tab alongside Views/Pinned/History; keep desktop sidebar destinations and bottom create. |
+| Mail | Read/reply to a message, then return to inbox. | Triage multiple conversations and search across accounts. | Direct Inbox tab plus Mailboxes; preserve account scope, reader back navigation, search and bottom compose. |
+| Calendar | Check availability, choose a date, or add an event. | Compare days/weeks and resolve overlaps. | View selection in the title, date/create at bottom-right; no redundant view tabs. |
+| Finances | Check the overall picture or inspect a recent charge. | Review transactions, plan a budget, and inspect cash flow. | Direct Overview plus Money/Planning/Manage; desktop sidebar preserves one-click destinations. |
+| Settings | Find and change a specific preference or connection. | Configure accounts, permissions, and workspace behavior. | Four stable groups with searchable settings on both group and child pages. |
+
+Section pages retain workspace search and review access rather than becoming navigation-only
+dead ends. Direct Inbox navigation exits thread/search/folder context but retains selected accounts.
+Section URLs, refresh and browser Back remain ordinary navigation. Frequent shortcuts supplement
+section pages rather than replacing their full destination coverage. Desktop keeps its sidebar;
+opening a section URL on desktop remains supported.
+
+The mobile pill has equal 6px inner padding on all four sides. Equal-width destinations stretch
+within that inset rather than inheriting the legacy dock's vertical centering. Keep the 72px outer
+footprint stable so the floating-action gap and content clearance remain correct. Selection must
+not change target geometry. At 320px, four labels and their targets must fit without clipping.
+
+Rationale: Android's [adaptive layout/navigation guidance](https://developer.android.com/design/ui/mobile/guides/layout-and-content/layout-and-nav-patterns)
+distinguishes navigation from actions and adapts placement to screen size. W3C's
+[ARIA current-item guidance](https://www.w3.org/WAI/WCAG21/Techniques/aria/ARIA26)
+requires programmatic orientation to accompany visual selection. These inform nohmi's shared
+pattern; the shortcut choices remain a bounded trial to evaluate through real use.
+
+
+Mobile section navigation is fixed to viewport coordinates and width, independent of route
+scrollbars or content height. Its outer footprint and inset must not move between child and
+section pages. A single decorative selection surface slides horizontally using only transform
+and the shared 220ms spatial timing; labels and touch targets remain stationary. Reduced motion
+removes the transition. The selected icon/label and tinted surface use the owning workspace's
+existing accent tokens, matching sidebar selection. Settings remains neutral. Keep hover/focus
+from painting an opaque surface over the moving indicator, and retain a visible keyboard focus
+cue. No per-frame JavaScript, route layout animation, or persistent will-change layer is needed.
+
+
+Mobile secondary title rows use a fixed 44px track, whether composed from plain text or
+selectors. The two-row header totals 104px; Today retains its single-row header. Long title
+sentences scroll within their row instead of increasing its height. Desktop keeps the shared
+52px header. Floating controls inherit their owning workspace accent for glyphs and selected,
+open, pressed, hover and focus surfaces; ordinary page controls retain their existing semantics.
+
+On mobile category pages, omit destinations already directly available in the app bar (Tasks
+Today, Mail Inbox, Finance Overview). Keep these destinations in desktop sidebars. Pass the
+actual visible shortcuts through shared navigation context rather than hiding labels globally.
+Category descriptions are optional and must explain a non-obvious destination or distinction;
+do not add descriptions that repeat an already clear label.
+
+Page controls remain directly visible in the lower header whenever possible; do not
+collapse one or two icon controls behind a viewport-width-only View options menu.
+Constrained control groups may scroll within their row without growing the header.
+Settings search uses the shared rounded input surface with anchored results, retaining
+its section/field matching and reveal routes. Category navigation cards use page-tone
+dividers. Add descriptions only when destination labels need explanation (for example,
+Finance Chat and Automations). On narrow Settings pages, center the profile identity
+and keep short scalar settings beside their labels; compound forms may stack.
+
+Collapsed contextual sidebars preserve each destination glyph. Counts, attention,
+and locks use a centered badge lane below the glyph within a 48px row; concurrent
+lock and count badges share that lane without overlapping the glyph or sidebar edge. Hide explanatory empty-state copy in icon-only sidebars. Expanded metadata
+returns to its trailing row position. The floating workspace switcher shares the
+upper search row's center and 32px control size, independent of rail/sidebar state.
+
+Sidebar workspace changes reuse the page entry direction, duration, and easing.
+Sidebar and workspace-rail selection use one persistent translated highlight per
+surface, with workspace color and reduced-motion support. Selection must remain
+aligned after resizing, async navigation loading, and scrolling.

@@ -226,7 +226,7 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
               Narrow recorded activity by type, actor, record, or date.
             </ResponsiveDialogDescription>
           </ResponsiveDialogHeader>
-          <ResponsiveDialogBody>
+          <div data-responsive-slot="layout">
             <form
               className="grid gap-4 sm:grid-cols-2"
               onSubmit={(event) => {
@@ -254,56 +254,61 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
                 });
               }}
             >
-              <label className="grid gap-1 text-sm" htmlFor="activity-type">
-                Event type
-                <NativeSelect id="activity-type" name="type" defaultValue={query.type ?? ""}>
-                  <NativeSelectOption value="">All types</NativeSelectOption>
-                  <NativeSelectOption value="human_answer_decision">
-                    Human decisions
-                  </NativeSelectOption>
-                  <NativeSelectOption value="financial_action">
-                    Financial actions
-                  </NativeSelectOption>
-                </NativeSelect>
-              </label>
-              <label className="grid gap-1 text-sm" htmlFor="activity-actor">
-                Actor
-                <NativeSelect id="activity-actor" name="actor" defaultValue={query.actor ?? ""}>
-                  <NativeSelectOption value="">All actors</NativeSelectOption>
-                  {["user", "agent", "connector", "system"].map((actor) => (
-                    <NativeSelectOption key={actor} value={actor}>
-                      {actor}
+              <ResponsiveDialogBody>
+                <label className="grid gap-1 text-sm" htmlFor="activity-type">
+                  Event type
+                  <NativeSelect id="activity-type" name="type" defaultValue={query.type ?? ""}>
+                    <NativeSelectOption value="">All types</NativeSelectOption>
+                    <NativeSelectOption value="human_answer_decision">
+                      Human decisions
                     </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </label>
-              <label className="grid min-w-0 gap-1 text-sm sm:col-span-2" htmlFor="activity-record">
-                Record ID
-                <Input
-                  id="activity-record"
-                  name="record"
-                  maxLength={240}
-                  defaultValue={query.recordId ?? ""}
-                />
-              </label>
-              <label className="grid gap-1 text-sm" htmlFor="activity-from">
-                From (UTC)
-                <Input
-                  id="activity-from"
-                  name="from"
-                  type="date"
-                  defaultValue={query.from?.slice(0, 10) ?? ""}
-                />
-              </label>
-              <label className="grid gap-1 text-sm" htmlFor="activity-through">
-                Through (UTC)
-                <Input
-                  id="activity-through"
-                  name="through"
-                  type="date"
-                  defaultValue={query.through?.slice(0, 10) ?? ""}
-                />
-              </label>
+                    <NativeSelectOption value="financial_action">
+                      Financial actions
+                    </NativeSelectOption>
+                  </NativeSelect>
+                </label>
+                <label className="grid gap-1 text-sm" htmlFor="activity-actor">
+                  Actor
+                  <NativeSelect id="activity-actor" name="actor" defaultValue={query.actor ?? ""}>
+                    <NativeSelectOption value="">All actors</NativeSelectOption>
+                    {["user", "agent", "connector", "system"].map((actor) => (
+                      <NativeSelectOption key={actor} value={actor}>
+                        {actor}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </label>
+                <label
+                  className="grid min-w-0 gap-1 text-sm sm:col-span-2"
+                  htmlFor="activity-record"
+                >
+                  Record ID
+                  <Input
+                    id="activity-record"
+                    name="record"
+                    maxLength={240}
+                    defaultValue={query.recordId ?? ""}
+                  />
+                </label>
+                <label className="grid gap-1 text-sm" htmlFor="activity-from">
+                  From (UTC)
+                  <Input
+                    id="activity-from"
+                    name="from"
+                    type="date"
+                    defaultValue={query.from?.slice(0, 10) ?? ""}
+                  />
+                </label>
+                <label className="grid gap-1 text-sm" htmlFor="activity-through">
+                  Through (UTC)
+                  <Input
+                    id="activity-through"
+                    name="through"
+                    type="date"
+                    defaultValue={query.through?.slice(0, 10) ?? ""}
+                  />
+                </label>
+              </ResponsiveDialogBody>
               <ResponsiveDialogFooter className="sm:col-span-2">
                 <Button type="button" variant="outline" onClick={() => setFiltersOpen(false)}>
                   Cancel
@@ -313,7 +318,7 @@ function Activity({ ownerId, readActivity, readEvidence }: Props) {
                 </Button>
               </ResponsiveDialogFooter>
             </form>
-          </ResponsiveDialogBody>
+          </div>
         </ResponsiveDialogContent>
       </ResponsiveDialog>
       {passiveLoading && !page ? <ContentSkeleton label="Loading activity…" rows={3} /> : null}

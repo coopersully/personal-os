@@ -1,3 +1,4 @@
+import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import type { ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -24,10 +25,12 @@ export function MailAppBarControls({
     <div className="mail-app-bar__controls">
       {search}
       {accounts}
-      <WorkspaceHeaderOptions>
-        <MailLayoutControl />
-        {sync}
-      </WorkspaceHeaderOptions>
+      {sync}
+      <WorkspaceHeaderControls label="Mail page controls">
+        <WorkspaceHeaderOptions>
+          <MailLayoutControl />
+        </WorkspaceHeaderOptions>
+      </WorkspaceHeaderControls>
     </div>
   );
 }

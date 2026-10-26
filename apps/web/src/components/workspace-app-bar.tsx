@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import type { WorkspaceId } from "../navigation/manifest.js";
+import { WorkspaceBreadcrumbs } from "./workspace-breadcrumbs";
+import { WorkspaceHeaderControlsSlot } from "./workspace-header-controls";
 
 export type WorkspaceAppBarWorkspace = WorkspaceId | "account";
 
@@ -38,12 +40,20 @@ export function WorkspaceAppBar({
       </div>
       {title ? (
         <div className="workspace-app-bar__page-title" data-slot="workspace-app-bar-title">
+          <WorkspaceBreadcrumbs workspace={workspace} />
           {title}
         </div>
       ) : null}
       <div className="workspace-app-bar__context" data-slot="workspace-app-bar-context">
         {context}
+        <WorkspaceHeaderControlsSlot placement="workspace" />
       </div>
+      {title && workspace !== "today" ? (
+        <div className="workspace-app-bar__page-actions" data-slot="workspace-app-bar-page-actions">
+          <WorkspaceHeaderControlsSlot placement="leading" />
+          <WorkspaceHeaderControlsSlot />
+        </div>
+      ) : null}
       <div className="workspace-app-bar__actions" data-slot="workspace-app-bar-actions">
         {actions}
         {attention}

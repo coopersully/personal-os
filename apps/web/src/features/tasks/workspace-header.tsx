@@ -149,33 +149,35 @@ export function TasksAppBarControls({ search, timeZone }: { search: ReactNode; t
       </WorkspaceHeaderControls>
       <div className="tasks-header-tools">
         {search}
-        {params.get("archive") === "all" ? (
-          <TaskContainerControls kind="archive" />
-        ) : scope === "lists" || scope === "projects" ? (
-          <TaskContainerControls kind={scope} />
-        ) : !archive ? (
-          <>
-            <WorkspaceFilters
-              params={params}
-              routeParams={routeParams}
-              timeZone={timeZone}
-              lists={activeLists}
-              projects={activeProjects}
-            />
-            <WorkspaceHeaderOptions>
-              <WorkspaceSort params={params} routeParams={routeParams} />
-              <WorkspaceDisplay params={params} routeParams={routeParams} />
-              {!params.has("view") && list ? (
-                <TaskContainerActions
-                  list={list}
-                  {...(project ? { project } : {})}
-                  lists={activeLists}
-                  projects={projects.data?.items ?? []}
-                />
-              ) : null}
-            </WorkspaceHeaderOptions>
-          </>
-        ) : null}
+        <WorkspaceHeaderControls label="Task page controls">
+          {params.get("archive") === "all" ? (
+            <TaskContainerControls kind="archive" />
+          ) : scope === "lists" || scope === "projects" ? (
+            <TaskContainerControls kind={scope} />
+          ) : !archive ? (
+            <>
+              <WorkspaceFilters
+                params={params}
+                routeParams={routeParams}
+                timeZone={timeZone}
+                lists={activeLists}
+                projects={activeProjects}
+              />
+              <WorkspaceHeaderOptions>
+                <WorkspaceSort params={params} routeParams={routeParams} />
+                <WorkspaceDisplay params={params} routeParams={routeParams} />
+                {!params.has("view") && list ? (
+                  <TaskContainerActions
+                    list={list}
+                    {...(project ? { project } : {})}
+                    lists={activeLists}
+                    projects={projects.data?.items ?? []}
+                  />
+                ) : null}
+              </WorkspaceHeaderOptions>
+            </>
+          ) : null}
+        </WorkspaceHeaderControls>
       </div>
     </div>
   );

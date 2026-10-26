@@ -8,9 +8,14 @@ import { useState } from "react";
 import { DataViewLoading, DataViewRecovery } from "@/components/data-view-state";
 import { FeedbackForm } from "@/components/feedback-form";
 import { MutationFeedback } from "@/components/mutation-feedback";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+} from "@/components/responsive-dialog";
 import { Field, FieldDescription, FieldLabel } from "@/components/settings-field";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useFeedbackMutation } from "@/lib/use-feedback-mutation";

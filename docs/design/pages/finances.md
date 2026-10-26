@@ -835,3 +835,11 @@ occupy the single bottom row. Keep action groups intact and let search shrink
 first. Cash flow’s section and date scope sit beside its title; timeline and
 transaction presentation use icon selectors, and Budget configuration uses a
 labelled icon action. On desktop, title/scope and search/actions share one header.
+
+
+### Overview summary density
+
+The overview starts with Spent this month, then Cash and Net worth. Compose the shared KeyMetrics
+grid variant, including its loading state: two equal columns on mobile and three on wide desktop.
+Keep the exact-value accessibility text, scope descriptions and existing drill-down destinations.
+Other metric rails retain their established presentation unless their page contract changes.

@@ -2,16 +2,9 @@ import { type ReactNode, useId } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeftIcon } from "@/components/icons";
 import { SettingsControlsContext } from "@/components/settings-controls-context";
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader } from "@/components/ui/card";
+import { PageBreadcrumbs } from "@/components/workspace-breadcrumbs";
 import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import { SettingsDataStateNotice } from "./dev/data-state-preview";
 import { SettingsFieldFocus } from "./settings-field-focus.js";
@@ -19,8 +12,6 @@ import { SettingsFieldFocus } from "./settings-field-focus.js";
 /** Settings uses the shared workspace header and keeps task-sized groups in the page. */
 export function SettingsPageLayout({
   title,
-  description,
-  section,
   search,
   actions,
   children,
@@ -39,33 +30,21 @@ export function SettingsPageLayout({
       <SettingsFieldFocus />
       {import.meta.env.DEV ? <SettingsDataStateNotice /> : null}
       <WorkspaceHeaderControls placement="title" label="Settings page">
-        <Breadcrumb aria-label="Settings breadcrumbs">
-          <BreadcrumbList>
-            <BreadcrumbItem>
-              <BreadcrumbLink asChild>
-                <Link to="/settings">settings</Link>
-              </BreadcrumbLink>
-            </BreadcrumbItem>
-            <BreadcrumbSeparator>/</BreadcrumbSeparator>
-            {back ? (
-              <>
-                <BreadcrumbItem>
-                  <BreadcrumbLink asChild>
-                    <Link to={back.to}>{back.label.replace(/^back to /i, "")}</Link>
-                  </BreadcrumbLink>
-                </BreadcrumbItem>
-                <BreadcrumbSeparator>/</BreadcrumbSeparator>
-              </>
-            ) : null}
-            <BreadcrumbItem>
-              <BreadcrumbPage>
-                <h1 className="workspace-app-bar__title" tabIndex={-1} id="settings-page-title">
-                  {title}
-                </h1>
-              </BreadcrumbPage>
-            </BreadcrumbItem>
-          </BreadcrumbList>
-        </Breadcrumb>
+        <div className="settings-page-heading">
+          <PageBreadcrumbs
+            label="Settings breadcrumbs"
+            items={[
+              { label: "settings", to: "/settings" },
+              ...(back ? [{ label: back.label.replace(/^back to /i, ""), to: back.to }] : []),
+            ]}
+          />
+          <h1 className="workspace-app-bar__title" tabIndex={-1} id="settings-page-title">
+            {title}
+          </h1>
+        </div>
+      </WorkspaceHeaderControls>
+      <WorkspaceHeaderControls label="Settings search" placement="workspace">
+        {search}
       </WorkspaceHeaderControls>
       <WorkspaceHeaderControls label="Settings actions">
         {back ? (
@@ -75,12 +54,8 @@ export function SettingsPageLayout({
             </Link>
           </Button>
         ) : null}
-        {search}
         {actions}
       </WorkspaceHeaderControls>
-      <p className="settings-page__description" data-settings-section={section}>
-        {description}
-      </p>
       <section className="settings-panel" aria-labelledby="settings-page-title">
         <SettingsControlsContext.Provider value={true}>{children}</SettingsControlsContext.Provider>
       </section>
@@ -90,6 +65,7 @@ export function SettingsPageLayout({
 
 /** A shared shadcn Card composition; feature modules still own fields and mutations. */
 export function SettingsSection({
+  description,
   action,
   children,
   title,
@@ -97,7 +73,6 @@ export function SettingsSection({
   headerContent,
   headerAside,
   icon,
-  description,
 }: {
   layout?: "rows" | "content";
   headerContent?: ReactNode;

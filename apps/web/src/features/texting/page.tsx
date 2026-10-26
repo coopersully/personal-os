@@ -3,6 +3,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useContext, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronRightIcon } from "@/components/icons";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+} from "@/components/responsive-dialog";
 import { SettingsControlsContext } from "@/components/settings-controls-context";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
@@ -24,13 +31,6 @@ import {
   CardHeader,
   CardTitle,
 } from "../../components/ui/card.js";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "../../components/ui/dialog.js";
 import { Input } from "../../components/ui/input.js";
 import { NativeSelect, NativeSelectOption } from "../../components/ui/native-select.js";
 import { Switch } from "../../components/ui/switch.js";

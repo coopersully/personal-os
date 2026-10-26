@@ -1,5 +1,6 @@
 import { getDefaultWorkspacePreferences } from "@personal-os/domain";
 import { MessageAttachments } from "@/components/message-attachments";
+import { useNavigationShortcuts } from "@/components/workspace-navigation-page";
 import { WorkspacePreferenceRecovery } from "../workspace-settings/save-recovery";
 
 export { formatAttachmentSize } from "@/components/message-attachments";
@@ -120,11 +121,6 @@ export function mailReplyRecipient(
   );
 }
 
-function inboxUnreadCount(items: Array<{ role: string; unreadCount: number }>) {
-  return items
-    .filter((mailbox) => mailbox.role === "inbox")
-    .reduce((sum, mailbox) => sum + mailbox.unreadCount, 0);
-}
 export const relative = formatRelativeTime;
 export const mailListDensities = ["compact", "comfortable", "expanded"] as const;
 export type MailListDensity = (typeof mailListDensities)[number];
@@ -225,7 +221,6 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
     () => accounts.data?.filter((account) => account.mailEnabled) ?? [],
     [accounts.data],
   );
-  const totalInboxUnread = inboxUnreadCount(mailboxes.data ?? []);
   const listScope = mailListScopeFromSearch(params);
   const selectedAccountIds = params.getAll("account");
   return (
@@ -251,7 +246,6 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
                 listScope={listScope}
                 onNavigate={onNavigate}
                 selectedAccountIds={selectedAccountIds}
-                unreadCount={totalInboxUnread}
               />
             </SidebarMenu>
           )}
@@ -826,13 +820,30 @@ function UnifiedMailDestinations({
   listScope,
   onNavigate,
   selectedAccountIds,
-  unreadCount,
 }: {
   listScope: MailListScope;
   onNavigate: () => void;
   selectedAccountIds: string[];
-  unreadCount: number;
 }) {
+  const navigationShortcuts = useNavigationShortcuts();
+  const queryClient = useQueryClient();
+  useEffect(
+    () =>
+      queryClient.getQueryCache().subscribe((event) => {
+        if (
+          event.type === "updated" &&
+          event.query.queryKey[0] === "mail-drafts" &&
+          event.action.type === "success"
+        )
+          void queryClient.invalidateQueries({ queryKey: ["mail-threads", "navigation-counts"] });
+      }),
+    [queryClient],
+  );
+  const counts = useQuery({
+    queryKey: ["mail-threads", "navigation-counts", selectedAccountIds],
+    queryFn: () => api.getMailNavigationCounts(selectedAccountIds),
+    refetchInterval: 60_000,
+  });
   const isMailbox = useLocation().pathname === "/mail";
   const scopes: Array<{ icon: typeof MailIcon; label: string; value: MailListScope }> = [
     { icon: InboxIcon, label: "Inbox", value: "all" },
@@ -845,39 +856,38 @@ function UnifiedMailDestinations({
 
   return (
     <>
-      {scopes.map(({ icon: Icon, label, value }) => {
-        const query = new URLSearchParams();
-        const params = mailListScopeParams(value);
-        if (params.unread) query.set("unread", params.unread);
-        if (params.view) query.set("view", params.view);
-        for (const accountId of selectedAccountIds) query.append("account", accountId);
-        const suffix = query.size ? `?${query.toString()}` : "";
-        return (
-          <SidebarMenuItem key={value}>
-            <SidebarMenuButton
-              className={value === "all" && unreadCount > 0 ? "sidebar-item-with-meta" : undefined}
-              asChild
-              isActive={isMailbox && listScope === value}
-              tooltip={label}
-            >
-              <Link
-                aria-label={value === "all" && unreadCount > 0 ? `${label} ${unreadCount}` : label}
-                onClick={onNavigate}
-                to={`/mail${suffix}`}
+      {scopes
+        .filter(({ value }) => value !== "all" || !navigationShortcuts.includes("inbox"))
+        .map(({ icon: Icon, label, value }) => {
+          const query = new URLSearchParams();
+          const params = mailListScopeParams(value);
+          if (params.unread) query.set("unread", params.unread);
+          if (params.view) query.set("view", params.view);
+          for (const accountId of selectedAccountIds) query.append("account", accountId);
+          const suffix = query.size ? `?${query.toString()}` : "";
+          return (
+            <SidebarMenuItem key={value}>
+              <SidebarMenuButton
+                className="sidebar-item-with-meta"
+                asChild
+                isActive={isMailbox && listScope === value}
+                tooltip={label}
               >
-                <Icon
-                  aria-hidden="true"
-                  weight={isMailbox && listScope === value ? "Filled" : "Outline"}
-                />
-                <span>{label}</span>
-              </Link>
-            </SidebarMenuButton>
-            {value === "all" && unreadCount > 0 ? (
-              <SidebarItemMeta count={unreadCount} label="Unread inbox messages" />
-            ) : null}
-          </SidebarMenuItem>
-        );
-      })}
+                <Link aria-label={label} onClick={onNavigate} to={`/mail${suffix}`}>
+                  <Icon
+                    aria-hidden="true"
+                    weight={isMailbox && listScope === value ? "Filled" : "Outline"}
+                  />
+                  <span>{label}</span>
+                </Link>
+              </SidebarMenuButton>
+              <SidebarItemMeta
+                count={counts.data?.[value]}
+                label={value === "drafts" ? "Drafts" : `${label} conversations`}
+              />
+            </SidebarMenuItem>
+          );
+        })}
     </>
   );
 }

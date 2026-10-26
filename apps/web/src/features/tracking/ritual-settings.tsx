@@ -11,6 +11,17 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DataViewLoading, DataViewRecovery } from "@/components/data-view-state";
 import { ReorderHandle } from "@/components/reorder-handle";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogClose as DialogClose,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogTrigger as DialogTrigger,
+  ResponsiveDialogBody,
+} from "@/components/responsive-dialog";
 import { api } from "../../api.js";
 import { useConfirmAction } from "../../components/confirm-action.js";
 import { DependentSetting } from "../../components/dependent-setting.js";
@@ -25,16 +36,6 @@ import { SettingsRecordAction } from "../../components/settings-record.js";
 import { Button } from "../../components/ui/button.js";
 import { Card, CardContent } from "../../components/ui/card.js";
 import { Checkbox } from "../../components/ui/checkbox.js";
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "../../components/ui/dialog.js";
 import { Input } from "../../components/ui/input.js";
 import { ItemGroup } from "../../components/ui/item.js";
 import { NativeSelect, NativeSelectOption } from "../../components/ui/native-select.js";
@@ -645,7 +646,9 @@ function SortableStep({
               Changes save automatically. Close to return to your routine.
             </DialogDescription>
           </DialogHeader>
-          <div className="settings-panel ritual-step-editor">{children}</div>
+          <ResponsiveDialogBody>
+            <div className="settings-panel ritual-step-editor">{children}</div>
+          </ResponsiveDialogBody>
           <DialogFooter>
             <Button
               variant="destructive"

@@ -50,3 +50,28 @@ it("updates both date parts and clock labels when the owner timezone changes", (
   expect(formatTimelineClock(instant, "America/New_York")).toBe("9:30 PM");
   expect(formatTimelineClock(instant, "UTC")).toBe("1:30 AM");
 });
+
+it("divides chained overlaps into lanes and reuses a lane at an exact boundary", () => {
+  const interval = (id: string, start: string, end: string) => ({
+    id,
+    allDay: false,
+    startsAt: `2026-10-26T${start}:00Z`,
+    endsAt: `2026-10-26T${end}:00Z`,
+  });
+  const layouts = positionTimelineEvents(
+    [
+      interval("a", "09:00", "10:00"),
+      interval("b", "09:30", "10:30"),
+      interval("c", "10:00", "11:00"),
+      interval("d", "11:00", "12:00"),
+    ],
+    { year: 2026, month: 10, day: 26 },
+    "UTC",
+  );
+  expect(layouts.map(({ column, columns }) => ({ column, columns }))).toEqual([
+    { column: 0, columns: 2 },
+    { column: 1, columns: 2 },
+    { column: 0, columns: 2 },
+    { column: 0, columns: 1 },
+  ]);
+});

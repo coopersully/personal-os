@@ -858,3 +858,12 @@ bounded before independent trailing controls, and inactive records faded on the 
 surface. Color values use a compact swatch/value trigger and a bounded shared picker
 popover with focus restoration. Server selection remains an explicit tested Connect
 flow even when its controls are flattened, because changing it signs the user out.
+
+
+Settings page introductions are omitted globally: breadcrumbs identify the page and
+its first section begins the body. Preserve useful section and field descriptions.
+Security's Log out is a full-width `ProfileRow` in the danger variant with a trailing
+chevron and the existing safe-default confirmation. Keep pending/error feedback in
+Sonner and preserve the existing web/native session reset behavior.
+
+Mobile account navigation uses Account, Personal, Workspaces, and App section landing pages. Each reuses the sidebar permission rules, attention indicators, and destination rows; the active child keeps its owning app-bar section selected. There is no generic More drawer.

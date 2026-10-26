@@ -349,7 +349,7 @@ function ProfileDialog({
               : "Start with the facts you know."}
           </DialogDescription>
         </DialogHeader>
-        <ResponsiveDialogBody>
+        <div data-responsive-slot="layout">
           <FeedbackForm
             fieldNames={profileFieldNames}
             validate={() => {
@@ -379,132 +379,137 @@ function ProfileDialog({
               if (parsed.success) save.mutate(parsed.data);
             }}
           >
-            <FieldSet disabled={save.isPending}>
-              <FieldLegend>Household and income</FieldLegend>
-              <FieldGroup className="grid gap-4 sm:grid-cols-2">
-                <Field>
-                  <FieldLabel htmlFor="profile-jurisdiction">Jurisdiction</FieldLabel>
-                  <Input
-                    name="jurisdiction"
-                    id="profile-jurisdiction"
-                    maxLength={120}
-                    value={form.jurisdiction}
-                    onChange={(event) => setForm({ ...form, jurisdiction: event.target.value })}
-                  />
-                  <FieldDescription>Country and state or region.</FieldDescription>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="profile-income-stability">Income stability</FieldLabel>
-                  <NativeSelect
-                    name="incomeStability"
-                    id="profile-income-stability"
-                    value={form.incomeStability}
-                    onChange={(event) =>
-                      setForm({
-                        ...form,
-                        incomeStability: event.target.value as ProfileForm["incomeStability"],
-                      })
-                    }
-                  >
-                    {Object.entries(incomeLabels).map(([value, label]) => (
-                      <NativeSelectOption key={value} value={value}>
-                        {label}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </Field>
-                {numericFields.map((field) => (
-                  <Field key={field.key}>
-                    <FieldLabel htmlFor={`profile-${field.key}`}>{field.label}</FieldLabel>
-                    {field.step === 0.01 ? (
-                      <CurrencyInput
-                        name={field.key}
-                        id={`profile-${field.key}`}
-                        min={field.min}
-                        max={field.max}
-                        value={form[field.key]}
-                        onValueChange={(value) => setForm({ ...form, [field.key]: value })}
-                      />
-                    ) : (
-                      <Input
-                        name={field.key}
-                        id={`profile-${field.key}`}
-                        type="number"
-                        min={field.min}
-                        max={field.max}
-                        step={field.step}
-                        value={form[field.key]}
-                        onChange={(event) => setForm({ ...form, [field.key]: event.target.value })}
-                      />
-                    )}
+            <ResponsiveDialogBody>
+              <FieldSet disabled={save.isPending}>
+                <FieldLegend>Household and income</FieldLegend>
+                <FieldGroup className="grid gap-4 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel htmlFor="profile-jurisdiction">Jurisdiction</FieldLabel>
+                    <Input
+                      name="jurisdiction"
+                      id="profile-jurisdiction"
+                      maxLength={120}
+                      value={form.jurisdiction}
+                      onChange={(event) => setForm({ ...form, jurisdiction: event.target.value })}
+                    />
+                    <FieldDescription>Country and state or region.</FieldDescription>
                   </Field>
-                ))}
-              </FieldGroup>
-            </FieldSet>
-            <FieldSet disabled={save.isPending}>
-              <FieldLegend>Planning preferences</FieldLegend>
-              <FieldGroup className="grid gap-4 sm:grid-cols-2">
-                <Field>
-                  <FieldLabel htmlFor="profile-reserve-months">Reserve target (months)</FieldLabel>
-                  <Input
-                    name="reserveMonths"
-                    id="profile-reserve-months"
-                    type="number"
-                    min="0"
-                    max="60"
-                    step="0.1"
-                    value={form.emergencyReserveMonths}
-                    onChange={(event) =>
-                      setForm({ ...form, emergencyReserveMonths: event.target.value })
-                    }
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="profile-buffer">Buffer target (USD)</FieldLabel>
-                  <CurrencyInput
-                    name="buffer"
-                    id="profile-buffer"
-                    min={0}
-                    max={100000000}
-                    value={form.bufferTarget}
-                    onValueChange={(value) => setForm({ ...form, bufferTarget: value })}
-                  />
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="profile-debt-priority">Debt priority</FieldLabel>
-                  <NativeSelect
-                    name="debtPriority"
-                    id="profile-debt-priority"
-                    value={form.debtPriority}
-                    onChange={(event) =>
-                      setForm({
-                        ...form,
-                        debtPriority: event.target.value as ProfileForm["debtPriority"],
-                      })
-                    }
-                  >
-                    <NativeSelectOption value="">Not recorded</NativeSelectOption>
-                    {Object.entries(debtPriorityLabels).map(([value, label]) => (
-                      <NativeSelectOption key={value} value={value}>
-                        {label}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </Field>
-                <Field className="sm:col-span-2">
-                  <FieldLabel htmlFor="profile-notes">Planning notes</FieldLabel>
-                  <Textarea
-                    name="notes"
-                    id="profile-notes"
-                    rows={3}
-                    value={form.notes}
-                    onChange={(event) => setForm({ ...form, notes: event.target.value })}
-                  />
-                  <FieldDescription>One preference per line.</FieldDescription>
-                </Field>
-              </FieldGroup>
-            </FieldSet>
-
+                  <Field>
+                    <FieldLabel htmlFor="profile-income-stability">Income stability</FieldLabel>
+                    <NativeSelect
+                      name="incomeStability"
+                      id="profile-income-stability"
+                      value={form.incomeStability}
+                      onChange={(event) =>
+                        setForm({
+                          ...form,
+                          incomeStability: event.target.value as ProfileForm["incomeStability"],
+                        })
+                      }
+                    >
+                      {Object.entries(incomeLabels).map(([value, label]) => (
+                        <NativeSelectOption key={value} value={value}>
+                          {label}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                  </Field>
+                  {numericFields.map((field) => (
+                    <Field key={field.key}>
+                      <FieldLabel htmlFor={`profile-${field.key}`}>{field.label}</FieldLabel>
+                      {field.step === 0.01 ? (
+                        <CurrencyInput
+                          name={field.key}
+                          id={`profile-${field.key}`}
+                          min={field.min}
+                          max={field.max}
+                          value={form[field.key]}
+                          onValueChange={(value) => setForm({ ...form, [field.key]: value })}
+                        />
+                      ) : (
+                        <Input
+                          name={field.key}
+                          id={`profile-${field.key}`}
+                          type="number"
+                          min={field.min}
+                          max={field.max}
+                          step={field.step}
+                          value={form[field.key]}
+                          onChange={(event) =>
+                            setForm({ ...form, [field.key]: event.target.value })
+                          }
+                        />
+                      )}
+                    </Field>
+                  ))}
+                </FieldGroup>
+              </FieldSet>
+              <FieldSet disabled={save.isPending}>
+                <FieldLegend>Planning preferences</FieldLegend>
+                <FieldGroup className="grid gap-4 sm:grid-cols-2">
+                  <Field>
+                    <FieldLabel htmlFor="profile-reserve-months">
+                      Reserve target (months)
+                    </FieldLabel>
+                    <Input
+                      name="reserveMonths"
+                      id="profile-reserve-months"
+                      type="number"
+                      min="0"
+                      max="60"
+                      step="0.1"
+                      value={form.emergencyReserveMonths}
+                      onChange={(event) =>
+                        setForm({ ...form, emergencyReserveMonths: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="profile-buffer">Buffer target (USD)</FieldLabel>
+                    <CurrencyInput
+                      name="buffer"
+                      id="profile-buffer"
+                      min={0}
+                      max={100000000}
+                      value={form.bufferTarget}
+                      onValueChange={(value) => setForm({ ...form, bufferTarget: value })}
+                    />
+                  </Field>
+                  <Field>
+                    <FieldLabel htmlFor="profile-debt-priority">Debt priority</FieldLabel>
+                    <NativeSelect
+                      name="debtPriority"
+                      id="profile-debt-priority"
+                      value={form.debtPriority}
+                      onChange={(event) =>
+                        setForm({
+                          ...form,
+                          debtPriority: event.target.value as ProfileForm["debtPriority"],
+                        })
+                      }
+                    >
+                      <NativeSelectOption value="">Not recorded</NativeSelectOption>
+                      {Object.entries(debtPriorityLabels).map(([value, label]) => (
+                        <NativeSelectOption key={value} value={value}>
+                          {label}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                  </Field>
+                  <Field className="sm:col-span-2">
+                    <FieldLabel htmlFor="profile-notes">Planning notes</FieldLabel>
+                    <Textarea
+                      name="notes"
+                      id="profile-notes"
+                      rows={3}
+                      value={form.notes}
+                      onChange={(event) => setForm({ ...form, notes: event.target.value })}
+                    />
+                    <FieldDescription>One preference per line.</FieldDescription>
+                  </Field>
+                </FieldGroup>
+              </FieldSet>
+            </ResponsiveDialogBody>
             <DialogFooter>
               <Button disabled={save.isPending} onClick={onClose} type="button" variant="outline">
                 Cancel
@@ -514,7 +519,7 @@ function ProfileDialog({
               </Button>
             </DialogFooter>
           </FeedbackForm>
-        </ResponsiveDialogBody>
+        </div>
       </DialogContent>
     </Dialog>
   );

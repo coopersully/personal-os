@@ -114,20 +114,20 @@ export function FilterTrigger({
     <DataControlButton
       grouped={grouped}
       {...props}
-      size={props.size ?? "sm"}
+      size={props.size ?? (compact ? "icon-sm" : "sm")}
       tooltip={props.tooltip ?? (compact ? (props["aria-label"] ?? "") : "")}
-      variant={active ? "secondary" : "ghost"}
+      variant={active && !compact ? "secondary" : "ghost"}
       data-filter-active={active}
       badgeCount={active ? (count ?? 0) : 0}
       className={cn(
         "max-w-full",
-        !active && !grouped && "border-dashed border-border text-muted-foreground",
+        !active && !grouped && !compact && "border-dashed border-border text-muted-foreground",
         className,
       )}
     >
       <FilterIcon aria-hidden="true" />
       <span className={compact ? "sr-only" : "max-w-48 truncate"}>{label}</span>
-      {!active && !grouped ? <PlusIcon aria-hidden="true" /> : null}
+      {!active && !grouped && !compact ? <PlusIcon aria-hidden="true" /> : null}
     </DataControlButton>
   );
 }
@@ -149,7 +149,7 @@ export function SortTrigger({
     <DataControlButton
       grouped={grouped}
       {...props}
-      size={props.size ?? "sm"}
+      size={props.size ?? (compact ? "icon-sm" : "sm")}
       tooltip={props.tooltip ?? (compact ? (props["aria-label"] ?? "") : "")}
       variant={selected ? "secondary" : "ghost"}
       badgeCount={selected ? 1 : 0}

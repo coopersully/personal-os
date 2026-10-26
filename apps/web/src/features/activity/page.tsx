@@ -6,15 +6,16 @@ import { type DataColumn, DataTable } from "@/components/data-table";
 import { DataChoice, FilterBar, SearchDataControls } from "@/components/data-view-controls";
 import { DataViewEmpty, DataViewLoading, DataViewRecovery } from "@/components/data-view-state";
 import { SearchIcon } from "@/components/icons";
-import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogBody,
+} from "@/components/responsive-dialog";
+import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { api } from "../../api.js";
 import { workspaceSearchFromParams } from "../../components/workspace-search.js";
@@ -261,33 +262,35 @@ export function ActivityPage() {
                 : null}
             </DialogDescription>
           </DialogHeader>
-          <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto">
-            {opened?.entries.map((entry) => (
-              <section key={entry.id} className="flex min-w-0 flex-col gap-2">
-                <p className="text-sm font-medium">{humanizeAction(entry.entityType)}</p>
-                <p className="text-xs text-muted-foreground">{changedFields(entry)}</p>
-                <details>
-                  <summary className="cursor-pointer text-xs text-muted-foreground">
-                    Recorded values
-                  </summary>
-                  <p className="break-all py-2 text-xs text-muted-foreground">{entry.entityId}</p>
-                  {[
-                    ["Before", entry.before],
-                    ["After", entry.after],
-                  ]
-                    .filter(([, value]) => value !== null && value !== undefined)
-                    .map(([label, value]) => (
-                      <div key={String(label)}>
-                        <p className="text-xs text-muted-foreground">{String(label)}</p>
-                        <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-3 text-xs">
-                          {JSON.stringify(value, null, 2)}
-                        </pre>
-                      </div>
-                    ))}
-                </details>
-              </section>
-            ))}
-          </div>
+          <ResponsiveDialogBody>
+            <div className="flex min-h-0 min-w-0 flex-col gap-4 overflow-y-auto">
+              {opened?.entries.map((entry) => (
+                <section key={entry.id} className="flex min-w-0 flex-col gap-2">
+                  <p className="text-sm font-medium">{humanizeAction(entry.entityType)}</p>
+                  <p className="text-xs text-muted-foreground">{changedFields(entry)}</p>
+                  <details>
+                    <summary className="cursor-pointer text-xs text-muted-foreground">
+                      Recorded values
+                    </summary>
+                    <p className="break-all py-2 text-xs text-muted-foreground">{entry.entityId}</p>
+                    {[
+                      ["Before", entry.before],
+                      ["After", entry.after],
+                    ]
+                      .filter(([, value]) => value !== null && value !== undefined)
+                      .map(([label, value]) => (
+                        <div key={String(label)}>
+                          <p className="text-xs text-muted-foreground">{String(label)}</p>
+                          <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-3 text-xs">
+                            {JSON.stringify(value, null, 2)}
+                          </pre>
+                        </div>
+                      ))}
+                  </details>
+                </section>
+              ))}
+            </div>
+          </ResponsiveDialogBody>
           <DialogFooter className="shrink-0">
             <Button onClick={() => setOpened(null)}>Done</Button>
           </DialogFooter>

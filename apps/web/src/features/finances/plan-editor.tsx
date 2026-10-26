@@ -216,439 +216,441 @@ export function FinancePlanEditor({
             Save your budget as a proposal. Review and approve it before it takes effect.
           </DialogDescription>
         </DialogHeader>
-        <ResponsiveDialogBody>
+        <div data-responsive-slot="layout">
           {plan ? (
             <p className="text-xs text-muted-foreground">Current version {plan.version}</p>
           ) : null}
           <form className="grid gap-6" onSubmit={submit}>
-            <FieldSet disabled={pending}>
-              <FieldGroup className="sm:grid sm:grid-cols-2">
-                {!plan ? (
+            <ResponsiveDialogBody>
+              <FieldSet disabled={pending}>
+                <FieldGroup className="sm:grid sm:grid-cols-2">
+                  {!plan ? (
+                    <Field>
+                      <FieldLabel htmlFor="plan-name">Plan name</FieldLabel>
+                      <Input
+                        id="plan-name"
+                        value={name}
+                        required
+                        maxLength={160}
+                        onChange={(event) => setName(event.target.value)}
+                      />
+                    </Field>
+                  ) : null}
                   <Field>
-                    <FieldLabel htmlFor="plan-name">Plan name</FieldLabel>
+                    <FieldLabel htmlFor="plan-month">Effective month</FieldLabel>
                     <Input
-                      id="plan-name"
-                      value={name}
+                      id="plan-month"
+                      type="month"
                       required
-                      maxLength={160}
-                      onChange={(event) => setName(event.target.value)}
+                      value={month}
+                      onChange={(event) => setMonth(event.target.value)}
                     />
                   </Field>
-                ) : null}
-                <Field>
-                  <FieldLabel htmlFor="plan-month">Effective month</FieldLabel>
-                  <Input
-                    id="plan-month"
-                    type="month"
-                    required
-                    value={month}
-                    onChange={(event) => setMonth(event.target.value)}
-                  />
-                </Field>
-              </FieldGroup>
-              <FieldSet>
-                <FieldLegend>Resources</FieldLegend>
-                {resources.map((row, index) => (
-                  <FieldGroup key={row.rowId} className="rounded-lg bg-muted/50 p-3">
-                    <FieldGroup className="sm:grid sm:grid-cols-3">
-                      <Field>
-                        <FieldLabel htmlFor={`resource-name-${row.rowId}`}>
-                          Resource {index + 1} name
-                        </FieldLabel>
-                        <Input
-                          id={`resource-name-${row.rowId}`}
-                          value={row.value.key}
-                          required
-                          maxLength={120}
-                          onChange={(event) =>
-                            updateResource(row.rowId, { key: event.target.value })
-                          }
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor={`resource-kind-${row.rowId}`}>
-                          Resource {index + 1} kind
-                        </FieldLabel>
-                        <NativeSelect
-                          className="w-full"
-                          id={`resource-kind-${row.rowId}`}
-                          value={row.value.kind}
-                          onChange={(event) =>
-                            updateResource(row.rowId, {
-                              kind: event.target.value as FinanceBudgetResource["kind"],
-                            })
-                          }
-                        >
-                          {Object.entries(resourceLabels).map(([kind, label]) => (
-                            <NativeSelectOption key={kind} value={kind}>
-                              {label}
-                            </NativeSelectOption>
-                          ))}
-                        </NativeSelect>
-                      </Field>
-                      <Field
-                        data-invalid={
-                          validatedAmounts.has(row.rowId) &&
-                          row.amount !== "" &&
-                          planAmountCents(row.amount) === null
-                        }
-                      >
-                        <FieldLabel htmlFor={`resource-amount-${row.rowId}`}>
-                          Resource {index + 1} amount
-                        </FieldLabel>
-                        <CurrencyInput
-                          id={`resource-amount-${row.rowId}`}
-                          inputMode="decimal"
-                          required
-                          aria-invalid={
-                            validatedAmounts.has(row.rowId) &&
-                            row.amount !== "" &&
-                            planAmountCents(row.amount) === null
-                          }
-                          onBlur={() =>
-                            setValidatedAmounts((current) => new Set([...current, row.rowId]))
-                          }
-                          value={row.amount}
-                          onValueChange={(value) =>
-                            setResources((rows) =>
-                              rows.map((item) =>
-                                item.rowId === row.rowId ? { ...item, amount: value } : item,
-                              ),
-                            )
-                          }
-                        />
-                      </Field>
-                    </FieldGroup>
-                    <FieldGroup className="sm:grid sm:grid-cols-2">
-                      <RecordChoice
-                        id={`resource-source-${row.rowId}`}
-                        label={`Resource ${index + 1} source`}
-                        options={accounts}
-                        value={row.value.sourceId}
-                        onChange={(sourceId) =>
-                          updateResource(row.rowId, { sourceId: sourceId || undefined })
-                        }
-                      />
-                      <Field>
-                        <FieldLabel htmlFor={`resource-description-${row.rowId}`}>
-                          Resource {index + 1} description
-                        </FieldLabel>
-                        <Input
-                          id={`resource-description-${row.rowId}`}
-                          maxLength={500}
-                          value={row.value.description ?? ""}
-                          onChange={(event) =>
-                            updateResource(row.rowId, {
-                              description: event.target.value || undefined,
-                            })
-                          }
-                        />
-                      </Field>
-                    </FieldGroup>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={resources.length === 1}
-                      onClick={() =>
-                        setResources((rows) => rows.filter((item) => item.rowId !== row.rowId))
-                      }
-                    >
-                      Remove resource {index + 1}
-                    </Button>
-                  </FieldGroup>
-                ))}
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={resources.length >= 100}
-                  onClick={() =>
-                    setResources((rows) => [
-                      ...rows,
-                      {
-                        value: { amount: 0, key: "", kind: "income" },
-                        amount: "",
-                        rowId: crypto.randomUUID(),
-                      },
-                    ])
-                  }
-                >
-                  Add resource
-                </Button>
-              </FieldSet>
-              <FieldSet>
-                <FieldLegend>Allocations</FieldLegend>
-                {allocations.map((row, index) => (
-                  <FieldGroup key={row.rowId} className="rounded-lg bg-muted/50 p-3">
-                    <FieldGroup className="sm:grid sm:grid-cols-3">
-                      <Field>
-                        <FieldLabel htmlFor={`allocation-name-${row.rowId}`}>
-                          Allocation {index + 1} name
-                        </FieldLabel>
-                        <Input
-                          id={`allocation-name-${row.rowId}`}
-                          value={row.value.key}
-                          required
-                          maxLength={120}
-                          onChange={(event) =>
-                            updateAllocation(row.rowId, { key: event.target.value })
-                          }
-                        />
-                      </Field>
-                      <Field>
-                        <FieldLabel htmlFor={`allocation-kind-${row.rowId}`}>
-                          Allocation {index + 1} kind
-                        </FieldLabel>
-                        <NativeSelect
-                          className="w-full"
-                          id={`allocation-kind-${row.rowId}`}
-                          value={row.value.kind}
-                          onChange={(event) =>
-                            changeAllocationKind(
-                              row.rowId,
-                              event.target.value as FinanceBudgetAllocation["kind"],
-                            )
-                          }
-                        >
-                          {Object.entries(allocationLabels).map(([kind, label]) => (
-                            <NativeSelectOption key={kind} value={kind}>
-                              {label}
-                            </NativeSelectOption>
-                          ))}
-                        </NativeSelect>
-                      </Field>
-                      <Field
-                        data-invalid={
-                          validatedAmounts.has(row.rowId) &&
-                          row.amount !== "" &&
-                          planAmountCents(row.amount) === null
-                        }
-                      >
-                        <FieldLabel htmlFor={`allocation-amount-${row.rowId}`}>
-                          Allocation {index + 1} amount
-                        </FieldLabel>
-                        <CurrencyInput
-                          id={`allocation-amount-${row.rowId}`}
-                          inputMode="decimal"
-                          required
-                          aria-invalid={
-                            validatedAmounts.has(row.rowId) &&
-                            row.amount !== "" &&
-                            planAmountCents(row.amount) === null
-                          }
-                          onBlur={() =>
-                            setValidatedAmounts((current) => new Set([...current, row.rowId]))
-                          }
-                          value={row.amount}
-                          onValueChange={(value) =>
-                            setAllocations((rows) =>
-                              rows.map((item) =>
-                                item.rowId === row.rowId ? { ...item, amount: value } : item,
-                              ),
-                            )
-                          }
-                        />
-                      </Field>
-                    </FieldGroup>
-                    <FieldGroup className="sm:grid sm:grid-cols-2">
-                      {row.value.kind === "spending" ? (
-                        <>
-                          <RecordChoice
-                            id={`allocation-category-${row.rowId}`}
-                            label={`Allocation ${index + 1} category`}
-                            options={categories}
-                            value={row.value.categoryId}
-                            onChange={(categoryId) =>
-                              updateAllocation(row.rowId, { categoryId: categoryId || undefined })
+                </FieldGroup>
+                <FieldSet>
+                  <FieldLegend>Resources</FieldLegend>
+                  {resources.map((row, index) => (
+                    <FieldGroup key={row.rowId} className="rounded-lg bg-muted/50 p-3">
+                      <FieldGroup className="sm:grid sm:grid-cols-3">
+                        <Field>
+                          <FieldLabel htmlFor={`resource-name-${row.rowId}`}>
+                            Resource {index + 1} name
+                          </FieldLabel>
+                          <Input
+                            id={`resource-name-${row.rowId}`}
+                            value={row.value.key}
+                            required
+                            maxLength={120}
+                            onChange={(event) =>
+                              updateResource(row.rowId, { key: event.target.value })
                             }
                           />
-                          <Field>
-                            <FieldLabel htmlFor={`allocation-legacy-${row.rowId}`}>
-                              Allocation {index + 1} category label
-                            </FieldLabel>
-                            <Input
-                              id={`allocation-legacy-${row.rowId}`}
-                              maxLength={240}
-                              value={row.value.legacyCategory ?? ""}
-                              onChange={(event) =>
-                                updateAllocation(row.rowId, {
-                                  legacyCategory: event.target.value || undefined,
-                                })
-                              }
-                            />
-                          </Field>
-                        </>
-                      ) : null}
-                      {row.value.kind === "debt" ? (
+                        </Field>
+                        <Field>
+                          <FieldLabel htmlFor={`resource-kind-${row.rowId}`}>
+                            Resource {index + 1} kind
+                          </FieldLabel>
+                          <NativeSelect
+                            className="w-full"
+                            id={`resource-kind-${row.rowId}`}
+                            value={row.value.kind}
+                            onChange={(event) =>
+                              updateResource(row.rowId, {
+                                kind: event.target.value as FinanceBudgetResource["kind"],
+                              })
+                            }
+                          >
+                            {Object.entries(resourceLabels).map(([kind, label]) => (
+                              <NativeSelectOption key={kind} value={kind}>
+                                {label}
+                              </NativeSelectOption>
+                            ))}
+                          </NativeSelect>
+                        </Field>
+                        <Field
+                          data-invalid={
+                            validatedAmounts.has(row.rowId) &&
+                            row.amount !== "" &&
+                            planAmountCents(row.amount) === null
+                          }
+                        >
+                          <FieldLabel htmlFor={`resource-amount-${row.rowId}`}>
+                            Resource {index + 1} amount
+                          </FieldLabel>
+                          <CurrencyInput
+                            id={`resource-amount-${row.rowId}`}
+                            inputMode="decimal"
+                            required
+                            aria-invalid={
+                              validatedAmounts.has(row.rowId) &&
+                              row.amount !== "" &&
+                              planAmountCents(row.amount) === null
+                            }
+                            onBlur={() =>
+                              setValidatedAmounts((current) => new Set([...current, row.rowId]))
+                            }
+                            value={row.amount}
+                            onValueChange={(value) =>
+                              setResources((rows) =>
+                                rows.map((item) =>
+                                  item.rowId === row.rowId ? { ...item, amount: value } : item,
+                                ),
+                              )
+                            }
+                          />
+                        </Field>
+                      </FieldGroup>
+                      <FieldGroup className="sm:grid sm:grid-cols-2">
                         <RecordChoice
-                          id={`allocation-account-${row.rowId}`}
-                          label={`Allocation ${index + 1} account`}
-                          required
+                          id={`resource-source-${row.rowId}`}
+                          label={`Resource ${index + 1} source`}
                           options={accounts}
-                          value={row.value.accountId}
-                          onChange={(accountId) => updateAllocation(row.rowId, { accountId })}
-                        />
-                      ) : null}
-                      {row.value.kind === "goal" || row.value.kind === "savings" ? (
-                        <RecordChoice
-                          id={`allocation-goal-${row.rowId}`}
-                          label={`Allocation ${index + 1} goal`}
-                          required={row.value.kind === "goal"}
-                          options={goals}
-                          value={row.value.goalId}
-                          onChange={(goalId) =>
-                            updateAllocation(row.rowId, { goalId: goalId || undefined })
+                          value={row.value.sourceId}
+                          onChange={(sourceId) =>
+                            updateResource(row.rowId, { sourceId: sourceId || undefined })
                           }
                         />
-                      ) : null}
-                      <Field>
-                        <FieldLabel htmlFor={`allocation-description-${row.rowId}`}>
-                          Allocation {index + 1} description
-                        </FieldLabel>
-                        <Input
-                          id={`allocation-description-${row.rowId}`}
-                          maxLength={500}
-                          value={row.value.description ?? ""}
-                          onChange={(event) =>
-                            updateAllocation(row.rowId, {
-                              description: event.target.value || undefined,
-                            })
-                          }
-                        />
-                      </Field>
-                    </FieldGroup>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={allocations.length === 1}
-                      onClick={() =>
-                        setAllocations((rows) => rows.filter((item) => item.rowId !== row.rowId))
-                      }
-                    >
-                      Remove allocation {index + 1}
-                    </Button>
-                  </FieldGroup>
-                ))}
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={allocations.length >= 500}
-                  onClick={() =>
-                    setAllocations((rows) => [
-                      ...rows,
-                      {
-                        value: { amount: 0, key: "", kind: "spending" },
-                        amount: "",
-                        rowId: crypto.randomUUID(),
-                      },
-                    ])
-                  }
-                >
-                  Add allocation
-                </Button>
-              </FieldSet>
-              <FieldGroup>
-                <Field>
-                  <FieldLabel htmlFor="plan-rationale">Rationale</FieldLabel>
-                  <Textarea
-                    id="plan-rationale"
-                    required
-                    maxLength={4000}
-                    value={rationale}
-                    onChange={(event) => setRationale(event.target.value)}
-                  />
-                </Field>
-                <FieldSet>
-                  <FieldLegend>Assumptions</FieldLegend>
-                  {assumptions.map((row, index) => (
-                    <Field key={row.id}>
-                      <FieldLabel htmlFor={`plan-assumption-${row.id}`}>
-                        Assumption {index + 1}
-                      </FieldLabel>
-                      <Textarea
-                        id={`plan-assumption-${row.id}`}
-                        required
-                        maxLength={1000}
-                        value={row.value}
-                        onChange={(event) =>
-                          setAssumptions((rows) =>
-                            rows.map((item) =>
-                              item.id === row.id ? { ...item, value: event.target.value } : item,
-                            ),
-                          )
-                        }
-                      />
+                        <Field>
+                          <FieldLabel htmlFor={`resource-description-${row.rowId}`}>
+                            Resource {index + 1} description
+                          </FieldLabel>
+                          <Input
+                            id={`resource-description-${row.rowId}`}
+                            maxLength={500}
+                            value={row.value.description ?? ""}
+                            onChange={(event) =>
+                              updateResource(row.rowId, {
+                                description: event.target.value || undefined,
+                              })
+                            }
+                          />
+                        </Field>
+                      </FieldGroup>
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
+                        disabled={resources.length === 1}
                         onClick={() =>
-                          setAssumptions((rows) => rows.filter((item) => item.id !== row.id))
+                          setResources((rows) => rows.filter((item) => item.rowId !== row.rowId))
                         }
                       >
-                        Remove assumption {index + 1}
+                        Remove resource {index + 1}
                       </Button>
-                    </Field>
+                    </FieldGroup>
                   ))}
                   <Button
                     type="button"
                     variant="outline"
-                    disabled={assumptions.length >= 100}
+                    disabled={resources.length >= 100}
                     onClick={() =>
-                      setAssumptions((rows) => [...rows, { id: crypto.randomUUID(), value: "" }])
+                      setResources((rows) => [
+                        ...rows,
+                        {
+                          value: { amount: 0, key: "", kind: "income" },
+                          amount: "",
+                          rowId: crypto.randomUUID(),
+                        },
+                      ])
                     }
                   >
-                    Add assumption
+                    Add resource
                   </Button>
                 </FieldSet>
-              </FieldGroup>
-            </FieldSet>
-            <Alert variant={balanced ? "default" : "destructive"}>
-              <AlertTitle>
-                {!amountsValid
-                  ? "Enter amounts with up to two decimal places"
-                  : balanced
-                    ? "Every cent assigned"
-                    : `${formatMoney(Math.abs(delta) / 100)} ${delta > 0 ? "left to assign" : "over-assigned"}`}
-              </AlertTitle>
-              {amountsValid ? (
-                <AlertDescription>
-                  Resources {formatMoney(resourceTotal / 100)} · Allocations{" "}
-                  {formatMoney(allocationTotal / 100)}
-                </AlertDescription>
-              ) : null}
-            </Alert>
-            {validationError ? (
-              <Alert variant="destructive">
-                <AlertTitle>Check the proposal</AlertTitle>
-                <AlertDescription>{validationError}</AlertDescription>
-              </Alert>
-            ) : null}
-            {error ? (
-              <Alert variant="destructive">
-                <AlertTitle>
-                  {isFinancePlanConflict(error)
-                    ? "A newer version needs review"
-                    : "Proposal could not be saved"}
-                </AlertTitle>
-                <AlertDescription>
-                  {
-                    classifyMutationError(error, {
-                      action: "save this financial plan",
-                      form: true,
-                      safeToRetry: false,
-                    }).message
-                  }{" "}
-                  Your edits are still here.
-                  {isFinancePlanConflict(error) ? (
-                    <Button type="button" variant="outline" onClick={onReload}>
-                      Close editor and reload latest
+                <FieldSet>
+                  <FieldLegend>Allocations</FieldLegend>
+                  {allocations.map((row, index) => (
+                    <FieldGroup key={row.rowId} className="rounded-lg bg-muted/50 p-3">
+                      <FieldGroup className="sm:grid sm:grid-cols-3">
+                        <Field>
+                          <FieldLabel htmlFor={`allocation-name-${row.rowId}`}>
+                            Allocation {index + 1} name
+                          </FieldLabel>
+                          <Input
+                            id={`allocation-name-${row.rowId}`}
+                            value={row.value.key}
+                            required
+                            maxLength={120}
+                            onChange={(event) =>
+                              updateAllocation(row.rowId, { key: event.target.value })
+                            }
+                          />
+                        </Field>
+                        <Field>
+                          <FieldLabel htmlFor={`allocation-kind-${row.rowId}`}>
+                            Allocation {index + 1} kind
+                          </FieldLabel>
+                          <NativeSelect
+                            className="w-full"
+                            id={`allocation-kind-${row.rowId}`}
+                            value={row.value.kind}
+                            onChange={(event) =>
+                              changeAllocationKind(
+                                row.rowId,
+                                event.target.value as FinanceBudgetAllocation["kind"],
+                              )
+                            }
+                          >
+                            {Object.entries(allocationLabels).map(([kind, label]) => (
+                              <NativeSelectOption key={kind} value={kind}>
+                                {label}
+                              </NativeSelectOption>
+                            ))}
+                          </NativeSelect>
+                        </Field>
+                        <Field
+                          data-invalid={
+                            validatedAmounts.has(row.rowId) &&
+                            row.amount !== "" &&
+                            planAmountCents(row.amount) === null
+                          }
+                        >
+                          <FieldLabel htmlFor={`allocation-amount-${row.rowId}`}>
+                            Allocation {index + 1} amount
+                          </FieldLabel>
+                          <CurrencyInput
+                            id={`allocation-amount-${row.rowId}`}
+                            inputMode="decimal"
+                            required
+                            aria-invalid={
+                              validatedAmounts.has(row.rowId) &&
+                              row.amount !== "" &&
+                              planAmountCents(row.amount) === null
+                            }
+                            onBlur={() =>
+                              setValidatedAmounts((current) => new Set([...current, row.rowId]))
+                            }
+                            value={row.amount}
+                            onValueChange={(value) =>
+                              setAllocations((rows) =>
+                                rows.map((item) =>
+                                  item.rowId === row.rowId ? { ...item, amount: value } : item,
+                                ),
+                              )
+                            }
+                          />
+                        </Field>
+                      </FieldGroup>
+                      <FieldGroup className="sm:grid sm:grid-cols-2">
+                        {row.value.kind === "spending" ? (
+                          <>
+                            <RecordChoice
+                              id={`allocation-category-${row.rowId}`}
+                              label={`Allocation ${index + 1} category`}
+                              options={categories}
+                              value={row.value.categoryId}
+                              onChange={(categoryId) =>
+                                updateAllocation(row.rowId, { categoryId: categoryId || undefined })
+                              }
+                            />
+                            <Field>
+                              <FieldLabel htmlFor={`allocation-legacy-${row.rowId}`}>
+                                Allocation {index + 1} category label
+                              </FieldLabel>
+                              <Input
+                                id={`allocation-legacy-${row.rowId}`}
+                                maxLength={240}
+                                value={row.value.legacyCategory ?? ""}
+                                onChange={(event) =>
+                                  updateAllocation(row.rowId, {
+                                    legacyCategory: event.target.value || undefined,
+                                  })
+                                }
+                              />
+                            </Field>
+                          </>
+                        ) : null}
+                        {row.value.kind === "debt" ? (
+                          <RecordChoice
+                            id={`allocation-account-${row.rowId}`}
+                            label={`Allocation ${index + 1} account`}
+                            required
+                            options={accounts}
+                            value={row.value.accountId}
+                            onChange={(accountId) => updateAllocation(row.rowId, { accountId })}
+                          />
+                        ) : null}
+                        {row.value.kind === "goal" || row.value.kind === "savings" ? (
+                          <RecordChoice
+                            id={`allocation-goal-${row.rowId}`}
+                            label={`Allocation ${index + 1} goal`}
+                            required={row.value.kind === "goal"}
+                            options={goals}
+                            value={row.value.goalId}
+                            onChange={(goalId) =>
+                              updateAllocation(row.rowId, { goalId: goalId || undefined })
+                            }
+                          />
+                        ) : null}
+                        <Field>
+                          <FieldLabel htmlFor={`allocation-description-${row.rowId}`}>
+                            Allocation {index + 1} description
+                          </FieldLabel>
+                          <Input
+                            id={`allocation-description-${row.rowId}`}
+                            maxLength={500}
+                            value={row.value.description ?? ""}
+                            onChange={(event) =>
+                              updateAllocation(row.rowId, {
+                                description: event.target.value || undefined,
+                              })
+                            }
+                          />
+                        </Field>
+                      </FieldGroup>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={allocations.length === 1}
+                        onClick={() =>
+                          setAllocations((rows) => rows.filter((item) => item.rowId !== row.rowId))
+                        }
+                      >
+                        Remove allocation {index + 1}
+                      </Button>
+                    </FieldGroup>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={allocations.length >= 500}
+                    onClick={() =>
+                      setAllocations((rows) => [
+                        ...rows,
+                        {
+                          value: { amount: 0, key: "", kind: "spending" },
+                          amount: "",
+                          rowId: crypto.randomUUID(),
+                        },
+                      ])
+                    }
+                  >
+                    Add allocation
+                  </Button>
+                </FieldSet>
+                <FieldGroup>
+                  <Field>
+                    <FieldLabel htmlFor="plan-rationale">Rationale</FieldLabel>
+                    <Textarea
+                      id="plan-rationale"
+                      required
+                      maxLength={4000}
+                      value={rationale}
+                      onChange={(event) => setRationale(event.target.value)}
+                    />
+                  </Field>
+                  <FieldSet>
+                    <FieldLegend>Assumptions</FieldLegend>
+                    {assumptions.map((row, index) => (
+                      <Field key={row.id}>
+                        <FieldLabel htmlFor={`plan-assumption-${row.id}`}>
+                          Assumption {index + 1}
+                        </FieldLabel>
+                        <Textarea
+                          id={`plan-assumption-${row.id}`}
+                          required
+                          maxLength={1000}
+                          value={row.value}
+                          onChange={(event) =>
+                            setAssumptions((rows) =>
+                              rows.map((item) =>
+                                item.id === row.id ? { ...item, value: event.target.value } : item,
+                              ),
+                            )
+                          }
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() =>
+                            setAssumptions((rows) => rows.filter((item) => item.id !== row.id))
+                          }
+                        >
+                          Remove assumption {index + 1}
+                        </Button>
+                      </Field>
+                    ))}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={assumptions.length >= 100}
+                      onClick={() =>
+                        setAssumptions((rows) => [...rows, { id: crypto.randomUUID(), value: "" }])
+                      }
+                    >
+                      Add assumption
                     </Button>
-                  ) : null}
-                </AlertDescription>
+                  </FieldSet>
+                </FieldGroup>
+              </FieldSet>
+              <Alert variant={balanced ? "default" : "destructive"}>
+                <AlertTitle>
+                  {!amountsValid
+                    ? "Enter amounts with up to two decimal places"
+                    : balanced
+                      ? "Every cent assigned"
+                      : `${formatMoney(Math.abs(delta) / 100)} ${delta > 0 ? "left to assign" : "over-assigned"}`}
+                </AlertTitle>
+                {amountsValid ? (
+                  <AlertDescription>
+                    Resources {formatMoney(resourceTotal / 100)} · Allocations{" "}
+                    {formatMoney(allocationTotal / 100)}
+                  </AlertDescription>
+                ) : null}
               </Alert>
-            ) : null}
+              {validationError ? (
+                <Alert variant="destructive">
+                  <AlertTitle>Check the proposal</AlertTitle>
+                  <AlertDescription>{validationError}</AlertDescription>
+                </Alert>
+              ) : null}
+              {error ? (
+                <Alert variant="destructive">
+                  <AlertTitle>
+                    {isFinancePlanConflict(error)
+                      ? "A newer version needs review"
+                      : "Proposal could not be saved"}
+                  </AlertTitle>
+                  <AlertDescription>
+                    {
+                      classifyMutationError(error, {
+                        action: "save this financial plan",
+                        form: true,
+                        safeToRetry: false,
+                      }).message
+                    }{" "}
+                    Your edits are still here.
+                    {isFinancePlanConflict(error) ? (
+                      <Button type="button" variant="outline" onClick={onReload}>
+                        Close editor and reload latest
+                      </Button>
+                    ) : null}
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+            </ResponsiveDialogBody>
             <DialogFooter>
               <Button type="button" variant="outline" disabled={pending} onClick={onClose}>
                 Cancel
@@ -658,7 +660,7 @@ export function FinancePlanEditor({
               </Button>
             </DialogFooter>
           </form>
-        </ResponsiveDialogBody>
+        </div>
       </DialogContent>
     </Dialog>
   );

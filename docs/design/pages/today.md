@@ -184,3 +184,16 @@ scale, natural word spaces and no inline chevrons. The queue is an open ItemGrou
 with individual task/reminder surfaces, never a containing Card. Schedule retains
 its single Card; successful absence uses the shared centered-icon Empty inside it.
 Weather location remains a separate reachable map control on mobile.
+
+The top bar contains orientation and weather context, without a generic Add action.
+Weather and location use separate matching secondary pills. The schedule toggle
+is plain text with a transparent resting and expanded background.
+
+
+Today uses Tasks' `WorkspaceRow` for task and reminder records, including metadata,
+completion alignment, inspectors and options. Both center the checkbox on the first
+title line instead of the complete title/metadata block. The collapsed Schedule keeps
+all-day event cards and one timed event in the same shared Calendar grid/event styling.
+
+The shared Calendar grid on Today inherits the schedule card surface; retain the
+same time rules and event treatment without painting a body-colored rectangle.

@@ -195,6 +195,9 @@ it("switches views without clearing filters and groups transaction creation acti
       preferences: { financeTransactionView: "cards" },
     }),
   );
+  expect(
+    screen.getByRole("button", { name: "Add in Transactions" }).closest(".floating-action-region"),
+  ).toHaveAttribute("data-align", "end");
   await user.click(screen.getByRole("button", { name: "Add in Transactions" }));
   expect(screen.getByRole("menuitem", { name: "Add transaction" })).toHaveAttribute(
     "href",

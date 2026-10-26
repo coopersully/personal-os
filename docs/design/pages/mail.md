@@ -219,3 +219,14 @@ existing previews and approval remain required. Review-only disposition clears t
 ### Shared workspace header
 
 Mail uses the shared title row for its mailbox view selector, preserving account and search filters when changing views. Search and accounts stay in the mobile utility row; sync and list layout are under View options. The conversation toolbar appears only when a conversation is selected. See [shared header rows](../system.md#shared-workspace-header-rows) for sizing and responsive placement.
+
+Header Sync is an icon action after layout options; mobile keeps it last inside
+the shared View options surface. Search yields width before icon actions clip.
+
+
+All mailbox destinations display complete conversation totals via the owner-scoped
+Mail navigation-count read, including zero. Counts follow Inbox/Unread/Starred/Snoozed/
+Sent filters and selected accounts; Drafts mirrors the owner-wide unsent draft view.
+The counts use shared sidebar metadata and refresh with conversation/draft changes.
+
+Mobile Mail uses a Mailboxes section landing page for Inbox, Unread, Starred, Snoozed, Sent, and Drafts, reusing sidebar rows/counts and preserving selected accounts. Compose stays in a bottom-right floating action above the section app bar.

@@ -1,15 +1,16 @@
 import { type ReactNode, useRef, useState } from "react";
 import { CheckIcon } from "@/components/icons";
-import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogClose as DialogClose,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogBody,
+} from "@/components/responsive-dialog";
+import { Button } from "@/components/ui/button";
 import { ProfileRow } from "./profile-rows";
 import { RecordTextEditor } from "./record-text-editor";
 
@@ -124,34 +125,36 @@ export function RecordSummaryTrial({
             </DialogDescription>
           ) : null}
         </DialogHeader>
-        {details || editing ? (
-          <section className="space-y-2">
-            <h3 className="settings-detail-heading">
-              {kind === "Goal" ? "Success looks like" : "Why it matters"}
-            </h3>
-            <DialogDescription asChild className="whitespace-pre-wrap leading-relaxed">
-              <div>
-                {editing ? (
-                  <RecordTextEditor
-                    label={kind === "Goal" ? "Success looks like" : "Why it matters"}
-                    value={editing.description}
-                    multiline
-                    pending={editing.pending}
-                    onSave={editing.saveDescription}
-                  />
-                ) : (
-                  description
-                )}
-              </div>
-            </DialogDescription>
-          </section>
-        ) : null}
-        {details}
-        {metadata ? (
-          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-            {metadata}
-          </div>
-        ) : null}
+        <ResponsiveDialogBody>
+          {details || editing ? (
+            <section className="space-y-2">
+              <h3 className="settings-detail-heading">
+                {kind === "Goal" ? "Success looks like" : "Why it matters"}
+              </h3>
+              <DialogDescription asChild className="whitespace-pre-wrap leading-relaxed">
+                <div>
+                  {editing ? (
+                    <RecordTextEditor
+                      label={kind === "Goal" ? "Success looks like" : "Why it matters"}
+                      value={editing.description}
+                      multiline
+                      pending={editing.pending}
+                      onSave={editing.saveDescription}
+                    />
+                  ) : (
+                    description
+                  )}
+                </div>
+              </DialogDescription>
+            </section>
+          ) : null}
+          {details}
+          {metadata ? (
+            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              {metadata}
+            </div>
+          ) : null}
+        </ResponsiveDialogBody>
         <DialogFooter className="mx-0 mb-0 p-0 pt-2 rounded-none">
           {actions}
           <DialogClose asChild>

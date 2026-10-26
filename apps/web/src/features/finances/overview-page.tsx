@@ -80,7 +80,7 @@ export function FinanceOverviewPage() {
         query={snapshot}
         loading={
           <OverviewSection title="At a glance">
-            <KeyMetrics label="Loading finance key metrics">
+            <KeyMetrics label="Loading finance key metrics" layout="grid">
               {["cash", "spending", "worth"].map((key) => (
                 <div key={key} className="finance-metric-skeleton">
                   <Skeleton className="h-4 w-24" />
@@ -135,20 +135,7 @@ export function FinanceOverviewPage() {
                 Review accounts
               </Link>
             </CollapsibleContent>
-            <KeyMetrics label="Finance key metrics">
-              <KeyMetric
-                compact
-                to="/finances/accounts"
-                label="Cash"
-                value={
-                  snapshot.data.data.cash === null
-                    ? "Unavailable"
-                    : formatCompactMoney(snapshot.data.data.cash)
-                }
-                exactValue={financeAmount(snapshot.data.data.cash)}
-                icon={BankIcon}
-                description="Recorded planning cash · your share"
-              />
+            <KeyMetrics label="Finance key metrics" layout="grid">
               <KeyMetric
                 compact
                 to="/finances/spending?period=month&pending=0"
@@ -161,6 +148,19 @@ export function FinanceOverviewPage() {
                 exactValue={financeAmount(snapshot.data.data.budget.spent)}
                 icon={ReceiptIcon}
                 description="Posted personal expenses · no pending or transfers"
+              />
+              <KeyMetric
+                compact
+                to="/finances/accounts"
+                label="Cash"
+                value={
+                  snapshot.data.data.cash === null
+                    ? "Unavailable"
+                    : formatCompactMoney(snapshot.data.data.cash)
+                }
+                exactValue={financeAmount(snapshot.data.data.cash)}
+                icon={BankIcon}
+                description="Recorded planning cash · your share"
               />
               <KeyMetric
                 compact

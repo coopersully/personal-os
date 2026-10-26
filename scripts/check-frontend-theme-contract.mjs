@@ -45,7 +45,12 @@ const stylesheetForDecorativeChecks = stylesheet
         "",
       ),
   )
-  // Cooper approved backdrop blur specifically for the floating mobile app bar.
+  // Cooper approved matching translucent app bars and shared floating action pills.
+  .replace(
+    /(\.(?:workspace-app-bar|floating-actions)\s*\{[^}]*?)-webkit-backdrop-filter: blur\(20px\);\s*backdrop-filter: blur\(20px\);/g,
+    "$1",
+  )
+  // The mobile app bar uses the same approved surface treatment.
   // Keep the exception bound to this selector and these exact blur declarations.
   .replace(
     /(\.workspace-dock\.workspace-app-tabs\s*\{[^}]*?)-webkit-backdrop-filter: blur\(20px\);\s*backdrop-filter: blur\(20px\);/g,

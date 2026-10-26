@@ -24,7 +24,10 @@ import {
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 
-const ResponsiveDialogContext = React.createContext<{ isMobile: boolean } | null>(null);
+const ResponsiveDialogContext = React.createContext<{
+  isMobile: boolean;
+  contentRef: React.RefObject<HTMLDivElement | null>;
+} | null>(null);
 
 function useResponsiveDialog() {
   const context = React.useContext(ResponsiveDialogContext);
@@ -47,6 +50,7 @@ function ResponsiveDialog({
   ...props
 }: ResponsiveDialogProps) {
   const isMobile = useIsMobile();
+  const contentRef = React.useRef<HTMLDivElement>(null);
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
   const resolvedOpen = open ?? uncontrolledOpen;
   const handleOpenChange = React.useCallback(
@@ -58,7 +62,7 @@ function ResponsiveDialog({
   );
 
   return (
-    <ResponsiveDialogContext.Provider value={{ isMobile }}>
+    <ResponsiveDialogContext.Provider value={{ isMobile, contentRef }}>
       {isMobile ? (
         <Drawer
           dismissible={dismissible}
@@ -91,14 +95,29 @@ function ResponsiveDialogContent({
   children,
   className,
   showCloseButton = true,
+  ref,
+  onEscapeKeyDown,
   ...props
 }: React.ComponentProps<typeof DialogContent>) {
-  const { isMobile } = useResponsiveDialog();
+  const { isMobile, contentRef } = useResponsiveDialog();
+  const setRef = (element: HTMLDivElement | null) => {
+    contentRef.current = element;
+    if (typeof ref === "function") ref(element);
+    else if (ref) ref.current = element;
+  };
+  const handleEscape: NonNullable<typeof onEscapeKeyDown> = (event) => {
+    if (contentRef.current?.querySelector('[role="combobox"][aria-expanded="true"]')) {
+      event.preventDefault();
+    }
+    onEscapeKeyDown?.(event);
+  };
 
   if (!isMobile) {
     return (
       <DialogContent
-        className={cn("max-h-[calc(100dvh-2rem)] overflow-hidden", className)}
+        ref={setRef}
+        onEscapeKeyDown={handleEscape}
+        className={cn("max-h-[calc(100dvh-2rem)] overflow-y-auto", className)}
         data-presentation="dialog"
         data-responsive-slot="content"
         showCloseButton={showCloseButton}
@@ -111,8 +130,10 @@ function ResponsiveDialogContent({
 
   return (
     <DrawerContent
+      ref={setRef}
+      onEscapeKeyDown={handleEscape}
       className={cn(
-        "max-h-[calc(100dvh-1rem)] border-transparent pb-[env(safe-area-inset-bottom)]",
+        "responsive-dialog-drawer overflow-y-auto border-transparent px-4 pb-[max(1rem,env(safe-area-inset-bottom))]",
         className,
         "w-full max-w-none sm:max-w-none",
       )}
@@ -162,7 +183,11 @@ function ResponsiveDialogFooter({
 }: React.ComponentProps<typeof DialogFooter>) {
   const { isMobile } = useResponsiveDialog();
   return isMobile ? (
-    <DrawerFooter className={className} data-responsive-slot="footer" {...props} />
+    <DrawerFooter
+      className={cn("mt-0 shrink-0", className)}
+      data-responsive-slot="footer"
+      {...props}
+    />
   ) : (
     <DialogFooter className={className} data-responsive-slot="footer" {...props} />
   );
@@ -200,3 +225,7 @@ export {
   ResponsiveDialogTitle,
   ResponsiveDialogTrigger,
 };
+
+export function useResponsiveDialogContainer() {
+  return React.useContext(ResponsiveDialogContext)?.contentRef;
+}

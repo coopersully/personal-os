@@ -20,6 +20,7 @@ describe("Settings breadcrumbs", () => {
         </SettingsPageLayout>
       </MemoryRouter>,
     );
+    expect(screen.queryByText("Choose access.")).not.toBeInTheDocument();
     const breadcrumbs = screen.getByRole("navigation", { name: "Settings breadcrumbs" });
     expect(within(breadcrumbs).getByRole("link", { name: "settings" })).toHaveAttribute(
       "href",
@@ -30,8 +31,6 @@ describe("Settings breadcrumbs", () => {
       "/settings?page=security",
     );
     expect(screen.getByRole("heading", { level: 1, name: "Workspace access" })).toBeVisible();
-    expect(
-      within(breadcrumbs).getByText("Workspace access").closest('[aria-current="page"]'),
-    ).not.toBeNull();
+    expect(within(breadcrumbs).queryByText("Workspace access")).not.toBeInTheDocument();
   });
 });

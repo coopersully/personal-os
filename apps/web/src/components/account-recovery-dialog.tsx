@@ -1,14 +1,15 @@
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Button } from "./ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "./ui/dialog";
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+  ResponsiveDialogBody,
+} from "@/components/responsive-dialog";
+import { Button } from "./ui/button";
 
 /** Account verification gates every workspace; recovery must not reshape its shell. */
 export function AccountRecoveryDialog({
@@ -63,7 +64,7 @@ export function AccountRecoveryDialog({
     }
   }
   return (
-    <Dialog open={open}>
+    <Dialog dismissible={false} open={open}>
       <DialogContent
         showCloseButton={false}
         onEscapeKeyDown={(event) => event.preventDefault()}
@@ -86,7 +87,7 @@ export function AccountRecoveryDialog({
             stays in place.
           </DialogDescription>
         </DialogHeader>
-        {children}
+        <ResponsiveDialogBody>{children}</ResponsiveDialogBody>
         <DialogFooter>
           <Button
             disabled={query.isFetching || retrying}

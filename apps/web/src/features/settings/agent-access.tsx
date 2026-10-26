@@ -18,6 +18,14 @@ import {
   TrashIcon,
   XIcon,
 } from "@/components/icons";
+import {
+  ResponsiveDialog as Dialog,
+  ResponsiveDialogContent as DialogContent,
+  ResponsiveDialogDescription as DialogDescription,
+  ResponsiveDialogFooter as DialogFooter,
+  ResponsiveDialogHeader as DialogHeader,
+  ResponsiveDialogTitle as DialogTitle,
+} from "@/components/responsive-dialog";
 import { SegmentedControl, SegmentedControlItem } from "@/components/segmented-control";
 import { api } from "../../api.js";
 import { FeedbackForm } from "../../components/feedback-form.js";
@@ -48,14 +56,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "../../components/ui/collapsible.js";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "../../components/ui/dialog.js";
 import { Input } from "../../components/ui/input.js";
 import {
   InputGroup,

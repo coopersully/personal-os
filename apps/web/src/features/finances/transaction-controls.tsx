@@ -9,11 +9,15 @@ import { type ReactNode, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
 import { ContentSkeleton } from "@/components/content-skeleton";
-import { SortOptionIcon, SortTrigger } from "@/components/data-view-controls";
+import { FilterTrigger, SortOptionIcon, SortTrigger } from "@/components/data-view-controls";
 import { DateInput } from "@/components/date-input";
 import {
+  FloatingActionButton,
+  FloatingActionRegion,
+  FloatingActions,
+} from "@/components/floating-actions";
+import {
   EyeIcon,
-  FilterIcon,
   GridIcon,
   LayersIcon,
   PlusIcon,
@@ -139,6 +143,58 @@ export function FinanceTransactionControls({
       </DropdownMenuContent>
     </DropdownMenu>
   );
+  const createAction = canCreate ? (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <FloatingActionButton label="Add in Transactions">
+          <PlusIcon />
+        </FloatingActionButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        onCloseAutoFocus={(event) => {
+          if (openingDialog.current) event.preventDefault();
+          openingDialog.current = false;
+        }}
+      >
+        <DropdownMenuItem
+          asChild
+          onSelect={() => {
+            openingDialog.current = true;
+          }}
+        >
+          <Link
+            to={{
+              pathname: "/finances/transactions",
+              search: `?${params}`,
+              hash: "finance-add-transaction",
+            }}
+          >
+            <PlusIcon />
+            Add transaction
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            openingDialog.current = true;
+            onAddCategory?.();
+          }}
+        >
+          <TagsIcon />
+          Add category
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            openingDialog.current = true;
+            onImport?.();
+          }}
+        >
+          <UploadIcon />
+          Import transactions
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  ) : null;
   return (
     <>
       {!compactHeader ? (
@@ -149,15 +205,13 @@ export function FinanceTransactionControls({
       <WorkspaceHeaderControls label="Transaction controls">
         <ResponsiveDialog open={filtersOpen} onOpenChange={setFiltersOpen}>
           <ResponsiveDialogTrigger asChild>
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              badgeCount={activeFilters}
-              data-filter-active={activeFilters > 0}
+            <FilterTrigger
+              compact
+              label="Filters"
+              active={activeFilters > 0}
+              count={activeFilters}
               aria-label={activeFilters ? `Filters (${activeFilters} active)` : "Filters"}
-            >
-              <FilterIcon aria-hidden="true" />
-            </Button>
+            />
           </ResponsiveDialogTrigger>
           <ResponsiveDialogContent data-finance-dialog data-finance-size="default">
             <ResponsiveDialogHeader>
@@ -373,59 +427,12 @@ export function FinanceTransactionControls({
           ) : null}
           {exportAction}
         </WorkspaceHeaderOptions>
-        {canCreate ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size="icon" aria-label="Add in Transactions">
-                <PlusIcon />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              onCloseAutoFocus={(event) => {
-                if (openingDialog.current) event.preventDefault();
-                openingDialog.current = false;
-              }}
-            >
-              <DropdownMenuItem
-                asChild
-                onSelect={() => {
-                  openingDialog.current = true;
-                }}
-              >
-                <Link
-                  to={{
-                    pathname: "/finances/transactions",
-                    search: `?${params}`,
-                    hash: "finance-add-transaction",
-                  }}
-                >
-                  <PlusIcon />
-                  Add transaction
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={() => {
-                  openingDialog.current = true;
-                  onAddCategory?.();
-                }}
-              >
-                <TagsIcon />
-                Add category
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={() => {
-                  openingDialog.current = true;
-                  onImport?.();
-                }}
-              >
-                <UploadIcon />
-                Import transactions
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
       </WorkspaceHeaderControls>
+      {createAction ? (
+        <FloatingActionRegion align="end">
+          <FloatingActions aria-label="Transaction actions">{createAction}</FloatingActions>
+        </FloatingActionRegion>
+      ) : null}
     </>
   );
 }

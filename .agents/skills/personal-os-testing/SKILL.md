@@ -5,6 +5,9 @@ description: Verify personal-os changes at the appropriate unit, API integration
 
 # personal-os testing
 
+Apply the repository [tracking lifecycle](../../../docs/engineering/work-context.md#mandatory-tracking-lifecycle)
+to assigned durable work; pure read-only use of this skill creates no tracking work.
+
 Final acceptance requires policy-complete local or hosted verification under
 `docs/engineering/delivery-verification.md`, including its Git-verified prose-only exception;
 iteration and early handoffs use focused evidence.

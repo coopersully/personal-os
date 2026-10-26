@@ -24,8 +24,8 @@ This grant does not authorize new chats, unrelated/shared-chat changes, scheduli
    acceptance owners, dependencies, related existing scopes and chat identities/links. Preserve
    completed scopes and existing assignments; do not create duplicate tracking or reopen settled work.
 4. **Name and place relevant chats.** Use verified live identities to give dedicated outcome chats
-   clear outcome/role titles and place them in the section. Reuse existing chats. Preserve explicit
-   user titles; reference unrelated or shared chats and their owners without renaming or moving them.
+   the titles defined in the heartbeat contract below and place them in the section. Reuse existing
+   chats. Preserve explicit user titles; reference unrelated or shared chats and their owners without renaming or moving them.
    Titles and placement never prove checkout ownership or transfer it.
 5. **Verify and retain receipts.** Read back tool results for section membership, chat names and
    issue links/ownership. Save their identifiers, source receipts, any protected-chat exclusions and
@@ -59,6 +59,49 @@ heads and outcome orchestrators perform oversight, with no additional supervisor
 [autonomous development](../../../docs/engineering/autonomous-development.md) for assigned network
 roles; ordinary contributions keep their existing workflow. See
 [provenance and evaluation cases](references/provenance.md) for sources and limits.
+
+## Every oversight heartbeat: tracking and presentation
+
+On **every oversight heartbeat**, including an unchanged pass, verify the live epic section,
+the section name, all member identities/order and dedicated chat titles against the existing
+authoritative setup record.
+This check is not deferred to the full-reconciliation deadline. Use actual host state; cached titles,
+a successful earlier wake or unchanged PR head are insufficient. Manual fresh/resumed assignments
+still complete the kickoff gate above before dispatch.
+
+- A dedicated epic section is named exactly for the current epic name. Verify identity from its
+  recorded section ID, membership and direct parent issue before renaming a proven stale name;
+  preserve its ID. Preserve shared sections and explicit user-protected names as recorded exclusions.
+- Cooper’s October 26 instruction supersedes subject-only names. Name managed chats
+  `ISSUE-ID - Issue name` from their verified direct Nohmi issue or epic parent, for example
+  `COO-159 - Development tooling`. Use the parent for multi-slice oversight; do not switch it for
+  each child. Prefer one or two words for the issue subject, generally at most five when clear.
+  Keep phases, progress, PR links and blockers in records. Reconcile changed issue mappings/names
+  through the current `nohmi-project-manager` checklist; never infer identity from similar wording.
+  Normalize an authorized issue title before its chat title and read back both. Preserve later
+  explicit exceptions; the portfolio manager maps to `COO-170 - Portfolio oversight`.
+- Reuse the recorded epic section, with Lead first and persistent owners in dependency/delivery
+  order. Subagents have no sidebar rows. Preserve explicit user title choices as recorded
+  exclusions when they remain applicable after the October 26 naming instruction.
+  Never rename, move or reorder unrelated/shared chats to make a section look consistent.
+- Check current direct issue coverage and owners under the
+  [tracking lifecycle](../../../docs/engineering/work-context.md#mandatory-tracking-lifecycle).
+  Repair only proven missing/changed setup within the assignment's bounded authority. Discover all
+  current section members before reordering; preserve unrelated members and their relative order.
+  Re-read each changed object, reconcile any uncertain write before retry, and update the same
+  authoritative setup entry after verified effects. Retain historical receipts and protected-chat
+  exclusions; do not create a second ledger, issue, section or chat for a resume.
+- For an unchanged pass, record checked-at and the live receipt in that setup entry; do not issue
+  redundant mutations or Linear comments. For unavailable/partial reads or failed writes, retain
+  last verified state plus the exact gap/next recovery condition. Do not report it as unchanged or
+  setup-complete. Block dependent new dispatch; preserve already-running authorized owners and
+  continue independent work. Reconcile the direct issue's setup reference before dispatch resumes.
+
+This is a procedure for an already authorized wake, not scheduling authority or proof of automation.
+Do not create/change schedules, unarchive chats, delete sections, move projects or take over owners.
+Preserve notification intent and the reporting rules below. Apply this repository contract when an
+installed nohmi head/orchestrator/context wrapper delegates here; stale wrapper examples do not
+replace current repository requirements. Installed-file adoption still needs its own verified receipt.
 
 ## Establish the baseline
 
@@ -97,11 +140,13 @@ unavailable from context or an explicit platform approval, stating the exact gap
 authorized work while resolving it. No role, issue text or helper skill expands the assigned scope.
 
 Use the host's actual task/collaboration tools and verified identities. New user-owned chats require
-explicit creation authority. Preserve existing owners and user model/runtime preferences. For new
-or replacement implementation workers, default to **GPT-6.1-Sol Light**: `model="gpt-6.1-sol"` and
-reasoning `low` (`thinking="low"` in chat tools), unless the user overrides it. Preserve Lead/reviewer
-settings and live worker settings; unavailable requested settings are a dispatch blocker, not a
-reason to silently substitute. Writable work requires an explicitly isolated checkout and owned paths.
+explicit creation authority. Cooper’s October 26 implementation preference is **GPT-6.1 Sol Medium**:
+`model="gpt-6.1-sol"`, reasoning `medium` (`thinking="medium"` in chat tools). Apply to new workers
+and the next supported continuation, preserving checkpoints and active owners. Never claim an
+unverified in-flight model change; if live switching is unsupported, use a safe stopped-owner handoff
+before replacement, never duplicate executors. Preserve Lead/independent-reviewer settings and later
+user overrides. Unavailable requested settings block dispatch rather than permit substitution.
+Writable work requires an explicitly isolated checkout and owned paths.
 
 The head never implements or merges; an assigned orchestrator delegates repairs and owns acceptance.
 Workers never merge. The assigned orchestrator reviews its own coordination work and delegated
@@ -137,12 +182,23 @@ reset. Monitoring is opt-in: editing guidance, adopting oversight or saving a ch
 wake. Preserve saved scope, cadence, timezone, notification settings and pause state.
 
 nohmi's existing preference overrides the personal quiet default: end each **scheduled oversight
-wake** with a user-visible report, even unchanged, in one or two plain-English sentences (about
-40 words maximum). Say what progressed and what is blocked or next; keep hashes and run IDs in the
-evidence record. This does not create a schedule or override an explicit user mute/quiet instruction.
+wake** with a user-visible report, even unchanged. Follow the current `nohmi-project-manager`
+consolidated scheduled-status contract: compact issue/worktree rows with phase and health, scope,
+concrete progress and next action, blocker/resolver and needs-Cooper. Retain these fields in the
+existing checkpoint; use actual worktree paths and mark stale evidence Unknown. Preserve required
+heartbeat formatting and keep hashes/run IDs in evidence. This does not create a schedule or
+override an explicit user mute/quiet instruction.
 Manual check-ins and worker callbacks need only material updates unless regular reports were requested.
 
 For substantive handoffs, report actual artifacts and limits, current stage, owner, remaining gate
 and the real next trigger: verified active monitor, bounded wait or user-driven follow-up. Link each
 PR/issue with its purpose. Never promise unconfigured unattended work. Completion does not grant
 archival, deletion, worktree cleanup or another delivery assignment.
+
+Honor a recorded explicit human cleanup grant within its original scope; do not request the same
+permission again. When authorized, the oversight owner archives dedicated child chats only after
+all assigned work, acceptance, production verification and follow-up obligations are complete and
+the chats are idle. The project manager archives completed oversight chats under its own recorded
+grant. Merge alone is insufficient. Preserve unfinished/shared chats and report already-archived
+exceptions. This does not authorize branch/worktree deletion or schedule creation; the authorized
+owner performs and verifies the eventual UI mutation.

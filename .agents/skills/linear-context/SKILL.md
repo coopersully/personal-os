@@ -22,8 +22,10 @@ Linear should link to durable context rather than duplicate it.
   identifiers or assume the checked-in snapshot is current.
 - Prefer a confident existing issue over a duplicate. If multiple issues plausibly match, report the
   ambiguity and do not write.
-- Linear reads are allowed for an in-scope request. Creating, assigning, relabeling, moving, or
-  commenting requires explicit user authority or a calling skill with an explicit, bounded grant.
+- Follow the canonical [tracking lifecycle](../../../docs/engineering/work-context.md#mandatory-tracking-lifecycle)
+  for assigned durable work. The standing repository grant covers bounded issue reuse/creation and
+  material updates without repeated approval. Pure discussion/read-only review remains read-only;
+  unrelated assignment, taxonomy or other mutations need their own authority.
 - Preserve the current human assignee unless the user requests a change. Do not assign work to an
   agent account merely because an agent performs the implementation.
 - The five portfolio Projects are ongoing containers. Every repository issue must belong to the

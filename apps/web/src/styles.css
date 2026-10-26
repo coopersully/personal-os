@@ -6981,9 +6981,13 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   overflow: hidden;
 }
 .ritual-surface {
+  position: fixed;
+  inset: 0;
+  isolation: isolate;
+  width: 100%;
   --ritual-chrome: var(--ritual-morning-content);
   --ritual-sky: var(--ritual-morning-sky);
-  height: 100dvh;
+  height: 100%;
   display: grid;
   place-items: center;
   padding: 88px 24px 72px;
@@ -6991,8 +6995,17 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   color: var(--card-foreground);
   text-align: center;
 }
+.ritual-scene {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+.ritual-scene :is(.ritual-clouds, .ritual-glow) { position: absolute; z-index: 0; }
 .ritual-presentation {
   position: relative;
+  z-index: 1;
   isolation: isolate;
   display: flex;
   flex-direction: column;
@@ -7052,6 +7065,7 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
   .ritual-card { min-height: 0; }
 }
 /* Approved ritual-only backdrop isolates the current page without capturing the screen. */
+.browser-ritual { border: 0; }
 .browser-ritual { backdrop-filter: blur(24px); }
 
 
@@ -7068,6 +7082,10 @@ html.ritual-window, html.ritual-window body, html.ritual-window #root {
 }
 
 .ritual-browser-preview {
+  border: 0;
+  isolation: isolate;
+  width: 100%;
+  height: 100%;
   --ritual-chrome: var(--ritual-morning-content);
   --ritual-sky: var(--ritual-morning-sky);
   background: var(--ritual-sky);

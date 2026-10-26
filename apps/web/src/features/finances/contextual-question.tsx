@@ -134,9 +134,7 @@ function ContextAnswer({
         </p>
       </div>
       {saved ? (
-        <Alert>
-          <AlertDescription>Context saved. The financial review remains open.</AlertDescription>
-        </Alert>
+        <p className="text-sm text-muted-foreground">Answered · financial review open</p>
       ) : stale ? (
         <Alert>
           <AlertDescription>

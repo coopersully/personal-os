@@ -8,6 +8,36 @@ Successful background autosaves are silent. Never render a persistent “All cha
 saved” message or idle success checkmark. Temporary saving feedback may disappear
 when complete; validation failures and retry remain visible until resolved.
 
+## Stable workspace geometry
+
+Action outcomes never introduce in-flow Alerts, status paragraphs, rows, or cards into a
+workspace, record, navigation bar, sidebar, or bento grid. The mutation hook delivers errors
+through Sonner across the app, including uncertain writes; legacy/custom mutation callers use
+`MutationFeedback` as an out-of-flow announcement adapter. Never replay a mutation from a
+generic error message. Keep field corrections, drafts, idempotency identities and domain retry
+controls in their existing owners. Background autosave success remains silent.
+
+Read errors use the signed-in read recovery queue, including finance coverage and secondary
+reads. Partial domain availability that still has usable records uses a Sonner notice with an explicit
+retry action; keep the available records, pagination and filters usable. Feature code must use `QueryFeedback` instead of a custom load-error Alert so the shared
+owner can suppress duplicates. Domain recovery that needs explicit review (partial batch results,
+conflicting settings, uncertain approval) registers a `RecoveryRequest`. Its shared queue presents
+one desktop dialog/mobile drawer at a time and waits behind account/read/connection recovery.
+Source content remains mounted. A decision surface clears only its own initial action toast
+by attempt ID, so duplicate feedback cannot cover its values or actions on a small screen. Never
+clear unrelated toasts. Include companion lookup/configuration retries in that surface; do not leave the only repair
+control behind its inert underlay. Domain controls decide whether to refresh, accept the latest
+state, or reapply an explicitly reviewed change; generic recovery never decides to write.
+
+Dynamic navigation attention affordances reserve their geometry before a failure. Details stay
+in a popover or recovery surface. Persisted record facts, readiness constraints and field correction
+are still content; do not erase them as though they were transient action feedback. Test both the
+Sonner/recovery delivery and absence of in-flow feedback, and visually compare workspace geometry
+before/during/after failures on mobile and desktop, including an unsaved draft and a failed retry.
+Component tests of these paths use the test-only `renderWithFeedback` outlet; full-app tests
+already have a Toaster and must not mount a duplicate. Assert action messages in Sonner rather
+than searching inside the editor or workspace container.
+
 ## Mandatory settings feedback contract
 
 **Sonner is required, not a preference, for every settings error and discrete action message.**
@@ -41,7 +71,43 @@ account query confirms success. A failed manual retry updates one loading Sonner
 Never duplicate the initial dialog explanation in a toast. Preserve native server configuration
 inside this recovery path. Authoritative 401 handling still clears private state and routes to
 sign-in; password-reset/email-verification flows and the anonymous public landing remain usable.
-A locally failed dataset must never lock the whole app behind this dialog.
+Authenticated read/load failures share this recovery surface app-wide: desktop dialog, mobile
+drawer. Keep one interruption at a time, with account verification first, failed reads next, and
+connection reminders last. Retry only failed reads and keep the gate open through pending work
+until the authoritative queries succeed. Keep drafts and existing layout mounted. Never replay a
+mutation with an uncertain outcome. Authentication, permission, missing-resource, and validation
+responses follow their sign-in/access/correction flows rather than an unresolvable Retry gate.
+Installation-owned background checks stay outside this signed-in data gate. The initial recovery
+explanation belongs in the dialog; manual retry failures update one loading-to-error Sonner toast.
+Retry preserves the failed request’s scope, including the direction of a paginated “load more”
+request; refreshing page one is not recovery for a failed next page.
+Keep keyboard focus on Retry while it is pending and after a failed attempt. Mark it busy and
+unavailable, and guard duplicate activation, without removing the focused control from tab order.
+Place recovery-action Sonner feedback at the top center so it cannot cover a mobile drawer’s
+title or retry controls.
+
+Check connected-account health as soon as a signed-in session opens, regardless of workspace.
+Use server-projected aggregate and enabled-capability health: reconnect, service attention, and
+automatic retry delays warrant a reminder; ready and ordinary syncing do not. Do not infer a failure
+from an old sync timestamp alone, or invent a freshness deadline in the renderer. Describe automatic
+recovery honestly rather than telling users to reconnect when credentials are still valid.
+
+Connection reminders require an explicit **Review connections** or **Snooze for 15 minutes** decision;
+no X, Escape, backdrop, or swipe dismissal. Review opens the repair destination and temporarily
+snoozes the reminder so it cannot obstruct repair. Store only account IDs, health-state keys, and
+expiry times in session storage, scoped to the signed-in owner and app origin. A new account or
+changed failure state surfaces immediately; repaired states clear their snooze. Recheck expiry on
+return from a hidden tab and after the timer expires. Storage failure must still allow an in-memory
+snooze. Never present a snooze as repair or permanently suppress an unresolved problem.
+
+The app shell owns this queue and the shared `RecoverySurface`; feature pages must not repeat
+connection banners. Domain adapters must use existing authoritative health contracts; providers
+without a health projection need one before they can participate. These gates concern reads and
+connection readiness, not every ordinary action or field-validation failure.
+Recovery also owns modal priority. Shared Dialog, Drawer, and Sheet roots defer newly opening
+page overlays until recovery finishes; an already-open editor stays mounted beneath recovery
+and keeps its draft. Recovery’s own nested repair dialogs remain available. Do not solve this
+with arbitrary delays, competing z-index values, or dismissing the user’s editor.
 
 Successful absence uses Empty; failed reads never masquerade as an empty collection. Follow the
 [data-page state matrix](system.md#data-page-state-and-recovery-contract).
@@ -85,7 +151,7 @@ Apply these questions in order:
 | Recoverable action failure: save, refresh, copy, or delete fails with a known safe retry path | Sonner error; retain values, actual saved state, and the original action | “Couldn’t refresh the wallpaper. Try again.” |
 | Unsaved or uncertain result: work remains unsaved, or the operation may have succeeded despite a timeout | Persistent unsaved/checking state and recovery; optional single toast to announce failure | “Couldn’t confirm the change. Check the event before retrying.” |
 | Conflict: another change prevents safely applying this edit | Persistent form/section message with resolution | “This event changed. Reload it before saving.” Preserve the draft |
-| Load failure: initial data cannot be displayed | Error state in the affected region, with Retry | “Couldn’t load your calendar.” Never show an empty-success state |
+| Signed-in read failure: initial data cannot be displayed | Shared read recovery queue (desktop dialog/mobile drawer), with Retry | “Couldn’t load your calendar.” Never show an empty-success state |
 | Stale/background failure: refresh fails but previous data exists | Retain data for transport/server failures with freshness/status; never retain data denied by 401/403 | “Showing the last update. Reconnect Google Calendar.” Avoid polling toasts |
 | Capability/access/authentication: permissions, verification, or connection blocks work | Persistent contextual Alert or sign-in state | “Confirm your email to connect accounts.” |
 | Temporary service limit: a rate limit or outage blocks repeated attempts | Toast for an isolated failure; persistent status if blocking continues | State a retry time only when known; do not encourage immediate retry loops |
@@ -246,3 +312,12 @@ their affected material, and each action has one notification owner. Uncertain
 mail creation stops automatic retries while retaining the draft for reconciliation.
 Concurrent mutation attempts cannot dismiss newer outcome feedback. Failed logout
 retains the session and recovery action.
+
+### Explaining recovery choices
+
+Use Shadcn Items to group a saved/attempted value comparison and to explain each recovery
+choice beside its action. Keep the read-only refresh step in the comparison area. Final choices
+belong in the footer, with their own concise consequence descriptions: reapply on the left as a
+secondary action, keep the latest saved values on the right as the primary safe choice. Stack in
+that order on phones. Neither choice becomes available until the latest values have been reviewed;
+this presentation must not weaken revision checks or automatically replay a write.

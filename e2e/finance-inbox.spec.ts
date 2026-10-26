@@ -140,9 +140,7 @@ test("Finance outstanding items open with context and retain notes for maintenan
     true,
   );
   await dialog.getByRole("button", { name: "Save answer" }).click();
-  await expect(
-    dialog.getByText("Note saved · awaiting maintenance", { exact: true }),
-  ).toBeVisible();
+  await expect(dialog.getByText("Note awaiting maintenance", { exact: true })).toBeVisible();
   await expect(
     dialog.getByText("Your update was checked. This item still needs review."),
   ).toBeVisible();
@@ -159,9 +157,7 @@ test("Finance outstanding items open with context and retain notes for maintenan
   await expect(page).not.toHaveURL(/review=/);
   await page.reload();
   await openReview.click();
-  await expect(
-    dialog.getByText("Note saved · awaiting maintenance", { exact: true }),
-  ).toBeVisible();
+  await expect(dialog.getByText("Note awaiting maintenance", { exact: true })).toBeVisible();
   await expect(
     dialog.getByText("Weekly transfer to my investment account", { exact: true }),
   ).toBeVisible();

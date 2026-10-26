@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
+import { QueryFeedback } from "@/components/async-state";
 import { CurrencyInput } from "@/components/currency-input";
 import { HistoryIcon } from "@/components/icons";
 import { MutationFeedback } from "@/components/mutation-feedback";
@@ -33,7 +34,6 @@ import {
   FieldLabel,
   FieldSet,
 } from "@/components/settings-field";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
 import { ItemGroup } from "@/components/ui/item";
@@ -114,16 +114,7 @@ export function FinanceAccountsPage() {
           {accounts.data ? (
             <>
               <MutationFeedback feedback={sync.feedback} />
-              {health.isError ? (
-                <Alert variant="warning">
-                  <AlertTitle>Account coverage could not load</AlertTitle>
-                  <AlertDescription>
-                    <Button variant="outline" onClick={() => void health.refetch()}>
-                      Retry account coverage
-                    </Button>
-                  </AlertDescription>
-                </Alert>
-              ) : null}
+              <QueryFeedback query={health} title="Couldn’t load account coverage." />
               {accounts.data.accounts.length ? (
                 <ItemGroup aria-label="Financial accounts" className="finance-account-grid">
                   {accounts.data.accounts.map((account) => {
@@ -464,14 +455,6 @@ function AccountEditor({
                   your institution. Reconnecting later requires your consent.
                 </DialogDescription>
               </DialogHeader>
-              <ResponsiveDialogBody>
-                {disconnect.isError ? (
-                  <Alert variant="destructive">
-                    <AlertTitle>Account is still tracked</AlertTitle>
-                    <AlertDescription>{disconnect.feedback?.message}</AlertDescription>
-                  </Alert>
-                ) : null}
-              </ResponsiveDialogBody>
               <DialogFooter>
                 <Button
                   disabled={disconnect.isPending}

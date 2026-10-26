@@ -47,7 +47,7 @@ export function useBudgetApproval<TInput, TResult>(options: {
   refresh: () => Promise<void>;
 }) {
   const toastId = useId();
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: options.mutationFn,
     retry: false,
     onMutate: () => {
@@ -79,6 +79,12 @@ export function useBudgetApproval<TInput, TResult>(options: {
       }
     },
   });
+  return {
+    ...mutation,
+    feedback: mutation.isError
+      ? { toastId, message: approvalErrorMessage(mutation.error) }
+      : undefined,
+  };
 }
 
 export function BudgetApprovalReadiness({

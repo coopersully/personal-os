@@ -1,8 +1,9 @@
+import { renderWithFeedback as render } from "@/test-utils/feedback";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { MailResponseBrief, MailThreadStewardship } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

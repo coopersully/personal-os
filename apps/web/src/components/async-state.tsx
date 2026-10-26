@@ -1,4 +1,6 @@
 import { ApiClientError } from "@personal-os/api-client";
+import { useContext } from "react";
+import { ReadRecoveryContext } from "../lib/read-recovery";
 import { useErrorToast, useSettingsError } from "../lib/settings-feedback.js";
 import { Button } from "./ui/button.js";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty.js";
@@ -21,9 +23,10 @@ export function InlineError({
   stale?: boolean;
   toastOnly?: boolean;
 }) {
-  const settingsFeedback = useSettingsError(error, title, retry);
-  useErrorToast(error, title, retry, !settingsFeedback);
-  if (settingsFeedback || stale || toastOnly) return null;
+  const recoveredGlobally = useContext(ReadRecoveryContext)(error);
+  const settingsFeedback = useSettingsError(recoveredGlobally ? null : error, title, retry);
+  useErrorToast(error, title, retry, !settingsFeedback && !recoveredGlobally);
+  if (recoveredGlobally || settingsFeedback || stale || toastOnly) return null;
   const description =
     error instanceof ApiClientError && error.status === 401
       ? "Your session has expired. Sign in again to continue."

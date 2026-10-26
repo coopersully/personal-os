@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { Toaster } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MailStewardshipPage } from "./stewardship-page.js";
 
@@ -136,6 +137,7 @@ function renderPage(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[route]}>
         <main>
+          <Toaster />
           <MailStewardshipPage {...props} />
         </main>
       </MemoryRouter>

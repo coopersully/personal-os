@@ -1,7 +1,8 @@
 import type { MailReview, MailStatus, MailStewardshipQuestion } from "@personal-os/domain";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
-import { AlertTriangleIcon, ArrowLeftIcon, CircleCheckIcon, RefreshIcon } from "@/components/icons";
+import { toast } from "sonner";
+import { AlertTriangleIcon, ArrowLeftIcon, RefreshIcon } from "@/components/icons";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -67,6 +68,9 @@ export function MailStewardshipPage({
         queryClient.invalidateQueries({ queryKey: ["mail-maintenance-run", result.run.id] }),
       ]);
       await onChanged?.();
+      toast.message(`Maintenance: ${maintenanceLabel(result.run.status)}`, {
+        description: result.summary,
+      });
     },
   });
   const review = useQuery({
@@ -134,15 +138,6 @@ export function MailStewardshipPage({
 
       <MutationFeedback feedback={maintain.feedback} />
       <QueryFeedback query={status} title="Couldn’t refresh workspace status." staleOnly />
-      {maintain.data ? (
-        <Alert>
-          <CircleCheckIcon aria-hidden="true" />
-          <AlertTitle>
-            Maintenance turn settled as {maintenanceLabel(maintain.data.run.status)}
-          </AlertTitle>
-          <AlertDescription>{maintain.data.summary}</AlertDescription>
-        </Alert>
-      ) : null}
 
       <Card role="status">
         <CardHeader>

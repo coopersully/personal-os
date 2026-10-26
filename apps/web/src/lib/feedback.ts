@@ -7,12 +7,17 @@ export type FeedbackOptions = {
   successDescription?: string;
   form?: boolean;
   safeToRetry?: boolean;
+  /** A domain decision surface owns the initial explanation for recognized conflicts. */
+  ownsError?: (error: unknown) => boolean;
+  errorPosition?: "top-center";
 };
 
 export type MutationFeedbackState = {
   kind: "validation" | "access" | "conflict" | "unsaved" | "uncertain" | "retryable";
   message: string;
   persistent: boolean;
+  /** The mutation hook owns this result; legacy adapters must not announce it again. */
+  toastId?: string | undefined;
   fields: Record<string, string>;
 };
 

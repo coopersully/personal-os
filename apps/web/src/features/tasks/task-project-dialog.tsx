@@ -72,7 +72,12 @@ export function TaskProjectDialog({
     onSuccess: () => finish(project ? "Project updated." : "Project created."),
   });
   const lifecycle = useFeedbackMutation({
-    feedback: { action: "update this project", safeToRetry: false, form: false },
+    feedback: {
+      action: "update this project",
+      safeToRetry: false,
+      form: false,
+      ownsError: (error) => Boolean(projectCompletionConflict(error)),
+    },
     mutationFn: async ({
       destinationListId,
       destinationProjectId,

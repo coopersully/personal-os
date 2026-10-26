@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
+import { QueryFeedback } from "../../components/async-state.js";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
 import { Button } from "../../components/ui/button.js";
 import { classifyMutationError } from "../../lib/feedback.js";
@@ -23,7 +24,6 @@ export function RitualLocal({ recoveryOnly = false }: { recoveryOnly?: boolean }
     refetchInterval: 10000,
   });
   useSettingsError(error, error);
-  useSettingsError(local.error, "Couldn’t load local routine status.");
   useSettingsError(
     local.data?.storageWarning,
     "Routine storage needs attention. Export pending changes before resetting local data.",
@@ -98,20 +98,10 @@ export function RitualLocal({ recoveryOnly = false }: { recoveryOnly?: boolean }
                 : "off"}
         </p>
       ) : null}
-      {!recoveryOnly && local.isError ? (
-        <Alert variant="warning">
-          <AlertTitle>Ritual status unavailable</AlertTitle>
-          <AlertDescription>Unable to read this Mac’s ritual status</AlertDescription>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={local.isFetching}
-            onClick={() => void local.refetch()}
-          >
-            Retry
-          </Button>
-        </Alert>
-      ) : !recoveryOnly && health ? (
+      {!recoveryOnly ? (
+        <QueryFeedback query={local} title="Couldn’t load local routine status." toastOnly />
+      ) : null}
+      {!recoveryOnly && health ? (
         <Alert variant="warning">
           <AlertTitle>
             {stageMessages[health.stage] ?? "Ritual delivery needs attention"}

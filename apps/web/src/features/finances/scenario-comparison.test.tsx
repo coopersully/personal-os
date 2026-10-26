@@ -1,8 +1,10 @@
+import { renderWithFeedback as render } from "@/test-utils/feedback";
+
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import type { FinanceScenarioResult } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import { FinanceScenarioComparison } from "./scenario-comparison.js";
@@ -253,10 +255,15 @@ it("recovers category reads while retaining scenario amounts", async () => {
   api.getFinanceCategories.mockRejectedValueOnce(new Error("private category error"));
   mount();
   await fillRequired();
-  expect(await screen.findByText("Spending categories unavailable")).toBeVisible();
-  await userEvent.click(screen.getByRole("button", { name: "Retry categories" }));
+  expect((await screen.findAllByText("Couldn’t load spending categories."))[0]).toBeVisible();
+  await userEvent.click(
+    within(screen.getByRole("region", { name: "Couldn’t load spending categories." })).getByRole(
+      "button",
+      { name: "Try again" },
+    ),
+  );
   await waitFor(() =>
-    expect(screen.queryByText("Spending categories unavailable")).not.toBeInTheDocument(),
+    expect(screen.queryByText("Couldn’t load spending categories.")).not.toBeInTheDocument(),
   );
   expect(screen.getByLabelText("Baseline monthly income")).toHaveValue("2,000.00");
 });

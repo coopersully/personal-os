@@ -121,6 +121,64 @@ test("completed source binds receipt, current body and selected attempt jobs", (
   assert.equal(result.jobs.length, 3);
 });
 
+for (const status of ["in_progress", "completed"]) {
+  test(`null merge identity stays pending with ${status} source, then recovers`, () => {
+    const client = fixture();
+    client.live.merge_commit_sha = null;
+    client.rows[0].status = status;
+    client.rows[0].conclusion = status === "completed" ? "success" : null;
+    const pages = client.pages;
+    client.pages = () => assert.fail("Pending merge identity must not read artifacts or jobs");
+    const pending = stableObservation(client);
+    assert.equal(pending.state, "pending");
+    assert.equal(pending.mergeSha, null);
+    assert.equal(client.downloads, 0);
+    assert.equal(pending.receipt, undefined);
+    client.pages = pages;
+    client.live.merge_commit_sha = merge;
+    client.rows[0].status = "completed";
+    client.rows[0].conclusion = "success";
+    assert.equal(stableObservation(client).state, "success");
+    assert.equal(client.downloads, 1);
+  });
+}
+
+for (const conclusion of ["failure", "cancelled"]) {
+  test(`null merge identity does not hide ${conclusion} source attempt`, () => {
+    const client = fixture();
+    client.live.merge_commit_sha = null;
+    client.rows[0].conclusion = conclusion;
+    assert.throws(() => stableObservation(client), /Latest source run failed\/canceled/);
+    assert.equal(client.downloads, 0);
+  });
+}
+
+for (const firstMerge of [null, merge]) {
+  test(`merge identity changing from ${firstMerge === null ? "null" : "valid"} recollects`, () => {
+    const client = fixture();
+    let reads = 0;
+    client.pr = () => ({
+      ...structuredClone(pr),
+      merge_commit_sha: reads++ === 0 ? firstMerge : firstMerge === null ? merge : null,
+    });
+    const result = stableObservation(client);
+    assert.equal(reads, 4);
+    assert.equal(result.state, firstMerge === null ? "success" : "pending");
+    assert.equal(result.mergeSha, firstMerge === null ? merge : null);
+    assert.equal(client.downloads, 1);
+    if (firstMerge !== null) assert.equal(result.receipt, undefined);
+  });
+}
+
+test("missing and malformed merge identities remain fatal", () => {
+  for (const value of [undefined, "", "bad-sha", 1, [merge], { sha: merge }]) {
+    const client = fixture();
+    client.live.merge_commit_sha = value;
+    assert.throws(() => stableObservation(client), /Live PR identity unavailable/);
+    assert.equal(client.downloads, 0);
+  }
+});
+
 function regeneratedFixture() {
   const client = fixture();
   const liveMerge = "e".repeat(40);

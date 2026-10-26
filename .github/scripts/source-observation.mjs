@@ -144,7 +144,8 @@ function tuple(pr, repository, number) {
     !shaPattern.test(pr.base.sha ?? "") ||
     typeof pr.base.ref !== "string" ||
     typeof pr.body !== "string" ||
-    !shaPattern.test(pr.merge_commit_sha ?? "")
+    (pr.merge_commit_sha !== null &&
+      (typeof pr.merge_commit_sha !== "string" || !shaPattern.test(pr.merge_commit_sha)))
   )
     fail("Live PR identity unavailable");
   return {
@@ -308,9 +309,11 @@ export function observeSource(client, expected = {}) {
       runAttempt: run.run_attempt,
       event: run.event,
     };
-    if (run.status === "completed") {
-      if (run.conclusion !== "success")
-        fail("Latest source run failed/canceled; inspect that attempt");
+    if (run.status === "completed" && run.conclusion !== "success")
+      fail("Latest source run failed/canceled; inspect that attempt");
+    // GitHub may temporarily return null while calculating mergeability. Keep the
+    // observation pending until a concrete merge identity can bind the receipt.
+    if (run.status === "completed" && identity.mergeSha !== null) {
       const artifacts = client.pages(`actions/runs/${run.id}/artifacts`, "artifacts");
       const matching = artifacts.filter(
         (artifact) => artifact.name === `source-candidate-${run.id}-${run.run_attempt}`,

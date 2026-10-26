@@ -128,7 +128,7 @@ runner while code is edited beneath it; stop only the owned run before edits.
 
 `ci.yml` runs source checks on opened, reopened, synchronize, and supported pushes.
 Its aggregate is `Source verification`. `pr-metadata.yml` runs on those PR events plus edits and ready-for-review and owns
-`CI required`, preserving the existing protection name/provider. It validates the event's Work map
+`CI required`, preserving the existing protection name/provider. It validates the live PR Work map
 and waits for the latest applicable successful source workflow for that PR on its exact head and base. Missing, pending,
 failed, or canceled source runs cannot pass the gate. Each workflow has a separate concurrency group;
 editing a description cancels only a superseded metadata gate, never source tests.

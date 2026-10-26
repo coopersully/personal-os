@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -65,8 +65,11 @@ function OwnerReadiness() {
   });
   return <p>{query.data?.canSend ? "Owner Chat available" : "Owner Chat locked"}</p>;
 }
-function open(extra?: ReactNode, route = "/finances/automations") {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function open(
+  extra?: ReactNode,
+  route = "/finances/automations",
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
   client.setQueryData(["me"], { id: "owner-a" });
   const user = userEvent.setup();
   render(
@@ -797,4 +800,83 @@ it("refreshes both projections without replacing proof and removes stale success
   expect(api.issueFinanceConversationChallenge).not.toHaveBeenCalled();
   expect(api.exchangeFinanceConversationChallenge).not.toHaveBeenCalled();
   expect(screen.queryByText("Readiness offline")).not.toBeInTheDocument();
+});
+
+it.each([
+  "ready",
+  "error",
+] as const)("dismisses stale %s refresh feedback after an account switch while a host read is pending", async (outcome) => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const user = open(undefined, "/finances/automations", client);
+  await screen.findByText("Not ready for Chat");
+  let finishHost!: (value: typeof readiness) => void;
+  const hostRead = new Promise<typeof readiness>((resolve) => {
+    finishHost = resolve;
+  });
+  api.getFinanceConversationHostReadiness.mockReturnValueOnce(hostRead);
+  if (outcome === "ready")
+    api.getFinanceConversationReadiness.mockResolvedValueOnce({
+      ...readiness,
+      canSend: true,
+      reason: "ready",
+      recovery: "none",
+    });
+  else
+    api.getFinanceConversationReadiness.mockRejectedValueOnce(new Error("Old account read failed"));
+  vi.mocked(toast.loading).mockReturnValueOnce("refresh-owner-a");
+  await user.click(screen.getByRole("button", { name: "Refresh readiness" }));
+  await waitFor(() => {
+    expect(api.getFinanceConversationHostReadiness).toHaveBeenCalledTimes(2);
+    expect(
+      client.getQueryState(["finance-conversation-readiness", "owner-a", 0])?.fetchStatus,
+    ).toBe("idle");
+  });
+  expect(toast.dismiss).not.toHaveBeenCalledWith("refresh-owner-a");
+  act(() => {
+    client.setQueryData(["me"], { id: "owner-b" });
+  });
+  await act(async () => {
+    finishHost(readiness);
+    await hostRead;
+  });
+  await waitFor(() => expect(toast.dismiss).toHaveBeenCalledWith("refresh-owner-a"));
+  expect(toast.success).not.toHaveBeenCalledWith("Chat is ready for the next eligible run.", {
+    id: "refresh-owner-a",
+  });
+  expect(toast.error).not.toHaveBeenCalledWith("Readiness could not be checked. Try again.", {
+    id: "refresh-owner-a",
+  });
+  expect(screen.queryByText("Old account read failed")).not.toBeInTheDocument();
+});
+
+it.each([
+  ["ready", "Chat is ready for the next eligible run."],
+  ["blocked", "Readiness checked. Review the next step."],
+  ["error", "Readiness could not be checked. Try again."],
+] as const)("announces the ordinary %s refresh outcome through its original Sonner toast only", async (outcome, message) => {
+  const user = open();
+  await screen.findByText("Not ready for Chat");
+  if (outcome === "error")
+    api.getFinanceConversationReadiness.mockRejectedValueOnce(new Error("Read unavailable"));
+  else
+    api.getFinanceConversationReadiness.mockResolvedValueOnce(
+      outcome === "ready"
+        ? { ...readiness, canSend: true, reason: "ready", recovery: "none" }
+        : readiness,
+    );
+  vi.mocked(toast.loading).mockReturnValueOnce("ordinary-refresh");
+  await user.click(screen.getByRole("button", { name: "Refresh readiness" }));
+  await waitFor(() =>
+    expect(outcome === "error" ? toast.error : toast.success).toHaveBeenCalledWith(message, {
+      id: "ordinary-refresh",
+    }),
+  );
+  expect(toast.loading).toHaveBeenCalledWith("Checking readiness…");
+  expect(
+    vi
+      .mocked(outcome === "error" ? toast.success : toast.error)
+      .mock.calls.filter(([, options]) => options?.id === "ordinary-refresh"),
+  ).toHaveLength(0);
+  expect(toast.dismiss).not.toHaveBeenCalledWith("ordinary-refresh");
+  expect(screen.queryByText(message)).not.toBeInTheDocument();
 });

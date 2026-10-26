@@ -25,6 +25,7 @@ import { useFinanceConversationReadiness } from "./use-finance-conversation-read
 export function FinanceConversationReadiness({ returnTo }: { returnTo?: string | null }) {
   const query = useFinanceConversationReadiness();
   const client = useQueryClient();
+  const session = usePreferenceSession(client);
   return (
     <section aria-label="Finance Chat readiness" className="flex min-w-0 flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -40,6 +41,10 @@ export function FinanceConversationReadiness({ returnTo }: { returnTo?: string |
                 query.refetch(),
                 client.invalidateQueries({ queryKey: ["finance-conversation-host-readiness"] }),
               ]);
+              if (!sameSession(client, session)) {
+                toast.dismiss(notice);
+                return;
+              }
               toast[result.isError ? "error" : "success"](
                 result.isError
                   ? "Readiness could not be checked. Try again."

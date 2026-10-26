@@ -1,7 +1,8 @@
 # Epic planning and launch
 
-This is the nohmi procedure for repository `oversight` and the personal head/orchestrator skills.
-The self-contained repository oversight skill supplies lifecycle and monitoring runbooks; the
+Use the user-installed `nohmi-orchestrator` (`~/.codex/skills/nohmi-orchestrator/SKILL.md`)
+as the canonical coordination entrypoint. The repository `oversight` path remains a compatibility
+route with repository-specific kickoff, lifecycle and monitoring constraints; the
 [autonomous development contract](autonomous-development.md) governs roles and merge authority.
 This documents a workflow, not a running coordinator or automated admission validator.
 
@@ -87,7 +88,8 @@ never add either as launch ceremony. Preserve one owner for shared paths and con
    slots for workers and reviewers; reserve scarce verification resources separately.
 6. Establish the real next trigger: bounded waits while active, a saved scoped heartbeat for
    authorized recurring work. Reuse matching monitors and preserve cadence/timezone. Apply the
-   oversight skill’s scheduled-report preference (short visible report even unchanged), unless the
+   current personal manager/orchestrator scheduled-report preference and the repository reporting
+   constraints (short visible report even unchanged), unless the
    user explicitly requests quiet/muted reporting. A checkpoint is not a scheduler. Without a wakeup,
    report waiting and the responsible owner
    rather than claim unattended execution is running.

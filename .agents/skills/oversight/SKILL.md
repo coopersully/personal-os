@@ -127,9 +127,8 @@ candidate-bound evidence and request named gaps. Inspect existing consumer tests
 run the smallest relevant behavioral check, batch coherent repairs, and obtain complete final
 verification after review convergence on the frozen candidate. Follow
 [verification efficiency](../../../docs/engineering/verification-efficiency.md) and
-[delivery verification](../../../docs/engineering/delivery-verification.md). Current policy includes
-docs-only shipping candidates; future scoped readiness and automated receipt reuse are proposals,
-not permission to omit stages. Do not repeat full suites for each reviewer or metadata edit.
+[delivery verification](../../../docs/engineering/delivery-verification.md). Only the delivery contract’s Git-verified prose-only exception may omit full stages;
+path-only planning or speculative evidence reuse never grants that exception. Do not repeat full suites for each reviewer or metadata edit.
 
 ## Monitoring and reports
 

@@ -9,10 +9,41 @@ and private evidence outside the source tree.
 
 Draft publication and early review require focused evidence, not a separate full run. This sequencing
 applies to ordinary contributions as well as handoff/network callers; see the
-[development handbook](development-handbook.md). Final acceptance still requires every stage below, including for docs-only shipping candidates.
-A successful scoped CI run or selected local execution does not establish complete readiness.
-Proposed finer receipt reuse or final-scope classification in the acceleration plan is not an
-implemented exemption; changing this boundary requires separate reviewed enforcement and evidence.
+[development handbook](development-handbook.md). Complete readiness requires the verification scope
+below plus independent review, live metadata/security/protection gates and issue-specific acceptance.
+A successful selected job alone never establishes readiness.
+
+## Git-verified prose-only scope
+
+The only narrow final exception is a nonempty diff containing regular non-executable Markdown
+additions/modifications in the classifier's explicit repository-prose allowlist: root README,
+AGENTS and CONTRIBUTING; docs engineering/architecture/design/product Markdown except the generated
+workspace-agent-tools dictionary; skill SKILL.md and direct references/*.md. Published app skills,
+script fixtures, generated/runtime inputs, other extensions and unknown paths are not prose scope.
+New transitive consumers require revisiting this allowlist, not silently treating their input as prose.
+
+Run `node .github/scripts/ci-scope.mjs --base <base-sha> --head <head-sha> --json` against the
+actual frozen checkout. The classifier inspects the complete Git diff, file modes and base ancestry.
+Missing/malformed/unavailable evidence, mixed/global changes, renames, deletions, symlinks and mode
+changes select full scope. Plain path lists are iteration advice and cannot authorize an exemption.
+CI uses this same classifier; its strict aggregate requires every declared dependency and actual
+success for every selected job. Only unselected jobs may skip. `ci:full` still forces all jobs.
+
+For `prose_only: true`, Repository contracts (including classifier/evaluator regressions and
+repository prose contracts), Classify changes and Source verification must succeed in the same
+current-head/base source workflow run/attempt. Preserve separate metadata, security, review,
+provider and protected-merge gates. Record the full classifier JSON, workflow revision and provider
+run identity; use readiness `verification.mode: "prose"` as described in its state reference. The
+evaluator recomputes scope from Git at the actual candidate checkout and requires those source jobs
+from that recorded attempt. Inspect the source run's PR/head/base association; offline validation
+cannot authenticate provider receipts. An unavailable checkout/Node/Git blocks narrow acceptance.
+No application compilation, coverage, browser/native run or duplicate local full verifier is required
+for this proven scope. Content/link review and applicable instruction adoption remain required.
+
+Every other shipping candidate requires complete local or equivalent hosted verification below.
+This includes classifier/workflow/evaluator/dependency/configuration changes, tool scripts, and
+changes whose transitive impact is uncertain. The CI/enforcement change introducing this exception
+must itself pass full verification; its later prose consumer must prove the narrow hosted path.
 
 ## Verification equivalence
 

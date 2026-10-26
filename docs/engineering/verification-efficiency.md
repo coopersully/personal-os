@@ -128,7 +128,6 @@ Record discovery, pass/skip counts and actual environment; required skipped or u
 are evidence gaps. Do not implement these capabilities by writing optimistic planner receipts.
 
 The [acceleration plan](../superpowers/plans/2026-08-26-ci-hardening-and-acceleration.md#current-follow-up-plan-october-23-2026)
-records staged owners, measured evidence and acceptance for future work. Complete final verification,
-including docs-only shipping candidates, remains mandatory under the delivery contract until a
-separately reviewed policy/classifier/enforcement change proves a safe exemption. This documentation
-introduces no such exemption and no runtime, CI or verifier feature.
+records staged owners, measured evidence and acceptance. The canonical delivery contract now permits
+only its Git-verified prose exception; other candidates retain full verification. Path-only planning,
+optimistic receipts and future cache proposals cannot narrow final acceptance.

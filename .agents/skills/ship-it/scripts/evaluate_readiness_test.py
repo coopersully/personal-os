@@ -2,11 +2,15 @@ import sys
 import copy
 import json
 import unittest
+import tempfile
+import subprocess
+import shutil
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from evaluate_readiness import evaluate
+from evaluate_readiness import evaluate, FULL_COVERAGE, FULL_SOURCE_JOBS
 from acceptance_test import acceptance_record, detailed_state
 
 HEAD = "a" * 40
@@ -141,8 +145,8 @@ class EvaluateReadinessTest(unittest.TestCase):
     def test_hosted_equivalence_requires_every_gate_and_diagnosed_local_failure(self):
         state = ready_state(verification={"mode": "hosted", "pnpmVerify": "FAILURE",
             "equivalenceVerified": True, "localOnlyComplete": True,
-            "equivalentChecks": {key: key for key in ("repository", "lint", "types-tests-coverage-builds", "browser")}})
-        for name in state["verification"]["equivalentChecks"].values():
+            "equivalentChecks": copy.deepcopy(FULL_COVERAGE)})
+        for name in FULL_SOURCE_JOBS:
             state["ci"]["expectedSelectedChecks"].append(name)
             state["ci"]["expectedCheckApps"][name] = 15368
             state["ci"]["checks"].append(dict(state["ci"]["checks"][0], name=name))
@@ -162,11 +166,10 @@ class EvaluateReadinessTest(unittest.TestCase):
         self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
 
     def test_hosted_matrix_requires_each_distinct_successful_member(self):
-        coverage = {"repository": "Repository", "lint": "Lint", "types-tests-coverage-builds": "Node",
-                    "browser": ["Browser desktop", "Browser mobile"]}
+        coverage = copy.deepcopy(FULL_COVERAGE)
         state = ready_state(verification={"mode": "hosted", "pnpmVerify": "NOT_RUN",
             "equivalenceVerified": True, "localOnlyComplete": True, "equivalentChecks": coverage})
-        for name in ["Repository", "Lint", "Node", "Browser desktop", "Browser mobile"]:
+        for name in FULL_SOURCE_JOBS:
             state["ci"]["expectedSelectedChecks"].append(name)
             state["ci"]["expectedCheckApps"][name] = 15368
             state["ci"]["checks"].append(dict(state["ci"]["checks"][0], name=name))
@@ -177,7 +180,7 @@ class EvaluateReadinessTest(unittest.TestCase):
         for invalid in [[], ["Browser desktop", "Lint"], ["Browser desktop", "Browser desktop"], [None]]:
             state["verification"]["equivalentChecks"]["browser"] = invalid
             self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
-        state["verification"]["equivalentChecks"]["browser"] = ["Browser desktop", "Browser mobile"]
+        state["verification"]["equivalentChecks"]["browser"] = copy.deepcopy(FULL_COVERAGE["browser"])
         state["ci"]["checks"].pop()
         self.assertEqual(evaluate(state)["decision"], "REMEDIATE")
 
@@ -188,7 +191,7 @@ class EvaluateReadinessTest(unittest.TestCase):
                                 for project in ("desktop-chromium", "mobile-chromium") for i in range(1, 5)]}
         state = ready_state(verification={"mode": "hosted", "pnpmVerify": "NOT_RUN",
             "equivalenceVerified": True, "localOnlyComplete": True, "equivalentChecks": coverage})
-        names = [name for value in coverage.values() for name in (value if isinstance(value, list) else [value])]
+        names = FULL_SOURCE_JOBS
         for name in names:
             state["ci"]["expectedSelectedChecks"].append(name)
             state["ci"]["expectedCheckApps"][name] = 15368
@@ -203,6 +206,20 @@ class EvaluateReadinessTest(unittest.TestCase):
             state["ci"]["checks"].remove(check)
             self.assertNotEqual(evaluate(state)["decision"], "MERGE", name)
             state["ci"]["checks"].append(check)
+
+    def test_full_hosted_inventory_cannot_omit_member_from_both_claims(self):
+        for missing in FULL_SOURCE_JOBS:
+            state = ready_state(verification={"mode": "hosted", "pnpmVerify": "NOT_RUN",
+                "equivalenceVerified": True, "localOnlyComplete": True,
+                "equivalentChecks": copy.deepcopy(FULL_COVERAGE)})
+            for name in FULL_SOURCE_JOBS:
+                if name == missing: continue
+                state["ci"]["expectedSelectedChecks"].append(name)
+                state["ci"]["expectedCheckApps"][name] = 15368
+                state["ci"]["checks"].append(dict(state["ci"]["checks"][0], name=name))
+            if missing in state["verification"]["equivalentChecks"]["browser"]:
+                state["verification"]["equivalentChecks"]["browser"].remove(missing)
+            self.assertIn("verification_incomplete", evaluate(state)["reasonCodes"], missing)
 
     def test_selected_job_must_exist_and_succeed_with_expected_provider(self):
         state = ready_state()
@@ -433,6 +450,86 @@ class EvaluateReadinessTest(unittest.TestCase):
                 result = evaluate(state)
                 self.assertEqual(result["decision"], "REMEDIATE")
                 self.assertIn("stale_evidence", result["reasonCodes"])
+
+
+class ProseReadinessTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.git("init")
+        self.git("config", "user.name", "Fixture")
+        self.git("config", "user.email", "fixture@example.invalid")
+        target = self.root / ".github/scripts/ci-scope.mjs"
+        target.parent.mkdir(parents=True)
+        shutil.copyfile(Path(__file__).resolve().parents[4] / ".github/scripts/ci-scope.mjs", target)
+        doc = self.root / "docs/engineering/example.md"
+        doc.parent.mkdir(parents=True)
+        doc.write_text("Before\n")
+        self.base = self.commit()
+        doc.write_text("After\n")
+        self.head = self.commit()
+        self.state = ready_state()
+        # Bind every existing acceptance/evidence identity to this real fixture.
+        self.state = json.loads(json.dumps(self.state).replace(HEAD, self.head).replace(BASE, self.base))
+        scope = json.loads(subprocess.check_output(["node", str(target), "--base", self.base,
+                                                   "--head", self.head, "--json"], text=True))
+        source = dict(headSha=self.head, baseSha=self.base, workflowId=12, runId=13,
+                      runAttempt=1, event="pull_request")
+        self.state["verification"] = dict(headSha=self.head, baseSha=self.base, focused="SUCCESS",
+                                          mode="prose", scope=scope, sourceRun=source)
+        for name in ["Classify changes", "Repository contracts", "Source verification"]:
+            self.state["ci"]["expectedSelectedChecks"].append(name)
+            self.state["ci"]["expectedCheckApps"][name] = 15368
+            self.state["ci"]["checks"].append(dict(source, name=name, appId=15368,
+                                                   status="COMPLETED", conclusion="SUCCESS"))
+        self.location = patch("evaluate_readiness.__file__", str(self.root / ".agents/skills/ship-it/scripts/evaluate_readiness.py"))
+        self.location.start()
+        self.addCleanup(self.location.stop)
+
+    def git(self, *args):
+        return subprocess.check_output(["git", *args], cwd=self.root, stderr=subprocess.DEVNULL, text=True).strip()
+
+    def commit(self):
+        self.git("add", "-A")
+        self.git("commit", "-m", "Fixture")
+        return self.git("rev-parse", "HEAD")
+
+    def test_real_git_prose_candidate_can_complete_readiness(self):
+        self.assertEqual(evaluate(self.state)["decision"], "MERGE")
+
+    def test_forged_scope_or_mismatched_source_identity_fails(self):
+        for key, value in [("baseSha", HEAD), ("runId", 99), ("event", "push")]:
+            with self.subTest(key=key):
+                state = copy.deepcopy(self.state)
+                state["verification"]["sourceRun"][key] = value
+                self.assertIn("verification_incomplete", evaluate(state)["reasonCodes"])
+        self.state["verification"]["scope"]["node"] = True
+        self.assertIn("verification_incomplete", evaluate(self.state)["reasonCodes"])
+
+    def test_absent_skipped_or_wrong_provider_selected_job_fails(self):
+        for mutation in ["absent", "skipped", "provider"]:
+            with self.subTest(mutation=mutation):
+                state = copy.deepcopy(self.state)
+                check = state["ci"]["checks"][-1]
+                if mutation == "absent": state["ci"]["checks"].pop()
+                elif mutation == "skipped": check["conclusion"] = "SKIPPED"
+                else: check["appId"] = 1
+                self.assertNotEqual(evaluate(state)["decision"], "MERGE")
+
+    def test_dirty_classifier_is_not_candidate_bound_proof(self):
+        script = self.root / ".github/scripts/ci-scope.mjs"
+        script.write_text("console.log(" + json.dumps(json.dumps(self.state["verification"]["scope"])) + ")")
+        self.assertIn("verification_incomplete", evaluate(self.state)["reasonCodes"])
+
+    def test_stale_checkout_and_nonprose_candidate_fail_closed(self):
+        (self.root / "runtime.ts").write_text("changed")
+        self.commit()
+        self.assertIn("verification_incomplete", evaluate(self.state)["reasonCodes"])
+        # Rebind claimed identities while retaining the old prose receipt.
+        head = self.git("rev-parse", "HEAD")
+        state = json.loads(json.dumps(self.state).replace(self.head, head))
+        self.assertIn("verification_incomplete", evaluate(state)["reasonCodes"])
 
 
 if __name__ == "__main__":

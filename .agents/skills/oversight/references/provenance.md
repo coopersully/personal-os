@@ -27,8 +27,9 @@ new-chat, unrelated/shared-chat, scheduling or cleanup authority. This is proced
 a claim that a host automatically enforces the gate.
 
 The later tracking/heartbeat correction makes `work-context.md` the lifecycle owner for all assigned
-durable work and requires live presentation checks on every oversight heartbeat. Exact Lead and
-short direct-issue implementation names replace older common-prefix examples. Repository instructions
+durable work and requires live presentation checks on every oversight heartbeat. The subsequent human
+correction requires durable subject titles across phases and issue changes, preserving explicit user
+choices instead of requiring universal Lead or issue-key prefixes. Repository instructions
 are the authority; installed wrappers delegating here must reload them. This change does not claim
 those external installations have been edited or that a scheduled pass has executed.
 
@@ -41,8 +42,8 @@ runtime tests or proof a host tool works.
 | --- | --- |
 | Unchanged oversight heartbeat | Read live section name/membership/order, dedicated titles and direct issue coverage anyway; retain checked-at/readback in the existing setup entry; no redundant mutation, duplicate issue or status comment |
 | Dedicated epic section retains an old name | Verify stable section ID/membership and current parent issue; rename only proven stale dedicated name to the epic name, preserving ID; shared or user-protected names remain excluded with evidence |
-| Dedicated implementation changes assigned issue | Verify the direct issue and owner, adopt `ISSUE-KEY — short purpose`; keep Lead `👀 - <epic name>`; preserve explicit user-protected titles and shared chats |
-| Older installed wrapper prescribes common-prefix/no-issue-key titles | Load current repository owner through agent-context/AGENTS; use current naming and record installed adoption separately; do not edit generic personal skills |
+| Dedicated implementation changes phase or assigned issue | Verify the direct issue and owner, keep an accurate durable subject title; rename only for initial/misleading titles, explicit request or a genuinely changed subject; preserve explicit title choices and shared chats |
+| Older installed wrapper prescribes issue-key or universal Lead prefixes | Load current repository owner through agent-context/AGENTS; use current naming and record installed adoption separately; do not edit generic personal skills |
 | Required sidebar or tracker source is missing on a heartbeat | Retain last verified receipt and explicit gap; do not call the pass unchanged/setup-complete; block dependent new dispatch, preserve active owners and continue independent work |
 | Setup mutation succeeds but readback fails or times out | Record uncertain result and inspect live object before retry; never duplicate creation or report verified success |
 | Documentation or prerequisite repair starts through a helper skill | Resolve unique live Nohmi Project, reuse/create direct issue before implementation, preserve assignee, record material changes and actual PR backlink, close only on full acceptance |

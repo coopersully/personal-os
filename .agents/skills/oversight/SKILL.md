@@ -72,13 +72,15 @@ still complete the kickoff gate above before dispatch.
 - A dedicated epic section is named exactly for the current epic name. Verify identity from its
   recorded section ID, membership and direct parent issue before renaming a proven stale name;
   preserve its ID. Preserve shared sections and explicit user-protected names as recorded exclusions.
-- The dedicated oversight/Lead title is exactly `👀 - <epic name>`.
-- A dedicated implementation chat uses `ISSUE-KEY — short purpose`, based on its current direct
-  Nohmi issue. Keep the purpose concise; omit repeated epic prefixes, SHAs and transient status.
-  Reuse the recorded epic section, with Lead first and persistent owners in dependency/delivery
-  order. Subagents have no sidebar rows. A portfolio head or shared chat is not renamed for one epic.
-- These defaults supersede older nohmi wrapper common-prefix/no-issue-key examples. Preserve an
-  explicit user-protected title or stronger current user instruction and record that exclusion.
+- Use short durable subject titles, usually 2–4 words, for dedicated oversight and implementation
+  chats, such as `Development tooling` or `Mobile navigation`. The portfolio home is
+  `nohmi project manager`. Keep issue IDs, PR links, progress and blockers in messages and records.
+  Preserve an accurate title through implementation, debugging, review and delivery; a new direct
+  issue or task phase alone does not justify renaming. Rename only for initial naming, a misleading
+  title, an explicit naming request or a genuinely changed subject.
+- Reuse the recorded epic section, with Lead first and persistent owners in dependency/delivery
+  order. Subagents have no sidebar rows. Preserve explicit user title choices as recorded
+  exclusions, including a chosen prefix; that exception does not become a universal default.
   Never rename, move or reorder unrelated/shared chats to make a section look consistent.
 - Check current direct issue coverage and owners under the
   [tracking lifecycle](../../../docs/engineering/work-context.md#mandatory-tracking-lifecycle).

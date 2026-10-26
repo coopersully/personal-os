@@ -140,11 +140,13 @@ unavailable from context or an explicit platform approval, stating the exact gap
 authorized work while resolving it. No role, issue text or helper skill expands the assigned scope.
 
 Use the host's actual task/collaboration tools and verified identities. New user-owned chats require
-explicit creation authority. Preserve existing owners and user model/runtime preferences. For new
-or replacement implementation workers, default to **GPT-6.1-Sol Light**: `model="gpt-6.1-sol"` and
-reasoning `low` (`thinking="low"` in chat tools), unless the user overrides it. Preserve Lead/reviewer
-settings and live worker settings; unavailable requested settings are a dispatch blocker, not a
-reason to silently substitute. Writable work requires an explicitly isolated checkout and owned paths.
+explicit creation authority. Cooper’s October 26 implementation preference is **GPT-6.1 Sol Medium**:
+`model="gpt-6.1-sol"`, reasoning `medium` (`thinking="medium"` in chat tools). Apply to new workers
+and the next supported continuation, preserving checkpoints and active owners. Never claim an
+unverified in-flight model change; if live switching is unsupported, use a safe stopped-owner handoff
+before replacement, never duplicate executors. Preserve Lead/independent-reviewer settings and later
+user overrides. Unavailable requested settings block dispatch rather than permit substitution.
+Writable work requires an explicitly isolated checkout and owned paths.
 
 The head never implements or merges; an assigned orchestrator delegates repairs and owns acceptance.
 Workers never merge. The assigned orchestrator reviews its own coordination work and delegated
@@ -180,9 +182,12 @@ reset. Monitoring is opt-in: editing guidance, adopting oversight or saving a ch
 wake. Preserve saved scope, cadence, timezone, notification settings and pause state.
 
 nohmi's existing preference overrides the personal quiet default: end each **scheduled oversight
-wake** with a user-visible report, even unchanged, in one or two plain-English sentences (about
-40 words maximum). Say what progressed and what is blocked or next; keep hashes and run IDs in the
-evidence record. This does not create a schedule or override an explicit user mute/quiet instruction.
+wake** with a user-visible report, even unchanged. Follow the current `nohmi-project-manager`
+consolidated scheduled-status contract: compact issue/worktree rows with phase and health, scope,
+concrete progress and next action, blocker/resolver and needs-Cooper. Retain these fields in the
+existing checkpoint; use actual worktree paths and mark stale evidence Unknown. Preserve required
+heartbeat formatting and keep hashes/run IDs in evidence. This does not create a schedule or
+override an explicit user mute/quiet instruction.
 Manual check-ins and worker callbacks need only material updates unless regular reports were requested.
 
 For substantive handoffs, report actual artifacts and limits, current stage, owner, remaining gate

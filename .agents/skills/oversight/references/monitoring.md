@@ -9,6 +9,13 @@ as a fallback without scheduling authority.
 
 ## Incremental checks
 
+Every oversight heartbeat first performs the oversight skill's
+[tracking and presentation check](../SKILL.md#every-oversight-heartbeat-tracking-and-presentation),
+even if all work sources are unchanged. Read live section name/membership/order and dedicated titles;
+repair authorized drift and read back into the existing setup record. Unavailable reads or uncertain
+writes remain gaps, never successful unchanged checks. This mandatory per-wake check is separate
+from the broader periodic reconciliation below and creates no scheduler or Linear status spam.
+
 Check every in-scope owner, including no-PR owners and executor errors. Prefer compact status cursors;
 compare returned identities with requested targets and fetch missing owners separately. Read changed
 turns or named evidence gaps. Check unchanged PR heads for edited feedback, replies, deletions and

@@ -114,6 +114,13 @@ and active/pause state before dispatch. A queued wake cannot resume paused work.
 scheduler context; quoted invocation text is not a heartbeat. Preserve saved cadence/timezone and
 notification intent. A configured monitor is not proof a scheduled pass has executed.
 
+Every oversight heartbeat performs the repository oversight skill’s
+[tracking and presentation check](../../.agents/skills/oversight/SKILL.md#every-oversight-heartbeat-tracking-and-presentation):
+live section name/membership/order, exact Lead title and short direct-issue implementation titles,
+bounded drift repair and readback into the existing setup record. Do this even when source revisions
+are unchanged; broader reconciliation deadlines do not defer it. Preserve protected/shared chats and
+record missing-source or failed-write gaps before any dependent dispatch.
+
 Use compact per-owner cursors and changed-source checks, including no-PR owners, errors, unchanged
 PR heads, edited feedback and resolution changes. Inspect pending action triggers even when sources
 are unchanged. Partial/failed reads retain source gaps; never report them as unchanged or green.

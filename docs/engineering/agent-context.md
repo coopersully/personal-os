@@ -7,6 +7,12 @@ four complete workspaces: Mail, Tasks, Calendar, and Finances. People and author
 the same domain-owned material. A workspace steward supplies expertise, maintains its ledger,
 asks questions that need human judgment, and produces an evidence-backed review.
 
+All nohmi skills and installed role/context entrypoints apply the
+[mandatory tracking lifecycle](work-context.md#mandatory-tracking-lifecycle) to assigned durable work.
+Oversight wakes also apply the [per-heartbeat setup check](../../.agents/skills/oversight/SKILL.md#every-oversight-heartbeat-tracking-and-presentation).
+Read these current repository owners even when an installed wrapper contains older examples; preserve
+role boundaries and explicit user limits. Read-only discussion alone creates no tracking work.
+
 Read the root `AGENTS.md`, then use the [development handbook](development-handbook.md) to
 select the next required step without replaying completed work. Use this map for relevant context. Read the relevant sections, not the entire archive.
 

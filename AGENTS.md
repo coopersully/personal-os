@@ -46,6 +46,9 @@ bounded prerequisite is part of the assigned outcome, not a reason to ask for me
 
 ## Linear Routing
 
+- All skills and installed nohmi role/context wrappers follow the canonical lifecycle in
+  `docs/engineering/work-context.md`; it covers implementation, documentation, prerequisite repair
+  and review fixes. Helper invocation does not exempt assigned durable work.
 - Implementation and durable repository changes MUST be tracked in Linear from intake through
   completion. Match/create the direct Nohmi issue before implementation when possible; reconcile
   already-started work immediately. Update material scope, progress, blockers, PR links and final

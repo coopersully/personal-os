@@ -5,6 +5,9 @@ description: Build and refine accessible, domain-owned nohmi React PWA experienc
 
 # nohmi frontend
 
+Apply the repository [tracking lifecycle](../../../docs/engineering/work-context.md#mandatory-tracking-lifecycle)
+to assigned durable work; pure read-only use of this skill creates no tracking work.
+
 Follow `docs/design/foundations.md`, `docs/design/governance.md`,
 `docs/design/system.md`, the relevant page specification in
 `docs/design/pages`, `apps/web/src/features/README.md`, and

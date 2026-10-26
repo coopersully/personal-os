@@ -24,8 +24,8 @@ This grant does not authorize new chats, unrelated/shared-chat changes, scheduli
    acceptance owners, dependencies, related existing scopes and chat identities/links. Preserve
    completed scopes and existing assignments; do not create duplicate tracking or reopen settled work.
 4. **Name and place relevant chats.** Use verified live identities to give dedicated outcome chats
-   clear outcome/role titles and place them in the section. Reuse existing chats. Preserve explicit
-   user titles; reference unrelated or shared chats and their owners without renaming or moving them.
+   the titles defined in the heartbeat contract below and place them in the section. Reuse existing
+   chats. Preserve explicit user titles; reference unrelated or shared chats and their owners without renaming or moving them.
    Titles and placement never prove checkout ownership or transfer it.
 5. **Verify and retain receipts.** Read back tool results for section membership, chat names and
    issue links/ownership. Save their identifiers, source receipts, any protected-chat exclusions and
@@ -59,6 +59,45 @@ heads and outcome orchestrators perform oversight, with no additional supervisor
 [autonomous development](../../../docs/engineering/autonomous-development.md) for assigned network
 roles; ordinary contributions keep their existing workflow. See
 [provenance and evaluation cases](references/provenance.md) for sources and limits.
+
+## Every oversight heartbeat: tracking and presentation
+
+On **every oversight heartbeat**, including an unchanged pass, verify the live epic section,
+the section name, all member identities/order and dedicated chat titles against the existing
+authoritative setup record.
+This check is not deferred to the full-reconciliation deadline. Use actual host state; cached titles,
+a successful earlier wake or unchanged PR head are insufficient. Manual fresh/resumed assignments
+still complete the kickoff gate above before dispatch.
+
+- A dedicated epic section is named exactly for the current epic name. Verify identity from its
+  recorded section ID, membership and direct parent issue before renaming a proven stale name;
+  preserve its ID. Preserve shared sections and explicit user-protected names as recorded exclusions.
+- The dedicated oversight/Lead title is exactly `👀 - <epic name>`.
+- A dedicated implementation chat uses `ISSUE-KEY — short purpose`, based on its current direct
+  Nohmi issue. Keep the purpose concise; omit repeated epic prefixes, SHAs and transient status.
+  Reuse the recorded epic section, with Lead first and persistent owners in dependency/delivery
+  order. Subagents have no sidebar rows. A portfolio head or shared chat is not renamed for one epic.
+- These defaults supersede older nohmi wrapper common-prefix/no-issue-key examples. Preserve an
+  explicit user-protected title or stronger current user instruction and record that exclusion.
+  Never rename, move or reorder unrelated/shared chats to make a section look consistent.
+- Check current direct issue coverage and owners under the
+  [tracking lifecycle](../../../docs/engineering/work-context.md#mandatory-tracking-lifecycle).
+  Repair only proven missing/changed setup within the assignment's bounded authority. Discover all
+  current section members before reordering; preserve unrelated members and their relative order.
+  Re-read each changed object, reconcile any uncertain write before retry, and update the same
+  authoritative setup entry after verified effects. Retain historical receipts and protected-chat
+  exclusions; do not create a second ledger, issue, section or chat for a resume.
+- For an unchanged pass, record checked-at and the live receipt in that setup entry; do not issue
+  redundant mutations or Linear comments. For unavailable/partial reads or failed writes, retain
+  last verified state plus the exact gap/next recovery condition. Do not report it as unchanged or
+  setup-complete. Block dependent new dispatch; preserve already-running authorized owners and
+  continue independent work. Reconcile the direct issue's setup reference before dispatch resumes.
+
+This is a procedure for an already authorized wake, not scheduling authority or proof of automation.
+Do not create/change schedules, unarchive chats, delete sections, move projects or take over owners.
+Preserve notification intent and the reporting rules below. Apply this repository contract when an
+installed nohmi head/orchestrator/context wrapper delegates here; stale wrapper examples do not
+replace current repository requirements. Installed-file adoption still needs its own verified receipt.
 
 ## Establish the baseline
 

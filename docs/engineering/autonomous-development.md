@@ -66,9 +66,11 @@ Unknown liveness blocks replacement writes rather than allowing two owners to ra
 
 ## Epic presentation
 
-Represent each admitted epic with one Codex sidebar section, reusing an existing section when its
+Represent each admitted epic with one Codex sidebar section named for the epic, preserving shared
+sections and explicit user-protected names. Reuse the existing section ID when its
 identity and membership match. The head records the epic-to-section mapping; its existing outcome
-lead maintains members. Use short common-prefix titles, Lead first, then persistent owners in
+lead maintains members. Use the repository oversight contract’s exact `👀 - <epic name>` Lead title and
+`ISSUE-KEY — short purpose` dedicated implementation titles, Lead first, then persistent owners in
 planned prerequisite/merge order. Order is a navigation aid, not an additional dependency gate.
 A portfolio head spanning epics stays outside their individual sections. Do not add another lead
 agent or create standalone workers just to fill the sidebar; subagents remain under their parent.
@@ -76,7 +78,9 @@ agent or create standalone workers just to fill the sidebar; subagents remain un
 Record section ID, member task/host IDs, exact titles, and intended display order in the outcome
 entry of the private registry, the authoritative setup record. Keep direct issue links/ownership and
 its registry reference reconciled under the kickoff gate; do not mirror raw host receipts in Linear. Confirm all live members before reordering and preserve unrelated members. Reconcile
-uncertain section creation before retrying; verify presentation after mutations. Respect explicit
+uncertain section creation before retrying; verify presentation after mutations. On every oversight
+heartbeat, verify live section name, membership/order and titles even when PRs and issues are unchanged, following
+the oversight skill’s per-wake check and saving readback in the same setup entry. Respect explicit
 user titles and existing ownership. Section maintenance does not authorize new tasks, schedulers,
 project moves, archival, or deletion. Apply the repository
 [mandatory kickoff/adoption gate](../../.agents/skills/oversight/SKILL.md#mandatory-kickoff-and-adoption-gate):

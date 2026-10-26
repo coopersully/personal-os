@@ -20,6 +20,8 @@ BASE = "b" * 40
 def ready_state(**overrides):
     value = {
         "pr": {
+            "number": 42,
+            "bodySha256": "d" * 64,
             "state": "OPEN",
             "isDraft": False,
             "headSha": HEAD,
@@ -106,6 +108,18 @@ def ready_state(**overrides):
             "squashAllowed": True,
         },
     }
+    scope = {key: key == "full" for key in "prose_only full repo terraform node database browser desktop containers dependencies".split()}
+    scope["changed_packages"] = []
+    identity = dict(headSha=HEAD, baseSha=BASE, number=42, repository="owner/repo", repositoryId=1,
+                    baseRef="main", mergeSha=HEAD, forceFull=False, runId=13, runAttempt=1,
+                    event="pull_request")
+    value["ci"]["sourceObservation"] = dict(identity, schemaVersion=1, stable=True, state="success",
+        bodySha256="d" * 64, workflowId=12,
+        receipt=dict(identity, schemaVersion=1, scope=scope, workflowSha=HEAD,
+                     workflowRef="owner/repo/.github/workflows/ci.yml@refs/pull/42/merge",
+                     workflowSha256="e" * 64, classifierSha256="f" * 64),
+        artifact=dict(id=1, digest="sha256:" + "e" * 64),
+        jobs=[dict(id=i + 1, name=name, conclusion="success") for i, name in enumerate(FULL_SOURCE_JOBS)])
     value["acceptance"] = acceptance_record()
     value["reviewedProductionPlan"] = acceptance_record()["productionPlan"]
     value["evidence"] = {name: [f"bundle.json#{name}"] for name in
@@ -120,6 +134,20 @@ def ready_state(**overrides):
 
 
 class EvaluateReadinessTest(unittest.TestCase):
+    def test_missing_stale_pending_or_foreign_source_observation_blocks_green_checks(self):
+        for change in (
+            lambda c: c.pop("sourceObservation"),
+            lambda c: c["sourceObservation"].update(state="pending"),
+            lambda c: c["sourceObservation"].update(number=99),
+            lambda c: c["sourceObservation"].update(bodySha256="c" * 64),
+            lambda c: c["sourceObservation"]["receipt"].update(runAttempt=2),
+            lambda c: c["sourceObservation"]["jobs"].pop(),
+            lambda c: c["sourceObservation"]["jobs"][0].update(conclusion="neutral"),
+        ):
+            state = ready_state()
+            change(state["ci"])
+            self.assertIn("source_observation_unverified", evaluate(state)["reasonCodes"])
+
     def test_exact_frozen_detailed_plan_preserves_all_readiness_gates(self):
         detailed = detailed_state()
         state = ready_state()

@@ -4,12 +4,20 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { createApiClient } from "@personal-os/api-client";
 import {
   accessTokens,
+  auditEvents,
   createDatabaseClient,
   type DatabaseClient,
+  knowledgeReceipts,
+  knowledgeRecords,
+  knowledgeRevisions,
   migrateDatabase,
   users,
 } from "@personal-os/database";
-import type { AccessScope, KnowledgeMutationInput } from "@personal-os/domain";
+import {
+  type AccessScope,
+  type KnowledgeMutationInput,
+  knowledgeReceiptSchema,
+} from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
 import { createApp } from "../../apps/api/src/app.js";
@@ -86,6 +94,90 @@ describe.sequential("persistent scoped knowledge", () => {
       }),
     });
   }
+  it.each([
+    "maximum fields",
+    "maximum serialized bytes",
+  ])("preserves %s losslessly when an agent fact becomes an inference", async (boundary) => {
+    const f = await fixture();
+    const apiApp = app();
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      token: f.token,
+      fetch: (url, init) => Promise.resolve(apiApp.request(String(url), init)),
+    });
+    const request = input({
+      content: {
+        kind: "fact",
+        value: {
+          subject: "s".repeat(2048),
+          predicate: "p".repeat(2048),
+          value: { type: "string", value: "v".repeat(2048) },
+        },
+      },
+      evidence: [],
+    });
+    if (request.content.kind !== "fact") throw new Error("Expected fact fixture");
+    if (boundary === "maximum serialized bytes") {
+      request.content.value.value = { type: "string", value: '"'.repeat(2048) };
+      request.content.value.subject = "";
+      const overhead = new TextEncoder().encode(JSON.stringify(request.content.value)).byteLength;
+      request.content.value.subject = "s".repeat(8192 - overhead);
+      expect(new TextEncoder().encode(JSON.stringify(request.content.value))).toHaveLength(8192);
+      const oversized = structuredClone(request);
+      if (oversized.content.kind !== "fact") throw new Error("Expected fact fixture");
+      oversized.content.value.subject += "s";
+      await expect(api.saveKnowledge(oversized)).rejects.toMatchObject({ status: 400 });
+    }
+    const expectedProposition = JSON.stringify(request.content);
+    expect(expectedProposition.length).toBeGreaterThan(2048);
+    const server = createPersonalOsMcpServer({ api, scopes: f.agent.scopes, timeZone: "UTC" });
+    const client = new Client({ name: "knowledge-boundary", version: "1" });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(st), client.connect(ct)]);
+    try {
+      const saved = await client.callTool({ name: "save_knowledge", arguments: request });
+      expect(saved.isError, JSON.stringify(saved)).not.toBe(true);
+      const receipt = knowledgeReceiptSchema.parse(
+        (saved.structuredContent as { result: unknown })?.result,
+      );
+      expect(receipt.record).toMatchObject({
+        content: { kind: "inference", value: { proposition: expectedProposition } },
+        status: "proposed",
+      });
+      if (receipt.record.content.kind !== "inference") throw new Error("Expected inference");
+      expect(JSON.parse(receipt.record.content.value.proposition)).toEqual(request.content);
+      const read = await client.callTool({
+        name: "get_knowledge",
+        arguments: { id: receipt.record.id, purpose: "planning" },
+      });
+      expect(read.isError, JSON.stringify(read)).not.toBe(true);
+      expect((read.structuredContent as { result: unknown })?.result).toEqual(receipt.record);
+      // A fresh API composition and an exact retry must recover the same persisted result.
+      const restarted = createApiClient({
+        baseUrl: "https://api.example.com",
+        token: f.token,
+        fetch: (url, init) => Promise.resolve(app().request(String(url), init)),
+      });
+      expect(await restarted.saveKnowledge(request)).toEqual(receipt);
+      expect(await restarted.getKnowledge({ id: receipt.record.id, purpose: "planning" })).toEqual(
+        receipt.record,
+      );
+      expect(await database.db.select().from(knowledgeRecords)).toHaveLength(1);
+      expect(await database.db.select().from(knowledgeReceipts)).toHaveLength(1);
+      expect(
+        await database.db
+          .select()
+          .from(auditEvents)
+          .where(eq(auditEvents.action, "knowledge.created")),
+      ).toHaveLength(1);
+      const revisions = await database.db.select().from(knowledgeRevisions);
+      expect(revisions).toHaveLength(1);
+      expect(revisions[0]?.snapshot).toEqual(receipt.record);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  }, 20_000);
   it("saves and reads persisted knowledge through normal MCP discovery, client and registered API", async () => {
     const f = await fixture();
     const apiApp = app();

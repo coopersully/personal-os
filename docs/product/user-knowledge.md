@@ -235,6 +235,13 @@ category disclosure controls exist. An agent statement retains original wording 
 session/message references; an agent interpretation remains proposed inference. A knowledge receipt
 and redacted audit event commit together, without changing workspace action policy.
 
+Incoming typed values are limited to 8 KiB of serialized UTF-8 JSON, with ordinary text fields
+limited to 2,048 characters. Inference propositions allow 8,256 characters so automatic agent
+interpretations can preserve the complete accepted typed content and its JSON wrapper without
+truncation. The 8 KiB request-value limit still applies to directly submitted inferences; generated
+inference envelopes may exceed that input limit. Reads and exact retries retain the persisted
+proposition verbatim.
+
 This is a save/read foundation, not the complete target system: correction, deletion controls,
 promotion, conflict resolution, search, context packs, source migration, and About you remain
 unimplemented. Goal revision evidence is rejected until Goals exposes a revision contract.

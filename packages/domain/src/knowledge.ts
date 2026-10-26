@@ -3,6 +3,14 @@ import { accessScopeSchema } from "./auth.js";
 import { idSchema, isoDateTimeSchema } from "./common.js";
 
 const text = z.string().trim().min(1).max(2048);
+const knowledgeValueMaxBytes = 8192;
+// Inferred propositions preserve JSON.stringify({ kind, value }) losslessly. The
+// fixed kind/value wrapper is under 64 ASCII bytes for every supported kind.
+const inferenceProposition = z
+  .string()
+  .trim()
+  .min(1)
+  .max(knowledgeValueMaxBytes + 64);
 export const knowledgePurposeSchema = z.enum([
   "setup",
   "bookkeeping",
@@ -103,7 +111,7 @@ export const knowledgeContentSchema = z.discriminatedUnion("kind", [
       value: z
         .object({
           subject: text,
-          proposition: text,
+          proposition: inferenceProposition,
           uncertainty: text,
           evidenceIds: z.array(idSchema).max(20),
           reviewCondition: text,
@@ -161,7 +169,10 @@ export const knowledgeMutationInputSchema = z
   })
   .strict()
   .superRefine((input, context) => {
-    if (new TextEncoder().encode(JSON.stringify(input.content.value)).byteLength > 8192)
+    if (
+      new TextEncoder().encode(JSON.stringify(input.content.value)).byteLength >
+      knowledgeValueMaxBytes
+    )
       context.addIssue({
         code: "custom",
         path: ["content", "value"],

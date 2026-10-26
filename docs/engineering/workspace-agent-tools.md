@@ -14889,7 +14889,7 @@ Save typed account knowledge with original evidence and a stable mutation UUID. 
                 "proposition": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 2048
+                  "maxLength": 8256
                 },
                 "uncertainty": {
                   "type": "string",

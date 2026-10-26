@@ -57,7 +57,7 @@ export function AutomationRegistration({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button>Register automation</Button>
+        <Button className="min-h-11">Register automation</Button>
       </DialogTrigger>
       <DialogContent data-finance-dialog data-finance-size="default">
         <DialogHeader>

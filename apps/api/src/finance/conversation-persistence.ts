@@ -24,6 +24,7 @@ import {
   financeConversationSendInputSchema,
   financeConversationSequenceSchema,
   idSchema,
+  observeAutomationHostScheduleHealth,
   projectFinanceConversationReadiness,
 } from "@personal-os/domain";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
@@ -135,16 +136,67 @@ export function createFinanceConversationService({
           scheduleId ? eq(automationHostSchedules.id, scheduleId) : undefined,
         ),
       )
-      .orderBy(desc(automationHostSchedules.updatedAt));
+      .orderBy(desc(automationHostSchedules.updatedAt), desc(automationHostSchedules.id));
     if (scheduleId && !schedules.length)
       throw new AppError("not_found", "The Finance host registration was not found.");
-    let fallback: FinanceConversationReadiness | null = null;
+    async function withHost(
+      result: FinanceConversationReadiness,
+      selected: (typeof schedules)[number],
+    ) {
+      const [latestRun] = await tx
+        .select({
+          id: workspaceMaintenanceRuns.id,
+          status: workspaceMaintenanceRuns.status,
+          updatedAt: workspaceMaintenanceRuns.updatedAt,
+          lastSafeError: workspaceMaintenanceRuns.lastSafeError,
+        })
+        .from(workspaceMaintenanceRuns)
+        .where(
+          and(
+            eq(workspaceMaintenanceRuns.userId, userId),
+            eq(workspaceMaintenanceRuns.domain, "finances"),
+            eq(workspaceMaintenanceRuns.automationScheduleId, selected.id),
+            eq(
+              workspaceMaintenanceRuns.authorizationConnectionId,
+              selected.authorizationConnectionId,
+            ),
+          ),
+        )
+        .orderBy(desc(workspaceMaintenanceRuns.createdAt), desc(workspaceMaintenanceRuns.id))
+        .limit(1);
+      return {
+        ...result,
+        host: {
+          scheduleId: selected.id,
+          connectionId: selected.authorizationConnectionId,
+          label: selected.schedule.label,
+          trigger: selected.schedule.trigger,
+          nextExpectedAt: observeAutomationHostScheduleHealth(selected.schedule, now())
+            .nextExpectedAt,
+          latestRun: latestRun
+            ? {
+                id: latestRun.id,
+                status: latestRun.status,
+                updatedAt: latestRun.updatedAt.toISOString(),
+                failureMessage: latestRun.lastSafeError?.message ?? null,
+              }
+            : null,
+        },
+      };
+    }
+    let fallback: {
+      result: FinanceConversationReadiness;
+      schedule: (typeof schedules)[number];
+    } | null = null;
     for (const candidate of schedules) {
       const { schedule, liveGrant, tokens } = await liveSchedule(tx, userId, candidate.id);
       let executionAuthorized = false;
       for (const token of tokens) {
         if (!token.scopes.includes("finances:maintain")) continue;
         try {
+          // liveSchedule already requires an unrevoked bearer or its matching live
+          // refresh grant. Project standing connection authority, then check current
+          // scopes and bypass; incoming requests still enforce bearer expiry.
           await requireWorkspaceExecution(
             tx,
             {
@@ -155,7 +207,6 @@ export function createFinanceConversationService({
               scopes: new Set(token.scopes),
             },
             "finances",
-            now(),
           );
           executionAuthorized = true;
           break;
@@ -213,11 +264,11 @@ export function createFinanceConversationService({
                 ? "expired"
                 : "unverified",
       });
-      if (result.canSend) return result;
-      fallback ??= result;
+      if (result.canSend) return withHost(result, candidate);
+      fallback ??= { result, schedule: candidate };
     }
     return (
-      fallback ??
+      (fallback ? await withHost(fallback.result, fallback.schedule) : null) ??
       projectFinanceConversationReadiness({
         registrationState: "missing",
         executionAuthorized: false,

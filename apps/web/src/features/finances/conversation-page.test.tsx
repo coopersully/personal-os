@@ -21,7 +21,12 @@ it.each([
   api.getFinanceConversationReadiness
     .mockResolvedValueOnce({ canSend: false, reason: "registration_paused" })
     .mockResolvedValue({ canSend: false, reason: "connection_disconnected" });
-  api.getFinanceConversationHostReadiness.mockResolvedValue({ messageCapability: "unverified" });
+  api.getFinanceConversationHostReadiness.mockResolvedValue({
+    canSend: false,
+    reason: "connection_disconnected",
+    recovery: "reconnect",
+    messageCapability: "unverified",
+  });
   api.getFinanceContextualQuestion.mockResolvedValue({ state: "unavailable" });
   api.getFinanceConversationMessageContext.mockResolvedValue({
     targetMessageId: "m",
@@ -1137,4 +1142,58 @@ it.each([
   if (kind === "unchanged")
     expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
   expect(api.sendFinanceConversationMessage).toHaveBeenCalledTimes(1);
+});
+
+it("recovers effective readiness through Automations while retaining the exact draft and selected host", async () => {
+  const host = {
+    scheduleId: "schedule-a",
+    connectionId: "connection-a",
+    label: "Morning and evening Claude",
+    trigger: { type: "scheduled", localTimes: ["08:00", "20:00"], timeZone: "America/New_York" },
+    nextExpectedAt: "2026-10-27T12:00:00Z",
+    latestRun: { id: "run-a", status: "blocked", updatedAt: "2026-10-26T12:00:00Z" },
+  };
+  const blocked = {
+    canSend: false,
+    reason: "challenge_required",
+    recovery: "verify_message_protocol",
+    messageCapability: "unverified",
+    host,
+  };
+  api.getFinanceConversationReadiness.mockResolvedValue(blocked);
+  const client = createAppQueryClient({ queries: { retry: false } });
+  client.setQueryData(["me"], { id: "owner" });
+  const user = userEvent.setup();
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={["/finances/chat"]}>
+        <Routes>
+          <Route path="/finances/chat" element={<FinanceConversationPage ownerId="owner" />} />
+          <Route path="/finances/automations" element={<FinanceAutomationsPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  await user.type(await screen.findByLabelText("Message"), "Keep my question for the next run");
+  expect(screen.getByText("Chat host: Morning and evening Claude")).toBeVisible();
+  expect(screen.getByText(/Daily at 08:00 and 20:00/)).toBeVisible();
+  expect(screen.getByText(/Next expected start:/)).toHaveTextContent("EDT");
+  expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+  await user.click(screen.getByRole("link", { name: "Verify message access" }));
+  const ready = {
+    ...blocked,
+    canSend: true,
+    reason: "ready",
+    recovery: "none",
+    messageCapability: "verified",
+  };
+  api.getFinanceConversationReadiness.mockResolvedValue(ready);
+  await user.click(await screen.findByRole("button", { name: "Refresh readiness" }));
+  expect(await screen.findByText(/Chat is available/)).toBeVisible();
+  await user.click(screen.getByRole("link", { name: "Return to conversation" }));
+  expect(await screen.findByLabelText("Message")).toHaveValue("Keep my question for the next run");
+  expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
+  expect(screen.getByText(/Messages wait for the next eligible automation run/)).toBeVisible();
+  expect(api.sendFinanceConversationMessage).not.toHaveBeenCalled();
+  expect(screen.getByText("A retained question")).toBeVisible();
 });

@@ -91,12 +91,15 @@ beforeEach(() => {
 });
 it("separates server schedule health, observed evidence, and aggregate Chat readiness", async () => {
   api.getFinanceConversationReadiness.mockResolvedValue({ ...readiness, canSend: true });
-  open();
+  const user = open();
   expect(await screen.findByText(/Chat is available/)).toBeInTheDocument();
   expect(await screen.findByText(/missed its expected check-in/)).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Review host setup" }));
   expect(screen.getByText(/Grace: 60 minutes/)).toBeInTheDocument();
   expect(screen.getByText(/Successful maintenance is not established/)).toBeInTheDocument();
-  expect(screen.getByText(/Message access for this host: unverified/)).toBeInTheDocument();
+  expect(
+    screen.getByText(/Message access for this host: unverified/, { selector: "p" }),
+  ).toBeInTheDocument();
 });
 it("does not invent an event countdown", async () => {
   api.listAutomationHostSchedules.mockResolvedValue([status("active", true)]);
@@ -195,7 +198,8 @@ it.each([
 });
 it("requires removal confirmation and fences the original state/version", async () => {
   const user = open();
-  await user.click(await screen.findByRole("button", { name: "Remove registration" }));
+  await user.click(await screen.findByRole("button", { name: "Review host setup" }));
+  await user.click(screen.getByRole("button", { name: "Remove registration" }));
   expect(api.revokeAutomationHostSchedule).not.toHaveBeenCalled();
   await user.click(screen.getByRole("button", { name: "Confirm removal" }));
   await waitFor(() =>
@@ -329,6 +333,7 @@ it("keeps saved instructions neutral when the actual host is already verified", 
   });
   const user = open();
   await screen.findByText(/Message access for this host: verified/);
+  await user.click(screen.getByRole("button", { name: "Review host setup" }));
   await user.click(screen.getByRole("button", { name: "Instructions" }));
   expect(screen.getByRole("dialog", { name: "Finance host instructions" })).toBeInTheDocument();
   expect(screen.getByText(/Installation status is unknown/)).toBeInTheDocument();
@@ -370,7 +375,8 @@ it("refreshes actual onboarding projection only after a confirmed host mutation"
   api.revokeAutomationHostSchedule.mockRejectedValueOnce(new Error("Not removed"));
   const user = open(<ManualControlsReadiness />);
   await screen.findByText("Manual capture hidden");
-  await user.click(await screen.findByRole("button", { name: "Remove registration" }));
+  await user.click(await screen.findByRole("button", { name: "Review host setup" }));
+  await user.click(screen.getByRole("button", { name: "Remove registration" }));
   await user.click(screen.getByRole("button", { name: "Confirm removal" }));
   await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Not removed", { id: "notice" }));
   expect(api.getFinanceOnboarding).toHaveBeenCalledTimes(1);
@@ -392,7 +398,8 @@ it("shows an honest empty registration list", async () => {
 it("cancels pending setup with the original version and closes after confirmation", async () => {
   api.listAutomationHostSchedules.mockResolvedValue([status("setup_pending")]);
   const user = open();
-  await user.click(await screen.findByRole("button", { name: "Cancel setup" }));
+  await user.click(await screen.findByRole("button", { name: "Finish setup" }));
+  await user.click(screen.getByRole("button", { name: "Cancel setup" }));
   await user.click(screen.getByRole("button", { name: "Confirm cancellation" }));
   await waitFor(() =>
     expect(api.cancelAutomationHostSchedule).toHaveBeenCalledWith("schedule-a", {
@@ -400,7 +407,9 @@ it("cancels pending setup with the original version and closes after confirmatio
       expectedState: "setup_pending",
     }),
   );
-  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog", { name: "Cancel this setup?" })).not.toBeInTheDocument(),
+  );
 });
 it("saves a renamed paused registration and preserves revision fencing", async () => {
   api.listAutomationHostSchedules.mockResolvedValue([status("paused")]);
@@ -421,7 +430,8 @@ it("uses safe fallback feedback for a non-Error failure and retains cancellation
   api.listAutomationHostSchedules.mockResolvedValue([status("setup_pending")]);
   api.cancelAutomationHostSchedule.mockRejectedValue({ secret: "must not render" });
   const user = open();
-  await user.click(await screen.findByRole("button", { name: "Cancel setup" }));
+  await user.click(await screen.findByRole("button", { name: "Finish setup" }));
+  await user.click(screen.getByRole("button", { name: "Cancel setup" }));
   await user.click(screen.getByRole("button", { name: "Confirm cancellation" }));
   await waitFor(() =>
     expect(toast.error).toHaveBeenCalledWith(
@@ -458,11 +468,12 @@ it("reports missing observations and disables verification for an unavailable co
       },
     },
   ]);
-  open();
+  const user = open();
   expect(await screen.findByText(/original host connection is unavailable/)).toBeInTheDocument();
   expect(screen.getByText(/Next expected start: Not reported/)).toBeInTheDocument();
-  expect(screen.getByText(/Host observation: Not reported/)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Verify message access" })).toBeDisabled();
+  await user.click(screen.getByRole("button", { name: "Review host setup" }));
+  expect(screen.getByText(/Host observation: Not reported/)).toBeInTheDocument();
   expect(screen.queryByText(/Grace:/)).not.toBeInTheDocument();
 });
 it.each([
@@ -481,6 +492,11 @@ it.each([
 
 it("routes an unavailable original connection to reconnection without offering verification", async () => {
   api.listAutomationHostSchedules.mockResolvedValue([{ ...status(), connectionAvailable: false }]);
+  api.getFinanceConversationHostReadiness.mockResolvedValue({
+    ...readiness,
+    reason: "connection_disconnected",
+    recovery: "reconnect",
+  });
   open();
   const reconnect = await screen.findByRole("link", { name: "Reconnect host" });
   expect(reconnect).toHaveAttribute("href", "/settings?section=agent-connections");
@@ -499,6 +515,11 @@ it.each([
     reason: "connection_disconnected",
   });
   api.listAutomationHostSchedules.mockResolvedValue([{ ...status(), connectionAvailable: false }]);
+  api.getFinanceConversationHostReadiness.mockResolvedValue({
+    ...readiness,
+    reason: "connection_disconnected",
+    recovery: "reconnect",
+  });
   open(
     undefined,
     `/finances/automations${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`,
@@ -649,10 +670,10 @@ it("shows scheduled cadence and delayed continuation without an API token form",
   const user = open();
   expect(await screen.findByText(/Daily at 08:00 and 20:00/)).toBeInTheDocument();
   expect(screen.getByText(/Projected next start/)).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Review host setup" }));
   expect(
     screen.getByText(/Saved answers wait for the next scheduled invocation/),
   ).toBeInTheDocument();
-  await user.click(screen.getByRole("button", { name: "Review host setup" }));
   expect(screen.getByRole("dialog", { name: "Finance host" })).toBeInTheDocument();
   expect(screen.queryByLabelText("Routine API trigger token")).not.toBeInTheDocument();
 });
@@ -695,10 +716,13 @@ it("formats projected starts and grace deadlines in the declared zone instead of
         },
       },
     ]);
-    open();
+    const user = open();
     const projected = await screen.findByText(/Projected next start/);
     expect(projected).toHaveTextContent("8:00:00 AM EDT (America/New_York)");
-    expect(projected).toHaveTextContent("8:15:00 AM EDT (America/New_York)");
+    await user.click(screen.getByRole("button", { name: "Review host setup" }));
+    expect(screen.getByText(/Overdue threshold/)).toHaveTextContent(
+      "8:15:00 AM EDT (America/New_York)",
+    );
     expect(projected).not.toHaveTextContent("5:00:00 AM");
   } finally {
     browser.mockRestore();
@@ -729,4 +753,48 @@ it("retains event registration with a chosen maximum latency", async () => {
       }),
     ),
   );
+});
+
+it("leads with blocked effective readiness when messaging alone is verified", async () => {
+  const blocked = {
+    ...readiness,
+    reason: "execution_not_authorized",
+    recovery: "authorize_execution",
+    messageCapability: "verified",
+  };
+  api.getFinanceConversationReadiness.mockResolvedValue(blocked);
+  api.getFinanceConversationHostReadiness.mockResolvedValue(blocked);
+  open();
+  const host = await screen.findByRole("region", { name: "Finance host" });
+  expect(await screen.findByText("Chat sending is locked.")).toBeInTheDocument();
+  expect(host).toHaveTextContent("Not ready for Chat");
+  expect(host.querySelector('a[href*="workspace-access"]')).toHaveTextContent(
+    "Review host permissions",
+  );
+  expect(host).not.toHaveTextContent("Ready for Chat");
+});
+
+it("refreshes both projections without replacing proof and removes stale success when the reads fail", async () => {
+  const ready = {
+    ...readiness,
+    canSend: true,
+    reason: "ready",
+    recovery: "none",
+    messageCapability: "verified",
+  };
+  api.getFinanceConversationReadiness.mockResolvedValue(ready);
+  api.getFinanceConversationHostReadiness.mockResolvedValue(ready);
+  const user = open();
+  await screen.findByText("Ready for Chat");
+  api.getFinanceConversationReadiness.mockRejectedValue(new Error("Readiness offline"));
+  api.getFinanceConversationHostReadiness.mockRejectedValue(new Error("Readiness offline"));
+  await user.click(screen.getByRole("button", { name: "Refresh readiness" }));
+  expect(await screen.findByText("Readiness unavailable")).toBeInTheDocument();
+  expect(screen.queryByText("Ready for Chat")).not.toBeInTheDocument();
+  expect(screen.queryByText(/Chat is available/)).not.toBeInTheDocument();
+  expect(api.getFinanceConversationReadiness).toHaveBeenCalledTimes(2);
+  expect(api.getFinanceConversationHostReadiness).toHaveBeenCalledTimes(2);
+  expect(api.issueFinanceConversationChallenge).not.toHaveBeenCalled();
+  expect(api.exchangeFinanceConversationChallenge).not.toHaveBeenCalled();
+  expect(screen.queryByText("Readiness offline")).not.toBeInTheDocument();
 });

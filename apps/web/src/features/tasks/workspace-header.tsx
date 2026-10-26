@@ -120,7 +120,7 @@ export function TasksAppBarControls({ search, timeZone }: { search: ReactNode; t
             <Button
               variant="ghost"
               size="sm"
-              className="tasks-header-view"
+              className="tasks-header-view workspace-app-bar__title"
               aria-label={`Tasks view: ${label}`}
               title={label}
             >

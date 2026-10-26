@@ -1,6 +1,7 @@
 import { settingsPath } from "@/features/settings/settings-routes";
 import {
   DayTimeline,
+  formatTimelineClock,
   localDateTimeAt,
   positionTimelineEvents,
   type TimelineEventLayout,
@@ -2033,6 +2034,7 @@ function WorkspaceAppBarForRoute({
   ) : null;
 
   return (
+    <>
     <WorkspaceAppBar
       actions={
         <>
@@ -2060,15 +2062,6 @@ function WorkspaceAppBarForRoute({
       primaryActions={
         isReviewQueue ? null : pathname === "/reminders" ? (
           <RemindersCreateButton onCreate={() => setEditor({ kind: "reminder" })} />
-        ) : workspace === "tasks" ? (
-          <TasksCreateButton
-            onCreate={(placement) =>
-              setEditor({ kind: "task", ...(placement ? { placement } : {}) })
-            }
-            onCreateReminder={() => setEditor({ kind: "reminder" })}
-          />
-        ) : workspace === "today" ? (
-          <CreateMenu setEditor={setEditor} />
         ) : null
       }
       attention={
@@ -2089,6 +2082,14 @@ function WorkspaceAppBarForRoute({
       }
       workspace={workspace}
     />
+    {workspace === "tasks" && pathname !== "/reminders" && !isReviewQueue ? (
+      <TasksCreateButton
+        floating
+        onCreate={(placement) => setEditor({ kind: "task", ...(placement ? { placement } : {}) })}
+        onCreateReminder={() => setEditor({ kind: "reminder" })}
+      />
+    ) : null}
+    </>
   );
 }
 
@@ -2318,30 +2319,6 @@ function WorkspaceMenuItem({
   );
 }
 
-function CreateMenu({ setEditor }: { setEditor: (editor: Editor) => void }) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <ShadcnButton aria-label="Add" size="sm">
-          <PlusIcon aria-hidden="true" data-icon="inline-start" /> <span>Add</span>
-        </ShadcnButton>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuGroup>
-          <DropdownMenuItem onSelect={() => setEditor({ kind: "task" })}>
-            <ListChecksIcon aria-hidden="true" /> Task
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setEditor({ kind: "reminder" })}>
-            <ListTodoIcon aria-hidden="true" /> Reminder
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setEditor({ kind: "event" })}>
-            <CalendarIcon aria-hidden="true" /> Event
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
 
 function TodayPage({
   brief,
@@ -2871,8 +2848,8 @@ function TodayWeatherTopbar({
       >
         <ShadcnButton
           aria-label={`Weather location: ${weather.location.shortLabel}`}
-          className="workspace-app-bar__weather-location"
-          variant="ghost"
+          className="workspace-app-bar__weather-trigger workspace-app-bar__weather-location"
+          variant="secondary"
         >
           <MapPinIcon aria-hidden="true" />
           <span>{weather.location.shortLabel}</span>
@@ -3321,7 +3298,7 @@ function CalendarPage({
         <QueryFeedback query={connectorAccounts} title="Couldn’t load calendar accounts." />
         <MutationFeedback feedback={moveEvent.feedback} />
         {events.isPending ? (
-          <PageLoading workspace="calendar" />
+          <PageLoading workspace="calendar" calendarView={view} />
         ) : events.isError && !events.data ? (
           <InlineError
             error={events.error}
@@ -6077,11 +6054,10 @@ function MailSyncButton({
               onSelect?.();
               sync.mutate();
             }}
-            size="sm"
+            size="icon-sm"
             variant={variant}
           >
             <RefreshIcon aria-hidden="true" className={sync.isPending ? "spin" : ""} />
-            <span>{sync.isPending ? "Syncing…" : failedAccountIds.length ? "Retry" : "Sync"}</span>
           </ShadcnButton>
         </TooltipTrigger>
         <TooltipContent>
@@ -9955,9 +9931,7 @@ export function dateTimeLocalToIso(value: string, timeZone: string): string {
   ).toISOString();
 }
 function formatTime(value: string, timeZone: string) {
-  return new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit", timeZone }).format(
-    new Date(value),
-  );
+  return formatTimelineClock(value, timeZone);
 }
 
 export function formatTimelineTimeRange(event: CalendarEvent, timeZone: string) {

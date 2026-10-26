@@ -25,8 +25,8 @@ export function MailAppBarControls({
       {search}
       {accounts}
       <WorkspaceHeaderOptions>
-        {sync}
         <MailLayoutControl />
+        {sync}
       </WorkspaceHeaderOptions>
     </div>
   );
@@ -48,7 +48,12 @@ export function MailAppBarTitle() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" aria-label={`Mail view: ${label}`}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="workspace-app-bar__title"
+          aria-label={`Mail view: ${label}`}
+        >
           {label}
         </Button>
       </DropdownMenuTrigger>

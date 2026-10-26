@@ -198,7 +198,9 @@ shadcn Calendar, and direct date fields only for Custom. Keep the popover 18rem 
 Keep only the calendar's labelled month navigation; do not add a second date-summary
 or previous/next-period row. Range bands extend from the center of the first rounded
 endpoint to the center of the last, continuing underneath their inner rounded edges.
-Page-title sentences share one font size, line height and baseline, with one normal
+Page-title sentences start-align within the app frame on desktop and mobile. Utilities
+and action controls remain end-aligned in their own slot. They share one font size,
+line height and baseline, with one normal
 word space between each selectable phrase. Only the static page title is semibold;
 scope phrases remain normal weight and muted.
 

@@ -9,10 +9,11 @@ import { type ReactNode, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ActionButton as Button } from "@/components/action-button";
 import { ContentSkeleton } from "@/components/content-skeleton";
-import { FilterTrigger, SortOptionIcon, SortTrigger } from "@/components/data-view-controls";
+import { SortOptionIcon, SortTrigger } from "@/components/data-view-controls";
 import { DateInput } from "@/components/date-input";
 import {
   EyeIcon,
+  FilterIcon,
   GridIcon,
   LayersIcon,
   PlusIcon,
@@ -44,6 +45,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
+import { WorkspaceHeaderOptions } from "@/components/workspace-header-options";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
 import { formatMoney } from "./format.js";
@@ -77,6 +80,7 @@ export function FinanceTransactionControls({
   onSort?: (value: string) => void;
 }) {
   const [params, setParams] = useSearchParams();
+  const compactHeader = useMediaQuery("(max-width: 767px)");
   const workspace = useFinanceWorkspaceReadiness();
   const canCreate =
     workspace.manualCreationVisible === true &&
@@ -97,56 +101,63 @@ export function FinanceTransactionControls({
   const savePresentation = useSaveFinancePresentation();
   const view = presentation.get("view") === "cards" ? "cards" : "table";
   const ViewIcon = view === "cards" ? GridIcon : ReceiptIcon;
+  const viewControl = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={`Transaction view: ${view === "cards" ? "Cards" : "Table"}`}
+        >
+          <ViewIcon />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        <DropdownMenuRadioGroup
+          value={view}
+          onValueChange={(value) => {
+            savePresentation.mutate({
+              financeTransactionView:
+                value as FinancesWorkspacePreferences["financeTransactionView"],
+            });
+            setParams((current) => {
+              const next = new URLSearchParams(current);
+              next.set("view", value);
+              return next;
+            });
+          }}
+        >
+          <DropdownMenuRadioItem value="table">
+            <ReceiptIcon />
+            Table
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="cards">
+            <GridIcon />
+            Cards
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
   return (
     <>
-      <WorkspaceHeaderControls label="Transaction view" placement="leading">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Transaction view: ${view === "cards" ? "Cards" : "Table"}`}
-            >
-              <ViewIcon />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuRadioGroup
-              value={view}
-              onValueChange={(value) => {
-                savePresentation.mutate({
-                  financeTransactionView:
-                    value as FinancesWorkspacePreferences["financeTransactionView"],
-                });
-                setParams((current) => {
-                  const next = new URLSearchParams(current);
-                  next.set("view", value);
-                  return next;
-                });
-              }}
-            >
-              <DropdownMenuRadioItem value="table">
-                <ReceiptIcon />
-                Table
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="cards">
-                <GridIcon />
-                Cards
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </WorkspaceHeaderControls>
+      {!compactHeader ? (
+        <WorkspaceHeaderControls label="Transaction view" placement="leading">
+          {viewControl}
+        </WorkspaceHeaderControls>
+      ) : null}
       <WorkspaceHeaderControls label="Transaction controls">
         <ResponsiveDialog open={filtersOpen} onOpenChange={setFiltersOpen}>
           <ResponsiveDialogTrigger asChild>
-            <FilterTrigger
-              compact
-              label="Filters"
-              active={activeFilters > 0}
-              count={activeFilters}
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              badgeCount={activeFilters}
+              data-filter-active={activeFilters > 0}
               aria-label={activeFilters ? `Filters (${activeFilters} active)` : "Filters"}
-            />
+            >
+              <FilterIcon aria-hidden="true" />
+            </Button>
           </ResponsiveDialogTrigger>
           <ResponsiveDialogContent data-finance-dialog data-finance-size="default">
             <ResponsiveDialogHeader>
@@ -299,66 +310,69 @@ export function FinanceTransactionControls({
             </form>
           </ResponsiveDialogContent>
         </ResponsiveDialog>
-        {onSort ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <SortTrigger compact label="Sort transactions" aria-label="Sort transactions" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuRadioGroup value={sort ?? "date:desc"} onValueChange={onSort}>
-                {(
-                  [
-                    ["date:desc", "Newest first"],
-                    ["date:asc", "Oldest first"],
-                    ["amount:desc", "Highest amount"],
-                    ["amount:asc", "Lowest amount"],
-                    ["merchant:asc", "Merchant A–Z"],
-                    ["merchant:desc", "Merchant Z–A"],
-                  ] as const
-                ).map(([value, label]) => (
-                  <DropdownMenuRadioItem key={value} value={value}>
-                    <SortOptionIcon value={value} />
-                    {label}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
-        {view === "cards" ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button size="icon" variant="ghost" aria-label="Display transactions">
-                <EyeIcon />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Group by</DropdownMenuLabel>
-              <DropdownMenuRadioGroup
-                value={presentation.get("group") ?? "none"}
-                onValueChange={(value) => {
-                  savePresentation.mutate({
-                    financeTransactionGroup:
-                      value as FinancesWorkspacePreferences["financeTransactionGroup"],
-                  });
-                  setParams((current) => {
-                    const next = new URLSearchParams(current);
-                    next.set("group", value);
-                    return next;
-                  });
-                }}
-              >
-                {transactionGroupingOptions.map(([value, label]) => (
-                  <DropdownMenuRadioItem key={value} value={value}>
-                    <LayersIcon />
-                    {label}
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
-        {exportAction}
+        <WorkspaceHeaderOptions>
+          {compactHeader ? viewControl : null}
+          {onSort ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <SortTrigger compact label="Sort transactions" aria-label="Sort transactions" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuRadioGroup value={sort ?? "date:desc"} onValueChange={onSort}>
+                  {(
+                    [
+                      ["date:desc", "Newest first"],
+                      ["date:asc", "Oldest first"],
+                      ["amount:desc", "Highest amount"],
+                      ["amount:asc", "Lowest amount"],
+                      ["merchant:asc", "Merchant A–Z"],
+                      ["merchant:desc", "Merchant Z–A"],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <DropdownMenuRadioItem key={value} value={value}>
+                      <SortOptionIcon value={value} />
+                      {label}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+          {view === "cards" ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="icon" variant="ghost" aria-label="Display transactions">
+                  <EyeIcon />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Group by</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={presentation.get("group") ?? "none"}
+                  onValueChange={(value) => {
+                    savePresentation.mutate({
+                      financeTransactionGroup:
+                        value as FinancesWorkspacePreferences["financeTransactionGroup"],
+                    });
+                    setParams((current) => {
+                      const next = new URLSearchParams(current);
+                      next.set("group", value);
+                      return next;
+                    });
+                  }}
+                >
+                  {transactionGroupingOptions.map(([value, label]) => (
+                    <DropdownMenuRadioItem key={value} value={value}>
+                      <LayersIcon />
+                      {label}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+          {exportAction}
+        </WorkspaceHeaderOptions>
         {canCreate ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

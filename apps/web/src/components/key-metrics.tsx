@@ -77,7 +77,7 @@ export function KeyMetrics({
   return (
     <Carousel
       aria-label={label}
-      className="group min-w-0 has-[[data-slot=carousel-next]:enabled]:pb-9"
+      className={`group min-w-0 ${Children.count(children) > 1 ? "pb-9" : ""} ${Children.count(children) <= 3 ? "xl:pb-0" : ""}`}
       opts={{ align: "start", loop: true, duration: reducedMotion ? 0 : 25 }}
     >
       <CarouselContent>

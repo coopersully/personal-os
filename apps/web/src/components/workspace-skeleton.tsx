@@ -27,7 +27,6 @@ const calendarSkeletonDays = [
   "saturday",
   "sunday",
 ] as const;
-const taskSkeletonRows = ["capture", "plan", "prepare", "follow-up", "review"] as const;
 const mailSkeletonRows = ["primary", "updates", "people", "receipts", "travel", "archive"] as const;
 const financeSkeletonMetrics = ["spending", "accounts", "review"] as const;
 const workspaceSkeletonComponents: Record<WorkspaceSkeletonKind, ComponentType> = {
@@ -42,9 +41,11 @@ const workspaceSkeletonComponents: Record<WorkspaceSkeletonKind, ComponentType> 
 export function WorkspaceSkeleton({
   kind,
   mode = "loading",
+  calendarView = "week",
 }: {
   kind: WorkspaceSkeletonKind;
   mode?: "loading" | "preview";
+  calendarView?: "day" | "week" | "month";
 }) {
   const SkeletonContent = workspaceSkeletonComponents[kind];
   return (
@@ -57,6 +58,7 @@ export function WorkspaceSkeleton({
       }
       className={`workspace-skeleton workspace-skeleton--${kind}`}
       data-workspace-skeleton={kind}
+      data-calendar-view={kind === "calendar" ? calendarView : undefined}
       role="status"
     >
       <SkeletonContent />
@@ -66,14 +68,23 @@ export function WorkspaceSkeleton({
 
 function TodaySkeleton() {
   return (
-    <div className="workspace-skeleton__today">
+    <div className="workspace-skeleton__today today-layout">
       <div className="workspace-skeleton__stack">
         <Skeleton className="workspace-skeleton__line workspace-skeleton__line--short" />
-        <ContentSkeleton announce={false} label="Loading schedule" shape="summary" rows={1} />
+        <div className="workspace-skeleton__schedule" aria-hidden="true">
+          <Skeleton className="workspace-skeleton__line workspace-skeleton__line--medium" />
+          <Skeleton className="workspace-skeleton__line workspace-skeleton__line--short" />
+          <Skeleton className="workspace-skeleton__line workspace-skeleton__line--long" />
+          <div className="workspace-skeleton__schedule-timeline">
+            <Skeleton />
+            <Skeleton />
+            <Skeleton />
+          </div>
+        </div>
       </div>
       <div className="workspace-skeleton__stack">
         <Skeleton className="workspace-skeleton__line workspace-skeleton__line--medium" />
-        <ContentSkeleton announce={false} label="Loading tasks and reminders" rows={3} />
+        <ContentSkeleton announce={false} label="Loading tasks and reminders" rows={6} />
       </div>
     </div>
   );
@@ -99,14 +110,9 @@ function CalendarSkeleton() {
 
 function TasksSkeleton() {
   return (
-    <div className="workspace-skeleton__narrow">
+    <div className="workspace-skeleton__tasks">
       <Skeleton className="workspace-skeleton__line workspace-skeleton__line--short" />
-      <Skeleton className="workspace-skeleton__line workspace-skeleton__line--medium" />
-      <div className="workspace-skeleton__stack workspace-skeleton__stack--rows">
-        {taskSkeletonRows.map((row) => (
-          <Skeleton className="workspace-skeleton__row" key={row} />
-        ))}
-      </div>
+      <ContentSkeleton announce={false} label="Loading tasks" rows={5} />
     </div>
   );
 }
@@ -115,9 +121,12 @@ function MailSkeleton() {
   return (
     <div className="workspace-skeleton__mail">
       <div className="workspace-skeleton__mail-list">
-        <Skeleton className="workspace-skeleton__line workspace-skeleton__line--medium" />
         {mailSkeletonRows.map((row) => (
-          <Skeleton className="workspace-skeleton__mail-row" key={row} />
+          <div className="workspace-skeleton__mail-row" key={row} aria-hidden="true">
+            <Skeleton className="workspace-skeleton__line workspace-skeleton__line--short" />
+            <Skeleton className="workspace-skeleton__line workspace-skeleton__line--medium" />
+            <Skeleton className="workspace-skeleton__line workspace-skeleton__line--long" />
+          </div>
         ))}
       </div>
       <div className="workspace-skeleton__mail-reader">

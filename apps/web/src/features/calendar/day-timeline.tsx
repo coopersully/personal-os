@@ -17,19 +17,35 @@ export type TimelineEventLayout<T extends TimelinePositionable = CalendarEvent> 
   startMinute: number;
 };
 
+// A timeline formats many timestamps in one owner timezone. Keep one formatter
+// pair rather than rebuilding ICU formatters for every event on every render.
+let timelineFormatters:
+  | { timeZone: string; parts: Intl.DateTimeFormat; clock: Intl.DateTimeFormat }
+  | undefined;
+function formattersFor(timeZone: string) {
+  if (timelineFormatters?.timeZone !== timeZone) {
+    timelineFormatters = {
+      timeZone,
+      parts: new Intl.DateTimeFormat("en", {
+        day: "numeric",
+        hour: "numeric",
+        hourCycle: "h23",
+        minute: "numeric",
+        month: "numeric",
+        second: "numeric",
+        timeZone,
+        year: "numeric",
+      }),
+      clock: new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit", timeZone }),
+    };
+  }
+  return timelineFormatters;
+}
+
 export function localDateTimeAt(value: Date | string, timeZone: string) {
   const values = Object.fromEntries(
-    new Intl.DateTimeFormat("en", {
-      day: "numeric",
-      hour: "numeric",
-      hourCycle: "h23",
-      minute: "numeric",
-      month: "numeric",
-      second: "numeric",
-      timeZone,
-      year: "numeric",
-    })
-      .formatToParts(new Date(value))
+    formattersFor(timeZone)
+      .parts.formatToParts(new Date(value))
       .map((part) => [part.type, part.value]),
   );
   return {
@@ -95,10 +111,8 @@ function formatHour(hour: number): string {
   return hour < 12 ? `${hour} AM` : `${hour - 12} PM`;
 }
 
-function formatTime(value: string, timeZone: string) {
-  return new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit", timeZone }).format(
-    new Date(value),
-  );
+export function formatTimelineClock(value: string, timeZone: string) {
+  return formattersFor(timeZone).clock.format(new Date(value));
 }
 const todayTimelinePixelsPerMinute = 1.5;
 export type TodayTimelineDensity = "compact" | "full" | "short";
@@ -186,12 +200,12 @@ export function DayTimeline<T extends TimelinePositionable>({
         {endMinute % 15 === 0 ? null : <i className="today-timeline__end-cap" />}
       </div>
       <div
-        aria-label={`Current time ${formatTime(currentTime.toISOString(), timeZone)}`}
+        aria-label={`Current time ${formatTimelineClock(currentTime.toISOString(), timeZone)}`}
         className="calendar-now-line today-timeline__now"
         role="timer"
         style={{ top: (currentMinute - startMinute) * todayTimelinePixelsPerMinute }}
       >
-        <span>{formatTime(currentTime.toISOString(), timeZone)}</span>
+        <span>{formatTimelineClock(currentTime.toISOString(), timeZone)}</span>
         <i />
       </div>
       <div className="today-timeline__track">

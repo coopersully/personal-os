@@ -187,3 +187,11 @@ For substantive handoffs, report actual artifacts and limits, current stage, own
 and the real next trigger: verified active monitor, bounded wait or user-driven follow-up. Link each
 PR/issue with its purpose. Never promise unconfigured unattended work. Completion does not grant
 archival, deletion, worktree cleanup or another delivery assignment.
+
+Honor a recorded explicit human cleanup grant within its original scope; do not request the same
+permission again. When authorized, the oversight owner archives dedicated child chats only after
+all assigned work, acceptance, production verification and follow-up obligations are complete and
+the chats are idle. The project manager archives completed oversight chats under its own recorded
+grant. Merge alone is insufficient. Preserve unfinished/shared chats and report already-archived
+exceptions. This does not authorize branch/worktree deletion or schedule creation; the authorized
+owner performs and verifies the eventual UI mutation.

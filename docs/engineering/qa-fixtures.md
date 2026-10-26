@@ -199,3 +199,18 @@ through yesterday in America/New_York. Rhythm shows populated historical days an
 today stays provisional and future days stay unknown. Reload recreates both records and coverage.
 
 The full demo also includes five recent fictional Finance Activity records: account ownership/planning confirmation, transaction categorization, and emergency-fund progress. Completed owner receipts and matching audits drive the real Activity projection and before/after disclosures. Dates are relative to fixture load; reloads replace the same stable records. Other personas keep empty Activity coverage. No live agent automation or financial action is executed by these history fixtures.
+
+### Browser recovery acceptance isolation
+
+Unrelated ritual and settings recovery acceptance uses `e2e/recovery-fixtures.ts` to
+serve the canonical weather fixture before navigation. Additional browser pages must
+install `fixtureWeather` before their first navigation. The dedicated weather recovery
+test keeps its explicit failure/retry behavior and does not use this successful fixture.
+
+Register restoration before mutating shared fixture state. The `cleanup` fixture runs
+restorers in reverse order during Playwright teardown, with its separate timeout budget,
+and reports restoration errors after attempting all registered restorers. Capture an
+authenticated standalone API context while the page is available; do not depend on
+`page.request` in a timed-out test body's `finally`. Ritual restoration also removes
+created optional reminders. `cleanup-recovery.spec.ts` intentionally expires one body
+and verifies that the next fresh settings login cannot see its temporary ritual.

@@ -10320,16 +10320,19 @@ describe("ilo web app", () => {
         }),
     );
     const tooFewPins = setup("/settings?page=wallpaper");
-    expect(await screen.findByRole("button", { name: "Refresh wallpaper" })).toBeDisabled();
+    const refreshWallpaper = await screen.findByRole("button", { name: "Refresh wallpaper" });
+    expect(refreshWallpaper).toBeDisabled();
     await waitFor(() => expect(finishPins).toBeDefined());
     finishPins?.([
       { id: "pin-1", imageUrl: "https://example.com/1.jpg", title: null },
       { id: "pin-2", imageUrl: "https://example.com/2.jpg", title: null },
       { id: "pin-3", imageUrl: "https://example.com/3.jpg", title: null },
     ]);
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Refresh wallpaper" })).toBeEnabled(),
-    );
+    await within(tooFewPins.container).findByAltText("Wallpaper rendered for your display");
+    await waitFor(() => {
+      expect(refreshWallpaper).toBeInTheDocument();
+      expect(refreshWallpaper).toBeEnabled();
+    });
     tooFewPins.unmount();
 
     mocks.getPinterestWallpaperSettings.mockResolvedValue({

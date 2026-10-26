@@ -55,6 +55,18 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Record source event and canonical scope
+        if: github.event_name == 'pull_request'
+        run: node .github/scripts/source-receipt.mjs "$RUNNER_TEMP/source-candidate.json"
+      - name: Retain attempt-specific source receipt
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/source-candidate.json
+          if-no-files-found: error
+          retention-days: 7
+
   infrastructure:
     name: Terraform
     needs: changes

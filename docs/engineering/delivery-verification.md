@@ -128,10 +128,54 @@ runner while code is edited beneath it; stop only the owned run before edits.
 
 `ci.yml` runs source checks on opened, reopened, synchronize, and supported pushes.
 Its aggregate is `Source verification`. `pr-metadata.yml` runs on those PR events plus edits and ready-for-review and owns
-`CI required`, preserving the existing protection name/provider. It validates the event's Work map
+`CI required`, preserving the existing protection name/provider. It validates the live PR Work map
 and waits for the latest applicable successful source workflow for that PR on its exact head and base. Missing, pending,
 failed, or canceled source runs cannot pass the gate. Each workflow has a separate concurrency group;
 editing a description cancels only a superseded metadata gate, never source tests.
+
+Stage A metadata observation retains polling and the single protected `CI required` context.
+It validates the live PR body, not the historical event body, and requires stable PR head/base,
+body hash and latest source run/attempt before accepting completed source evidence. Reads have a
+120-second observation budget, 15-second command timeouts, at most three 100-row pages per
+inventory and one bounded recollection for a changing PR/attempt. API read failure gets one retry
+within that same budget. A trusted retargeted metadata event fails immediately until a genuine new candidate event;
+run-association mismatches are negative stale hints, never positive provenance. The `ci:full`
+decision comes from the original receipt event; editing the live label affects future events only.
+The existing 40-minute polling deadline remains; pending source runs
+only use lightweight identity/status reads, without repeatedly downloading artifacts.
+
+The classification job uploads `source-candidate-<run-id>-<attempt>` under existing artifact runtime
+authority. Its single `source-candidate.json` entry records original event head/base, repository/PR,
+run/attempt, workflow/classifier digests and canonical scope; no PR body is retained. Metadata uses
+its existing Actions read permission to bind the exact run artifact/digest, independently recomputed
+scope and every selected job's actual current-attempt success. Archive input is capped at 64 KiB,
+the one decoded JSON entry at 16 KiB; content is never extracted or executed. Receipts expire after
+seven days. Missing, expired, malformed, foreign or stale receipts fail closed. Local fixtures do
+not prove hosted artifact access: actual unchanged-token upload/download and attempt binding remain
+explicit rollout evidence.
+
+GitHub can regenerate a synthetic merge commit after an original-base restoration even when
+its integrated content is unchanged. The immutable receipt retains its original merge/workflow SHA;
+the observation retains the current live synthetic SHA. A mismatch permits no boolean override:
+the observer performs two logical current-repository Git commit lookups (up to four requests with
+the existing bounded retry), verifies both response SHAs/provider URLs, requires exactly the ordered
+parents `[current base, current head]` in both objects and an identical valid tree SHA. Missing,
+malformed, denied, unreachable, different-parent or different-tree evidence fails closed. All other
+repository/PR/base/ref, original workflow/ref/digests, event/run/attempt, selected jobs and final
+PR/body/attempt fences remain mandatory. A trusted retarget event still rejects immediately.
+Normalized provider commit evidence accompanies the observation; readiness requires that complete
+structure, both original/live identities and current PR tuple, never an unsupported equivalence flag.
+It validates evidence bindings, not authenticity of caller-supplied JSON; inspect saved provider
+responses and the actual collector. No receipt is rewritten and no new permission is introduced.
+
+A failed-jobs-only retry that omits classification has no new-attempt receipt. Retry the complete
+source run under the bounded retry policy, then recover metadata; never reuse another attempt's
+artifact or start duplicate full suites automatically. The final evidence collector uses the same
+observer, retains body hashes rather than body text, and readiness requires that exact successful
+observation. Provider contexts alone do not establish PR or attempt identity. This strengthens
+observation; it does not establish server-side invalidation of an older green commit-scoped context
+on a same-head retry or isolate two PRs sharing a head. Separate-check protection migration and
+polling removal remain unaccepted pending that proof and separate authority.
 
 A failed/canceled source run fails its waiting metadata gate. A same-head source retry does not
 trigger a new PR event: after source recovery, the shipping controller must rerun the failed/canceled

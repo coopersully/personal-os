@@ -5,7 +5,7 @@ import sys
 import subprocess
 from pathlib import Path
 
-from acceptance import review_problems
+from acceptance import review_problems, sha
 
 PENDING = {"IN_PROGRESS", "PENDING", "QUEUED", "WAITING"}
 GITHUB_MERGE_STATES = {
@@ -57,6 +57,94 @@ def equivalent_job_names(coverage):
         if not isinstance(group, list) or len(group) != len(expected) or sorted(group, key=str) != sorted(expected):
             return None
     return list(FULL_SOURCE_JOBS)
+
+
+def source_integration_matches(observation, receipt):
+    source_sha, live_sha = receipt.get("mergeSha"), observation.get("mergeSha")
+    if (not sha(source_sha) or not sha(live_sha)
+            or receipt.get("workflowSha") != source_sha):
+        return False
+    if source_sha == live_sha:
+        return "mergeCommitEvidence" not in observation
+    evidence = observation.get("mergeCommitEvidence")
+    if (not isinstance(evidence, dict)
+            or set(evidence) != {"provider", "repository", "sourceCommit", "liveCommit"}
+            or evidence.get("provider") != "github-rest"
+            or evidence.get("repository") != observation.get("repository")):
+        return False
+    trees = []
+    for key, expected in (("sourceCommit", source_sha), ("liveCommit", live_sha)):
+        commit = evidence.get(key)
+        if (not isinstance(commit, dict)
+                or set(commit) != {"sha", "treeSha", "parentShas", "url"}
+                or commit.get("sha") != expected or not sha(commit.get("treeSha"))
+                or commit.get("parentShas") != [observation.get("baseSha"), observation.get("headSha")]
+                or commit.get("url") != f"https://api.github.com/repos/{observation.get('repository')}/git/commits/{expected}"):
+            return False
+        trees.append(commit["treeSha"])
+    return trees[0] == trees[1]
+
+
+def source_observation_matches(observation, pr, verification):
+    """Consume the bounded shared observer; green commit contexts alone cannot bind a PR attempt."""
+    if not isinstance(observation, dict):
+        return False
+    receipt = observation.get("receipt") or {}
+    artifact = observation.get("artifact") or {}
+    if not isinstance(receipt, dict) or not isinstance(artifact, dict):
+        return False
+    scope = receipt.get("scope") or {}
+    if not isinstance(scope, dict):
+        return False
+    bools = "prose_only full repo terraform node database browser desktop containers dependencies".split()
+    if (set(scope) != set(bools + ["changed_packages"])
+            or any(type(scope.get(key)) is not bool for key in bools)
+            or scope.get("changed_packages") != []):
+        return False
+    full = scope["full"] and all(not scope[key] for key in bools if key != "full")
+    prose = (scope["prose_only"] and scope["repo"]
+             and all(not scope[key] for key in bools if key not in {"prose_only", "repo"}))
+    if not (full or prose):
+        return False
+    expected = FULL_SOURCE_JOBS if full else ["Classify changes", "Repository contracts", "Source verification"]
+    jobs = observation.get("jobs")
+    if (not isinstance(jobs, list) or len(jobs) != len(expected)
+            or sorted(j.get("name", "") for j in jobs if isinstance(j, dict)) != sorted(expected)
+            or any(type(j.get("id")) is not int or j["id"] <= 0 or j.get("conclusion") != "success" for j in jobs)):
+        return False
+    if (observation.get("state") != "success" or observation.get("stable") is not True
+            or observation.get("schemaVersion") != 1
+            or type(artifact.get("id")) is not int or artifact["id"] <= 0
+            or not re.fullmatch(r"sha256:[a-f0-9]{64}", str(artifact.get("digest")))
+            or any(type(observation.get(key)) is not int or observation[key] <= 0
+                   for key in ("workflowId", "runId", "runAttempt"))
+            or observation.get("event") != "pull_request"
+            or receipt.get("event") != "pull_request"):
+        return False
+    for field in ("headSha", "baseSha", "number", "bodySha256", "mergeSha", "repository", "repositoryId", "baseRef"):
+        if observation.get(field) != pr.get(field) or pr.get(field) is None:
+            return False
+    if not re.fullmatch(r"[a-f0-9]{64}", str(pr.get("bodySha256"))):
+        return False
+    for field in ("headSha", "baseSha", "number", "repository", "repositoryId", "baseRef",
+                  "runId", "runAttempt", "forceFull"):
+        if receipt.get(field) != observation.get(field) or receipt.get(field) is None:
+            return False
+    if (type(receipt.get("forceFull")) is not bool
+            or receipt.get("schemaVersion") != 1
+            or type(receipt.get("number")) is not int or receipt["number"] < 1
+            or type(receipt.get("repositoryId")) is not int or receipt["repositoryId"] < 1
+            or not re.fullmatch(r"[\w.-]+/[\w.-]+", str(receipt.get("repository")))
+            or not re.fullmatch(r"[a-f0-9]{40}", str(receipt.get("mergeSha")))
+            or not source_integration_matches(observation, receipt)
+            or receipt.get("workflowRef") != f"{receipt['repository']}/.github/workflows/ci.yml@refs/pull/{receipt['number']}/merge"):
+        return False
+    if any(not re.fullmatch(r"[a-f0-9]{64}", str(receipt.get(field)))
+           for field in ("workflowSha256", "classifierSha256")):
+        return False
+    source = verification.get("sourceRun")
+    return not source or all(source.get(key) == observation.get(key)
+                             for key in ("headSha", "baseSha", "workflowId", "runId", "runAttempt", "event"))
 
 
 def prose_verification(verification, pr, checks, expected):
@@ -292,6 +380,9 @@ def evaluate(state):
         )
 
     verification = state.get("verification") or {}
+    if not source_observation_matches((state.get("ci") or {}).get("sourceObservation"), pr, verification):
+        remediation_codes.append("source_observation_unverified")
+        remediation_reasons.append("Current live PR/body and exact successful source-attempt receipt/jobs are unverified")
     full_verified = verification.get("pnpmVerify") == "SUCCESS"
     if verification.get("mode") == "hosted":
         names = equivalent_job_names(verification.get("equivalentChecks"))

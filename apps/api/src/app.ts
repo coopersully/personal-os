@@ -93,6 +93,7 @@ import { createFinanceSmsAcknowledgementDispatcher } from "./finance-sms-acknowl
 import { createFinanceStatusService } from "./finance-status-service.js";
 import { createGoalsService } from "./goals-service.js";
 import { createGooglePubSubAuth, GooglePubSubAuthError } from "./google-pubsub-auth.js";
+import { createKnowledgeRecordService } from "./knowledge/record-service.js";
 import { createMailMaintenanceService } from "./mail-maintenance-service.js";
 import { createMailService } from "./mail-service.js";
 import { createMailStewardshipService } from "./mail-stewardship-service.js";
@@ -117,6 +118,7 @@ import { registerFinanceMaintenanceExecutionRoutes } from "./routes/finance-main
 import { registerFinanceOnboardingRoutes } from "./routes/finance-onboarding.js";
 import { registerFinanceRoutes } from "./routes/finances.js";
 import { registerGoalsRoutes } from "./routes/goals.js";
+import { registerKnowledgeRoutes } from "./routes/knowledge.js";
 import { registerMailRoutes } from "./routes/mail.js";
 import { registerMailStewardshipRoutes } from "./routes/mail-stewardship.js";
 import { registerNotificationRoutes } from "./routes/notifications.js";
@@ -590,6 +592,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
     now,
   });
+  const knowledgeService = createKnowledgeRecordService({ db: dependencies.db, now });
   const goalService = createGoalsService({ db: dependencies.db, now });
   const maintenance = createWorkspaceMaintenanceService({ db: dependencies.db, now });
   const mailMaintenance = createMailMaintenanceService({
@@ -1198,6 +1201,8 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/mail/*", authenticate);
   app.use("/v1/goals/*", authenticate);
   app.use("/v1/goals", authenticate);
+  app.use("/v1/knowledge", authenticate);
+  app.use("/v1/knowledge/*", authenticate);
   app.use("/v1/rituals", authenticate);
   app.use("/v1/rituals/*", authenticate);
   app.use("/v1/motives/*", authenticate);
@@ -1508,6 +1513,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     mutationContext,
   });
 
+  registerKnowledgeRoutes({ app, knowledge: knowledgeService });
   registerGoalsRoutes({ app, goals: goalService, mutationContext });
   registerRitualRoutes({
     app,

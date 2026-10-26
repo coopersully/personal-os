@@ -345,6 +345,11 @@ export const iloToolCatalog = {
   restore_task: write("tasks", ["tasks:write"]),
   preview_task_move: preview("tasks", ["tasks:read"]),
   move_task: write("tasks", ["tasks:write"], { destructive: true }),
+  save_knowledge: write("knowledge", ["knowledge:read", "knowledge:write"], {
+    policy: "approved_rule",
+    idempotent: true,
+  }),
+  get_knowledge: read("knowledge", ["knowledge:read"]),
   list_goals: read("goals", ["goals:read"]),
   create_goal: write("goals", ["goals:write"]),
   update_goal: write("goals", ["goals:write"]),

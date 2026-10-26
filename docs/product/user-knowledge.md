@@ -1,7 +1,7 @@
 # nohmi User Knowledge
 
 - Status: Approved target product contract; not yet implemented as a complete system
-- Last reconciled: 2026-09-11
+- Last reconciled: 2026-10-26
 
 ## Purpose
 
@@ -224,6 +224,23 @@ implemented, the target relies on credential scopes, purpose-limited context ass
 privacy rules above; the deferred control must not be described as available.
 
 ## Relationship to current implementation
+
+The initial source implementation provides `POST /v1/knowledge`,
+`GET /v1/knowledge/:id?purpose=…`, and registered `save_knowledge` / `get_knowledge` MCP tools.
+PostgreSQL owns record identity, immutable initial revisions, attributed sources, relationships,
+and retry receipts. Explicit `knowledge:read` and `knowledge:write` grants are opt-in for agents;
+existing credentials receive no new grants. Every read and retry rechecks the live credential,
+owner, purpose, workspace and inherited source scopes. Sensitive records remain owner-only until
+category disclosure controls exist. An agent statement retains original wording and external
+session/message references; an agent interpretation remains proposed inference. A knowledge receipt
+and redacted audit event commit together, without changing workspace action policy.
+
+This is a save/read foundation, not the complete target system: correction, deletion controls,
+promotion, conflict resolution, search, context packs, source migration, and About you remain
+unimplemented. Goal revision evidence is rejected until Goals exposes a revision contract.
+Focused PostgreSQL and registered MCP/API/client tests establish source behavior, not production
+availability. No provider or production mutation is required by these tests.
+
 
 | Current record | What it provides | Why it is not complete User Knowledge |
 | --- | --- | --- |

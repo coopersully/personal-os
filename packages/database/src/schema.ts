@@ -6429,3 +6429,94 @@ export const financeReviewBatchRuns = pgTable(
     ),
   ],
 );
+
+/** Stable account-owned knowledge identity; content lives in immutable revisions. */
+export const knowledgeRecords = pgTable(
+  "knowledge_records",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex("knowledge_records_owner_id_idx").on(table.userId, table.id)],
+);
+export const knowledgeRevisions = pgTable(
+  "knowledge_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    recordId: uuid("record_id").notNull(),
+    revision: integer("revision").notNull(),
+    snapshot: jsonb("snapshot").$type<import("@personal-os/domain").KnowledgeRecord>().notNull(),
+  },
+  (table) => [
+    uniqueIndex("knowledge_revisions_owner_record_revision_idx").on(
+      table.userId,
+      table.recordId,
+      table.revision,
+    ),
+    foreignKey({
+      columns: [table.userId, table.recordId],
+      foreignColumns: [knowledgeRecords.userId, knowledgeRecords.id],
+    }).onDelete("cascade"),
+  ],
+);
+export const knowledgeSources = pgTable(
+  "knowledge_sources",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id").notNull(),
+    recordId: uuid("record_id").notNull(),
+    source: jsonb("source").$type<import("@personal-os/domain").KnowledgeSource>().notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.userId, table.recordId],
+      foreignColumns: [knowledgeRecords.userId, knowledgeRecords.id],
+    }).onDelete("cascade"),
+  ],
+);
+export const knowledgeRelationships = pgTable(
+  "knowledge_relationships",
+  {
+    userId: uuid("user_id").notNull(),
+    recordId: uuid("record_id").notNull(),
+    relatedRecordId: uuid("related_record_id").notNull(),
+  },
+  (table) => [
+    uniqueIndex("knowledge_relationships_pair_idx").on(
+      table.userId,
+      table.recordId,
+      table.relatedRecordId,
+    ),
+    foreignKey({
+      columns: [table.userId, table.recordId],
+      foreignColumns: [knowledgeRecords.userId, knowledgeRecords.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.userId, table.relatedRecordId],
+      foreignColumns: [knowledgeRecords.userId, knowledgeRecords.id],
+    }).onDelete("cascade"),
+  ],
+);
+/** Operational receipts retain hashes and references, never knowledge values. */
+export const knowledgeReceipts = pgTable(
+  "knowledge_receipts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    recordId: uuid("record_id").notNull(),
+    mutationKey: uuid("mutation_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+  },
+  (table) => [
+    uniqueIndex("knowledge_receipts_owner_key_idx").on(table.userId, table.mutationKey),
+    foreignKey({
+      columns: [table.userId, table.recordId],
+      foreignColumns: [knowledgeRecords.userId, knowledgeRecords.id],
+    }).onDelete("cascade"),
+  ],
+);

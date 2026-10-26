@@ -24,8 +24,10 @@ import {
   users,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
+import { applyFinanceCategorizationsInputSchema, financeQuestionSchema } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, inArray } from "drizzle-orm";
+import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
 
 const now = new Date("2026-08-15T12:00:00.000Z");
@@ -120,6 +122,132 @@ describe.sequential("Finance status service", () => {
     if (!created) throw new Error("Fixture account was not created.");
     return created;
   }
+
+  it.each([
+    "owned",
+    "foreign_transaction",
+    "foreign_account",
+    "missing",
+    "all_missing",
+    "malformed",
+    "empty",
+    "null",
+  ])("projects legacy question %s input consistently through list and status without leaking partial targets", async (kind) => {
+    const userId = await makeUser(`Projection ${kind}`);
+    const foreignUserId = await makeUser(`Foreign projection ${kind}`);
+    const ownedAccount = await account(userId, "current");
+    const foreignAccount = await account(foreignUserId, "current");
+    const [ownedTransaction, target] = await database.db
+      .insert(financeTransactions)
+      .values([
+        {
+          userId,
+          accountId: ownedAccount.id,
+          merchant: "Owned purchase",
+          direction: "expense" as const,
+          amount: 100,
+          transactionDate: "2026-08-10",
+        },
+        // These deliberately inconsistent historical rows isolate the transaction-owner
+        // predicate from the account-owner predicate. Both shapes are permitted by storage.
+        {
+          userId: kind === "foreign_transaction" ? foreignUserId : userId,
+          accountId: kind === "foreign_account" ? foreignAccount.id : ownedAccount.id,
+          merchant: "Private target marker",
+          direction: "expense" as const,
+          amount: 200,
+          transactionDate: "2026-08-10",
+        },
+      ])
+      .returning();
+    if (!ownedTransaction || !target) throw new Error("Missing projection fixture");
+    const decision = (transactionId: string) => ({
+      transactionId,
+      categoryId: crypto.randomUUID(),
+      confidence: 0.5,
+      rationale: "Unverified historical proposal",
+      learnMerchant: "suggest",
+      expectedTransactionUpdatedAt: ownedTransaction.updatedAt.toISOString(),
+    });
+    const validInput = {
+      decisions:
+        kind === "all_missing"
+          ? [decision(crypto.randomUUID())]
+          : [
+              decision(ownedTransaction.id),
+              decision(kind === "missing" ? crypto.randomUUID() : target.id),
+            ],
+    };
+    applyFinanceCategorizationsInputSchema.parse(validInput);
+    const input =
+      kind === "malformed"
+        ? { decisions: [decision(ownedTransaction.id), { transactionId: "invalid" }] }
+        : kind === "empty"
+          ? { decisions: [] }
+          : kind === "null"
+            ? null
+            : validInput;
+    const id = crypto.randomUUID();
+    const question = financeQuestionSchema.parse({
+      id,
+      actionKind: "categorization",
+      sourceRefs: [],
+      choices: [],
+      prompt: "Please provide the missing Finance evidence before this change is applied.",
+      why: "The categorization evidence is incomplete, low-confidence, or protected as an ambiguous transfer.",
+      expectedAnswer: [
+        {
+          name: "decisions",
+          type: "object_array",
+          required: true,
+          nullable: false,
+          example: "[...]",
+        },
+      ],
+    });
+    const [saved] = await database.db
+      .insert(financeAgentActionReviews)
+      .values({
+        id,
+        userId,
+        actionKind: "question",
+        requestingAgentId: "legacy-agent",
+        fingerprint: crypto.randomUUID(),
+        sourceRefs: [],
+        privatePayload: { question, original: { actionKind: "categorization", input } },
+      })
+      .returning();
+    const actions = createFinanceActionService({
+      db: database.db,
+      finances: {} as never,
+      now: () => now,
+    });
+    const listed = await actions.listQuestions(userId, 50, id);
+    const statusQuestion = (
+      await service().getFinanceStatus(userId, { type: "all_outstanding" })
+    ).details.questions.find((item) => item.id === id);
+    expect(listed).toHaveLength(1);
+    expect(statusQuestion).toEqual(listed[0]);
+    if (kind === "owned") {
+      expect(listed[0]?.sourceRefs).toHaveLength(2);
+      expect(listed[0]?.sourceRefs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ accountId: ownedAccount.id, remoteId: ownedTransaction.id }),
+          expect.objectContaining({ accountId: ownedAccount.id, remoteId: target.id }),
+        ]),
+      );
+    } else {
+      // Exact equality also rejects partial references, changed prompts, and foreign metadata.
+      expect(listed).toEqual([question]);
+      expect(statusQuestion).toEqual(question);
+    }
+    expect(
+      await database.db
+        .select()
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.id, id)),
+    ).toEqual([saved]);
+  });
 
   it("reports current account and current-month evidence without manufacturing stale zeros", async () => {
     const userId = await makeUser("Current Finance");

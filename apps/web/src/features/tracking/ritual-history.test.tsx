@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import type { RitualOccurrence } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { toast } from "sonner";
 import { SettingsFeedbackContext } from "../../lib/settings-feedback.js";
 import { RitualDataAction } from "./ritual-data-action.js";
@@ -9,6 +9,7 @@ import { RitualHistory } from "./ritual-history.js";
 import { RitualLocal } from "./ritual-local.js";
 
 const mocks = vi.hoisted(() => ({
+  profile: vi.fn(),
   history: vi.fn(),
   export: vi.fn(),
   remove: vi.fn(),
@@ -16,7 +17,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("../../api.js", () => ({
   api: {
-    getMe: async () => ({ planningTimezone: "America/New_York" }),
+    getMe: mocks.profile,
     listRitualHistory: mocks.history,
     exportRitualData: mocks.export,
     deleteRitualData: mocks.remove,
@@ -65,6 +66,7 @@ function mount(child: React.ReactNode) {
 beforeEach(() => {
   vi.resetAllMocks();
   localStorage.clear();
+  mocks.profile.mockResolvedValue({ planningTimezone: "America/New_York" });
   mocks.history.mockResolvedValue({ items: [occurrence], nextCursor: null });
   mocks.export.mockResolvedValue({ occurrences: [occurrence] });
   mocks.remove.mockResolvedValue(undefined);
@@ -85,9 +87,58 @@ afterEach(async () => {
       ),
     { timeout: 3_000 },
   );
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+it.each([
+  ["2026-10-26T00:15:00Z", "week", "2026-10-19", "2026-10-25"],
+  ["2026-11-01T00:15:00Z", "month", "2026-10-01", "2026-10-31"],
+])("waits for the planning timezone at %s before requesting %s history", async (now, period, dateFrom, dateTo) => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(now));
+  let resolveProfile!: (profile: { planningTimezone: string }) => void;
+  mocks.profile.mockReturnValue(
+    new Promise((resolve) => {
+      resolveProfile = resolve;
+    }),
+  );
+  mount(<RitualHistory />);
+  if (period === "month") {
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    fireEvent.keyDown(screen.getByRole("button", { name: /^Period:/ }), { key: "ArrowDown" });
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "This Month" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  }
+  expect(screen.getByRole("status", { name: "Loading ritual history" })).toBeInTheDocument();
+  expect(mocks.history).not.toHaveBeenCalled();
+  await act(async () => resolveProfile({ planningTimezone: "America/New_York" }));
+  await screen.findByRole("button", { name: /Morning Ritual/ });
+  expect(mocks.history).toHaveBeenCalledExactlyOnceWith(undefined, {
+    dateFrom,
+    dateTo,
+    sort: "newest",
+    limit: 10,
+  });
+});
+
+it("retries the missing planning profile before querying history", async () => {
+  mocks.profile.mockRejectedValueOnce(new Error("private profile detail"));
+  mount(<RitualHistory />);
+  await screen.findByRole("region", { name: "History unavailable" });
+  expect(mocks.history).not.toHaveBeenCalled();
+  expect(screen.queryByRole("status", { name: "Loading ritual history" })).not.toBeInTheDocument();
+  expect(toast.error).toHaveBeenCalledWith("Couldn’t load ritual history.", expect.any(Object));
+  expect(screen.queryByText("Couldn’t load ritual history.")).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(/private profile detail|No rituals|No ritual history/),
+  ).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await screen.findByRole("button", { name: /Morning Ritual/ });
+  expect(mocks.profile).toHaveBeenCalledTimes(2);
+  expect(mocks.history).toHaveBeenCalledTimes(1);
+});
+
 it("filters, paginates and exports complete response and escape history", async () => {
   mocks.history.mockImplementation((cursor) =>
     Promise.resolve({
@@ -398,6 +449,8 @@ it("removes meaningless empty-table controls while preserving a non-destructive 
 });
 
 it("does not confuse failed history with empty history and retries with preserved criteria", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-26T00:15:00Z"));
   mocks.history.mockRejectedValueOnce(new Error("private query detail"));
   mount(<RitualHistory />);
   await screen.findByRole("region", { name: "History unavailable" });

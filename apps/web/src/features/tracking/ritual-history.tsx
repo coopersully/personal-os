@@ -149,8 +149,11 @@ export function RitualHistory() {
   const history = useQuery({
     queryKey: ["ritual-history", filters, cursors[page]],
     queryFn: () => api.listRitualHistory(cursors[page], filters),
+    // A browser-zone request can select a different week before the profile arrives.
+    enabled: profile.data !== undefined,
   });
-  const visible = history.data?.items ?? [];
+  const availability = profile.data === undefined ? profile : history;
+  const visible = profile.data === undefined ? [] : (history.data?.items ?? []);
   const total = history.data?.total;
   const hasRows = visible.length > 0;
   const constrained = Boolean(search.trim() || kind || status);
@@ -409,9 +412,9 @@ export function RitualHistory() {
       </search>
       <section aria-label="History results" className="flex min-w-0 flex-col gap-3">
         {!hasRows ? <div className="text-xs text-muted-foreground">{periodNavigation}</div> : null}
-        {history.isPending ? <DataViewLoading label="Loading ritual history" /> : null}
+        {availability.isPending ? <DataViewLoading label="Loading ritual history" /> : null}
         <DataViewRecovery
-          query={history}
+          query={availability}
           title="Couldn’t load ritual history."
           unavailableLabel="History unavailable"
         />
@@ -430,7 +433,7 @@ export function RitualHistory() {
             caption={periodNavigation}
           />
         ) : null}
-        {!history.isPending && !history.isError && !visible.length ? (
+        {!availability.isPending && !availability.isError && !visible.length ? (
           <DataViewEmpty
             title={
               constrained

@@ -43,7 +43,6 @@ import {
   financeActionReviewSchema,
   financeConversationCausalClaimSchema,
   financeMaintenanceCandidateItemDraftSchema,
-  financeQuestionSchema,
   financeReimbursementQuestionAnswerSchema,
   idSchema,
   type MaterialSourceReference,
@@ -63,6 +62,7 @@ import {
 import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
+import { projectFinanceActionQuestion } from "./finance/action-question-projection.js";
 import { isActiveBudgetAction } from "./finance/budget-authority.js";
 import { commitFinanceCandidateEffects } from "./finance/candidate-effect-receipt.js";
 import { lockFinanceEffectOwner } from "./finance/conversation-causality.js";
@@ -458,11 +458,6 @@ function reviewFromRow(row: typeof financeAgentActionReviews.$inferSelect): Fina
     sourceRefs: row.sourceRefs,
     status: row.status,
   });
-}
-
-function questionFromRow(row: typeof financeAgentActionReviews.$inferSelect): FinanceQuestion {
-  const payload = row.privatePayload as { question: FinanceQuestion };
-  return financeQuestionSchema.parse({ ...payload.question, id: row.id });
 }
 
 /**
@@ -1011,6 +1006,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           return missing(
             "The categorization evidence is incomplete, low-confidence, or protected as an ambiguous transfer.",
             [expectedAnswer("decisions", "object_array", { example: "[...]" })],
+            sourceRefs,
           );
         return prepared(
           input,
@@ -3651,7 +3647,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         )
         .orderBy(desc(financeAgentActionReviews.createdAt))
         .limit(limit);
-      return rows.map(questionFromRow);
+      return Promise.all(rows.map((row) => projectFinanceActionQuestion(db, row)));
     },
     async approve<T>(
       id: string,

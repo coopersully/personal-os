@@ -36,6 +36,7 @@ import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
 import type { createAssistantService } from "./assistant-service.js";
 import { AppError } from "./errors.js";
 import { summarizeFinanceAccounts } from "./finance/account-semantics.js";
+import { projectFinanceActionQuestion } from "./finance/action-question-projection.js";
 import { findUnverifiedLegacyFinanceEffects } from "./finance/legacy-maintenance-evidence.js";
 import {
   activeAllocationsByTransaction,
@@ -861,14 +862,18 @@ export function createFinanceStatusService({ db, now }: Options) {
         ];
         const questions = [
           ...planningQuestions,
-          ...actionQuestions.flatMap((row) => {
-            const payload = row.privatePayload as { question: unknown };
-            const parsed = financeQuestionSchema.safeParse({
-              ...(payload.question as Record<string, unknown>),
-              id: row.id,
-            });
-            return parsed.success ? [parsed.data] : [];
-          }),
+          ...(
+            await Promise.all(
+              actionQuestions.map(async (row) => {
+                const payload = row.privatePayload as { question: unknown };
+                const parsed = financeQuestionSchema.safeParse({
+                  ...(payload.question as object),
+                  id: row.id,
+                });
+                return parsed.success ? [await projectFinanceActionQuestion(tx, row)] : [];
+              }),
+            )
+          ).flat(),
         ];
         const latestRun = maintenanceRuns[0];
         const activeRun =

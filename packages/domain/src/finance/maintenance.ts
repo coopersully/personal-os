@@ -37,6 +37,11 @@ export type FinanceMaintenanceRecovery = z.infer<typeof financeMaintenanceRecove
 
 export const financeMaintenanceNextActionSchema = z.discriminatedUnion("tool", [
   z.object({
+    tool: z.literal("get_finance_status"),
+    arguments: z.object({ scope: maintenanceScopeSchema }),
+    reason: z.string().min(1).max(1000),
+  }),
+  z.object({
     tool: z.literal("get_finance_ledger_challenge"),
     arguments: z.object({ challengeId: idSchema }),
     reason: z.string().min(1).max(1000),

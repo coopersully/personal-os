@@ -1,15 +1,15 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { AccessScope } from "@personal-os/domain";
 import { z } from "zod";
-import { createIloAppLinks } from "./app-links.js";
+import { createPersonalOsAppLinks } from "./app-links.js";
 import { financePresentationResourceUris } from "./presentation-resources.js";
 import {
   canDiscoverTool,
-  type IloToolDefinition,
-  type IloToolName,
-  iloToolCatalog,
-  iloToolPolicies,
-  iloToolStages,
+  type PersonalOsToolDefinition,
+  type PersonalOsToolName,
+  personalOsToolCatalog,
+  personalOsToolPolicies,
+  personalOsToolStages,
 } from "./tool-catalog.js";
 
 const errorSchema = z.object({
@@ -20,7 +20,7 @@ const errorSchema = z.object({
   status: z.number().optional(),
 });
 
-export const iloToolOutputSchema = z
+export const personalOsToolOutputSchema = z
   .object({
     _ilo: z.object({
       domain: z.string(),
@@ -31,9 +31,9 @@ export const iloToolOutputSchema = z
         recovery: z.url(),
         today: z.url(),
       }),
-      policy: z.enum(iloToolPolicies),
+      policy: z.enum(personalOsToolPolicies),
       readOnly: z.boolean(),
-      stage: z.enum(iloToolStages),
+      stage: z.enum(personalOsToolStages),
     }),
     error: errorSchema.optional(),
     ok: z.boolean().optional(),
@@ -63,7 +63,7 @@ type RuntimeRegisterTool = (
   callback: ToolCallback,
 ) => unknown;
 
-export type IloToolSurfaceOptions = {
+export type PersonalOsToolSurfaceOptions = {
   appBaseUrl: string;
   includeCompatibility: boolean;
   readOnly: boolean;
@@ -74,7 +74,10 @@ export type IloToolSurfaceOptions = {
  * Wrap feature-owned registrations with one deterministic discovery and result contract.
  * The proxy is intentionally narrow at runtime: feature modules only call registerTool.
  */
-export function createIloToolSurface(server: McpServer, options: IloToolSurfaceOptions): McpServer {
+export function createPersonalOsToolSurface(
+  server: McpServer,
+  options: PersonalOsToolSurfaceOptions,
+): McpServer {
   const registerTool = server.registerTool.bind(server) as unknown as RuntimeRegisterTool;
 
   return new Proxy(server, {
@@ -120,11 +123,11 @@ export function createIloToolSurface(server: McpServer, options: IloToolSurfaceO
                 src: `${options.appBaseUrl}/icon-192.png`,
               },
             ],
-            outputSchema: iloToolOutputSchema,
+            outputSchema: personalOsToolOutputSchema,
           },
           async (...args: unknown[]) => {
             const raw = await callback(...args);
-            return attachIloMetadata(raw, definition, options.appBaseUrl);
+            return attachPersonalOsMetadata(raw, definition, options.appBaseUrl);
           },
         );
       };
@@ -132,15 +135,19 @@ export function createIloToolSurface(server: McpServer, options: IloToolSurfaceO
   });
 }
 
-function getToolDefinition(name: string): IloToolDefinition {
-  const definition = iloToolCatalog[name as IloToolName];
+function getToolDefinition(name: string): PersonalOsToolDefinition {
+  const definition = personalOsToolCatalog[name as PersonalOsToolName];
   if (!definition) {
     throw new Error(`MCP tool ${name} is missing from the nohmi tool catalog.`);
   }
   return definition;
 }
 
-function attachIloMetadata(raw: unknown, definition: IloToolDefinition, appBaseUrl: string) {
+function attachPersonalOsMetadata(
+  raw: unknown,
+  definition: PersonalOsToolDefinition,
+  appBaseUrl: string,
+) {
   if (!raw || typeof raw !== "object") return raw;
   const value = raw as {
     content?: unknown;
@@ -153,7 +160,7 @@ function attachIloMetadata(raw: unknown, definition: IloToolDefinition, appBaseU
       ...value.structuredContent,
       _ilo: {
         domain: definition.domain,
-        links: createIloAppLinks(appBaseUrl, definition.domain),
+        links: createPersonalOsAppLinks(appBaseUrl, definition.domain),
         policy: definition.policy,
         readOnly: definition.readOnly,
         stage: definition.stage,

@@ -13,7 +13,7 @@ nohmi is an autonomous exoskeleton for power users in an increasingly agentic an
 gives the person ownership of their data, workflows, and agent authority, learns how their life
 works, and helps authorized agents act as capable copilots rather than disconnected chat sessions.
 
-The internal repository and infrastructure name is `personal-os`; `nohmi` is the user-facing product
+The internal application name is Personal OS (`personal-os` in repository and infrastructure identifiers); `nohmi` is the user-facing product
 name and is always lowercase.
 
 ## Product model

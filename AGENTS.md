@@ -7,7 +7,9 @@ personal agent skills and routine definitions. Keep changes small, explicit, and
 
 ## Product Spelling
 
-- The internal repository, package, and infrastructure name is `personal-os`.
+- The internal application name is `Personal OS`. Use `personal-os` for repository, package,
+  infrastructure and machine identifiers, `PersonalOs` / `personalOs` in code, and `PERSONAL_OS`
+  for constants and environment variables.
 - The user-facing product name is `nohmi`, always lowercase, including at the start of a sentence.
 - Do not introduce former product names in paths, prose, protocol identifiers, examples, fixtures,
   or agent guidance. The target contains none; remaining current runtime identifiers require an

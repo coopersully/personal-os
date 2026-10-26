@@ -1,6 +1,6 @@
 import CryptoKit
 import XCTest
-@testable import IloNative
+@testable import PersonalOsNative
 final class RitualTests: XCTestCase {
  func testPresentationRequiresPendingUnlockedAndDue() {
   let now = Date(timeIntervalSince1970: 1000)

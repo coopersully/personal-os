@@ -100,12 +100,12 @@ describe("Calendar floating navigation edge states", () => {
 
   it("delegates search to the shared workspace control", async () => {
     const listener = vi.fn();
-    window.addEventListener("nohmi:workspace-search", listener);
+    window.addEventListener("personal-os:workspace-search", listener);
     const browser = userEvent.setup();
     renderCalendar();
     await browser.click(screen.getByRole("button", { name: "Search calendar" }));
     expect(listener).toHaveBeenCalledOnce();
-    window.removeEventListener("nohmi:workspace-search", listener);
+    window.removeEventListener("personal-os:workspace-search", listener);
   });
 
   it("submits optional links and keeps provider failures visible", async () => {

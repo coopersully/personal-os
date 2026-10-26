@@ -192,8 +192,8 @@ export function useWorkspaceSettingsActions(enabled: boolean): WorkspaceSettings
   const results = useQueries({
     queries: setupDomainOptions.map(({ domain }) => ({
       enabled,
-      queryFn: () => api.getIloSetup({ domain }),
-      queryKey: ["ilo-setup-plan", domain],
+      queryFn: () => api.getPersonalOsSetup({ domain }),
+      queryKey: ["personal-os-setup-plan", domain],
       refetchInterval: 60_000,
       staleTime: 30_000,
     })),
@@ -249,8 +249,8 @@ function AgentAccessSettings({
   });
   const setupPlan = useQuery({
     enabled: view === "workspaces" && selectedDomainEnabled,
-    queryFn: () => api.getIloSetup({ domain: selectedDomain }),
-    queryKey: ["ilo-setup-plan", selectedDomain],
+    queryFn: () => api.getPersonalOsSetup({ domain: selectedDomain }),
+    queryKey: ["personal-os-setup-plan", selectedDomain],
     refetchInterval: 10_000,
   });
   const mailSetup = useQuery({

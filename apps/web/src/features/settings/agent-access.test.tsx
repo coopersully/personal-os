@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => ({
   getAgentConnectionGuide: vi.fn(),
   getAssistantSetupStatus: vi.fn(),
   getExecutionPolicySettings: vi.fn(),
-  getIloSetup: vi.fn(),
+  getPersonalOsSetup: vi.fn(),
   getFinanceGuidedSetup: vi.fn(),
   getMailSetupContext: vi.fn(),
   listAccessTokens: vi.fn(),
@@ -231,7 +231,7 @@ describe("agent access settings", () => {
         },
       ],
     });
-    mocks.getIloSetup.mockImplementation(async ({ domain }: { domain?: string } = {}) => {
+    mocks.getPersonalOsSetup.mockImplementation(async ({ domain }: { domain?: string } = {}) => {
       const selectedDomain = domain ?? "mail";
       const active = selectedDomain === "mail" || selectedDomain === "tasks";
       const draft = selectedDomain === "finances";

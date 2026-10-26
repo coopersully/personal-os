@@ -1,7 +1,7 @@
 import AppKit
 import XCTest
 
-@testable import IloNative
+@testable import PersonalOsNative
 
 final class PetSceneTests: XCTestCase {
   func testClickDoesNotBeginOrFinishADrag() throws {

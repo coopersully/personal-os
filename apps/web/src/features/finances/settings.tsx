@@ -77,7 +77,7 @@ export function FinanceSettings() {
         queryClient.invalidateQueries({ queryKey: ["domain-profile", "finances"] }),
         queryClient.invalidateQueries({ queryKey: ["finance-guided-setup"] }),
         queryClient.invalidateQueries({ queryKey: ["finances", "guided-setup"] }),
-        queryClient.invalidateQueries({ queryKey: ["ilo-setup-plan", "finances"] }),
+        queryClient.invalidateQueries({ queryKey: ["personal-os-setup-plan", "finances"] }),
         queryClient.invalidateQueries({ queryKey: ["assistant-setup-status"] }),
       ]),
   });

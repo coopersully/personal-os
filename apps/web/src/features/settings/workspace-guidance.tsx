@@ -99,7 +99,7 @@ function GuidanceForm({ profile }: { profile: DomainProfile }) {
       await cache.invalidateQueries({ queryKey: ["assistant-setup-status"] });
       if (next.domain === "calendar")
         await cache.invalidateQueries({ queryKey: ["calendar-status"] });
-      await cache.invalidateQueries({ queryKey: ["ilo-setup-plan", next.domain] });
+      await cache.invalidateQueries({ queryKey: ["personal-os-setup-plan", next.domain] });
     },
   });
   const reload = useFeedbackMutation({

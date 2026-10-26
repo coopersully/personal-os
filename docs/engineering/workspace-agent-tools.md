@@ -6938,7 +6938,7 @@ Start or continue nohmi setup. Call this immediately after connecting and again 
 - Domain: assistant; stage: context; policy: read_only.
 - Grants (any): orientation only.
 - Compatibility: normal discovery; annotations: `{"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}`.
-- [Adapter source](../../apps/mcp/src/tools/assistant.ts); typed API methods: `getIloSetup`.
+- [Adapter source](../../apps/mcp/src/tools/assistant.ts); typed API methods: `getPersonalOsSetup`.
 
 ```json
 {

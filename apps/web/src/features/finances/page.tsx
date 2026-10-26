@@ -1758,7 +1758,7 @@ function FinancePlaybookCard({ data }: { data: FinancePlaybookResponse | undefin
       <ShadcnCardHeader>
         <ShadcnCardTitle>Wealth-building priorities</ShadcnCardTitle>
         <ShadcnCardDescription>
-          Approved Ilo Finance playbook {data.playbook.version} ·{" "}
+          Approved nohmi Finance playbook {data.playbook.version} ·{" "}
           {data.assessment.readiness.replace("_", " ")}
         </ShadcnCardDescription>
       </ShadcnCardHeader>
@@ -3460,7 +3460,7 @@ function downloadFinanceCsv(name: string, rows: Array<Record<string, unknown>>) 
   const href = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = href;
-  link.download = `personal-os-finances-${name}-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.download = `nohmi-finances-${name}-${new Date().toISOString().slice(0, 10)}.csv`;
   link.click();
   URL.revokeObjectURL(href);
 }

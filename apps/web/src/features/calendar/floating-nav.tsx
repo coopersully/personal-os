@@ -148,7 +148,7 @@ export function CalendarFloatingNav({
       </FloatingActionButton>
       <FloatingActionButton
         label="Search calendar"
-        onClick={() => window.dispatchEvent(new Event("nohmi:workspace-search"))}
+        onClick={() => window.dispatchEvent(new Event("personal-os:workspace-search"))}
         ref={searchTrigger}
       >
         <SearchIcon aria-hidden="true" />

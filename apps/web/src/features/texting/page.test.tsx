@@ -1,8 +1,9 @@
+import { renderWithFeedback as render } from "@/test-utils/feedback";
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { textingConsentVersion } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { TextingSettings } from "./page.js";
@@ -152,9 +153,7 @@ describe("Texting settings", () => {
     renderSettings(2);
     await user.click(await screen.findByRole("button", { name: "Disconnect number" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      /Couldn’t confirm.*disconnect this phone number/,
-    );
+    expect(await screen.findByText(/Couldn’t confirm.*disconnect this phone number/)).toBeVisible();
     expect(await screen.findByLabelText("Mobile number")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Disconnect number" })).not.toBeInTheDocument();
     expect(mocks.getTextingConnection).toHaveBeenCalledTimes(2);
@@ -255,7 +254,7 @@ describe("Texting settings", () => {
     await user.click(screen.getByRole("button", { name: "Send verification code" }));
     await user.type(await screen.findByLabelText("Verification code"), "1234");
     await user.click(screen.getByRole("button", { name: "Verify and connect" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("verify this phone number");
+    expect(await screen.findByText(/verify this phone number/)).toBeVisible();
   });
 
   it("returns to setup when the connection is disconnected", async () => {

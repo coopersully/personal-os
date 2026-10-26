@@ -72,7 +72,7 @@ import {
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
-import { ConnectionRecoveryAlert, visibleConnectorRefreshInterval } from "../connections/health.js";
+import { visibleConnectorRefreshInterval } from "../connections/health.js";
 import { type ComposeIntent, FloatingMailComposer } from "./floating-compose.js";
 import { useMailLayoutPreferences } from "./layout-preferences";
 
@@ -517,7 +517,6 @@ export function MailPage({ user }: { user: User }) {
         >
           <ResizablePanel defaultSize="34%" id="mail-list" minSize="280px">
             <section aria-label="Conversations" className="mail-thread-list">
-              <ConnectionRecoveryAlert accounts={enabled} />
               {listScope === "drafts" ? (
                 drafts.isPending ? (
                   <PageLoading />

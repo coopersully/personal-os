@@ -3,6 +3,7 @@ import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { QueryFeedback } from "@/components/async-state";
 import { DataViewEmpty, DataViewRecovery } from "@/components/data-view-state";
 import {
   ApprovalHandIcon,
@@ -344,7 +345,6 @@ function AgentAccessSettings({
           : selectedDomain === "tasks"
             ? tasks.isPending
             : financeSetup.isPending));
-  const blockingError = guide.error;
   const readinessError =
     setup.error ??
     tokens.error ??
@@ -380,18 +380,7 @@ function AgentAccessSettings({
           </CardHeader>
           <CardContent className="settings-section__body agent-access__body">
             <MutationFeedback feedback={revokeOAuthClient.feedback} />
-            {blockingError ? (
-              <Alert variant="destructive">
-                <XIcon />
-                <AlertTitle>Workspace access could not be loaded</AlertTitle>
-                <AlertDescription>
-                  Couldn’t load the connection guide. Try again to check available access.
-                </AlertDescription>
-                <Button variant="outline" onClick={() => void guide.refetch()}>
-                  Retry connection guide
-                </Button>
-              </Alert>
-            ) : null}
+            <QueryFeedback query={guide} title="Couldn’t load the connection guide." />
 
             <FieldSet>
               <FieldLegend className="sr-only" variant="label">
@@ -523,18 +512,7 @@ function AgentAccessSettings({
               </CardDescription>
             </CardHeader>
             <CardContent className="settings-section__body agent-access__body">
-              {blockingError ? (
-                <Alert variant="destructive">
-                  <XIcon />
-                  <AlertTitle>Agent connection details could not be loaded</AlertTitle>
-                  <AlertDescription>
-                    Couldn’t load the connection guide. Try again to check available access.
-                  </AlertDescription>
-                  <Button variant="outline" onClick={() => void guide.refetch()}>
-                    Retry connection guide
-                  </Button>
-                </Alert>
-              ) : null}
+              <QueryFeedback query={guide} title="Couldn’t load the connection guide." />
 
               <WorkspaceSettingsStatus
                 error={setupPlan.error}

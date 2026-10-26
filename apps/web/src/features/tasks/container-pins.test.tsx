@@ -76,7 +76,8 @@ it("keeps a failed pin reachable through Settings without silently retrying", as
   expect(
     await screen.findByRole("link", { name: "Review unsaved pin preferences" }),
   ).toHaveAttribute("href", "/settings?page=tasks");
-  expect(screen.getByRole("button", { name: "Pin First" })).toBeDisabled();
+  expect(screen.queryByRole("button", { name: "Pin First" })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Review unsaved pin preferences" })).toBeVisible();
 });
 
 function OtherTaskPreferences() {

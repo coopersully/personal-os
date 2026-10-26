@@ -482,11 +482,11 @@ test.describe("durable Finance manual setup", () => {
     const before = await human.getFinanceOnboarding();
     await page.route("**/v1/finances/onboarding", (route) => route.abort("failed"));
     await page.goto("/finances/setup");
-    await expect(
-      page.getByText("Finance setup could not be checked. Try again.", { exact: true }),
-    ).toBeVisible();
+    const recovery = page.getByRole("dialog", { name: "Let’s reconnect" });
+    await expect(recovery).toBeVisible();
     await page.unroute("**/v1/finances/onboarding");
-    await page.getByRole("button", { name: "Retry setup review", exact: true }).click();
+    await recovery.getByRole("button", { name: "Try again", exact: true }).click();
+    await expect(recovery).not.toBeVisible();
     const review = page.getByRole("region", { name: "Setup review", exact: true });
     await review.getByRole("radio", { name: "Use Finance manually", exact: true }).check();
     await page.route("**/v1/finances/onboarding/answers", (route) => route.abort("failed"));

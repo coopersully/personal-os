@@ -31,7 +31,6 @@ import {
 import { SettingsControlsContext } from "@/components/settings-controls-context";
 import { Field, FieldGroup, FieldLabel, FieldSet } from "@/components/settings-field";
 import { SettingsSelect } from "@/components/settings-select";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -199,12 +198,7 @@ export function FinanceWealthPage() {
         <div className="flex min-w-0 flex-col gap-3">
           <FinanceSourceState label="Financial goals" query={goals} />
           <FinanceSourceState label="Goal confirmation context" query={me} />
-          {changeGoal.isError && !confirm ? (
-            <Alert variant="destructive">
-              <AlertTitle>Goal was not changed</AlertTitle>
-              <AlertDescription>{changeGoal.feedback?.message}</AlertDescription>
-            </Alert>
-          ) : null}
+
           {visibleGoals?.length ? (
             <ItemGroup className="gap-3">
               {visibleGoals.map((goal) => {
@@ -404,14 +398,7 @@ export function FinanceWealthPage() {
                   : `Remove ${confirm.goal.name} from your active goals. Existing plan allocations remain part of their recorded budget versions.`}
               </DialogDescription>
             </DialogHeader>
-            <ResponsiveDialogBody>
-              {changeGoal.isError ? (
-                <Alert variant="destructive">
-                  <AlertTitle>Goal was not changed</AlertTitle>
-                  <AlertDescription>{changeGoal.feedback?.message}</AlertDescription>
-                </Alert>
-              ) : null}
-            </ResponsiveDialogBody>
+
             <DialogFooter>
               <Button
                 disabled={changeGoal.isPending}

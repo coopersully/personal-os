@@ -142,9 +142,9 @@ describe("complete finance plan", () => {
     else api.approveFinanceBudget.mockResolvedValueOnce({ ...result(plan), outcome: "failed" });
     mount();
     fireEvent.click(await screen.findByRole("button", { name: "Approve version 3" }));
-    await waitFor(() => expect(notifications.error).toHaveBeenCalled());
-    expect(screen.getByRole("button", { name: "Approve version 3" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "Approve version 3" }));
+    await screen.findByText("Approval needs review");
+    await userEvent.click(screen.getByRole("button", { name: "Return to plan" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Approve version 3" }));
     await waitFor(() => expect(api.approveFinanceBudget).toHaveBeenCalledTimes(2));
     const first = api.approveFinanceBudget.mock.calls[0]?.[0];
     const second = api.approveFinanceBudget.mock.calls[1]?.[0];
@@ -216,9 +216,9 @@ describe("complete finance plan", () => {
     api.approveFinanceBudget.mockRejectedValueOnce(new Error("Connection interrupted"));
     mount();
     await userEvent.click(await screen.findByRole("button", { name: "Approve version 3" }));
-    await waitFor(() => expect(notifications.error).toHaveBeenCalled());
-    expect(screen.queryByText("Approval did not complete")).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Approve version 3" }));
+    expect(await screen.findByText("Approval needs review")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Return to plan" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Approve version 3" }));
     await waitFor(() => expect(api.approveFinanceBudget).toHaveBeenCalledTimes(2));
     expect(api.approveFinanceBudget.mock.calls[1]?.[0]).toEqual(
       api.approveFinanceBudget.mock.calls[0]?.[0],
@@ -255,8 +255,9 @@ describe("complete finance plan", () => {
       ),
     );
     expect(screen.queryByText("The plan changed before approval")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Approve version 3" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Approve version 3", hidden: true })).toBeDisabled();
     api.getFinanceBudget.mockResolvedValue(result({ ...plan, version: 4 }));
+    await userEvent.click(screen.getByRole("button", { name: "Return to plan" }));
     await userEvent.click(screen.getByRole("button", { name: "Refresh plan" }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Approve version 4" })).toBeEnabled(),
@@ -304,6 +305,7 @@ describe("complete finance plan", () => {
     mount();
     await userEvent.click(await screen.findByRole("button", { name: "Approve version 3" }));
     await waitFor(() => expect(notifications.error).toHaveBeenCalled());
+    await userEvent.click(screen.getByRole("button", { name: "Return to plan" }));
     const options = notifications.error.mock.calls.at(-1)?.[1] as unknown as {
       action: { onClick: () => void };
     };
@@ -343,7 +345,7 @@ describe("complete finance plan", () => {
         description: expect.stringContaining("Request ID: request-support"),
       }),
     );
-    expect(screen.queryByText("Approval needs review")).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Approval needs review" })).toBeInTheDocument();
     expect(screen.queryByText("private raw failure")).not.toBeInTheDocument();
   });
 
@@ -352,7 +354,9 @@ describe("complete finance plan", () => {
       new ApiClientError({ status: 409, message: "stale", code: "conflict" }),
     );
     mount();
-    await userEvent.click(await screen.findByRole("button", { name: "Approve version 3" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Approve version 3", hidden: true }),
+    );
     await waitFor(() => expect(notifications.error).toHaveBeenCalled());
     api.getFinanceBudget.mockRejectedValueOnce(new Error("offline"));
     await userEvent.click(screen.getByRole("button", { name: "Refresh plan" }));
@@ -362,7 +366,7 @@ describe("complete finance plan", () => {
         expect.any(Object),
       ),
     );
-    expect(screen.getByRole("button", { name: "Approve version 3" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Approve version 3", hidden: true })).toBeDisabled();
     expect(screen.queryByText(/Could not refresh the plan/)).not.toBeInTheDocument();
   });
 
@@ -373,6 +377,7 @@ describe("complete finance plan", () => {
     mount();
     await userEvent.click(await screen.findByRole("button", { name: "Approve version 3" }));
     await waitFor(() => expect(notifications.error).toHaveBeenCalled());
+    await userEvent.click(screen.getByRole("button", { name: "Return to plan" }));
     await userEvent.click(screen.getByRole("button", { name: "Revise plan" }));
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByRole("button", { name: "Approve version 3" })).toBeDisabled();
@@ -486,12 +491,47 @@ describe("complete finance plan", () => {
     api.listFinanceAccounts.mockRejectedValue(new Error("Accounts unavailable"));
     api.getCanonicalFinanceBudgetStatus.mockRejectedValue(new Error("Status unavailable"));
     mount();
-    expect(await screen.findByText("Some linked records are unavailable")).toBeInTheDocument();
-    expect(screen.getByText("Active plan status unavailable")).toBeInTheDocument();
+    expect(await screen.findByText("Couldn’t load accounts.")).toBeInTheDocument();
+    expect(screen.getAllByText("Couldn’t load active plan status.").length).toBeGreaterThan(0);
     expect(screen.getByText("Account unavailable")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve version 3" })).toBeEnabled();
     await userEvent.click(screen.getByRole("button", { name: "Revise plan" }));
     expect(screen.getByLabelText("Allocation 3 account")).toHaveValue(accountId);
+  });
+
+  it("announces bucket read failures once while retaining the plan", async () => {
+    api.listFinanceBudgetBuckets.mockRejectedValue(new Error("Buckets unavailable"));
+    mount();
+    await waitFor(() =>
+      expect(notifications.error).toHaveBeenCalledWith(
+        "Couldn’t load buckets.",
+        expect.any(Object),
+      ),
+    );
+    expect(notifications.error).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Approve version 3" })).toBeEnabled();
+  });
+
+  it("keeps one category failure owner and a usable retry when no plan exists", async () => {
+    api.getFinanceBudget.mockResolvedValue(result(null));
+    api.getFinanceCategories.mockRejectedValue(
+      new ApiClientError({ status: 403, code: "forbidden", message: "Not permitted" }),
+    );
+    mount();
+    await waitFor(() =>
+      expect(notifications.error).toHaveBeenCalledWith(
+        "Couldn’t load categories.",
+        expect.any(Object),
+      ),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Budget buckets" }));
+    expect(screen.getByRole("button", { name: "Retry categories" })).toBeEnabled();
+    expect(notifications.error).toHaveBeenCalledTimes(1);
+    api.getFinanceCategories.mockResolvedValue([]);
+    await userEvent.click(screen.getByRole("button", { name: "Retry categories" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Retry categories" })).not.toBeInTheDocument(),
+    );
   });
 
   it("does not interpret a failed tool result as a saved or empty plan", async () => {
@@ -505,7 +545,7 @@ describe("complete finance plan", () => {
       },
     });
     mount();
-    expect(await screen.findByText("Plan unavailable")).toBeInTheDocument();
+    expect(await screen.findByText("Couldn’t load the plan.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create plan" })).not.toBeInTheDocument();
   });
 

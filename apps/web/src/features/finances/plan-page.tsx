@@ -16,7 +16,9 @@ import { useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ActionButton as Button } from "@/components/action-button";
+import { QueryFeedback } from "@/components/async-state";
 import { EditIcon, SettingsIcon } from "@/components/icons";
+import { RecoveryRequest } from "@/components/recovery-request";
 import {
   ResponsiveDialog as Dialog,
   ResponsiveDialogContent as DialogContent,
@@ -41,7 +43,7 @@ import {
 } from "@/components/ui/table";
 import { WorkspaceHeaderControls } from "@/components/workspace-header-controls";
 import { api } from "../../api.js";
-import { InlineError, PageLoading } from "../../components/async-state.js";
+import { PageLoading } from "../../components/async-state.js";
 import { useFeedbackMutation } from "../../lib/use-feedback-mutation.js";
 import { FinanceBudgetBucketManager } from "./bucket-manager.js";
 import {
@@ -300,6 +302,7 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
       return requireFinancePlanResult(result);
     },
     onSuccess: async (result) => {
+      toast.success(`Version ${result.data.version} saved.`);
       queryClient.setQueryData(["finance-plan", requestedPlanId], result);
       setEditing(null);
       await refresh();
@@ -408,11 +411,9 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
                     </DialogHeader>
                     <ResponsiveDialogBody>
                       {categoryQuery.isError ? (
-                        <InlineError
-                          error={categoryQuery.error}
-                          retry={() => categoryQuery.refetch()}
-                          stale={categoryQuery.data !== undefined}
-                        />
+                        <Button variant="secondary" onClick={() => void categoryQuery.refetch()}>
+                          Retry categories
+                        </Button>
                       ) : (
                         <FinanceBudgetBucketManager
                           categories={relations.categories}
@@ -423,14 +424,6 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
                   </DialogContent>
                 </Dialog>
               </div>
-              {bucketQuery.isError ? (
-                <InlineError
-                  error={bucketQuery.error}
-                  toastOnly
-                  retry={() => bucketQuery.refetch()}
-                  stale={Boolean(bucketQuery.data)}
-                />
-              ) : null}
               {bucketQuery.isPending ? (
                 <p role="status">Loading buckets…</p>
               ) : bucketQuery.isSuccess && !relations.buckets.length ? (
@@ -440,17 +433,11 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
           </WorkspaceHeaderControls>
         ) : null}
         {planQuery.isPending ? <PageLoading workspace="finances" /> : null}
-        {planQuery.isError ? (
-          <Alert variant="destructive">
-            <AlertTitle>{plan ? "Saved plan may be out of date" : "Plan unavailable"}</AlertTitle>
-            <AlertDescription>
-              {"Couldn’t refresh this information. Try again."}
-              <Button variant="outline" onClick={reload}>
-                Try again
-              </Button>
-            </AlertDescription>
-          </Alert>
-        ) : null}
+        <QueryFeedback query={planQuery} title="Couldn’t load the plan." />
+        <QueryFeedback query={categoryQuery} title="Couldn’t load categories." />
+        <QueryFeedback query={accountQuery} title="Couldn’t load accounts." />
+        <QueryFeedback query={goalQuery} title="Couldn’t load goals." />
+        <QueryFeedback query={bucketQuery} title="Couldn’t load buckets." />
         {loaded && !plan && approvalTask ? (
           <p>No budget proposal is available to approve.</p>
         ) : null}
@@ -562,6 +549,22 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
                     onRevise={approvalTask ? undefined : openEditor}
                     onRefresh={() => void refreshApproval()}
                   />
+                  <RecoveryRequest
+                    toastId={approve.feedback?.toastId}
+                    open={approve.isError}
+                    title="Approval needs review"
+                    description={
+                      approve.feedback?.message ?? "Check the latest plan before trying again."
+                    }
+                    actions={
+                      <>
+                        <Button variant="secondary" onClick={() => approve.reset()}>
+                          Return to plan
+                        </Button>
+                        <Button onClick={() => void refreshApproval()}>Refresh plan</Button>
+                      </>
+                    }
+                  />
                   {approve.error || approvalNeedsRefresh ? (
                     <Button variant="outline" onClick={() => void refreshApproval()}>
                       Refresh plan
@@ -573,25 +576,9 @@ export function FinancePlanPage({ approvalTask = false }: { approvalTask?: boole
             {statusQuery.isPending ? (
               <p className="text-sm text-muted-foreground">Checking active plan…</p>
             ) : statusQuery.isError ? (
-              <Alert variant="destructive">
-                <AlertTitle>Active plan status unavailable</AlertTitle>
-                <AlertDescription>
-                  {"Couldn’t refresh this information. Try again."}
-                </AlertDescription>
-              </Alert>
+              <QueryFeedback query={statusQuery} title="Couldn’t load active plan status." />
             ) : !active ? (
               <p className="text-sm text-muted-foreground">No approved plan is active yet.</p>
-            ) : null}
-            {[categoryQuery, accountQuery, goalQuery, bucketQuery].some(
-              (query) => query.isError,
-            ) ? (
-              <Alert>
-                <AlertTitle>Some linked records are unavailable</AlertTitle>
-                <AlertDescription>
-                  Saved identities and amounts remain visible. Refresh to reload category, account,
-                  goal, or bucket names.
-                </AlertDescription>
-              </Alert>
             ) : null}
             <PlanDetails plan={plan} relations={relations} />
           </>

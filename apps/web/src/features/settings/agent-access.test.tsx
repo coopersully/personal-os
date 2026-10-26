@@ -720,9 +720,15 @@ describe("agent access settings", () => {
 
     await browser.click(screen.getByRole("button", { name: "Set up a local token" }));
     await browser.click(screen.getByRole("button", { name: "Create local token" }));
+    await waitFor(() =>
+      expect(mocks.toastError).toHaveBeenCalledWith(
+        expect.stringMatching(/confirm whether we could create an agent token/),
+        expect.anything(),
+      ),
+    );
     expect(
-      await screen.findByText(/confirm whether we could create an agent token/),
-    ).toBeInTheDocument();
+      screen.queryByText(/confirm whether we could create an agent token/),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText("Copy this token now")).not.toBeInTheDocument();
   });
 

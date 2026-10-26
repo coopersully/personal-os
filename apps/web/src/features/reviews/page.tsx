@@ -8,15 +8,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useDeferredValue, useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { DataChoice, FilterBar } from "@/components/data-view-controls";
-import {
-  AlertTriangleIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  CircleCheckIcon,
-  RefreshIcon,
-} from "@/components/icons";
+import { ChevronLeftIcon, ChevronRightIcon, CircleCheckIcon } from "@/components/icons";
 import { SettingsRecordAction, SettingsRecordContent } from "@/components/settings-record";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,6 +26,7 @@ import { WorkspaceIcon, workspaceIdentities } from "@/components/workspace-ident
 import { WorkspaceSearch } from "@/components/workspace-search";
 import { api } from "../../api.js";
 import { QueryFeedback } from "../../components/async-state.js";
+import { useErrorToast } from "../../lib/settings-feedback.js";
 
 const pageSize = 10;
 const skeletonRows = ["first", "second", "third"] as const;
@@ -201,6 +195,12 @@ export function ReviewsPage({ workspace }: { workspace?: AgentAccessDomain }) {
     setCursor(null);
     setPreviousCursors([]);
   }, [deferredSearch, kind, domain, sort]);
+  const unavailable = query.data?.unavailableDomains ?? [];
+  useErrorToast(
+    unavailable.length ? unavailable : null,
+    `Some workspaces are unavailable. ${joinLabels(unavailable)} could not be checked. Counts may be incomplete.`,
+    () => void query.refetch(),
+  );
   const pageNumber = previousCursors.length + 1;
   const start = (pageNumber - 1) * pageSize + 1;
   const visibleItems = transform
@@ -305,22 +305,6 @@ export function ReviewsPage({ workspace }: { workspace?: AgentAccessDomain }) {
       <div className="flex min-w-0 flex-col gap-4">
         {query.isPending ? <QueueSkeleton /> : null}
         <QueryFeedback query={{ ...query, refetch: retry }} title="Couldn’t load your reviews." />
-        {query.data && query.data.unavailableDomains.length > 0 ? (
-          <Alert variant="warning">
-            <AlertTriangleIcon />
-            <AlertTitle>Some workspaces are unavailable</AlertTitle>
-            <AlertDescription>
-              {joinLabels(query.data.unavailableDomains)} could not be checked. Counts may be
-              incomplete.
-            </AlertDescription>
-            <AlertAction>
-              <Button onClick={() => query.refetch()} size="sm" variant="outline">
-                <RefreshIcon data-icon="inline-start" />
-                Check again
-              </Button>
-            </AlertAction>
-          </Alert>
-        ) : null}
         {query.data && query.data.items.length === 0 ? (
           <Empty className="reviews-page__empty">
             <EmptyHeader>

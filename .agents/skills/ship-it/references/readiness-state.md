@@ -145,8 +145,27 @@ matrix stage. The Node row remains `Node quality`; the browser row includes all 
 `Browser acceptance (<project>, <shard>/4)`
 jobs for each of `desktop-chromium` and `mobile-chromium`. Require every matrix member and never reuse a job across
 stages or fill multiple rows with a shared aggregate. These names must also appear in expected required/selected checks
-with their provider IDs. Set `localOnlyComplete` only after any additional native/platform or
+with their provider IDs. The evaluator independently requires the current canonical Node/repository/lint names, all eight
+browser members and both native jobs plus classification/Terraform/source aggregate. Removing a
+member from both the submitted coverage map and selected inventory cannot establish equivalence.
+Set `localOnlyComplete` only after any additional native/platform or
 issue-specific requirements pass. Record each attempted local failure in `localFailures` with
 `classification` (`fixed` or `environment`), an `evidence` reference, and successful
 `focusedReproduction`. Unknown failures block equivalence. An explicit pnpmVerify FAILURE requires at least one diagnosis record. The evidence map must include the
 workflow revision, configuration comparison, workflow-run PR/head/base association, and failure diagnosis records; do not invent them.
+
+
+## Git-verified prose mode
+
+For the canonical prose-only exception set `verification.mode: "prose"`, `focused: "SUCCESS"`,
+current `headSha` and `baseSha`, and `scope` to the complete JSON from
+`node .github/scripts/ci-scope.mjs --base <base> --head <head> --json`.
+Record `sourceRun` with `headSha`, `baseSha`, positive integer `workflowId`, `runId`, `runAttempt`,
+and `event: "pull_request"`. Authenticate the provider run's workflow and PR/head/base association
+in collected evidence. `Classify changes`, `Repository contracts`, and `Source verification` must
+be selected, successful GitHub Actions checks (app 15368) from that same run/attempt/event.
+The evaluator recomputes the classifier from the actual checkout at the claimed head; stale Git,
+unknown input, forged scope, missing/skipped source jobs or mismatched run identities cannot pass.
+Explicitly classify unselected skipped provider jobs as `required: false` only after checking the
+workflow's scope and complete job inventory. Do not omit selected security/metadata checks.
+All normal review, protection, metadata, ownership and production-plan gates still apply.

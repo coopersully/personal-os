@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 import { setSettingTime } from "./settings-controls.js";
+import { fixtureWeather } from "./weather-fixtures.js";
 
 async function selectCalendarView(page: Page, view: string) {
   const picker = page.getByRole("button", { name: /^Calendar view:/ });
@@ -119,6 +120,7 @@ test("desktop navigation fills the viewport while long content scrolls independe
   test.skip(testInfo.project.name !== "desktop-chromium", "Desktop shell geometry");
   // This flow checks three workspaces and nine Calendar view/viewport combinations, then restores settings.
   test.setTimeout(90_000);
+  await fixtureWeather(page);
   await page.setViewportSize({ width: 1280, height: 480 });
   await page.goto("/login");
   await page.getByLabel("Email").fill("demo+full@nohmi.test");

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDocumentation } from "../.github/scripts/ci-scope.mjs";
 import { planVerification } from "./verification-plan.mjs";
 
 // Recommendations only. These records are not authenticated merge/production evidence.
@@ -120,9 +121,11 @@ export function buildPlan(input) {
     verification: {
       iteration: planVerification(input.paths),
       final: {
-        commands: [["pnpm", "verify"]],
+        commands: input.paths.every(isDocumentation) ? [] : [["pnpm", "verify"]],
+        prerequisite:
+          "Before choosing final commands, compute Git scope at frozen head/base. Prose-looking paths alone do not authorize omission; if Git proof fails, use full verification.",
         alternative:
-          "Complete equivalent hosted stages under delivery-verification.md; omitted stages are not passes",
+          "Policy-complete hosted verification under delivery-verification.md, including only its Git-verified prose exception; selected stages cannot skip",
         additional:
           "Select behavior, platform, provider and production acceptance from requirements; paths alone cannot establish these",
       },

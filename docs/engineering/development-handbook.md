@@ -58,7 +58,7 @@ failures and next triggers in the existing checkpoint; they do not become passin
 | verify-focused | Behavior regression, affected consumer types, changed-file lint and relevant contract/platform checks; `personal-os-testing` | Reuse receipts with matching inputs. Failed check gets bounded diagnosis, not blind full-suite retries. |
 | review | Independent requirement/standard dispositions; `deep-review` | Reassess changed concerns and consumers; retain valid coverage. Self-review cannot fill independent acceptance. |
 | publish | Same PR created/refined with consistent Work map and Linear backlinks; `create-pr` | Reuse an existing PR; refresh only affected metadata. Publication is not proof of acceptance. |
-| verify-final | Complete frozen-candidate local or equivalent hosted verification; `delivery-verification.md` | Reuse the complete matching set. Missing hosted stages require full local verification, not guessed exemptions. |
+| verify-final | Complete frozen-candidate local or equivalent hosted verification; `delivery-verification.md` | Reuse the complete matching set. Missing selected stages fail; only the Git-verified prose exception may omit full stages. |
 | deliver | Live protected merge, production or non-runtime acceptance and reconciliation; `handoff` | Historical completion is reusable only for that outcome. Refresh live gates before any new effect. |
 
 The default order is an efficient dependency order, not a ban on useful early review or publication.
@@ -132,12 +132,11 @@ consumer contracts and applicable platform/provider checks from the actual requi
 iteration needs content/link review, not application compilation. Tooling scripts need their own
 regressions even when product code is unchanged. Shared contracts expand to transitive consumers.
 
-Complete final verification remains mandatory for every shipping candidate, including docs-only
-changes under current policy. This is an explicit conservative boundary, not an optimized final
-scope classifier. Narrow final exemptions require separately reviewed classifier/enforcement changes;
-this handbook introduces none. Hosted equivalence can avoid duplicate local work only when every
-required stage is present and current. Full verification runs after convergence on a frozen committed
-candidate; draft publication and early review do not each require their own full run.
+Complete final verification follows the delivery contract: full local/equivalent hosted checks,
+or its Git-verified prose-only exception with successful repository and source gates. A path-only
+planner never grants that exception. Missing selected stages and unexpected skips fail readiness.
+Verification runs after convergence on a frozen committed candidate; draft publication and early
+review do not each require their own full run.
 
 One execution owner shares receipts. Reviewers ask for named missing evidence; they do not each run
 the suite. Load this map once, then the current step's owner and relevant domain contract, not every

@@ -103,8 +103,9 @@ require explicit approval, bounded scope, an owner and an exit condition. These 
 policy, not proof that all gates are already automated. Preserve existing role and merge boundaries.
 
 Use `docs/engineering/development-handbook.md` to select the next required step and reuse valid
-evidence. Run complete verification on the frozen candidate after review convergence and before
-merge; draft publication and early review use focused checks:
+evidence. Run policy-complete verification on the frozen candidate after review convergence and before
+merge; only the Git-verified prose exception in `delivery-verification.md` may omit full stages.
+Draft publication and early review use focused checks. The complete local command remains:
 
 ```bash
 pnpm verify

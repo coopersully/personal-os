@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      required_jobs: ${{ steps.scope.outputs.required_jobs }}
       full: ${{ steps.scope.outputs.full }}
       repo: ${{ steps.scope.outputs.repo }}
       terraform: ${{ steps.scope.outputs.terraform }}
@@ -43,22 +44,12 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          changed_files="$RUNNER_TEMP/changed-files.txt"
           scope_json="$RUNNER_TEMP/ci-scope.json"
-          if [[ "$EVENT_NAME" == "pull_request" ]]; then
-            if ! git diff --name-only --diff-filter=ACMRD "$BASE_SHA...$HEAD_SHA" > "$changed_files"; then
-              echo "Unable to calculate the pull-request diff; selecting full CI." >&2
-              : > "$changed_files"
-            fi
-          else
-            : > "$changed_files"
-          fi
           node .github/scripts/ci-scope.mjs \
-            --files "$changed_files" \
-            --json \
-            --github-output "$GITHUB_OUTPUT" | tee "$scope_json"
+            --base "$BASE_SHA" --head "$HEAD_SHA" \
+            --json --github-output "$GITHUB_OUTPUT" | tee "$scope_json"
           {
-            echo "## CI scope (shadow mode)"
+            echo "## CI scope"
             echo '```json'
             cat "$scope_json"
             echo '```'
@@ -67,7 +58,7 @@ jobs:
   infrastructure:
     name: Terraform
     needs: changes
-    if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.terraform == 'true' }}
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'infrastructure') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -84,7 +75,7 @@ jobs:
   repository:
     name: Repository contracts
     needs: changes
-    if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.repo == 'true' }}
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'repository') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -100,7 +91,7 @@ jobs:
   lint-and-format:
     name: Lint and format
     needs: changes
-    if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.node == 'true' }}
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'lint-and-format') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -118,7 +109,7 @@ jobs:
   quality:
     name: Node quality
     needs: changes
-    if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.node == 'true' || needs.changes.outputs.database == 'true' }}
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'quality') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -137,7 +128,7 @@ jobs:
   browser:
     name: Browser acceptance (${{ matrix.project }}, ${{ matrix.shard }}/4)
     needs: changes
-    if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.browser == 'true' }}
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'browser') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -172,7 +163,7 @@ jobs:
   desktop:
     name: Desktop (${{ matrix.os }})
     needs: changes
-    if: ${{ needs.changes.outputs.full == 'true' || needs.changes.outputs.desktop == 'true' }}
+    if: ${{ contains(fromJSON(needs.changes.outputs.required_jobs || '[]'), 'desktop') }}
     strategy:
       fail-fast: false
       matrix:
@@ -252,8 +243,8 @@ jobs:
               "",
             ].join("\n"),
           );
-          if (!requiredGate(results)) {
-            console.error("One or more required CI dependencies did not succeed or skip.", results);
+          if (!requiredGate(results, JSON.parse(scope))) {
+            console.error("One or more required CI dependencies are missing or did not satisfy the selected scope.", results);
             process.exit(1);
           }
           NODE

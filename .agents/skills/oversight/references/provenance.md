@@ -49,7 +49,7 @@ runtime tests or proof a host tool works.
 | Single-owner feature | One owner/branch; no additional supervisor or mandatory composition worker |
 | Stable reviewed prerequisite is unmerged | Assess exact source/merge milestone; source integration can proceed only on authorized stable base |
 | Shared contract changes | Identify existing transitive consumers and fixtures before final freeze; preserve one shared-path owner |
-| Focused check passes but full stages are absent | Report partial execution; no full readiness, including a docs-only shipping candidate |
+| Focused check passes but full stages are absent | Report partial execution unless the canonical Git-verified prose exception is proven; selected jobs cannot skip and all other readiness gates remain |
 | New failure after older pass or input changed mid-run | Reject stale evidence; diagnose and rerun affected checks; do not mask failure with cached green |
 | Runtime is healthy but fixture state cannot be fingerprinted | Preparation may be reusable after identity checks; test results need fresh execution |
 | Scheduled wake unchanged, or user muted it | Default short nohmi report; preserve explicit mute/quiet and existing cadence; no new schedule |

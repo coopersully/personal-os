@@ -2,6 +2,7 @@ import argparse
 import json
 import re
 import sys
+import subprocess
 from pathlib import Path
 
 from acceptance import review_problems
@@ -35,17 +36,64 @@ def check_state(check):
     return status, conclusion
 
 
+FULL_COVERAGE = {
+    "repository": ["Repository contracts"],
+    "lint": ["Lint and format"],
+    "types-tests-coverage-builds": ["Node quality"],
+    "browser": [f"Browser acceptance ({project}, {shard}/4)"
+                for project in ("desktop-chromium", "mobile-chromium") for shard in range(1, 5)],
+}
+FULL_SOURCE_JOBS = ["Classify changes", "Terraform", "Source verification",
+                    "Desktop (macos-14)", "Desktop (windows-latest)",
+                    *(name for group in FULL_COVERAGE.values() for name in group)]
+
+
 def equivalent_job_names(coverage):
-    gates = {"repository", "lint", "types-tests-coverage-builds", "browser"}
-    if not isinstance(coverage, dict) or set(coverage) != gates:
+    if not isinstance(coverage, dict) or set(coverage) != set(FULL_COVERAGE):
         return None
-    names = []
-    for value in coverage.values():
+    for key, expected in FULL_COVERAGE.items():
+        value = coverage[key]
         group = [value] if isinstance(value, str) else value
-        if not isinstance(group, list) or not group or any(not isinstance(n, str) or not n for n in group):
+        if not isinstance(group, list) or len(group) != len(expected) or sorted(group, key=str) != sorted(expected):
             return None
-        names.extend(group)
-    return names if len(names) == len(set(names)) else None
+    return list(FULL_SOURCE_JOBS)
+
+
+def prose_verification(verification, pr, checks, expected):
+    """Recompute from Git, not caller-supplied scope booleans or path lists."""
+    source = verification.get("sourceRun") or {}
+    names = ["Classify changes", "Repository contracts", "Source verification"]
+    if (verification.get("baseSha") != pr["baseSha"]
+        or source.get("headSha") != pr["headSha"] or source.get("baseSha") != pr["baseSha"]
+        or source.get("event") != "pull_request"
+        or any(type(source.get(k)) is not int or source[k] <= 0
+               for k in ("workflowId", "runId", "runAttempt"))
+        or not all(name in expected for name in names)):
+        return False
+    for name in names:
+        matches = [c for c in checks if c.get("name") == name]
+        if (len(matches) != 1 or check_state(matches[0]) != ("COMPLETED", "SUCCESS")
+            or matches[0].get("appId") != 15368
+            or any(matches[0].get(k) != source[k] for k in ("workflowId", "runId", "runAttempt", "event"))):
+            return False
+    root = Path(__file__).resolve().parents[4]
+    try:
+        current = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                                 capture_output=True, text=True, timeout=15).stdout.strip()
+        if current != pr["headSha"]:
+            return False
+        classifier = root / ".github/scripts/ci-scope.mjs"
+        committed = subprocess.run(["git", "show", f"{pr['headSha']}:.github/scripts/ci-scope.mjs"],
+                                   cwd=root, check=True, capture_output=True, timeout=15).stdout
+        if classifier.read_bytes() != committed:
+            return False
+        output = subprocess.run(["node", str(root / ".github/scripts/ci-scope.mjs"),
+                                 "--base", pr["baseSha"], "--head", pr["headSha"], "--json"],
+                                cwd=root, check=True, capture_output=True, text=True, timeout=30)
+        scope = json.loads(output.stdout)
+        return scope.get("prose_only") is True and verification.get("scope") == scope
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return False
 
 
 def current_attempts(checks):
@@ -255,6 +303,8 @@ def evaluate(state):
                         for c in checks) for name in names)
             and verification.get("localOnlyComplete") is True
         )
+    if verification.get("mode") == "prose":
+        full_verified = prose_verification(verification, pr, checks, expected)
     failures = verification.get("localFailures", [])
     failures_resolved = isinstance(failures, list) and all(
         isinstance(f, dict) and f.get("classification") in {"fixed", "environment"}
@@ -266,7 +316,7 @@ def evaluate(state):
     if verification.get("focused") != "SUCCESS" or not full_verified or not failures_resolved:
         remediation_codes.append("verification_incomplete")
         remediation_reasons.append(
-            "Candidate needs complete local or equivalent hosted verification and diagnosed failures"
+            "Candidate needs policy-complete verification (full or Git-verified prose) and diagnosed failures"
         )
 
     metadata = state.get("metadata") or {}

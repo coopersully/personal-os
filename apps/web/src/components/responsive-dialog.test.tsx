@@ -3,6 +3,7 @@
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ResponsiveDialog,
@@ -71,6 +72,24 @@ function Example() {
   );
 }
 
+function StatefulEditor({ onMount }: { onMount: () => void }) {
+  const [count, setCount] = useState(() => {
+    onMount();
+    return 0;
+  });
+  return (
+    <ResponsiveDialogBody>
+      <label>
+        Draft title
+        <input defaultValue="Original title" />
+      </label>
+      <button type="button" onClick={() => setCount((value) => value + 1)}>
+        Add guest: {count}
+      </button>
+    </ResponsiveDialogBody>
+  );
+}
+
 describe("ResponsiveDialog", () => {
   beforeEach(() => setViewport(1024));
 
@@ -111,19 +130,41 @@ describe("ResponsiveDialog", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("keeps an uncontrolled modal open when the presentation changes", async () => {
-    const resize = setViewport(1024);
+  it.each([
+    1024, 375,
+  ])("preserves local and uncontrolled drafts across both presentations starting at %ipx", async (initialWidth) => {
+    const resize = setViewport(initialWidth);
+    const onMount = vi.fn();
     const user = userEvent.setup();
-    render(<Example />);
-
-    await user.click(screen.getByRole("button", { name: "Open details" }));
-    expect(screen.getByRole("dialog")).toHaveAttribute("data-presentation", "dialog");
-
-    act(() => resize(375));
-
-    await waitFor(() =>
-      expect(screen.getByRole("dialog")).toHaveAttribute("data-presentation", "drawer"),
+    render(
+      <ResponsiveDialog defaultOpen>
+        {/* JSDOM omits the browser's computed transform default, which Vaul reads on press. */}
+        <ResponsiveDialogContent aria-describedby={undefined} style={{ transform: "none" }}>
+          <ResponsiveDialogHeader>
+            <ResponsiveDialogTitle>Edit event</ResponsiveDialogTitle>
+          </ResponsiveDialogHeader>
+          <StatefulEditor onMount={onMount} />
+        </ResponsiveDialogContent>
+      </ResponsiveDialog>,
     );
-    expect(screen.getByRole("heading", { name: "Event details" })).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog");
+    const titleInput = screen.getByRole("textbox", { name: "Draft title" });
+    await user.click(screen.getByRole("button", { name: "Add guest: 0" }));
+    await user.clear(titleInput);
+    await user.type(titleInput, "Unsaved workshop");
+
+    for (const width of [initialWidth < 768 ? 1280 : 320, initialWidth]) {
+      act(() => resize(width));
+      await waitFor(() =>
+        expect(dialog).toHaveAttribute("data-presentation", width < 768 ? "drawer" : "dialog"),
+      );
+      expect(screen.getByRole("dialog")).toBe(dialog);
+      expect(screen.getByRole("textbox", { name: "Draft title" })).toBe(titleInput);
+      expect(titleInput).toHaveValue("Unsaved workshop");
+      expect(titleInput).toHaveFocus();
+      expect(screen.getByRole("button", { name: "Add guest: 1" })).toBeInTheDocument();
+    }
+    // Includes the initial mobile media-query effect settling after the first render.
+    expect(onMount).toHaveBeenCalledTimes(1);
   });
 });

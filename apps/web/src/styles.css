@@ -8646,6 +8646,23 @@ button, select, input::placeholder, textarea::placeholder { text-transform: lowe
   .settings-panel [data-settings-row] > :is([data-slot="field-label"], [data-slot="field-content"]) { grid-column: 1; }
 }
 
+/* One stable Vaul tree changes geometry without remounting editor drafts. */
+.responsive-dialog-surface[data-presentation="dialog"][data-vaul-drawer-direction="bottom"] {
+  inset: 50% auto auto 50%;
+  margin: 0;
+  max-height: calc(100dvh - 2rem);
+  border-radius: var(--radius-xl);
+  transform: translate(-50%, -50%) !important;
+  animation: none !important;
+  transition: none;
+  touch-action: auto;
+  user-select: text;
+}
+.responsive-dialog-surface[data-presentation="dialog"] > [data-slot="drawer-handle"],
+.responsive-dialog-surface[data-presentation="dialog"]::after {
+  display: none;
+}
+
 /* Responsive overlays own viewport sizing; forms retain their intrinsic height. */
 [data-responsive-slot="content"][data-presentation="drawer"] {
   max-height: calc(100dvh - 1rem);

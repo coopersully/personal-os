@@ -1,22 +1,21 @@
 import * as React from "react";
 import { XIcon } from "@/components/icons";
 import { Button } from "@/components/ui/button";
-import {
+import type {
   Dialog,
   DialogClose,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { DialogFooter } from "@/components/ui/dialog";
 import {
   Drawer,
   DrawerClose,
   DrawerContent,
   DrawerDescription,
-  DrawerFooter,
   DrawerHeader,
   DrawerTitle,
   DrawerTrigger,
@@ -63,33 +62,30 @@ function ResponsiveDialog({
 
   return (
     <ResponsiveDialogContext.Provider value={{ isMobile, contentRef }}>
-      {isMobile ? (
-        <Drawer
-          autoFocus
-          dismissible={dismissible}
-          onOpenChange={handleOpenChange}
-          open={resolvedOpen}
-          {...props}
-        >
-          {children}
-        </Drawer>
-      ) : (
-        <Dialog onOpenChange={handleOpenChange} open={resolvedOpen} {...props}>
-          {children}
-        </Dialog>
-      )}
+      {/* Keep the primitive tree mounted while presentation changes, preserving drafts. */}
+      <Drawer
+        autoFocus
+        dismissible={dismissible}
+        handleOnly={!isMobile}
+        repositionInputs={isMobile}
+        onOpenChange={handleOpenChange}
+        open={resolvedOpen}
+        {...props}
+      >
+        {children}
+      </Drawer>
     </ResponsiveDialogContext.Provider>
   );
 }
 
 function ResponsiveDialogTrigger(props: React.ComponentProps<typeof DialogTrigger>) {
   const { isMobile } = useResponsiveDialog();
-  return isMobile ? <DrawerTrigger {...props} /> : <DialogTrigger {...props} />;
+  return <DrawerTrigger data-slot={isMobile ? "drawer-trigger" : "dialog-trigger"} {...props} />;
 }
 
 function ResponsiveDialogClose(props: React.ComponentProps<typeof DialogClose>) {
   const { isMobile } = useResponsiveDialog();
-  return isMobile ? <DrawerClose {...props} /> : <DialogClose {...props} />;
+  return <DrawerClose data-slot={isMobile ? "drawer-close" : "dialog-close"} {...props} />;
 }
 
 function ResponsiveDialogContent({
@@ -113,32 +109,17 @@ function ResponsiveDialogContent({
     onEscapeKeyDown?.(event);
   };
 
-  if (!isMobile) {
-    return (
-      <DialogContent
-        ref={setRef}
-        onEscapeKeyDown={handleEscape}
-        className={cn("max-h-[calc(100dvh-2rem)] overflow-y-auto", className)}
-        data-presentation="dialog"
-        data-responsive-slot="content"
-        showCloseButton={showCloseButton}
-        {...props}
-      >
-        {children}
-      </DialogContent>
-    );
-  }
-
   return (
     <DrawerContent
       ref={setRef}
       onEscapeKeyDown={handleEscape}
       className={cn(
-        "responsive-dialog-drawer overflow-y-auto border-transparent px-4 pb-[max(1rem,env(safe-area-inset-bottom))]",
+        "responsive-dialog-surface gap-4 max-h-[calc(100dvh-2rem)] w-full overflow-y-auto border-transparent sm:max-w-sm",
         className,
-        "w-full max-w-none sm:max-w-none",
+        isMobile && "responsive-dialog-drawer max-w-none gap-0 sm:max-w-none",
       )}
-      data-presentation="drawer"
+      data-slot={isMobile ? "drawer-content" : "dialog-content"}
+      data-presentation={isMobile ? "drawer" : "dialog"}
       data-responsive-slot="content"
       {...props}
     >
@@ -160,10 +141,13 @@ function ResponsiveDialogHeader({
   ...props
 }: React.ComponentProps<typeof DialogHeader>) {
   const { isMobile } = useResponsiveDialog();
-  return isMobile ? (
-    <DrawerHeader className={className} data-responsive-slot="header" {...props} />
-  ) : (
-    <DialogHeader className={className} data-responsive-slot="header" {...props} />
+  return (
+    <DrawerHeader
+      className={cn(!isMobile && "gap-2", className)}
+      data-slot={isMobile ? "drawer-header" : "dialog-header"}
+      data-responsive-slot="header"
+      {...props}
+    />
   );
 }
 
@@ -183,14 +167,13 @@ function ResponsiveDialogFooter({
   ...props
 }: React.ComponentProps<typeof DialogFooter>) {
   const { isMobile } = useResponsiveDialog();
-  return isMobile ? (
-    <DrawerFooter
-      className={cn("mt-0 shrink-0", className)}
+  return (
+    <DialogFooter
+      className={cn(isMobile && "flex flex-col", className)}
+      data-slot={isMobile ? "drawer-footer" : "dialog-footer"}
       data-responsive-slot="footer"
       {...props}
     />
-  ) : (
-    <DialogFooter className={className} data-responsive-slot="footer" {...props} />
   );
 }
 
@@ -206,12 +189,17 @@ function ResponsiveDialogActions({ className, ...props }: React.ComponentProps<"
 
 function ResponsiveDialogTitle(props: React.ComponentProps<typeof DialogTitle>) {
   const { isMobile } = useResponsiveDialog();
-  return isMobile ? <DrawerTitle {...props} /> : <DialogTitle {...props} />;
+  return <DrawerTitle data-slot={isMobile ? "drawer-title" : "dialog-title"} {...props} />;
 }
 
 function ResponsiveDialogDescription(props: React.ComponentProps<typeof DialogDescription>) {
   const { isMobile } = useResponsiveDialog();
-  return isMobile ? <DrawerDescription {...props} /> : <DialogDescription {...props} />;
+  return (
+    <DrawerDescription
+      data-slot={isMobile ? "drawer-description" : "dialog-description"}
+      {...props}
+    />
+  );
 }
 
 export {

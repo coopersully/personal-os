@@ -79,6 +79,59 @@ describe.sequential("persistent scoped knowledge", () => {
     relatedRecordIds: [],
     ...overrides,
   });
+  const persistedKnowledge = () =>
+    Promise.all([
+      database.db.select().from(knowledgeRecords),
+      database.db.select().from(knowledgeRevisions),
+      database.db.select().from(knowledgeSources),
+      database.db.select().from(knowledgeRelationships),
+      database.db.select().from(knowledgeReceipts),
+      database.db.select().from(auditEvents),
+    ]);
+  it("rechecks credential expiry for a cached principal before reads and exact retries", async () => {
+    const f = await fixture();
+    const request = input({ evidence: [] });
+    await database.db
+      .update(accessTokens)
+      .set({ expiresAt: new Date(now().getTime() + 60_000) })
+      .where(eq(accessTokens.id, f.agent.actorId));
+    const saved = await service().create(f.agent, request);
+    expect(await service().get(f.agent, { id: saved.record.id, purpose: "planning" })).toEqual(
+      saved.record,
+    );
+    expect(await service().create(f.agent, request)).toEqual(saved);
+    const before = await persistedKnowledge();
+
+    await database.db
+      .update(accessTokens)
+      .set({ expiresAt: now() })
+      .where(eq(accessTokens.id, f.agent.actorId));
+    await expect(
+      service().get(f.agent, { id: saved.record.id, purpose: "planning" }),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(service().create(f.agent, request)).rejects.toMatchObject({ status: 403 });
+    expect(await persistedKnowledge()).toEqual(before);
+  });
+  it("rejects duplicate related IDs before persisting any knowledge or audit changes", async () => {
+    const f = await fixture();
+    const related = await service().create(f.human, input());
+    const before = await persistedKnowledge();
+
+    await expect(
+      service().create(
+        f.human,
+        input({ relatedRecordIds: [related.record.id, related.record.id] }),
+      ),
+    ).rejects.toMatchObject({
+      issues: [
+        {
+          path: ["relatedRecordIds"],
+          message: "Relationships must be unique.",
+        },
+      ],
+    });
+    expect(await persistedKnowledge()).toEqual(before);
+  });
   it("records_user_fact_and_rejects_forged_source", async () => {
     const f = await fixture(),
       request = input();
